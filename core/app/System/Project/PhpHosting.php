@@ -2,6 +2,7 @@
 
 namespace App\System\Project;
 
+use App\Lib\Deploy\Dind\TenantNetwork;
 use App\Models\Domain as DomainModel;
 use App\Models\User as ModelsUser;
 use App\System;
@@ -11,6 +12,10 @@ use App\System\Project\PhpHosting\FpmApacheStack;
 use App\System\Project\PhpHosting\PhpRuntime;
 use App\System\Project\PhpHosting\PhpStack;
 use App\System\Project\PhpHosting\PhpStackResolver;
+use App\System\Project\PhpHosting\Services\RunnerServiceManager;
+use App\System\Project\PhpHosting\Services\S6ServiceManager;
+use App\System\Project\PhpHosting\Services\ServiceManager;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\Yaml\Yaml;
 
 /**
@@ -95,7 +100,24 @@ class PhpHosting implements Runtime
 
     public function start(): void
     {
+        $this->prepareTenantNetwork();
         $this->system()->exec("sudo docker compose -f {$this->composeFilePath()} up -d --remove-orphans");
+        // The account's bridge port carries nothing until it is bound.
+        $this->prepareTenantNetwork();
+    }
+
+    /**
+     * The account runs on pash-tenants, which compose cannot start
+     * without and whose firewall a reboot drops. A failure is a warning: with no
+     * rules, enable_icc still keeps the network's members apart.
+     */
+    private function prepareTenantNetwork(): void
+    {
+        try {
+            $this->system()->exec(TenantNetwork::firewallArgv(), [], 60);
+        } catch (\Exception $e) {
+            Log::warning("Tenant network firewall not applied for {$this->username()}: " . trim($e->getMessage()));
+        }
     }
 
     public function stop(): void
@@ -196,25 +218,42 @@ class PhpHosting implements Runtime
         $this->fpmApache()?->deleteDomainConfig($this, $domainName);
     }
 
+    /**
+     * What keeps the account's processes up: s6, or the entrypoint runner on
+     * an account rendered before s6. Not cached: rendering the template changes it.
+     */
+    public function services(): ServiceManager
+    {
+        return S6ServiceManager::manages($this) ? new S6ServiceManager($this) : new RunnerServiceManager($this);
+    }
+
     public function reloadCron(): void
     {
-        $this->system()->exec(
-            "sudo docker compose -f {$this->composeFilePath()} exec -T php service cron restart"
-        );
+        $this->services()->reload('cron');
     }
 
     public function runEntrypointInitScripts(): void
     {
-        $this->system()->runProcess(
-            "sudo docker compose -f {$this->composeFilePath()} exec -T php bash /entrypoint-runner.sh init --all"
-        );
+        $this->system()->runProcess($this->execArgv([
+            'bash', '-c', 'for f in /entrypoint-init.d/*.sh; do [ -f "$f" ] && bash "$f"; done; true',
+        ]));
     }
 
-    public function runEntrypointScriptsSync(): void
+    public function syncServices(): void
     {
-        $this->system()->runProcess(
-            "sudo docker compose -f {$this->composeFilePath()} exec -T php bash /entrypoint-runner.sh sync --all"
-        );
+        $this->services()->sync();
+    }
+
+    /**
+     * Run $command in the account's php service.
+     *
+     * @param list<string> $command
+     *
+     * @return list<string>
+     */
+    public function execArgv(array $command): array
+    {
+        return ['sudo', 'docker', 'compose', '-f', $this->composeFilePath(), 'exec', '-T', $this->defaultServiceName(), ...$command];
     }
 
     public function reloadApache(): void

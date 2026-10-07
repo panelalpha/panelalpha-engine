@@ -119,7 +119,7 @@ return [
     'tine20URL' => getenv('APP_URL') ?: null,
 
     // All four are outside the checkout, on the bind mount, because a deploy
-    // clears and re-clones ~/project (engine#173). tine reads them as plain
+    // clears and re-clones ~/project. tine reads them as plain
     // config values, so there is nothing to symlink.
     'filesdir' => '/data/files',
     'tmpdir'   => '/data/tmp',
@@ -168,8 +168,8 @@ chmod 600 /app/config.inc.php
 # per request -- files a checkout does not have. Without them the client waits
 # ten seconds for Tine.__translationData.__isLoaded, puts up "A problem with
 # the translations was detected" and reloads into the same wait, for ever,
-# while the health probe sees a perfectly good HTTP 200. Measured, on the first
-# green deploy of this recipe. panelalpha-langbuild.php has the detail.
+# while the health probe sees a perfectly good HTTP 200.
+# panelalpha-langbuild.php has the detail.
 php /app/panelalpha-langbuild.php
 
 # --------------------------------------------------- install or update ----

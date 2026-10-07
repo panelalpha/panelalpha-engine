@@ -19,7 +19,7 @@ services:
     mem_limit: 256m
 
   # One-shot: fails the deploy naming each missing mail setting. Values come
-  # from .env (the project's env vars), not interpolation (engine#336).
+  # from .env (the project's env vars), not interpolation.
   email-check:
     image: getfider/fider:v0.38.0
     restart: "no"

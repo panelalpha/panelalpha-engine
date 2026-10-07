@@ -151,6 +151,24 @@ class FrameworkServiceTest extends TestCase
         $this->assertSame('on', $service['environment']['HTTPS']);
     }
 
+    /** DVinyl-shaped: `BASE_URL=` blank in .env.example means "serve from /". */
+    public function test_a_path_prefix_key_the_project_sets_is_left_to_its_env_file(): void
+    {
+        $service = $this->service(['path_prefix_keys' => ['BASE_URL']], 3000, 'https://shop.example.com');
+
+        $this->assertArrayNotHasKey('BASE_URL', $service['environment']);
+        $this->assertSame('https://shop.example.com', $service['environment']['APP_URL']);
+        $this->assertSame(['.env'], $service['env_file']);
+
+        // A recipe or the account that names it still wins.
+        $service = $this->service(
+            ['path_prefix_keys' => ['BASE_URL'], 'env' => ['BASE_URL' => '/app']],
+            3000,
+            'https://shop.example.com'
+        );
+        $this->assertSame('/app', $service['environment']['BASE_URL']);
+    }
+
     public function test_the_recipes_own_variables_win(): void
     {
         // A recipe that says which port its framework listens on knows better
@@ -268,6 +286,97 @@ class FrameworkServiceTest extends TestCase
                 8000
             );
             $this->assertArrayNotHasKey('user', $service);
+        }
+    }
+
+    /**
+     * PeerTube: pnpm through corepack in the host build, then `exec pnpm start`
+     * in plain node:22-bookworm, which has no pnpm, and a 127 restart loop.
+     */
+    public function test_a_pnpm_project_gets_its_package_manager_in_the_run_container(): void
+    {
+        $install = "HUSKY=0 LEFTHOOK=0 CI=1 sh -c 'command -v corepack >/dev/null 2>&1 || npm install -g corepack'"
+            . ' && corepack enable && corepack prepare pnpm@10.15.1 --activate && pnpm install --frozen-lockfile';
+        $service = $this->service([
+            'strategy' => 'express',
+            'runtime' => 'node',
+            'image' => 'node:22-bookworm',
+            'package_manager' => 'pnpm',
+            'install_command' => $install,
+            'entrypoint' => 'panelalpha-entrypoint.sh',
+        ]);
+
+        $script = $service['command'][2];
+        $this->assertStringContainsString('corepack enable --install-directory /tmp/corepack-bin', $script);
+        $this->assertStringContainsString('corepack prepare pnpm@10.15.1 --activate', $script);
+        $this->assertStringContainsString('PATH=/tmp/corepack-bin:/tmp/corepack-npm/bin:$$PATH', $script);
+        $this->assertStringEndsWith(' && exec /app/panelalpha-entrypoint.sh', $script);
+        $this->assertStringNotContainsString('HUSKY', $script);
+
+        $direct = $this->service([
+            'strategy' => 'nextjs',
+            'package_manager' => 'pnpm',
+            'install_command' => $install,
+            'start_command' => 'pnpm start',
+        ]);
+        $this->assertStringEndsWith(' && exec pnpm start', $direct['command'][2]);
+        $this->assertStringContainsString('corepack prepare pnpm@10.15.1', $direct['command'][2]);
+    }
+
+    public function test_npm_and_yarn_classic_run_unchanged(): void
+    {
+        foreach ([
+            ['npm', 'HUSKY=0 LEFTHOOK=0 CI=1 npm ci --no-audit --no-fund'],
+            ['yarn', "HUSKY=0 LEFTHOOK=0 CI=1 sh -c 'command -v corepack >/dev/null 2>&1 || npm install -g corepack'"
+                . ' && corepack enable && yarn install --frozen-lockfile --ignore-engines'],
+        ] as [$pm, $install]) {
+            $service = $this->service([
+                'strategy' => 'express',
+                'package_manager' => $pm,
+                'install_command' => $install,
+                'entrypoint' => 'panelalpha-entrypoint.sh',
+            ]);
+            $this->assertSame(['sh', '-c', 'exec /app/panelalpha-entrypoint.sh'], $service['command'], $pm);
+        }
+    }
+
+    public function test_yarn_berry_is_provisioned_too(): void
+    {
+        $service = $this->service([
+            'strategy' => 'express',
+            'package_manager' => 'yarn',
+            'install_command' => "HUSKY=0 LEFTHOOK=0 CI=1 sh -c 'command -v corepack >/dev/null 2>&1 || npm install -g corepack'"
+                . ' && corepack enable && yarn install --immutable',
+            'entrypoint' => 'panelalpha-entrypoint.sh',
+        ]);
+
+        $this->assertStringContainsString('corepack enable --install-directory', $service['command'][2]);
+    }
+
+    /** The account uid gets a passwd entry from files written next to the run file. */
+    public function test_php_mounts_the_account_user_files_read_only(): void
+    {
+        $service = FrameworkService::for([
+            'runtime' => 'php',
+            'image' => 'panelalpha/php:8.3-apache-bookworm-paXXXX',
+            'user' => '1001:1001',
+            'account_user_files' => true,
+        ], 8000);
+
+        $this->assertContains('./panelalpha.passwd:/etc/passwd:ro', $service['volumes']);
+        $this->assertContains('./panelalpha.group:/etc/group:ro', $service['volumes']);
+    }
+
+    public function test_without_account_user_files_nothing_is_mounted_over_etc(): void
+    {
+        $service = FrameworkService::for([
+            'runtime' => 'php',
+            'image' => 'php:8.3-apache-bookworm',
+            'user' => '1001:1001',
+        ], 8000);
+
+        foreach ($service['volumes'] as $volume) {
+            $this->assertStringNotContainsString(':/etc/', $volume);
         }
     }
 }

@@ -20,4 +20,4 @@ description: >-
   organization. Email verification and password reset stay off as upstream
   ships them (they need SMTP); file uploads need S3 settings as project env
   vars. TRUSTED_PROXY_HOP_COUNT keeps its default of 1, so rate limits key
-  on the hop the engine's proxy added (engine#319).
+  on the hop the engine's proxy added.

@@ -120,6 +120,8 @@ class PrepareFromSource
             // The resolved image, not the strategy's default one. What gets
             // seeded has to be what the project asked for.
             'deploy_image' => is_string($decision['image'] ?? null) ? $decision['image'] : null,
+            // The app config's `health: {start_period}`, read by AppHealth after `compose up`.
+            AppHealth::DETAIL_START_PERIOD => $appConfig?->startPeriod(),
             'git_commit' => $gitRepo !== null ? $this->readGitCommit($projectDir) : null,
         ]);
 
@@ -156,7 +158,7 @@ class PrepareFromSource
         }
 
         // `database:` is provisioned only by the writers that generate the app
-        // service; anywhere else it used to do nothing, silently (engine#210).
+        // service; anywhere else it used to do nothing, silently.
         $inertDatabase = ManifestDatabase::inertWarning($decision);
         if ($inertDatabase !== null) {
             $logger?->warn($inertDatabase);
@@ -182,14 +184,18 @@ class PrepareFromSource
 
         $sourceLabel = $gitRepo !== null ? GitUrl::sanitize($gitRepo) : 'uploaded archive';
         $this->dind->strategy()->apply($decision, $appConfig, $projectDir, $chown, $sourceLabel);
+        $this->dind->strategy()->dropUndefinedOverrideServices($chown);
         $this->dind->strategy()->installRailsHostInitializer($projectDir, $chown);
 
         if ($gitRepo !== null || is_dir($projectDir . '/.git')) {
             $this->gitForProjectDir($projectDir)->allowUntrustedGitDirectory();
         }
 
+        // Kept on the project so every later rule sync (a rename, a port re-detect) proxies with it.
+        $user->setAppPortScheme($decision['port_scheme'] ?? $appConfig?->portScheme());
+        $this->dind->applyProjectEnvVars(is_string($decision['compose_path'] ?? null) ? $decision['compose_path'] : null);
+        // After .env exists: compose publishes a host port taken from it.
         $this->dind->networking()->detectAndCreateProxyRules($user);
-        $this->dind->applyProjectEnvVars();
         $this->dind->strategy()->keepEngineFilesOutOfBuildContext($decision, $projectDir, $chown);
     }
 
@@ -243,7 +249,7 @@ class PrepareFromSource
         try {
             // Hooks explain a refusal on stdout; the failure message is built
             // from stderr, so without this it only names the script.
-            $this->dind->shell()->execAsUser(['bash', '-c', 'exec bash "$0" 1>&2', $path]);
+            $this->dind->shell()->execAsUserWithProjectEnv(['bash', '-c', 'exec bash "$0" 1>&2', $path]);
         } catch (DeployCancelledException $e) {
             throw $e;
         } catch (\Exception $e) {

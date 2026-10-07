@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Dind\Source;
 
+use App\Lib\Deploy\Platform\ManifestException;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Models\User as ModelsUser;
 use App\System as EngineSystem;
@@ -50,21 +51,21 @@ class GitRepository extends WorkTree
 
     /**
      * Clone the account's configured git remote into ~/project (no deploy preparation).
+     *
+     * With $beforeReplacing the clone lands in a staging directory first, and
+     * ~/project is only emptied (after $beforeReplacing ran) once it succeeded,
+     * so a failed clone leaves the running app and its files alone.
      */
-    public function cloneConfiguredRepository(): void
+    public function cloneConfiguredRepository(?callable $beforeReplacing = null): void
     {
         $user = $this->project->userModel();
-        $system = $this->project->system();
         $gitRepo = $user->getGitRepoOrFail();
-        $chown = $user->getChownString();
         $gitProjectDir = $this->tree()->appDirPath();
         $logger = $this->project->shell()->logger();
 
-        $system->exec(['sudo', 'mkdir', '-p', $gitProjectDir]);
-        if ($chown) {
-            $system->exec(['sudo', 'chown', $chown, $gitProjectDir]);
+        if ($beforeReplacing === null) {
+            $this->emptyDirectoryFor($gitProjectDir);
         }
-        $this->tree()->clearContents($gitProjectDir);
 
         $gitToken = $user->getGitToken();
         $safeRepo = GitUrl::sanitize($gitRepo);
@@ -76,15 +77,75 @@ class GitRepository extends WorkTree
         }
 
         try {
-            $this->clone($gitRepo, $branch, $gitToken);
+            if ($beforeReplacing === null) {
+                $this->clone($gitRepo, $branch, $gitToken);
+            } else {
+                $this->cloneThenReplace($gitRepo, $branch, $gitToken, $gitProjectDir, $beforeReplacing);
+            }
             $this->adoptCheckout($gitRepo, $branch, $gitToken);
         } catch (GitException $e) {
             throw new \RuntimeException($e->getMessage(), 0, $e);
         }
 
         $logger?->ok('Repository cloned');
+        if ($this->wantsFullHistory($gitRepo)) {
+            $logger?->info('Fetching the full history and tags (the recipe sets git: {history: full})');
+            try {
+                $this->fetchFullHistory($gitToken);
+            } catch (GitException $e) {
+                throw new \RuntimeException($e->getMessage(), 0, $e);
+            }
+        }
         $this->fetchSubmodules($gitToken);
         $this->allowUntrustedGitDirectory();
+    }
+
+    private function cloneThenReplace(
+        string $gitRepo,
+        ?string $branch,
+        ?string $gitToken,
+        string $gitProjectDir,
+        callable $beforeReplacing,
+    ): void {
+        $stagingDir = $this->tree()->stagingDirPath();
+        $this->tree()->removeStaging($stagingDir);
+        $this->emptyDirectoryFor($stagingDir, clear: false);
+
+        try {
+            $this->clone($gitRepo, $branch, $gitToken, $stagingDir);
+        } catch (\Throwable $e) {
+            $this->tree()->removeStaging($stagingDir);
+            throw $e;
+        }
+
+        $beforeReplacing();
+        $this->emptyDirectoryFor($gitProjectDir);
+        $this->tree()->moveStagingInto($stagingDir, $gitProjectDir);
+    }
+
+    private function emptyDirectoryFor(string $dir, bool $clear = true): void
+    {
+        $system = $this->project->system();
+        $chown = $this->project->userModel()->getChownString();
+
+        $system->exec(['sudo', 'mkdir', '-p', $dir]);
+        if ($chown) {
+            $system->exec(['sudo', 'chown', $chown, $dir]);
+        }
+        if ($clear) {
+            $this->tree()->clearContents($dir);
+        }
+    }
+
+    /** Read after the clone, so a repository's own `.panelalpha/` can ask too. */
+    private function wantsFullHistory(string $gitRepo): bool
+    {
+        try {
+            return $this->project->appConfig($gitRepo)?->fullGitHistory() ?? false;
+        } catch (ManifestException) {
+            // A malformed app config is reported by the preparation that follows.
+            return false;
+        }
     }
 
     public function allowUntrustedGitDirectory(): void
@@ -132,8 +193,9 @@ class GitRepository extends WorkTree
     }
 
     /** A fresh `git init` stays empty here until a pull: this class never synced it on connect. */
-    protected function fetchAndSyncFreshInit(string $branch, ?string $token): void
+    protected function fetchAndSyncFreshInit(string $branch, ?string $token): ?string
     {
+        return null;
     }
 
     protected function runCommand(array $cmd, int $timeout): string

@@ -5,7 +5,7 @@ namespace Tests\Unit\Http;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#241: on a CSF host :2011 reaches core through docker-proxy, from the
+ * On a CSF host :2011 reached core through docker-proxy, from the
  * bridge gateway, and that gateway sat inside the trusted 172.16.0.0/12 -- so
  * an internet client's X-Forwarded-For was believed. Only the two proxies that
  * really set the header may be trusted, and :2011 must start the chain itself.
@@ -66,7 +66,7 @@ class CoreNginxClientAddressTest extends TestCase
         $this->assertStringNotContainsString('include /etc/nginx/pa-trusted-proxy', $api);
         // Nothing sits in front of :2011, so a client's own header is dropped.
         $this->assertStringNotContainsString('$proxy_add_x_forwarded_for', $conf);
-        $this->assertSame(2, substr_count($api, 'proxy_set_header X-Forwarded-For $remote_addr;'));
+        $this->assertSame(1, substr_count($api, 'proxy_set_header X-Forwarded-For $remote_addr;'));
     }
 
     public function test_the_api_port_refuses_the_phpmyadmin_credentials_route(): void
@@ -97,18 +97,12 @@ class CoreNginxClientAddressTest extends TestCase
         );
     }
 
-    public function test_csf_puts_the_api_dnat_back_after_every_start(): void
+    /** ufw reloads only its own chains, so Docker's DNAT for :2011 is never flushed. */
+    public function test_the_firewall_leaves_dockers_dnat_alone(): void
     {
-        $csf = $this->file('scripts/csf.sh');
-        $this->assertStringContainsString("    install_core_publish_rules\n", $csf);
-        $this->assertStringContainsString('panelalpha-publish-core', $csf);
-        $this->assertStringContainsString('csf-publish-core.sh', $csf);
-
-        $publish = $this->file('scripts/csf-publish-core.sh');
-
-        // Filtered by CSF's own allow/deny chain, not a bare ACCEPT.
-        $this->assertMatchesRegularExpression('/--ctstate DNAT -j LOCALINPUT\n.*--ctstate DNAT -j ACCEPT/', $publish);
-        $this->assertStringContainsString('-j DNAT --to-destination "$ip:$PORT"', $publish);
-        $this->assertStringContainsString('iptables -n -L LOCALINPUT >/dev/null 2>&1 || exit 0', $publish);
+        $ufw = $this->file('scripts/firewall/ufw.sh');
+        $this->assertStringContainsString('s/^MANAGE_BUILTINS=.*/MANAGE_BUILTINS=no/', $ufw);
+        $this->assertStringNotContainsString('-t nat -F', $ufw);
+        $this->assertFileDoesNotExist(__DIR__ . '/../../../../scripts/csf-publish-core.sh');
     }
 }

@@ -24,7 +24,7 @@ cd ~/project
 # Account homes are root-owned 755, so the store has to be created rather than
 # written into $HOME directly. It is also the only thing that survives a
 # deploy: GitRepository::cloneConfiguredRepository empties ~/project before
-# every clone (engine #173).
+# every clone.
 STORE="${HOME}/.panelalpha"
 DATA="${STORE}/drupal"
 mkdir -p "${STORE}"
@@ -56,7 +56,7 @@ chmod 700 "${DATA}/private"
 #
 # They reach the container through a second `env_file:` entry at a path that
 # climbs out of the checkout, rather than through .env: ProjectEnvironment
-# copies .env to .env.default at mode 644 (engine #173). The administrator login
+# copies .env to .env.default at mode 644. The administrator login
 # is the engine's (`credentials:` in panelalpha.yaml), delivered the same way
 # from ~/.panelalpha/app-credentials.env.
 #

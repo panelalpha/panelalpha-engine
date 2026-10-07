@@ -47,7 +47,7 @@ class InstallWithoutBuildingTheProjectTest extends TestCase
     /**
      * ajslater/codex names `uv_build` as its backend, and its `bin/manage.py`
      * imports the `codex` package: without the project installed every deploy
-     * died with `ModuleNotFoundError: No module named 'codex'` (issue #2076).
+     * died with `ModuleNotFoundError: No module named 'codex'`.
      */
     public function test_a_uv_project_with_a_build_backend_installs_itself(): void
     {
@@ -59,6 +59,24 @@ class InstallWithoutBuildingTheProjectTest extends TestCase
         );
 
         $this->assertStringEndsWith('uv sync --frozen', $command);
+    }
+
+    /**
+     * uv honours .python-version and, when the image's Python differs, links
+     * .venv to a CPython it downloads outside /app (index-tts: `.venv/bin/indextts:
+     * not found` at run time). The sync is pinned to the image's interpreter.
+     */
+    public function test_uv_sync_stays_on_the_image_interpreter(): void
+    {
+        $command = PythonRuntime::installCommand(
+            ['pyproject.toml' => true, 'uv.lock' => true],
+            "[project]\nname = \"indextts\"\nversion = \"2.0.0\"\n\n[build-system]\nbuild-backend = \"hatchling.build\"\n"
+        );
+
+        $this->assertStringContainsString(
+            'UV_PYTHON_DOWNLOADS=never UV_PYTHON="$(command -v python)" VIRTUAL_ENV="$PWD/.venv" .venv/bin/uv sync --frozen',
+            $command
+        );
     }
 
     /**

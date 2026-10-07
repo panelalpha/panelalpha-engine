@@ -23,18 +23,8 @@ description: >-
 
   The editor needs its /comms websocket (debug output, node status). It works
   against the engine host; the *.panelalpha.online test relay strips
-  `Upgrade` (panelalpha/engine#170), so on a test domain the editor shows
+  `Upgrade`, so on a test domain the editor shows
   "lost connection" while deploys over HTTP still work. Use a real domain.
-
-  Measured on mariusz.panelalpha.tools (2026-09-28, engine 705f250a): deploy
-  56s, rebuild 26s, app 59 MiB. Anonymous: /flows, /settings, /nodes,
-  /diagnostics, /context/global, POST /flows and POST /nodes 401; /comms
-  answers {"auth":"fail"} to a bad token; /.env, /.git/config, flows.json,
-  flows_cred.json and settings.js 404. As admin: token via /auth/token, a
-  flow deployed through POST /flows (http in -> function -> http response,
-  plus an http request node with basic-auth credentials) answered, and
-  env.get() of the password and secret returned undefined; after rebuild the
-  flows, the pre-rebuild token and the decrypted credentials were all intact.
 credentials:
   adopt_from: .panelalpha/nodered/admin.env
   fields:

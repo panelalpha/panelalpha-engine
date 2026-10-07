@@ -421,7 +421,7 @@ class JsPackageManagerTest extends TestCase
 
     public function test_resolve_lifecycle_command_runs_a_framework_default_inside_the_workspace(): void
     {
-        // engine#160: `npx next build` at a pnpm workspace root finds no next.
+        // `npx next build` at a pnpm workspace root finds no next.
         $partial = [
             'default_build' => 'npx next build',
             'default_start' => 'npx next start -H 0.0.0.0 -p 3000',
@@ -598,5 +598,77 @@ class JsPackageManagerTest extends TestCase
         }
 
         return $dir;
+    }
+
+    public function test_scripts_calling_php_are_found_through_the_scripts_they_run(): void
+    {
+        $selfoss = ['scripts' => [
+            'postinstall' => 'npm run install-dependencies',
+            'install-dependencies' => 'npm run install-dependencies:client && npm run install-dependencies:server',
+            'install-dependencies:client' => 'npm ci --include=dev --prefix client/',
+            'install-dependencies:server' => 'composer install',
+        ]];
+        $this->assertTrue(JsPackageManager::scriptsCallPhp($selfoss, 'npm run build'));
+        $this->assertTrue(JsPackageManager::scriptsCallPhp(
+            ['scripts' => ['build' => 'yarn assets', 'preassets' => 'php artisan ziggy:generate']],
+            'yarn run build'
+        ));
+        $this->assertTrue(JsPackageManager::scriptsCallPhp([], 'php bin/console assets:install && npm run build'));
+
+        $this->assertFalse(JsPackageManager::scriptsCallPhp(['scripts' => ['build' => 'vite build']], 'npm run build'));
+        // A path or a package name containing the word is not a call.
+        $this->assertFalse(JsPackageManager::scriptsCallPhp(
+            ['scripts' => ['postinstall' => 'node scripts/composer-check.js', 'build' => 'php-parser-cli']],
+            'npm run build'
+        ));
+        // A script naming itself does not loop.
+        $this->assertFalse(JsPackageManager::scriptsCallPhp(['scripts' => ['build' => 'npm run build']], 'npm run build'));
+    }
+
+    public function test_a_task_runner_config_or_a_workspace_hook_calling_php_is_found(): void
+    {
+        $files = [
+            // opensourcepos/opensourcepos gulpfile.js, trimmed.
+            'gulpfile.js' => "gulp.task('update-licenses', function () {\n"
+                . "    return run_completion(run('composer licenses --format=json --no-dev > public/license/composer.LICENSES').exec());\n});\n",
+            'Gruntfile.js' => "grunt.initConfig({ shell: { lint: { command: 'php vendor/bin/phpcs' } } });\n",
+            'packages/php/blueprint/package.json' => '{"scripts":{"postinstall":"XDEBUG_MODE=off composer install --quiet"}}',
+        ];
+        $read = static fn (string $file): ?string => $files[$file] ?? null;
+
+        $this->assertTrue(JsPackageManager::scriptsCallPhp(['scripts' => ['build' => 'gulp default']], 'npm run build', $read));
+        $this->assertTrue(JsPackageManager::scriptsCallPhp(['scripts' => ['build' => 'npx grunt dist']], 'npm run build', $read));
+        $this->assertTrue(JsPackageManager::scriptsCallPhp(
+            ['workspaces' => ['packages/php/blueprint'], 'scripts' => ['build' => 'vite build']],
+            'npm run build',
+            $read
+        ));
+
+        // The build never runs gulp, so the gulpfile is not the build's.
+        $this->assertFalse(JsPackageManager::scriptsCallPhp(['scripts' => ['build' => 'vite build']], 'npm run build', $read));
+        $this->assertFalse(JsPackageManager::scriptsCallPhp(
+            ['scripts' => ['build' => 'gulp default']],
+            'npm run build',
+            static fn (string $file): ?string => $file === 'gulpfile.js' ? "const php = require('gulp-php-minify');\ngulp.task('default', () => gulp.src('src/*.js'));\n" : null
+        ));
+        // Without a reader only package.json is read, as before.
+        $this->assertFalse(JsPackageManager::scriptsCallPhp(['scripts' => ['build' => 'gulp default']], 'npm run build'));
+    }
+
+    public function test_yarn_berry_defaults_to_plug_n_play(): void
+    {
+        $berryLock = "__metadata:\n  version: 8\n";
+
+        // secretsanta: packageManager yarn@4.5.1 and no .yarnrc.yml.
+        $this->assertTrue(JsPackageManager::isYarnPnp(['packageManager' => 'yarn@4.5.1'], null, $berryLock));
+        $this->assertTrue(JsPackageManager::isYarnPnp([], null, $berryLock));
+        $this->assertTrue(JsPackageManager::isYarnPnp([], "nodeLinker: pnp\n", "# yarn lockfile v1\n"));
+
+        $this->assertFalse(JsPackageManager::isYarnPnp([], "nodeLinker: node-modules\n", $berryLock));
+        $this->assertFalse(JsPackageManager::isYarnPnp([], "nodeLinker: 'pnpm'\n", $berryLock));
+        $this->assertFalse(JsPackageManager::isYarnPnp([], null, "# yarn lockfile v1\n"));
+        $this->assertFalse(JsPackageManager::isYarnPnp(['packageManager' => 'yarn@1.22.22'], null, $berryLock));
+        $this->assertFalse(JsPackageManager::isYarnPnp(['packageManager' => 'pnpm@9.0.0'], null, $berryLock));
+        $this->assertFalse(JsPackageManager::isYarnPnp([], null, null));
     }
 }

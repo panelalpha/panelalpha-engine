@@ -9,7 +9,7 @@
 #
 # Chyrp reads STORAGE_DIR from $_SERVER['CHYRP_STORAGE_DIR'] and falls back to
 # includes/ (includes/common.php:101). includes/ is inside the checkout, and a
-# redeploy clears and re-clones ~/project (engine#173) -- so config.json.php,
+# redeploy clears and re-clones ~/project -- so config.json.php,
 # which holds the database password and every setting, would be destroyed by
 # every deploy and the site would reinstall itself each time.
 #
@@ -21,7 +21,7 @@ SetEnv CHYRP_STORAGE_DIR /data
 
 # ------------------------------------------------------------------ uploads
 #
-# The shared PHP base image loads no php.ini at all (engine#185), so PHP's
+# The shared PHP base image loads no php.ini at all, so PHP's
 # built-in defaults apply: 2M per upload and an 8M POST. Chyrp's own default
 # upload limit is 10M and upstream's Dockerfile raises PHP's to 100M; this is
 # the same thing said in the one place a hosting account can say it. Lower it
@@ -32,14 +32,14 @@ php_value post_max_size 100M
 # ------------------------------------------------------------ error output
 #
 # The same missing php.ini leaves display_errors on for every account on the
-# platform (engine#185). Chyrp turns it off itself in includes/error.php, but
+# platform. Chyrp turns it off itself in includes/error.php, but
 # only for a request that reached a file which includes it: asking Apache for
-# includes/class/SQL.php directly answered 200 with
+# includes/class/SQL.php directly answers 200 with
 #
 #   Fatal error: Uncaught Error: Undefined constant "INCLUDES_DIR" in
 #   /app/includes/class/SQL.php:11
 #
-# measured on a deployed account. Nothing should be printing PHP's diagnostics
+# Nothing should be printing PHP's diagnostics
 # to the public. The site's own errors still go to error_log.txt, which
 # includes/error.php:8 sets and the block below denies.
 php_flag display_errors Off
@@ -51,8 +51,8 @@ php_flag display_errors Off
 #
 #   docker-compose.override.yml  the engine writes this recipe's overrides/
 #                                into the project root under that name, and the
-#                                vhost's FilesMatch does not reach it
-#                                (engine#181). Served as text it publishes the
+#                                vhost's FilesMatch does not reach it.
+#                                Served as text it publishes the
 #                                deploy's arrangement.
 #   error_log.txt                includes/error.php:8 points PHP's error_log at
 #                                MAIN_DIR/error_log.txt -- the document root.

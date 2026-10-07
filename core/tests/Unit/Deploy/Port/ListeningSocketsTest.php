@@ -72,6 +72,34 @@ class ListeningSocketsTest extends TestCase
         $this->assertTrue(ListeningSockets::isLoopback('00000000000000000000000001000000'));
     }
 
+    public function test_all_of_127_0_0_0_8_is_loopback(): void
+    {
+        // Docker's embedded DNS in every compose network: 127.0.0.11.
+        $this->assertTrue(ListeningSockets::isLoopback('0B00007F'));
+        $this->assertTrue(ListeningSockets::isLoopback('0100017F'));
+        $this->assertFalse(ListeningSockets::isLoopback('7F00000A'), '10.0.0.127 is not loopback');
+    }
+
+    public function test_an_ipv4_mapped_loopback_is_loopback(): void
+    {
+        // A JVM's 127.0.0.1 listener, as it appears in /proc/net/tcp6.
+        $this->assertTrue(ListeningSockets::isLoopback('0000000000000000FFFF00000100007F'));
+        $this->assertTrue(ListeningSockets::isLoopback('0000000000000000ffff00000b00007f'));
+        $this->assertFalse(ListeningSockets::isLoopback('0000000000000000FFFF00000200000A'), '::ffff:10.0.0.2');
+        $this->assertFalse(ListeningSockets::isLoopback('00000000000000000000000000000000'), '[::]');
+    }
+
+    public function test_an_ipv4_mapped_loopback_listener_is_not_chosen(): void
+    {
+        // SignServer CE: WildFly's 127.0.0.1:8090 bound while 8081 was still booting.
+        $sockets = [
+            ['addr' => '0000000000000000FFFF00000100007F', 'port' => 8090],
+            ['addr' => '0000000000000000FFFF00000100007F', 'port' => 9990],
+        ];
+
+        $this->assertNull(ListeningSockets::chooseAppPort($sockets, 8081));
+    }
+
     public function test_the_wildcard_address_is_not_loopback(): void
     {
         $this->assertFalse(ListeningSockets::isLoopback('00000000'));
@@ -101,6 +129,33 @@ class ListeningSocketsTest extends TestCase
         ];
 
         $this->assertSame(3000, ListeningSockets::chooseAppPort($sockets, 8080));
+    }
+
+    /** rapidbay's image runs a stock nginx on 80 beside its declared 5000. */
+    public function test_a_port_the_image_declares_outranks_the_generic_preference(): void
+    {
+        $sockets = [
+            ['addr' => '00000000', 'port' => 80],
+            ['addr' => '00000000', 'port' => 5000],
+        ];
+
+        $this->assertSame(80, ListeningSockets::chooseAppPort($sockets, 6881));
+        $this->assertSame(5000, ListeningSockets::chooseAppPort($sockets, 6881, [6881, 5000]));
+    }
+
+    /** php-fpm on 9000 beside the real server on 8081; both stay candidates. */
+    public function test_every_candidate_is_ranked_so_a_non_http_first_choice_can_be_passed_over(): void
+    {
+        $sockets = [
+            ['addr' => '00000000', 'port' => 8081],
+            ['addr' => '00000000', 'port' => 9000],
+            ['addr' => '00000000', 'port' => 4369],
+            ['addr' => '00000000', 'port' => 2222],
+        ];
+
+        $this->assertSame([9000, 8081], ListeningSockets::rankedAppPorts($sockets, 8080));
+        $this->assertSame(9000, ListeningSockets::chooseAppPort($sockets, 8080));
+        $this->assertSame([], ListeningSockets::rankedAppPorts([...$sockets, ['addr' => '00000000', 'port' => 8080]], 8080));
     }
 
     public function test_an_unrecognised_port_is_chosen_by_number(): void

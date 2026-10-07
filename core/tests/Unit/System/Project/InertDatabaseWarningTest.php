@@ -9,7 +9,7 @@ use App\System\Project\Dind\Strategy\ManifestDatabase;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#210: a `database:` no writer provisions must say so in the deploy
+ * A `database:` no writer provisions must say so in the deploy
  * log. The dockerfile and generated strategies honour it now, so the warning
  * is left only where the key is still inert.
  */

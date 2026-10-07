@@ -17,9 +17,8 @@ use PHPUnit\Framework\TestCase;
  *   "issue": "Runtime 'php' is required but could not be resolved for this project"
  *
  * while the very next deploy of the same URL with the same recipe reached
- * serving: ok in 120 s (ESMira, supported-apps#1216). The recipe was found
- * either way — inspect knew which recipe applied and still concluded the
- * runtime it names could not exist.
+ * serving: ok (ESMira). The recipe was found either way — inspect knew which
+ * recipe applied and still concluded the runtime it names could not exist.
  *
  * Local-path submodules need `protocol.file.allow`, which git has refused by
  * default since 2.38 and which the production command deliberately does not

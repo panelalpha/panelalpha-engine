@@ -2,7 +2,7 @@
 description: >-
   Kresus is a self-hosted personal finance / budget manager: a Node/Express
   server (TypeScript) that serves its own SPA and, through the Python "woob"
-  library, can scrape bank statements. supported-apps#1074. It listens on 9876
+  library, can scrape bank statements. It listens on 9876
   (HOST already 0.0.0.0 in the image) and gates the ENTIRE app behind HTTP Basic
   Auth when KRESUS_AUTH=<user>:<pass> is set (server/index.ts mounts
   express-basic-auth before every route, challenge on).
@@ -13,7 +13,7 @@ description: >-
   traefik-fronted dev compose. Upstream publishes that exact build as the
   official multi-arch image bnjbvr/kresus on Docker Hub, so this recipe runs the
   image (pinned to the stable tag 0.25.4) via a compose-replace rather than
-  rebuilding it on a 2-core host. This is the jetlog / mixpost pattern: a
+  rebuilding it from source. This is the jetlog / mixpost pattern: a
   description-only recipe whose overrides/docker-compose.yml is picked up by the
   compose-usable probe, so the deploy runs the replacement stack as-is.
 
@@ -24,7 +24,7 @@ description: >-
   store — on a named volume (kresus_db) that survives redeploy and storage
   reclaim. Kresus's own runtime dir (/home/user/data: woob modules, sources
   list, logs) sits on a second named volume (kresus_data). ~/project is wiped
-  every redeploy (engine#173) and holds neither.
+  every redeploy and holds neither.
 
   BOOT DETERMINISM. The stable image's entrypoint runs `yarn global upgrade
   kresus` on every boot unless IS_NIGHTLY is set. The recipe sets IS_NIGHTLY=1 to
@@ -49,8 +49,8 @@ description: >-
   keys onto that .env without dropping the recipe's (EnvFile::merge).
 
   The published port is declared explicitly (9876) so the proxy has an app port
-  to target (engine#234); a no-op `ready` service gated on the kresus
-  healthcheck makes `compose up` block until Kresus actually answers (engine#90).
+  to target; a no-op `ready` service gated on the kresus
+  healthcheck makes `compose up` block until Kresus actually answers.
 credentials:
   fields:
     KRESUS_AUTH_USER: {kind: username, value: admin}

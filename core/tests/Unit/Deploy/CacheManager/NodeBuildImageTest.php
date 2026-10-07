@@ -18,7 +18,7 @@ class NodeBuildImageTest extends TestCase
             . "COPY --from=node /usr/local/bin/ /usr/local/bin/\n"
             . "COPY --from=node /usr/local/lib/node_modules/ /usr/local/lib/node_modules/\n"
             . "COPY --from=node /opt/ /opt/\n"
-            . "RUN node --version && npm --version\n",
+            . "RUN node --version && npm --version && { ! command -v corepack >/dev/null || corepack enable pnpm; }\n",
             $dockerfile
         );
     }

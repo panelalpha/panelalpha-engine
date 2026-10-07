@@ -7,7 +7,7 @@ use App\Lib\Deploy\Platform\Probes\ComposeUsableNestedProbe;
 
 /**
  * A compose stack kept under docker/ or deploy/ is found, but only for a
- * project nothing else claims (engine#91).
+ * project nothing else claims.
  */
 class ComposeUsableNestedProbeTest extends ProbeTestCase
 {
@@ -60,6 +60,24 @@ class ComposeUsableNestedProbeTest extends ProbeTestCase
         // huly's ws-tests/, a docs example, a dev container: all valid compose.
         $this->write('examples/docker-compose.yml', self::ZORAXY);
         $this->write('.devcontainer/docker-compose.yml', self::ZORAXY);
+
+        $this->assertFalse($this->evaluate());
+    }
+
+    /** autobase keeps its deployable stack in console/, beside automation/ and images/. */
+    public function test_the_only_other_directory_with_a_usable_stack_is_found(): void
+    {
+        $this->write('console/docker-compose.yml', self::ZORAXY);
+        $this->write('ws-tests/docker-compose.yml', self::ZORAXY);
+        $this->write('automation/README.md', '# ansible');
+
+        $this->assertSame(['compose_path' => $this->dir . '/console/docker-compose.yml'], $this->evaluate());
+    }
+
+    public function test_two_other_directories_with_a_stack_are_a_guess(): void
+    {
+        $this->write('server/docker-compose.yml', self::ZORAXY);
+        $this->write('agent/docker-compose.yml', self::ZORAXY);
 
         $this->assertFalse($this->evaluate());
     }

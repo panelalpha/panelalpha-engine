@@ -14,7 +14,7 @@ apt-get 11.9s, build 2.2s, inside a 53.1s critical path" is.
 |---|---|---|
 | Install, tokens, TLS | [`docs/02-getting-started/`](docs/02-getting-started/install.md) | `--in-container` for tests; installer prints `pae-artisan` |
 | MCP | [`docs/04-connecting-your-ai/`](docs/04-connecting-your-ai/your-assistant.md) | `tests/mcp/`; do not invent client UIs |
-| Detection / stacks | [`docs/07-supported-projects/`](docs/07-supported-projects/how-detection-works.md) | §6a Railpack measurements; §11 onboarding an app |
+| Detection / stacks | [`docs/07-supported-projects/`](docs/07-supported-projects/how-detection-works.md) | §6a Railpack; §11 onboarding an app |
 | Deploy failures | [`docs/02-getting-started/what-happens.md`](docs/02-getting-started/what-happens.md) | Explainer rules vs DinD proof |
 | Telemetry | [`docs/02-getting-started/what-is-collected.md`](docs/02-getting-started/what-is-collected.md) | Field list when changing `DeployReport` |
 | Pipeline speed / caches | (none — operator does not measure this) | §1–§10 below |
@@ -34,17 +34,8 @@ cd core
 ./vendor/bin/phpunit --testsuite Unit
 ```
 
-**Current baseline: 2140 tests, 7986 assertions, 2 failures.**
-
-Those 2 failures are pre-existing and unrelated to Deploy:
-
-| Test | Cause |
-|---|---|
-| `ChangeWebserverSystemTest::test_webserver_script_parse_args_handles_php_argument_order` | `scripts/webserver-parse-args.test.sh` is missing from the repo |
-| `UserIpAddressesTest::test_get_bind_ip_addresses_filters_non_local_default_ipv4` | depends on the host's default IPv4 route |
-
-Report them as pre-existing **only after proving it** — `git stash`, re-run,
-confirm the same 2 fail on the baseline, `git stash pop`. Never wave a failure
+Report a failure as pre-existing **only after proving it** — `git stash`, re-run,
+confirm the same tests fail on the baseline, `git stash pop`. Never wave a failure
 away as "probably pre-existing".
 
 A recipe change must also keep detection stable. The fastest proof is
@@ -72,7 +63,7 @@ npm run check             # typecheck + lint + format — run before pushing
 Three things an agent gets wrong here:
 
 **A green run is not full coverage.** A lot of the suite skips for legitimate
-environmental reasons (CSF not installed, IP management absent, `pae-artisan`
+environmental reasons (no firewall on the host, IP management absent, `pae-artisan`
 unreachable). Every run now prints what it skipped and why; read that summary
 before reporting a result, and quote the skip count alongside the pass count.
 `MAX_SKIPPED=<n>` turns the budget into a gate.
@@ -95,7 +86,7 @@ of `npm test`.
 ## 2. Deploy tests (DinD)
 
 ```bash
-php scripts/dind-test/deploy.php <git-url|local-path> [flags]
+php scripts/tools/dind-test/deploy.php <git-url|local-path> [flags]
 ```
 
 Runs the **real** engine code (`Dind`, `DetectProjectStrategy`,
@@ -141,18 +132,18 @@ mode, build breakdown, phases:
   Strategy:  NestJS (nestjs)
   Railpack:  no
   Mode:      cold (fresh container)
-  Build:     9 layer(s), 0 cached, 32.9s spent building
-  Time:      103.8s total (create 0.8s, daemon-wait 1.2s, daemon-settle (test-only) 2s,
-             seed (test-only) 42s, clone/detect 0.3s, start 50.8s, settle (test-only) 5s,
-             http-check (test-only) 0.3s, unaccounted 1.4s)
-  Production critical path: ~53.1s
+  Build:     <n> layer(s), <n> cached, Ns spent building
+  Time:      Ns total (create Ns, daemon-wait Ns, daemon-settle (test-only) Ns,
+             seed (test-only) Ns, clone/detect Ns, start Ns, settle (test-only) Ns,
+             http-check (test-only) Ns, unaccounted Ns)
+  Production critical path: ~Ns
 
   Build steps (inside the account's Docker, slowest first):
-      16.9s  RUN HUSKY=0 LEFTHOOK=0 CI=1 npm ci --no-audit --no-fund
-      11.9s  RUN apt-get update && apt-get install -y --no-install-recommends git && ...
-       2.2s  RUN npm run build
-       0.5s  RUN node -e '...strip git-hook scripts...'
-       0.3s  COPY . .
+      Ns  RUN HUSKY=0 LEFTHOOK=0 CI=1 npm ci --no-audit --no-fund
+      Ns  RUN apt-get update && apt-get install -y --no-install-recommends git && ...
+      Ns  RUN npm run build
+      Ns  RUN node -e '...strip git-hook scripts...'
+      Ns  COPY . .
 ```
 
 ### The phases
@@ -162,7 +153,7 @@ mode, build breakdown, phases:
 | `create` | **yes** | Render the account's compose file and `docker compose up` the DinD container |
 | `daemon-wait` | **yes** | Inner dockerd becoming reachable |
 | `daemon-settle` | no — test only | Fixed 2s margin for a loaded host |
-| `seed` | no — **backgrounded in production** | Copies the `ImageCatalog` images into the inner daemon. ~40s and it dominates wall time; production uses `InnerDocker::seedBaseImagesInBackground()`, which does not block a deploy |
+| `seed` | no — **backgrounded in production** | Copies the `ImageCatalog` images into the inner daemon. It dominates wall time; production uses `InnerDocker::seedBaseImagesInBackground()`, which does not block a deploy |
 | `clone/detect` | **yes** | Fetch/copy the source, run `DetectProjectStrategy`, write the deploy files |
 | `start` | **yes** | Host compile (nginx/Nitro only) + image preload + `compose up` incl. the image build |
 | `settle`, `http-check` | no — test only | This script's own verification |
@@ -181,15 +172,15 @@ visible individually. That is the level to optimise at.
 
 ```bash
 # Phase 0 — GLOBAL SEED. One account, 11 base images. Paid ONCE.
-php scripts/dind-test/deploy.php <any-app> --real-home --name=NAME --seed-only
+php scripts/tools/dind-test/deploy.php <any-app> --real-home --name=NAME --seed-only
 
 # Then every app deploys into that seeded account:
-php scripts/dind-test/deploy.php <app> --real-home --name=NAME --reuse-container            # COLD
-php scripts/dind-test/deploy.php <app> --real-home --name=NAME --reuse-container --keep-cache # WARM
+php scripts/tools/dind-test/deploy.php <app> --real-home --name=NAME --reuse-container            # COLD
+php scripts/tools/dind-test/deploy.php <app> --real-home --name=NAME --reuse-container --keep-cache # WARM
 ```
 
 **Global seed is not a per-deploy cost.** It imports the `ImageCatalog` images
-into the account's inner daemon (~45-70s for 11 images). Production does it in
+into the account's inner daemon. Production does it in
 the background at account creation (`InnerDocker::seedBaseImagesInBackground()`),
 so no deploy ever waits on it. Measure it once, report it once, and keep it out
 of every app's number.
@@ -198,8 +189,7 @@ of every app's number.
 
 **Tear down between apps.** All apps in one account build the same
 `project-app:latest` under the same compose project. Without a teardown, app N
-silently *runs app N-1's image* and reports a meaningless HTTP 200 in ~5s. An
-earlier run of this battery had go-beszel "passing" while serving NestJS.
+silently *runs app N-1's image* and reports a meaningless HTTP 200.
 
 ```bash
 docker exec $C docker compose -f $P/docker-compose.panelalpha.yml down --rmi local -v --remove-orphans
@@ -240,52 +230,15 @@ This is production's warm path.
 package-manager caches for host compiles.
 
 > **The trap:** the tester recreates the container by default, destroying cache
-> #2, so running it twice measures cold twice. An early battery reported
-> "warm 103s vs cold 110s" and nearly concluded caching does not help. Use
-> `--reuse-container`.
-
----
-
-## 6. Measured results
-
-Global seed: **51s** for 11 images, once for the whole table below.
-
-| App | Strategy | Railpack | Cold crit | Warm crit | Rebuild | Slowest layer | HTTP |
-|---|---|---|---|---|---|---|---|
-| nestjs | NestJS | no | 47.2s | **1.6s** | 1s (8 cached) | `npm ci` 14.0s, `apt-get git` 11.5s | 200 |
-| nextjs | Next.js | no | 79.0s | **1.8s** | 1s (9 cached) | `pnpm install` 27.5s, `pnpm run build` 14.1s | 200 |
-| java-petclinic | Java (Maven) | no | 124.3s | **2.0s** | 2s (3 cached) | `mvn -B -q -DskipTests package` **106.7s** | 200 |
-| laravel | Laravel | no | 60.4s | 17.8s | 2s (8 cached) | `composer install --no-dev` **13.9s** | 200 |
-| railpack-probe | **Railpack** | **yes** | 33.2s | 9.0s | — | — | 200 |
-| django | Dockerfile (repo's) | no | 53.5s | 2.0s | 3s (6 cached) | `FROM uv:python3.12` 27.5s | 400¹ |
-| remix | Dockerfile (repo's) | no | 250.0s | 12.9s | 5s (18 cached) | `npm install --include=dev` **168.9s** | 000² |
-| rust-axum | Rust | no | 64.5s | 31.3s | 2s (4 cached) | `cargo build --release` 13.4s | —³ |
-| vite-react | Vite | no | 11.9s⁴ | — | — | host compile (not a layer) | 200 |
-| astro | Compose (repo's) | no | 6.3s | — | — | — | 000² |
-
-¹ Django's own `ALLOWED_HOSTS` rejects the container hostname; app and Postgres both up.
-² The repo's own Dockerfile/compose fails, not a recipe.
-³ Library workspace, no binary — the guard fires correctly.
-⁴ Fresh account (host-compile recipe; see §4).
-
-Known-failing, all upstream defects rather than engine faults — say which:
-angular-realworld cannot resolve its own `realworld/assets/theme/styles.css`;
-sveltejs/realworld ships a malformed `pnpm-lock.yaml`
-(`ERR_PNPM_BROKEN_LOCKFILE`); beszel's `//go:embed all:dist` needs its JS
-frontend built first; node-express-boilerplate's Dockerfile uses `node:alpine`,
-which no longer ships yarn; the nuxt starter dies in `npm install` with
-`Cannot read properties of null (reading 'edgesOut')` — **reproduced with the
-engine changes stashed**, so not ours.
-
-When you claim a failure is pre-existing, prove it the same way: stash, re-run,
-compare, restore.
+> #2, so running it twice measures cold twice, and reads as "caching does not
+> help". Use `--reuse-container`.
 
 ---
 
 ## 6a. Railpack
 
 > Baseline: [`docs/07-supported-projects/how-detection-works.md`](docs/07-supported-projects/how-detection-works.md)
-> (order, Deno/Elixir gap). This section is measurements and the cache path.
+> (order, Deno/Elixir gap). This section is the cache path and how to verify it.
 
 Railpack is the catch-all just before `static`/`fallback`, so it is reached only
 when nothing earlier claims the repo. It is gated by
@@ -301,17 +254,11 @@ and `denoland/deno_std` all detect as `fallback`.
 ### Real repos that do reach it
 
 Anything with a `package.json` whose framework we have no recipe for — Koa,
-hapi, Restify, Feathers, or a plain Node server:
+hapi, Restify, Feathers, or a plain Node server.
 
-| Repo | Cold crit | Warm crit | Image built | HTTP |
-|---|---|---|---|---|
-| `feathers-chat/quick-start` (real Feathers app) | 59.3s | **13.5s** | yes | **200** |
-| bare Node server (fixture) | 33.9s | **11.0s** | yes | **200** |
-| `expressjs/express` | 96.8s | 39.1s | yes | — ¹ |
-| `hapijs/hapi` | 93.5s | 38.9s | yes | — ¹ |
-
-¹ Library repos: Railpack builds the image fine, but there is no server and no
-`start` script, so nothing listens. Build success is the signal here, not HTTP.
+For a library repo (`expressjs/express`, `hapijs/hapi`) Railpack builds the
+image fine, but there is no server and no `start` script, so nothing listens.
+Build success is the signal there, not HTTP.
 
 A repo with dependencies but **no `start` script and no server** (`koajs/examples`,
 `lodash/lodash`) makes the Railpack build fail, and the chain falls back to
@@ -338,14 +285,13 @@ grep -oP 'railpack-[a-z]+-?[0-9.]*' reg.log | sort -u     # which stack tags wer
 grep -oP '"(GET|HEAD|PUT|POST|PATCH) ' reg.log | sort | uniq -c
 ```
 
-Measured across the four Railpack deploys above:
+What a correct run shows:
 
-- every build read **all seven** stack tags — `railpack-go-1.22`,
-  `railpack-node-20`, `railpack-node-22`, `railpack-python-3.11`,
-  `railpack-python-3.12`, `railpack-ruby-3.3.6`, `railpack-ruby-3.4.1`
-- cold: 50-64 registry requests, 22-36 blob fetches
-- warm: 42 requests, 14 blobs — fewer, because BuildKit already holds them
-- **142 GET + 56 HEAD, and 0 PUT/POST/PATCH.** Not one write. That is
+- the build reads the `railpack-*` stack tags it was given (all seven unless
+  narrowed — see "Narrowing `--cache-from`" in §6b)
+- a warm build makes fewer requests and fetches fewer blobs than a cold one,
+  because BuildKit already holds them
+- **GET and HEAD only, no PUT/POST/PATCH.** Not one write. That is
   `tenantFlags()`'s empty `--cache-to` doing its job: a tenant build must
   never export layers holding customer source into a registry every other
   account can read.
@@ -366,12 +312,12 @@ matches the project's lockfile — and nothing counts or stores it. So "how ofte
 was this cache used" cannot be answered from the product today.
 
 It *can* be measured from the cache registry's access log, which is what
-`scripts/dind-test/cache-usage.php` does:
+`scripts/tools/dind-test/cache-usage.php` does:
 
 ```bash
-MARK=$(php scripts/dind-test/cache-usage.php --mark)
-php scripts/dind-test/deploy.php <app> --real-home --name=NAME
-php scripts/dind-test/cache-usage.php --from=$MARK
+MARK=$(php scripts/tools/dind-test/cache-usage.php --mark)
+php scripts/tools/dind-test/deploy.php <app> --real-home --name=NAME
+php scripts/tools/dind-test/cache-usage.php --from=$MARK
 ```
 
 Distinguish the two columns; conflating them is the easy mistake:
@@ -382,55 +328,41 @@ Distinguish the two columns; conflating them is the easy mistake:
 - **BLOB PULLS / MB** — cached layer data actually transferred. This is real
   usage. A tag with reads and ~0 MB did nothing for that build.
 
-One real Railpack deploy (Feathers app, Node):
+The report has one row per tag:
 
 ```
 CACHE TAG                  MANIFEST READS   BLOB PULLS         MB   VERDICT
-railpack-node-22                        2           24      143.3   USED
-railpack-node-20                        2           10        0.1   consulted, no payload
-railpack-go-1.22                        1            4        0.0   consulted, no payload
-railpack-python-3.11                    2            4        0.0   consulted, no payload
-railpack-python-3.12                    2            4        0.0   consulted, no payload
-railpack-ruby-3.3.6                     2            2        0.0   consulted, no payload
-railpack-ruby-3.4.1                     2            2        0.0   consulted, no payload
+railpack-node-22                      <n>          <n>        <n>   USED
+railpack-node-20                      <n>          <n>        <n>   consulted, no payload
+...
 
-Writes during this window: 0 (read-only — correct for a tenant deploy)
+Writes during this window: <n>
 ```
 
-**One cache of seven does the work — per build.** For a Node project the six
-non-Node tags cost a manifest round trip each and deliver nothing. Across eight
-Railpack deploys the pattern was exact: every tag read 16 times (8 × GET+HEAD),
-while only `railpack-node-22` transferred payload (143.2 MB). That is what
-motivated narrowing `--cache-from` (below).
+**For a Node project, one cache of seven does the work.** The non-Node tags
+cost a manifest round trip each and deliver nothing. That is what motivated
+narrowing `--cache-from` (below).
 
 Do **not** read this as "the other six tags are useless". They are unused *by a
 Node build*, and Node is all Railpack normally sees because the recipes claim
 the other languages first. When a project does fall through to Railpack, those
-tags are worth a great deal — a Ruby project pays 28.1s with its tag warmed
-against 208.2s without. See "Does the shared cache actually make Railpack
-faster?" below for the per-stack A/B.
+tags are worth a great deal. See "Does the shared cache make Railpack faster?"
+below for how to run the per-stack A/B.
 
-### Does the shared cache actually make Railpack faster? Yes — measured
+### Does the shared cache make Railpack faster?
 
-A/B on the same fixtures, fresh container every run (so the account's own
-BuildKit cache is never what is measured), cache disabled by **renaming** the
-registry container so `lookUpCacheRegistry()` resolves null. Rename rather than
-stop: `deploy.php` ran `docker container prune -f` at the time, which deletes a
-*stopped* registry container outright. It now removes only its own container by
-name, so stopping would do — the rename is what these numbers were taken with. Metric is `clone/detect`, because for a Railpack
+How to A/B it: the same fixtures, a fresh container every run (so the account's
+own BuildKit cache is never what is measured), and the cache disabled by
+renaming or stopping the registry container so `lookUpCacheRegistry()` resolves
+null. Stopping is safe now that `deploy.php` removes only its own container by
+name; with the old unscoped `docker container prune -f` a *stopped* registry
+container was deleted outright. Metric is `clone/detect`, because for a Railpack
 app the build runs inside `prepareUserAppFromSources()`, not in `start`.
 
-| Stack | cache ON | cache OFF | delta |
-|---|---|---|---|
-| ruby | **28.1s** (26.0, 30.1) | **208.2s** (249.4, 167.0) | **−180.1s (−87%)** |
-| python | 46.6s (46.9, 46.4) | 68.8s (75.9, 61.7) | −22.2s (−32%) |
-| node | 35.0s (45.8, 24.2) | 50.0s (47.1, 53.0) | −15.0s (−30%) |
-| go | 43.2s (46.7, 39.7) | 44.1s (51.3, 37.0) | −0.9s (−2%) |
-
-The cache works, and the size of the win tracks exactly what `mise install` costs
-per language: ruby compiles from source (a 7.4× speedup when cached), python and
-node download prebuilt binaries (~30%), go's toolchain is cheap enough that the
-cache is noise.
+The cache works, and the size of the win tracks what `mise install` costs per
+language: ruby compiles from source and gains the most, python and node download
+prebuilt binaries and gain less, go's toolchain is cheap enough that the cache
+is noise.
 
 **Reproducing this needs the recipes bypassed.** `RailsDockerfile::isRubyApp()`,
 `PythonRecipe` and `GoRecipe` claim `Gemfile` / `requirements.txt` / `go.mod`
@@ -446,13 +378,12 @@ if (getenv('PANELALPHA_FORCE_RAILPACK') === '1'
 ```
 
 **The tension this exposes.** The ruby recipe exists *because* Railpack's ruby
-path was slow — its comment cites "82.6s measured against ~2s for an image
-load". The cache now brings that same path down to 28.1s. The recipe is still
-faster, so bypassing it would be wrong; but it does mean the ruby/python/go warm
-tags are insurance for projects the recipes decline, not everyday load. Whether
-that insurance is worth ~3.3 GB of registry disk (1.7 GB after shared-layer
-dedup) is a product call, and it should be made against these numbers rather
-than against the assumption that the tags are simply dead.
+path was slow. The cache narrows that gap, but the recipe is still faster, so
+bypassing it would be wrong; it does mean the ruby/python/go warm tags are
+insurance for projects the recipes decline, not everyday load. Whether that
+insurance is worth its registry disk is a product call, and it should be made
+against an A/B like the one above rather than against the assumption that the
+tags are simply dead.
 
 ### Narrowing `--cache-from` to the stack Railpack picked
 
@@ -466,29 +397,21 @@ runtime or version we do not warm — returns null and every tag is read exactly
 as before. Guessing a narrower list wrong costs a full rebuild; a spare round
 trip costs milliseconds, so the fallback is always the safe direction.
 
-Measured on the same Feathers app, same fixture, before and after:
-
-| | Manifest reads | Tags consulted | `node-22` payload | Crit | HTTP |
-|---|---|---|---|---|---|
-| before | 13 | all 7 | 143.3 MB | 59.3s | 200 |
-| after | **1** | **node-22 only** | **143.3 MB** | 56.9s | 200 |
-
-The payload is byte-identical, so the cache still does exactly as much work —
-only the six useless round trips are gone. The decision is logged, so you can
-tell which path a deploy took:
+Narrowing does not change the payload: the cache does exactly as much work, and
+only the round trips to tags the build cannot use are gone. The decision is
+logged, so you can tell which path a deploy took:
 
 ```
 Railpack cache narrowed for <account>: node-22
 Railpack plan for <account> names no warmed runtime; reading every cache tag.
 ```
 
-Both paths were exercised: `feathers-chat/quick-start` pins to a warmed version
-and narrows to `node-22`; `expressjs/express` declares `"node": ">= 18"`, which
-resolves to a version we do not warm, so it falls back to all seven — and got
-0.1 MB from the cache either way, before and after. **That is worth noting as a
-follow-up rather than a win:** a repo pinning an unwarmed runtime gets no cache
-benefit at all, narrowing or not. Warming `node-18` would help those repos far
-more than this change does.
+A repo that pins a warmed version narrows (`feathers-chat/quick-start` to
+`node-22`); one whose range resolves to a version we do not warm
+(`expressjs/express`, `"node": ">= 18"`) falls back to all seven. **A repo
+pinning an unwarmed runtime gets no cache benefit at all, narrowing or not.**
+Warming that runtime (`node-18` here) would help those repos more than
+narrowing does.
 
 Writes are expected over the whole log (cache warming writes these tags from
 synthetic projects) and must be **zero inside a deploy window**. The script
@@ -500,11 +423,11 @@ every other account can read, which `tenantFlags()` exists to prevent.
 
 ## 7. Host gotchas
 
-- **`/tmp` may be a RAM-backed tmpfs.** It is on these dev boxes (`/etc/fstab`).
+- **`/tmp` may be a RAM-backed tmpfs.** It often is (`/etc/fstab`).
   A DinD account keeps its entire inner Docker storage — every seeded image and
   build layer — under its account dir, so a tester rooted in `/tmp` writes
-  gigabytes into RAM. Five accounts consumed 29G here and killed a run with
-  `no space left on device` while the disk was 75% free. The tester now uses
+  gigabytes into RAM, and a run dies with `no space left on device` while the
+  disk still has room. The tester now uses
   `~/.cache/panelalpha-dind-test`; keep it on disk.
 - **Sysbox is not the blocker.** `sysbox-runc` is registered and
   `sysbox-{fs,mgr}` run. If you see
@@ -532,38 +455,38 @@ anything.
 
 ```json
 "timings": {
-  "total_seconds": 168,
+  "total_seconds": N,
   "phases": [
-    {"name": "preparing",       "seconds": 2},
-    {"name": "cloning",         "seconds": 7},
-    {"name": "detect",          "seconds": 0},
-    {"name": "image_transfer", "seconds": 39},
-    {"name": "build",           "seconds": 95.9},
-    {"name": "start_to_answer", "seconds": 22.1}
+    {"name": "preparing",       "seconds": N},
+    {"name": "cloning",         "seconds": N},
+    {"name": "detect",          "seconds": N},
+    {"name": "image_transfer", "seconds": N},
+    {"name": "build",           "seconds": N},
+    {"name": "start_to_answer", "seconds": N}
   ],
   "stages": [
-    {"name": "preparing", "started_at": …, "finished_at": …, "seconds": 2},
-    {"name": "cloning",   "started_at": …, "finished_at": …, "seconds": 7},
-    {"name": "running",   "started_at": …, "finished_at": …, "seconds": 159}
+    {"name": "preparing", "started_at": …, "finished_at": …, "seconds": N},
+    {"name": "cloning",   "started_at": …, "finished_at": …, "seconds": N},
+    {"name": "running",   "started_at": …, "finished_at": …, "seconds": N}
   ],
   "build": {
-    "total_seconds": 114.6, "step_count": 11, "cached_steps": 6,
-    "cache_hit_ratio": 0.545,
+    "total_seconds": N, "step_count": N, "cached_steps": N,
+    "cache_hit_ratio": N,
     "slowest": [{"step": "#8", "command": "RUN install-php-extensions imagick",
-                 "seconds": 77.5, "cached": false}]
+                 "seconds": N, "cached": false}]
   }
 }
 ```
 
 `phases` is the block to read. The three recorded `stages` are kept because the
-API has always returned them, but `running` is one 159-second blob covering
+API has always returned them, but `running` is one blob covering
 detection, base images, the build and the app booting — four things with four
 different fixes. `phases` splits it using milestones the pipeline already logs
 (`Detected project type`, `Loaded base image`, `Starting application`,
 `Health check … answered`). See "Reading a run" in §9 for what each means.
 
 Stage durations come from `latest.json` and are always present. The build
-breakdown re-reads the whole log — hundreds of kilobytes on a real build — so it
+breakdown re-reads the whole log — large on a real build — so it
 is computed once the deploy has finished, or on demand with `?build_timings=1`.
 Polling a running deploy stays cheap.
 
@@ -585,16 +508,16 @@ reports, and scores a `CACHED` step as costing zero. Unit tests in
 ## 9. Validating deploy speed and the caches
 
 ```bash
-scripts/benchmark-deploys.sh                      # the whole fixture set
-scripts/benchmark-deploys.sh --apps benchphp --keep
-scripts/benchmark-deploys.sh --json               # for CI
+scripts/tools/benchmark-deploys.sh                      # the whole fixture set
+scripts/tools/benchmark-deploys.sh --apps benchphp --keep
+scripts/tools/benchmark-deploys.sh --json               # for CI
 ```
 
 > Measuring what an **API client** experiences instead — seven apps across
 > three runtimes (PHP 8.1 and 8.3, Node, Python), in four modes that differ by
 > one thing each (no prewarm → prewarmed → rebuild → restart), driven over REST
 > with a full per-phase breakdown of every run — is
-> [`scripts/rest-speed-test.php`](scripts/rest-speed-test.php). Both suites read
+> [`scripts/tools/rest-speed-test.php`](scripts/tools/rest-speed-test.php). Both suites read
 > the same `DeployTimings` numbers, so their results compare directly; this
 > section is the tool for engine work, that script for answering "how fast is
 > this host, from outside". Modes (no prewarm → prewarmed → rebuild → restart)
@@ -612,19 +535,19 @@ Four fixtures, one per strategy that behaves differently under caching —
 | **restart** | the engine's own `down()` + `up()` + health probe; no build at all |
 
 `restart` is the engine's restart path, not a bare `docker compose up`. The
-latter is 1–2s; the engine's is ~14s because it recreates the container and
+engine's is much slower than the latter because it recreates the container and
 waits for the inner daemon. Compare it against itself over time, not against
 compose.
 
 It exits non-zero when a fixture detects as the wrong strategy, when a deploy
 fails, or when the warm rebuild's cache hit ratio falls below `MIN_WARM_RATIO`
-(default `0.5`).
+(default `0.5`). `static` and `compose` build no image, so they have no layers
+and no hit ratio — that is correct, not a cache failure, and the suite does not
+flag it.
 
 **Do not measure "warm" by deleting and redeploying the account.** That destroys
-cache #2 along with the account and measures cold twice — the trap §5 describes.
-Measured here on 2026-08-28: delete-and-redeploy moved Matomo 257s → 248s, while
-rebuilding in place moved it to 47.6s and a restart to 1.9s. The first number
-would have read as "caching does nothing".
+cache #2 along with the account and measures cold twice — the trap §5 describes
+— and reads as "caching does nothing".
 
 ### Reading a run: the phases
 
@@ -632,16 +555,16 @@ Totals tell you a fixture got slower. Phases tell you which part did, and they
 are printed under every fixture:
 
 ```
-bphp2         php         129.5s      39s    18.1s      10       5  ok (cache .500)
+<fixture>      php           Ns       Ns       Ns     <n>     <n>  ok (cache <ratio>)
     phase                cold     warm
-    preparing              4s       -s
-    cloning                4s       4s
-    detect                 2s       1s
-    image_transfer        78s       -s
-    build               19.7s       4s
-    start_to_answer     18.3s      22s
-      cold layer  RUN composer install --no-dev --no-interacti   12.4s
-      warm layer  COPY . .                                          1s
+    preparing              Ns       -s
+    cloning                Ns       Ns
+    detect                 Ns       Ns
+    image_transfer         Ns       -s
+    build                  Ns       Ns
+    start_to_answer        Ns       Ns
+      cold layer  RUN composer install --no-dev --no-interacti     Ns
+      warm layer  COPY . .                                          Ns
 ```
 
 | Phase | Spans | Fixed by |
@@ -663,17 +586,16 @@ because the compose-up window contains both the build and the boot and those are
 fixed by different people. `start_to_answer` is that window with the build
 subtracted, so the phases never sum past the deploy's total.
 
-**What the example above says.** Grav's cold deploy is dominated by
-`image_transfer` at 78s — not the build, and certainly not `composer install`,
-which is 12.4s. That 78s is loading the ~1GB shared PHP base *into the
-account's DinD*, which every new account pays even when the image is already on
-the host. The warm rebuild drops `build` from 19.7s to 4s because every layer
-including `composer install` came back `CACHED` — that is what a working cache
+**How to read it.** A cold PHP deploy can be dominated by `image_transfer`
+rather than the build, and certainly rather than `composer install`: that phase
+is loading the shared PHP base *into the account's DinD*, which every new
+account pays even when the image is already on the host. A warm rebuild whose
+layers, `composer install` included, come back `CACHED` is what a working cache
 looks like, and it is why the suite fails a warm rebuild whose hit ratio is low.
 
-`start_to_answer` barely moves between cold and warm (18.3s → 22s): it is the
-app booting, not anything the engine caches. A fixture that regresses *there*
-is an application problem, not a build one.
+`start_to_answer` should barely move between cold and warm: it is the app
+booting, not anything the engine caches. A fixture that regresses *there* is an
+application problem, not a build one.
 
 ### Every step, not just the phases
 
@@ -682,16 +604,16 @@ announces with the time until the next one. Nothing is aggregated away:
 
 ```
 At    Took  Step
-0s    2s    Starting stage: preparing
-2s    6s    Cloning repository https://github.com/matomo-org/matomo (branch: 6.x-dev)
-8s    1s    Repository cloned
-9s    0s    Detected project type: PHP
-10s   26s   Preparing shared PHP base image panelalpha/php:8.1-cli-bookworm-pab1ff14ca
-36s   1s    Detected application port: 8000
-37s   12s   Using default environment variables (source: none)
-49s   1s    Loaded base image composer:2 from host cache
-50s   118s  Starting application (docker compose up -d)
-168s  —     Deploy finished successfully
+Ns    Ns    Starting stage: preparing
+Ns    Ns    Cloning repository <url> (branch: <branch>)
+Ns    Ns    Repository cloned
+Ns    Ns    Detected project type: PHP
+Ns    Ns    Preparing shared PHP base image panelalpha/php:<minor>-cli-bookworm-pa<hash>
+Ns    Ns    Detected application port: <port>
+Ns    Ns    Using default environment variables (source: none)
+Ns    Ns    Loaded base image composer:2 from host cache
+Ns    Ns    Starting application (docker compose up -d)
+Ns    —     Deploy finished successfully
 ```
 
 `--timeline` also prints **every** build layer rather than the ten slowest,
@@ -699,8 +621,8 @@ because a layer that regressed from 0.1s to 30s does not appear in a top ten
 taken from the run before it regressed.
 
 **Read the label as "time from this milestone to the next", not "time this step
-took".** Work is charged to the last thing announced before it, so the 12s above
-sits against *"Using default environment variables"* when it is really the
+took".** Work is charged to the last thing announced before it, so time charged
+to *"Using default environment variables"* above is really the
 `composer:2` transfer that finishes on the following line. Fixing that means
 logging around the work rather than after it; until then the timeline tells you
 *when* the time went, and the phase and layer views tell you *to what*.
@@ -710,45 +632,44 @@ number in the thousands. Only `info`/`ok`/`warn`/`error` are milestones.
 
 ### What `docker compose up` is doing
 
-A 118-second `Starting application (docker compose up -d)` sounds like
+A long `Starting application (docker compose up -d)` sounds like
 orchestration. It is not. Compose announces `<Kind> <name> <Verb>` around
 everything it does, and pairing the verbs gives:
 
 ```
 What docker compose did:
-  Image project-app        building   116s
-  Container project-app-1  starting     1s
-  Network project_default  creating     0s
-  Container project-app-1  creating     0s
+  Image project-app        building     Ns
+  Container project-app-1  starting     Ns
+  Network project_default  creating     Ns
+  Container project-app-1  creating     Ns
 ```
 
-**116 of the 118 seconds is the image build.** Creating the network and the
-container, and starting it, is about one second in total. If a compose-up looks
-slow, it is the build inside it — go to the layer table, not to Compose.
+**Nearly all of it is the image build.** Creating the network and the
+container, and starting it, is negligible. If a compose-up looks slow, it is
+the build inside it — go to the layer table, not to Compose.
 
 `Running` is not an action: Compose prints it for a container it did not have to
 touch, and it is skipped. A `Starting` with no `Started` is skipped too — the
 container never came up, and inventing a duration for it would hide the failure.
 
-The layer table is where that 116s resolves:
+The layer table is where the build time resolves:
 
 ```
-#8   77.5s  RUN install-php-extensions imagick
-#19  19.2s  exporting to image                  ← writing + unpacking 1.36GB
-#14   8.4s  RUN composer install --no-dev --no-interaction --no-scripts
-#15   6.9s  COPY . .
+#8    Ns  RUN install-php-extensions imagick
+#19   Ns  exporting to image                  ← writing + unpacking the image
+#14   Ns  RUN composer install --no-dev --no-interaction --no-scripts
+#15   Ns  COPY . .
 ```
 
-`#19 exporting to image` has no `[stage x/y]` descriptor, so it was invisible
-until 2026-08-29 and its cost was charged to the app's boot instead — `build`
-read 95.9s and `start_to_answer` 22.1s, when the truth is 115.1s and 2.9s.
-Writing and unpacking a 1.36GB image is not bookkeeping. Any BuildKit step is
-counted now, bracketed or not; only `[internal]` ones are dropped.
+`exporting to image` has no `[stage x/y]` descriptor; it still counts as
+`build`, not as the app's boot. Writing and unpacking a large image is not
+bookkeeping. Any BuildKit step is counted, bracketed or not; only `[internal]`
+ones are dropped.
 
 ### Transferring base images: registries only, and what baking costs
 
 There is no `docker save | docker load` any more: it copied incomplete
-containerd-store images without complaint (#156, #229). `DindImageStore::seedCommand()`
+containerd-store images without complaint. `DindImageStore::seedCommand()`
 is the whole ladder, used by `ensure()` and the parallel compose seed alike:
 account already has it → `panelalpha-cache-registry` → then, for **our** images
 only, the host that built it (push, then pull); for public images, the image's
@@ -758,12 +679,11 @@ deploy's behalf. So cache-registry holds the prewarmed catalogue, which prewarm
 keeps, plus our images built on demand by a deploy, which the weekly trim
 removes.
 
-**Check the registry through the daemon, never over the network.** Until
-2026-09 the probe was `curl 127.0.0.1:5000`, run by `System::exec()` inside
-the core container, where that is core's own loopback. It failed on every real
-install and nothing ever reached the registry; the numbers below came from the
-dind-test harness, which runs on the host and so never saw it. The probe is now
-`docker inspect` of the container.
+**Check the registry through the daemon, never over the network.** The probe is
+`docker inspect` of the container. A `curl 127.0.0.1:5000` run by
+`System::exec()` inside the core container hits core's own loopback, fails on
+every real install, and sends nothing to the registry; the dind-test harness
+runs on the host and cannot catch that.
 
 **The two ends address it differently and must.** The host pushes to
 `127.0.0.1:5000`; the account pulls `panelalpha-cache-registry:5000`.
@@ -778,28 +698,26 @@ as insecure by default.
 It is a required compose service, behind no profile: a PHP base exists on no
 public registry, so without `cache-registry` it has no way into an account.
 
-Measured on 10.10.10.25 (2026-09-24, DokuWiki, 1.09GB PHP base, empty account),
-just before `save | load` was removed: `save | load` 21s, registry first push
-17s, already pushed 15s; `node:22` 11s against 10s.
-
-Measured on 178.104.84.45, 984MB and 989MB PHP bases, into a real account:
-
-| | `save \| load` | registry, first push | registry, already pushed |
-|---|---|---|---|
-| first image into an **empty** account | 14.3-15.0s | 12.2s | **8.8s** |
-| second image, a different PHP minor | 15.6-16.3s | 9.5s | **7.6s** |
-| image the account **already has** | 6.5s | — | **0.36s** |
+**Two containers, one storage.** Every account reaches `panelalpha-cache-registry`
+and pulls from it by tag, so it runs read-only (`maintenance.readonly`, storage
+mounted `:ro`): anything but GET/HEAD answers 405. The host pushes to
+`panelalpha-cache-registry-writer`, core deletes tags there, and garbage-collect
+runs inside it. The writer runs with `network_mode: host` and listens on the
+host's `127.0.0.1:5000` only (debug listener off), so no account can resolve or
+route to it, guard or no guard: accounts older than the egress guard have none,
+and a tenant can remove its own. Core reaches it with `nsenter --net` into the
+host's namespace (`CacheRegistry::hostArgv()`). To verify it with throwaway
+copies: `docker push` to the writer, then `docker pull` from the read-only one
+works; a push, manifest PUT or DELETE against the read-only one is 405; a tag
+deleted and collected on the writer is 404 on the reader at once (the
+descriptor cache is off on both).
 
 The registry is not about compression — the wire is loopback. It is that
 `docker save` streams every layer whatever the target holds, while `docker pull`
-asks what is missing, and pulls compressed blobs.
-
-**Roughly 1.7-2x on realistic seeds, not the 17x an earlier measurement on
-10.10.10.25 recorded.** That figure was a plain base against the imagick variant
-of the *same minor* -- one differing layer, so the pull moved almost nothing.
-Two different PHP minors share only the Debian base; the PHP build and the
-extension layers are most of the gigabyte and are unique to each. The last row
-is the mechanism at its limit: total overlap, and `save` still streams 984MB.
+asks what is missing, and pulls compressed blobs. So the gain depends on layer
+overlap: a plain base and its imagick variant of the *same minor* differ by one
+layer, while two different PHP minors share only the Debian base, and the PHP
+build and the extension layers are unique to each.
 
 `system:image:prewarm` fills the registry: after warming the host it pushes
 every catalogue image the host holds. The weekly schedule runs it with
@@ -814,51 +732,42 @@ core container; every deploy-time push holds it shared, because a GC during an
 upload deletes that upload's layers. `--runtimes=` skips the trim, since a
 subset of the catalogue would delete the rest.
 
-Measured 2026-09-24 on registry 3.1.1: `garbage-collect --delete-untagged`
-keeps an OCI index's platform manifest and attestation, and the image still
-pulls and runs. The Docker Hub limit on these hosts is **100 per hour per
-egress IP** (`ratelimit-limit: 100;w=3600`), shared by every machine behind the
-office NAT, and registry-proxy has no credentials there. A morning of test
-deploys plus one `--dry-run` ran it to 0: the planner used to size each pull
-item with `docker manifest inspect`, which runs in core's CLI and goes to Hub
-anonymously, around the host daemon's mirror. It now asks cache-registry, then
-registry-proxy (`RegistryImageConfig::downloadBytes()`), and falls back to
+On registry 3.1.1, `garbage-collect --delete-untagged` keeps an OCI index's
+platform manifest and attestation, and the image still pulls and runs. The
+anonymous Docker Hub limit is **100 per hour per egress IP**
+(`ratelimit-limit: 100;w=3600`), shared by every machine behind the same NAT,
+when registry-proxy has no credentials, and test deploys can exhaust it. So the
+pull planner must not size items with `docker manifest inspect`, which runs in
+core's CLI and goes to Hub anonymously, around the host daemon's mirror. It
+asks cache-registry, then registry-proxy
+(`RegistryImageConfig::downloadBytes()`), and falls back to
 `docker manifest inspect` only for what neither answers, such as an uncached
-ghcr.io image. Sizes are byte-identical; the dry run went from >2 min to 17s.
+ghcr.io image.
 
 #### Baking extensions into the base is not free
 
-Matomo, plain base against the imagick base, both prewarmed:
-
-| Phase | plain (842MB) | imagick (1.0GB) |
-|---|---|---|
-| image_transfer | 39s | **85s** |
-| build | 115.1s | **69.1s** |
-| total | **168s** | 195s |
-
-46s comes off the build and 46s goes onto the transfer. Every extension baked
-in makes the image bigger, and **every account pays that size**, while the
-compile it replaces was paid once per account too. Baking only wins once the
-transfer stops scaling with image size — which, per the table above, means
-overlapping layers, which means the account already had a related base.
+What comes off the build goes onto `image_transfer`. Every extension baked in
+makes the image bigger, and **every account pays that size**, while the compile
+it replaces was paid once per account too. Baking only wins once the transfer
+stops scaling with image size — which means overlapping layers, which means the
+account already had a related base.
 
 #### Why seeding PHP bases into every account is the wrong fix
 
 The obvious next move is to add `panelalpha/php:*` to `AccountSeedPlan` so
 `seedBaseImagesInBackground()` loads it at account creation, off the deploy's
-critical path. **Do not.** Three measurements say it backfires:
+critical path. **Do not.** It backfires three ways:
 
-- **The head start is ~21s, not 84s.** The seed fires at container creation and
-  the base is needed after `preparing` (3s) + `cloning` (16s) + `detect` (2s).
-  A 56s transfer cannot hide inside a 21s window.
+- **The head start is shorter than the transfer.** The seed fires at container
+  creation and the base is needed after `preparing` + `cloning` + `detect`; a
+  PHP base transfer does not fit inside that window.
 - **It would collide with itself.** If the background seed is still loading when
   the deploy calls `ensurePhpBaseImage()`, `hasImage()` is false and the deploy
-  starts *its own* transfer of the same gigabyte into the same account. Two
-  concurrent 1GB loads is slower than one.
+  starts *its own* transfer of the same image into the same account. Two
+  concurrent loads of the same image are slower than one.
 - **Disk multiplies by account.** Each DinD keeps its own store under
-  `/home/<user>/docker` — 2.1G for a Matomo account, 1.1G for a static one.
-  Seeding an 842MB base into all 19 accounts on this host is ~16GB, on a 42GB
-  disk that already sits at 86%.
+  `/home/<user>/docker`, so a base seeded into every account is stored once per
+  account.
 
 `ImageCatalog::SCOPE_RECIPE` exists for on-demand preloading and currently has
 no consumer, so adding entries there would be inert rather than harmful — but it
@@ -866,8 +775,8 @@ would not help either.
 
 **What would actually help**, in rough order of value: stop each account keeping
 a private copy of a shared base (an architectural change to DinD storage, not a
-tuning knob); or keep the base small and accept the compile, now that the
-compile is ~77s against an 85s transfer and the two are close to a wash.
+tuning knob); or keep the base small and accept the compile, since the compile
+and the transfer it would replace are close to a wash.
 
 ### What `image_transfer` is, and is not
 
@@ -879,63 +788,23 @@ image at deploy time.
 The phase is the cost of copying that image from the host into the account's own
 Docker daemon. Each DinD account has an isolated image store, so a fresh account
 holds nothing and the engine does `docker save | docker load` across the
-boundary: **842MB** for the PHP base plus **315MB** for `composer:2` (needed by
-the `COPY --from=composer:2` in the generated Dockerfile).
+boundary: the PHP base
+plus `composer:2` (needed by the `COPY --from=composer:2` in the generated
+Dockerfile).
 
-That is 26s and 12s of Matomo's cold deploy, and 78s of Grav's — now the largest
-phase of a cold PHP deploy, larger than the build itself. Every new account pays
-it, however many accounts received the same bytes before.
+On a cold PHP deploy it can be the largest phase, larger than the build itself.
+Every new account pays it, however many accounts received the same bytes before.
 
 `panelalpha-cache-registry:5000` already runs on the host and a DinD daemon can
 pull from it directly (start command in §9, "Transferring base images"). Pushing
-the PHP base images there would turn an 842MB uncompressed save/load into a
+the PHP base images there would turn an uncompressed save/load into a
 compressed pull over loopback. Not done; it is the obvious next lever on
 cold-deploy time.
 
-### Reference figures (10.10.10.25, 2026-08-28)
-
-Straight from `scripts/benchmark-deploys.sh`, both PHP base images present:
-
-| Fixture | Strategy | Cold | Warm | Restart | Layers | Cached |
-|---|---|---|---|---|---|---|
-| Spoon-Knife | static | 8.4s | 6s | 13.8s | 0 | — |
-| node-js-getting-started | express | 71.3s | 11s | 14.0s | 10 | 6 (0.60) |
-| listmonk | compose | 27.6s | 7s | 15.2s | 0 | — |
-| Matomo | php | **93.8s** | 50s | 14.7s | 10 | 5 (0.50) |
-
-`static` and `compose` build no image, so they have no layers and no hit ratio —
-that is correct, not a cache failure, and the suite does not flag it.
-
-**Matomo went 248s → 168s → 93.8s** across this session: 248s with no shared
-base image at all, 168s once `panelalpha/php:8.1-cli-bookworm-pab1ff14ca` was
-built (dropping `apt-get` 22.7s and the standard extension set 123.7s), and
-93.8s once the `-xf4f426f8` extras variant absorbed `imagick` (77.5s). Both
-images have to exist; the plain one alone leaves imagick compiling per deploy.
-
-Matomo, the same breakdown, before and after the shared base image existed —
-`artisan project:deploy:timings matomo` prints exactly this:
-
-```
-phase              no base image   with base image
-preparing                     2s                2s
-cloning                       7s                7s
-detect                       <1s               <1s
-image_transfer               51s               39s
-build                     182.0s            115.1s
-start_to_answer               6s               2.9s
-                          ------             ------
-total                       248s               168s
-
-build layers, no base image        build layers, with base image
-  install-php-extensions   123.7s    install-php-extensions imagick  77.5s
-  apt-get git unzip         22.7s    composer install                 8.4s
-  layer export              21.5s    COPY . .                         6.9s
-  composer install           8.9s    FROM panelalpha/php:8.1…         1.3s
-```
-
-`composer install` is routinely blamed and is routinely not the problem: 8.4s
-against 123.7s of extension compilation. Building both base images (plain and
-`-x…` with imagick) took the same deploy to **93.8s**.
+`composer install` is routinely blamed and is routinely not the problem;
+compiling PHP extensions is. An app that needs an extension outside the plain
+base (Matomo's `imagick`) needs the `-x…` extras variant too: the plain base
+alone leaves that extension compiling on every deploy.
 
 ---
 
@@ -943,8 +812,8 @@ against 123.7s of extension compilation. Building both base images (plain and
 
 `InnerDocker::ensurePhpBaseImage()` builds `panelalpha/php:<php>-pa<hash>` **on
 the host**, once, and loads it into each account, so no account compiles the
-standard extension set. When it is missing every PHP deploy pays ~146s
-(`apt-get` + `install-php-extensions`) and the only trace is one line:
+standard extension set. When it is missing every PHP deploy pays for `apt-get`
+and `install-php-extensions` itself, and the only trace is one line:
 
 ```
 Building shared PHP base image panelalpha/php:8.1-cli-bookworm-pab1ff14ca in the background
@@ -957,8 +826,8 @@ leaves that message and nothing else. Check for the image itself:
 docker images | grep panelalpha/php     # empty means every PHP deploy is paying full price
 ```
 
-On 10.10.10.25 it had never built, because **host `docker build` had no network
-at all**:
+Where it had never built, the cause was that **host `docker build` had no
+network at all**:
 
 ```
 iptables -P FORWARD DROP
@@ -977,7 +846,7 @@ iptables -I FORWARD -o docker0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACC
 iptables -t nat -A POSTROUTING -s 172.20.0.0/16 ! -o docker0 -j MASQUERADE
 ```
 
-These are not persisted across a reboot, and CSF (`scripts/csf.sh`) is the likely
+These are not persisted across a reboot, and CSF (since replaced by ufw) is the likely
 reason Docker's own rules went missing.
 
 ---
@@ -1001,7 +870,7 @@ git clone --depth 1 <url> /tmp/app && ls -A /tmp/app
 php scratch/detect.php /tmp/app
 
 # 3. Deploy it for real.
-php scripts/dind-test/deploy.php <src> --name=<app> --real-home --reuse-container
+php scripts/tools/dind-test/deploy.php <src> --name=<app> --real-home --reuse-container
 
 # 4. Verify the app, not the status code.
 docker exec dind-test-<app> curl -sSL -o /tmp/o.html -w '%{http_code}\n' http://127.0.0.1:8000/
@@ -1011,8 +880,8 @@ Iterate on step 2 until detection is right, *then* pay for step 3.
 
 ### Detect without deploying
 
-Detection is pure and needs no container. A detect run is ~1s against ~2 minutes
-for a deploy:
+Detection is pure and needs no container. A detect run takes seconds; a deploy
+takes minutes:
 
 ```php
 <?php // scratch/detect.php
@@ -1043,7 +912,7 @@ Six questions, from `ls -A` and the manifests:
 | Does it need a database? | no `.env`, no bundled compose, installer with a DB step | `database: mysql` |
 | Does it need a build? | `.scss`/`.ts`, a `build` script, a `Makefile` | a `build`-stage command |
 | Does it hold state on disk? | flat-file storage, uploads, generated config | there is **no** persist key; redeploy wipes `/app` |
-| Does it derive a secret from its own path? | `realpath(`, `__DIR__`, `getcwd()`, `DOCUMENT_ROOT` near `salt`/`key`/`secret`/`session_name` | every account's checkout is `/app`, so that secret is the same on every tenant: use `PA_INSTANCE_SECRET` instead (engine#175) |
+| Does it derive a secret from its own path? | `realpath(`, `__DIR__`, `getcwd()`, `DOCUMENT_ROOT` near `salt`/`key`/`secret`/`session_name` | every account's checkout is `/app`, so that secret is the same on every tenant: use `PA_INSTANCE_SECRET` instead |
 
 A root `docker-compose.yml` is often a *developer environment*, not a
 deployment. Compose has priority 980, so it wins by default. Read it first.

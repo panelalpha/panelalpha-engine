@@ -9,6 +9,8 @@ use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\FailureOutput;
 use App\Lib\Domains\PublicUrl;
 use App\System\Project\Dind as DindRuntime;
+use App\System\Project\Dind\AppLauncher;
+use App\System\Project\Dind\Generation\ZeroDowntimeRedeploy;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -58,7 +60,7 @@ final class DeploymentWorkflow
 
             if ($mechanics->isDindWithoutGit()) {
                 $mechanics->publishDomain($domain);
-                $deployLogger?->info('Environment ready, waiting for project files');
+                $deployLogger?->info(DeployLogger::WAITING_FOR_FILES);
 
                 return;
             }
@@ -72,7 +74,7 @@ final class DeploymentWorkflow
             $deployLogger?->finish(DeployLogger::STATUS_CANCELLED, $e->getMessage());
             $this->invokeBeforeRetention($beforeRetention, $deployLogger, $user->username, cancelled: true);
             $this->disposition()->afterCancelled($user, $e->getMessage());
-            throw self::deployProblem('deploy_cancelled', $e->getMessage(), $stage);
+            throw ProblemException::deploy('deploy_cancelled', $e->getMessage(), $stage);
         } catch (\Exception $e) {
             $deployLogger?->recordFailureOutput($e->getMessage());
             $match = DeployFailureExplainer::match($e->getMessage());
@@ -85,7 +87,7 @@ final class DeploymentWorkflow
             $deployLogger?->finish(DeployLogger::STATUS_FAILED, $message);
             $this->invokeBeforeRetention($beforeRetention, $deployLogger, $user->username);
             $this->disposition()->afterFailure($user, $message);
-            throw self::deployProblem($match['rule'] ?? 'deploy_failed', $message, $stage);
+            throw ProblemException::deploy($match['rule'] ?? 'deploy_failed', $message, $stage);
         }
 
         $warnings = [];
@@ -97,7 +99,8 @@ final class DeploymentWorkflow
                 $result = $mechanics->startApplication();
                 if ($result['exit_code'] !== 0) {
                     try {
-                        $mechanics->abortPartialDeploy();
+                        // A first deploy: the volumes hold only what this failed start wrote.
+                        $mechanics->abortPartialDeploy(removeVolumes: true);
                     } catch (\Exception $cleanup) {
                         Log::warning(
                             "Partial deploy cleanup failed for {$user->username}: {$cleanup->getMessage()}",
@@ -112,7 +115,7 @@ final class DeploymentWorkflow
                 $deployLogger?->finish(DeployLogger::STATUS_CANCELLED, $e->getMessage());
                 $this->invokeBeforeRetention($beforeRetention, $deployLogger, $user->username, cancelled: true);
                 $this->disposition()->afterCancelled($user, $e->getMessage());
-                throw self::deployProblem('deploy_cancelled', $e->getMessage(), $stage);
+                throw ProblemException::deploy('deploy_cancelled', $e->getMessage(), $stage);
             } catch (\Exception $e) {
                 $failureOutputs[] = $e->getMessage();
                 $failures[] = $this->startFailureMessage($e->getMessage(), $deployLogger);
@@ -131,15 +134,18 @@ final class DeploymentWorkflow
             $this->invokeBeforeRetention($beforeRetention, $deployLogger, $user->username);
             $this->disposition()->afterFailure($user, $summary);
             $match = DeployFailureExplainer::match(implode("\n", $failureOutputs));
-            throw self::deployProblem($match['rule'] ?? 'app_did_not_start', $summary, $stage);
+            throw ProblemException::deploy($match['rule'] ?? 'app_did_not_start', $summary, $stage);
         }
 
-        $warnings = array_merge($warnings, $mechanics->servingWarnings());
+        $serving = $mechanics->servingWarnings();
+        $warnings = array_merge($warnings, $serving);
         $warnings = array_merge($warnings, $mechanics->publicUrlWarnings($domain));
         self::logDomainNotices($deployLogger, $mechanics->user());
 
         if ($warnings !== []) {
-            $hint = $mechanics->customEnvFailureHint();
+            // Only an app that is not serving can have been broken by its variables,
+            // not a public name or certificate warning.
+            $hint = $serving !== [] ? $mechanics->customEnvFailureHint() : null;
             if ($hint !== null) {
                 $warnings[] = $hint;
             }
@@ -171,6 +177,7 @@ final class DeploymentWorkflow
         }
         $deployLogger->info('Deploy started (source: ' . $source . ($commit !== null && $commit !== '' ? ', commit: ' . $commit : '') . ')');
 
+        $succeeded = false;
         try {
             $reuseRunning = $user->getTemplate() === 'dind' && $mechanics->isApplicationEnvironmentRunning();
             if (!$reuseRunning) {
@@ -184,28 +191,37 @@ final class DeploymentWorkflow
             $domain = $mechanics->requireMainDomain();
             $result = $mechanics->startApplication();
             if ($result['exit_code'] !== 0) {
-                try {
-                    $mechanics->abortPartialDeploy();
-                } catch (\Exception $cleanup) {
-                    Log::warning(
-                        "Partial deploy cleanup failed for {$user->username}: {$cleanup->getMessage()}",
-                    );
+                if (!empty($result[AppLauncher::RELEASE_FAILED])) {
+                    // Nothing new was started: tearing down now would only stop the version still serving.
+                    $deployLogger->info(self::releaseFailedLine($result));
+                } elseif (($serving = ZeroDowntimeRedeploy::keptServing($result)) !== null) {
+                    // A version still serves: tearing down would stop it.
+                    $deployLogger->info($serving);
+                } else {
+                    try {
+                        $mechanics->abortPartialDeploy();
+                    } catch (\Exception $cleanup) {
+                        Log::warning(
+                            "Partial deploy cleanup failed for {$user->username}: {$cleanup->getMessage()}",
+                        );
+                    }
                 }
                 $output = $result['stderr'] ?: $result['stdout'];
                 $message = $this->startFailureMessage($output, $deployLogger);
                 $deployLogger->finish(DeployLogger::STATUS_FAILED, $message);
                 $this->disposition()->afterFailure($user, $message);
                 $match = DeployFailureExplainer::match($output);
-                throw self::deployProblem($match['rule'] ?? 'app_did_not_start', $message, $deployLogger->currentStage());
+                throw ProblemException::deploy($match['rule'] ?? 'app_did_not_start', $message, $deployLogger->currentStage());
             }
 
+            $serving = $mechanics->servingWarnings();
             $warnings = array_merge(
-                $mechanics->servingWarnings(),
+                $serving,
                 $mechanics->publicUrlWarnings($domain),
             );
             self::logDomainNotices($deployLogger, $user);
             if ($warnings !== []) {
-                $hint = $mechanics->customEnvFailureHint();
+                $hint = $serving !== [] ? $mechanics->customEnvFailureHint() : null;
                 if ($hint !== null) {
                     $warnings[] = $hint;
                 }
@@ -215,11 +231,12 @@ final class DeploymentWorkflow
                 $mechanics->persistSuccess();
                 $deployLogger->finish(DeployLogger::STATUS_SUCCESS);
             }
+            $succeeded = true;
         } catch (DeployCancelledException $e) {
             $stage = $deployLogger->currentStage();
             $deployLogger->finish(DeployLogger::STATUS_CANCELLED, $e->getMessage());
             $this->disposition()->afterCancelled($user, $e->getMessage());
-            throw self::deployProblem('deploy_cancelled', $e->getMessage(), $stage);
+            throw ProblemException::deploy('deploy_cancelled', $e->getMessage(), $stage);
         } catch (ProblemException $e) {
             throw $e;
         } catch (\Exception $e) {
@@ -228,17 +245,19 @@ final class DeploymentWorkflow
             $message = $match['message'] ?? $e->getMessage();
             $deployLogger->finish(DeployLogger::STATUS_FAILED, $message);
             $this->disposition()->afterFailure($user, $message);
-            throw self::deployProblem($match['rule'] ?? 'deploy_failed', $message, $deployLogger->currentStage());
+            throw ProblemException::deploy($match['rule'] ?? 'deploy_failed', $message, $deployLogger->currentStage());
+        } finally {
+            $mechanics->settleRedeploy($succeeded);
         }
     }
 
     /**
      * Wipe-and-redeploy from git or zip (HTTP/artisan rebuild path).
      *
-     * Finishes the deploy log but does not persist deployment_status — callers
-     * such as UserController::recordRebuildSucceeded own that.
-     * Throws plain \Exception (not ProblemException / FailureRetention) to
-     * match the historical HTTP rebuild contract.
+     * Finishes the deploy log and records a failure on the project; success is
+     * persisted by callers such as ProjectRebuild::recordSucceeded().
+     * A start failure is thrown as a ProblemException carrying the explainer's
+     * rule; anything else as a plain \Exception.
      */
     public function rebuildFromSource(?DeployLogger $deployLogger = null, ?string $zipPath = null): void
     {
@@ -257,6 +276,7 @@ final class DeploymentWorkflow
             $deployLogger->info('Deploy started (source: rebuild)');
         }
 
+        $succeeded = false;
         try {
             $reuseRunning = $mechanics->isApplicationEnvironmentRunning();
             if (!$reuseRunning) {
@@ -276,16 +296,19 @@ final class DeploymentWorkflow
             $mechanics->ingestForWipeRebuild($zipPath);
 
             $this->startAndFinishSourceDeploy($deployLogger, $mechanics);
+            $succeeded = true;
         } catch (DeployCancelledException $e) {
             $deployLogger->finish(DeployLogger::STATUS_CANCELLED, $e->getMessage());
+            FailureRetention::retainAfterDeployCancelled($user, $e->getMessage());
             throw $e;
         } catch (\Exception $e) {
             $deployLogger->recordFailureOutput($e->getMessage());
-            $deployLogger->finish(
-                DeployLogger::STATUS_FAILED,
-                DeployFailureExplainer::explain($e->getMessage()) ?? $e->getMessage()
-            );
+            $message = DeployFailureExplainer::explain($e->getMessage()) ?? FailureOutput::withoutNoise($e->getMessage());
+            $deployLogger->finish(DeployLogger::STATUS_FAILED, $message);
+            FailureRetention::retainAfterDeployFailure($user, $message);
             throw $e;
+        } finally {
+            $mechanics->settleRedeploy($succeeded);
         }
     }
 
@@ -294,17 +317,33 @@ final class DeploymentWorkflow
      *
      * Unlike {@see rebuildFromSource()} this does not wipe ~/project first: the
      * archive normally sits inside it. Same contract otherwise: the deploy log
-     * is finished here, deployment_status is not persisted, and failures are
-     * thrown as plain exceptions for the caller to map.
+     * is finished here, a failure is recorded on the project, and a start failure
+     * is a ProblemException; anything else is a plain exception for the caller to map.
      */
     public function deployFromArchive(?DeployLogger $deployLogger, string $zipPath): void
     {
         $mechanics = $this->resolveMechanics();
 
-        $deployLogger?->stage(DeployLogger::STAGE_CLONING);
-        $mechanics->ingestArchive($zipPath);
+        $succeeded = false;
+        try {
+            $deployLogger?->stage(DeployLogger::STAGE_CLONING);
+            $mechanics->ingestArchive($zipPath);
 
-        $this->startAndFinishSourceDeploy($deployLogger, $mechanics);
+            $this->startAndFinishSourceDeploy($deployLogger, $mechanics);
+            $succeeded = true;
+        } catch (\InvalidArgumentException $e) {
+            // A refused archive (the caller answers 422 on zip_path): nothing was replaced.
+            throw $e;
+        } catch (DeployCancelledException $e) {
+            FailureRetention::retainAfterDeployCancelled($mechanics->user(), $e->getMessage());
+            throw $e;
+        } catch (\Exception $e) {
+            $message = DeployFailureExplainer::explain($e->getMessage()) ?? FailureOutput::withoutNoise($e->getMessage());
+            FailureRetention::retainAfterDeployFailure($mechanics->user(), $message);
+            throw $e;
+        } finally {
+            $mechanics->settleRedeploy($succeeded);
+        }
     }
 
     /**
@@ -316,6 +355,12 @@ final class DeploymentWorkflow
         $deployLogger?->stage(DeployLogger::STAGE_RUNNING);
         $result = $mechanics->startApplication();
         if ($result['exit_code'] !== 0) {
+            if (!empty($result[AppLauncher::RELEASE_FAILED])) {
+                $deployLogger?->info(self::releaseFailedLine($result));
+            } elseif (($serving = ZeroDowntimeRedeploy::keptServing($result)) !== null) {
+                // Said as a checkout redeploy says it.
+                $deployLogger?->info($serving);
+            }
             $raw = $result['stderr'] ?: $result['stdout'];
             $deployLogger?->recordFailureOutput($raw);
             $message = $this->failureSentence($raw);
@@ -323,14 +368,27 @@ final class DeploymentWorkflow
             if ($hint !== null) {
                 $deployLogger?->info($hint);
             }
-            $full = $hint !== null
-                ? "Failed to start app: {$message} | {$hint}"
-                : "Failed to start app: {$message}";
+            $full = self::startFailure($message) . ($hint !== null ? " | {$hint}" : '');
+            // The rule is matched here, on the output, as telemetry does: the
+            // sentence thrown on no longer carries anything a rule can match.
+            $region = trim(FailureOutput::select($raw));
+            $match = ($region !== '' ? DeployFailureExplainer::match($region) : null) ?? DeployFailureExplainer::match($raw);
+            $stage = $deployLogger?->currentStage();
             $deployLogger?->finish(DeployLogger::STATUS_FAILED, $full);
-            throw new \Exception($full);
+            throw ProblemException::deploy($match['rule'] ?? 'app_did_not_start', $full, $stage);
         }
 
         $this->finishSourceRebuildServing($deployLogger, $mechanics);
+    }
+
+    /** "Left as it was" only when something was running: a first deploy had nothing to leave. */
+    private static function releaseFailedLine(array $result): string
+    {
+        return match ($result[AppLauncher::RAN_BEFORE_RELEASE] ?? null) {
+            true => 'The release failed before the new version started; the running app was left as it was',
+            false => 'The release failed before the new version started; no version of the app is running',
+            default => 'The release failed before the new version started',
+        };
     }
 
     private function finishSourceRebuildServing(?DeployLogger $logger, DeployMechanics $mechanics): void
@@ -347,7 +405,7 @@ final class DeploymentWorkflow
             : $logger?->finish(DeployLogger::STATUS_PARTIAL, implode(' | ', $warnings));
     }
 
-    /** A fallback domain that still works: said in the log, not a warning (#79). */
+    /** A fallback domain that still works: said in the log, not a warning. */
     private static function logDomainNotices(?DeployLogger $logger, $user): void
     {
         foreach (PublicUrl::notices((string) $user->domain, $user->getDetails()) as $notice) {
@@ -376,7 +434,13 @@ final class DeploymentWorkflow
     {
         $logger?->recordFailureOutput($output);
 
-        return 'Failed to start app: ' . $this->failureSentence($output);
+        return self::startFailure($this->failureSentence($output));
+    }
+
+    /** A new version the switch refused for an empty page did start: only the sentence is said. */
+    private static function startFailure(string $sentence): string
+    {
+        return str_starts_with($sentence, DeployFailureExplainer::EMPTY_NEW_VERSION) ? $sentence : "Failed to start app: {$sentence}";
     }
 
     /**
@@ -415,13 +479,5 @@ final class DeploymentWorkflow
         } catch (\Throwable $e) {
             Log::warning('Before-' . $this->disposition()->hookName() . " hook failed for {$username}: {$e->getMessage()}");
         }
-    }
-
-    private static function deployProblem(string $code, string $message, ?string $stage): ProblemException
-    {
-        return ProblemException::one('deploy', $code, $message, array_filter([
-            'stage' => $stage,
-            'deploy_log_offset' => 0,
-        ], static fn (mixed $v): bool => $v !== null));
     }
 }

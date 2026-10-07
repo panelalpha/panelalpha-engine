@@ -46,7 +46,7 @@ say "using sutoj/piler:${PILER_TAG}"
 # ---------------------------------------------------------------------------
 # 2. The secrets, outside the checkout.
 #
-# engine#173: every deploy empties ~/project before the clone, so a guard on a
+# Every deploy empties ~/project before the clone, so a guard on a
 # file in there never fires on a redeploy -- the database password would be
 # regenerated while db_data still held the old one. And ProjectEnvironment::apply() copies ~/project/.env to .env.default at
 # mode 644 inside a home that is root-owned 0755, which makes anything written
@@ -73,7 +73,7 @@ if [ ! -f "${STORE}" ]; then
 # Written by PanelAlpha on the first deploy of this account, and reused by every
 # redeploy. This file is the compose stack's env_file; nothing in it is ever
 # copied into ~/project, because the engine republishes ~/project/.env as a
-# world-readable .env.default (engine#173).
+# world-readable .env.default.
 #
 # The database account Piler connects with. Read by the mariadb image to create
 # it, and by the piler image's start.sh to write piler.conf, config-site.php and
@@ -98,7 +98,7 @@ fi
 cat > .env <<EOF
 # Written by PanelAlpha. Compose reads this for \${...} substitution in
 # docker-compose.yml. Nothing secret belongs here: the engine copies this file
-# to .env.default at mode 644 (engine#173). This account's credentials are in
+# to .env.default at mode 644. This account's credentials are in
 # ~/.panelalpha/piler.env, 0600.
 PILER_IMAGE=sutoj/piler:${PILER_TAG}
 PILER_DB_IMAGE=mariadb:12.0.2

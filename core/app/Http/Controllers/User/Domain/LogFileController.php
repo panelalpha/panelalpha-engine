@@ -3,8 +3,7 @@
 namespace App\Http\Controllers\User\Domain;
 
 use App\Http\Controllers\Controller;
-use App\Models\Domain;
-use App\Models\User;
+use App\Lib\Domains\DomainLogFiles;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -40,19 +39,10 @@ class LogFileController extends Controller
             'all_webservers' => 'nullable',
         ]);
 
-        $user = $this->projectOrNotFound($username);
+        $user = $this->projectOr404($username);
+        $logFiles = DomainLogFiles::find($user, $domain) ?? abort(404, 'Not found');
 
-        /** @var ?Domain $domain */
-        $domain = $user->domains()->getQuery()->where('domain', $domain)->first();
-        if (!$domain) {
-            abort(404, 'Not found');
-        }
-
-        $projectDomain = $domain->projectDomain();
-
-        $logFiles = empty($params['all_webservers']) ? $projectDomain->listLogFiles() : $projectDomain->listWebserverLogFiles();
-
-        return new JsonResponse(['data' => $logFiles]);
+        return new JsonResponse(['data' => $logFiles->list(!empty($params['all_webservers']))]);
     }
 
     #[OA\Get(
@@ -83,23 +73,11 @@ class LogFileController extends Controller
             'all_webservers' => 'nullable',
         ]);
 
-        $user = $this->projectOrNotFound($username);
+        $user = $this->projectOr404($username);
+        $logFiles = DomainLogFiles::find($user, $domain) ?? abort(404, 'Not found');
+        $path = $logFiles->path($filename, !empty($params['all_webservers'])) ?? abort(404, 'Not found');
 
-        /** @var ?Domain $domain */
-        $domain = $user->domains()->getQuery()->where('domain', $domain)->first();
-        if (!$domain) {
-            abort(404, 'Not found');
-        }
-
-        $projectDomain = $domain->projectDomain();
-
-        $logFiles = empty($params['all_webservers']) ? $projectDomain->listLogFiles() : $projectDomain->listWebserverLogFiles();
-        foreach ($logFiles as $logFile) {
-            if ($logFile['file'] == $filename) {
-                /** @var BinaryFileResponse */
-                return response()->download($logFile['path']);
-            }
-        }
-        abort(404, 'Not found');
+        /** @var BinaryFileResponse */
+        return response()->download($path);
     }
 }

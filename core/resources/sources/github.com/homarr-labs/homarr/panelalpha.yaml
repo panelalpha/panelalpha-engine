@@ -14,32 +14,23 @@ description: >-
   isn't one), not the runtime, not a single byte of the image. The same choice
   the Seafile and Zabbix recipes make, for a different reason.
 
-  The reason is the build, and it is measured. Stock, the engine detects
-  `dockerfile` and builds the monorepo. On the batch host that took 427.3s of a
-  486.2s deploy with a 0 cache-hit ratio, 260.9s of it in one `pnpm turbo
-  build` layer. On the host this recipe was written on -- 8 cores, an account
-  capped at 7.5 GB -- that layer does not finish at all:
+  The reason is the build. Stock, the engine detects `dockerfile` and builds
+  the monorepo, and its one `pnpm turbo build` layer does not finish:
 
       failed to solve: ResourceExhausted: process "/bin/sh -c
       TURBO_PLATFORM=... pnpm turbo build --filter=@homarr/nextjs...
       --filter=@homarr/cli" did not complete successfully:
       cannot allocate memory
 
-  reproduced at a 3 GB account limit and again at 7.5 GB. And because the
-  engine's generated docker-compose.yml sits in the build context and changes
-  every redeploy (engine#208), a `dockerfile` project pays that build again on
-  every rebuild. An image pull is ~30s once and ~0s after.
+  And because the engine's generated docker-compose.yml sits in the build
+  context and changes every redeploy, a `dockerfile` project pays
+  that build again on every rebuild.
 
   == The 502, and what it actually was ==
 
-  Not a boot race. `docker compose up -d` does run without `--wait`
-  (engine#204) and the deploy is finished the moment it returns
-  (DeploymentWorkflow.php:73), so the window is real -- and here it is about
-  three seconds wide: on the reproduced control the app container started at
-  05:49:24, nginx bound :7575 at 05:49:25 and the deploy declared success at
-  05:49:27. But the 502 never closes. Measured on that control: still 502,
-  identical 157-byte body, eleven minutes later and after more than three
-  hundred restarts of the Next.js process.
+  Not a boot race. `docker compose up -d` does run without `--wait` and the deploy is finished the moment it returns
+  (DeploymentWorkflow.php:73), so the window is real -- but the 502 never
+  closes.
 
   The cause is not in Homarr. It is the engine, and it is worth stating
   precisely, because nothing in the application's own logs points at it.
@@ -49,8 +40,7 @@ description: >-
   creates that `.env` by copying the repository's `.env.example`
   (EnvExampleCopies.php:12-18,73). Homarr's `.env.example` is a template for a
   developer, and it says so on every line -- but it is a valid env file, and a
-  compose `env_file` beats an image's own `ENV`. Measured on the control, the
-  copy was byte-identical to the repository's and the running container had:
+  compose `env_file` beats an image's own `ENV`. The running container gets:
 
       DB_URL=FULL_PATH_TO_YOUR_SQLITE_DB_FILE
       SECRET_ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000
@@ -58,11 +48,10 @@ description: >-
   overriding the image's `ENV DB_URL='/appdata/db/db.sqlite'`. So the database
   path became a relative filename. run.sh runs the migrations from /app and
   they succeed -- "Migration complete", the seeded board, the seeded groups --
-  writing `/app/FULL_PATH_TO_YOUR_SQLITE_DB_FILE` (364544 bytes, measured).
+  writing `/app/FULL_PATH_TO_YOUR_SQLITE_DB_FILE`.
   Next.js's standalone server.js then does `process.chdir(__dirname)`, so the
   server opens the same relative name from /app/apps/nextjs and gets
-  `/app/apps/nextjs/FULL_PATH_TO_YOUR_SQLITE_DB_FILE` -- 0 bytes, measured,
-  an empty database:
+  `/app/apps/nextjs/FULL_PATH_TO_YOUR_SQLITE_DB_FILE` -- an empty database:
 
       SqliteError: no such table: session
       SqliteError: no such table: cron_job_configuration
@@ -70,14 +59,13 @@ description: >-
 
   run.sh starts nginx before node and then restarts node in a `while true`
   loop, so the port answers within a second of the container starting and
-  answers 502 for as long as the container lives. That is the whole verdict:
-  `serving-error_page`, port 7575 HTTP 502, and an engine that reports the
+  answers 502 for as long as the container lives, while the engine reports the
   deploy as a success.
 
   The second line of that `.env` is the quieter half. `0000...0` is 64 valid
   hex characters, so it passes `SECRET_ENCRYPTION_KEY`'s validation
   (packages/common/env.ts:13-25) and the server would have started with it: a
-  control deploy that worked would encrypt every integration API key under a
+  stock deploy that worked would encrypt every integration API key under a
   key published in upstream's repository.
 
   The recipe does not carry `env_file` at all, generates a real key once into
@@ -96,7 +84,7 @@ description: >-
   (`trustHost: true` in packages/auth/configuration.ts:61 is NextAuth's
   callback-URL host, not an identity). This is not Hubleys.
 
-  What it has instead is engine#200's first-visitor problem, and it has it in
+  What it has instead is the first-visitor problem, and it has it in
   the strongest form. Onboarding is a public tRPC router gated on nothing but
   the current step (packages/api/src/trpc.ts:169-183 -- `onboardingProcedure`
   is `publicProcedure` plus `if (currentStep !== step) FORBIDDEN`), and
@@ -141,7 +129,7 @@ description: >-
   whole product. It is replaced by-target with ~/.panelalpha/homarr/appdata,
   which is the only directory that both survives a redeploy and belongs to the
   account: ~ is chown root:root on every rebuild (Project.php:813) and ~/project
-  is deleted and re-cloned (engine#173). db.sqlite, the redis dump and
+  is deleted and re-cloned. db.sqlite, the redis dump and
   uploaded media are all under it.
 
   The image is built for this: entrypoint.sh chowns /appdata to $PUID:$PGID and
@@ -152,36 +140,19 @@ description: >-
   prepare hook and the engine never writes an override of its own for a compose
   project.
 
-  == Numbers ==
-
-  Recipe, two fresh accounts: 46s and 51s, `deploy-ok`, `serving: ok`, HTTP
-  200, `healthy: true`, zero failing baseline checks. Redeploy: 21s and 28s,
-  of which init is one second. Control, same host, same commit: 484s,
-  `serving: error_page`, HTTP 502, `healthy: false`, one failing check --
-  and only after the account was given 12 GB, because at 3 GB and again at
-  7.5 GB the stock build ran out of memory and the deploy failed outright.
-  The recipe accounts were given 2 GB and used 805 MiB of it, the app
-  container 285 MiB of a 1 GiB cap.
-
   == Things worth knowing ==
 
   * `homarr recreate-admin` and `homarr users update-password` do their work and
     then never exit -- the CLI leaves a handle open and the process hangs after
-    printing its result, with or without a reachable redis. Measured: the user,
-    the group, the permission and the membership were all committed by a run
-    that had to be killed. panelalpha/homarr/bootstrap.mjs therefore starts each
+    printing its result, with or without a reachable redis. The user, the
+    group, the permission and the membership are all committed by a run that
+    has to be killed. panelalpha/homarr/bootstrap.mjs therefore starts each
     command, watches the database for the row it was supposed to write, kills it
     the moment the row is there, and fails loudly if it never arrives. An exit
     code is never waited for, because one never comes.
   * The CLI is invoked as `node ./cli.cjs`, never as `/usr/bin/homarr`. That is
-    a shell wrapper, so killing it leaves node holding the pipes -- measured,
-    the init container hung at "closing the installer" until the deploy timed
-    out and the whole deploy failed.
-  * The gate was tested by breaking it. With bootstrap.mjs forced to
-    `process.exit(1)`, `init` exited 1, `app` never started, `docker compose up
-    -d` failed, `POST /projects/<user>/rebuild` answered HTTP 500 and the deploy
-    log said `failed`. The account served 502 -- nothing -- rather than an
-    unclaimed Homarr. That is the intended failure mode.
+    a shell wrapper, so killing it leaves node holding the pipes and the init
+    container hangs until the deploy times out.
   * The app container keeps running its own redis (REDIS_IS_EXTERNAL=false).
     An external one would be a second container for nothing: nothing outside
     the app needs it, and the migrations and the CLI run without it.

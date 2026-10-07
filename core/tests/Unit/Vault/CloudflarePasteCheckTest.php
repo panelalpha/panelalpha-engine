@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Validation\ValidationException;
 
 /**
- * engine#7 for Cloudflare: the form runs the calls the tunnel setup makes
+ * The token check for Cloudflare: the form runs the calls the tunnel setup makes
  * (resolveAccount, the tunnel list, the zone lookup) before storing a token.
  */
 class CloudflarePasteCheckTest extends VaultTestCase

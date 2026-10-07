@@ -22,6 +22,9 @@ detect:
     - file: composer.json
   none:
     - file: artisan
+    # A library composer.json with no package to install and no PHP beside it
+    # is Packagist metadata on another kind of project. See ComposerMetadataOnlyProbe.
+    - probe: composer-metadata-only
 commands:
   - id: composer-install
     stage: build

@@ -56,16 +56,8 @@ final class HostDiskGuard
             return null;
         }
 
-        $lowest = null;
-        $where = null;
-        foreach (self::PATHS as $path) {
-            $free = $this->freeBytes($path);
-            if ($free !== null && ($lowest === null || $free < $lowest)) {
-                $lowest = $free;
-                $where = $path;
-            }
-        }
-        if ($lowest === null || $lowest >= $this->minimumBytes) {
+        $lowest = $this->lowest();
+        if ($lowest === null || $lowest['free'] >= $this->minimumBytes) {
             return null;
         }
 
@@ -73,13 +65,32 @@ final class HostDiskGuard
             'Deploy refused before it started: the engine host has %s free on %s, below the %s '
             . 'a deploy needs (DEPLOY_HOST_MIN_FREE). Free disk on the host and deploy again; '
             . '`pae system:image:prune` removes base images no project has used recently.',
-            HostPrewarmPlan::formatBytes($lowest),
-            $where,
+            HostPrewarmPlan::formatBytes($lowest['free']),
+            $lowest['path'],
             HostPrewarmPlan::formatBytes($this->minimumBytes)
         );
     }
 
-    private function freeBytes(string $path): ?int
+    /**
+     * The deploy path with the least free space, or null when none could be read.
+     *
+     * @return array{path: string, free: int, size: int}|null
+     */
+    public function lowest(): ?array
+    {
+        $lowest = null;
+        foreach (self::PATHS as $path) {
+            $usage = $this->usage($path);
+            if ($usage !== null && ($lowest === null || $usage['free'] < $lowest['free'])) {
+                $lowest = ['path' => $path] + $usage;
+            }
+        }
+
+        return $lowest;
+    }
+
+    /** @return array{free: int, size: int}|null */
+    private function usage(string $path): ?array
     {
         try {
             $output = $this->system->execOnHost(['df', '-Pk', $path]);
@@ -92,7 +103,10 @@ final class HostDiskGuard
             return null;
         }
         $fields = preg_split('/\s+/', trim($lines[count($lines) - 1])) ?: [];
+        if (!isset($fields[1], $fields[3]) || !ctype_digit($fields[1]) || !ctype_digit($fields[3])) {
+            return null;
+        }
 
-        return isset($fields[3]) && ctype_digit($fields[3]) ? (int) $fields[3] * 1024 : null;
+        return ['free' => (int) $fields[3] * 1024, 'size' => (int) $fields[1] * 1024];
     }
 }

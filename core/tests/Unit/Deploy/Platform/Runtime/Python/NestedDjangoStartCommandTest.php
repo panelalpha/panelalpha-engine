@@ -6,7 +6,7 @@ use App\Lib\Deploy\Platform\Runtime\PythonRuntime;
 use PHPUnit\Framework\TestCase;
 
 /**
- * NetBox, issue #414, and the whole family of Django projects laid out the way
+ * NetBox, and the whole family of Django projects laid out the way
  * `django-admin startproject` writes them into a subdirectory.
  *
  * The start command was not resolved at all: detection reported `deployable:

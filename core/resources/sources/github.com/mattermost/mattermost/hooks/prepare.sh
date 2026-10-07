@@ -26,7 +26,7 @@ fi
 
 # The database password lives in ~/.panelalpha/mattermost/db.env, generated
 # once: the postgres volume outlives the checkout, and ~/project (with its .env)
-# is emptied before every deploy (engine#173), so a password kept there would be
+# is emptied before every deploy, so a password kept there would be
 # regenerated while the volume still holds the first one. An account deployed
 # before this kept it in ~/project/.env; one that still has it is carried over.
 STORE_DIR="${HOME}/.panelalpha/mattermost"

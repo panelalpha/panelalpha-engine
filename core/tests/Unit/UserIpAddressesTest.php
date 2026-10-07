@@ -53,7 +53,7 @@ class UserIpAddressesTest extends TestCase
      *
      * live when this test was written alongside the NAT feature (77ced0e).
      * It was commented out — not deleted — in bea3cc4 on 2026-06-25, whose
-     * only message is `panelalpha#2151`. Commenting rather than deleting is
+     * only message is an issue reference. Commenting rather than deleting is
      * how someone says "temporarily", so re-enabling it to make this test
      * pass would revert a deliberate change on a question this test cannot
      * answer: whether a public `default_ipv4` should be bindable.
@@ -62,13 +62,13 @@ class UserIpAddressesTest extends TestCase
      * assert the current behaviour would quietly bless a state its own author
      * left marked as provisional, and the next person would have no idea a
      * decision was outstanding. `$forBinding` and `isBindableIpv4()` are dead
-     * code until #2151 is settled, and this is the marker saying so.
+     * code until that question is settled, and this is the marker saying so.
      */
     public function test_get_bind_ip_addresses_filters_non_local_default_ipv4(): void
     {
         $this->markTestSkipped(
             'Bindability filtering is disabled in resolveIpAddresses() — commented out in '
-            . 'bea3cc4 for panelalpha#2151. Re-enable the guard and this test together.'
+            . 'bea3cc4. Re-enable the guard and this test together.'
         );
     }
 

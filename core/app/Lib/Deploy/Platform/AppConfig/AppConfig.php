@@ -35,6 +35,11 @@ final class AppConfig
     /** …or layers on top of one the engine generated. */
     public const COMPOSE_OVERRIDE = 'override';
 
+    /** `git: {history: full}`: the clone gets the whole history and every tag. */
+    public const GIT_HISTORY_FULL = 'full';
+
+    public const GIT_HISTORY_SHALLOW = 'shallow';
+
     /**
      * Keys this class reads itself; everything else it may hold is a manifest key,
      * spelled as in `resources/apps/<id>/panelalpha.yaml`.
@@ -43,8 +48,11 @@ final class AppConfig
      */
     private const OWN_KEYS = [
         '$schema', 'description', 'extends', 'env',
-        'precheck', 'prepare', 'entrypoint', 'commands', 'files', 'app', 'compose',
+        'precheck', 'prepare', 'entrypoint', 'commands', 'files', 'app', 'compose', 'git', 'health',
     ];
+
+    /** Ceiling for `health: {start_period}`, in seconds. */
+    public const MAX_START_PERIOD = 1800;
 
     /** Names the shipped recipe this application is an instance of. */
     public const EXTENDS_KEY = 'extends';
@@ -68,6 +76,9 @@ final class AppConfig
         private readonly array $env,
         private readonly ?array $manifest,
         private readonly ?CredentialSpec $credentials,
+        private readonly bool $fullGitHistory = false,
+        private readonly ?string $portScheme = null,
+        private readonly ?int $startPeriod = null,
     ) {
     }
 
@@ -126,6 +137,9 @@ final class AppConfig
             $config?->env() ?? [],
             $config?->manifest(),
             $config?->credentials(),
+            $config?->fullGitHistory() ?? false,
+            $config?->portScheme(),
+            $config?->startPeriod(),
         );
     }
 
@@ -173,6 +187,9 @@ final class AppConfig
                 $raw['credentials'] ?? null,
                 static fn (string $m): ManifestException => new ManifestException(self::YAML_FILENAME . ": {$m}")
             ),
+            self::readGitHistory($raw) === self::GIT_HISTORY_FULL,
+            self::readPortScheme($raw),
+            self::readStartPeriod($raw),
         );
     }
 
@@ -208,6 +225,9 @@ final class AppConfig
             $config?->env() ?? [],
             $config?->manifest(),
             $config?->credentials(),
+            $config?->fullGitHistory() ?? false,
+            $config?->portScheme(),
+            $config?->startPeriod(),
         );
 
         return $appConfig->isEmpty() ? null : $appConfig;
@@ -246,7 +266,10 @@ final class AppConfig
             && $this->requires === []
             && $this->env === []
             && $this->manifest === null
-            && $this->credentials === null;
+            && $this->credentials === null
+            && !$this->fullGitHistory
+            && $this->portScheme === null
+            && $this->startPeriod === null;
     }
 
     /**
@@ -386,6 +409,34 @@ final class AppConfig
         return $this->credentials;
     }
 
+    /**
+     * Whether the deploy clone needs the whole history and every tag: a build
+     * that stamps its version with `git describe` fails on the default
+     * depth-1 clone.
+     */
+    public function fullGitHistory(): bool
+    {
+        return $this->fullGitHistory;
+    }
+
+    /**
+     * `port_scheme`: what the app's port speaks. Read here as well as in the
+     * manifest, since a compose recipe declares it without being a manifest.
+     */
+    public function portScheme(): ?string
+    {
+        return $this->portScheme;
+    }
+
+    /**
+     * `health: {start_period}`: how long the app may take to bind its port
+     * after the deploy's own probe gave up. Null means the engine's default.
+     */
+    public function startPeriod(): ?int
+    {
+        return $this->startPeriod;
+    }
+
     // -- YAML reading ------------------------------------------------------
 
     /**
@@ -434,6 +485,38 @@ final class AppConfig
     }
 
     /** @param array<string, mixed> $raw */
+    private static function readPortScheme(array $raw): ?string
+    {
+        $scheme = $raw['port_scheme'] ?? null;
+        if ($scheme !== null && !in_array($scheme, PlatformManifest::PORT_SCHEMES, true)) {
+            throw new ManifestException(
+                self::YAML_FILENAME . ": 'port_scheme' must be one of " . implode(', ', PlatformManifest::PORT_SCHEMES)
+            );
+        }
+
+        return $scheme;
+    }
+
+    /** @param array<string, mixed> $raw */
+    private static function readStartPeriod(array $raw): ?int
+    {
+        $health = $raw['health'] ?? null;
+        if ($health === null) {
+            return null;
+        }
+        $period = is_array($health) ? ($health['start_period'] ?? null) : null;
+        if (!is_array($health) || array_diff(array_keys($health), ['start_period']) !== []
+            || !is_int($period) || $period < 0 || $period > self::MAX_START_PERIOD
+        ) {
+            throw new ManifestException(
+                self::YAML_FILENAME . ": 'health' must be {start_period: <seconds, 0-" . self::MAX_START_PERIOD . '>}'
+            );
+        }
+
+        return $period;
+    }
+
+    /** @param array<string, mixed> $raw */
     private static function readComposeContent(array $raw): ?string
     {
         $compose = $raw['compose'] ?? null;
@@ -452,6 +535,26 @@ final class AppConfig
         }
 
         return $content;
+    }
+
+    /** @param array<string, mixed> $raw */
+    private static function readGitHistory(array $raw): string
+    {
+        $git = $raw['git'] ?? null;
+        if ($git === null) {
+            return self::GIT_HISTORY_SHALLOW;
+        }
+        $history = is_array($git) ? ($git['history'] ?? null) : null;
+        if (!is_array($git) || array_diff(array_keys($git), ['history']) !== []
+            || !in_array($history, [self::GIT_HISTORY_FULL, self::GIT_HISTORY_SHALLOW], true)
+        ) {
+            throw new ManifestException(
+                self::YAML_FILENAME . ": 'git' must be {history: " . self::GIT_HISTORY_FULL
+                . '} or {history: ' . self::GIT_HISTORY_SHALLOW . '}'
+            );
+        }
+
+        return $history;
     }
 
     /** @param array<string, mixed> $raw */
@@ -497,8 +600,8 @@ final class AppConfig
         if (isset($raw[self::EXTENDS_KEY])) {
             $manifest[self::EXTENDS_KEY] = $raw[self::EXTENDS_KEY];
         }
-        // `credentials` rides along too: a compose recipe declares a login without being a manifest.
-        $describes = array_diff(array_keys($manifest), ['requires', 'credentials', self::EXTENDS_KEY]) !== [];
+        // `credentials` and `port_scheme` ride along too: a compose recipe declares them without being a manifest.
+        $describes = array_diff(array_keys($manifest), ['requires', 'credentials', 'port_scheme', self::EXTENDS_KEY]) !== [];
 
         $inherit = $raw[self::EXTENDS_KEY] ?? null;
         if ($inherit !== null) {

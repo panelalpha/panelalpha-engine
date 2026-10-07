@@ -7,13 +7,12 @@ description: >-
   data. Auth is Better Auth over a Postgres backend.
 
   PULL THE GHCR IMAGE, DO NOT BUILD. Kan publishes ghcr.io/kanbn/kan and
-  ghcr.io/kanbn/kan-migrate. engine#229 corrupts only images whose `docker save`
-  exports a manifest-only stub on the containerd image store; measured on the
-  target host both Kan images save at full size (~80 MB / ~64 MB) with real
-  layer blobs, so they seed into the account's nested Docker cleanly and are
-  pulled as-is. No local rebuild is needed, which also means the Next.js
-  NEXT_PUBLIC_* build-time trap does not apply here: the image ships
-  apps/web/bootstrap.cjs (next-runtime-env), which on boot rewrites
+  ghcr.io/kanbn/kan-migrate. The image-seed bug corrupts only images whose `docker save`
+  exports a manifest-only stub on the containerd image store; both Kan images
+  save at full size with real layer blobs, so they seed into the account's
+  nested Docker cleanly and are pulled as-is. No local rebuild is needed, which
+  also means the Next.js NEXT_PUBLIC_* build-time trap does not apply here: the
+  image ships apps/web/bootstrap.cjs (next-runtime-env), which on boot rewrites
   public/__ENV.js from the live NEXT_PUBLIC_* environment, and every read goes
   through env() at run time -- so NEXT_PUBLIC_BASE_URL and the auth toggles are
   taken from the container's environment, not baked at build.
@@ -24,8 +23,8 @@ description: >-
   and has no ready gate. This override supplies the real stack: postgres:15 on a
   named volume, `migrate` run to completion before the app serves, a `seed`
   one-shot that creates the workspace owner, the app on 3000 (the only published
-  port, so the engine's scan takes it as primary -- engine#231/#234), and a
-  `ready` gate (engine#204) so the deploy turns green only once the site answers.
+  port, so the engine's scan takes it as primary), and a
+  `ready` gate so the deploy turns green only once the site answers.
 
   AUTH AND EMAIL. NEXT_PUBLIC_ALLOW_CREDENTIALS=true turns on email+password
   (Better Auth's emailAndPassword is gated on exactly this). NEXT_PUBLIC_DISABLE_EMAIL=true

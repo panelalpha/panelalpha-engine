@@ -12,7 +12,7 @@ description: >-
   linuxserver/babybuddy and tagged per release; this recipe pins the current
   release v2.11.0 (v2.11.0-ls251). The repository also ships its own Dockerfile,
   but the LSIO image is the standard deploy and seeding a Docker Hub image also
-  sidesteps engine#229 (image-seed NotFound). The image is a single container:
+  sidesteps the image-seed NotFound. The image is a single container:
   s6 runs the app's overridden `migrate` (which also seeds the first superuser),
   then nginx in front of gunicorn on :8000. SQLite is Baby Buddy's default and
   the whole datastore -- users, children and every entry -- lives under /config,
@@ -26,7 +26,7 @@ description: >-
   the account's own ids so the container's files stay account-owned, the
   Django SECRET_KEY seeded once from ~/.panelalpha, the admin login from the
   engine, and
-  only the app publishing a port (engine#234).
+  only the app publishing a port.
 
   DOMAIN + HTTPS + CSRF. Django 4+ checks the browser Origin header on every
   POST -- the login form included -- against CSRF_TRUSTED_ORIGINS, and rejects
@@ -54,7 +54,7 @@ description: >-
   (MCP app_credentials_get). The Django SECRET_KEY is seeded once into
   ~/.panelalpha/babybuddy (0600 in 0700) and reused on every rebuild (rotating
   it would log everyone out). The `ready` gate blocks the deploy from turning
-  green until the site answers AND the admin has been rotated (engine#204/#90),
+  green until the site answers AND the admin has been rotated,
   so the deploy never finishes with admin/admin live.
 credentials:
   login_path: /login/

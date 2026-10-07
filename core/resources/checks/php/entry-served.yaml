@@ -2,12 +2,12 @@
 #
 # The webserver refusing `/` because it has no document to serve there.
 #
-# Measured on a live deploy: a PHP project whose index.php is gone -- deleted
-# over SFTP, or never there because the application's entry point is in
-# public/ -- answers 403 Forbidden, and until this existed that read as a
-# healthy application. 4xx is under the server-error threshold, so the port
-# probe passed it, the reachability comparison passed it, and the six-hourly
-# sweep recorded `serving: ok` for a site nobody could open.
+# A PHP project whose index.php is gone -- deleted over SFTP, or never there
+# because the application's entry point is in public/ -- answers 403 Forbidden,
+# and until this existed that read as a healthy application. 4xx is under the
+# server-error threshold, so the port probe passed it, the reachability
+# comparison passed it, and the six-hourly sweep recorded `serving: ok` for a
+# site nobody could open.
 #
 # 403 only, and the narrowness is the point. A PHP front controller answering
 # 404 for `/` has made a routing decision, and nothing here can tell that from

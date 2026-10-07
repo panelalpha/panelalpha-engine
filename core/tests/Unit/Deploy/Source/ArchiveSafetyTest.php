@@ -39,24 +39,107 @@ class ArchiveSafetyTest extends TestCase
     public function test_rejects_a_symlink_that_name_checks_cannot_catch(): void
     {
         // `link -> /etc` followed by `link/passwd`: both names are relative and
-        // free of "..", so only the member type gives the escape away.
-        $listing = "-rw-r--r--  3.0 unx   12 tx defN 24-Jan-01 00:00 project/index.php\n"
-            . "lrwxrwxrwx  3.0 unx    4 bx stor 24-Jan-01 00:00 link -> /etc\n";
+        // free of "..", so only the link's target gives the escape away.
+        $listing = "-rw-r--r-- root/root  12 2024-01-01 00:00 project/index.php\n"
+            . "lrwxrwxrwx root/root   0 2024-01-01 00:00 link -> /etc\n";
+        $names = ['project/index.php', 'link'];
 
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessageMatches('/symbolic link/');
 
         ArchiveSafety::assertRegularMembersOnly($listing);
+        ArchiveSafety::assertLinksStayInside(ArchiveSafety::tarLinks($listing, $names), $names);
     }
 
-    public function test_rejects_symlinks_in_tar_verbose_listing(): void
+    /** GitHub's archive of manyfold: `CLAUDE.md -> AGENTS.md` refused the whole deploy. */
+    public function test_a_relative_link_inside_the_archive_is_allowed(): void
     {
-        $listing = "-rw-r--r-- root/root  12 2024-01-01 00:00 project/index.php\n"
-            . "lrwxrwxrwx root/root   0 2024-01-01 00:00 link -> /etc\n";
-
-        $this->expectException(\InvalidArgumentException::class);
+        $listing = "drwxrwxr-x root/root   0 2025-09-30 10:00 manyfold-6e69e99/\n"
+            . "-rw-rw-r-- root/root 812 2025-09-30 10:00 manyfold-6e69e99/AGENTS.md\n"
+            . "lrwxrwxrwx root/root   0 2025-09-30 10:00 manyfold-6e69e99/CLAUDE.md -> AGENTS.md\n"
+            . "lrwxrwxrwx root/root   0 2025-09-30 10:00 manyfold-6e69e99/docs/my readme -> ../AGENTS.md\n";
+        $names = ['manyfold-6e69e99/', 'manyfold-6e69e99/AGENTS.md', 'manyfold-6e69e99/CLAUDE.md', 'manyfold-6e69e99/docs/my readme'];
 
         ArchiveSafety::assertRegularMembersOnly($listing);
+        $links = ArchiveSafety::tarLinks($listing, $names);
+        ArchiveSafety::assertLinksStayInside($links, $names);
+
+        $this->assertSame([
+            'manyfold-6e69e99/CLAUDE.md' => 'AGENTS.md',
+            'manyfold-6e69e99/docs/my readme' => '../AGENTS.md',
+        ], $links);
+    }
+
+    /** @return array<string, array{array<string, string>, list<string>}> */
+    public static function escapingLinkProvider(): array
+    {
+        return [
+            'absolute' => [['x' => '/etc'], ['x']],
+            'empty' => [['x' => ''], ['x']],
+            'climbs above the root' => [['x' => '../../etc'], ['x']],
+            'climbs above the root from a subdirectory' => [['a/x' => '../../etc'], ['a/', 'a/x']],
+            'through another link' => [['b' => '.', 'a' => 'b/..'], ['b', 'a']],
+            'a member stored below a link' => [['l' => 'sub'], ['sub/', 'l', 'l/f']],
+        ];
+    }
+
+    /**
+     * @param array<string, string> $links
+     * @param list<string> $names
+     */
+    #[DataProvider('escapingLinkProvider')]
+    public function test_a_link_that_could_leave_the_archive_is_refused(array $links, array $names): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Archive contains a symbolic link, which could redirect extraction outside the project directory.');
+
+        ArchiveSafety::assertLinksStayInside($links, $names);
+    }
+
+    public function test_a_link_to_a_sibling_in_a_parent_directory_is_allowed(): void
+    {
+        ArchiveSafety::assertLinksStayInside(['docs/r' => '../README.md', 'bin/python' => 'python3'], ['README.md', 'docs/', 'docs/r', 'bin/python', 'bin/python3']);
+
+        $this->addToAssertionCount(1);
+    }
+
+    public function test_zip_link_members_are_found_by_name(): void
+    {
+        $listing = "Archive:  upload.zip\n"
+            . "-rw-r--r--  3.0 unx   12 tx defN 24-Jan-01 00:00 app/AGENTS.md\n"
+            . "lrwxrwxrwx  3.0 unx    9 bx stor 24-Jan-01 00:00 app/my CLAUDE.md\n";
+
+        $this->assertSame(['app/my CLAUDE.md'], ArchiveSafety::zipLinkNames($listing, ['app/AGENTS.md', 'app/my CLAUDE.md', 'CLAUDE.md']));
+    }
+
+    public function test_a_link_line_that_cannot_be_read_is_refused(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        ArchiveSafety::tarLinks("lrwxrwxrwx root/root 0 2024-01-01 00:00 other -> x\n", ['link']);
+    }
+
+    public function test_accepts_zip_members_without_file_type_bits(): void
+    {
+        // What zipfile.writestr() writes for a bare file name; unzip extracts it
+        // as a regular file.
+        ArchiveSafety::assertRegularMembersOnly(<<<'LISTING'
+        Archive:  bare.zip
+        Zip file size: 315 bytes, number of entries: 2
+        ?rw-------  2.0 unx       65 b- stor 26-Oct-02 11:42 docker-compose.yml
+        ?rw-------  2.0 unx       12 b- stor 26-Oct-02 11:42 sub/index.html
+        2 files, 77 bytes uncompressed, 77 bytes compressed:  0.0%
+        LISTING);
+
+        $this->addToAssertionCount(1);
+    }
+
+    public function test_untyped_members_do_not_hide_a_symlink(): void
+    {
+        $listing = "?rw-------  2.0 unx   65 b- stor 26-Oct-02 11:42 docker-compose.yml\n"
+            . "lrwxrwxrwx  3.0 unx    4 bx stor 24-Jan-01 00:00 link\n";
+
+        $this->assertSame(['link'], ArchiveSafety::zipLinkNames($listing, ['docker-compose.yml', 'link']));
     }
 
     public function test_rejects_special_files(): void

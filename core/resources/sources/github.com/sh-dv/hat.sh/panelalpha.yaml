@@ -12,10 +12,3 @@ description: >-
   from v2.3.6 (the current HEAD, 540d3cc) and pinned by digest because
   upstream publishes only `latest`. nginx listens on 80 inside the
   container, published as 8080.
-
-  == Verified on 10.10.10.25 (engine 705f250a), memory_limit 2000 ==
-
-  Fresh create: health :8080 200, 48 s. / 200 <title>Hat.sh - Simple, fast,
-  secure client-side file encryption</title>; the page's _next chunks,
-  /service-worker.js (1.3 MB) and /about/ all 200. Rebuild: 18 s, / 200 with
-  the same title. /.env and /.git/config are nginx 404s.

@@ -14,7 +14,7 @@ use PHPUnit\Framework\TestCase;
  *   RuntimeError: Building a package is not possible in non-package mode.
  *
  * That was the install step of an entire family of apps — ActivityWatch
- * (#528) among them — and nothing about the project was wrong: only the "build
+ * among them — and nothing about the project was wrong: only the "build
  * a distribution of the root" half of the install was impossible. The engine
  * now installs such a project with `poetry install --no-root`, which resolves
  * the lockfile and installs the dependencies while skipping the project.

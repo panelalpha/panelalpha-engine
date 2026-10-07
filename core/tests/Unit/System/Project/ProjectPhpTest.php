@@ -6,7 +6,9 @@ use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Project;
 use App\System\Project\Php;
+use App\System\Project\PhpHosting;
 use App\System\Project\PhpHosting\FpmStack;
+use App\System\Project\PhpHosting\Services\RunnerServiceManager;
 use App\System\Services\Webserver;
 use PHPUnit\Framework\TestCase;
 
@@ -52,6 +54,8 @@ class ProjectPhpTest extends TestCase
 
         $project = new Project($system, $this->phpHostingModel());
         file_put_contents($project->composeFilePath(), "services:\n  php:\n    image: test\n");
+        $runtime = $project->runtime();
+        $this->assertInstanceOf(PhpHosting::class, $runtime);
 
         $php = $project->php();
 
@@ -76,7 +80,7 @@ class ProjectPhpTest extends TestCase
                 'php',
                 'bash',
                 '-c',
-                FpmStack::restartFpmScript('8.3'),
+                FpmStack::restartScript(new RunnerServiceManager($runtime), '8.3'),
             ],
             $system->processJournal[0]
         );

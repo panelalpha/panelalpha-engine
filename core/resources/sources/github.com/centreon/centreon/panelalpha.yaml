@@ -32,7 +32,7 @@ description: >-
   Dockerfile is what builds it. Two things upstream publishes make that work:
   ghcr.io/centreon/centreon/centreon-web-dependencies-collect:26.11-alma9 is
   public (AlmaLinux 9, PHP 8.4 from remi, and centreon-engine,
-  centreon-broker, gorgone and the Nagios plugins already installed, 926 MB),
+  centreon-broker, gorgone and the Nagios plugins already installed),
   and packages.centreon.com serves centreon-web for the series without
   credentials. files/Dockerfile.panelalpha is
   .github/docker/centreon-web/alma9/Dockerfile with exactly one substitution:
@@ -40,8 +40,7 @@ description: >-
   repository, instead of installing RPMs that upstream's pipeline has just
   built and bind-mounted in. That is the branch upstream's own file takes when
   STABILITY=stable. Nothing is patched, nothing is forked and nothing from the
-  checkout is compiled. Build: **1m30s** on a warm base image, producing a
-  1.2 GB image.
+  checkout is compiled.
 
   What the checkout *does* contribute, and the reason the build context is the
   repository, is .github/docker/centreon-web/alma9/entrypoint -- the only
@@ -66,10 +65,9 @@ description: >-
   The `web` service must not bind-mount anything under `./`. It builds, and
   `ComposeFileInspector::isLocalDevCompose()` treats a service that both
   builds and bind-mounts a project path as a workstation file; the compose
-  probe then declines the whole file and `dockerfile` wins on priority.
-  Measured with `./panelalpha:/panelalpha:ro` present: "Detected project type:
-  Dockerfile", port 8080 instead of 8000. The installer's answer files
-  therefore reach the container through `COPY` in the Dockerfile.
+  probe then declines the whole file and `dockerfile` wins on priority. The
+  installer's answer files therefore reach the container through `COPY` in
+  the Dockerfile.
 
   And ~/project/panelalpha/ is 0755, not 0700: the engine scans the project
   tree after the prepare hook, and a directory it may not read fails the
@@ -80,7 +78,7 @@ description: >-
 
   The same answer as Zabbix, reached the same way: **everything outbound, and
   nothing inbound.** centengine runs Nagios plugins, all of which are
-  clients -- measured from inside a real account, ICMP to a public address
+  clients -- from inside an account, ICMP to a public address
   answers (the image's check_icmp is setuid root, so the account needs no
   CAP_NET_RAW of its own), TCP connects, DNS resolves and SNMP over UDP goes
   out. centreon-plugins, the Perl collection that does the interesting work
@@ -100,15 +98,15 @@ description: >-
 
   ## /proc is not namespaced, and this is where that is believed
 
-  panelalpha/engine#215. `/proc/loadavg` and `/proc/meminfo` read the same
+  `/proc/loadavg` and `/proc/meminfo` read the same
   inside an account as on the host. The starter dataset's CPU, Load and Memory
   services check 127.0.0.1 over SNMP and therefore report the *machine's*
-  figures: measured, "Ram Total: 15.24 GB" on a host with 15 GB and an account
-  with 2 GB, and a Load service in CRITICAL on a load average the account did
-  not generate. Ping, Disk-/ and anything aimed at a real external target are
-  genuinely the account's own view. An operator who minds should set
-  CENTREON_DATASET=0 and let the customer add their own hosts; the trade is
-  that the account then opens on an empty monitor.
+  figures: the host's total RAM rather than the account's limit, and a Load
+  service in CRITICAL on a load average the account did not generate. Ping,
+  Disk-/ and anything aimed at a real external target are genuinely the
+  account's own view. An operator who minds should set CENTREON_DATASET=0 and
+  let the customer add their own hosts; the trade is that the account then opens
+  on an empty monitor.
 
   ## Credentials
 
@@ -117,15 +115,15 @@ description: >-
   bcrypt hash of **Centreon!2021** -- the same pair that appears in four of the
   entrypoint's own scripts and in every CI log. database.json beside it ships
   root/`centreon` and centreon/`centreon`, and the installer grants that second
-  user `ALL ON *.* WITH GRANT OPTION`. Measured on a stock build of the same
-  images: `admin`/`Centreon!2021` returns HTTP 200 and an API token.
+  user `ALL ON *.* WITH GRANT OPTION`. On a stock build of the same images,
+  `admin`/`Centreon!2021` returns HTTP 200 and an API token.
 
   This recipe never installs on any of the three. The admin login is generated
   by the engine (`credentials:` below, with a symbol for Centreon's password
   policy) and returned by GET /projects/{name}/app-credentials (MCP
   app_credentials_get). hooks/prepare.sh generates a database root password and
   a database user password into ~/.panelalpha/centreon/ (the only writable
-  directory that survives a rebuild, panelalpha/engine#173), bcrypt-hashes the
+  directory that survives a rebuild), bcrypt-hashes the
   admin password with the account's own PHP, and writes its own admin.json and
   database.json into the checkout on every deploy. A container.d step copies them over
   upstream's *before* the installer reads them, and refuses to continue -- exit
@@ -138,34 +136,33 @@ description: >-
   once, with this account's hash.
 
   The published port is closed for the whole of that. Upstream starts Apache at
-  step 06 and installs Centreon at step 15, so for the two minutes the install
+  step 06 and installs Centreon at step 15, so for as long as the install
   takes, a stock container serves the installation wizard on its published
   port. This recipe makes step 06 a no-op and starts httpd at step 97, after
   the install, the credential rotation and the poller configuration. A redeploy
   of an installed account skips all of it and leaves whatever password the
   customer has set.
 
-  The gate was tested by breaking its precondition, on a fresh account: with
-  the answer files not written, step 14 printed "refusing to install:
-  /panelalpha/admin.json is missing or empty", the container exited, compose
-  reported `dependency failed to start: container project-web-1 is unhealthy`,
-  the deploy **failed**, and the public name returned **502** -- not a login
-  form and not an installer. That is the panelalpha/engine#204 shape that
+  If the answer files are not written, step 14 prints "refusing to install:
+  /panelalpha/admin.json is missing or empty", the container exits, compose
+  reports `dependency failed to start: container project-web-1 is unhealthy`,
+  the deploy **fails**, and the public name returns **502** -- not a login
+  form and not an installer. That is the readiness-gate shape that
   works: `up -d` runs without `--wait`, but compose does block on a
   `depends_on` health condition, and the failing service is a dependency of
   one the deploy notices.
 
-  Measured on the control: `admin`/`Centreon!2021` over the real public HTTPS
-  name returns **401 Authentication failed** here, and **HTTP 200 with an API
-  token** on a stock build of the same image. The shipped database
-  credentials are refused too -- `centreon`/`centreon` and `root`/`centreon`
-  both give `ERROR 1045 Access denied`. `/centreon/install/setup.php` is 404:
-  upstream's entrypoint deletes the installer, and this recipe keeps that.
+  So `admin`/`Centreon!2021` returns **401 Authentication failed** here, where
+  a stock build of the same image answers **HTTP 200 with an API token**. The
+  shipped database credentials are refused too -- `centreon`/`centreon` and
+  `root`/`centreon` both give `ERROR 1045 Access denied`.
+  `/centreon/install/setup.php` is 404: upstream's entrypoint deletes the
+  installer, and this recipe keeps that.
 
   ## Applying a configuration change does not work from the UI, and that is
   ## upstream's
 
-  Measured, and the one thing an operator must know before selling this.
+  The one thing an operator must know before selling this.
   Adding a host and pressing Configuration > Pollers > Export configuration
   with "Move Export Files" and "Restart Monitoring Engine" ticked **generates
   and moves the files correctly and does not restart centengine.** The same is
@@ -176,12 +173,10 @@ description: >-
   recipe. gorgone accepts the request, logs `[engine] Event: [ENGINECOMMAND]
   ... RESTART_PROGRAM`, logs `Create sub-process`, logs `commands processing
   has finished`, and centengine's external-command counter stays at zero --
-  120 commands in a row produced `External Commands Last 1/5/15 min: 0 / 0 /
-  0`, so it is not buffering either. Writing the same line to the same FIFO as
-  the same user (`su -s /bin/bash centreon-gorgone -c "echo '[$(date +%s)]
-  RESTART_PROGRAM' > /var/lib/centreon-engine/rw/centengine.cmd"`) reloads the
-  configuration in under fifteen seconds, every time, and is how every
-  configuration change in this recipe's verification was applied. The
+  `External Commands Last 1/5/15 min: 0 / 0 / 0` -- so it is not buffering
+  either. Writing the same line to the same FIFO as the same user (`su -s
+  /bin/bash centreon-gorgone -c "echo '[$(date +%s)] RESTART_PROGRAM' >
+  /var/lib/centreon-engine/rw/centengine.cmd"`) reloads the configuration. The
   permissions check out (centreon-gorgone is in the centreon-engine group, the
   FIFO is 0660 centreon-engine:centreon-engine) and gorgone's
   `command_file:` matches centengine's.
@@ -201,38 +196,22 @@ description: >-
   (ServiceHardener.php:279). A Centreon Central is six daemons and their
   children -- httpd, php-fpm, cbd and cbwd, centengine forking a plugin per
   check, snmpd, crond, and gorgone with about fifteen Perl workers -- and 256
-  is enough at rest (36 in use) but has no headroom for a burst. Measured: a
-  single `systemctl restart gorgoned`, which briefly runs two sets of workers,
-  crossed it and centengine began returning `(Execute command failed) ... fail
+  is enough at rest but has no headroom for a burst: a single `systemctl
+  restart gorgoned`, which briefly runs two sets of workers, crosses it and
+  centengine begins returning `(Execute command failed) ... fail
   to start /usr/lib64/nagios/plugins/check_icmp: Resource temporarily
   unavailable` -- a monitoring system reporting UNKNOWN because it could not
   fork. The compose file sets 1024.
 
-  ## Memory: it fits
+  ## Memory and disk
 
-  Measured on the account's own cgroup, with a 2048 MB limit on the account.
+  `memory.current` runs high because page cache from the image build sits in
+  the account's cgroup and is reclaimed rather than allocated. There is no
+  schema-import spike to plan around; the install is incremental.
 
-  | | |
-  |---|---|
-  | web (the Central) | 274 MB |
-  | db (mariadb:11.4) | 128 MB |
-  | account cgroup, `anon` | **454 MB** |
-  | account cgroup, slab | 179 MB |
-  | account cgroup, `memory.current` | 1785 MB (of which 1141 MB is page cache) |
-  | peak | 2050 MB, during the image build |
-  | `oom_kill` | **0** |
-
-  The number that matters is `anon`: about 450 MB of real working set for the
-  whole stack, which is less than Zabbix. `memory.current` runs high because
-  page cache from a 1.2 GB image build sits in the account's cgroup and is
-  reclaimed rather than allocated -- `memory.events` shows 1865 reclaims and
-  zero OOM kills. There is no schema-import spike to plan around; the install
-  is incremental.
-
-  **Disk is the real cost**: 2.4 GB in the account home -- a 1.65 GB image
-  (926 MB base plus the packages), a 274 MB checkout read only at build time,
-  1.24 GB of buildkit cache that makes a redeploy 42 s instead of 200 s, and
-  289 MB of volumes. Budget 4 GB, not 2.
+  **Disk is the real cost**: the image (the base plus the packages), a
+  checkout read only at build time, the buildkit cache that keeps a redeploy
+  fast, and the volumes. Budget 4 GB, not 2.
 
   ## Left for the customer
 

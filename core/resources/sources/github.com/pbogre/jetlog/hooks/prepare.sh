@@ -2,7 +2,7 @@
 set -e
 
 # Everything the recipe generates lives in ~/.panelalpha/jetlog: ~/project is
-# re-cloned and wiped on every redeploy (engine#173), so a secret or the DB
+# re-cloned and wiped on every redeploy, so a secret or the DB
 # written there would be lost. ~/.panelalpha is the one account-owned dir that
 # survives a rebuild.
 PA_DIR="${HOME}/.panelalpha/jetlog"

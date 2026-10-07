@@ -31,19 +31,19 @@ Some tests skip when the engine does not have what they need, for example no fir
 
 ## Groups
 
-| Command | What it does |
-| --- | --- |
-| `npm test` | The everyday run: logic checks, the API, and the application deploys |
-| `npm run test:smoke` | A short check that the engine answers |
-| `npm run test:unit` | Logic only. No engine, so it works offline |
-| `npm run test:supported-apps` | Only the application deploys. These also run inside `npm test` |
-| `npm run test:slow` | Turns the firewall off and on, and tries every PHP version |
-| `npm run test:cli` | The engine's own commands. Only works when the tests run on the engine's server |
+| Command                         | What it does                                                                               |
+| ------------------------------- | ------------------------------------------------------------------------------------------ |
+| `npm test`                      | The everyday run: logic checks, the API, and the application deploys                       |
+| `npm run test:smoke`            | A short check that the engine answers                                                      |
+| `npm run test:unit`             | Logic only. No engine, so it works offline                                                 |
+| `npm run test:supported-apps`   | Only the application deploys. These also run inside `npm test`                             |
+| `npm run test:slow`             | Turns the firewall off and on, and tries every PHP version                                 |
+| `npm run test:cli`              | The engine's own commands. Only works when the tests run on the engine's server            |
 | `npm run test:webserver-change` | Switches the web server, then switches it back. This changes the engine for everyone on it |
-| `npm run test:update` | The engine's update |
-| `npm run test:ui` | Watch the tests in a window |
-| `npm run report` | Open the report from the last run |
-| `npm run check` | Check the test code before you commit it |
+| `npm run test:update`           | The engine's update                                                                        |
+| `npm run test:ui`               | Watch the tests in a window                                                                |
+| `npm run report`                | Open the report from the last run                                                          |
+| `npm run check`                 | Check the test code before you commit it                                                   |
 
 `npm run test:supported-apps` deploys each application from a fixed list, waits until it is online, and opens its address. The same run also checks, once each: a refused create, an archive with no file, a working copy pushed back to the live site, a backup, stopping and starting the containers, a site that lost its front page, a git hook, and WordPress on an ordinary account. `SUPPORTED_APPS=koel,ntfy` runs only those applications from the list. The once-each checks still run.
 
@@ -61,4 +61,6 @@ This serves the report on port 9323 and prints the address to open. If you are n
 ssh -L 9323:127.0.0.1:9323 root@engine.example.com
 ```
 
-A failed test keeps a trace. Open it from the report.
+A failed test keeps a trace. Open it from the report. The API token (and `LICENSE_KEY` /
+`SYSTEM_UPDATE_LICENSE_KEY` when set) is replaced with `[REDACTED]` in every trace and report
+archive once the run ends, so a published report does not carry it.

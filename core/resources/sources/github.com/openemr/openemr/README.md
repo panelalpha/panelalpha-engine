@@ -3,19 +3,15 @@
 OpenEMR is an electronic health record and practice-management system: about
 9,000 files of PHP served straight out of the checkout, MySQL or MariaDB
 underneath, and an installer that builds a 700-table schema and a language
-table with a quarter of a million rows in it. Tracker issue
-[#633](https://git.modulesgarden.tech/panelalpha/playground/supported-apps/-/work_items/633).
+table with a quarter of a million rows in it.
 
 Detection reads the repository correctly on its own — composer.json and no
 artisan, so the `php` strategy, PHP 8.3, the shared Apache base image with
-`~/project` bind-mounted, `composer install` on the host. `composer install`
-resolved 187 packages and the webpack theme build ran; the deploy finished
-successfully without this recipe and every request answered **HTTP 500**, which
-is the `serving-error_page` verdict it exists to fix.
+`~/project` bind-mounted, `composer install` on the host and the webpack theme
+build. Without this recipe the deploy finishes and every request answers
+**HTTP 500**.
 
 ## The 500, exactly
-
-Reproduced on the deployed account:
 
 ```
 PHP Fatal error:  Uncaught UnexpectedValueException: Could not detect
@@ -26,20 +22,20 @@ environment name. Searched envvars: ENVIRONMENT, ENV
 #3 /app/public/index.php(20): require_once('/app/bootstrap....')
 ```
 
-Two facts compose into it. `PhpDocroot` pointed Apache at `/app/public`, so
-**every** request in the account was served by `public/index.php` — OpenEMR's
+Two facts compose into it. `PhpDocroot` points Apache at `/app/public`, so
+**every** request in the account is served by `public/index.php` — OpenEMR's
 opt-in, experimental front controller. That file's first act is to require
 `bootstrap.php`, which calls `Firehed\Container\AutoDetect::instance('config')`,
 and firehed/container refuses to build a container without `ENVIRONMENT` or
 `ENV` in the environment. Neither is in `.env.example`, nothing in the checkout
 sets them, and the exception is uncaught. Every path, HTTP 500.
 
-`bootstrap.php` also sets `display_errors=0`, so the body was **empty** — which
-is why the original health report's entire `php` group passed on a site that was
+`bootstrap.php` also sets `display_errors=0`, so the body is **empty** — which
+is why the health report's entire `php` group passes on a site that is
 completely dead: `no-fatal-error`, `no-database-error` and
-`no-diagnostics-in-output` all match against the response body, and there was
+`no-diagnostics-in-output` all match against the response body, and there is
 nothing in it to match. The missing `sites/default/sqlconf.php` configuration
-was never even reached.
+is never even reached.
 
 Fixing the document root fixes the 500. `files/.htaccess` then 404s
 `/public/index.php` as well, because with `/app` served it is no longer the
@@ -62,11 +58,10 @@ not exist, and `interface/globals.php` computes `$web_root` by subtracting
 `DOCUMENT_ROOT` from the application directory (line 197) — which with the two
 one directory apart prefixes every generated URL with `/public`.
 
-**`docroot: .` does not fix this**, and the recipe was written with it before
-the first test deploy proved otherwise. `PlatformManifest::readDocroot()`
+**`docroot: .` does not fix this.** `PlatformManifest::readDocroot()`
 normalises both `''` and `'.'` to `''`, and `PhpDocroot::environment()` reads
-`''` as "not declared" and runs `detect()`. Measured: with `docroot: .` in
-`panelalpha.yaml`, the generated compose file still said `PA_DOCROOT:
+`''` as "not declared" and runs `detect()`: with `docroot: .` in
+`panelalpha.yaml`, the generated compose file still says `PA_DOCROOT:
 /app/public`. Leaving the key out is no better — the base image's
 `panelalpha-serve.sh` falls back to `/app/public` whenever that directory
 exists, so both paths converge on the same wrong answer.
@@ -97,8 +92,8 @@ composer.json requires `ext-mysqli` and `ext-pdo_mysql`, and
 installed". `database: mysql` in `panelalpha.yaml` is the manifest key that
 answers this (Matomo's and Omeka S's, for the same reason): `AppDatabase`
 provisions a database and user on the account's own MySQL server — visible in
-the panel, openable in phpMyAdmin, inside the account's backup, and costing a
-3.7 GB host neither a container nor a volume — and the generated compose file
+the panel, openable in phpMyAdmin, inside the account's backup, and costing the
+host neither a container nor a volume — and the generated compose file
 passes `DB_HOST`/`DB_PORT`/`DB_DATABASE`/`DB_USERNAME`/`DB_PASSWORD` into the
 container.
 
@@ -165,8 +160,8 @@ composer-plugin whose `CustomModuleInstaller::getInstallPath()` returns
 `interface/modules/custom_modules/<name>`. The php manifest installs with
 `--no-plugins` (a plugin is arbitrary PHP out of a customer repository and the
 install runs on the host daemon), and `PhpHostBuild::mayRunPlugins()` lifts that
-only for the five installer plugins it names, so Composer used its default
-`LibraryInstaller` and the module is in `vendor/`, where OpenEMR's module
+only for the five installer plugins it names, so Composer uses its default
+`LibraryInstaller` and the module lands in `vendor/`, where OpenEMR's module
 scanner never looks. `panelalpha-install.php` copies it across. Cosmetic — it is
 optional billing integration, not a boot requirement — but a module in
 `vendor/` is a module the practice cannot see.
@@ -180,18 +175,16 @@ start the session because headers have already been sent` whenever
 `headers_sent()` is true, and under the CLI SAPI `headers_sent()` becomes true
 on the first byte PHP writes to stdout.
 
-Measured, on the first test deploy of this recipe: a single `echo "[openemr]
-installing into …"` before the call killed the install with an uncaught
+A single `echo` before the call kills the install with an uncaught
 `RuntimeException` out of `Gacl->__construct()` — *after* the 700-table schema,
-the language pack, the globals and the version row had all been written. The
-account was left with a half-built database, no ACLs and no administrator, and
-the deploy rolled back. Every message in `panelalpha-install.php` therefore goes
+the language pack, the globals and the version row have all been written,
+leaving a half-built database with no ACLs and no administrator. Every message in `panelalpha-install.php` therefore goes
 through `fwrite(STDERR, …)`, which bypasses PHP's output layer; `error_log()` is
 safe for the same reason, which is why the Installer's own Monolog handler can
 log throughout. Upstream's two CLI entry points print nothing before the call,
 which is the same rule arrived at by having nothing to say.
 
-## The install looks like it should be slow, and is not
+## The install, and the start period
 
 `Installer::load_file()` reads each dump file a line at a time and issues **one
 `mysqli_query` per statement**. `sql/database.sql` is 6,408 statements. The
@@ -201,18 +194,14 @@ loads it unconditionally — there is no setting that skips it, and deleting the
 file fails the install outright (`load_file()` returns false on a dumpfile it
 cannot open).
 
-Measured on `mariusz2` (2 cores, 3.7 GB, `--memory-limit=1800`, with another
-agent's webpack build running): **all of that is about 20 seconds**, and
-`quick_install()` returns in about 30. `database-users.shared-hosting.palocal`
-is one bridge away rather than a real network hop, and the whole load runs
-inside a single transaction with autocommit off. The intuition that a
-quarter-million round trips must cost minutes is simply wrong here, and it is
-worth writing down so the next reader does not size a timeout around it.
+It is quicker than that sounds: `database-users.shared-hosting.palocal` is one
+bridge away rather than a real network hop, and the whole load runs inside a
+single transaction with autocommit off. Do not size a timeout around the
+intuition that a quarter-million round trips must cost minutes.
 
-`start_period` is 600s all the same — about twenty times the measured figure. A
-check that passes inside the start period marks the container healthy
-immediately, so the margin is free, and this host is usually building something
-else at the same time. `AppLauncher::COMPOSE_TIMEOUT_SECONDS` is 3600, which is
+`start_period` is 600s all the same. A check that passes inside the start
+period marks the container healthy immediately, so the margin is free.
+`AppLauncher::COMPOSE_TIMEOUT_SECONDS` is 3600, which is
 the budget that actually applies to `docker compose up -d`; no `timeout:` is set
 on the staged command, so nothing shorter cuts it off.
 
@@ -266,45 +255,3 @@ mail, and the practice's own SMTP settings live in Administration → Globals.
 `ext-redis` is in composer.json's `require` but OpenEMR only uses Redis when
 `REDIS_SERVER` is set; unset, sessions are files and that is correct for one
 container.
-
-## Verified on mariusz2
-
-Deployed from this recipe on 2026-09-20, account `openemrtestqpn1`, 2 cores /
-3.7 GB, `--memory-limit=1800`, with another agent building on the same host.
-
-- **Verdict `deploy-ok`, `serving: ok`, healthy, all 12 health checks pass.**
-  Deploy 242–288s wall; `quick_install()` 32s of that.
-- `GET /` → 302 → `/interface/login/login.php?site=default` → **200**,
-  external HTTP 200, title `OpenEMR Login`.
-- **A real login, not a 200.** `POST
-  /interface/main/main_screen.php?auth=login&site=default` with `authUser=admin`
-  and the generated password → 302 to
-  `/interface/main/tabs/main.php?token_main=…`, which renders **68 KB** of the
-  authenticated application (Administrator, Calendar, Messages, Patient,
-  Logout). Control: the same POST with a wrong password answers 200 — the login
-  page again — and never redirects.
-- Every asset the login page references resolves: `/library/*.js`,
-  `/public/assets/jquery/…`, and the webpack-built `/public/themes/style_light.css`,
-  all 200. `$web_root` is empty, so no URL carries a `/public` prefix.
-- **The redeploy path was exercised directly.** `sites/default/sqlconf.php` was
-  reset to its committed placeholder (what a re-clone does), the upgrade-stage
-  command re-run: it reported `already installed; rewrote
-  sites/default/sqlconf.php`, restored `$config = 1` and the real credentials,
-  reinstalled nothing (1 row in `users_secure`, 237,509 in `lang_definitions`,
-  unchanged), and login still worked.
-
-Exposure probes against the public domain:
-
-| Path | Result |
-|---|---|
-| `sites/`, `sites/default/sqlconf.php`, `sites/default/config.php`, `sites/default/documents/` | **403** |
-| `sites/default/images/login_logo.gif`, `…/logo_1.png` | 200 — intended |
-| `setup.php`, `sql_upgrade.php`, `acl_upgrade.php`, `ippf_upgrade.php`, `public/index.php` | **404** |
-| `admin.php` | **403** (OpenEMR's own guard) |
-| `.git/config`, `.env`, `.panelalpha-admin-password`, `docker-compose.yml`, `panelalpha-install.php`, `panelalpha-setup.sh`, `bin/` | **403** |
-| `composer.json`, `composer.lock`, `contrib/util/installScripts/InstallerAuto.php` | 200 — public repository content; `InstallerAuto.php` answers only its 78-byte "set `OPENEMR_ENABLE_INSTALLER_AUTO=1`" refusal |
-
-The one rule added after that run — the `RedirectMatch` for
-`/public/index.php` — was applied to the live account and re-probed rather than
-proved by a fresh deploy: `/public/index.php` 404, `/public/assets/…` and
-`/public/themes/…` still 200, `/` still 302, login still 200.

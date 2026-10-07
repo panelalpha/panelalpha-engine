@@ -91,7 +91,7 @@ function pa_db(): array
  * rather than disclosing it, but a config.php full of getenv() is one that
  * cannot leak a password even if some future misconfiguration served it as
  * text. It is also rewritten on every deploy rather than preserved, because
- * every deploy re-clones ~/project (engine#173) and there is never a file here
+ * every deploy re-clones ~/project and there is never a file here
  * to keep.
  */
 function pa_write_config(): void
@@ -117,7 +117,7 @@ $config['db_pass'] = getenv('DB_PASSWORD');
 // /data is ~/.panelalpha/groupoffice, bind-mounted by the compose override.
 // Every uploaded file, every mail attachment and every blob lands under
 // file_storage_path (go/core/fs/Blob.php:380-384), so it has to be somewhere a
-// redeploy cannot reach: ~/project is cleared and re-cloned (engine#173).
+// redeploy cannot reach: ~/project is cleared and re-cloned.
 $config['file_storage_path'] = '/data/files/';
 $config['tmpdir'] = '/data/tmp/';
 

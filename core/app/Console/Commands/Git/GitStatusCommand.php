@@ -2,6 +2,9 @@
 
 namespace App\Console\Commands\Git;
 
+use App\Http\Requests\Git\GitStatusRequest;
+use App\Lib\Git\GitActions;
+use App\Models\User;
 use Illuminate\Console\Command;
 
 class GitStatusCommand extends Command
@@ -10,7 +13,7 @@ class GitStatusCommand extends Command
 
     protected $signature = 'git:status
                             {username : Project username}
-                            {--path= : Directory path inside the project (defaults to project (DinD) or public_html (FPM/LiteSpeed))}
+                            {--path= : Directory path inside the project (defaults to project (DinD) or the document root of the main domain (FPM/LiteSpeed))}
                             {--fetch : Fetch from remote before reporting status}';
 
     protected $description = 'Git repository status';
@@ -24,6 +27,8 @@ class GitStatusCommand extends Command
             $params['fetch'] = '1';
         }
 
-        return $this->dispatchGit('GET', '/git/status', $params);
+        return $this->runGit(GitStatusRequest::class, $params,
+            fn (User $user, array $valid) => app(GitActions::class)
+                ->status($user, $valid, filter_var($valid['fetch'] ?? false, FILTER_VALIDATE_BOOLEAN)));
     }
 }

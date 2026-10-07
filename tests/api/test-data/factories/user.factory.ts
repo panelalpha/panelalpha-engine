@@ -131,19 +131,11 @@ export class UserFactory {
     return { username, domain: await this.assignedDomain(username) };
   }
 
+  /** A user the test already deleted is fine; one still on the engine afterwards throws. */
   async deleteUser(username: string): Promise<void> {
     this.pending.delete(username);
     await this.cleanupUserDomains(username);
-
-    try {
-      await this.api.deleteUser(username);
-    } catch (error) {
-      // User might already be deleted
-      console.warn(
-        `Failed to delete user ${username}:`,
-        error instanceof Error ? error.message : error
-      );
-    }
+    await this.api.deleteUserSafe(username);
   }
 
   private track(username: string, options: CreateUserOptions): void {

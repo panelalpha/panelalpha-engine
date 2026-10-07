@@ -16,15 +16,12 @@ cd ~/project
 #    and a `node` running `npm install && vite --host` as a permanent process.
 #
 #    App, queue and scheduler are recognised as the application and dropped.
-#    `webserver` and `node` are not, so they were kept as runtime sidecars and
-#    merged into the generated compose. Measured on the deploy that produced the
-#    `serving-unknown` verdict this recipe fixes: the containers that came up
-#    were `scart-nginx` and `scart-node`, the port probe on 8000 answered
-#    `Recv failure: Connection reset by peer` -- nginx, alive, proxying FastCGI
-#    to an `app:9000` that does not exist in the generated stack, where the
-#    application is Apache on 8000 in the shared PHP base image -- and the
-#    domain answered 502. `node` meanwhile would run `npm install` at container
-#    start and hold a Vite dev server open, on an account capped at 1800 MB.
+#    `webserver` and `node` are not, so they would be kept as runtime sidecars
+#    and merged into the generated compose: nginx answering on 8000 by proxying
+#    FastCGI to an `app:9000` that does not exist in the generated stack, where
+#    the application is Apache on 8000 in the shared PHP base image, so the
+#    domain answers 502. `node` meanwhile would run `npm install` at container
+#    start and hold a Vite dev server open on the account.
 #
 #    Both files have to go, not just the first. The primary scan looks at
 #    docker-compose.yml; with that gone the fallback scan globs
@@ -59,10 +56,9 @@ if [ ! -s "${STORE}/secrets.env" ]; then
     # install stage -- by then it is too late. The generated service loads .env
     # through `env_file:`, and Compose reads it when the container is
     # *created*: an `APP_KEY=` line makes APP_KEY a real, empty environment
-    # variable, and Laravel's Dotenv is immutable, so it never overwrites one.
-    # Measured on Winter CMS: key:generate wrote a good key into .env and every
-    # request still answered MissingAppKeyException, with `printenv APP_KEY`
-    # printing an empty line and the file printing the key. This recipe states
+    # variable, and Laravel's Dotenv is immutable, so it never overwrites one:
+    # key:generate writes a good key into .env and every request still answers
+    # MissingAppKeyException. This recipe states
     # the whole manifest rather than `extends: laravel` precisely so that the
     # platform's `key-generate` command is not inherited.
     #
@@ -117,8 +113,7 @@ if [ ! -f .env ]; then
     # real DB_HOST is then written into the generated `environment:` as the
     # sidecar's service name.
     #
-    # SQLite is not an option here, and that was measured rather than assumed:
-    # config/database.php takes DB_DATABASE verbatim, `gp247:install` migrates
+    # SQLite is not an option here: config/database.php takes DB_DATABASE verbatim, `gp247:install` migrates
     # and seeds onto SQLite without complaint, and the storefront serves -- but
     # the admin dashboard, the page every admin login lands on, is
     # GP247\Shop\Admin\Models\AdminOrder's statistics, four raw queries built

@@ -117,7 +117,7 @@ class HostScriptTest extends TestCase
 
     /**
      * A folded multi-line description must be commented on every line, or its
-     * later lines land in the host script as bare shell (engine#198).
+     * later lines land in the host script as bare shell.
      */
     public function test_a_multiline_description_is_fully_commented(): void
     {

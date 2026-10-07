@@ -198,6 +198,29 @@ class RuntimeSidecarsFromProjectTest extends TestCase
         }
     }
 
+    /**
+     * Zerobyte: every service kept from its workstation file was
+     * its e2e suite. Dropping them must not drop the production variant's env
+     * too, which the app used to get with them.
+     */
+    public function test_a_workstation_file_left_with_only_a_test_suite_still_gives_the_app_its_env(): void
+    {
+        $result = $this->sidecarsFromFiles([
+            'compose.yaml' => (string) file_get_contents(dirname(__DIR__, 4) . '/fixtures/compose/zerobyte-compose.yaml'),
+        ]);
+
+        $this->assertSame([], $result['services']);
+        $this->assertSame('debug', $result['app_env']['LOG_LEVEL'] ?? null);
+        $this->assertArrayHasKey('APP_SECRET', $result['app_env']);
+        $this->assertArrayNotHasKey('NODE_ENV', $result['app_env']);
+
+        $decision = (new RuntimeSidecars($this->stubbedDind($this->stubbedSystem([]))))
+            ->mergeRuntimeSidecars(['env' => ['LOG_LEVEL' => 'info']], $result);
+        $this->assertSame('info', $decision['env']['LOG_LEVEL'], 'what the strategy generates still wins');
+        $this->assertArrayHasKey('APP_SECRET', $decision['env']);
+        $this->assertArrayNotHasKey('depends_on', $decision);
+    }
+
     /** LinkAce's shape, reduced: a workstation stack beside a production one. */
     private const LINKACE_DEV = <<<'YAML'
     name: linkace_dev
@@ -250,7 +273,7 @@ class RuntimeSidecarsFromProjectTest extends TestCase
 
     /**
      * The production file says what runs beside the app; the workstation file
-     * added caddy, a second database and a debug server (engine#166).
+     * added caddy, a second database and a debug server.
      */
     public function test_a_production_compose_beats_the_development_one(): void
     {
@@ -279,6 +302,35 @@ class RuntimeSidecarsFromProjectTest extends TestCase
         ]);
 
         $this->assertSame(['postgres'], array_keys($result['services']));
+    }
+
+    /**
+     * Playerr from an archive: no repository URL to match, but its own
+     * docker-compose.yml builds `playerr` from the root, so the casaos and
+     * github variants of that service are the app, not backing services.
+     */
+    public function test_a_variant_of_the_root_build_is_not_a_backing_service_without_a_repository(): void
+    {
+        $result = $this->sidecarsFromFiles([
+            'docker-compose.yml' => "services:\n  playerr:\n    build: .\n    container_name: playerr\n"
+                . "    ports:\n      - \"2727:2727\"\n    volumes:\n      - ./config:/app/config\n",
+            'docker-compose.casaos.yml' => "services:\n  playerr:\n    image: playerr:latest\n    container_name: playerr\n"
+                . "    network_mode: bridge\n    ports:\n      - \"2727:2727\"\n",
+            'docker-compose.github.yml' => "services:\n  playerr:\n    image: maikboarder/playerr:latest\n    container_name: playerr\n"
+                . "    ports:\n      - \"2727:2727\"\n",
+        ]);
+
+        $this->assertSame([], $result['services']);
+    }
+
+    public function test_a_template_datastore_beside_the_root_build_is_still_kept(): void
+    {
+        $result = $this->sidecarsFromFiles([
+            'docker-compose.yml' => "services:\n  web:\n    build:\n      context: ./\n    volumes:\n      - .:/app\n",
+            'docker-compose.example.yml' => "services:\n  web:\n    image: acme/shop:1\n  cache:\n    image: redis:7\n",
+        ]);
+
+        $this->assertSame(['cache'], array_keys($result['services']));
     }
 
     public function test_a_development_template_still_speaks_when_it_is_the_only_one(): void

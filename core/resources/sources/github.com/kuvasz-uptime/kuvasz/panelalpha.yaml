@@ -6,9 +6,14 @@ description: >-
 
   This recipe runs the published image of the current release
   (kuvaszmonitoring/kuvasz:4.4.0) with a postgres:18 sidecar, as the upstream
-  docker-examples compose does. The customer sets ADMIN_USER and
-  ADMIN_PASSWORD (at least 12 characters, not equal to the user) in the
-  project's environment variables; a one-shot check service fails the deploy
-  naming each one that is missing. The database password is generated once
+  docker-examples compose does. Kuvasz refuses to start without ADMIN_USER
+  and ADMIN_PASSWORD (at least 12 characters, not equal to the user); the
+  engine generates them (`credentials:`, returned by
+  `GET /projects/{name}/app-credentials`; project env vars with those names
+  set before the first deploy are kept instead). The database password is generated once
   into ~/.panelalpha/kuvasz/. Monitors defined in the UI live in the database
   (named volume); the YAML config file is shipped empty.
+credentials:
+  fields:
+    ADMIN_USER: {kind: username}
+    ADMIN_PASSWORD: {kind: password}

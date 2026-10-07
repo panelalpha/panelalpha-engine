@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Pomerium, an identity-aware access proxy (on :8080) that puts a sign-in in
+  front of an application. The repository's build downloads an Envoy binary
+  and embeds it (envoy-linux-amd64), so the Go strategy stopped on a missing
+  embed. This recipe runs upstream's published pomerium/pomerium image of the
+  current release (v0.33.4, pinned by digest) with TLS left to the hosting
+  proxy. One route sends the site's own address to a bundled placeholder page
+  for any signed-in user; the project's UPSTREAM environment variable points
+  it at the real application. No identity provider is configured, so sign-in
+  goes through Pomerium's hosted authenticate service. The shared and cookie
+  secrets are generated once into ~/.panelalpha/pomerium.

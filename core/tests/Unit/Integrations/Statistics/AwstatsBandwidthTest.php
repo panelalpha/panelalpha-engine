@@ -53,8 +53,8 @@ class AwstatsBandwidthTest extends TestCase
 
     public function test_daily_bandwidth_includes_traffic_awstats_did_not_count_as_viewed(): void
     {
-        // Measured on a live project: 20 browser requests and 52 from curl,
-        // which AWStats files as a robot, at 355 bytes each.
+        // A real day: 20 browser requests and 52 from curl, which AWStats files
+        // as a robot, at 355 bytes each.
         file_put_contents($this->dataDir . '/awstats092026.robots.com.txt', implode("\n", [
             'BEGIN_DAY 1',
             '20260923 20 20 7100 1',

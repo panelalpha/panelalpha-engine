@@ -11,7 +11,7 @@ use Symfony\Component\Yaml\Yaml;
 
 /**
  * Ghost and listmonk both ship an unauthenticated first-run page that makes
- * whoever submits it first the site's administrator (#263). Their recipes
+ * whoever submits it first the site's administrator. Their recipes
  * complete it with generated credentials kept in ~/.panelalpha, before the
  * application listens on its published port.
  *

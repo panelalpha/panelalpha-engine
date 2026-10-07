@@ -6,7 +6,7 @@ use App\System\Project\Dind\AppHealth;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Which answers the port probe keeps waiting on (engine#280).
+ * Which answers the port probe keeps waiting on.
  *
  * An image that runs its own proxy in front of the app (Pingvin Share X:
  * Caddy) binds the port at once and answers 502 until the backend is up. The
@@ -51,11 +51,11 @@ class HealthProbeRetryTest extends TestCase
      * @param list<string> $codes what curl answers, call by call
      * @return array{0: string, 1: int} the reported code and how many times curl ran
      */
-    private function probe(array $codes, int $attempts = 4): array
+    private function probe(array $codes, int $attempts = 4, bool $waitOnServerError = false): array
     {
         file_put_contents($this->dir . '/codes', implode("\n", $codes) . "\n");
         $script = $this->dir . '/probe.sh';
-        file_put_contents($script, AppHealth::probeScript([8000], 1, $attempts, 0));
+        file_put_contents($script, AppHealth::probeScript([8000], 1, $attempts, 0, null, $waitOnServerError));
 
         $env = 'PATH=' . escapeshellarg($this->dir . ':' . getenv('PATH'))
             . ' FAKE_CURL_DIR=' . escapeshellarg($this->dir);
@@ -88,6 +88,23 @@ class HealthProbeRetryTest extends TestCase
 
         $this->assertSame('500', $code);
         $this->assertSame(1, $calls);
+    }
+
+    public function test_a_deploy_waits_out_a_500_while_the_backend_starts(): void
+    {
+        // Pingvin Share X: the frontend answers 500 until its backend is up.
+        [$code, $calls] = $this->probe(['500', '500', '200'], 4, true);
+
+        $this->assertSame('200', $code);
+        $this->assertSame(3, $calls);
+    }
+
+    public function test_a_deploy_still_reports_a_500_that_never_clears(): void
+    {
+        [$code, $calls] = $this->probe(['500'], 3, true);
+
+        $this->assertSame('500', $code);
+        $this->assertSame(3, $calls);
     }
 
     public function test_a_healthy_app_is_probed_once(): void

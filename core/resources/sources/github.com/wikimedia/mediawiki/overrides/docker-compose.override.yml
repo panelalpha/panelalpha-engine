@@ -42,7 +42,7 @@ services:
       #   /data/php/zz-mediawiki.ini    the php.ini the base image does not
       #                                 load.
       #
-      # A redeploy empties and re-clones ~/project (engine#173), so a wiki that
+      # A redeploy empties and re-clones ~/project, so a wiki that
       # kept any of this under the document root would come back with a new
       # $wgSecretKey -- invalidating every session and every edit token -- and
       # with every uploaded file gone while the `image` rows pointing at them
@@ -62,7 +62,7 @@ services:
       # Said out loud, because the manifest cannot say it: MediaWiki serves
       # from its own repository root, and `docroot: .` is folded to '' by
       # PlatformManifest::readDocroot() (Platform/PlatformManifest.php:305),
-      # which means "undeclared" (engine#172). PhpDocroot::detect() reaches
+      # which means "undeclared". PhpDocroot::detect() reaches
       # /app on its own -- none of public/, web/, public_html/ or webroot/
       # exists here and index.php does -- but the document root decides which
       # files are a URL, and that is not something to leave to a probe order.
@@ -82,7 +82,7 @@ services:
       # $wgSecretKey; a file that is not in the served tree at all is not.
       MW_CONFIG_FILE: /data/LocalSettings.php
 
-      # The image loads no php.ini at all (engine#185) and its conf.d is not
+      # The image loads no php.ini at all and its conf.d is not
       # writable by the account uid, so this is the only way to give the
       # container one. PHP reads PHP_INI_SCAN_DIR from its own environment at
       # startup whatever the SAPI, so it reaches the Apache module and the CLI

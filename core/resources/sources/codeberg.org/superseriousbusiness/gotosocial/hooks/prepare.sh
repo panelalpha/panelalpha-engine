@@ -33,7 +33,7 @@ fi
 # ---------------------------------------------------------------------------
 # 2. Persistent data.
 #
-# ~/project is emptied and re-cloned on every deploy (engine#173) and ~ is
+# ~/project is emptied and re-cloned on every deploy and ~ is
 # chowned root on every rebuild (Project.php); ~/.panelalpha is the only
 # directory that both survives and belongs to the account. The SQLite database,
 # the media store and the instance keypair all live under storage/, so a redeploy

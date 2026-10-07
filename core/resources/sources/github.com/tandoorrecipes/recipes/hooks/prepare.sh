@@ -23,7 +23,7 @@ fi
 # ---------------------------------------------------------------------------
 # 1. Secrets.
 #
-# engine#173: every deploy re-clones and ProjectTree::clearContents()
+# Every deploy re-clones and ProjectTree::clearContents()
 # (GitRepository.php:89) empties ~/project first, so a guard on a file in there
 # never fires. Regenerating SECRET_KEY logs every session out; regenerating
 # POSTGRES_PASSWORD locks the app out of the pgdata volume, which still holds

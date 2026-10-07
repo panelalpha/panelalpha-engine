@@ -353,7 +353,7 @@ class EnvSidecars
      * A datastore with no password is unreachable rather than open — these
      * images refuse to start without one — so the blank is filled for the
      * engines that demand it, with a per-account password rather than the
-     * `app` everyone could guess (engine#189). Redis numbers its databases
+     * `app` everyone could guess. Redis numbers its databases
      * rather than naming them, which is why its default is `0` and not `app`.
      *
      * @param array{username: string, password: string, database: string} $spec

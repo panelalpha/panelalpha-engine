@@ -12,7 +12,7 @@ services:
     image: memtly/memtly:latest
     restart: unless-stopped
     # Kestrel binds :5000 (hard-coded UseUrls in Program.cs). The published host
-    # port must be explicit for the engine to see it (engine#234); 8080 is a
+    # port must be explicit for the engine to see it; 8080 is a
     # preferred proxy port and the engine forwards to it.
     ports:
       - "8080:5000"
@@ -36,8 +36,8 @@ services:
       # only ever creates non-admin users.
       Memtly__Account__Registration__Enabled: "false"
     volumes:
-      # Named volumes, not ~/project paths: a redeploy wipes ~/project
-      # (engine#173). /app/config holds BOTH the SQLite database and the ASP.NET
+      # Named volumes, not ~/project paths: a redeploy wipes ~/project.
+      # /app/config holds BOTH the SQLite database and the ASP.NET
       # DataProtection keyring the app writes there -- persisting it is what
       # keeps galleries, accounts and auth cookies alive across a redeploy.
       - memtly_config:/app/config
@@ -54,7 +54,7 @@ services:
       start_period: 30s
 
   # Does nothing and exits 0. `docker compose up -d` without --wait returns
-  # before the app answers (engine#90); a depends_on condition still blocks, so
+  # before the app answers; a depends_on condition still blocks, so
   # this makes up -d return only once Memtly is really healthy. alpine, so
   # nothing large is pulled for a container that exits immediately.
   ready:

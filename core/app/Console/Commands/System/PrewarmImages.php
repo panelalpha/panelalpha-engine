@@ -22,9 +22,10 @@ use Illuminate\Console\Command;
  * week. The registry keeps only the catalogue: other tags are removed and
  * garbage-collected, under a lock deploy-time pushes also take.
  *
- * What to warm and in what order comes from `config/core/images.yaml`. Disk
- * is the binding constraint on a VPS, so the plan is cut off by a budget and a
- * reserve, and both are enforced against measurements rather than estimates:
+ * What may be warmed and in what order comes from `config/core/images.yaml`;
+ * what is, from `DEPLOY_PREWARM_IMAGES` (`pae configure prewarm`, empty by
+ * default). Disk is the binding constraint on a VPS, so the plan is cut off by
+ * a budget and a reserve, and both are enforced against measurements rather than estimates:
  * an image's download size decides whether to attempt it, and the free space
  * it actually consumed decides whether to attempt the next one.
  */
@@ -35,8 +36,8 @@ class PrewarmImages extends Command
 
     protected $signature = 'system:image:prewarm
         {--dry-run : Print the plan and exit}
-        {--budget= : Max disk to spend, e.g. 6G ("none" for unlimited; default from images.yaml)}
-        {--reserve= : Free space to leave untouched, e.g. 10G (default from images.yaml)}
+        {--budget= : Max disk to spend, e.g. 6G ("none" for unlimited; default DEPLOY_PREWARM_BUDGET, then images.yaml)}
+        {--reserve= : Free space to leave untouched, e.g. 10G (default DEPLOY_PREWARM_RESERVE, then images.yaml)}
         {--runtimes= : Comma-separated subset, e.g. php,node,static}
         {--keep-build-cache : Do not prune the buildx cache afterwards}
         {--keep-unused : Never drop a current image, even when free space is under the reserve}
@@ -94,6 +95,10 @@ class PrewarmImages extends Command
             $budget === null ? 'none' : HostPrewarmPlan::formatBytes($budget),
             HostPrewarmPlan::formatBytes($plan['spendable'])
         ));
+
+        if ($catalog === []) {
+            $this->line('No image is selected for prewarming; deploys build or pull what they need. Select some with `pae configure prewarm`.');
+        }
 
         $this->renderPlan($plan);
 
@@ -189,7 +194,7 @@ class PrewarmImages extends Command
     private function publish(System $system, array $catalog): void
     {
         if (!$this->registryRunning($system)) {
-            $this->warn('panelalpha-cache-registry is not running; nothing published.');
+            $this->warn('panelalpha-cache-registry-writer is not running; nothing published.');
 
             return;
         }
@@ -278,7 +283,7 @@ class PrewarmImages extends Command
     {
         try {
             return trim((string) $system->exec(
-                ['sudo', 'docker', 'inspect', '-f', '{{.State.Running}}', DindImageStore::CACHE_REGISTRY_CONTAINER],
+                ['sudo', 'docker', 'inspect', '-f', '{{.State.Running}}', DindImageStore::CACHE_REGISTRY_WRITER_CONTAINER],
                 [],
                 30
             )) === 'true';
@@ -291,7 +296,7 @@ class PrewarmImages extends Command
     {
         try {
             $out = (string) $system->exec(
-                ['sudo', 'docker', 'exec', DindImageStore::CACHE_REGISTRY_CONTAINER, 'du', '-sk', '/var/lib/registry'],
+                ['sudo', 'docker', 'exec', DindImageStore::CACHE_REGISTRY_WRITER_CONTAINER, 'du', '-sk', '/var/lib/registry'],
                 [],
                 300
             );

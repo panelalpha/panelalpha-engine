@@ -194,4 +194,90 @@ class UploadedArchiveTest extends TestCase
             'extraction runs as the account, by id: the core container has no passwd entry for it'
         );
     }
+
+    /**
+     * Python's zipfile.writestr() writes members as 0600 with no type bits.
+     * Unpacked as-is, detection (another uid) could not read the compose
+     * file and served the placeholder.
+     */
+    public function test_a_zip_of_0600_members_unpacks_with_checkout_modes(): void
+    {
+        $zip = new \ZipArchive();
+        $zip->open($this->home . '/app.zip', \ZipArchive::CREATE);
+        $zip->addFromString('docker-compose.yml', "services: {}\n");
+        $zip->addFromString('bin/run', "#!/bin/sh\n");
+        $zip->addEmptyDir('conf');
+        $zip->addFromString('conf/app.ini', "a=1\n");
+        $zip->setExternalAttributesName('docker-compose.yml', \ZipArchive::OPSYS_UNIX, 0600 << 16);
+        $zip->setExternalAttributesName('bin/run', \ZipArchive::OPSYS_UNIX, 0700 << 16);
+        $zip->setExternalAttributesName('conf/', \ZipArchive::OPSYS_UNIX, 040700 << 16);
+        $zip->setExternalAttributesName('conf/app.ini', \ZipArchive::OPSYS_UNIX, 0100600 << 16);
+        $zip->close();
+
+        $this->assertSame(
+            ['docker-compose.yml' => '0644', 'bin/run' => '0755', 'conf' => '0755', 'conf/app.ini' => '0644'],
+            $this->unpackedModes('app.zip', ['docker-compose.yml', 'bin/run', 'conf', 'conf/app.ini'])
+        );
+    }
+
+    public function test_a_tarball_of_0600_members_unpacks_with_checkout_modes(): void
+    {
+        $src = $this->home . '/src';
+        mkdir($src . '/bin', 0700, true);
+        file_put_contents($src . '/index.php', '<?php');
+        chmod($src . '/index.php', 0600);
+        file_put_contents($src . '/bin/run', '#!/bin/sh');
+        chmod($src . '/bin/run', 0700);
+        $this->runOk(['tar', '-czf', $this->home . '/app.tar.gz', '-C', $src, '.']);
+        $this->runOk(['rm', '-rf', $src]);
+
+        $this->assertSame(
+            ['index.php' => '0644', 'bin' => '0755', 'bin/run' => '0755'],
+            $this->unpackedModes('app.tar.gz', ['index.php', 'bin', 'bin/run'])
+        );
+    }
+
+    public function test_modes_are_normalised_as_the_account(): void
+    {
+        $this->touchInHome('site.zip');
+
+        $this->assertSame(
+            ['sudo', 'setpriv', '--reuid', '1001', '--regid', '1002', '--clear-groups', 'chmod', '-R', 'u+rwX,go=rX', '--', '/tmp/x'],
+            UploadedArchive::inHome('site.zip', $this->home)->normaliseModesArgv(1001, 1002, '/tmp/x')
+        );
+    }
+
+    /**
+     * Extract and normalise for real, as ourselves (the sudo setpriv prefix dropped).
+     *
+     * @param list<string> $paths
+     * @return array<string, string> path => octal mode
+     */
+    private function unpackedModes(string $archiveName, array $paths): array
+    {
+        $archive = UploadedArchive::inHome($archiveName, $this->home);
+        $into = sys_get_temp_dir() . '/pa-unpack-' . bin2hex(random_bytes(8));
+        mkdir($into);
+        try {
+            $this->runOk(array_slice($archive->extractArgv(1, 1, $archive->path, $into), 7));
+            $this->runOk(array_slice($archive->normaliseModesArgv(1, 1, $into), 7));
+            clearstatcache();
+            $modes = [];
+            foreach ($paths as $path) {
+                $modes[$path] = sprintf('%04o', fileperms($into . '/' . $path) & 07777);
+            }
+
+            return $modes;
+        } finally {
+            $this->runOk(['rm', '-rf', $into, $this->home . '/' . $archiveName]);
+        }
+    }
+
+    /** @param list<string> $argv */
+    private function runOk(array $argv): void
+    {
+        $process = new \Symfony\Component\Process\Process($argv);
+        $process->run();
+        $this->assertSame(0, $process->getExitCode(), implode(' ', $argv) . "\n" . $process->getErrorOutput());
+    }
 }

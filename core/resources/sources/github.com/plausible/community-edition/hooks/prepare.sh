@@ -1,5 +1,5 @@
 #!/bin/bash
-# Generates SECRET_KEY_BASE (64+ bytes, engine#338) and the PostgreSQL password
+# Generates SECRET_KEY_BASE (64+ bytes) and the PostgreSQL password
 # once into ~/.panelalpha/plausible-ce; the volumes keep the first values.
 set -e
 DIR="${HOME}/.panelalpha/plausible-ce"

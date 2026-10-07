@@ -1,7 +1,7 @@
 # Compose-replace: the repo compose is a dev environment (Dockerfile.dev) and
 # the release compose has no image. Runs upstream's published release image.
 # Secrets come from ~/.panelalpha (hooks/prepare.sh); POSTGRES_* declared here
-# trip engine#419.
+# trip a known engine defect.
 services:
   web:
     image: bonfirenetworks/bonfire:1.0.7-social

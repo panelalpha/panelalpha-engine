@@ -25,8 +25,18 @@ final class FailureOutput
     /** How much to keep when nothing announced itself. */
     private const FALLBACK = 6;
 
-    /** How much of a failed build step's own output to keep. */
-    private const STEP_LINES = 40;
+    /**
+     * How much of a failed build step's own output to keep. publify's
+     * `Unable to find libclang` sat 46 lines above `#11 ERROR:`, under
+     * Bundler's backtrace.
+     */
+    private const STEP_LINES = 60;
+
+    /**
+     * A build step its memory limit stopped. The compile errors printed above
+     * it are symptoms, and can be further up than CONTEXT reaches.
+     */
+    private const MEMORY_EXHAUSTED = '/(?:ResourceExhausted:|did not complete successfully:)[^\n]*cannot allocate memory/';
 
     /** BuildKit's `#<step> <seconds> ` in front of a step's output line. */
     private const STEP_PREFIX = '/^#\d+ \d+(?:\.\d+)? /';
@@ -37,9 +47,16 @@ final class FailureOutput
      */
     private const CAUSE = [
         '/^#\d+ ERROR:/',                       // BuildKit's own error line
+        // tar restoring an owner the account's id range cannot hold; Flutter
+        // prints its network advice after it.
+        '/Cannot change ownership to uid \d+, gid \d+: Invalid argument/',
         '/^failed to solve:/',                    // ...and the summary that names it
         '/^Error response from daemon:/',         // the daemon refusing to run a container
-        '/^runc create failed:/',
+        // `runc run failed:` is a RUN step that could not start (minthcm).
+        '/^runc (?:create|run) failed:/',
+        // apt's own error lines (`E: Failed to fetch ... 404`), above the step's `#N ERROR:`.
+        // The account's apt-lists denial is no finding (see NOISE).
+        '/^E: (?!List directory \/var\/lib\/apt\/lists\/partial is missing)/',
         '/^npm error (?!npm error)/',            // npm's own error block
         '/^npm ERR!/',
         '/^gyp ERR!/',
@@ -62,6 +79,8 @@ final class FailureOutput
         '/^\s+imports [\w.\/-]+\S*: (?:build constraints|no required module|cannot find)/',
         // A repo with no buildable package at all -- lura is a framework.
         '/^no Go files in \//',
+        // The toolchain refusing go.mod's version (GOTOOLCHAIN=local in the official image).
+        '/^go: go\.mod requires go >= /',
         '/^error: cannot find module providing package /',
         '/^FAILURE: Build failed/',              // Gradle's own banner
         '/^\* What went wrong:/',                // ...and the section naming the task
@@ -73,6 +92,8 @@ final class FailureOutput
         '/^gyp: /',
         '/^\s*PHP Fatal error:/i',
         '/^Traceback \(most recent call last\)/',
+        // Ruby's require of a gem the bundle does not have; its backtrace follows.
+        '/^LoadError: cannot load such file -- /',
         '/^fatal:/',                             // git
         '/^(?:Memory cgroup )?[Oo]ut of memory\b/',
         '/^Killed\b/',
@@ -111,7 +132,7 @@ final class FailureOutput
         // real failure is thousands of lines later. A `mkdir` naming anything
         // else is still a finding.
         // coreutils quotes it with ‘’, three bytes each, which a bare `.`
-        // never matched: the real line was never dropped (#86).
+        // never matched: the real line was never dropped.
         '/^mkdir: cannot create directory (?:\'|"|‘)\/root(?:\'|"|’):/',
         // `apk add` runs as the account, not root, so this is ignored -- a Go
         // host compile wraps it in `|| true`. `ERROR:` on another subject is
@@ -120,16 +141,27 @@ final class FailureOutput
         // `docker compose up`'s progress: an image, network, volume or
         // container changing state, and the per-layer pull lines. On a stack
         // pulling several images this is hundreds of lines and it was the
-        // whole reported "reason" for rero-ils (#112). A line saying `Error`
+        // whole reported "reason" for rero-ils. A line saying `Error`
         // matches neither and is kept.
         '/^\s*(?:Image|Network|Volume|Container)\s+\S+\s+(?:Pulling|Pulled|Building|Built|Creating|Created'
             . '|Starting|Started|Waiting|Healthy|Running|Recreate|Recreated|Stopping|Stopped|Removing|Removed'
             . '|Skipped)(?:\s+[\d.]+s)?\s*$/',
         '/^\s*[0-9a-f]{12}\s+(?:Pulling fs layer|Waiting|Downloading|Download complete|Verifying Checksum'
             . '|Extracting|Pull complete|Already exists)\b/',
+        // `docker run`'s own pull of an image it does not have yet, which a
+        // host build prints on stderr ahead of anything the build says.
+        '/^Unable to find image \'[^\']+\' locally$/',
+        '/^[\w.-]+: Pulling from [\w.\/:-]+$/',
+        '/^[0-9a-f]{12}: (?:Pulling fs layer|Waiting|Downloading|Download complete|Verifying Checksum'
+            . '|Extracting|Pull complete|Already exists)\b/',
+        '/^Digest: sha256:[0-9a-f]{64}$/',
+        '/^Status: (?:Downloaded newer image|Image is up to date) for \S+$/',
         // The same for `apt-get update`, best effort in the Rust host compile
-        // (`|| true`): the account cannot write the apt lists (#86).
+        // (`|| true`): the account cannot write the apt lists.
         '/^E: List directory \/var\/lib\/apt\/lists\/partial is missing\. - Acquire \(13: Permission denied\)$/',
+        // A Makefile's `git describe` in a build context with no .git (ntfy). Real
+        // git failures (`fatal: repository ... not found`) still lead.
+        '/^(?:#\d+ \d+(?:\.\d+)? )?fatal: not a git repository\b/',
         '/^\s*$/',
     ];
 
@@ -147,11 +179,20 @@ final class FailureOutput
 
         $window = array_slice($lines, -self::WINDOW);
         foreach ($window as $i => $line) {
+            if (preg_match(self::MEMORY_EXHAUSTED, $line) === 1) {
+                return trim(implode("\n", array_slice($window, $i, self::CONTEXT)));
+            }
+        }
+        $offset = count($lines) - count($window);
+        foreach ($window as $i => $line) {
             // A build step's own output carries BuildKit's `#13 249.2 ` prefix.
             $bare = (string) preg_replace(self::STEP_PREFIX, '', $line);
             foreach (self::CAUSE as $pattern) {
                 if (preg_match($pattern, $line) === 1 || preg_match($pattern, $bare) === 1) {
-                    return trim(implode("\n", array_slice($window, $i, self::CONTEXT)));
+                    $start = self::npmBlockStart($lines, $offset + $i);
+
+                    return self::stepCause($lines, $offset + $i)
+                        ?? trim(implode("\n", array_slice($lines, $start, self::CONTEXT)));
                 }
             }
         }
@@ -162,6 +203,20 @@ final class FailureOutput
         // so the whole window is returned -- it is already bounded to WINDOW
         // non-noise lines, and keeps whatever the explainer can recognise.
         return trim(implode("\n", $window));
+    }
+
+    /**
+     * The output without its progress and advisory lines, for a failure no
+     * explainer rule matched. A host build's stderr starts with docker's image
+     * pull, which was reported as the reason. Nothing else is dropped: the
+     * text may be a sentence the engine already made.
+     */
+    public static function withoutNoise(string $output): string
+    {
+        $lines = preg_split('/\r?\n/', trim($output)) ?: [];
+        $kept = array_filter($lines, static fn (string $l): bool => !self::isNoise($l));
+
+        return $kept === [] ? trim($output) : trim(implode("\n", $kept));
     }
 
     /**
@@ -200,7 +255,7 @@ final class FailureOutput
      * is nothing but noise. The maven image's `mkdir: cannot create directory
      * '/root'` and the JVM's JAVA_TOOL_OPTIONS banner go to stderr while Maven
      * prints `[ERROR] ... release version 25 not supported` to stdout, and the
-     * banner was reported as the reason (#86).
+     * banner was reported as the reason.
      */
     public static function fromStreams(string $stderr, string $stdout): string
     {
@@ -212,6 +267,66 @@ final class FailureOutput
         }
 
         return $stderr !== '' ? $stderr : $stdout;
+    }
+
+    /**
+     * When BuildKit's `#N ERROR:` is the first line that announced itself, the
+     * cause is in what step N printed above it, which no CAUSE pattern knows:
+     * yum's `Could not resolve host: mirrorlist.centos.org` (flexisip), a
+     * bindgen panic under a Bundler backtrace (publify). The region starting
+     * at `#N ERROR:` only reaches the generic exit code, so it is centred on
+     * the step's own line an explainer rule recognises instead. Null when
+     * none does: the old region stands.
+     *
+     * @param list<string> $lines
+     */
+    private static function stepCause(array $lines, int $at): ?string
+    {
+        if (preg_match('/^#(\d+) ERROR:/', $lines[$at], $m) !== 1) {
+            return null;
+        }
+        $own = array_values(array_filter(
+            array_slice($lines, 0, $at),
+            static fn (string $l): bool => str_starts_with($l, '#' . $m[1] . ' ')
+        ));
+        $rule = DeployFailureExplainer::match(implode("\n", $own))['rule'] ?? null;
+        if ($rule === null) {
+            return null;
+        }
+
+        // The shortest tail of the step that still reads as that rule starts at its line.
+        for ($k = count($own) - 1; $k >= 0; $k--) {
+            $tail = array_slice($own, $k);
+            if ((DeployFailureExplainer::match(implode("\n", $tail))['rule'] ?? null) !== $rule) {
+                continue;
+            }
+            $region = implode("\n", array_slice($tail, 0, self::CONTEXT));
+
+            return trim((DeployFailureExplainer::match($region)['rule'] ?? null) === $rule ? $region : implode("\n", $tail));
+        }
+
+        return null;
+    }
+
+    /**
+     * Where the `npm error` block holding line $at begins. npm 11 prints a
+     * command's whole usage after EUSAGE, longer than WINDOW, so the window
+     * opened mid-block and `npm error code` and its reason were cut off.
+     *
+     * @param list<string> $lines
+     */
+    private static function npmBlockStart(array $lines, int $at): int
+    {
+        $isNpmError = static fn (string $l): bool =>
+            preg_match('/^npm error(?:\s|$)/', (string) preg_replace(self::STEP_PREFIX, '', $l)) === 1;
+        if (!$isNpmError($lines[$at])) {
+            return $at;
+        }
+        while ($at > 0 && $isNpmError($lines[$at - 1])) {
+            $at--;
+        }
+
+        return $at;
     }
 
     private static function isNoise(string $line): bool
@@ -227,7 +342,7 @@ final class FailureOutput
 
     /**
      * Tags compose says it builds (`Image <tag> Building`). That line is noise
-     * and is dropped, so the explainer cannot see it (#235).
+     * and is dropped, so the explainer cannot see it.
      *
      * @param list<string> $lines
      * @return array<string, true>

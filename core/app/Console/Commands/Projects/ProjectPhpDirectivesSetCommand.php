@@ -2,13 +2,15 @@
 
 namespace App\Console\Commands\Projects;
 
-use App\Console\Commands\Concerns\CallsEngineApi;
+use App\Http\Requests\UserPhpUpdateCustomIniSettingsRequest;
+use App\Lib\Project\CustomIniSettings;
+use App\Models\User;
+use App\System;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Validator;
 
 class ProjectPhpDirectivesSetCommand extends Command
 {
-    use CallsEngineApi;
-
     protected $signature = 'project:php-directives:set
         {username : Hosting account username}
         {version : PHP version}
@@ -60,13 +62,13 @@ class ProjectPhpDirectivesSetCommand extends Command
             }
         }
 
-        $response = $this->dispatchEngine('PUT', '/projects/' . rawurlencode($username) . '/php/custom-ini-settings', [
-            'php_version' => $version,
-            'settings' => $settings,
-        ]);
-        if ($response->getStatusCode() >= 400) {
-            return $this->rejectEngineResponse($response);
-        }
+        Validator::make(
+            ['php_version' => $version, 'settings' => $settings],
+            (new UserPhpUpdateCustomIniSettingsRequest())->rules(),
+        )->validate();
+
+        $user = User::findByUsernameOrFail($username);
+        (new CustomIniSettings(app(System::class)))->replace($user, $version, $settings);
 
         return 0;
     }

@@ -36,7 +36,7 @@ description: >-
 
   Persistence. Crafty keeps EVERYTHING under its data dirs - app/config (the
   SQLite db, keys, config.json, generated creds), servers/ (each Minecraft world),
-  backups/, logs/, import/ - and ~/project is wiped every redeploy (engine#173).
+  backups/, logs/, import/ - and ~/project is wiped every redeploy.
   All five are bind-mounted onto ~/.panelalpha/crafty, the only writable dir the
   wipe never touches, so the admin login and any created server definition survive
   a rebuild.

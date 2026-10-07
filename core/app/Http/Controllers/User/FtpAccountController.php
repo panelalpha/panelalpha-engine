@@ -25,7 +25,7 @@ class FtpAccountController extends Controller
             new OA\Response(response: 200, description: 'List of FTP accounts', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'array', items: new OA\Items(ref: '#/components/schemas/FtpAccount'))],
             )),
-            new OA\Response(response: 404, description: 'User not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     public function index(string $username): FtpAccountCollection
@@ -37,7 +37,7 @@ class FtpAccountController extends Controller
             ->first();
         if (!$user) {
             abort(new JsonResponse([
-                'message' => 'User not found',
+                'message' => 'Project not found',
             ], 404));
         }
         return new FtpAccountCollection($user->ftpAccounts);
@@ -76,7 +76,7 @@ class FtpAccountController extends Controller
         $user = User::query()->withCount('ftpAccounts')->where('username', $username)->first();
         if (!$user) {
             abort(new JsonResponse([
-                'message' => 'User not found',
+                'message' => 'Project not found',
             ], 404));
         }
 

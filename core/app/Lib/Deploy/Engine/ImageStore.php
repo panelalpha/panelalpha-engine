@@ -21,9 +21,10 @@ interface ImageStore
      *
      * How the shared bases the engine owns come into existence — nothing is
      * COPYed in, so the Dockerfile is all the input there is. Must be
-     * idempotent: a deploy calls it on every run.
+     * idempotent: a deploy calls it on every run. $pull false builds FROM an
+     * image only this host has.
      */
-    public function hostBuildCommand(string $tag, string $dockerfile, bool $rebuild = false): string;
+    public function hostBuildCommand(string $tag, string $dockerfile, bool $rebuild = false, bool $pull = true): string;
 
     /**
      * Push a host image to where accounts pull shared images from, so an
@@ -40,9 +41,24 @@ interface ImageStore
     /**
      * Get one image into the account by whatever route works, printing one
      * line that says which. $ours: built on the host, so it comes from there;
-     * otherwise from its own registry.
+     * otherwise from its own registry. $private: the project has a login for
+     * its registry, so it never goes through a shared one; $dockerConfig is
+     * the client config holding that login.
      */
-    public function seedCommand(EngineAccount $account, string $image, bool $ours): string;
+    public function seedCommand(
+        EngineAccount $account,
+        string $image,
+        bool $ours,
+        bool $private = false,
+        ?string $dockerConfig = null,
+    ): string;
+
+    /**
+     * {@see seedCommand()} for a public image the host should fetch on the
+     * accounts' behalf, once, rather than each account from its own registry:
+     * one no pull-through cache reaches, such as Railpack's on ghcr.io.
+     */
+    public function seedThroughHostCommand(EngineAccount $account, string $image): string;
 
     /**
      * Seed several images at once, never more than $concurrency in flight.
@@ -71,12 +87,28 @@ interface ImageStore
     public function imageIdArgv(string $image): array;
 
     /**
-     * Inside the account: point its daemon at the engine's registries, printing
-     * `changed` when that needed a reload.
+     * On the host: the account's own container's mounts, so a registry
+     * refresh can tell whether its daemon.json is a file this engine renders
+     * and can safely rewrite in place, or still an older account's own.
      *
      * @return list<string>
      */
-    public function registryConfigArgv(): array;
+    public function hostAccountMountsArgv(EngineAccount $account): array;
+
+    /**
+     * On the host: the account's processes with their host-visible PIDs, so
+     * its daemon can be signalled from the host without a shell inside it.
+     *
+     * @return list<string>
+     */
+    public function hostAccountProcessesArgv(EngineAccount $account): array;
+
+    /**
+     * On the host: signal the account's daemon, found by a host-visible PID.
+     *
+     * @return list<string>
+     */
+    public function hostSignalDockerdArgv(int $pid): array;
 
     /**
      * Inside the account: $image's declared ports as JSON, in the

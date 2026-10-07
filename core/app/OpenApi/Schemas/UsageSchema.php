@@ -17,6 +17,11 @@ use OpenApi\Attributes as OA;
     properties: [
         new OA\Property(property: 'storage', ref: '#/components/schemas/UsageQuota'),
         new OA\Property(
+            property: 'logs',
+            ref: '#/components/schemas/UsageQuota',
+            description: 'Bytes the project\'s container logs take on its disk, rotated files included. Not part of storage.usage; 0 for a project without containers of its own. maximum is null.',
+        ),
+        new OA\Property(
             property: 'bandwidth',
             ref: '#/components/schemas/UsageQuota',
             description: 'Transfer for the current calendar month in the host timezone, in bytes. maximum is the project bandwidth_limit in bytes, or null when unlimited.',

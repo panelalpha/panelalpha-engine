@@ -17,9 +17,8 @@ detect:
           glob: svelte.config
         -
           dep: svelte
-    - dep: '@sveltejs/adapter-static'
-  none:
-    - dep: '@sveltejs/adapter-node'
+    # The adapter svelte.config imports; the dependencies when it names none.
+    - probe: sveltekit-static-adapter
 commands:
   - id: npm-install
     stage: build

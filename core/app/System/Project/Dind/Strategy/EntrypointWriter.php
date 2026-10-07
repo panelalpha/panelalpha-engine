@@ -47,13 +47,14 @@ class EntrypointWriter
     {
         return [
             PlatformStage::PHASE_ENV => PlatformStage::phaseFor(
-                $this->dind->userModel()->getDeploymentStatus()
+                $this->dind->userModel()->getDeploymentStatus(),
+                $this->dind->userModel()->hasDeployedBefore(),
             ),
         ];
     }
 
     /**
-     * Detection named a platform the registry cannot find (engine#169: a
+     * Detection named a platform the registry cannot find (a
      * worker's stale recipe list). No entrypoint follows, so every stage
      * command is dropped; this is the line that says so.
      *
@@ -159,7 +160,7 @@ class EntrypointWriter
         }
 
         $plan = app(DeployPlanContext::class)->get();
-        $manifest = PlatformRegistry::forDecision($decision);
+        $manifest = PlatformRegistry::forDecisionOrAppConfig($decision, $appConfig);
         $unresolved = self::unresolvedPlatformWarning($decision, $manifest);
         if ($unresolved !== null) {
             $this->dind->shell()->logger()?->warn($unresolved);

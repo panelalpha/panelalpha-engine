@@ -139,8 +139,8 @@ class CheckRunnerTest extends TestCase
     }
 
     /**
-     * Measured on a live deploy: delete a site's entry document and `/`
-     * answers 404 while every other page answers 200.
+     * Delete a site's entry document and `/` answers 404 while every other page
+     * answers 200.
      */
     public function test_a_static_site_that_lost_its_front_page_is_reported(): void
     {
@@ -209,6 +209,20 @@ class CheckRunnerTest extends TestCase
         $this->assertSame(CheckResult::STATUS_FAIL, $app['status']);
         $this->assertSame('Read the application log.', $app['fix']);
         $this->assertStringContainsString('running container', $app['detail']);
+    }
+
+    /** A proxy with no upstream answers 502/503/504; a fast 500 is the app's own. */
+    public function test_a_fast_500_blames_the_app_not_a_proxy(): void
+    {
+        $this->write('index.html');
+
+        $fast = $this->check($this->probeTimed(500, 'Internal Server Error', 0.001), 'no-server-error');
+        $this->assertSame(CheckResult::STATUS_FAIL, $fast['status']);
+        $this->assertSame('Read the application log.', $fast['fix']);
+        $this->assertStringNotContainsString('proxy', $fast['detail']);
+
+        $untimed = $this->check($this->probe(500, 'Internal Server Error'), 'no-server-error');
+        $this->assertSame('Read the application log.', $untimed['fix']);
     }
 
     /**

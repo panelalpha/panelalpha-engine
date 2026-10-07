@@ -24,7 +24,7 @@ final class CheckRegistry
     /**
      * Runtimes that run what the repository ships have no group of their own,
      * so they borrow the framework checks (Django ALLOWED_HOSTS, Rails blocked
-     * host). Each is guarded by `when: file:` (#209).
+     * host). Each is guarded by `when: file:`.
      */
     private const BORROWED_GROUPS = [
         PlatformManifest::RUNTIME_COMPOSE => PlatformManifest::RUNTIME_COMMAND,

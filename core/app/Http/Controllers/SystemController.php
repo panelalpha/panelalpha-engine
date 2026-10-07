@@ -12,7 +12,10 @@ use App\Lib\Ssl\Issuers;
 use App\Lib\Ssl\SharedZones;
 use App\Models\Ipv4NatMap;
 use App\Models\Setting;
+use App\Models\User;
+use App\Rules\UpstreamHost;
 use App\System;
+use App\System\AccountContainers;
 use App\System\Network;
 use App\System\Services\Webserver\Litespeed;
 use Illuminate\Http\JsonResponse;
@@ -72,15 +75,45 @@ class SystemController extends Controller
             'latest_webserver_change' => $system->getLatestChangeWebserverInfo(),
             'latest_update' => $system->getLatestUpdateInfo(),
             // Why new projects stopped getting panelalpha.online names, e.g. a
-            // used-up site quota; null once a label is sold again (#79).
+            // used-up site quota; null once a label is sold again.
             'panelalpha_online' => [
                 'last_error' => DomainAllocator::lastOnlineError(),
             ],
+            // Projects holding secrets this APP_KEY cannot decrypt.
+            'unreadable_secrets' => self::unreadableSecrets(User::query()->cursor()),
+            // Reported only: the operator removes them, the engine never does.
+            'orphan_account_containers' => (new AccountContainers($system))
+                ->orphanReport(User::query()->pluck('username')),
         ];
 
         return new JsonResponse([
             'data' => $data,
         ]);
+    }
+
+    /**
+     * The one place that names the APP_KEY: a project only knows it cannot
+     * decode its secrets, the server knows that many projects at once point
+     * at the key.
+     *
+     * @param iterable<User> $users
+     * @return array{count: int, projects: list<string>, warning: ?string}
+     */
+    public static function unreadableSecrets(iterable $users): array
+    {
+        $projects = [];
+        foreach ($users as $user) {
+            if ($user->unreadableSecrets() !== []) {
+                $projects[] = (string) $user->username;
+            }
+        }
+
+        $warning = $projects === [] ? null : count($projects) . ' project(s) hold secrets the engine cannot '
+            . 'decode: ' . implode(', ', $projects) . '. The APP_KEY may be invalid, or changed since they were '
+            . 'stored. Restore the previous APP_KEY before those projects are saved again, or their secrets are '
+            . 'stored empty.';
+
+        return ['count' => count($projects), 'projects' => $projects, 'warning' => $warning];
     }
 
     /**
@@ -99,14 +132,12 @@ class SystemController extends Controller
      */
     private static function servedCertificate(string $url): ?array
     {
-        $engine = new EngineCertificate();
-        $path = $engine->certificatePath();
-
-        if (!is_readable($path)) {
+        $pem = (new EngineCertificate())->served();
+        if ($pem === null) {
             return null;
         }
 
-        $facts = CertificateFacts::fromPem((string) file_get_contents($path));
+        $facts = CertificateFacts::fromPem($pem);
         if ($facts === null) {
             return null;
         }
@@ -560,26 +591,13 @@ class SystemController extends Controller
             new OA\Response(response: 200, description: 'Config updated', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
+            new OA\Response(response: 422, description: 'Validation error: a host that is not a hostname or an IP, a port that is not 1-65535', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function updateEximConfig(Request $request): JsonResponse
     {
-        $params = $request->validate([
-            'smarthost_provider' => 'string|nullable',
-            'sendgrid_api_token' => 'string|nullable',
-            'mailchannels_username' => 'string|nullable',
-            'mailchannels_password' => 'string|nullable',
-            'amazon_ses_smtp_endpoint' => 'string|nullable',
-            'amazon_ses_starttls_port' => 'string|nullable',
-            'amazon_ses_smtp_username' => 'string|nullable',
-            'amazon_ses_smtp_password' => 'string|nullable',
-            'smtp_host' => 'string|nullable',
-            'smtp_port' => 'string|nullable',
-            'smtp_username' => 'string|nullable',
-            'smtp_password' => 'string|nullable',
-            'smtp_implicit_tls' => 'boolean|nullable',
-            'sender_domain' => 'string|nullable',
-        ]);
+        self::withoutTrailingDots($request);
+        $params = $request->validate(self::eximConfigRules());
 
         $system = new System();
         Setting::updateEximConfig($params);
@@ -588,6 +606,70 @@ class SystemController extends Controller
         return new JsonResponse([
             'data' => $params,
         ]);
+    }
+
+    /**
+     * What the Exim config takes, saved by PUT /system/exim-config and by a
+     * test email's `config`. Hosts, ports and the sender domain end up in
+     * update-exim4.conf.conf, which update-exim4.conf pastes into a sed
+     * expression: a `|` there broke the apply with a raw sed error.
+     *
+     * @return array<string, mixed>
+     */
+    private static function eximConfigRules(string $prefix = ''): array
+    {
+        $host = ['string', 'nullable', new UpstreamHost()];
+        // digits_between: `integer` alone takes " 587" and "587\n", which MCP
+        // passes through untrimmed. `integer` stays so `between` compares the number.
+        $port = 'string|nullable|digits_between:1,5|integer|between:1,65535';
+        $rules = [
+            'smarthost_provider' => 'string|nullable',
+            'sendgrid_api_token' => 'string|nullable',
+            'mailchannels_username' => 'string|nullable',
+            'mailchannels_password' => 'string|nullable',
+            'amazon_ses_smtp_endpoint' => $host,
+            'amazon_ses_starttls_port' => $port,
+            'amazon_ses_smtp_username' => 'string|nullable',
+            'amazon_ses_smtp_password' => 'string|nullable',
+            // A port here would land in the address: smtp_port is appended as `::<port>`.
+            'smtp_host' => $host,
+            'smtp_port' => $port,
+            'smtp_username' => 'string|nullable',
+            'smtp_password' => 'string|nullable',
+            'smtp_implicit_tls' => 'boolean|nullable',
+            // The domain senders are rewritten to: an address is not one.
+            'sender_domain' => [...$host, static function (string $attribute, mixed $value, \Closure $fail): void {
+                if (is_string($value) && filter_var($value, FILTER_VALIDATE_IP) !== false) {
+                    $fail('The :attribute must be a domain name, not an IP address.');
+                }
+            }],
+        ];
+
+        $prefixed = [];
+        foreach ($rules as $field => $rule) {
+            $prefixed[$prefix . $field] = $rule;
+        }
+
+        return $prefixed;
+    }
+
+    /**
+     * `smtp.example.com.` names the same host and was accepted before; it is
+     * stored without the dot, so the hostname rule and Exim's readhost take it.
+     */
+    private static function withoutTrailingDots(Request $request, ?string $under = null): void
+    {
+        $input = $under === null ? $request->all() : $request->input($under);
+        if (!is_array($input)) {
+            return;
+        }
+        foreach (['smtp_host', 'amazon_ses_smtp_endpoint', 'sender_domain'] as $field) {
+            $value = $input[$field] ?? null;
+            if (is_string($value) && strlen($value) > 1 && str_ends_with($value, '.')) {
+                $input[$field] = substr($value, 0, -1);
+            }
+        }
+        $request->merge($under === null ? $input : [$under => $input]);
     }
 
     #[OA\Post(
@@ -607,10 +689,12 @@ class SystemController extends Controller
             new OA\Response(response: 200, description: 'Test email result', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
+            new OA\Response(response: 422, description: 'Validation error: the recipient, or a config value PUT /system/exim-config refuses', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function sendTestEmail(Request $request): JsonResponse
     {
+        self::withoutTrailingDots($request, 'config');
         /**
          * @var array{
          *   email: string,
@@ -618,22 +702,10 @@ class SystemController extends Controller
          * } $params
          */
         $params = $request->validate([
-            // Goes into the message's To: header; a line break there adds headers.
-            'email' => 'required|string|email|max:254',
-            'config.smarthost_provider' => 'string|nullable',
-            'config.sendgrid_api_token' => 'string|nullable',
-            'config.mailchannels_username' => 'string|nullable',
-            'config.mailchannels_password' => 'string|nullable',
-            'config.amazon_ses_smtp_endpoint' => 'string|nullable',
-            'config.amazon_ses_starttls_port' => 'string|nullable',
-            'config.amazon_ses_smtp_username' => 'string|nullable',
-            'config.amazon_ses_smtp_password' => 'string|nullable',
-            'config.smtp_host' => 'string|nullable',
-            'config.smtp_port' => 'string|nullable',
-            'config.smtp_username' => 'string|nullable',
-            'config.smtp_password' => 'string|nullable',
-            'config.smtp_implicit_tls' => 'boolean|nullable',
-            'config.sender_domain' => 'string|nullable',
+            // Goes into the message's To: header, where a line break adds headers. Checked
+            // as Exim::sendTestEmail() checks it, so a refusal is a 422, not its exception.
+            'email' => 'required|string|email:rfc,filter|max:254',
+            ...self::eximConfigRules('config.'),
         ]);
 
         $system = new System();

@@ -27,14 +27,14 @@ image instead.
   `~/.panelalpha/zammad/` (`db.env` for PostgreSQL, `zammad.env` for Zammad).
 - Volumes: `postgresql-data`, `redis-data`, `zammad-storage`.
 
-Measured on mariusz: ~1.5 GB in total once running (init, railsserver,
-scheduler and websocket are ~250-550 MB each); memory_limit 2500 is enough.
+The stack needs about 1.5 GB once running (init, railsserver, scheduler and
+websocket are a few hundred MB each); a 2500 MB account is enough.
 
 ## First visit
 
 Zammad's own getting-started wizard (create the first admin, organisation,
 system URL, email). The live-update websocket does not pass the
-`*.panelalpha.online` test front (engine#170); test that on a real domain.
+`*.panelalpha.online` test front; test that on a real domain.
 
 Bumping: change the image tag (`7.2.0-00NN` from
 `ghcr.io/zammad/zammad`); `zammad-init` migrates on start.

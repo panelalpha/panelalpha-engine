@@ -12,7 +12,7 @@ description: >-
 
   output_directory is `.` because a package.json makes the engine host-run
   `npm install` for an nginx recipe and then require <output>/index.html
-  (default dist/, which this repo never produces) (engine#341). The build
+  (default dist/, which this repo never produces). The build
   stage is a no-op on purpose: left empty, the host compile falls back to
   `npm run build`, the same 7z packaging step.
 extends: static

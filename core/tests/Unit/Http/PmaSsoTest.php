@@ -9,7 +9,7 @@ use Illuminate\Http\Request;
 use Tests\TestCase;
 
 /**
- * engine#48 item 19: the phpMyAdmin SSO exchange hands back MySQL credentials
+ * The phpMyAdmin SSO exchange hands back MySQL credentials
  * and used to admit any private address -- which every tenant container on
  * pash-default-network has. Only the phpMyAdmin container may redeem now.
  */

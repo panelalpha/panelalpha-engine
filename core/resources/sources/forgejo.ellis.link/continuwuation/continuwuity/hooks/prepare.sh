@@ -4,7 +4,7 @@ set -e
 cd ~/project
 
 # The RocksDB is all of Continuwuity's state - accounts, rooms, messages, media
-# - and ~/project is emptied on every deploy (engine#173), so it must live in
+# - and ~/project is emptied on every deploy, so it must live in
 # ~/.panelalpha, the only writable directory the wipe never touches. The frozen
 # server_name lives beside it.
 STATE="${HOME}/.panelalpha/continuwuity"
@@ -28,7 +28,7 @@ chmod 600 "${TOKEN_FILE}"
 # so the bind mount it writes is owned by the user it runs as. Values are
 # consumed by ${...} interpolation from ~/project/.env at `docker compose up`.
 # Writing .env here also makes the engine treat the env as already-prepared
-# (ProjectEnvironment does not copy a repo .env.example over it, engine#218).
+# (ProjectEnvironment does not copy a repo .env.example over it).
 {
   echo "CONTAINER_UID=$(id -u)"
   echo "CWUITY_DATA_DIR=${DATA_DIR}"

@@ -134,7 +134,7 @@ class SidecarCredentialsTest extends TestCase
 
         $env = SidecarCredentials::pinSidecarCredentials('db', $service, [], $passwords)['environment'];
 
-        // Names stay `app`; only secrets change (engine#189).
+        // Names stay `app`; only secrets change.
         $this->assertSame('app', $env['MYSQL_USER']);
         $this->assertSame('app', $env['MYSQL_DATABASE']);
         $this->assertSame($passwords->for('MYSQL_PASSWORD'), $env['MYSQL_PASSWORD']);
@@ -201,6 +201,25 @@ class SidecarCredentialsTest extends TestCase
             'CFG_LOG_LEVEL' => 'info',
             'WORKERS' => '4',
         ], SidecarCredentials::envFromWorkstationAppService($service));
+    }
+
+    public function test_published_secrets_in_flags_a_literal_secret_like_key(): void
+    {
+        $service = ['environment' => [
+            'APP_SECRET' => '94bad46abe2c1d9f',
+            'LOG_LEVEL' => 'debug',
+            'JWT_SECRET' => '${JWT_SECRET:?set it}',
+        ]];
+
+        // Only the literal: a reference and a non-secret key are left alone.
+        $this->assertSame(['APP_SECRET'], SidecarCredentials::publishedSecretsIn($service));
+    }
+
+    public function test_published_secrets_in_is_empty_with_nothing_secret_like(): void
+    {
+        $service = ['environment' => ['CONFIGURATION_FROM' => 'env:CFG', 'WORKERS' => 4]];
+
+        $this->assertSame([], SidecarCredentials::publishedSecretsIn($service));
     }
 
     public function test_env_from_workstation_app_service_reads_the_list_form(): void

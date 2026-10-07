@@ -20,7 +20,7 @@ The panel's login throttle is keyed on the client address, and Hoard only
 believes `X-Forwarded-For` from `trusted_proxies` (default: loopback). Behind
 the engine every visitor arrives from the proxy, so all of them share one
 throttle bucket. Trusting the proxy instead would read the first, client-supplied
-`X-Forwarded-For` entry (engine#319), so the default is kept.
+`X-Forwarded-For` entry, so the default is kept.
 
 ## What the recipe does
 

@@ -29,8 +29,7 @@ cd ~/project
 #
 # From we.phorge.it, not GitHub: Phorge's arcanist is a fork and the pair is
 # developed together. Shallow, because nothing here reads its history, and
-# re-cloned on every deploy because the clone wipes ~/project (engine defect
-# #173) -- about 20s and 24 MB.
+# re-cloned on every deploy because the clone wipes ~/project.
 if [ ! -d arcanist/src ]; then
     rm -rf arcanist
     git clone --depth 1 https://we.phorge.it/source/arcanist.git arcanist
@@ -43,8 +42,8 @@ fi
 # Two of these have to survive a redeploy or the account breaks:
 #
 #   The MySQL root password is stored in the database volume, which outlives
-#   the checkout. ~/project is wiped and re-cloned on every deploy (engine
-#   defect #173), so a password kept there would be regenerated on the second
+#   the checkout. ~/project is wiped and re-cloned on every deploy, so
+#   a password kept there would be regenerated on the second
 #   deploy while the volume still held the first one -- a healthy database
 #   nothing can log into.
 #
@@ -61,21 +60,25 @@ fi
 # must not leak into the rest of this script, where a 077 default would leave
 # directories the engine (www-data) cannot scan.
 #
-# Engine defect #173 is also why none of this goes in .env: the engine writes
+# None of this goes in .env either: the engine writes
 # .env.default 644, readable by every other tenant on the host.
 SECRETS="$HOME/.panelalpha/phorge"
 mkdir -p "$SECRETS"
 chmod 700 "$SECRETS"
 
-# PHORGE_DB_PASSWORD, not MYSQL_ROOT_PASSWORD: the container's own
-# MYSQL_ROOT_PASSWORD is set by the engine (to the literal `app`) and is a
-# different value with a different meaning. panelalpha/phorge-db-secure.php
-# uses the engine's to log in once and this one to replace it.
+# The database's root password. db-root.env below hands it to the db service as
+# MYSQL_ROOT_PASSWORD; panelalpha/phorge-db-secure.php reads it from here.
 if [ ! -f "$SECRETS/db.env" ]; then
     ( umask 077; printf 'PHORGE_DB_PASSWORD=%s\n' \
         "$(openssl rand -base64 30 | tr -d '/+=' | cut -c1-28)" > "$SECRETS/db.env" )
     chmod 600 "$SECRETS/db.env"
 fi
+
+# The same password as MYSQL_ROOT_PASSWORD for the db service (env_file in the
+# override): MySQL refuses to initialise without one, and the engine sets none.
+# Rewritten from db.env every time, so the two never drift.
+( umask 077; sed -n 's/^PHORGE_DB_PASSWORD=/MYSQL_ROOT_PASSWORD=/p' "$SECRETS/db.env" > "$SECRETS/db-root.env" )
+chmod 600 "$SECRETS/db-root.env"
 
 # Alphanumeric. It is passed to PhabricatorAuthPassword::setPassword() which
 # takes anything, but it is also a value an operator copies out of a file and
@@ -108,7 +111,7 @@ fi
 # conf/local/ is where `bin/config set` writes local.json, which holds the
 # MySQL root password.
 #
-# 755, and the 700 it obviously wants is measured and wrong: after this hook
+# 755, and the 700 it obviously wants is wrong: after this hook
 # the engine walks the whole project tree as www-data (ProjectContext /
 # PhpDocroot look for the document root), and a directory it cannot scandir
 # fails the entire deploy with the raw PHP error
@@ -127,7 +130,7 @@ chmod 755 conf conf/local .phorge-repos .phorge-files
 # ---------------------------------------------------------------------------
 # 5. Nothing to move out of the way.
 #
-# Engine defect #166 mines a compose file left in the project root for runtime
+# The engine mines a compose file left in the project root for runtime
 # sidecars. Phorge ships none -- no docker-compose.yml, no compose.yaml, not
 # anywhere in the tree -- so there is no glob here at all. Worth saying
 # explicitly, because the glob other recipes use (`docker-compose.*.yml`) would

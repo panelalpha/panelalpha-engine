@@ -21,7 +21,7 @@ variable`. The repository is the source tree; the supported deployment is
   the REST API do not need it.
 - 2 gunicorn workers instead of 3.
 - Client IP: nginx takes the last `X-Forwarded-For` hop (the peer the engine
-  vhost saw; a client-supplied value stays first, engine#319) and passes wger
+  vhost saw; a client-supplied value stays first) and passes wger
   that single address, with `AXES_IPWARE_PROXY_COUNT=0`. With upstream's
   count of 1 and the engine's longer chain, ipware returned `None`, so every
   failed login would have landed in one shared axes lockout bucket.

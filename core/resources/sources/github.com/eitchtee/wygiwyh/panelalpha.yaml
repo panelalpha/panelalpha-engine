@@ -11,8 +11,8 @@ description: >-
   SEED THE OFFICIAL IMAGE, DO NOT BUILD. Upstream publishes eitchtee/wygiwyh on
   Docker Hub and tags every release; this recipe pins the current release
   0.23.2 (amd64 digest sha256:18dee9255de2893417f060906ff7bdf3e39ac13a9922235f
-  ff3d438a5c61512c). Seeding a Hub image also sidesteps engine#229 (image-seed
-  NotFound). The prod image is a single container: its supervisord runs the web
+  ff3d438a5c61512c). Seeding a Hub image also sidesteps the image-seed
+  NotFound. The prod image is a single container: its supervisord runs the web
   process (which migrates, then seeds the admin, then execs gunicorn) alongside
   the procrastinate task workers. The task queue lives in Postgres
   (procrastinate), so there is no Redis.
@@ -21,7 +21,7 @@ description: >-
   only psycopg -- no MySQL driver), which the schema's MySQL-only `database:`
   cannot provide, so the datastore is a compose concern. The repo's own
   docker-compose.prod.yml is close but bind-mounts ./media and ./postgres_data
-  into the project dir, which a redeploy wipes (engine#173), and leaves URL and
+  into the project dir, which a redeploy wipes, and leaves URL and
   the passwords blank for a human to fill. This override supplies the real
   stack: postgres:15 on a named volume, uploads on a named volume, secrets from
   ~/.panelalpha, and only the web service publishes a port.
@@ -31,7 +31,7 @@ description: >-
   admin from ADMIN_EMAIL/ADMIN_PASSWORD only when it does not already exist (it
   never resets an existing password), so a redeploy neither re-runs migrations
   destructively nor changes the owner's credentials. A `ready` gate waits on the
-  app's healthcheck (engine#204) so the deploy turns green only once the site
+  app's healthcheck so the deploy turns green only once the site
   actually answers, which is also what fails the deploy if a migration fails
   instead of publishing a 500 site.
 

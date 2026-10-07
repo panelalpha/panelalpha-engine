@@ -18,8 +18,8 @@ description: >-
   deploy still reports success. The replacement builds the release,
   publishes only the app port (3000), sets ANCHR_PUBLIC_URL to the site's
   address and keeps uploads (/app/data) and the database on named volumes.
-  Upstream's EOL mongo:6.0 becomes mongo:7.0 (8.x fails on this kernel,
-  engine#146); the repo's scripts/mongo-init.sh still creates the app user.
+  Upstream's EOL mongo:6.0 becomes mongo:7.0 (8.x fails on this
+  kernel); the repo's scripts/mongo-init.sh still creates the app user.
 
   hooks/prepare.sh writes, once, ~/.panelalpha/anchr/app.env (JWT secret and
   database password) and mongo.env (root and app credentials), 0600 in a

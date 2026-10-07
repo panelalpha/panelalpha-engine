@@ -8,7 +8,8 @@ use App\System;
 use App\System\Filesystem;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
-use PHPUnit\Framework\TestCase;
+use Illuminate\Support\Facades\Log;
+use Tests\TestCase;
 
 class DindOuterLifecycleTest extends TestCase
 {
@@ -19,9 +20,15 @@ class DindOuterLifecycleTest extends TestCase
     /** @var list<string|list<string>> */
     private array $executed = [];
 
+    /** True: the host's `alice` was not started from the account directory. */
+    private bool $foreignOnly = false;
+
+    private static ?self $current = null;
+
     protected function setUp(): void
     {
         parent::setUp();
+        self::$current = $this;
         $this->tmpRoot = sys_get_temp_dir() . '/pa-dind-outer-' . bin2hex(random_bytes(4));
         $this->homeRoot = $this->tmpRoot . '/home';
         $this->templateRoot = $this->tmpRoot . '/templates/user/dind/project';
@@ -44,7 +51,7 @@ class DindOuterLifecycleTest extends TestCase
         $project = $this->dindWithStubbedTemplate($system, $model);
 
         mkdir($this->homeRoot . '/alice/.panelalpha', 0777, true);
-        mkdir($system->projectDirPath('alice'), 0777, true);
+        is_dir($system->projectDirPath('alice')) || mkdir($system->projectDirPath('alice'), 0777, true);
 
         $project->materialize();
 
@@ -105,7 +112,7 @@ class DindOuterLifecycleTest extends TestCase
             {
                 $this->executed[] = $cmd;
 
-                return FakeProcess::forCommand($cmd);
+                return DindOuterLifecycleTest::hostAnswer($cmd);
             }
 
             public function filesystem(): Filesystem
@@ -125,9 +132,11 @@ class DindOuterLifecycleTest extends TestCase
         };
 
         $project = $this->dindWithStubbedTemplate($system, $model);
-        mkdir($system->projectDirPath('alice'), 0777, true);
+        is_dir($system->projectDirPath('alice')) || mkdir($system->projectDirPath('alice'), 0777, true);
         $project->materialize();
 
+        // remove() logs the data-root wipe the fake refuses; keep that off the test log.
+        Log::spy();
         try {
             $project->start();
             $this->fail('Expected start to throw');
@@ -189,7 +198,7 @@ class DindOuterLifecycleTest extends TestCase
         $model = $this->dindModel();
         $system = $this->recordingSystem();
         $project = $this->dindWithStubbedTemplate($system, $model);
-        mkdir($system->projectDirPath('alice'), 0777, true);
+        is_dir($system->projectDirPath('alice')) || mkdir($system->projectDirPath('alice'), 0777, true);
 
         $project->materialize();
 
@@ -198,6 +207,47 @@ class DindOuterLifecycleTest extends TestCase
             $this->assertStringNotContainsStringIgnoringCase('deploy', $flat);
             $this->assertStringNotContainsString('clone', $flat);
         }
+    }
+
+    /**
+     * A host container that only shares the account's name is not the
+     * account's: delete used to `docker rm -f` it by name.
+     */
+    public function test_tear_down_leaves_a_foreign_container_with_the_account_name(): void
+    {
+        $this->foreignOnly = true;
+        $system = $this->recordingSystem();
+        $project = $this->dind($system, $this->dindModel());
+        file_put_contents($project->composeFilePath(), "services: {}\n");
+
+        $project->tearDown();
+
+        $this->assertContains([
+            'sudo', 'docker', 'ps', '-a',
+            '--filter', 'name=^/alice$',
+            '--filter', 'label=com.docker.compose.project.working_dir=' . $system->projectDirPath('alice'),
+            '--format', '{{.Names}}',
+        ], $this->executed);
+        $this->assertNotContains(['sudo', 'docker', 'rm', '-f', 'alice'], $this->executed);
+    }
+
+    /**
+     * The host: an `alice` container exists; it carries the account's Compose
+     * label unless the test made it foreign.
+     *
+     * @param string|list<string> $cmd
+     */
+    public static function hostAnswer(string|array $cmd): FakeProcess
+    {
+        $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
+        if (str_starts_with($line, 'sudo docker ps -a --filter name=^/alice$')) {
+            $labelled = str_contains($line, 'label=com.docker.compose.project.working_dir=');
+            $foreign = self::$current?->foreignOnly ?? false;
+
+            return FakeProcess::ok($labelled && $foreign ? '' : "alice\n");
+        }
+
+        return FakeProcess::forCommand($cmd);
     }
 
     private function dind(System $system, ModelsUser $model): Dind
@@ -300,7 +350,7 @@ class DindOuterLifecycleTest extends TestCase
             {
                 $this->executed[] = $cmd;
 
-                return FakeProcess::forCommand($cmd);
+                return DindOuterLifecycleTest::hostAnswer($cmd);
             }
 
             public function filesystem(): Filesystem

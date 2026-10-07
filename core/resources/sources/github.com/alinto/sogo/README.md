@@ -2,18 +2,12 @@
 
 SOGo 5.12.11 is groupware written in Objective-C on GNUstep and SOPE: calendars,
 contacts, tasks and a webmail client, published over CalDAV, CardDAV, GroupDAV
-and ActiveSync as well as its own AngularJS UI. Tracker row
-`panelalpha/playground/supported-apps#770`, previously `Unsupported` at
-`serving-missing_entry` / HTTP 403.
+and ActiveSync as well as its own AngularJS UI.
 
-Two questions had to be answered before any of the rest of this was worth
-writing, and both came out in SOGo's favour.
+## A mail client, not a mail server
 
-## 1. Is it in scope, given that this platform rejects mail-receiving apps?
-
-Yes, on exactly the basis b1gMail (#1348) and tine (#1220) were kept: SOGo is a
-mail **client**. It is never the destination MTA for its domain and nothing in
-it wants port 25.
+SOGo is a mail **client**. It is never the destination MTA for its domain and
+nothing in it wants port 25.
 
 - **Reading** is IMAP, as a client. `SoObjects/Mailer/SOGoMailBaseObject.m:30`
   imports `<NGImap4/NGImap4Client.h>`; the server it talks to is
@@ -28,22 +22,15 @@ it wants port 25.
   socket. `packaging/debian/control` has no MTA in `Depends` and only
   *recommends* `memcached` and a web server.
 
-So the shape is the same as b1gMail's POP3 pull and tine's IMAP client: the
-mailbox belongs to somebody else's server, and the account owner names it.
+The mailbox belongs to somebody else's server, and the account owner names it.
 `SOGO_IMAP_SERVER` and `SOGO_SMTP_SERVER` are empty by default, and calendars
 and contacts are fully usable with both unset — which is why
 `SOGoLoginModule` is set to `Calendar` here rather than upstream's `Mail`.
 
-Proven live rather than argued: a throwaway GreenMail IMAP/SMTP server was
-stood up beside the account, a message was delivered into it over SMTP, and it
-was opened and read in SOGo's own webmail UI over the public HTTPS domain.
+## Building
 
-## 2. Does it build here at all?
-
-Yes, and it is cheap — which was the surprise. The engine has no Objective-C
-runtime and `core/resources/platforms/` has no GNUstep platform, but
-`dockerfile` lets a recipe bring any image, so the question was only whether a
-buildable path fits an account's budget.
+The engine has no Objective-C runtime and `core/resources/platforms/` has no
+GNUstep platform, but `dockerfile` lets a recipe bring any image.
 
 The repository is **not** self-contained. `SOPE/` in the checkout holds only
 `NGCards` and `GDLContentStore` — the two subprojects SOGo owns — and the rest
@@ -58,38 +45,26 @@ packages.sogo.nu serves no key file of its own).
 
 With those installed, the checkout compiles itself. **None of SOGo comes
 prebuilt** — the `sogo` binary package is never installed; only SOPE, which is
-a different product, does. Measured on the dev host:
-
-| | |
-|---|---|
-| `./configure && make -j4 && make install` | **45 s** |
-| whole image, cold, no cache, inside the account | **106 s** |
-| cold build under `docker build --no-cache -m 2500m` | succeeded |
-| cold build under `docker build --no-cache -m 1024m` | succeeded |
-| runtime image | 526 MB |
+a different product, does.
 
 Three build-time traps, all fixed in `files/Dockerfile`:
 
 - `/usr/share/GNUstep/Makefiles/GNUstep.sh` reads `$ZSH_VERSION` unguarded, so
   sourcing it under `set -u` aborts the build. `set -ex`, never `-eux`.
 - `/bin/sh` in `debian:bookworm` is dash, which has no `pipefail`. A
-  `make | tail -40` therefore reports **success for a failed compile** — the
-  first attempt here "built" in 45 s and produced no `sogod` at all. Redirect
-  to a file and grep it on failure; never pipe.
+  `make | tail -40` therefore reports **success for a failed compile** and
+  produces no `sogod` at all. Redirect to a file and grep it on failure; never
+  pipe.
 - `libsope-ldap4.9-dev` brings `NGLdapConnection.h`, which `#include <ldap.h>`.
   Debian's `libldap2-dev` is not pulled in by anything and `LDAPSource.m` will
   not compile without it, even for an instance that never uses LDAP.
 
-## What the 403 was
+## Why the generic platform fails
 
 The repository has no web root, no Dockerfile and no compose file, so detection
-fell through to `php-plain` over the repository root (confirmed by
-`POST /source/inspect`: candidates `php-plain` priority 200 `via: detected`).
-Reproduced on a control account with the recipe moved aside: deploy succeeded in
-46 s, `serving: missing_entry`, and the `php/entry-served` check reported *"The
-front page is missing: / answered 403 … There is no index.php anywhere in
-~/project"*. The body is a 337-byte stock `Apache/2.4.68 (Debian)` 403 — Apache
-refusing to list a directory with no index.
+falls through to `php-plain` over the repository root and every request answers
+403 (`serving: missing_entry`) — Apache refusing to list a directory with no
+index.
 
 ## What this recipe supplies
 
@@ -98,7 +73,7 @@ Everything SOGo expects from a machine it owns, which a tenant account is not.
 - **A web server, in the image.** `sogod` speaks HTTP on 20000 and expects a
   proxy in front that sets the `x-webobjects-*` headers; the engine only ever
   creates an HTTP proxy rule to one port, and there is no path to expose a raw
-  TCP port. nginx therefore lives in the container, serves the 53 MB of
+  TCP port. nginx therefore lives in the container, serves
   `WebServerResources` off disk, proxies `/SOGo`, redirects `/` and the
   `.well-known` DAV paths, and 404s everything else.
   - The one change from upstream's sample: `x-webobjects-server-url` is built
@@ -122,73 +97,24 @@ Everything SOGo expects from a machine it owns, which a tenant account is not.
   `Type=forking`. Without the flag the entrypoint's foreground parent exits 0 as
   soon as the real daemon is forked away, the entrypoint reads that as "sogod
   died" and takes the container down, once a minute, forever, while sogod is up
-  and answering. That was the `Restarting (0)` on the first deploy here.
-- **Persistence.** `~/project` is emptied on every deploy (engine#173), so the
+  and answering.
+- **Persistence.** `~/project` is emptied on every deploy, so the
   database password is generated once by `hooks/prepare.sh` into
   `~/.panelalpha/sogo/sogo.env` and read as a second `env_file`; the first
   login (`sogoadmin`) is the engine's (`credentials:` in `panelalpha.yaml`),
   returned by `GET /projects/{name}/app-credentials` (MCP
   `app_credentials_get`); the
   calendars and contacts are rows in the named volume `sogo-db`.
-- **A gate.** `docker compose up -d` runs without `--wait` (engine#204), so
+- **A gate.** `docker compose up -d` runs without `--wait`, so
   `probe` polls `/SOGo/` and `ready` waits on it having exited.
+- **Nothing to leak.** The checkout exists only in the build stage, so the
+  runtime image contains no repository at all, and `sogo.conf` — which carries
+  the database password — is `0640 root:sogo` in a `0750` directory outside
+  every served path. nginx answers 404 for everything it does not serve.
 
-## Verified
+## Known limits
 
-Deployed cold from nothing but the repository URL onto a second, untouched
-account (`sogocold`, no cached layers): **222 s**, `deploy-ok`, `serving: ok`,
-HTTP 302 on `/` (to `/SOGo`) and 200 on `/SOGo/`, every health check passing,
-no hand-fixing. A real `POST /projects/<user>/rebuild` on the working account
-took **34.2 s** and a control deploy of the same repository with this recipe
-moved aside took 46 s to reach the 403 above.
-
-Past the probe, in a browser on the public HTTPS domain:
-
-- Logged in as the generated first user; SOGo loaded its Calendar module.
-- Created a **private** calendar event in the UI (`saveAsAppointment` 200) and
-  read it back in the events list.
-- Created a contact in the UI (`saveAsContact` 200) and read it back on the
-  contact card.
-- Opened the webmail INBOX against the throwaway IMAP server and read the
-  message body.
-
-Isolation, by body rather than by status code. A second user `bob` was created
-through `overrides/app.sh`:
-
-| request | result |
-|---|---|
-| owner `GET` the private `.ics` | 200, 625 bytes, the real VEVENT with `CLASS:PRIVATE` |
-| `bob` `GET` the same `.ics` | 404, 91 bytes, `object not found` |
-| anonymous `GET` the same `.ics` | 401, 0 bytes |
-| owner `GET` the `.vcf` | 200, 136 bytes, the real VCARD |
-| `bob` `GET` the same `.vcf` | 404, 91 bytes |
-| `bob` `PROPFIND` the owner's calendar | 404 |
-| `bob` `PROPFIND` *his own* calendar | 207 (control: bob's account works) |
-
-Exposure, over the public domain, comparing bodies: `/etc/sogo/sogo.conf`,
-`/sogo.conf`, `/.git/config`, `/.git/HEAD`, `/Dockerfile`,
-`/panelalpha/entrypoint.sh`, `/panelalpha/nginx-sogo.conf`,
-`/docker-compose.yml`, `/docker-compose.override.yml`, `/.env`, `/GNUmakefile`,
-`/Version`, `/packaging/debian/control`, `/server-status` and `/nginx_status`
-all return the same 153-byte nginx 404; five alias-traversal attempts at
-`sogo.conf` return 400. There is nothing to leak in the first place: the
-checkout exists only in the build stage, so the runtime image contains no
-repository at all, and `sogo.conf` — which carries the database password in six
-URLs — is `0640 root:sogo` in a `0750` directory outside every served path.
-
-Redeploy kept everything: the event and the contact came back byte-identical
-(same md5), `sogo.env` unchanged, both named volumes intact, row counts equal.
-
-Memory, measured: `project-app-1` (nginx + sogod × 3 workers) 50 MB idle and
-about 260 MB with a session open, against a 512 MB limit; `project-db-1` 93 MB;
-`project-memcached-1` 9 MB. The whole account sat at **300 MB**. SOGo's own
-watchdog caps each worker at 384 MB of vmem and says so at startup. This is not
-a heavy app to run — it is only a heavy app to *say*, and the build is 106 s.
-
-## Left undone
-
-- ActiveSync is not built (`--enable-activesync` needs `libwbxml2` wiring and
-  nothing here tests an Outlook client).
+- ActiveSync is not built (`--enable-activesync` needs `libwbxml2` wiring).
 - SAML2, MFA and OpenID are off; `./configure` defaults them off and none of
   them can be exercised from a tenant account.
 - No `users:sso`. SOGo authenticates every request with HTTP Basic or its own

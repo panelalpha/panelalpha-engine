@@ -55,7 +55,7 @@ class DockerfileVariantRankingTest extends TestCase
     }
 
     /**
-     * engine#258: PortsReport asks with no listing, and the ranking rewrite
+     * PortsReport asks with no listing, and the ranking rewrite
      * only took the plain name from the listing -- so it found nothing and
      * inspect lost the Dockerfile's EXPOSE.
      */

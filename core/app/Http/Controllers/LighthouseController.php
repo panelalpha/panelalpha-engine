@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Lib\Lighthouse\LighthouseFailed;
+use App\Lib\Lighthouse\LighthouseRunner;
 use App\Lib\Lighthouse\LighthouseTarget;
 use App\System;
 use App\Models\Domain;
@@ -91,72 +93,12 @@ class LighthouseController extends Controller
         $engineIp = $this->engineIp();
         $pin = $localResolve && $engineIp !== null && Domain::existsByName($host) ? $host : null;
 
-        $system = app(System::class);
-        $filename = md5($url) . ($desktop ? "-desktop" : "-mobile") . ".json";
-        $path = "/data/{$filename}";
-        $realPath = $system->engineDirPath() . "/data/lighthouse/{$filename}";
-
-        $chromeFlags = [
-            '--headless',
-            '--no-sandbox',
-            '--disable-gpu',
-            '--disable-dev-shm-usage',
-            '--ignore-certificate-errors',
-        ];
-
-        $chromeFlags[] = '--host-resolver-rules="' . LighthouseTarget::resolverRules($pin, $engineIp) . '"';
-
-        $args = [
-            "sudo",
-            "docker",
-            "compose",
-            "-f",
-            $system->composeFilePath(),
-            "exec",
-            "-T",
-            "lighthouse",
-            "lighthouse",
-            $url,
-            "--output",
-            "json",
-            "--output-path",
-            $path,
-            "--chrome-flags=" . escapeshellarg(implode(" ", $chromeFlags)),
-            "--ignore-status-code",
-            "--no-enable-error-reporting",
-            "--only-audits=final-screenshot",
-            "--only-categories=performance",
-        ];
-        if ($desktop) {
-            $args[] = "--preset=desktop";
-        }
         try {
-            $system->exec($args);
-        } catch (\Exception $e) {
+            $result = (new LighthouseRunner(app(System::class)))
+                ->report($url, $desktop, LighthouseTarget::resolverRules($pin, $engineIp));
+        } catch (LighthouseFailed $e) {
             return new JsonResponse([
                 'message' => $e->getMessage(),
-            ], 502);
-        }
-
-        if (!file_exists($realPath)) {
-            return new JsonResponse([
-                'message' => 'report file not found',
-            ], 502);
-        }
-
-        $result = file_get_contents($realPath);
-        $system->exec(["sudo", "rm", "-rf", $realPath]);
-        if (!is_string($result)) {
-            return new JsonResponse([
-                'message' => 'cannot read report file',
-            ], 502);
-        }
-
-        /** @var mixed */
-        $result = json_decode($result, true);
-        if (!is_array($result)) {
-            return new JsonResponse([
-                'message' => 'cannot parse report file',
             ], 502);
         }
 

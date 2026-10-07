@@ -1,9 +1,11 @@
 #!/bin/bash
 # Runs in the account shell after the clone and after overrides/ and files/ are
 # in place, before `docker compose up`. Two jobs the compose file cannot do:
-# persist this account's secrets and the seeded admin's password where the next
-# deploy will not delete them, and seed ~/project/.env with the account-tunable
-# defaults the env_vars merge sits over.
+# persist this account's secrets where the next deploy will not delete them, and
+# seed ~/project/.env with the account-tunable defaults the env_vars merge sits
+# over. The seeded admin's login is the engine's (`credentials:` in
+# panelalpha.yaml), in ~/.panelalpha/app-credentials.env, which the init service
+# reads as an env_file.
 set -e
 cd ~/project
 
@@ -18,7 +20,6 @@ say() { echo "[pyfedi] $*" >&2; }
 STORE="${HOME}/.panelalpha/pyfedi"
 DB_ENV="${STORE}/db.env"
 APP_ENV="${STORE}/app.env"
-NOTE="${STORE}/credentials.txt"
 
 mkdir -p "${STORE}"
 chmod 700 "${HOME}/.panelalpha" "${STORE}"
@@ -28,8 +29,6 @@ if [ ! -f "${APP_ENV}" ] || [ ! -f "${DB_ENV}" ]; then
     # DATABASE_URL DSN, so no '/', '+', '@' or '=' to confuse either.
     PG_PASSWORD="$(openssl rand -hex 24)"
     SECRET_KEY="$(openssl rand -hex 32)"
-    ADMIN_USER="paadmin"
-    ADMIN_PASSWORD="$(openssl rand -hex 16)"
     (
         umask 077
         cat > "${DB_ENV}" <<EOF
@@ -48,39 +47,9 @@ SECRET_KEY=${SECRET_KEY}
 # PieFed reads the database straight from DATABASE_URL. The psycopg2 scheme is
 # required (SQLAlchemy 2.x rejects a bare postgres://); host is the db service.
 DATABASE_URL=postgresql+psycopg2://piefed:${PG_PASSWORD}@db:5432/piefed
-
-# The first admin, seeded once by the init one-shot (files/panelalpha/pyfedi/
-# init.sh). verified=True, so login works immediately with no email step.
-ADMIN_USER=${ADMIN_USER}
-ADMIN_PASSWORD=${ADMIN_PASSWORD}
-EOF
-        cat > "${NOTE}" <<EOF
-PieFed on this account
-======================
-
-PieFed is a fediverse link aggregator (a Lemmy/Mbin alternative).
-
-ADMIN LOGIN (seeded automatically on the first deploy)
-  Username: ${ADMIN_USER}
-  Password: ${ADMIN_PASSWORD}
-  Email:    admin@<this account's domain>
-  The admin is created verified, so you can log in at once -- open this
-  account's URL, click Log in, and use the credentials above. Change the
-  password from the account settings afterwards.
-
-SECRETS
-  SECRET_KEY and the database password live in ~/.panelalpha/pyfedi/ (0600).
-  They are generated once and never rewritten; a rebuild reuses them, which is
-  what keeps your login and your data working across redeploys.
-
-FEDERATION / UPLOADS (known limits)
-  Outbound ActivityPub delivery runs in a Celery worker this stack does not
-  start, so cross-instance federation is not active. Image upload is multipart
-  and does not pass the shared panelalpha.online tunnel; it works on an account
-  with its own domain pointed at the engine.
 EOF
     )
-    say "secrets + admin written to ${STORE}; see ${NOTE}"
+    say "secrets written to ${STORE}"
 else
     say "reusing the secrets in ${STORE}"
 fi

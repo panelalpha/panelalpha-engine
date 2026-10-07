@@ -21,7 +21,7 @@ services:
 
   # The image has no shell, so it cannot healthcheck itself: `wait` polls it
   # from alpine and `ready` waits on `wait` completing. `up -d` runs without
-  # --wait (engine#204), so this blocks it until PodFetch answers.
+  # --wait, so this blocks it until PodFetch answers.
   wait:
     image: docker.io/library/alpine:3
     restart: "no"

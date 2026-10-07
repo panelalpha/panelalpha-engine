@@ -43,7 +43,7 @@ services:
       # unprivileged container user can write.
       - data:/data
     # gunicorn binds 0.0.0.0:8000; Bugsink is the only service that publishes a
-    # port (engine#234: publish explicitly).
+    # port (publish explicitly).
     ports:
       - "8000:8000"
     healthcheck:
@@ -59,7 +59,7 @@ services:
 
   # No-op gate: `docker compose up -d` blocks on a depends_on health condition,
   # so this makes `up` return only once the site actually answers rather than the
-  # moment the container starts (engine#204/#90). Reuses the already-pulled image
+  # moment the container starts. Reuses the already-pulled image
   # so it needs no extra download.
   ready:
     image: bugsink/bugsink:2.6.0

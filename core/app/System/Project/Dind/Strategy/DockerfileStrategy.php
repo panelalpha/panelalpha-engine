@@ -6,6 +6,9 @@ use App\System\Project\Dind as DindProject;
 use App\Lib\Deploy\Compose\ComposeHarden;
 use App\Lib\Deploy\Detect\DockerfileFinder;
 use App\Lib\Deploy\Compose\DeployCompose;
+use App\Lib\Deploy\Compose\RepositoryAppTerminal;
+use App\Lib\Deploy\Source\GitUrl;
+use App\System\Project\Dind\Paths;
 
 /**
  * A repository that ships its own Dockerfile.
@@ -80,7 +83,10 @@ class DockerfileStrategy
             [
                 'build_args' => $this->buildArgs($decision),
                 'env' => array_merge(
-                    ComposeHarden::urlEnvironment($this->dind->publicAppUrl()),
+                    ComposeHarden::urlEnvironment($this->dind->publicAppUrl(), [
+                        $this->dind->projectTree()->readIn($projectDir, '.env'),
+                        $this->dind->projectTree()->readIn($projectDir, '.env.example'),
+                    ]),
                     $database['env'] ?? [],
                     $this->environment($projectDir),
                     $strategy->entrypoint()->deployPhaseEnvironment()
@@ -89,7 +95,8 @@ class DockerfileStrategy
                 // Docker invents an anonymous volume per path -- data the
                 // engine cannot see, back up, or keep across a recreate.
                 'dockerfile_volumes' => $this->declaredVolumes($projectDir, $dockerfile),
-            ] + (isset($database['extra_hosts']) ? ['extra_hosts' => $database['extra_hosts']] : []),
+            ] + (isset($database['extra_hosts']) ? ['extra_hosts' => $database['extra_hosts']] : [])
+                + $this->terminal($projectDir, $dockerfile),
             $sidecars
         );
         $this->dind->composeWriter()->writeGeneratedCompose(
@@ -101,6 +108,40 @@ class DockerfileStrategy
             ),
             $chown
         );
+    }
+
+    /**
+     * `tty` / `stdin_open` from the repository's own compose service for this
+     * Dockerfile, read from the root and from the Dockerfile's directory.
+     *
+     * @return array<string, true>
+     */
+    private function terminal(string $projectDir, string $dockerfile): array
+    {
+        $dir = dirname($dockerfile);
+        $dirs = array_unique(['', $dir === '.' ? '' : $dir . '/']);
+        $files = [];
+        foreach ($dirs as $dir) {
+            foreach (Paths::composeFileCandidates() as $name) {
+                if (!Paths::isEngineComposeFile($projectDir . '/' . $dir . $name)) {
+                    $files[$dir . $name] = $this->dind->projectTree()->readIn($projectDir, $dir . $name);
+                }
+            }
+        }
+        $repoUrl = (string) $this->dind->userModel()->getGitRepo();
+        $settings = RepositoryAppTerminal::settings(
+            $dockerfile,
+            $files,
+            $repoUrl === '' ? null : GitUrl::ownerAndRepo($repoUrl)
+        );
+        if ($settings !== []) {
+            $this->dind->shell()->logger()?->info(
+                'Running the app with ' . implode(' and ', array_map(static fn (string $k): string => "{$k}: true", array_keys($settings)))
+                . ', as the repository\'s compose file does'
+            );
+        }
+
+        return $settings;
     }
 
     /**

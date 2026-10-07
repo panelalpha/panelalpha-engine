@@ -3,8 +3,10 @@
 namespace App\System\Project\Dind;
 
 use App\Integrations\Tunnels\Cloudflare;
+use App\Lib\Deploy\Compose\ServiceHardener;
 use App\Lib\Deploy\DetectAppPort;
 use App\Lib\Deploy\Dind\DindEngine;
+use App\Lib\Deploy\Dind\DindImageStore;
 use App\Lib\Deploy\Platform\ProjectContext;
 use App\Models\User as ModelsUser;
 use App\System;
@@ -33,6 +35,7 @@ final class AccountTemplate
         $templateVars = $this->templateVars($model, $system);
         $system->filesystem()->makeDirFromTemplate($projectDir, $projectTemplateDir, $templateVars);
         $this->project->setupEntrypointInitScripts();
+        $this->project->setupDaemonJson();
         $system->runProcess(
             "sudo test -f {$projectDir}/entrypoint.sh && sudo chmod +x {$projectDir}/entrypoint.sh"
         );
@@ -40,7 +43,7 @@ final class AccountTemplate
         // Rendered from the account's state, not off: a rebuild re-renders the
         // template and used to leave a live tunnel with no connector.
         Cloudflare::renderConnector($model, Cloudflare::connectorWanted($model));
-        // The template is s6's; a re-rendered account keeps nothing of supervisord.
+        // A re-rendered account keeps nothing of the init it ran before.
         SupervisordServiceManager::removeLayout($this->project);
 
         $composePath = $this->bootstrapWelcomeApp($model);
@@ -72,10 +75,8 @@ else
   useradd --uid {$uid} --home-dir /home/{$username} --shell /bin/bash {$username}
 fi
 mkdir -p "/home/\$(hostname)/docker"
-cat > /etc/docker/daemon.json <<EOF
-{"data-root": "/home/\$(hostname)/docker", "ip": "0.0.0.0", "ipv6": false, "group": "{$username}", "insecure-registries": ["panelalpha-cache-registry:5000", "panelalpha-registry-proxy:5000"], "registry-mirrors": ["http://panelalpha-registry-proxy:5000"]}
-EOF
-echo "[init] generated /etc/docker/daemon.json"
+# daemon.json itself is rendered on the host and bind-mounted read-only now;
+# nothing in this container writes it any more.
 mkdir -p "/home/{$username}/.docker"
 chown {$uid}:{$uid} "/home/{$username}/.docker"
 echo "[init] created /home/{$username}/.docker"
@@ -89,6 +90,34 @@ BASH;
         }
 
         return $scripts;
+    }
+
+    /**
+     * The account's `/etc/docker/daemon.json`, rendered on the host and
+     * bind-mounted read-only into the container — so trusting a registry
+     * never needs a shell inside the account, only a file next to
+     * entrypoint.sh and a `docker compose up`.
+     *
+     * Username is known here at render time (account creation or a registry
+     * refresh), unlike the init script this replaced, which had to read its
+     * own hostname because it ran after the container already existed.
+     */
+    public function daemonJson(): string
+    {
+        $username = $this->project->userModel()->username;
+
+        return json_encode([
+            'data-root' => "/home/{$username}/docker",
+            'live-restore' => true,
+            'ip' => '0.0.0.0',
+            'ipv6' => false,
+            'group' => $username,
+            'insecure-registries' => [DindImageStore::CACHE_REGISTRY, DindImageStore::PROXY_REGISTRY],
+            'registry-mirrors' => ['http://' . DindImageStore::PROXY_REGISTRY],
+            // Unrotated, a container's log grows inside the account's quota.
+            'log-driver' => 'json-file',
+            'log-opts' => ServiceHardener::LOG_OPTIONS,
+        ], JSON_UNESCAPED_SLASHES);
     }
 
     /**
@@ -152,6 +181,7 @@ BASH;
             'device_write_bps' => $deviceWriteBps,
             'block_device' => $blockDevice,
             'php_versions' => $system->php()->listAvailablePhpVersions(),
+            'proc_mounts' => LxcfsProc::mounts(LxcfsProc::present($system), AccountRuntime::isSysbox()),
         ];
     }
 

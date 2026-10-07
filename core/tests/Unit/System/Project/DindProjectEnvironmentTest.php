@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Project;
 
+use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Compose\ComposePlaceholders;
 use App\Lib\Deploy\EnvFile;
@@ -53,9 +54,78 @@ class DindProjectEnvironmentTest extends TestCase
         $this->assertFalse($model->usedCustomEnvVars());
     }
 
+    /** LinkAce ships no .env.example: key:generate found no APP_KEY line to fill. */
+    public function test_a_laravel_project_without_a_template_gets_an_app_key_line(): void
+    {
+        $model = $this->dindModel(['deploy_strategy' => 'laravel']);
+        $this->forcedEnvironment($model, tracked: false)->apply();
+        $first = $this->vars((string) file_get_contents($this->projectDir . '/.env'))['APP_KEY'] ?? '';
+
+        $this->assertStringStartsWith('base64:', $first);
+        $this->assertSame(32, strlen(base64_decode(substr($first, 7))));
+
+        // A reclone lands here again: the same key, not a new one.
+        unlink($this->projectDir . '/.env');
+        $this->forcedEnvironment($model, tracked: false)->apply();
+        $this->assertSame($first, $this->vars((string) file_get_contents($this->projectDir . '/.env'))['APP_KEY']);
+    }
+
+    public function test_a_laravel_template_without_the_line_and_a_blank_untracked_env_get_one(): void
+    {
+        file_put_contents($this->projectDir . '/.env.example', "APP_NAME=Demo\n");
+        $this->forcedEnvironment($this->dindModel(['deploy_strategy' => 'laravel']), tracked: false)->apply();
+        $env = $this->vars((string) file_get_contents($this->projectDir . '/.env'));
+        $this->assertSame('Demo', $env['APP_NAME']);
+        $this->assertStringStartsWith('base64:', $env['APP_KEY']);
+
+        // An archive's .env left from a deploy before this fix: empty, untracked.
+        file_put_contents($this->projectDir . '/.env', "APP_KEY=\n");
+        $this->forcedEnvironment($this->dindModel(['deploy_strategy' => 'laravel']), tracked: false)->apply();
+        $this->assertSame($env['APP_KEY'], $this->vars((string) file_get_contents($this->projectDir . '/.env'))['APP_KEY']);
+    }
+
+    public function test_an_app_key_line_is_left_alone_where_it_is_not_ours(): void
+    {
+        // A key the project's .env already has.
+        file_put_contents($this->projectDir . '/.env', "APP_KEY=base64:mine\n");
+        $this->forcedEnvironment($this->dindModel(['deploy_strategy' => 'laravel']), tracked: false)->apply();
+        $this->assertSame("APP_KEY=base64:mine\n", file_get_contents($this->projectDir . '/.env'));
+
+        // A .env the repository tracks.
+        file_put_contents($this->projectDir . '/.env', "APP_NAME=Tracked\n");
+        $this->forcedEnvironment($this->dindModel(['deploy_strategy' => 'laravel']), tracked: true)->apply();
+        $this->assertSame("APP_NAME=Tracked\n", file_get_contents($this->projectDir . '/.env'));
+
+        // Not Laravel.
+        unlink($this->projectDir . '/.env');
+        file_put_contents($this->projectDir . '/.env.example', "APP_NAME=Demo\n");
+        $this->forcedEnvironment($this->dindModel(['deploy_strategy' => 'php']), tracked: false)->apply();
+        $this->assertArrayNotHasKey('APP_KEY', $this->vars((string) file_get_contents($this->projectDir . '/.env')));
+
+        // The account's own key wins.
+        unlink($this->projectDir . '/.env');
+        $model = $this->dindModel(['deploy_strategy' => 'laravel', 'env_vars' => ['APP_KEY' => 'base64:account']]);
+        $this->forcedEnvironment($model, tracked: false)->apply();
+        $this->assertSame('base64:account', $this->vars((string) file_get_contents($this->projectDir . '/.env'))['APP_KEY']);
+    }
+
+    public function test_a_utf16_example_is_read_as_text(): void
+    {
+        // DumbPad ships .env.example as UTF-16LE with a BOM and CRLF; copied
+        // byte for byte, compose refused `.env` on "\x00".
+        $utf16 = "\xFF\xFE" . mb_convert_encoding("# DumbPad\r\nPORT=3000\r\n\r\nDUMBPAD_PIN=\r\n", 'UTF-16LE', 'UTF-8');
+        file_put_contents($this->projectDir . '/.env.example', $utf16);
+
+        $this->dind($this->dindModel())->applyProjectEnvVars();
+
+        $contents = (string) file_get_contents($this->projectDir . '/.env');
+        $this->assertStringNotContainsString("\0", $contents);
+        $this->assertSame('3000', $this->vars($contents)['PORT']);
+    }
+
     public function test_apply_comments_out_example_lines_compose_would_refuse(): void
     {
-        // saltcorn: a .env.example meant to be `source`d (engine#135).
+        // saltcorn: a .env.example meant to be `source`d.
         file_put_contents(
             $this->projectDir . '/.env.example',
             "unset DATABASE_URL SQLITE_FILEPATH\nexport SALTCORN_SESSION_SECRET='hrh64b45b3'\n"
@@ -91,7 +161,40 @@ class DindProjectEnvironmentTest extends TestCase
     }
 
     /**
-     * #178: every deploy re-clones ~/project, so the key written from
+     * An archive project keeps ~/project, and its .env, across redeploys: an
+     * env var removed since the last deploy must leave .env too, back to the
+     * base value or out entirely, while the ones still set and the file's own
+     * lines stay.
+     */
+    public function test_a_removed_env_var_leaves_an_env_that_survives_redeploys(): void
+    {
+        file_put_contents($this->projectDir . '/.env.example', "APP_NAME=Demo\nMODE=base\n");
+        $model = $this->dindModel(['env_vars' => ['MODE' => 'custom', 'TOREMOVE' => 'keepme-1', 'KEEPME' => 'stay']]);
+        $this->forcedEnvironment($model, tracked: false)->apply();
+        $env = $this->vars((string) file_get_contents($this->projectDir . '/.env'));
+        $this->assertSame(['custom', 'keepme-1', 'stay'], [$env['MODE'], $env['TOREMOVE'], $env['KEEPME']]);
+
+        // No reclone: the archive's directory, with an edit the operator made in place.
+        file_put_contents($this->projectDir . '/.env', "EDITED=1\n", FILE_APPEND);
+        $model->setDetails(['env_vars' => ['KEEPME' => 'stay']]);
+        $this->forcedEnvironment($model, tracked: false)->apply();
+
+        $env = $this->vars((string) file_get_contents($this->projectDir . '/.env'));
+        // Re-merged after the base, so KEEPME moves to the end: order is not the point.
+        $this->assertEquals(['APP_NAME' => 'Demo', 'MODE' => 'base', 'KEEPME' => 'stay', 'EDITED' => '1'], $env);
+        $default = $this->vars((string) file_get_contents($this->projectDir . '/.env.default'));
+        $this->assertSame(['APP_NAME' => 'Demo', 'MODE' => 'base', 'EDITED' => '1'], $default);
+
+        $model->setDetails(['env_vars' => []]);
+        $this->forcedEnvironment($model, tracked: false)->apply();
+        $this->assertSame(
+            ['APP_NAME' => 'Demo', 'MODE' => 'base', 'EDITED' => '1'],
+            $this->vars((string) file_get_contents($this->projectDir . '/.env'))
+        );
+    }
+
+    /**
+     * Every deploy re-clones ~/project, so the key written from
      * .env.example has to be the same one each time or every session dies.
      */
     public function test_a_redeploy_from_env_example_keeps_the_same_app_key(): void
@@ -187,7 +290,7 @@ class DindProjectEnvironmentTest extends TestCase
     }
 
     /**
-     * #179: a nested .env.example gets the root copy's secrets rule. Plainpad's
+     * A nested .env.example gets the root copy's secrets rule. Plainpad's
      * Laravel API is server/ (its app_root) and its template ships
      * APP_KEY={KEY}; a well-known signing key is replaced the same way.
      */
@@ -205,7 +308,7 @@ class DindProjectEnvironmentTest extends TestCase
         $env = $this->vars((string) file_get_contents($this->projectDir . '/server/.env'));
         $this->assertStringStartsWith('base64:', $env['APP_KEY']);
         $this->assertSame(32, strlen((string) base64_decode(substr($env['APP_KEY'], 7), true)));
-        // Seeded like the root copy (#178), so a redeploy keeps the key.
+        // Seeded like the root copy, so a redeploy keeps the key.
         $this->assertSame(
             ComposePlaceholders::publishedSecret('APP_KEY', $dind->strategy()->secrets()->for('compose-placeholders')),
             $env['APP_KEY']
@@ -323,13 +426,15 @@ class DindProjectEnvironmentTest extends TestCase
     }
 
     /**
-     * kaneo (#144): postgres reads its password from `.env` through
+     * kaneo: postgres reads its password from `.env` through
      * `env_file:`, the repo ships no `.env.example`, and an empty `.env`
-     * left the database refusing its first start.
+     * left the database refusing its first start. The generated value goes
+     * to `.env.panelalpha`, attached after `.env` wherever `.env` is loaded,
+     * never into `.env`, which a build context carries into the image.
      */
-    public function test_compose_database_password_read_through_env_file_is_generated_into_env(): void
+    public function test_compose_database_password_read_through_env_file_is_generated_into_env_panelalpha(): void
     {
-        file_put_contents($this->projectDir . '/compose.yml', <<<'YAML'
+        file_put_contents($this->projectDir . '/compose.yml', $compose = <<<'YAML'
         services:
           postgres:
             image: postgres:16-alpine
@@ -340,27 +445,89 @@ class DindProjectEnvironmentTest extends TestCase
             env_file:
               - .env
         YAML);
+        file_put_contents($this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE, $compose);
 
         $model = $this->dindModel(['deploy_strategy' => 'compose']);
         $dind = $this->dind($model);
         $dind->applyProjectEnvVars();
 
-        $env = $this->vars((string) file_get_contents($this->projectDir . '/.env'));
+        $this->assertArrayNotHasKey('POSTGRES_PASSWORD', $this->vars((string) @file_get_contents($this->projectDir . '/.env')));
+        $engine = $this->vars((string) file_get_contents($this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES));
         $this->assertSame(
             ComposePlaceholders::generatedSecret(
                 'POSTGRES_PASSWORD',
                 $dind->strategy()->secrets()->for('compose-placeholders')
             ),
-            $env['POSTGRES_PASSWORD']
+            $engine['POSTGRES_PASSWORD']
         );
+        $this->assertSame('0600', $this->mode(EngineArtifacts::ENV_OVERRIDES));
+        $run = Yaml::parseFile($this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE);
+        $this->assertSame(['.env', EngineArtifacts::ENV_OVERRIDES], $run['services']['postgres']['env_file']);
+        $this->assertSame(['.env', EngineArtifacts::ENV_OVERRIDES], $run['services']['kaneo']['env_file']);
 
-        // A redeploy over the .env it wrote keeps the same value.
+        // A redeploy keeps the same value, and still keeps it out of .env.
         $this->forcedEnvironment($model, tracked: false)->apply();
-        $this->assertSame($env, $this->vars((string) file_get_contents($this->projectDir . '/.env')));
+        $this->assertSame($engine, $this->vars((string) file_get_contents($this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES)));
+        $this->assertArrayNotHasKey('POSTGRES_PASSWORD', $this->vars((string) @file_get_contents($this->projectDir . '/.env')));
     }
 
-    /** onetimesecret (#140): `${VAR:?}` in an included file's `command:`. */
-    public function test_compose_required_variables_in_an_included_file_are_generated_into_an_existing_env(): void
+    /**
+     * The vd420 case: `DB_PASSWORD: ${DB_PASSWORD:?}` in `environment:`, a
+     * build that copies its context into a docroot. The account's own
+     * env_vars still go to `.env`; only what the engine generated is kept out.
+     */
+    public function test_a_generated_required_secret_stays_out_of_env_and_the_customers_values_stay_in(): void
+    {
+        file_put_contents($this->projectDir . '/docker-compose.yml', <<<'YAML'
+        services:
+          web:
+            build: .
+            environment:
+              DB_PASSWORD: ${DB_PASSWORD:?}
+              SITE_NAME: ${SITE_NAME:-demo}
+        YAML);
+
+        $model = $this->dindModel(['deploy_strategy' => 'compose', 'env_vars' => ['SITE_NAME' => 'Mine']]);
+        $this->forcedEnvironment($model, tracked: false)->apply();
+
+        $env = $this->vars((string) file_get_contents($this->projectDir . '/.env'));
+        $this->assertSame('Mine', $env['SITE_NAME']);
+        $this->assertArrayNotHasKey('DB_PASSWORD', $env);
+        $this->assertStringNotContainsString('DB_PASSWORD', (string) @file_get_contents($this->projectDir . '/.env.default'));
+        $engine = $this->vars((string) file_get_contents($this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES));
+        $this->assertSame(['DB_PASSWORD'], array_keys($engine));
+        $this->assertSame(48, strlen($engine['DB_PASSWORD']));
+
+        // A password set in the panel is the account's own: it goes to .env, nothing is generated.
+        $model = $this->dindModel(['deploy_strategy' => 'compose', 'env_vars' => ['DB_PASSWORD' => 'hunter2']]);
+        $this->forcedEnvironment($model, tracked: false)->apply();
+        $this->assertSame('hunter2', $this->vars((string) file_get_contents($this->projectDir . '/.env'))['DB_PASSWORD']);
+        $this->assertFileDoesNotExist($this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES);
+    }
+
+    /** borgwarehouse ships `.env.sample`, and its compose file requires every key in it. */
+    public function test_a_env_sample_template_seeds_env_like_env_example(): void
+    {
+        file_put_contents($this->projectDir . '/docker-compose.yml', <<<'YAML'
+        services:
+          borgwarehouse:
+            image: borgwarehouse/borgwarehouse
+            ports:
+              - '${WEB_SERVER_PORT:?WEB_SERVER_PORT variable missing}:${WEB_SERVER_PORT}'
+            volumes:
+              - ${CONFIG_PATH:?CONFIG_PATH variable missing}:/home/borgwarehouse/app/config
+        YAML);
+        file_put_contents($this->projectDir . '/.env.sample', "WEB_SERVER_PORT=3000\nCONFIG_PATH=./config\n");
+
+        $this->dind($this->dindModel(['deploy_strategy' => 'compose']))->applyProjectEnvVars();
+
+        $env = $this->vars((string) file_get_contents($this->projectDir . '/.env'));
+        $this->assertSame('3000', $env['WEB_SERVER_PORT']);
+        $this->assertSame('./config', $env['CONFIG_PATH']);
+    }
+
+    /** onetimesecret: `${VAR:?}` in an included file's `command:`. */
+    public function test_compose_required_variables_in_an_included_file_are_generated_beside_an_existing_env(): void
     {
         mkdir($this->projectDir . '/docker/compose', 0777, true);
         file_put_contents($this->projectDir . '/docker-compose.yml', "include:\n  - path: docker/compose/simple.yml\n");
@@ -376,7 +543,93 @@ class DindProjectEnvironmentTest extends TestCase
 
         $env = $this->vars((string) file_get_contents($this->projectDir . '/.env'));
         $this->assertSame('', $env['SMTP_HOST']);
-        $this->assertSame(48, strlen($env['VALKEY_PASSWORD']));
+        $this->assertArrayNotHasKey('VALKEY_PASSWORD', $env);
+        $engine = $this->vars((string) file_get_contents($this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES));
+        $this->assertSame(48, strlen($engine['VALKEY_PASSWORD']));
+    }
+
+    /**
+     * The run file inlines the same generated value first and says so; one
+     * value is one log line, not one per file it lands in.
+     */
+    public function test_a_generated_compose_secret_already_logged_is_not_logged_again(): void
+    {
+        file_put_contents($this->projectDir . '/docker-compose.yml', <<<'YAML'
+        services:
+          maindb:
+            image: valkey/valkey:8.1
+            command: valkey-server --requirepass ${VALKEY_PASSWORD:?VALKEY_PASSWORD must be set}
+        YAML);
+
+        $generatedLines = function (bool $runFileLoggedIt): array {
+            @unlink($this->projectDir . '/.env');
+            @unlink($this->projectDir . '/.env.default');
+            $dind = $this->dind($this->dindModel(['deploy_strategy' => 'compose']));
+            if ($runFileLoggedIt) {
+                $dind->strategy()->secrets()->notYetAnnounced(['VALKEY_PASSWORD']);
+            }
+            $logger = DeployLogger::start('alice');
+            try {
+                (new class ($dind) extends Dind\ProjectEnvironment {
+                    protected function envIsTracked(): bool
+                    {
+                        return false;
+                    }
+                })->apply();
+                $lines = array_column($logger->read()['lines'], 'msg');
+            } finally {
+                $logger->finish(DeployLogger::STATUS_SUCCESS);
+                DeployLogger::deleteUserLogs('alice');
+            }
+
+            return array_values(array_filter($lines, static fn (string $l): bool => str_contains($l, 'Generated them')));
+        };
+
+        $notLoggedYet = $generatedLines(false);
+        $this->assertCount(1, $notLoggedYet);
+        $this->assertStringContainsString('VALKEY_PASSWORD', $notLoggedYet[0]);
+        $this->assertSame([], $generatedLines(true));
+    }
+
+    /**
+     * TaskingAI: docker/docker-compose.yml with docker/.env.example beside it.
+     * Run from the root, compose only reads the root .env.
+     */
+    public function test_a_nested_compose_files_env_is_carried_into_the_root_env(): void
+    {
+        mkdir($this->projectDir . '/docker');
+        $compose = $this->projectDir . '/docker/docker-compose.yml';
+        file_put_contents($compose, <<<'YAML'
+        services:
+          api:
+            image: taskingai/api
+            environment:
+              OBJECT_STORAGE_TYPE: ${OBJECT_STORAGE_TYPE}
+              POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+        YAML);
+        file_put_contents($this->projectDir . '/docker/.env.example', "OBJECT_STORAGE_TYPE=local\nPOSTGRES_PASSWORD=\n");
+
+        $this->dind($this->dindModel(['deploy_strategy' => 'compose']))->applyProjectEnvVars($compose);
+
+        $this->assertFileExists($this->projectDir . '/docker/.env');
+        $env = $this->vars((string) file_get_contents($this->projectDir . '/.env'));
+        $this->assertSame('local', $env['OBJECT_STORAGE_TYPE']);
+        $this->assertArrayHasKey('POSTGRES_PASSWORD', $env);
+    }
+
+    public function test_the_root_env_wins_over_a_nested_compose_files_env(): void
+    {
+        mkdir($this->projectDir . '/docker');
+        $compose = $this->projectDir . '/docker/docker-compose.yml';
+        file_put_contents($compose, "services:\n  api:\n    image: acme/api\n");
+        file_put_contents($this->projectDir . '/docker/.env', "MODE=nested\nONLY_NESTED=1\n");
+
+        $model = $this->dindModel(['deploy_strategy' => 'compose', 'env_vars' => ['MODE' => 'mine']]);
+        $this->forcedEnvironment($model, tracked: false)->apply($compose);
+
+        $env = $this->vars((string) file_get_contents($this->projectDir . '/.env'));
+        $this->assertSame('mine', $env['MODE']);
+        $this->assertSame('1', $env['ONLY_NESTED']);
     }
 
     public function test_a_tracked_env_is_not_given_generated_values(): void
@@ -387,10 +640,15 @@ class DindProjectEnvironmentTest extends TestCase
         $this->forcedEnvironment($this->dindModel(['deploy_strategy' => 'compose']), tracked: true)->apply();
 
         $this->assertSame("APP_NAME=Demo\n", file_get_contents($this->projectDir . '/.env'));
+        // The value the database needs still reaches compose, from the engine's own file.
+        $this->assertArrayHasKey(
+            'POSTGRES_PASSWORD',
+            $this->vars((string) file_get_contents($this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES))
+        );
     }
 
     /**
-     * #173: `.env.default` copies `.env` after the prepare hook wrote its
+     * `.env.default` copies `.env` after the prepare hook wrote its
      * secrets, and ~/project is traversable by every uid on the host. An
      * earlier deploy's 0644 copy is tightened on the next apply().
      */
@@ -409,6 +667,53 @@ class DindProjectEnvironmentTest extends TestCase
         $this->assertSame('0644', $this->mode('.env'));
     }
 
+    /** Merging env_vars into a .env a hook made 0600 used to rewrite it 0644. */
+    public function test_rewriting_env_never_widens_its_mode(): void
+    {
+        file_put_contents($this->projectDir . '/.env', "ADMIN_PASS=from-the-hook\n");
+        chmod($this->projectDir . '/.env', 0600);
+        $this->forcedEnvironment($this->dindModel(['env_vars' => ['TOKEN' => 'x']]), tracked: false)->apply();
+        $this->assertSame('0600', $this->mode('.env'));
+        $this->assertSame(['ADMIN_PASS' => 'from-the-hook', 'TOKEN' => 'x'], $this->vars((string) file_get_contents($this->projectDir . '/.env')));
+
+        // Without env_vars, the restored base is written back the same way.
+        $this->forcedEnvironment($this->dindModel(), tracked: false)->apply();
+        $this->assertSame('0600', $this->mode('.env'));
+
+        chmod($this->projectDir . '/.env', 0640);
+        $this->forcedEnvironment($this->dindModel(['env_vars' => ['TOKEN' => 'y']]), tracked: false)->apply();
+        $this->assertSame('0640', $this->mode('.env'));
+
+        // Never wider than before either.
+        chmod($this->projectDir . '/.env', 0666);
+        $this->forcedEnvironment($this->dindModel(['env_vars' => ['TOKEN' => 'z']]), tracked: false)->apply();
+        $this->assertSame('0644', $this->mode('.env'));
+    }
+
+    /** A .env the engine creates holds env_vars and generated secrets: owner-only. */
+    public function test_a_new_env_is_created_owner_only(): void
+    {
+        file_put_contents($this->projectDir . '/.env.example', "APP_NAME=Demo\n");
+        $this->dind($this->dindModel())->applyProjectEnvVars();
+        $this->assertSame('0600', $this->mode('.env'));
+
+        unlink($this->projectDir . '/.env');
+        unlink($this->projectDir . '/.env.example');
+        $this->dind($this->dindModel(['env_vars' => ['VI_TOKEN' => 'secret']]))->applyProjectEnvVars();
+        $this->assertSame('0600', $this->mode('.env'));
+        $this->assertStringContainsString('VI_TOKEN=secret', (string) file_get_contents($this->projectDir . '/.env'));
+    }
+
+    public function test_an_existing_env_merged_with_env_vars_keeps_its_mode(): void
+    {
+        file_put_contents($this->projectDir . '/.env', "APP_NAME=Demo\n");
+        chmod($this->projectDir . '/.env', 0644);
+
+        $this->dind($this->dindModel(['env_vars' => ['VI_TOKEN' => 'secret']]))->applyProjectEnvVars();
+
+        $this->assertSame('0644', $this->mode('.env'));
+    }
+
     public function test_env_overrides_are_written_owner_only(): void
     {
         file_put_contents($this->projectDir . '/.env', "APP_NAME=Demo\n");
@@ -424,8 +729,8 @@ class DindProjectEnvironmentTest extends TestCase
 
         $this->assertSame('0600', $this->mode(EngineArtifacts::ENV_OVERRIDES));
         $this->assertSame('0600', $this->mode('.env.default'));
-        // Still 0644: port detection reads it as www-data, not through sudo.
-        $this->assertSame('0644', $this->mode(EngineArtifacts::RUN_COMPOSE));
+        // The run file now carries .env.panelalpha too; port detection reads it through sudo.
+        $this->assertSame('0600', $this->mode(EngineArtifacts::RUN_COMPOSE));
     }
 
     private function mode(string $name): string

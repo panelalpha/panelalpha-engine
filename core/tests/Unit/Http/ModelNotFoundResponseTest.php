@@ -49,6 +49,17 @@ class ModelNotFoundResponseTest extends TestCase
             ->assertExactJson(['message' => 'Ip subnet not found']);
     }
 
+    public function test_a_missing_user_model_is_called_a_project(): void
+    {
+        Route::get('/api/test-missing-user', static function () {
+            throw (new ModelNotFoundException())->setModel(\App\Models\User::class, [7]);
+        });
+
+        $this->getJson('/api/test-missing-user')
+            ->assertStatus(404)
+            ->assertExactJson(['message' => 'Project not found']);
+    }
+
     public function test_an_exception_without_a_model_says_not_found(): void
     {
         Route::get('/api/test-missing-anything', static function () {

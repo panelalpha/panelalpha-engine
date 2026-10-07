@@ -12,14 +12,14 @@ description: >-
   SEED THE OFFICIAL IMAGE, DO NOT BUILD. Upstream publishes libredesk/libredesk
   on Docker Hub and tags every release; this recipe pins the current stable
   release v2.8.0 (v2.9.0 exists only as release candidates on Docker Hub at time
-  of writing, so it is not used). Seeding a Hub image also sidesteps engine#229
-  (image-seed NotFound). The image is Alpine 3.18 with the Go binary and the
+  of writing, so it is not used). Seeding a Hub image also sidesteps the
+  image-seed NotFound. The image is Alpine 3.18 with the Go binary and the
   baked-in SPA -- nothing is built from the clone.
 
   WHY COMPOSE-REPLACE. Libredesk needs Postgres and Redis beside it, which the
   schema's MySQL-only `database:` cannot provide, so the datastore is a compose
   concern. Upstream's own docker-compose.yml is close but bind-mounts ./uploads
-  and ./config.toml into the project dir a redeploy wipes (engine#173), publishes
+  and ./config.toml into the project dir a redeploy wipes, publishes
   Postgres and Redis on the host, and runs install+upgrade+serve in one command
   with no gate. This override supplies the durable stack: postgres:17-alpine and
   redis:7-alpine on named volumes with no host ports, uploads on a named volume,
@@ -33,7 +33,7 @@ description: >-
   service_completed_successfully -- so a failed install fails the deploy instead
   of publishing a broken site, and a redeploy is idempotent (the schema and the
   admin password are never reset). A `ready` gate waits on the app's healthcheck
-  (engine#204) so the deploy turns green only once the site answers.
+  so the deploy turns green only once the site answers.
 
   CONFIG + SECRETS. config.toml (which upstream expects the operator to create
   from config.sample.toml) is rendered by hooks/prepare.sh, with env=prod and

@@ -5,7 +5,7 @@ description: >-
   checks for new releases, and PostgreSQL. The repository's compose file
   requires SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET with `:?`, so the plain
   deploy stops at interpolation; the engine also generates a value for the
-  secret-named SPOTIFY_CLIENT_SECRET over the customer's (engine#336), and the
+  secret-named SPOTIFY_CLIENT_SECRET over the customer's, and the
   public URL, CORS and CSRF origins default to upstream's own domain, so the
   Spotify login would send users there.
 

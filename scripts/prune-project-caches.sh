@@ -6,8 +6,8 @@
 # ~/project every deploy, so vendor/ and node_modules are rebuilt every time and
 # these are what keep that off packagist and the npm registry. Nothing mounts
 # them into a running application, so a project that has stopped deploying holds
-# them for exactly as long as it never reads them -- measured at ~306MB for a
-# Laravel skeleton with a Vite front end.
+# them for exactly as long as it never reads them -- ~306MB for a Laravel
+# skeleton with a Vite front end.
 #
 # Runs in the host's mount namespace, entered by the caller: /var/cache/panelalpha
 # is not a core-container volume, which is why this cannot be done from PHP.

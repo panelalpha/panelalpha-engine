@@ -12,8 +12,8 @@ description: >-
   Postgres. overrides/docker-compose.yml is a REPLACE compose (no build), which
   detection prefers to the root Dockerfile (compose priority 980 > dockerfile
   970) because the file references only prebuilt images. No platform block is
-  declared, so the account's public address reaches the app the way engine#221
-  intends: ComposePlaceholders rewrites the app service's PA_PUBLIC_URL, shipped
+  declared, so the account's public address reaches the app the intended
+  way: ComposePlaceholders rewrites the app service's PA_PUBLIC_URL, shipped
   as http://localhost, to the account's https URL before the stack starts, and
   the app's entrypoint derives Instance:WebDomain / Instance:AccountDomain from
   it. Everything else the app needs is set as a .NET environment override
@@ -34,7 +34,7 @@ description: >-
   The Postgres password is generated once by hooks/prepare.sh into
   ~/.panelalpha/iceshrimp/ (0600) and copied into
   ~/project/.env each deploy for compose substitution — never regenerated,
-  because ~/project is wiped on every redeploy (engine#173) and a fresh DB
+  because ~/project is wiped on every redeploy and a fresh DB
   password would lock the app out of its own volume. Postgres data and uploaded
   media live on named volumes, which survive rebuild and are wiped only on
   account deletion or a failed-deploy rollback.
@@ -43,8 +43,7 @@ description: >-
   SMTP, set through the account's env vars. Media processing defaults to the
   managed ImageSharp path (no native libvips needed). A no-op ready service
   gates the deploy on the app's own /api/v1/instance health so the engine does
-  not call the deploy finished while the first migration is still running
-  (engine#90, engine#204).
+  not call the deploy finished while the first migration is still running.
 credentials:
   adopt_from: .panelalpha/iceshrimp/secrets.env
   fields:

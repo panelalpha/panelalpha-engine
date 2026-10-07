@@ -1,0 +1,22 @@
+------
+> [base 7/7] RUN bundle install --jobs 4 --retry 3  && rm -rf ~/.bundle /usr/local/bundle/ruby/*/cache:
+214.7 /usr/local/lib/ruby/3.3.0/bundler/worker.rb:90:in `block (2 levels) in
+214.7 create_threads'
+214.7
+214.7 An error occurred while installing selma (0.5.3), and Bundler cannot continue.
+214.7
+214.7 In Gemfile:
+214.7   publify_amazon_sidebar was resolved to 10.0.0, which depends on
+214.7     publify_core was resolved to 10.0.3, which depends on
+214.7       html-pipeline was resolved to 3.2.4, which depends on
+214.7         selma
+------
+WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+panelalpha.Dockerfile:14
+--------------------
+13 |     COPY .ruby-version* .tool-versions* ./
+14 | >>> RUN bundle install --jobs 4 --retry 3 \
+15 | >>>  && rm -rf ~/.bundle /usr/local/bundle/ruby/*/cache
+16 |
+--------------------
+failed to solve: process "/bin/sh -c bundle install --jobs 4 --retry 3  && rm -rf ~/.bundle /usr/local/bundle/ruby/*/cache" did not complete successfully: exit code: 5

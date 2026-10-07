@@ -10,6 +10,7 @@ namespace App\Lib\Deploy\Port;
  *     ${VAR-default}    the default, when unset
  *     ${VAR} or $VAR    nothing — a port with no default is dropped by the
  *                       caller's `> 0` guard
+ *     ${VAR:?err}       nothing — required, and there is no default to read
  */
 final class EnvVarDefault
 {
@@ -27,6 +28,7 @@ final class EnvVarDefault
     private const RULES = [
         '/\$\{(' . self::NAME . '):-([^}]*)\}/' => '$2',
         '/\$\{(' . self::NAME . ')-([^}]*)\}/' => '$2',
+        '/\$\{(' . self::NAME . '):?\?[^}]*\}/' => '',
         '/\$\{(' . self::NAME . ')\}/' => '',
         '/\$(' . self::NAME . ')/' => '',
     ];

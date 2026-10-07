@@ -1,6 +1,7 @@
 # Compose-replace: the repo ships no compose file or Dockerfile.
 # Runs the LinuxServer image upstream recommends; settings and library on named
-# volumes, behind a small nginx front for engine#323.
+# volumes, behind a small nginx front that sends `Connection: upgrade` only for real
+# upgrades.
 services:
   app:
     image: linuxserver/calibre-web:0.6.27
@@ -34,7 +35,7 @@ services:
     mem_limit: 64m
 
   # The only published port. The engine's vhost sends `Connection: upgrade` on
-  # every request and gevent then never finishes a POST (engine#323); drop once fixed.
+  # every request and gevent then never finishes a POST; drop once fixed.
   web:
     image: nginx:1-alpine
     restart: unless-stopped

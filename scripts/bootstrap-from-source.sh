@@ -2,7 +2,7 @@
 # Bring the engine up from an already-uploaded source tree, without the full
 # installer. Does what install_panelalpha_engine() does — env files, config
 # seeding, TLS, network, vendor, compose, migrations — and nothing else: no
-# apt upgrade, no CSF, no monit, no sysctl, no Let's Encrypt, no telemetry.
+# apt upgrade, no firewall, no monit, no sysctl, no Let's Encrypt, no telemetry.
 #
 # Idempotent: every step is guarded, so re-running it after another upload is
 # the redeploy path.
@@ -104,6 +104,10 @@ command -v ssh-keygen >/dev/null || MISSING+=(openssh-client)
 command -v curl >/dev/null || MISSING+=(curl)
 command -v rsync >/dev/null || MISSING+=(rsync)
 command -v ipcalc >/dev/null || MISSING+=(ipcalc)
+# As in installer.sh: its nftables.service stays disabled.
+command -v nft >/dev/null || MISSING+=(nftables)
+# As in installer.sh: the engine queues its background webserver reloads with `at`.
+command -v at >/dev/null || MISSING+=(at)
 [ "$QUOTA" != 1 ] || command -v setquota >/dev/null || MISSING+=(quota)
 if [ ${#MISSING[@]} -gt 0 ]; then
     step "Installing ${MISSING[*]}"
@@ -231,6 +235,7 @@ chown -R 33:33 core/storage core/bootstrap/cache 2>/dev/null ||
 # file is gitignored — without it compose cannot even parse the project.
 step "Seeding config files from templates/"
 cp -n docker-compose.yml-nginx-proxy docker-compose.yml-webserver
+bash scripts/refresh-webserver-image.sh "$PWD" || warn "Could not bring the webserver image tag up to date"
 
 mkdir -p webserver-config/{apache,nginx,nginx-proxy}/vhosts \
     webserver-config/{litespeed,openlitespeed}-admin \
@@ -240,10 +245,15 @@ mkdir -p webserver-config/{apache,nginx,nginx-proxy}/vhosts \
 cp -Rn templates/webserver-config/. webserver-config/
 cp -Rn templates/config/pure-ftpd/. config/pure-ftpd/
 chmod +x config/pure-ftpd/entrypoint.sh
+# As in installer.sh: without a password database pure-ftpd logs no failed login.
+mkdir -p pureftpd
+touch pureftpd/pureftpd.passwd
 cp -Rn templates/config/sftp/. config/sftp/
 # Scripts are engine code, not host state: -n would keep the installed copy.
 cp templates/config/sftp/{entrypoint.sh,sync-logins.sh} config/sftp/
 cp -Rn templates/config/logrotate/. config/logrotate/
+# Their postrotate reopens the webserver's logs: engine code, not host state.
+cp templates/config/logrotate/{apache,nginx,nginx-proxy}.conf config/logrotate/
 cp -Rn templates/config/exim/. config/exim/
 cp -Rn templates/config/modsecurity/. config/modsecurity/
 [ -f config/sftp/ssh_host_ed25519_key ] ||
@@ -271,12 +281,26 @@ docker network inspect pash-default-network >/dev/null 2>&1 || {
     step "Creating pash-default-network"
     bash scripts/ensure-docker-network.sh "${DOCKER_NETWORK_MTU}"
 }
+# The accounts' network; sites-db and the registries join it.
+DOCKER_NETWORK_MTU="${DOCKER_NETWORK_MTU}" bash scripts/tenant-network-firewall.sh --create --restart-docker \
+    || warn "Could not create the tenant network"
+# Closed from boot until core binds it, not only from when core starts.
+bash scripts/tenant-network-firewall.sh --install-units \
+    || warn "Could not install the tenant network's boot units"
 
 # ----------------------------------------------------------------------- vendor
-if [ "$FORCE_COMPOSER" = 1 ] || [ ! -d core/vendor ]; then
+# The upload excludes core/vendor, so a redeploy that brings a new composer.lock
+# must install again. The stamp records the lock the vendor tree was built from.
+COMPOSER_LOCK_STAMP=core/vendor/.pa-composer-lock
+composer_needed() {
+    [ "$FORCE_COMPOSER" = 1 ] || [ ! -d core/vendor ] ||
+        [ "$(cat "$COMPOSER_LOCK_STAMP" 2>/dev/null)" != "$(sha256sum core/composer.lock | cut -d' ' -f1)" ]
+}
+if composer_needed; then
     step "Installing composer dependencies"
     resolve_composer_image "${ENGINE_DIR}/core" "${ENGINE_DIR}"
     docker run --rm -v "${ENGINE_DIR}/core:/app" -w /app "$COMPOSER_IMAGE" composer install
+    sha256sum core/composer.lock | cut -d' ' -f1 >"$COMPOSER_LOCK_STAMP"
 fi
 
 # --------------------------------------------------------------------- the stack
@@ -344,8 +368,13 @@ if grep -q '^COMPOSE_PROFILES=' .env &&
         # symlink now dangles because stopping resolved took its target away --
         # `-L` is true of the link while `-e` follows it, so the pair is exactly
         # "a link pointing at nothing".
+        #
+        # A third shape is resolved's own file at the link's end: Debian 12's
+        # cloud image links /run/systemd/resolve/resolv.conf, which names real
+        # servers now and is gone after the next boot, leaving no DNS at all.
         if grep -q '^[[:space:]]*nameserver[[:space:]]\+127\.0\.0\.53' /etc/resolv.conf 2>/dev/null ||
-            { [ -L /etc/resolv.conf ] && [ ! -e /etc/resolv.conf ]; }; then
+            { [ -L /etc/resolv.conf ] && [ ! -e /etc/resolv.conf ]; } ||
+            { [ -L /etc/resolv.conf ] && readlink -f /etc/resolv.conf | grep -q '^/run/systemd/resolve/'; }; then
             step "Repointing /etc/resolv.conf away from the resolved stub"
             cp -a /etc/resolv.conf /etc/resolv.conf.backup
             rm -f /etc/resolv.conf
@@ -414,24 +443,26 @@ fi
 
 # ------------------------------------------------------------------- hardening
 # installer.sh's harden_host. On by default so a source install reaches the same end
-# state as a packaged one — the API test suite exercises CSF, so an engine without it
-# is not a complete engine. --no-hardening skips the lot.
+# state as a packaged one — the API test suite exercises the firewall, so an engine
+# without it is not a complete engine. --no-hardening skips the lot.
 #
-# Before the stack, not after: csf.sh rebuilds the whole iptables ruleset, dropping
-# the chains the Docker daemon installs at start, so the daemon has to be restarted
-# — and with the stack up that takes every container down with it. It needs .env,
-# the compose bridge and docker0, so this is the earliest point it can run.
+# Before the stack, not after: on a host still running CSF, firewall.sh moves it to
+# ufw and CSF's uninstaller flushes the whole iptables ruleset, dropping the chains
+# the Docker daemon installs at start, so the daemon has to be restarted — and with
+# the stack up that takes every container down with it. It needs .env, the compose
+# bridge and docker0, so this is the earliest point it can run.
 if [ "$HARDEN" = 1 ]; then
-    step "Applying host configuration (sysctl, monit, CSF)"
+    step "Applying host configuration (sysctl, monit, firewall)"
     bash scripts/configure-sysctl.sh || warn "sysctl configuration failed"
     bash scripts/configure-monit.sh || warn "monit configuration failed"
-    bash scripts/csf.sh --install || warn "CSF install failed"
+    bash scripts/firewall.sh --install || warn "Firewall setup failed"
     service docker restart || warn "Could not restart Docker"
-    # engine#246, as in installer.sh: the build network, while Docker's chains are fresh.
+    # As in installer.sh: the build network, while Docker's chains are fresh.
     bash scripts/build-network-firewall.sh --create panelalpha-build || warn "Could not create the build network"
+    bash scripts/tenant-network-firewall.sh --create --restart-docker || warn "Could not apply the tenant network firewall"
 fi
 
-# Same as installer.sh: without it no project disk limit is enforced (#244).
+# Same as installer.sh: without it no project disk limit is enforced.
 if [ "$QUOTA" = 1 ]; then
     step "Turning on filesystem quota for /home"
     bash scripts/configure-quota.sh || warn "Could not turn on filesystem quota; project disk limits will not be enforced"
@@ -439,7 +470,20 @@ else
     warn "Skipping filesystem quota (--no-quota): project disk limits will not be enforced"
 fi
 
+# Same as installer.sh: lxcfs gives each account its own /proc/meminfo, loadavg and CPUs.
+step "Setting up lxcfs"
+bash scripts/configure-lxcfs.sh || warn "lxcfs is not running; accounts will see the host's memory, CPUs and load in /proc"
+
+# Same as installer.sh: host profiles that attach by path also confine tenant binaries.
+step "Disabling the host's path-attached AppArmor profiles"
+bash scripts/configure-apparmor.sh || warn "Could not disable the host's path-attached AppArmor profiles; tenant binaries at those paths stay confined"
+
 step "Starting the stack"
+# As in installer.sh: sites-db and the registries join pash-tenants.
+docker network inspect pash-tenants >/dev/null 2>&1 || {
+    echo "The accounts' network pash-tenants could not be created; the tenant-network-firewall messages above say why." >&2
+    exit 1
+}
 # A host that ran the old stack still has dockerhub-mirror on registry-proxy's port.
 bash scripts/retire-dockerhub-mirror.sh .env
 # shellcheck disable=SC2086
@@ -453,6 +497,13 @@ done
 
 step "Running migrations"
 docker compose exec -T core php artisan migrate --force
+
+step "Moving accounts onto the tenant network"
+# As in installer.sh: live, and never fails the bootstrap.
+docker compose exec -T core php artisan project:network:move --all || warn "Some accounts could not be moved onto the tenant network"
+
+step "Pointing Exim at this host's Docker addresses"
+docker compose exec -T core php artisan system:exim:rebuild --networks || warn "Exim's listen addresses could not be updated"
 
 IP_WAS_SET=0
 if ! docker compose exec -T core php artisan settings:exists default_ipv4 >/dev/null 2>&1; then
@@ -468,11 +519,19 @@ fi
 # `listen 10.x.x.x:80/443`. nginx cannot make that change on a reload — binding the
 # specific address fails with EADDRINUSE against its own wildcard socket — so the
 # webserver keeps serving the old config and every tenant vhost 502s until it restarts.
-# installer.sh only ever sets the address on a host with no tenant vhosts yet, so it
-# never hits this; a re-run over an existing install does.
+# Render first, as installer.sh's render_webserver_config does: a restart alone boots
+# the shipped wildcard nginx.conf again, and the first project hits the bind failure.
 if [ "$IP_WAS_SET" = 1 ]; then
+    step "Rendering the webserver config for ${PUBLIC_IP}"
+    docker compose exec -T core php artisan system:domain:rebuild || warn "Could not rebuild the webserver configuration"
     step "Restarting the webserver to pick up the address-specific vhosts"
     docker compose restart sites-http
+else
+    # An update can ship a new webserver config (new includes, a new image's modules);
+    # render it now rather than at the next domain change. The reload restarts the
+    # webserver itself if the listen addresses changed.
+    step "Rendering the webserver config"
+    docker compose exec -T core php artisan system:domain:rebuild || warn "Could not rebuild the webserver configuration"
 fi
 
 # SFTP-as-root uploads leave root-owned files where php-fpm needs to write.
@@ -509,15 +568,29 @@ if [ "$HARDEN" = 1 ]; then
     # per PHP minor is paid by whichever customer deploys that minor first.
     bash scripts/prewarm-images.sh || warn "Could not start image prewarm"
 else
-    warn "Skipped sysctl/monit/CSF/prewarm (--no-hardening) — CSF-dependent API tests will fail"
+    warn "Skipped sysctl/monit/firewall/prewarm (--no-hardening) — firewall API tests will fail"
 fi
+
+# Tokens survive a redeploy, so count them rather than assume a fresh engine.
+# Fails when the list cannot be read; prints 0 for an empty one.
+existing_tokens() {
+    local list
+    list=$(docker compose exec -T core php artisan api:token:list 2>/dev/null) || return 1
+    printf '%s\n' "$list" | tr -d '\r' | grep -cE '^\| +[0-9]+ +\|' || true
+}
 
 echo
 step "Engine is up."
 echo "  API URL: https://${PUBLIC_IP}:2011/api"
 echo "  MCP URL: https://${PUBLIC_IP}:2011/mcp"
 echo
-echo "No tokens exist yet — mint them when you need them ('pae', or 'pae-artisan'):"
+if ! tokens=$(existing_tokens); then
+    echo "Mint tokens when you need them ('pae', or 'pae-artisan'):"
+elif [ "$tokens" -gt 0 ]; then
+    echo "${tokens} token(s) already exist ('pae api:token:list'); mint another when you need one ('pae', or 'pae-artisan'):"
+else
+    echo "No tokens exist yet — mint them when you need them ('pae', or 'pae-artisan'):"
+fi
 echo "  pae api:token:create default"
 echo "  pae mcp:token:create default   # prints the registration command for every MCP client"
 echo

@@ -141,7 +141,7 @@ class PhpBaseImage
      * Debian packages a manifest may add with `system_packages:`, each set
      * becoming its own `-x` variant. An allowlist, because every distinct set
      * is another ~1.1 GB image on the host; ffmpeg alone is +371 MB, which is
-     * why it is not in the plain base (engine#193).
+     * why it is not in the plain base.
      *
      * @var list<string>
      */

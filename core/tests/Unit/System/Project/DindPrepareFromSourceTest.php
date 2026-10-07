@@ -2,6 +2,8 @@
 
 namespace Tests\Unit\System\Project;
 
+use App\Lib\Deploy\Checkout\EngineArtifacts;
+use App\Models\Domain as DomainModel;
 use App\Models\User as ModelsUser;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
@@ -73,7 +75,7 @@ class DindPrepareFromSourceTest extends TestCase
         $this->assertSame('static', $details['deploy_strategy']);
         $this->assertNotSame('', (string) $details['deploy_label']);
         $this->assertNull($details['git_commit']);
-        $this->assertFileExists($this->projectDir . '/docker-compose.yml');
+        $this->assertFileExists($this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE);
     }
 
     public function test_pre_check_is_a_no_op_when_the_repo_has_no_precheck_script(): void
@@ -102,6 +104,12 @@ class DindPrepareFromSourceTest extends TestCase
             public function save(array $options = []): bool
             {
                 return true;
+            }
+
+            // getMainDomain() queries the database; this fixture has no domain.
+            public function getMainDomain(): ?DomainModel
+            {
+                return null;
             }
         };
         $model->username = 'alice';

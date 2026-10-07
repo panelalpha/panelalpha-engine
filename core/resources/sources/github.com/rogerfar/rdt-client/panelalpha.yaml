@@ -24,13 +24,6 @@ description: >-
   The login is returned by GET /projects/{name}/app-credentials; accounts
   deployed before this kept it in ~/.panelalpha/rdtclient/admin.env, which
   `adopt_from` carries over.
-
-  Measured on 10.10.10.25 (2026-09-28, engine 705f250a): deploy 65s, rebuild
-  49s; app 94 MiB, proxy 5 MiB. Anonymous Create, /Api/Settings,
-  /Api/Torrents, /api/v2/torrents/info, /api/v2/app/preferences, the SABnzbd
-  queue and /hub negotiate -> 403; the same hub negotiate sent straight to
-  app:6500 -> 200, which is what the proxy exists to stop. Websocket upgrade
-  on /hub with a session -> 101.
 credentials:
   adopt_from: .panelalpha/rdtclient/admin.env
   fields:

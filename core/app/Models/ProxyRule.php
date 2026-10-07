@@ -145,45 +145,95 @@ class ProxyRule extends Model
     /**
      * Ensure generated HTTP :80 and :443 rules exist for a domain → account upstream.
      */
-    public static function ensureGeneratedHttpPair(string $username, string $fqdn, int $upstreamPort): void
-    {
-        self::upsertGeneratedHttpRule($username, $fqdn, 80, $upstreamPort, true);
-        self::upsertGeneratedHttpRule($username, $fqdn, 443, $upstreamPort, true);
+    public static function ensureGeneratedHttpPair(
+        string $username,
+        string $fqdn,
+        int $upstreamPort,
+        ?string $upstreamProtocol = null
+    ): void {
+        self::upsertGeneratedHttpRule($username, $fqdn, 80, $upstreamPort, true, $upstreamProtocol);
+        self::upsertGeneratedHttpRule($username, $fqdn, 443, $upstreamPort, true, $upstreamProtocol);
+    }
+
+    /**
+     * Upsert the domain's generated :80/:443 pair in place and drop every other
+     * generated row of the user (legacy *:appPort rows, a previous domain).
+     */
+    public static function syncGeneratedHttpPair(
+        string $username,
+        string $fqdn,
+        int $upstreamPort,
+        ?string $upstreamProtocol = null
+    ): void {
+        $keep = [];
+        foreach ([80, 443] as $listenPort) {
+            $rule = self::upsertGeneratedHttpRule($username, $fqdn, $listenPort, $upstreamPort, true, $upstreamProtocol);
+            if ($rule !== null) {
+                $keep[] = $rule->id;
+            }
+        }
+
+        self::forUser($username)->where('is_generated', true)->whereNotIn('id', $keep)->delete();
     }
 
     /**
      * Persist one generated HTTP listen → upstream rule for a project domain.
+     * Returns null when a hand-made rule already owns that domain and port.
+     * $upstreamProtocol is 'https' when the recipe declares the app port speaks TLS.
      */
     public static function upsertGeneratedHttpRule(
         string $username,
         string $fqdn,
         int $listenPort,
         int $upstreamPort,
-        bool $isPrimary = false
-    ): void {
-        self::updateOrCreate(
-            [
-                'owner_scope' => 'user',
-                'username' => $username,
-                'transport' => 'http',
-                'listen_port' => $listenPort,
-                'server_name' => $fqdn,
-            ],
-            [
-                'enabled' => true,
-                'listen_ip' => '*',
-                'upstream_host' => $username,
-                'upstream_port' => $upstreamPort,
-                'upstream_protocol' => 'http',
-                'is_generated' => true,
-                'metadata' => [
-                    'description' => ($isPrimary ? 'Primary' : 'Additional')
-                        . " {$listenPort}→{$upstreamPort} for {$username}",
-                    'source' => 'auto-detected-from-compose',
-                    'detected_port' => $upstreamPort,
-                ],
-            ]
-        );
+        bool $isPrimary = false,
+        ?string $upstreamProtocol = null
+    ): ?self {
+        // The domain vhost renders one rule per port, and an operator's rule beats the default.
+        // Another project's rule named after the domain is never rendered, so it beats nothing.
+        $handMade = self::query()
+            ->where('transport', 'http')
+            ->where('listen_port', $listenPort)
+            ->where('server_name', $fqdn)
+            ->where('is_generated', false)
+            ->where(static fn (Builder $q) => $q->where('owner_scope', 'system')->orWhere('username', $username))
+            ->exists();
+        if ($handMade) {
+            return null;
+        }
+
+        $key = [
+            'owner_scope' => 'user',
+            'username' => $username,
+            'transport' => 'http',
+            'listen_port' => $listenPort,
+            'server_name' => $fqdn,
+        ];
+        /** @var self $rule */
+        $rule = self::query()->where($key)->where('is_generated', true)->first() ?? new self($key);
+        $setByRecipe = ($rule->metadata['port_scheme'] ?? null) === 'https';
+        $rule->fill([
+            'enabled' => true,
+            'listen_ip' => '*',
+            'upstream_host' => $username,
+            'upstream_port' => $upstreamPort,
+            'is_generated' => true,
+            'metadata' => [
+                'description' => ($isPrimary ? 'Primary' : 'Additional')
+                    . " {$listenPort}→{$upstreamPort} for {$username}",
+                'source' => 'auto-detected-from-compose',
+                'detected_port' => $upstreamPort,
+            ] + ($upstreamProtocol === 'https' ? ['port_scheme' => 'https'] : []),
+        ]);
+        if ($upstreamProtocol === 'https') {
+            $rule->upstream_protocol = 'https';
+        } elseif (!$rule->exists || $rule->upstream_protocol === null || $setByRecipe) {
+            // Undeclared: http, except an operator's own switch to https, which stays.
+            $rule->upstream_protocol = 'http';
+        }
+        $rule->save();
+
+        return $rule;
     }
 
     /**

@@ -4,7 +4,7 @@ Project/ALM management — products, projects, stories, tasks, bugs, releases �
 on ZenTao's own PHP framework, with MySQL underneath and no Composer at the
 repository root.
 
-Upstream: <https://github.com/easysoft/zentaopms>. Tracker: #829.
+Upstream: <https://github.com/easysoft/zentaopms>.
 
 ## What the engine could not infer
 
@@ -16,12 +16,12 @@ which is on none of those lists, and has no index file at the repository root �
 so `detect()` falls through everything and returns `''`, no `PA_DOCROOT` is
 emitted, and `panelalpha-serve.sh` falls back to `/app` because there is no
 `/app/public`. `/app` holds `README.md`, `Makefile`, `config/` and `module/`
-and no index, so Apache answers 403 and the report says `serving-missing_entry`.
+and no index, so Apache answers 403.
 
 `docroot: www` in `panelalpha.yaml` is the fix, and it is enough on its own:
 `www` is a plain relative path, so unlike `.` it survives
 `PlatformManifest::readDocroot()` (`PlatformManifest.php:297-318`), which folds
-both `''` and `'.'` to "undeclared". **#172 does not bite here** and no
+both `''` and `'.'` to "undeclared". **That fold does not bite here** and no
 `PA_DOCROOT` override is needed — this is the case the manifest key exists for.
 Adding `www` to the probe list would be the wrong fix: `www/` is also the
 conventional name for a whole *site* directory, and a project with a
@@ -44,11 +44,11 @@ at the repository root. None of them is reachable over HTTP by construction
 rather than by an `.htaccess` rule.
 
 That is a materially better position than CouchCMS or OpenEMR, which serve from
-the repository root and need a `files/.htaccess` to claw it back (#181). It also
+the repository root and need a `files/.htaccess` to claw it back. It also
 means `panelalpha-setup.sh` and `panelalpha-install.php` can sit at the
 repository root without relying on the vhost's `panelalpha-*` deny rule.
 
-Verified on a live deploy over the public HTTPS domain: `/config/my.php`,
+So `/config/my.php`,
 `/db/zentao.sql`, `/docker-compose.override.yml`, `/Makefile`,
 `/framework/router.class.php` and `/module/user/model.php` return no content,
 because none of them is under the document root; `/.git/config`,
@@ -59,13 +59,13 @@ generated vhost's own rules.
 **Read those results carefully if you audit this yourself.** Upstream's
 `www/.htaccess` rewrites *every* path that is not a real file back to
 `index.php` (`RewriteRule (.*)$ index.php/$1 [L]`), so a missing file answers
-**200**, not 404. A status-code-only probe reports two dozen "leaks" that are
-all the same empty page. Compare bodies, not codes.
+**200**, not 404. A status-code-only probe reports "leaks" that are all the
+same empty page. Compare bodies, not codes.
 
 ### What upstream does put in the document root
 
-`www/` holds more than the front controller, and on a first deploy every one of
-these answered 200 to an unauthenticated request:
+`www/` holds more than the front controller, and without the recipe every one
+of these answers 200 to an unauthenticated request:
 
 | File | What it is |
 | --- | --- |
@@ -75,15 +75,13 @@ these answered 200 to an unauthenticated request:
 | `coverage.php`, `webcoverage.php` | test-coverage reports |
 | `init.php` | bare framework bootstrap that builds a `commonModel` named "tester" |
 | `worker.php`, `cron.php` | RoadRunner/FrankenPHP and cron entries, neither meant for HTTP |
-| `install.php.tmp`, `upgrade.php.tmp` | Apache has no `.tmp` handler, so it served the installer's **source as plain text** — and these are the files `Makefile:85-86` renames into a live installer |
+| `install.php.tmp`, `upgrade.php.tmp` | Apache has no `.tmp` handler, so it serves the installer's **source as plain text** — and these are the files `Makefile:85-86` renames into a live installer |
 
 `hooks/prepare.sh` appends a `FilesMatch` deny for all of them to
 `www/.htaccess`. Denied rather than deleted, so the checkout stays exactly as
 upstream ships it and an account that wants them back has one line to remove.
 `index.php`, `api.php`, `imgproxy.php` (a three-line stub that only prints a
-discouraging message) and the asset directories are untouched — re-verified
-after the change: the whole table above is 403 and the application and its REST
-API still work.
+discouraging message) and the asset directories are untouched.
 
 ## There is no web installer to race
 
@@ -99,9 +97,8 @@ build closes it.
 **And the install controller refuses to run even if one appeared.**
 `install/control.php:25` calls `helper::end()` unless `$this->app->installing`,
 and that flag is only set when the app is created in installing mode — which
-only `www/install.php` does. Measured: `GET /install.php` on a live deploy is
-rewritten to `index.php`, reaches the install controller and returns an **empty
-200**. No wizard, no step 1, no way to claim the admin account. So the answer to
+only `www/install.php` does. `GET /install.php` is rewritten to `index.php`,
+reaches the install controller and returns an **empty 200**. No wizard, no step 1, no way to claim the admin account. So the answer to
 "can an unauthenticated visitor claim the first admin?" is **no**, for two
 independent reasons.
 
@@ -125,7 +122,7 @@ schema, the privilege seed or the password hashing.
 The super-admin password is generated per account by `hooks/prepare.sh` into
 `~/.panelalpha/zentao-admin-password` — mode 0600 inside a 0700 directory,
 because account homes are root-owned 0755 and an account cannot create a file
-directly in its own home — and is never a default. #173 writes `.env.default`
+directly in its own home — and is never a default. The engine writes `.env.default`
 into the checkout 0644 and readable by every other tenant, which is the other
 reason nothing secret belongs in `~/project`.
 
@@ -165,10 +162,10 @@ redeploy does not touch it.
 **Attachments do not.** `fileModel::setSavePath()`
 (`module/file/model.php:533`) puts uploads in
 `www/data/upload/<companyID>/<YYYYMM>/`, which is inside the checkout — and
-every clone wipes `~/project` (#173). So **a redeploy destroys every uploaded
+every clone wipes `~/project`. So **a redeploy destroys every uploaded
 file while the `zt_file` rows that point at them survive**, leaving an
 application that lists attachments it can no longer serve. This is upstream's
-layout, not the engine's fault, but #173 is what turns "files in the checkout"
+layout, not the engine's fault, but the engine wiping the checkout is what turns "files in the checkout"
 into "files that disappear". Say so to anyone who hosts this.
 
 `www/data/` is also inside the document root. Upstream protects it with nothing;
@@ -224,14 +221,13 @@ becoming a derived work under §6.
 - **Upstream turns `display_errors` back on.** `www/.htaccess` carries
   `php_value display_errors 1` under `<IfModule php_module>` — which is the
   mod_php 8 module name, and the shared base image *is* mod_php
-  (`panelalpha-serve.sh` execs `apache2-foreground`). Combined with #185, which
+  (`panelalpha-serve.sh` execs `apache2-foreground`). Combined with the shared PHP base image, which
   leaves the platform with `display_errors=1` and no `php.ini` to fix it
   centrally, a notice would be rendered into every visitor's page.
   `hooks/prepare.sh` appends an override that turns it off, guarded so a
-  redeploy does not stack copies. Measured after the change:
-  `display_errors=0` under Apache. `expose_php` is still `1` — it is
-  `PHP_INI_SYSTEM`, so no `.htaccess` can touch it, and `X-Powered-By:
-  PHP/8.3.33` is on every response. That half of #185 needs a php.ini in the
+  redeploy does not stack copies. `expose_php` stays `1` — it is
+  `PHP_INI_SYSTEM`, so no `.htaccess` can touch it, and an `X-Powered-By`
+  header is on every response. That half of the problem needs a php.ini in the
   base image and cannot be fixed from a recipe.
 - **`POST /api.php/v1/stories` without a `reviewer` array is a fatal.**
   `array_filter($_POST['reviewer'])` in `module/story/zen.php:1252` gets `''`
@@ -254,33 +250,6 @@ rather than serving an application whose code and schema do not match. The
 previous container keeps running and the account's data is untouched. Driving
 ZenTao's upgrade wizard from the CLI is the obvious next piece of work.
 
-## What was verified
-
-On `mariusz.panelalpha.tools`, 2026-09-20, ZenTao 22.6 (`d5bfff8c`), PHP 8.3,
-`--memory-limit=2000`:
-
-- `deploy-ok`, `serving: ok`, HTTP 200, **60.2 s**, every health check passing.
-  Install log: `schema: 804 statements executed`, company and super-admin
-  created, `seed finished`.
-- **Logged in with the generated credential over the public HTTPS domain**, two
-  ways: `POST /api.php/v1/tokens` (201, real session token) and the human web
-  form at `/user-login.html`, after which `/my-index.html` renders
-  `Dashboard - ZenTao` rather than the login page.
-- **Created a product, a project and a story through the REST API and read all
-  three back** in fresh authenticated requests — `GET /products/1`,
-  `GET /projects/1`, `GET /stories/1` — plus `GET /products` and
-  `GET /products/1/stories` listing them. The product is also visible in the
-  real web UI at `/product-browse.html`.
-- The exposure table above, before and after the `www/.htaccess` hardening.
-- The upgrade stage re-run in place: `already installed; leaving the database
-  alone`, `schema 22.6 matches the checkout`, exit 0, and the product and story
-  still readable afterwards.
-
-Not verified: a full engine-driven redeploy. The `#173` re-clone is documented
-engine behaviour and the attachment path was established by reading
-`fileModel::setSavePath()` and confirming `~/project/www/data/upload/` on the
-live account, but no redeploy was exercised end to end here.
-
 ## Files
 
 | Path | Why |
@@ -290,4 +259,4 @@ live account, but no redeploy was exercised end to end here.
 | `files/panelalpha-setup.sh` | install/upgrade stage driver (repository root, outside the docroot) |
 | `files/panelalpha-install.php` | CLI install through upstream's own install model |
 | `files/www/data/.htaccess` | no listing, no script execution in the attachment directory |
-| `overrides/docker-compose.override.yml` | healthcheck + `ready` service (#90) |
+| `overrides/docker-compose.override.yml` | healthcheck + `ready` service |

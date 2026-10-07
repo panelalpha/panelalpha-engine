@@ -46,7 +46,7 @@ final class ImageCatalog
     /**
      * Every entry the file describes, in declared order.
      *
-     * @return list<array{ref: string, kind: string, runtime: string, prewarm: ?int, why: string}>
+     * @return list<array{id: string, ref: string, kind: string, runtime: string, prewarm: ?int, why: string}>
      */
     public static function entries(): array
     {
@@ -79,7 +79,7 @@ final class ImageCatalog
      * What the host warms, highest priority first; ties broken by ref so a run
      * is reproducible. An entry with no `prewarm` is not warmed at all.
      *
-     * @return list<array{ref: string, kind: string, runtime: string, prewarm: ?int, why: string}>
+     * @return list<array{id: string, ref: string, kind: string, runtime: string, prewarm: ?int, why: string}>
      */
     public static function prewarmed(): array
     {
@@ -126,7 +126,7 @@ final class ImageCatalog
      * version it does not describe, a ref docker would not accept.
      *
      * @param array<string, mixed> $entry
-     * @return array{ref: string, kind: string, runtime: string, prewarm: ?int, why: string}|null
+     * @return array{id: string, ref: string, kind: string, runtime: string, prewarm: ?int, why: string}|null
      */
     private static function resolve(array $entry): ?array
     {
@@ -147,7 +147,11 @@ final class ImageCatalog
         if (is_string($literal) && $literal !== '') {
             $ref = ImageTransfer::normalizeImageRef($literal);
 
-            return $ref === null ? null : ['ref' => $ref, 'kind' => HostPrewarmPlan::KIND_PULL] + $common;
+            return $ref === null ? null : [
+                'id' => self::repository($literal),
+                'ref' => $ref,
+                'kind' => HostPrewarmPlan::KIND_PULL,
+            ] + $common;
         }
 
         $version = $entry['version'] ?? null;
@@ -174,7 +178,11 @@ final class ImageCatalog
             return null;
         }
 
+        $extensions = self::entryExtensions($entry);
+        sort($extensions);
+
         return [
+            'id' => $runtime . ':' . $version . ($extensions === [] ? '' : '+' . implode('+', $extensions)),
             'ref' => $ref,
             'kind' => $built === null ? HostPrewarmPlan::KIND_PULL : HostPrewarmPlan::KIND_BUILD,
             // Only a variant needs it -- a plain base's Dockerfile is derivable
@@ -183,6 +191,16 @@ final class ImageCatalog
             // does.
             'extensions' => $built === null ? [] : self::entryExtensions($entry),
         ] + $common;
+    }
+
+    /** An extra's id: its image without the tag, which moves with upstream releases. */
+    private static function repository(string $image): string
+    {
+        $image = trim(explode('@', trim($image), 2)[0]);
+        $slash = strrpos($image, '/');
+        $colon = strrpos($image, ':');
+
+        return $colon !== false && ($slash === false || $colon > $slash) ? substr($image, 0, $colon) : $image;
     }
 
     /**

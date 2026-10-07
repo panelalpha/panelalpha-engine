@@ -12,7 +12,7 @@ STORE="${HOME}/.panelalpha"
 # Account homes are root-owned 755, so this directory has to be created rather
 # than written into $HOME directly, and it is the only place a generated secret
 # survives a deploy: GitRepository::cloneConfiguredRepository empties ~/project
-# before every clone (engine #173), while the postgres volume does not.
+# before every clone, while the postgres volume does not.
 mkdir -p "${STORE}"
 chmod 700 "${STORE}"
 
@@ -23,7 +23,7 @@ chmod 700 "${STORE}"
 # DEVELOPMENT", its own header says, with `image: ghcr.io/tt-rss/tt-rss:latest`,
 # a bind mount of the source tree and a `db` service with
 # POSTGRES_PASSWORD=password out of .env-dist. The php strategy does not run
-# that file but does mine it for backing services (engine #166), so left in
+# that file but does mine it for backing services, so left in
 # place it contributes a postgres whose password is published in the repository
 # and three more containers nothing routes to.
 #
@@ -40,7 +40,7 @@ for f in docker-compose.yml docker-compose.yaml docker-compose.*.yml docker-comp
     esac
     [ -f "$f" ] || continue
     mv -f "$f" "${STORE}/upstream-compose/"
-    echo "[tt-rss] moved $f out of the checkout (engine #166)"
+    echo "[tt-rss] moved $f out of the checkout"
 done
 
 # The repository .gitignore's /.env and ships .env-dist, so a clone has no .env
@@ -79,8 +79,8 @@ fi
 #       only thing that wins that merge, and an `environment:` value has to
 #       come from a compose variable.
 #
-# ProjectEnvironment::apply() then copies .env to .env.default at mode 644
-# (engine #173), so that one password is in the account's home twice. Both are
+# ProjectEnvironment::apply() then copies .env to .env.default at mode 644,
+# so that one password is in the account's home twice. Both are
 # dotfiles, which the generated vhost denies outright (apache-vhost.stub's
 # `FilesMatch "^\.(?!well-known)"`), so neither is web-readable -- but it is
 # why the admin password, which is a login credential rather than an internal
@@ -158,10 +158,7 @@ chmod 600 .env
 # nothing to carry that rule onto Apache. The generated vhost grants the
 # document root (`Require all granted`, apache-vhost.stub) and denies only
 # dotfiles, .git, docker-compose.y{,a}ml and panelalpha*, so without this file
-# every cached article image and every export is a plain GET away. Measured on
-# a deployed account: a file dropped at the repository root answered 200 with
-# its contents, and the same file under cache/images/ and under lock/ answered
-# 403 with these .htaccess in place.
+# every cached article image and every export is a plain GET away.
 #
 # Nothing in the application links to these paths directly (grep for
 # 'cache/images' across classes/, include/ and js/ finds no URL), so denying
@@ -192,7 +189,7 @@ done
 # print "Please run this script using PHP CLI executable" and exit 1 -- but
 # they do it *after* Apache has already echoed the `#!/usr/bin/env php` line
 # that sits outside their `<?php`, and the refusal itself names the interpreter
-# path. Measured: `GET /update.php` answered 200 with
+# path: `GET /update.php` answers 200 with
 # "PHP_EXECUTABLE is set to '/usr/local/bin/php'". Small, but it is a 200 that
 # serves no purpose.
 #

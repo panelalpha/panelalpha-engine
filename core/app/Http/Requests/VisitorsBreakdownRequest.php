@@ -14,6 +14,7 @@ class VisitorsBreakdownRequest extends FormRequest
         'referrers',
         'os',
         'browsers',
+        'status_codes',
     ];
 
     public function authorize(): bool

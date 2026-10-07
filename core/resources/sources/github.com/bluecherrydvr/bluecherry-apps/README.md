@@ -5,13 +5,12 @@ over RTSP and ONVIF into files plus a MySQL database; `www/` is the PHP
 administration interface; `/hls` (:7003) and `/api` (:7005) are bc-server's own
 listeners, proxied by the same nginx that serves the UI.
 
-Detection: `php`. The repository has no compose file Docker auto-loads, no
-Dockerfile at its root, and a `composer.json` under `www/`, so the PHP strategy
-won. It first produced `serving-missing_entry` — a 403, because `PhpDocroot`
-did not know about `www/` — and then, once `www` was added to
-`PhpDocroot::LATE_CANDIDATES`, `deploy-ok` with the interface on screen.
+Without the recipe, detection picks `php`: the repository has no compose file
+Docker auto-loads, no Dockerfile at its root, and a `composer.json` under
+`www/`, so the PHP strategy wins and serves the `www/` interface
+(`PhpDocroot::LATE_CANDIDATES`).
 
-**That `deploy-ok` is the trap.** What Apache serves is the administration
+**That successful deploy is the trap.** What Apache serves is the administration
 console with nothing behind it: no `bc-server`, no database, and no
 `/etc/bluecherry.conf` for `www/lib/db.php` to read credentials from. Recording,
 the ONVIF and RTSP clients, the live-view stream and the JSON API are all the
@@ -25,11 +24,9 @@ catalogue — `lib/v4l2_device_solo6x10.cpp`, `lib/v4l2_device_tw5864.cpp`, a
 `libudev` PCI enumerator in `server/bc-detect.cpp`. All of that is for
 Bluecherry's own optional capture cards.
 
-It was deployed to check. In an ordinary unprivileged container with no
-`/dev/video*`, no `--device` and no kernel module, the enumerator finds nothing,
-`bc-server` carries on, and the logs contain no video, solo6x10, udev or card
-errors. That is the IP-camera path, which is how the product is sold today.
-Idle: **49.5 MiB** for the application container, **104.7 MiB** for MariaDB.
+In an ordinary unprivileged container with no `/dev/video*`, no `--device` and
+no kernel module, the enumerator finds nothing and `bc-server` carries on. That
+is the IP-camera path, which is how the product is sold today.
 
 ## The image is the artifact
 
@@ -165,10 +162,8 @@ UPDATE Users
 The `WHERE` clause is the same test `lib.php` makes, which is what makes this
 safe to run on every deploy: it is idempotent, and on an account whose owner has
 since changed their password it matches nothing and the script says so instead
-of logging a sign-in refusal. Verified in both directions — the shipped
-credential is refused (`{"status":"2",…}`), the generated one is accepted
-(`{"status":"1","msg":["\/"]}`), and a customer-chosen password survives a
-redeploy untouched.
+of logging a sign-in refusal. A customer-chosen password survives a redeploy
+untouched.
 
 `salt` is `char(4)` and the application's own generator is
 `data::getRandomString(4)` over `[0-9a-z]`, so the salt matches that shape; the
@@ -202,8 +197,8 @@ holds one line: the image tag.
 
 Two reasons, both engine behaviour rather than preference.
 
-**The guard.** The engine wipes and re-clones `~/project` on every deploy
-(engine#173), so the `if [ -f .env ]` guard every other recipe uses never fires
+**The guard.** The engine wipes and re-clones `~/project` on every deploy,
+so the `if [ -f .env ]` guard every other recipe uses never fires
 on a redeploy — it would regenerate the database password while `db_data` still
 held the old one.
 `~/.panelalpha` survives the clone. The account's home is root-owned `0755`, so
@@ -212,22 +207,15 @@ held the old one.
 **The leak.** `~/project/.env` is copied to `~/project/.env.default` at mode
 **644** (`ProjectEnvironment::apply`), inside a home that is `root:root 0755` and
 a project directory that is `0755`. So anything in `.env` is readable by every
-other account's uid on the same host. Confirmed on a live deploy, reading one
-account's file as another account's user:
+other account's uid on the same host.
 
-```
-# su -s /bin/sh -c 'cat /home/<acct>/project/.env.default' <other-acct>
-BLUECHERRY_ADMIN_PASSWORD=…
-BLUECHERRY_DB_ROOT_PASSWORD=…
-```
-
-That is why nothing secret goes in `.env` here. It is the same engine#173 that
+That is why nothing secret goes in `.env` here. It is the same engine behaviour that
 breaks the guard, but this half of it is a cross-tenant credential disclosure
 rather than an inconvenience.
 
 ## Readiness
 
-`AppLauncher` runs `docker compose up -d` without `--wait` (engine#90), so the
+`AppLauncher` runs `docker compose up -d` without `--wait`, so the
 deploy is "finished" when containers have been *started*. Here that gap is the
 whole first boot: MariaDB initialises a data directory, then the entrypoint
 waits for it, creates the schema, loads the initial data and only then starts
@@ -248,7 +236,7 @@ curl -fsS -m 5 http://127.0.0.1/login | grep -q 'Bluecherry DVR'
 
 — the vhost this recipe adds, through php-fpm, matching the login page's own
 `<title>`, so a PHP fatal rendered with a 200 does not pass either. `curl` is in
-the image and nginx has `server_name _`, so engine#165 does not apply.
+the image and nginx has `server_name _`, so the probe's loopback `Host` header is fine.
 
 Both one-shots set `healthcheck: {disable: true}`: they run the application's
 image, whose `HEALTHCHECK` is false in a container that runs neither nginx nor
@@ -275,24 +263,18 @@ which covers `recordings/` and `monitor.rrd`, the round-robin database behind
 the Health and Statistics pages. The whole directory rather than `recordings/`
 alone, so a redeploy does not throw the monitoring history away.
 
-Measured on a live account, not reasoned about:
-
 - **It survives a redeploy.** The volume outlives `docker compose down` and the
-  `~/project` re-clone. Verified: a rebuild kept the data and the credentials.
+  `~/project` re-clone.
 - **`df` inside the container reports the host's root filesystem.** Not the
-  account's share of it — the actual figure from a deployed account was
-  `/dev/sda1 150G 118G 26G 82% /var/lib/bluecherry`, which is the host disk
-  every other tenant is also on. Bluecherry's 95% ceiling is therefore 95% *of
+  account's share of it — the host disk every other tenant is also on.
+  Bluecherry's 95% ceiling is therefore 95% *of
   the host disk*, and a camera left recording will drive it there and hold it
   there by design.
 - **The account's disk quota does not catch it.** The engine's limit is
   `setquota -u <account>` (`Project::configureQuota`), an ext4 **uid** quota.
   Recordings are written by `bc-server` as the container's `bluecherry` user,
-  and they land on the host owned by **uid 1001** — verified against an account
-  whose own uid was 1081, with uid 1001 assigned to no host user at all. So
-  nothing Bluecherry records is charged to the account that owns it. (On the
-  test host no quota was active at all: `/` is mounted `rw,relatime` with no
-  `usrquota`.) The panel's own usage figure is `du -shm` run as the account
+  and they land on the host owned by **uid 1001**, not the account's uid. So
+  nothing Bluecherry records is charged to the account that owns it. The panel's own usage figure is `du -shm` run as the account
   user, and `~/docker` is `root:root 0700`, so it does not see the volume
   either.
 - Lowering the thresholds does not cap the footprint: they are still
@@ -310,7 +292,6 @@ this — not a deployment blocker, but not a detail either.**
 - **Mail.** Event notifications need an SMTP server the engine does not
   provide: Settings → E-mail, or `G_SMTP_*` in `GlobalSettings`.
 - **Cameras.** Added by the customer against their own RTSP/ONVIF endpoints.
-  This is the one part of the application no deploy here exercises.
 - **Licensing.** The UI has a Licenses page that activates a key through
   `/usr/lib/bluecherry/licensecmd` against Bluecherry's own service. Nothing
   here activates one, and no camera limit was found enforced in the tree.

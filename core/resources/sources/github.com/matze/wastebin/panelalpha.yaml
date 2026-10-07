@@ -16,8 +16,8 @@ description: >-
   quxfoo/wastebin on Docker Hub and tags every release; this recipe runs that
   official image with a compose-replace, pinned to the current stable release
   3.7.2. Building from source would compile a Rust binary on the host for no
-  gain, and a Docker Hub seed also sidesteps engine#229 (image-seed NotFound is
-  the GHCR/registry-save case, not Hub). The final image is FROM scratch (uid
+  gain, and a Docker Hub seed also sidesteps the image-seed
+  NotFound (the GHCR/registry-save case, not Hub). The final image is FROM scratch (uid
   10001, no shell), so all health probing is done by an external curl sidecar and
   a fresh named volume is chowned by a one-shot init before the app starts.
 
@@ -39,14 +39,14 @@ description: >-
   localhost.
 
   PERSISTENCE. The SQLite db lives at /data/state.db on a named Docker volume, so
-  pastes survive redeploy and storage reclaim (~/project is wiped every deploy,
-  engine#173). WASTEBIN_SIGNING_KEY and WASTEBIN_PASSWORD_SALT are generated once
+  pastes survive redeploy and storage reclaim (~/project is wiped every
+  deploy). WASTEBIN_SIGNING_KEY and WASTEBIN_PASSWORD_SALT are generated once
   into ~/.panelalpha/wastebin/ (0600 in 0700), the only writable place a deploy
   does not wipe, and fed in via env_file so they never appear in the recipe and
   are never rewritten across redeploys.
 
   PORT. The app serves the UI, paste creation and retrieval on 8088
   (WASTEBIN_ADDRESS_PORT); published as 8088:8088, the only service that
-  publishes a port (engine#234). A curl health sidecar plus a `ready` gate make
-  `docker compose up` block until wastebin actually answers (engine#204), since
+  publishes a port. A curl health sidecar plus a `ready` gate make
+  `docker compose up` block until wastebin actually answers, since
   the scratch image has no shell to run its own healthcheck.

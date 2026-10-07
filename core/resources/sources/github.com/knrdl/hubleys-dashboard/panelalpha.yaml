@@ -8,9 +8,8 @@ description: >-
   a scope question.
 
   It builds and runs out of the box. The repository's Dockerfile is a clean
-  three-stage Node build, the engine detects `dockerfile`, and the stock deploy
-  finished successfully in 75.3s. The site was then HTTP 500 on every path and
-  the verdict was serving-error_page. The cause is one line:
+  three-stage Node build and the engine detects `dockerfile`, but the site then
+  answers HTTP 500 on every path. The cause is one line:
 
       // src/hooks.server.ts:56
       } else { error(500, 'forward auth not configured') }
@@ -19,21 +18,14 @@ description: >-
   four request headers -- Remote-User, Remote-Groups, Remote-Name,
   Remote-Email -- and believes them; section 3 of the README is instructions
   for putting Caddy or nginx plus Authelia in front to set them. With nothing
-  in front there is no Remote-User, so every request is that 500. Reproduced
-  on the stock deploy, inside the container:
+  in front there is no Remote-User, so every request is that 500:
 
       $ curl -s localhost:3000/
       {"message":"forward auth not configured"}
 
-  And the 500 is the less interesting half. On that same stock deploy:
-
-      $ curl -s -o /dev/null -w '%{http_code}' https://<domain>/
-      500
-      $ curl -s -o /dev/null -w '%{http_code}' -H 'Remote-User: attacker' https://<domain>/
-      200        (40449 bytes -- the whole dashboard)
-      $ curl -s -H 'Remote-User: attacker' -H 'Remote-Groups: admins' \
-             https://<domain>/settings/admin
-      200
+  And the 500 is the less interesting half. On a stock deploy, a request
+  carrying `Remote-User: attacker` gets the whole dashboard, and adding
+  `Remote-Groups: admins` opens /settings/admin.
 
   An unauthenticated deploy of this repository is not a broken site. It is an
   open one, wearing a 500 as a disguise: anyone on the internet can name
@@ -48,10 +40,8 @@ description: >-
   ~/project/panelalpha/hubleys-auth.conf, and the four lines that matter are
   `proxy_set_header Remote-User/-Groups/-Name/-Email`, set unconditionally on
   every proxied request. `proxy_set_header` replaces whatever the client sent,
-  so the spoof above is dead: measured after the recipe, a request carrying
-  `Remote-User: admin` and `Remote-Groups: admins` returns a body byte-identical
-  to the anonymous one (the only difference in the two documents is the CSP
-  nonce).
+  so the spoof above is dead: a request carrying `Remote-User: admin` and
+  `Remote-Groups: admins` gets the same page as an anonymous one.
 
   Authentication itself is HTTP Basic, which is the one authenticator a
   shared-hosting account already has -- there is no IdP here to do forward auth
@@ -77,22 +67,12 @@ description: >-
   a password prompt, which is written down in the README the recipe leaves in
   the account.
 
-  Measured on the finished deploy, three different people getting three
-  different dashboards from one process:
-
-      anonymous (guest)    200   10292 b   public section + a Sign in tile
-      bob (no group)       200    7998 b   public section only
-      admin (group admins) 200   13226 b   + the Private section
-      admin, wrong password 401
-
-  A tile the operator added under `allow: [group:admins]`, pointing at
-  https://example.internal/backups/, appeared for admin after Settings ->
-  Admin -> Reload application (POSTed over the public HTTPS name, 200
-  "Reload successful") and was absent from the anonymous and from bob's
-  payloads -- the string `example.internal` does not occur in either document.
-  `/panelalpha-login` is the way to make a browser ask for the password, since
-  a browser never volunteers Basic credentials: anonymous 401, with credentials
-  200 and a page that bounces to `/`.
+  One process serves each visitor their own dashboard: an anonymous visitor
+  (guest) gets the public section and a Sign in tile, a signed-in user with no
+  group the public section only, a member of `admins` the Private section as
+  well, and a wrong password is a 401. `/panelalpha-login` is the way to make
+  a browser ask for the password, since a browser never volunteers Basic
+  credentials; after signing in it bounces to `/`.
 
   == Where the data lives ==
 
@@ -101,7 +81,7 @@ description: >-
   can put a file into, so the customer could never edit config.yml, and
   config.yml *is* the product. The override replaces that mount, by target,
   with ~/.panelalpha/hubleys/data. ~ itself is chown root:root on every rebuild
-  (Project.php:813) and ~/project is cleared and re-cloned (engine#173), so
+  (Project.php:813) and ~/project is cleared and re-cloned, so
   ~/.panelalpha is the only place that both survives and belongs to the account
   (Project.php:814). ~/project/config.yml is left behind as a symlink to the
   real file, recreated each deploy, so it is still where a file manager will
@@ -125,49 +105,34 @@ description: >-
 
   The `auth` container is `nginxinc/nginx-unprivileged` run as `<account
   uid>:0`. Stock nginx drops its workers to uid 101, which cannot read a 0600
-  htpasswd in a 0700 directory the account owns -- measured: every
-  authenticated request answered 500 while anonymous ones were fine. The
+  htpasswd in a 0700 directory the account owns, so every authenticated
+  request would answer 500 while anonymous ones work. The
   unprivileged image is built to run as an arbitrary uid, so the password file
   never has to be loosened; it listens on 8080 and the override publishes that
   on 3000.
 
   == Redeploy ==
 
-  Four real `POST /projects/<user>/rebuild` calls, across two accounts. Every
-  time: config.yml with the operator's added section, users/config/admin.json,
-  the uploaded wallpaper, htpasswd with a second user added by hand, groups.map
-  and the generated password all came back byte-identical by md5, and the three
-  dashboards above were unchanged. ~/project is re-cloned and the recipe's
-  files, the symlink and the generated override are all laid down again.
+  A redeploy keeps config.yml, users/config/, uploaded wallpapers, htpasswd,
+  groups.map and the generated password, all under ~/.panelalpha. ~/project is
+  re-cloned and the recipe's files, the symlink and the generated override are
+  all laid down again.
 
-  The timing is a story about the build context. The first rebuild took 62s
-  because `COPY . /app/` was not cached: the engine's generated
-  docker-compose.yml sits in the context and carries `PA_DEPLOY_PHASE: install`
-  on the first deploy and `upgrade` on every one after, and that one word threw
-  away the 42s npm layer under it -- cache_hit_ratio 0.313, 48.5s of build, and
-  excluding only .git did not help. With the platform's own files excluded as
-  well, the next rebuild with nothing changed was 13s total, 0.1s of build,
-  cache_hit_ratio 0.75, `COPY . /app/` cached -- and on a fresh account with
-  the finished recipe, where the exclusions are in place from the first deploy,
-  the very first rebuild was already the 13s one.
-
-  == Numbers ==
-
-  Recipe deploy 90.3s and 90.5s on two fresh accounts, deploy-ok, serving: ok,
-  HTTP 200, `healthy: true` with no failing check. Control, same host, same
-  commit: 75.3s, serving-error_page, HTTP 500. The 15s difference is the nginx
-  image pull and two containers instead of one. Redeploy 13s warm. Memory:
-  app 31-48 MiB, auth 3.7-10.3 MiB of a 48 MiB cap, whole account container
-  190-263 MiB of its 1200 MiB limit. No `ready` gate: the site answered 200
-  16 seconds after a 13s rebuild returned, with the app container still
-  reporting `health: starting`.
+  The platform's own files are excluded from the build context, not only
+  .git: the engine's generated docker-compose.yml sits in the context and
+  carries `PA_DEPLOY_PHASE: install` on the first deploy and `upgrade` on every
+  one after, and that one word would otherwise invalidate `COPY . /app/` and
+  the npm layer under it on the first rebuild.
 
   == Things worth knowing ==
 
+  * There is no `ready` gate: the site answers 200 shortly after a rebuild
+    returns, while the app container still reports `health: starting`.
+
   * BODY_SIZE_LIMIT is set to 12M because adapter-node caps a body at 512 kB,
-    a twentieth of the 10 MB wallpaper upload the app advertises. Measured: a
-    1.47 MB PNG answered `{"error":{"message":"Payload Too Large"}}`
-    (handler.js:1405) without it and 200 with it.
+    a twentieth of the 10 MB wallpaper upload the app advertises; without it a
+    larger upload answers `{"error":{"message":"Payload Too Large"}}`
+    (handler.js:1405).
   * FAVICON_FILE is pointed at a path that does not exist. onServerStartup()
     copies it over /app/client/favicon.png, /app is owned by uid 1000 inside
     the image, and the container runs as the account -- so a customer who put a
@@ -186,15 +151,12 @@ description: >-
     (src/routes/background/[slug]/+server.ts). The ids are 32 random bytes, so
     this is not reachable by guessing, but it is upstream's check to add, not
     the recipe's.
-  * Multipart form POSTs to a *.panelalpha.online name never arrive: the
-    wallpaper upload over the public name timed out at 40s and the account's
-    own nginx access log has no line for it, so it dies before the account.
-    The same request through the same proxy on the account's own :3000
-    answered 200 in 0.024s, and a urlencoded POST (Settings -> Admin ->
-    Reload) over the public name is a normal 200. That is the platform, not
-    this app.
+  * Multipart form POSTs (the wallpaper upload) to a *.panelalpha.online name
+    never arrive: they time out before reaching the account, while the same
+    request on the account's own :3000 works and a urlencoded POST over the
+    public name is a normal 200. That is the platform, not this app.
   * Nothing in ~/project is web-reachable: the vhost is a pure proxy, so
     /.git/config, /docker-compose.override.yml, /.env, /package.json,
     /node_modules/..., /Dockerfile, /src/hooks.server.ts and
     /panelalpha/hubleys-auth.conf all come back as the application's own 404
-    page, compared by body and not by status.
+    page.

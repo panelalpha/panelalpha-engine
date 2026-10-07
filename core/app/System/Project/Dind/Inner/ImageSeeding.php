@@ -3,11 +3,14 @@
 namespace App\System\Project\Dind\Inner;
 
 use App\System\Project\Dind\InnerDocker;
+use App\Lib\Deploy\Dind\DindImageStore;
+use App\Lib\Deploy\Dind\RegistryConfigSync;
 use App\Lib\Deploy\CacheManager\ImageTransfer;
 use App\Lib\Deploy\CacheManager\RegistryImageConfig;
 use App\Lib\Deploy\CacheManager\BuiltImage;
 use App\Lib\Deploy\CacheManager\RailpackCache;
 use App\Lib\Deploy\Compose\DeployCompose;
+use App\Lib\Deploy\EnvFile;
 use App\Lib\Deploy\Platform\Runtime\Images;
 
 /**
@@ -57,12 +60,24 @@ class ImageSeeding
      * reads them out of the plan railpack just wrote, which is the only thing
      * that knows which builder and runtime tags it resolved to.
      *
+     * Railpack's own live on ghcr.io, which registry-proxy does not mirror, so
+     * the host fetches each once and every account after that pulls it from
+     * the cache registry instead of from the internet. A base the project's
+     * railpack config names instead goes the way any public image does.
+     *
      * @param list<string> $images
      */
     public function preloadRailpack(array $images): void
     {
         foreach ($images as $image) {
-            $this->ensure($image);
+            if (!RailpackCache::isRailpackImage($image)) {
+                $this->ensure($image);
+            } elseif (!$this->hasImage($image)) {
+                $this->runSeed($image, $this->inner->imageStore()->seedThroughHostCommand(
+                    $this->inner->dind()->engineAccount(),
+                    $image
+                ));
+            }
         }
     }
 
@@ -85,7 +100,12 @@ class ImageSeeding
             return;
         }
 
-        $this->seedInParallel($images, $concurrency);
+        // A private image is pulled on its own below, with the project's login.
+        $login = $this->inner->dind()->registryLogin();
+        $this->seedInParallel(
+            array_values(array_filter($images, static fn (string $image): bool => !$login->covers($image))),
+            $concurrency
+        );
 
         // Whatever the parallel pass missed still has to be there. Each check
         // is a round-trip into the account, so ask the inner daemon once for
@@ -114,7 +134,15 @@ class ImageSeeding
         }
 
         $images = [];
-        foreach (DeployCompose::imageRefs($contents) as $image) {
+        $profiles = $this->activeProfiles(dirname($composePath) . '/.env');
+        // `wordpress:${WORDPRESS_VERSION:-latest}` names an image only once
+        // interpolated; read raw it was skipped and never preloaded.
+        try {
+            $env = $this->inner->dind()->environment()->forInterpolation();
+        } catch (\Throwable) {
+            $env = [];
+        }
+        foreach (DeployCompose::imageRefs($contents, activeProfiles: $profiles, env: $env) as $image) {
             if (is_string($image) && $image !== '' && ImageTransfer::isSafeImageRef($image)) {
                 $images[] = $image;
             }
@@ -124,10 +152,32 @@ class ImageSeeding
     }
 
     /**
+     * COMPOSE_PROFILES as `compose up` will read it from the project's .env;
+     * none set means only unprofiled services start.
+     *
+     * @return list<string>
+     */
+    private function activeProfiles(string $envPath): array
+    {
+        $fs = $this->inner->dind()->system()->filesystem();
+        $contents = $fs->fileExists($envPath) ? $fs->fileGetContents($envPath) : '';
+        foreach (EnvFile::parse(is_string($contents) ? $contents : '') as $row) {
+            if (($row['type'] ?? '') === 'variable' && ($row['key'] ?? '') === 'COMPOSE_PROFILES') {
+                return array_values(array_filter(array_map('trim', explode(',', (string) ($row['value'] ?? '')))));
+            }
+        }
+
+        return [];
+    }
+
+    /**
      * @param list<string> $images
      */
     private function seedInParallel(array $images, int $concurrency): void
     {
+        if ($images === []) {
+            return;
+        }
         $this->ensureRegistryConfig();
         $host = $this->inner->host();
         $host->logDim("Seeding {$concurrency} base images at a time");
@@ -223,6 +273,31 @@ class ImageSeeding
         return ImageTransfer::parseExposedPorts(is_string($output) ? $output : '');
     }
 
+    /**
+     * The `KEY=value` lines $image sets for itself: from the account when it
+     * holds the image, otherwise from the registries. Empty when neither says.
+     *
+     * @return list<string>
+     */
+    public function imageEnvironment(string $image): array
+    {
+        if ($image === '' || !ImageTransfer::isSafeImageRef($image)) {
+            return [];
+        }
+
+        try {
+            $env = json_decode(trim($this->inner->dind()->shell()->execQuiet(
+                ['docker', 'image', 'inspect', '--format', '{{json .Config.Env}}', '--', $image],
+                [],
+                30
+            )), true);
+        } catch (\Exception $e) {
+            return (new RegistryImageConfig())->environment($image);
+        }
+
+        return is_array($env) ? array_values(array_filter($env, 'is_string')) : [];
+    }
+
     public function ensure(string $image): void
     {
         if ($this->hasImage($image)) {
@@ -286,43 +361,102 @@ class ImageSeeding
         };
     }
 
-    /** Run the seed ladder for one image and log the line saying where it came from. */
+    /**
+     * Run the seed ladder for one image and log the line saying where it came from.
+     *
+     * One of our shared images is announced once: "Using shared base image",
+     * or nothing when it is not built yet, because the caller then says it is
+     * building it. Only a real failure is a warning.
+     */
     private function seed(string $image, bool $ours): bool
+    {
+        // An image the project logs in for is pulled straight into the account.
+        $login = $this->inner->dind()->registryLogin();
+        $private = !$ours && $login->covers($image);
+
+        return $this->runSeed($image, $this->inner->imageStore()->seedCommand(
+            $this->inner->dind()->engineAccount(),
+            $image,
+            $ours,
+            $private,
+            $private ? $login->configDir() : null
+        ), $ours);
+    }
+
+    /** $ours: one of our shared images, logged as "Using shared base image". */
+    private function runSeed(string $image, string $command, bool $ours = false): bool
     {
         $this->ensureRegistryConfig();
         $host = $this->inner->host();
-        // Opens the image_transfer span; the ladder's own line closes it.
-        $host->logInfo("Fetching base image {$image}");
+        // Opens the image_transfer span; the ladder's own line closes it. Dim for
+        // a shared image, whose one line is the outcome.
+        $fetching = "Fetching base image {$image}";
+        $ours ? $host->logDim($fetching) : $host->logInfo($fetching);
         try {
-            $output = $this->inner->dind()->system()->exec(
-                $this->inner->imageStore()->seedCommand(
-                    $this->inner->dind()->engineAccount(),
-                    $image,
-                    $ours
-                ),
-                [],
-                self::SEED_TIMEOUT_SECONDS
-            );
+            $output = $this->inner->dind()->system()->exec($command, [], self::SEED_TIMEOUT_SECONDS);
         } catch (\Exception $e) {
             $host->failDeployIfDiskFull($e->getMessage());
-            $host->logInfo("Could not get {$image} into the account: " . trim($e->getMessage()));
+            if ($ours && trim($e->getMessage()) === DindImageStore::NOT_BUILT_HERE) {
+                return false;
+            }
+            $host->logWarn(self::seedFailure($image, $e->getMessage()));
 
             return false;
         }
 
         $line = trim((string) $output);
-        if ($line !== '') {
+        $present = $this->hasImage($image);
+        if ($ours && $present) {
+            $host->logInfo(self::usingShared($image, $line));
+        } elseif (!$ours && $line !== '') {
             $host->logInfo($line);
         }
 
-        return $this->hasImage($image);
+        return $present;
+    }
+
+    /** The one line for a shared image the account now has, naming where it came from. */
+    public static function usingShared(string $image, string $seedLine): string
+    {
+        $from = match (true) {
+            str_contains($seedLine, 'from the host') => ' (from this host)',
+            str_contains($seedLine, 'from the cache registry') => ' (from the cache registry)',
+            default => '',
+        };
+
+        return "Using shared base image {$image}{$from}";
     }
 
     /**
-     * Once per deploy, on the first image question: an account created before the
-     * cache registry or registry-proxy existed has a daemon that trusts neither,
-     * because its daemon.json is written only at creation. Add both and reload
-     * it in place, and rewrite the account's init script so a restart keeps them.
+     * One line naming the image and why. The seed script ends on its own
+     * "Could not get <image> into the account", after whatever the failing
+     * step printed, so that sentence leads once and the rest is the reason.
+     */
+    public static function seedFailure(string $image, string $error): string
+    {
+        $said = "Could not get {$image} into the account";
+        $lines = array_values(array_filter(
+            array_map('trim', preg_split('/\R/', $error) ?: []),
+            static fn (string $line): bool => $line !== '' && $line !== $said
+        ));
+
+        return $lines === [] ? $said : $said . ': ' . implode(' ', $lines);
+    }
+
+    /**
+     * Once per deploy, on the first image question.
+     *
+     * An account created after the mount shipped reads that file directly:
+     * {@see \App\System\Project\Dind::rewriteDaemonJsonInPlace()} keeps the
+     * same inode the bind mount already serves (refusing a symlink
+     * there), so HUPing the account's own dockerd from the host (never a
+     * shell inside the account) is enough to pick it up, no restart needed.
+     *
+     * An account that predates the mount has no mount to tell apart from one
+     * that is simply missing, so it only gets the plain, symlink-safe render
+     * {@see \App\System\Project\Dind::setupDaemonJson()} writes anyway -- its
+     * own init script still writes a correct daemon.json on its own next
+     * boot, and it gets the mount itself the next time it is recreated.
      */
     private function ensureRegistryConfig(): void
     {
@@ -331,20 +465,74 @@ class ImageSeeding
         }
         $this->registryConfigChecked = true;
 
-        $shell = $this->inner->dind()->shell();
-        $store = $this->inner->imageStore();
+        $dind = $this->inner->dind();
+        $fs = $dind->system()->filesystem();
+        $path = $dind->daemonJsonPath();
+        $rendered = $dind->daemonJsonContents();
+
         try {
-            if (trim((string) $shell->execQuiet($store->registryConfigArgv(), [], 30)) !== 'changed') {
+            $current = $fs->fileExists($path) ? $fs->fileGetContents($path) : null;
+            if ($current === $rendered) {
                 return;
             }
-            // Registry mirrors and trusted registries apply on SIGHUP, so nothing restarts.
-            $shell->execQuiet($this->inner->dind()->services()->signalArgv('docker', 'HUP'), [], 30);
-            $this->inner->dind()->setupEntrypointInitScripts();
+
+            if (!$this->accountHasDaemonJsonMount()) {
+                // No bind mount to keep live: a plain, symlink-safe render,
+                // which is what this account gets when it is next recreated
+                // either way. Nothing to signal -- its own init script is
+                // what applies this on its own next boot.
+                $dind->setupDaemonJson();
+
+                return;
+            }
+
+            // Mounted: write the existing inode in place so the running
+            // container's view changes too, then HUP its dockerd to read it.
+            if (!$dind->rewriteDaemonJsonInPlace()) {
+                return;
+            }
+            $pid = $this->dockerdHostPid();
+            if ($pid === null) {
+                return;
+            }
+            $dind->system()->execOnHost($this->inner->imageStore()->hostSignalDockerdArgv($pid));
             $this->inner->host()->logInfo('Pointed this account\'s Docker at the engine\'s image registries');
         } catch (\Exception $e) {
             // Not fatal: public images still come straight from their registries.
             $this->inner->host()->logDim('Could not update this account\'s registry settings: ' . trim($e->getMessage()));
         }
+    }
+
+    /** Whether the running container already binds daemon.json from the host, or still carries its own. */
+    private function accountHasDaemonJsonMount(): bool
+    {
+        try {
+            $json = $this->inner->dind()->system()->exec(
+                $this->inner->imageStore()->hostAccountMountsArgv($this->inner->dind()->engineAccount()),
+                [],
+                15
+            );
+        } catch (\Exception $e) {
+            return false;
+        }
+
+        return RegistryConfigSync::hasDaemonJsonMount((string) $json);
+    }
+
+    /** The account's dockerd, by the PID the host can actually signal -- the account is its own PID namespace. */
+    private function dockerdHostPid(): ?int
+    {
+        try {
+            $output = $this->inner->dind()->system()->exec(
+                $this->inner->imageStore()->hostAccountProcessesArgv($this->inner->dind()->engineAccount()),
+                [],
+                15
+            );
+        } catch (\Exception $e) {
+            return null;
+        }
+
+        return RegistryConfigSync::dockerdHostPid((string) $output);
     }
 
     public function hasImage(string $image): bool

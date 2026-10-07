@@ -11,7 +11,7 @@ description: >-
   (ghcr.io/importantimport/hatsu:0.3.4). HATSU_DOMAIN is the project's domain;
   the SQLite database is on a named volume. Both are set in `environment:` so
   the engine's copy of .env.example (hatsu.local, a relative database) does
-  not apply; its HATSU_LOG arrives quoted (engine#348) and only warns. The customer sets
+  not apply; its HATSU_LOG arrives quoted and only warns. The customer sets
   HATSU_PRIMARY_ACCOUNT (the static site's domain, which must serve a feed
   over HTTPS) in the project's environment variables; a one-shot check
   service fails the deploy naming it when it is missing. HATSU_ACCESS_TOKEN

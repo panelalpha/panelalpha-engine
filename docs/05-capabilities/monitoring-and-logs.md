@@ -66,6 +66,7 @@ When the answer is no, it names what it found instead. The common ones:
 | `directory_listing` | A list of files instead of a page. |
 | `error_page` | Your application is running and returning an error. |
 | `php_error` | A fatal PHP error is on the page. |
+| `blank_page` | Your application answered `/` with an empty page. In PHP this is usually a fatal error the application hides; its container output or debug mode shows it. |
 | `database_error` | The application is up but cannot reach its database. |
 | `dev_server` | A development server is running, not a production build. Fix your start command. |
 | `no_root_route` | Nothing is set up at `/`. |
@@ -96,7 +97,15 @@ The webserver's access and error logs for a hostname. Not the deploy log - these
 Show me the error log for shop.example.com.
 ```
 
-Use these for 404s and 500s that only some visitors hit. For how many people came, and how much data they transferred, ask for the counts: [Visitor statistics](visitor-statistics.md). If the assistant cannot read the logs, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
+On a project that runs in its own container, what the application itself printed, such as a stack trace or a worker's errors, is in its container output. Ask for a time window when you know roughly when it went wrong:
+
+```text
+Show me what the app container of shop printed between 14:00 and 14:30 today.
+```
+
+The assistant reads up to 5000 lines at a time, and can limit them to a period such as the last two hours.
+
+Use the webserver logs for 404s and 500s that only some visitors hit. For how many people came, and how much data they transferred, ask for the counts: [Visitor statistics](visitor-statistics.md). If the assistant cannot read the logs, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
 ## 4. Usage - "is it running out of something?"
 
@@ -116,7 +125,7 @@ Samples are kept over several time windows, from the last few minutes to the las
 How close is this project to its limits?
 ```
 
-Covers storage, domains, subdomains, FTP and SFTP accounts, and databases. To change a limit: [Limits](projects.md#limits).
+Covers storage, the disk its container logs take, domains, subdomains, FTP and SFTP accounts, and databases. To change a limit: [Limits](projects.md#limits).
 
 **From inside a project.** If you run a monitoring app or agent in a project (Zabbix, Netdata, node_exporter and the like), two files in it describe the whole server, not the project:
 

@@ -15,7 +15,7 @@ x-backend-env: &backend-env
 services:
   # One-shot: the app cannot log anyone in without a Spotify app, so the deploy
   # fails here naming each missing variable. Read from .env, not interpolated:
-  # the engine would generate a value for SPOTIFY_CLIENT_SECRET (engine#336).
+  # the engine would generate a value for SPOTIFY_CLIENT_SECRET.
   check:
     image: ghcr.io/emlopezr/trackwatch-backend:9197bd6@sha256:958eb5dad25108e6cc81416a0ab50833d5355e2f904ef5c30b36f5712ff38854
     restart: "no"

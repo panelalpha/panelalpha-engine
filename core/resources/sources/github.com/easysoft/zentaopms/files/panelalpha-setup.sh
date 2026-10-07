@@ -30,7 +30,7 @@ fi
 
 # 1. config/my.php -- the database the engine provisioned and the account's own
 #    URL. Written every time rather than only when missing: every deploy
-#    re-clones over ~/project (#173), so there is never a file here to preserve,
+#    re-clones over ~/project, so there is never a file here to preserve,
 #    and the values the container was handed are by definition the ones that
 #    work. It holds getenv() calls rather than values, so it is not a secret.
 php /app/panelalpha-install.php config

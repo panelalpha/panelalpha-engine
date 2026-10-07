@@ -333,6 +333,19 @@ install_sysbox() {
     log_info "Sysbox runtime installed successfully"
 }
 
+# sysbox-fs gives itself 10 s to start, and on a busy host (Docker restarting,
+# packages installing) it can miss that and stay failed while this script
+# reports success; every account then fails with "sysfs.sock: no such file".
+ensure_sysbox_running() {
+    systemctl is-active --quiet sysbox-mgr && systemctl is-active --quiet sysbox-fs && return 0
+    log_warn "Sysbox is not running - starting it"
+    # start, not restart: whatever still runs keeps its containers.
+    systemctl start sysbox 2>/dev/null || true
+    if ! systemctl is-active --quiet sysbox-mgr || ! systemctl is-active --quiet sysbox-fs; then
+        log_warn "Sysbox did not start (systemctl status sysbox-fs sysbox-mgr) - accounts will not start"
+    fi
+}
+
 # Uninstall Sysbox
 uninstall_sysbox() {
     log_info "Uninstalling Sysbox runtime..."
@@ -399,6 +412,7 @@ main() {
         "")
             check_dependencies
             install_sysbox
+            ensure_sysbox_running
             ensure_registry_mirror
             ;;
         *)

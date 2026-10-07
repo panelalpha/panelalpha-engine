@@ -2,8 +2,8 @@
 
 use App\Http\Controllers\BackupContainerController;
 use App\Http\Controllers\BugReportController;
-use App\Http\Controllers\CsfController;
 use App\Http\Controllers\DomainController;
+use App\Http\Controllers\FirewallController;
 use App\Http\Controllers\HttpAcmeChallengeController;
 use App\Http\Controllers\IpController;
 use App\Http\Controllers\LighthouseController;
@@ -146,6 +146,7 @@ $projectRoutes = function (): void {
     Route::get('/{username}/domains/installed-ssl-certs', [UserDomainController::class, 'indexInstalledSslCerts']);
     Route::get('/{username}/domains/{domain}', [UserDomainController::class, 'show']);
     Route::get('/{username}/domains/{domain}/installed-ssl-cert', [UserDomainController::class, 'installedSslCert']);
+    Route::get('/{username}/domains/{domain}/mail-dns', [UserDomainController::class, 'mailDns']);
     Route::post('/{username}/domains', [UserDomainController::class, 'store']);
     Route::put('/{username}/domains/{domain}', [UserDomainController::class, 'update']);
     Route::delete('/{username}/domains/{domain}', [UserDomainController::class, 'destroy']);
@@ -234,6 +235,8 @@ $projectRoutes = function (): void {
     Route::post('/{username}/git/pull', [GitController::class, 'pull']);
     Route::post('/{username}/git/push', [GitController::class, 'push']);
     Route::post('/{username}/git/revert', [GitController::class, 'revert']);
+    Route::post('/{username}/git/deploy-key', [GitController::class, 'deployKey']);
+    Route::delete('/{username}/git/deploy-key', [GitController::class, 'deleteDeployKey']);
     Route::post('/{username}/git/deploy-hook', [DeployHookController::class, 'create']);
     Route::get('/{username}/git/deploy-hook', [DeployHookController::class, 'show']);
     Route::post('/{username}/git/deploy-hook/rotate', [DeployHookController::class, 'rotate']);
@@ -250,6 +253,7 @@ $projectRoutes = function (): void {
     Route::post('/{username}/containers/action', [ContainerController::class, 'projectAction']);
     Route::post('/{username}/containers/{service}/action', [ContainerController::class, 'serviceAction']);
     Route::get('/{username}/containers/{service}/logs', [ContainerController::class, 'logs']);
+    Route::get('/{username}/containers/{service}/logs/stream', [ContainerController::class, 'streamLogs']);
 
     // What the account's own files are, next to what its last deploy decided.
     // The same report POST /source/inspect gives for a repository or a path,
@@ -357,15 +361,18 @@ Route::put('/system/ipv4-nat-maps', [SystemController::class, 'upsertIpv4NatMap'
 Route::delete('/system/ipv4-nat-maps/{id}', [SystemController::class, 'deleteIpv4NatMap']);
 Route::post('/system/ipv4-nat-maps/rebuild', [SystemController::class, 'rebuildIpv4NatMaps']);
 
-Route::get('/csf/rules', [CsfController::class, 'getRules']);
-Route::post('/csf/rules/{type}', [CsfController::class, 'addRule']);
-Route::put('/csf/rules/{type}/{lineMd5}', [CsfController::class, 'editRule']);
-Route::delete('/csf/rules/{type}/{lineMd5}', [CsfController::class, 'deleteRule']);
-Route::get('/csf/ui-credentials', [CsfController::class, 'getUiCredentials']);
-Route::get('/csf/status', [CsfController::class, 'getStatus']);
-Route::put('/csf/restart', [CsfController::class, 'restart']);
-Route::put('/csf/enable', [CsfController::class, 'enable']);
-Route::put('/csf/disable', [CsfController::class, 'disable']);
+Route::get('/firewall/status', [FirewallController::class, 'status']);
+Route::put('/firewall/enable', [FirewallController::class, 'enable']);
+Route::put('/firewall/disable', [FirewallController::class, 'disable']);
+Route::put('/firewall/reload', [FirewallController::class, 'reload']);
+Route::get('/firewall/logs', [FirewallController::class, 'logs']);
+Route::get('/firewall/trusted', [FirewallController::class, 'trusted']);
+Route::post('/firewall/trusted', [FirewallController::class, 'trust']);
+Route::delete('/firewall/trusted/{id}', [FirewallController::class, 'untrust']);
+Route::get('/firewall/rules', [FirewallController::class, 'rules']);
+Route::post('/firewall/rules', [FirewallController::class, 'addRule']);
+Route::put('/firewall/rules/{id}', [FirewallController::class, 'updateRule']);
+Route::delete('/firewall/rules/{id}', [FirewallController::class, 'deleteRule']);
 
 Route::get('/metrics/current', [ServerMetricsController::class, 'current']);
 Route::get('/metrics/last-5-minutes', [ServerMetricsController::class, 'last5Minutes']);
@@ -386,6 +393,8 @@ Route::get('/modsec/rulesets', [ModsecController::class, 'getRulesets']);
 Route::put('/modsec/rulesets/{name}/enable', [ModsecController::class, 'enableRuleset']);
 Route::put('/modsec/rulesets/{name}/disable', [ModsecController::class, 'disableRuleset']);
 Route::put('/modsec/rulesets/{name}/config-files', [ModsecController::class, 'toggleConfigFiles']);
+Route::get('/modsec/custom-rules', [ModsecController::class, 'getCustomRules']);
+Route::put('/modsec/custom-rules', [ModsecController::class, 'setCustomRules']);
 Route::get('/modsec/audit-log/files', [ModsecController::class, 'listAuditLogFiles']);
 Route::get('/modsec/audit-log/files/{filename}', [ModsecController::class, 'downloadAuditLogFile']);
 Route::get('/modsec/audit-log/files/{filename}/tail', [ModsecController::class, 'tailAuditLogFile']);

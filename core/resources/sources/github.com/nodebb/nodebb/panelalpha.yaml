@@ -6,7 +6,7 @@ description: >-
   permission for directory /opt/config" (the image runs as uid 1001) and would
   lose its data on every redeploy anyway. overrides/docker-compose.yml runs
   the published ghcr.io/nodebb/nodebb image of the current release with
-  mongo:7.0 (8.x does not start on this kernel, engine#146) and named volumes
+  mongo:7.0 (8.x does not start on this kernel) and named volumes
   for the config, build, uploads and database. hooks/prepare.sh generates the
   MongoDB root and NodeBB passwords once into ~/.panelalpha/nodebb/; the
   NodeBB user is created by an init script on the first start, as upstream's

@@ -15,7 +15,7 @@ the other options take the upstream `PEERTUBE_*` variables.
 ## What the recipe does
 
 - The repository root is the pnpm source tree; the plain deploy restart-loops
-  with `exec: pnpm: not found` (engine#414) and has no database anyway.
+  with `exec: pnpm: not found` and has no database anyway.
   `overrides/docker-compose.yml` runs `chocobozzz/peertube:v8.3.1` with
   `postgres:17-alpine` and `redis:8-alpine`, as `support/docker/production`,
   without its nginx, certbot and postfix sidecars and without the RTMP port.

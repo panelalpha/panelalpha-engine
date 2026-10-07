@@ -2,22 +2,16 @@
 
 namespace App\Console\Commands\Usage;
 
-use App\Console\Commands\Concerns\DispatchesApiRoute;
-use Illuminate\Console\Command;
+use App\Lib\Usage\ProjectUsage;
 
-class ProjectUsageCommand extends Command
+class ProjectUsageCommand extends UsageCommand
 {
-    use DispatchesApiRoute;
-
     protected $signature = 'project:usage {project : Project username}';
 
-    protected $description = 'Show resource usage for a project (GET /projects/{username}/usage)';
+    protected $description = 'Show resource usage for a project';
 
-    public function handle(): int
+    public function handle(ProjectUsage $usage): int
     {
-        $project = rawurlencode((string) $this->argument('project'));
-        $response = $this->dispatchApiRoute('GET', "/projects/{$project}/usage");
-
-        return $this->writeResponseBody($response, null);
+        return $this->printJson($usage->summary($this->project()));
     }
 }

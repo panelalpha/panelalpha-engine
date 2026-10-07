@@ -7,7 +7,7 @@ services:
     ports:
       - "8080:8080"
     # Database settings sit in env files: named in `environment:` they make the
-    # engine take this service for a datastore (engine#419).
+    # engine take this service for a datastore.
     env_file:
       - ../.panelalpha/focusflow/app.env
       - ./focusflow-db.env

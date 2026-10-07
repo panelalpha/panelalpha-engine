@@ -22,7 +22,7 @@ The app starts with no settings. Optional project environment variables:
   `ttlequals0/minuspod:2.97.36-cpu` on port 8000, `/app/data` on the named
   volume `minuspod-data` (kept across redeploys).
 - No `cap_drop`/`cap_add`: the engine keeps upstream's `cap_drop: ALL` but
-  strips its `cap_add` (engine#349), which leaves the entrypoint unable to
+  strips its `cap_add`, which leaves the entrypoint unable to
   chown the data directory or drop to uid 1000.
 - `MINUSPOD_TRUSTED_PROXY_COUNT=1` so login lockout and rate limits see the
   visitor's address (the last, proxy-added X-Forwarded-For hop) instead of the

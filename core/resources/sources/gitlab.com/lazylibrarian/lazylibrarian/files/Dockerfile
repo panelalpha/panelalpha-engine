@@ -22,7 +22,7 @@ RUN pip install -r requirements.txt
 # The application itself.
 COPY . /app
 
-# The datadir is a bind mount to the account's persistent ~/.panelalpha (see
+# The datadir is a bind mount of the account's persistent ~/.panelalpha/lazylibrarian (see
 # ../overrides/docker-compose.override.yml); everything LazyLibrarian writes —
 # the SQLite db, config.ini, logs, cache — lives there and survives a rebuild.
 # config.ini is pre-seeded by the prepare hook with BASIC auth enabled.

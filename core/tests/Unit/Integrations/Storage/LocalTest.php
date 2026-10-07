@@ -5,7 +5,6 @@ namespace Tests\Unit\Integrations\Storage;
 use App\Integrations\Storage\Local;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
-use RuntimeException;
 
 class LocalTest extends TestCase
 {
@@ -98,13 +97,16 @@ class LocalTest extends TestCase
         $this->assertFileDoesNotExist($this->root . '/.panelalpha-backup-probe');
     }
 
-    public function test_test_fails_when_root_is_missing(): void
+    public function test_test_creates_a_missing_root(): void
     {
+        // test() prepares the root the way the first put() would, so a new location passes.
         $missing = $this->root . '/missing';
         $storage = new Local($missing);
 
-        $this->expectException(RuntimeException::class);
         $storage->test();
+
+        $this->assertDirectoryExists($missing);
+        $this->assertFileDoesNotExist($missing . '/.panelalpha-backup-probe');
     }
 
     public function test_rejects_path_traversal(): void

@@ -7,7 +7,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * Behind the engine's proxy a PHP app saw REMOTE_ADDR=172.25.0.1, the Docker
- * bridge gateway, for every visitor (engine#11). The proxy already sends the
+ * bridge gateway, for every visitor. The proxy already sends the
  * client in X-Real-IP; Apache has to be told to believe it, and only from a
  * private source so a visitor cannot pick their own address.
  */

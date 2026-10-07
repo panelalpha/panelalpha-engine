@@ -117,6 +117,7 @@ export const SERVING_WORDS = [
   'directory_listing',
   'error_page',
   'php_error',
+  'blank_page',
   'php_source',
   'database_error',
   'dependency_unreachable',

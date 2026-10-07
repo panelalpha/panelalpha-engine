@@ -2,6 +2,9 @@
 
 namespace App\Console\Commands\Git;
 
+use App\Http\Requests\Git\GitPathRequest;
+use App\Lib\Git\GitActions;
+use App\Models\User;
 use Illuminate\Console\Command;
 
 class GitBranchesCommand extends Command
@@ -10,7 +13,7 @@ class GitBranchesCommand extends Command
 
     protected $signature = 'git:branches
                             {username : Project username}
-                            {--path= : Directory path inside the project (defaults to project (DinD) or public_html (FPM/LiteSpeed))}';
+                            {--path= : Directory path inside the project (defaults to project (DinD) or the document root of the main domain (FPM/LiteSpeed))}';
 
     protected $description = 'List git branches';
 
@@ -18,6 +21,7 @@ class GitBranchesCommand extends Command
     {
         $path = $this->resolvePath();
 
-        return $this->dispatchGit('GET', '/git/branches', ['path' => $path]);
+        return $this->runGit(GitPathRequest::class, ['path' => $path],
+            fn (User $user, array $params) => app(GitActions::class)->branches($user, $params));
     }
 }

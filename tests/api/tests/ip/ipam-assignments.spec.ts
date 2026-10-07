@@ -285,7 +285,7 @@ test.describe('IP assignment validation', () => {
 
     expect(response.status).toBe(422);
     expect((response.body as { message?: string }).message).toMatch(
-      /IP subnet not found|User not found/
+      /IP subnet not found|Project not found/
     );
   });
 });

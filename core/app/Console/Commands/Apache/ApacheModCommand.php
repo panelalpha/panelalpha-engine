@@ -40,10 +40,4 @@ abstract class ApacheModCommand extends ProjectFleetCommand
     {
         return '  Mod ' . $this->done() . '.';
     }
-
-    /** Pre-existing: these two exit 0 even when every project failed. */
-    protected function failuresAreFatal(): bool
-    {
-        return false;
-    }
 }

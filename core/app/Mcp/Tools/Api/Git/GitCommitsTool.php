@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     List git commits
 
-    List git commits. Optional `path` defaults to `project` on DinD and `public_html` on FPM/LiteSpeed. Query `branch` filters the log; `limit` caps how many commits are returned.
+    List git commits. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. Query `branch` filters the log; `limit` caps how many commits are returned.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -72,9 +72,9 @@ class GitCommitsTool extends ApiTool
     {
         return [
             'name' => $schema->string()->required(),
-            'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).'),
+            'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).'),
             'branch' => $schema->string(),
-            'limit' => $schema->integer(),
+            'limit' => $schema->integer()->min(1),
         ];
     }
 }

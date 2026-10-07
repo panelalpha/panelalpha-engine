@@ -115,6 +115,30 @@ class AwstatsIngestTest extends TestCase
         $this->assertContains('-config=example.com', $daily);
     }
 
+    public function test_ingest_merges_into_a_fresh_temporary_file_and_removes_it(): void
+    {
+        file_put_contents($this->root . '/logs/access.log', "line\n");
+        $seen = [];
+        $stats = $this->awstats(function (array $argv) use (&$seen): void {
+            foreach ($argv as $arg) {
+                if (str_starts_with($arg, '-logfile=')) {
+                    $path = substr($arg, strlen('-logfile='));
+                    $seen[] = [$path, is_file($path)];
+                }
+            }
+        });
+
+        $stats->ingestDomain('example.com', $this->root . '/logs', []);
+        $stats->ingestDomain('example.com', $this->root . '/logs', []);
+
+        $this->assertCount(4, $seen);
+        $this->assertTrue($seen[0][1], 'the merged log exists while AWStats reads it');
+        $this->assertSame($seen[0][0], $seen[1][0], 'both updates of one run read the same merge');
+        $this->assertNotSame($seen[0][0], $seen[2][0], 'every run merges into a file of its own');
+        $this->assertFileDoesNotExist($seen[0][0]);
+        $this->assertFileDoesNotExist($seen[2][0]);
+    }
+
     public function test_ingest_backfill_uses_about_twelve_months_of_rotated_access_logs(): void
     {
         $recent = $this->root . '/logs/access.log-2026-08.log.gz';
@@ -136,6 +160,30 @@ class AwstatsIngestTest extends TestCase
         $this->assertNotContains($bytes, $merge);
     }
 
+    public function test_ingest_reads_the_names_logrotate_actually_gives_rotated_logs(): void
+    {
+        // config/logrotate: dateext, dateformat -%Y-%m, extension .log, compress.
+        $compressed = $this->root . '/logs/access-2026-08.log.gz';
+        // What a rotation leaves when compression did not happen, and the file
+        // the webserver kept writing to until it reopened its logs.
+        $uncompressed = $this->root . '/logs/access-2026-09.log';
+        $rotatedBytes = $this->root . '/logs/bytes-2026-09.log';
+        $errors = $this->root . '/logs/error-2026-09.log';
+        file_put_contents($this->root . '/logs/access.log', 'now');
+        foreach ([$compressed, $uncompressed, $rotatedBytes, $errors] as $path) {
+            file_put_contents($path, 'x');
+        }
+
+        $this->awstats()->ingestDomain('example.com', $this->root . '/logs', []);
+
+        $merge = $this->argv[0];
+        $this->assertContains($this->root . '/logs/access.log', $merge);
+        $this->assertContains($compressed, $merge);
+        $this->assertContains($uncompressed, $merge);
+        $this->assertNotContains($rotatedBytes, $merge);
+        $this->assertNotContains($errors, $merge);
+    }
+
     public function test_awstats_data_is_gitignored_like_config(): void
     {
         $gitignore = (string) file_get_contents(dirname(base_path()) . '/.gitignore');
@@ -143,10 +191,13 @@ class AwstatsIngestTest extends TestCase
         $this->assertMatchesRegularExpression('/^awstats-data\r?$/m', $gitignore);
     }
 
-    private function awstats(): Awstats
+    private function awstats(?\Closure $inspect = null): Awstats
     {
-        $capture = function (array $argv): int {
+        $capture = function (array $argv) use ($inspect): int {
             $this->argv[] = $argv;
+            if ($inspect !== null) {
+                $inspect($argv);
+            }
 
             return 0;
         };

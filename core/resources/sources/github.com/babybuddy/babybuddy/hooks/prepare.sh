@@ -8,8 +8,8 @@ cd ~/project
 
 say() { echo "[babybuddy] $*" >&2; }
 
-# ~/.panelalpha/babybuddy survives a redeploy; ~/project is emptied every deploy
-# (engine#173). A secret written under ~/project would be regenerated on every
+# ~/.panelalpha/babybuddy survives a redeploy; ~/project is emptied every deploy.
+# A secret written under ~/project would be regenerated on every
 # rebuild -- a new SECRET_KEY logs everyone out. The admin login is the
 # engine's (`credentials:` in panelalpha.yaml), in ~/.panelalpha/app-credentials.env.
 STORE_DIR="${HOME}/.panelalpha/babybuddy"

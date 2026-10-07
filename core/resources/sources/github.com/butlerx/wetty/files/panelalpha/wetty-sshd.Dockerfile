@@ -11,10 +11,9 @@
 #     RUN adduser -D -h /home/term -s /bin/sh term && \
 #         ( echo "term:term" | chpasswd )
 #
-# -- a shared password published in a public git repository. Measured on a
-# stock deploy of this repository, an anonymous socket.io client typed `term`
-# and `term` and got `uid=1000(term) gid=1000(term)`. This image exists so the
-# recipe never has to ship that.
+# -- a shared password published in a public git repository: on a stock deploy
+# of this repository anyone who types `term` and `term` gets a shell. This image
+# exists so the recipe never has to ship that.
 #
 # What is different here:
 #

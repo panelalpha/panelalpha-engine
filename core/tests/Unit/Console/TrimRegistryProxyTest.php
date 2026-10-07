@@ -8,7 +8,7 @@ use Tests\TestCase;
 class TrimRegistryProxyTest extends TestCase
 {
     /**
-     * The store is a named volume (#285), so a restart alone keeps it. The
+     * The store is a named volume, so a restart alone keeps it. The
      * wipe must remove the storage tree and scheduler state, not the mountpoint.
      */
     public function test_it_wipes_the_store_inside_the_container(): void

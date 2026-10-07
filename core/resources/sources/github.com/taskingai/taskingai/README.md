@@ -7,7 +7,7 @@ nginx routing them on :8080.
 
 Plain deploy: the engine picks up `docker/docker-compose.yml` and runs it from
 the repository root. Every value comes from `${VAR}` in `docker/.env`, which
-compose never reads there (engine#443), so the backends restart-loop with
+compose never reads there, so the backends restart-loop with
 `Exception: Env OBJECT_STORAGE_TYPE is not set`. Upstream's health checks
 call `curl`, which none of the images ship, so they never pass either.
 

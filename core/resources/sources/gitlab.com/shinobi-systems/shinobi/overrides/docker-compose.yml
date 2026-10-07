@@ -41,7 +41,7 @@ services:
       start_period: 20s
     mem_limit: 1536m
 
-  # `up -d` runs without --wait (engine#204); this blocks it until Shinobi answers.
+  # `up -d` runs without --wait; this blocks it until Shinobi answers.
   ready:
     image: alpine:3
     restart: "no"

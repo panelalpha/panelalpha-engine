@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Compose;
 
+use App\Lib\Deploy\EnvFile;
+
 /**
  * Public-URL aliases. Applications behind the reverse proxy generate http://
  * links unless told the external origin, and every framework spells the
@@ -11,11 +13,20 @@ final class PublicUrlEnvironment
 {
     /**
      * `ORIGIN` is SvelteKit adapter-node's, which refuses to start on an
-     * invalid one (engine#192).
+     * invalid one.
      *
      * @var list<string>
      */
     private const URL_KEYS = ['URL', 'PUBLIC_URL', 'BASE_URL', 'APP_URL', 'ASSET_URL', 'SITE_URL', 'ENDURAIN_HOST', 'ORIGIN'];
+
+    /**
+     * URL keys many apps read as a sub-path prefix instead, where blank means
+     * "serve from /": DVinyl registers its routes under BASE_URL and exits on
+     * `/https://<domain>`.
+     *
+     * @var list<string>
+     */
+    private const PATH_PREFIX_KEYS = ['BASE_URL'];
 
     /**
      * The same fact spelled as a bare hostname: an Apache `php:*-apache` image
@@ -33,7 +44,7 @@ final class PublicUrlEnvironment
     /**
      * `$httpsFlags` is false for an image the engine did not write: MeTube
      * reads `HTTPS=on` as "terminate TLS here" and dies looking for a
-     * certificate (engine#289). TLS ends at the proxy; the URL keys say https.
+     * certificate. TLS ends at the proxy; the URL keys say https.
      *
      * @return array<string, string>
      */
@@ -55,13 +66,38 @@ final class PublicUrlEnvironment
     }
 
     /**
-     * The keys that carry the whole public URL.
+     * The URL keys a blank value in a template can be filled for; a blank
+     * path-prefix key means "root" and stays blank.
      *
      * @return list<string>
      */
-    public static function urlKeys(): array
+    public static function blankFillKeys(): array
     {
-        return self::URL_KEYS;
+        return array_values(array_diff(self::URL_KEYS, self::PATH_PREFIX_KEYS));
+    }
+
+    /**
+     * The path-prefix keys a project's own env file sets blank or to a path:
+     * that app reads the key as a prefix, so the full URL must not be forced on it.
+     *
+     * @param list<?string> $envFiles contents of `.env` / `.env.example`, null when absent
+     * @return list<string>
+     */
+    public static function pathPrefixKeysIn(array $envFiles): array
+    {
+        $keys = [];
+        foreach ($envFiles as $contents) {
+            foreach (is_string($contents) ? EnvFile::parse($contents) : [] as $row) {
+                $key = ($row['type'] ?? '') === 'variable' ? (string) ($row['key'] ?? '') : '';
+                if (in_array($key, self::PATH_PREFIX_KEYS, true)
+                    && preg_match('#^[a-z][a-z0-9+.-]*://#i', trim((string) ($row['value'] ?? ''))) !== 1
+                ) {
+                    $keys[$key] = true;
+                }
+            }
+        }
+
+        return array_keys($keys);
     }
 
     /** The host a vhost would match on, without the scheme, port or path. */

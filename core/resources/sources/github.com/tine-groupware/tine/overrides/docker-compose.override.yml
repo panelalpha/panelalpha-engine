@@ -32,7 +32,7 @@ services:
       #   /data/sessions   the File session backend, so a redeploy does not log
       #                    everyone out.
       #
-      # A redeploy clears and re-clones ~/project (engine#173), so a groupware
+      # A redeploy clears and re-clones ~/project, so a groupware
       # site that kept attachments under the document root would lose every one
       # of them while the database rows pointing at them survived. tine reads
       # all four as plain config values (etc/tine20/config.inc.php.mpl names
@@ -55,7 +55,7 @@ services:
     # generated secrets -- the setup user's password and
     # credentialCacheSharedKey -- written once by
     # hooks/prepare.sh, 0600 in a 0700 directory, outside ~/project because a
-    # redeploy wipes that (engine#173) and because engine#173 also leaves
+    # redeploy wipes that and because the engine also leaves
     # .env.default there 0644.
     #
     # It has to exist before the container is *created*: env_file is read then,
@@ -73,7 +73,7 @@ services:
     environment:
       # The one way to give this container a php.ini. The base image loads none
       # at all and scans /usr/local/etc/php/conf.d, a directory inside the image
-      # the account uid cannot write to (engine#185). PHP reads PHP_INI_SCAN_DIR
+      # the account uid cannot write to. PHP reads PHP_INI_SCAN_DIR
       # from its own environment at startup whatever the SAPI, so naming a
       # second directory here reaches the Apache module and the CLI both.
       #
@@ -108,7 +108,7 @@ services:
     # not up and when the frontend build did not produce a client, which is the
     # failure that would otherwise reach a customer as a blank page.
     #
-    # Host is 127.0.0.1:8000, as it is for AppHealth's own probe (#190). tine
+    # Host is 127.0.0.1:8000, as it is for AppHealth's own probe. tine
     # accepts it: config.inc.php declares tine20URL, so
     # Tinebase_Core::getUrl() never consults the Host header.
     healthcheck:
@@ -127,7 +127,7 @@ services:
   # own, but it does block on a `depends_on` health condition -- so a service
   # that waits for the app is what makes `up -d` return only once tine has
   # built its schema, created its administrator and rendered a page, and what
-  # the health probe then meets (engine#90).
+  # the health probe then meets.
   #
   # alpine:3 and not a datastore image: anything the sidecar miner recognises
   # as a backing service here produces `dependency cycle detected: app -> ready

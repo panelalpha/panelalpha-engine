@@ -4,6 +4,7 @@ namespace App\Mcp\Servers;
 
 use App\Auth\TokenAbilities;
 use App\Mcp\ToolPolicy;
+use App\Mcp\ToolSearch\PagedToolSearch;
 use App\Mcp\Tools\MetricsLatestTool;
 use App\Mcp\Tools\ProjectListSummaryTool;
 use Laravel\Mcp\Server;
@@ -11,6 +12,9 @@ use Laravel\Mcp\Server\Contracts\Transport;
 use Laravel\Mcp\Server\Attributes\Instructions;
 use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Attributes\Version;
+use Laravel\Mcp\Server\ServerContext;
+use Laravel\Mcp\Server\Tools\ToolSearch;
+use Laravel\Mcp\Transport\JsonRpcRequest;
 
 #[Name('PanelAlpha Engine')]
 #[Version('1.0.0')]
@@ -31,8 +35,16 @@ use Laravel\Mcp\Server\Attributes\Version;
     offline. Follow the annotations, and confirm destructive calls with the
     operator on a production server.
 
-    Git on a project starts with `git_status`: `managed_by: deploy` means
-    redeploy with `project_rebuild`, `site_git` means the git tools. `git_push`
+    Deploys run in the background: `project_create`, `project_rebuild` and
+    `project_deploy_archive` answer at once with a task `id`, and so do
+    `git_pull`, `git_change_branch` and `git_revert` on a `managed_by: deploy`
+    checkout. Follow it with `task_get` until it is completed, failed or
+    cancelled; never start another deploy while it runs.
+
+    Git on a project starts with `git_status`. On `managed_by: deploy` a
+    pull, branch change or revert rebuilds the app after it, as the task
+    above; `project_rebuild` redeploys without changing the checkout. On
+    `site_git` the git tools change the checkout and rebuild nothing. `git_push`
     commits a dirty tree itself; confirm first.
 
     Only the everyday tools are listed. Find any other (MySQL, FTP, cron,
@@ -70,7 +82,7 @@ class EngineServer extends Server
      * ToolSearch::class (see ToolPolicy::layout()). The default value stays a
      * plain list, since ToolRegistry reads it.
      *
-     * @var array<int|string, class-string<\Laravel\Mcp\Server\Tool>|array<int, class-string<\Laravel\Mcp\Server\Tool>>>
+     * @var array<int|string, class-string<\Laravel\Mcp\Server\Tool>|\Laravel\Mcp\Server\Tool|array<int, class-string<\Laravel\Mcp\Server\Tool>>>
      */
     protected array $tools = [
         MetricsLatestTool::class,
@@ -78,11 +90,13 @@ class EngineServer extends Server
     ];
 
     // One page over the whole catalogue: Cursor and Codex ignore nextCursor
-    // and lose every tool past the first page (#55). Both properties matter —
+    // and lose every tool past the first page. Both properties matter —
     // perPage() is min($requested ?? $default, $max).
     public int $maxPaginationLength = 1000;
 
     public int $defaultPaginationLength = 1000;
+
+    private ?PagedToolSearch $catalogue = null;
 
     public function __construct(Transport $transport)
     {
@@ -107,5 +121,24 @@ class EngineServer extends Server
 
         // Last, so the catalogue holds exactly what the filters above left.
         $this->tools = (new ToolPolicy())->layout($this->tools);
+
+        // The package builds a plain ToolSearch from that key, whose
+        // search_tools cannot page; register the paged pair in its place.
+        if (isset($this->tools[ToolSearch::class])) {
+            $this->catalogue = new PagedToolSearch($this->tools[ToolSearch::class]);
+            unset($this->tools[ToolSearch::class]);
+            $this->tools = [...$this->tools, ...$this->catalogue->tools()];
+        }
+    }
+
+    protected function handleInitializeMessage(JsonRpcRequest $request, ServerContext $context): void
+    {
+        // The areas come from what this caller's catalogue holds, so the list
+        // cannot go stale and never names tools the token cannot reach.
+        if ($this->catalogue !== null) {
+            $context->instructions = rtrim($context->instructions) . "\n" . $this->catalogue->areasLine();
+        }
+
+        parent::handleInitializeMessage($request, $context);
     }
 }

@@ -69,7 +69,7 @@ class TelemetrySectionTest extends TestCase
         $this->assertNull($this->sending($section));
     }
 
-    /** Opening a toggle row and pressing Enter must leave it as it is (#255). */
+    /** Opening a toggle row and pressing Enter must leave it as it is. */
     public function test_enter_on_sending_leaves_it_on(): void
     {
         Setting::setRuntimeSettings([NotificationPreferences::SETTING_TELEMETRY_ENABLED => '1']);

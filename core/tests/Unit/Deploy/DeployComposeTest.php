@@ -206,7 +206,7 @@ class DeployComposeTest extends TestCase
 
     /**
      * A sidecar with a healthcheck is waited on until it passes: Servas runs
-     * `artisan migrate` on boot and lost the race to its MariaDB (engine#187).
+     * `artisan migrate` on boot and lost the race to its MariaDB.
      */
     public function test_the_app_waits_for_a_sidecar_that_has_a_healthcheck(): void
     {
@@ -295,6 +295,20 @@ class DeployComposeTest extends TestCase
         YAML;
 
         $this->assertSame(['mysql:8.4', 'redis:latest'], DeployCompose::imageRefs($compose));
+    }
+
+    public function test_image_refs_keep_a_recipe_pinned_image_by_its_digest(): void
+    {
+        $digest = 'sha256:' . str_repeat('a', 64);
+        $compose = <<<YAML
+        services:
+          app:
+            image: traefik/whoami:v1.10.3@{$digest}
+          again:
+            image: traefik/whoami@{$digest}
+        YAML;
+
+        $this->assertSame(["traefik/whoami@{$digest}"], DeployCompose::imageRefs($compose));
     }
 
     public function test_image_refs_are_capped_and_deduplicated(): void

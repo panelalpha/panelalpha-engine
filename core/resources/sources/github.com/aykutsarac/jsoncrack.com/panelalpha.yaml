@@ -18,7 +18,7 @@ commands:
   - id: npm-install
     stage: build
     role: dependencies
-    # Spelled out like the engine's own pnpm line (engine#351): corepack is
+    # Spelled out like the engine's own pnpm line: corepack is
     # enabled only by the command, and package.json pins pnpm@10.20.0.
     run: >-
       sh -c 'command -v corepack >/dev/null 2>&1 || npm install -g corepack'

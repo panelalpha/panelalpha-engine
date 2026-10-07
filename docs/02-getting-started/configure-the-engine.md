@@ -1,6 +1,6 @@
 # Configure the engine
 
-`pae configure` on your VPS walks through the engine's own settings: the address assistants use, what those assistants are allowed to do, tokens for your own software, how many jobs run at once, the Docker Hub login image downloads go out under, the memory the site database keeps for caches, the firewall's web interface, and what the engine reports about itself. You pick one area, change it, and come back for the next.
+`pae configure` on your VPS walks through the engine's own settings: the address assistants use, what those assistants are allowed to do, tokens for your own software, how many jobs run at once, the Docker Hub login image downloads go out under, which base images are kept ready, the memory the site database keeps for caches, the firewall's web interface, and what the engine reports about itself. You pick one area, change it, and come back for the next.
 
 ```bash
 pae configure
@@ -19,8 +19,8 @@ When you leave, the wizard prints what it wrote. If you changed nothing, it says
 - **API tokens.** A token for software you run yourself, not for an assistant. You can limit which parts of the engine that token may call, or revoke it.
 - **Queue.** How many deploys, backups, or staging copies run at the same time. They share one queue. The wizard asks for a number from 1 to 32 and applies it.
 - **Docker Hub.** The Docker Hub account every image download on this server goes out under. Without one, all projects share one anonymous limit for your server's address, and busy servers hit it: deploys then fail with "Docker Hub temporarily refused further downloads". Use a Docker Hub access token with the **Public Repo Read-only** scope. The wizard checks the token with Docker Hub, and warns you if it can read private repositories, because every project on this server could then download them.
+- **Prewarmed images.** Which base images the server keeps ready before any project asks for them, and how much disk that may use. By default it keeps none. The first deploy that needs an image builds or downloads it, later deploys reuse it, and the server deletes it again after a few days without use. Pick the images your projects use when you want their first deploy to skip that wait: a PHP version costs about 1 GB and several minutes to build. The **budget** is the most disk one prewarm run may spend (6G by default, `none` for no limit), and the **reserve** is the free disk it always leaves (10G by default). Changes apply at the next weekly prewarm, or straight away with `pae system:image:prewarm`.
 - **Site database.** How much memory the database for hosted PHP sites keeps for its caches: the InnoDB buffer pool (32M by default), the MyISAM key buffer (8M) and the Aria page cache (8M). Raise them when hosted sites have large databases. A size is written like `64M` or `1G`. Saving one restarts that database, so sites lose it for a few seconds; the wizard asks first.
-- **Firewall UI.** Turns the firewall's web interface on port 2012 on or off. It is off by default because it keeps a process running just for itself. When you turn it on, the wizard prints the login. Only addresses listed in `/etc/csf/ui/ui.allow` can open it.
 - **Telemetry.** Whether reports leave this server, how much a report carries, and whether bug reports are allowed. Recording a deploy on the server itself carries on either way: [Telemetry](what-is-collected.md).
 
 **Nothing more** closes the menu.
@@ -31,7 +31,7 @@ To open one area without the menu, name it:
 pae configure mcp-tokens
 ```
 
-The names are `address`, `mcp-tokens`, `api-tokens`, `queue`, `docker-hub`, `sites-db`, `csf-ui`, and `telemetry`. Add `--dry-run` to see what would be written and write nothing.
+The names are `address`, `mcp-tokens`, `api-tokens`, `queue`, `docker-hub`, `prewarm`, `sites-db`, and `telemetry`. Add `--dry-run` to see what would be written and write nothing.
 
 The wizard needs the terminal you have over SSH. It will not run from a script.
 

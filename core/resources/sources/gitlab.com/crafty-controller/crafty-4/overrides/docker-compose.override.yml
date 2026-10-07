@@ -4,7 +4,7 @@
 # persistent state and a memory ceiling for the JRE-capable image.
 #
 # Crafty keeps EVERYTHING under its data dirs and ~/project is wiped every
-# redeploy (engine#173), so all five live on ~/.panelalpha/crafty, which the
+# redeploy, so all five live on ~/.panelalpha/crafty, which the
 # wipe never touches. ${CRAFTY_DATA} is interpolated from ~/project/.env, which
 # hooks/prepare.sh writes before the build. config/ holds the SQLite db, keys,
 # config.json and the generated admin creds; servers/ each Minecraft world.

@@ -27,7 +27,7 @@ class UserController extends Controller
             new OA\Response(response: 200, description: 'List of MySQL users', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'array', items: new OA\Items(ref: '#/components/schemas/MysqlUser'))],
             )),
-            new OA\Response(response: 404, description: 'User not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     /**
@@ -35,7 +35,7 @@ class UserController extends Controller
      */
     public function index($username): MysqlUserCollection
     {
-        $user = $this->projectOrNotFound($username);
+        $user = $this->projectOr404($username);
 
         $mysql = (new System())->mysql();
         $mysqlUsers = [];
@@ -69,7 +69,7 @@ class UserController extends Controller
      */
     public function show($username, $dbuser)
     {
-        $user = $this->projectOrNotFound($username);
+        $user = $this->projectOr404($username);
 
         /** @var ?MysqlUser $dbuser */
         $dbuser = $user->mysqlUsers()->getQuery()->where('user', $user->qualifyMysqlUser($dbuser))->first();
@@ -105,7 +105,7 @@ class UserController extends Controller
      */
     public function store($username, MysqlUserStoreRequest $request)
     {
-        $user = $this->projectOrNotFound($username);
+        $user = $this->projectOr404($username);
 
         /** @var array{name: string, password: string} */
         $params = $request->validated();
@@ -169,7 +169,7 @@ class UserController extends Controller
      */
     public function destroy($username, $dbuser)
     {
-        $user = $this->projectOrNotFound($username);
+        $user = $this->projectOr404($username);
 
         /** @var ?MysqlUser $dbuser */
         $dbuser = $user->mysqlUsers()->getQuery()->where('user', $user->qualifyMysqlUser($dbuser))->first();
@@ -210,7 +210,7 @@ class UserController extends Controller
      */
     public function rename($username, $dbuser, MysqlUserRenameRequest $request)
     {
-        $user = $this->projectOrNotFound($username);
+        $user = $this->projectOr404($username);
 
         /** @var ?MysqlUser $dbuser */
         $dbuser = $user->mysqlUsers()->getQuery()->where('user', $user->qualifyMysqlUser($dbuser))->first();
@@ -277,7 +277,7 @@ class UserController extends Controller
      */
     public function changePassword($username, $dbuser, MysqlUserChangePasswordRequest $request)
     {
-        $user = $this->projectOrNotFound($username);
+        $user = $this->projectOr404($username);
 
         /** @var ?MysqlUser $dbuser */
         $dbuser = $user->mysqlUsers()->getQuery()->where('user', $user->qualifyMysqlUser($dbuser))->first();

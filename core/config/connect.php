@@ -36,4 +36,8 @@ return [
 
     'url' => (string) env('PANELALPHA_CONNECT', 'https://connect.panelalpha.com'),
 
+    // Where the *.panelalpha.online front (eu1.withoutdns.com) connects from.
+    // Connect does not publish it, so it is configured; comma-separated IPs/CIDRs.
+    'front_addresses' => (string) env('PANELALPHA_CONNECT_FRONT', '159.69.7.81'),
+
 ];

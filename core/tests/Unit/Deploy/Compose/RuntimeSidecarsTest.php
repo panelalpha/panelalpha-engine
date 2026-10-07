@@ -148,6 +148,60 @@ class RuntimeSidecarsTest extends TestCase
         $this->assertNull($result['build_image']);
     }
 
+    /** Playerr's docker-compose.casaos.yml is the app itself on `playerr:latest`. */
+    public function test_a_template_service_named_after_the_repository_is_not_a_backing_service(): void
+    {
+        $casaos = "services:\n  playerr:\n    image: playerr:latest\n    ports:\n      - '2727:2727'\n";
+        $this->assertSame([], RuntimeSidecars::fromYaml($casaos, true, null, 'github.com/Maikboarder/Playerr')['services']);
+
+        $byImage = "services:\n  web:\n    image: maikboarder/playerr:latest\n  db:\n    image: postgres:16\n";
+        $this->assertSame(['db'], array_keys(RuntimeSidecars::fromYaml($byImage, true, null, 'github.com/maikboarder/playerr')['services']));
+
+        // A datastore keeps its place even in a repository of the same name.
+        $redis = "services:\n  redis:\n    image: redis:7\n";
+        $this->assertSame(['redis'], array_keys(RuntimeSidecars::fromYaml($redis, true, null, 'github.com/acme/redis')['services']));
+    }
+
+    /** Without a repository identity, the name the repository's compose gives its root build. */
+    public function test_a_template_service_named_like_the_root_build_is_not_a_backing_service(): void
+    {
+        $casaos = "services:\n  playerr:\n    image: playerr:latest\n    ports:\n      - '2727:2727'\n";
+        $this->assertSame(['playerr'], array_keys(RuntimeSidecars::fromYaml($casaos, true)['services']));
+        $this->assertSame([], RuntimeSidecars::fromYaml($casaos, true, null, null, null, null, null, [], null, null, ['playerr'])['services']);
+
+        // Matched on the image name or container_name as well; a datastore stays.
+        $byImage = "services:\n  web:\n    image: playerr:2\n  db:\n    image: postgres:16\n";
+        $this->assertSame(['db'], array_keys(RuntimeSidecars::fromYaml($byImage, true, null, null, null, null, null, [], null, null, ['playerr'])['services']));
+        $byContainer = "services:\n  web:\n    image: ghcr.io/x/y:1\n    container_name: Playerr\n";
+        $this->assertSame([], RuntimeSidecars::fromYaml($byContainer, true, null, null, null, null, null, [], null, null, ['playerr'])['services']);
+        $redis = "services:\n  redis:\n    image: redis:7\n";
+        $this->assertSame(['redis'], array_keys(RuntimeSidecars::fromYaml($redis, true, null, null, null, null, null, [], null, null, ['redis'])['services']));
+    }
+
+    public function test_root_build_service_names_are_the_services_built_from_the_repository_root(): void
+    {
+        $yaml = "services:\n  playerr:\n    build: .\n    container_name: Playerr-App\n"
+            . "  web:\n    build:\n      dockerfile: dev.Dockerfile\n"
+            . "  docs:\n    build: ./docs\n  db:\n    image: postgres:16\n";
+
+        $this->assertSame(['playerr', 'playerr-app', 'web'], RuntimeSidecars::rootBuildServiceNames($yaml));
+        $this->assertSame([], RuntimeSidecars::rootBuildServiceNames('not: [yaml'));
+    }
+
+    /**
+     * rapidbay's example file, deployed from an archive: no repository name to
+     * match, but the app `links:` its indexer, so it is the top of the stack.
+     */
+    public function test_a_template_app_that_links_its_dependency_is_not_a_backing_service(): void
+    {
+        $template = "services:\n  jackett:\n    image: linuxserver/jackett\n    ports:\n      - 9117:9117\n"
+            . "  rapidbay:\n    image: hauxir/rapidbay:latest\n    environment:\n"
+            . "      - JACKETT_HOST=http://jackett:9117\n    ports:\n      - 5000:5000\n    links:\n      - jackett\n";
+        $result = RuntimeSidecars::fromYaml($template, true);
+
+        $this->assertSame(['jackett'], array_keys($result['services']));
+    }
+
     public function test_only_the_backing_services_are_kept(): void
     {
         // The app service is the thing being deployed, not a dependency of it;
@@ -267,7 +321,9 @@ class RuntimeSidecarsTest extends TestCase
     {
         $result = $this->extract(self::STACK);
 
-        $this->assertSame('unless-stopped', $result['services']['db']['restart']);
+        // Its `ports` are stripped and the app that needed it was dropped, so no
+        // policy is added here: GeneratedCompose gives every sidecar one.
+        $this->assertArrayNotHasKey('restart', $result['services']['db']);
         $this->assertArrayHasKey('mem_limit', $result['services']['db']);
         $this->assertArrayHasKey('pids_limit', $result['services']['db']);
     }
@@ -306,7 +362,7 @@ class RuntimeSidecarsTest extends TestCase
     {
         // Phorge's recipe ships exactly this: a mysql service with no
         // environment at all. It used to come up as app/app with root@'%'
-        // on `app` too (engine#189).
+        // on `app` too.
         $passwords = SidecarPasswords::derived('account-seed');
         $result = RuntimeSidecars::fromYaml(
             "services:\n  db:\n    image: mysql:8.0\n    volumes:\n      - db:/var/lib/mysql\nvolumes:\n  db: {}\n",
@@ -389,9 +445,213 @@ class RuntimeSidecarsTest extends TestCase
         $this->assertArrayNotHasKey('ports', $result['services']['app']);
     }
 
+    /**
+     * BookStack's workstation file: its node asset watcher runs the checkout
+     * from a bind on a stock image, cannot write the host-built node_modules
+     * in an account and restart-loops, so every deploy ended partial.
+     */
+    public function test_an_image_service_running_the_checkout_from_a_bind_is_dropped(): void
+    {
+        $result = $this->extract(<<<'YAML'
+        services:
+          app:
+            build: .
+            volumes:
+              - ./:/app
+            depends_on:
+              node:
+                condition: service_started
+          db:
+            image: mysql:8.4
+            volumes:
+              - ./:/backup:ro
+          node:
+            image: node:22-alpine
+            working_dir: /app
+            user: node
+            volumes:
+              - ./:/app
+            entrypoint: /app/dev/docker/entrypoint.node.sh
+          worker:
+            image: acme/worker
+            volumes:
+              - ./storage:/data
+        YAML, false);
+
+        $this->assertSame(['db', 'worker'], array_keys($result['services']));
+    }
+
+    /**
+     * Sail's mysql binds a script from require-dev laravel/sail, which a
+     * `--no-dev` install never has: Docker made a directory there and the
+     * entrypoint failed sourcing it (Bagisto).
+     */
+    public function test_a_kept_sidecar_loses_binds_into_installed_dependencies(): void
+    {
+        $result = $this->extract(<<<'YAML'
+        services:
+          laravel.test:
+            build:
+              context: ./vendor/laravel/sail/runtimes/8.3
+              args:
+                WWWGROUP: '${WWWGROUP}'
+            volumes:
+              - '.:/var/www/html'
+          mysql:
+            image: 'mysql/mysql-server:8.0'
+            volumes:
+              - 'sail-mysql:/var/lib/mysql'
+              - './vendor/laravel/sail/database/mysql/create-testing-database.sh:/docker-entrypoint-initdb.d/10-create-testing-database.sh'
+              - {type: bind, source: ./node_modules/x, target: /x}
+              - 'vendor:/opt/vendor'
+              - './docker/my.cnf:/etc/mysql/conf.d/my.cnf'
+        volumes:
+          sail-mysql:
+          vendor:
+        YAML, false);
+
+        $this->assertSame(
+            ['sail-mysql:/var/lib/mysql', 'vendor:/opt/vendor', './docker/my.cnf:/etc/mysql/conf.d/my.cnf'],
+            $result['services']['mysql']['volumes']
+        );
+        $this->assertSame([
+            'mysql: ./vendor/laravel/sail/database/mysql/create-testing-database.sh:/docker-entrypoint-initdb.d/10-create-testing-database.sh',
+            'mysql: ./node_modules/x',
+        ], $result['dropped_mounts']);
+    }
+
+    /**
+     * Shlink's dev compose: its databases run as the laptop's uid with their
+     * data directory in the checkout, and MySQL refused to initialise there.
+     */
+    public function test_a_kept_datastore_runs_as_its_own_user_on_a_volume(): void
+    {
+        $result = $this->extract(<<<'YAML'
+        services:
+          shlink_php:
+            user: 1000:1000
+            build:
+              context: .
+            volumes:
+              - ./:/home/shlink/www
+          shlink_db_mysql:
+            user: 1000:1000
+            image: mysql:8.0
+            volumes:
+              - ./:/home/shlink/www
+              - ./data/infra/database:/var/lib/mysql
+              - ./data/infra/my.cnf:/etc/mysql/conf.d/my.cnf
+          shlink_redis_acl:
+            image: redis:7.4-alpine
+            volumes:
+              - ./data/infra/redis/redis-acl.conf:/usr/local/etc/redis/redis.conf
+          shlink_swagger_ui:
+            image: swaggerapi/swagger-ui:v5.11.3
+            volumes:
+              - ./docs/swagger:/app
+        YAML, false);
+
+        $mysql = $result['services']['shlink_db_mysql'];
+        $this->assertArrayNotHasKey('user', $mysql);
+        $this->assertSame(
+            ['./:/home/shlink/www', 'shlink_db_mysql-data:/var/lib/mysql', './data/infra/my.cnf:/etc/mysql/conf.d/my.cnf'],
+            $mysql['volumes']
+        );
+        $this->assertArrayHasKey('shlink_db_mysql-data', $result['volumes']);
+        $this->assertSame(['shlink_db_mysql: ./data/infra/database:/var/lib/mysql'], $result['replaced_mounts']);
+        $this->assertSame(
+            ['./data/infra/redis/redis-acl.conf:/usr/local/etc/redis/redis.conf'],
+            $result['services']['shlink_redis_acl']['volumes']
+        );
+        $this->assertArrayNotHasKey('shlink_swagger_ui', $result['services']);
+    }
+
+    /**
+     * Digiboard's compose: a Traefik that discovers containers through the
+     * Docker socket. The account never gets the socket and its own proxy does
+     * the routing, so keeping it left a container retrying the provider forever.
+     */
+    public function test_a_bundled_ingress_proxy_is_not_kept_as_a_runtime_service(): void
+    {
+        $result = $this->extract(<<<'YAML'
+        services:
+          traefik:
+            image: traefik:v3.5
+            command:
+              - --providers.docker=true
+              - --entrypoints.web.address=:80
+            ports:
+              - "80:80"
+            volumes:
+              - /var/run/docker.sock:/var/run/docker.sock:ro
+              - traefik_letsencrypt:/letsencrypt
+          app:
+            build: .
+            depends_on:
+              - traefik
+              - redis
+            labels:
+              - traefik.http.services.app.loadbalancer.server.port=3000
+          redis:
+            image: redis:7-alpine
+            depends_on:
+              - traefik
+            volumes:
+              - redis-data:/data
+          proxy:
+            image: nginxproxy/nginx-proxy:1.6
+        volumes:
+          traefik_letsencrypt:
+          redis-data:
+        YAML, false);
+
+        $this->assertSame(['redis'], array_keys($result['services']));
+        $this->assertSame(['traefik (traefik:v3.5)', 'proxy (nginxproxy/nginx-proxy:1.6)'], $result['dropped_proxies']);
+        $this->assertArrayNotHasKey('traefik_letsencrypt', $result['volumes']);
+        $this->assertArrayNotHasKey('depends_on', $result['services']['redis']);
+    }
+
+    /** A Traefik routing the stack's own paths from a file provider is part of the app, as on the compose strategy. */
+    public function test_a_traefik_that_routes_the_stacks_own_paths_is_kept(): void
+    {
+        $result = $this->extract(<<<'YAML'
+        services:
+          router:
+            image: traefik:v3.1
+            command: --providers.file.filename=/etc/traefik/dynamic.yml
+          app:
+            build: .
+          db:
+            image: postgres:16
+        YAML, false);
+
+        $this->assertSame(['router', 'db'], array_keys($result['services']));
+        $this->assertSame([], $result['dropped_proxies']);
+    }
+
+    /** What the hardener removes from a kept service comes back, for the deploy log. */
+    public function test_a_kept_sidecars_removed_mounts_are_reported(): void
+    {
+        $result = $this->extract(<<<'YAML'
+        services:
+          app:
+            build: .
+          redis:
+            image: redis:7-alpine
+            volumes:
+              - /var/run/docker.sock:/var/run/docker.sock
+              - redis-data:/data
+        volumes:
+          redis-data:
+        YAML, false);
+
+        $this->assertSame(['redis-data:/data'], $result['services']['redis']['volumes']);
+        $this->assertSame(['redis: volume /var/run/docker.sock:/var/run/docker.sock'], $result['hardening_removed']);
+    }
+
     public function test_a_file_with_no_services_contributes_nothing(): void
     {
-        $empty = ['services' => [], 'volumes' => [], 'env' => [], 'app_env' => [], 'app_mounts' => [], 'build_image' => null, 'app_aliases' => []];
+        $empty = ['services' => [], 'volumes' => [], 'env' => [], 'app_env' => [], 'app_mounts' => [], 'build_image' => null, 'app_aliases' => [], 'published_secrets' => []];
 
         $this->assertSame($empty, $this->extract("volumes:\n  dbdata:\n"));
         $this->assertSame($empty, $this->extract(''));
@@ -402,7 +662,7 @@ class RuntimeSidecarsTest extends TestCase
         // A broken compose file is the project's problem. It must not be an
         // exception out of the deploy.
         $this->assertSame(
-            ['services' => [], 'volumes' => [], 'env' => [], 'app_env' => [], 'app_mounts' => [], 'build_image' => null, 'app_aliases' => []],
+            ['services' => [], 'volumes' => [], 'env' => [], 'app_env' => [], 'app_mounts' => [], 'build_image' => null, 'app_aliases' => [], 'published_secrets' => []],
             $this->extract("services:\n  app:\n   - [\n")
         );
     }
@@ -410,7 +670,7 @@ class RuntimeSidecarsTest extends TestCase
     public function test_a_missing_file_contributes_nothing(): void
     {
         $this->assertSame(
-            ['services' => [], 'volumes' => [], 'env' => [], 'app_env' => [], 'app_mounts' => [], 'build_image' => null, 'app_aliases' => []],
+            ['services' => [], 'volumes' => [], 'env' => [], 'app_env' => [], 'app_mounts' => [], 'build_image' => null, 'app_aliases' => [], 'published_secrets' => []],
             RuntimeSidecars::fromFile('/nonexistent/compose.yaml')
         );
     }
@@ -479,6 +739,66 @@ class RuntimeSidecarsTest extends TestCase
             'CFG_CALLBACK_CONFIG' => '{"base_url": "http://localhost:8081", "signing_key": "abc"}',
             'CFG_LOG_LEVEL' => 'info',
         ], $result['app_env']);
+    }
+
+    public function test_a_test_variant_of_the_app_is_not_harvested(): void
+    {
+        // Zerobyte: every service builds the repo; the e2e ones turn rate
+        // limiting off and point Node at a test CA.
+        $yaml = <<<'YAML'
+        services:
+          zerobyte-dev:
+            build: .
+            environment:
+              - NODE_ENV=development
+            volumes:
+              - ./app:/app/app
+          zerobyte-e2e:
+            build: .
+            environment:
+              - DISABLE_RATE_LIMITING=true
+              - NODE_EXTRA_CA_CERTS=/tinyauth-ca/root.crt
+            volumes:
+              - ./playwright/data:/var/lib/zerobyte/data
+          zerobyte_test:
+            build: .
+            environment:
+              - TRUSTED_ORIGINS=https://localhost:5557
+            volumes:
+              - .:/app
+        YAML;
+        $result = RuntimeSidecars::fromYaml($yaml, false, null, 'github.com/nicotsx/zerobyte');
+
+        $this->assertSame(['NODE_ENV' => 'development'], $result['app_env']);
+    }
+
+    public function test_a_secret_like_key_with_a_literal_value_is_flagged_as_published(): void
+    {
+        // Zerobyte's production variant ships its own signing secret in the
+        // repository; kept verbatim, every account that deploys it gets the
+        // exact same value, so the caller needs to know which key and service.
+        $yaml = <<<'YAML'
+        services:
+          zerobyte-prod:
+            build: .
+            image: nicotsx/zerobyte:latest
+            environment:
+              - APP_SECRET=94bad46abe2c1d9f
+              - LOG_LEVEL=debug
+        YAML;
+        $result = RuntimeSidecars::fromYaml($yaml, false, null, 'github.com/nicotsx/zerobyte');
+
+        $this->assertSame('94bad46abe2c1d9f', $result['app_env']['APP_SECRET']);
+        $this->assertSame(['zerobyte-prod' => ['APP_SECRET']], $result['published_secrets']);
+    }
+
+    public function test_a_required_secret_reference_is_not_flagged_as_published(): void
+    {
+        // Nothing in UTASK's harvested env is a secret-like key with a literal
+        // value — the regression this must not fire on.
+        $result = RuntimeSidecars::fromYaml(self::UTASK, false, null, 'github.com/ovh/utask');
+
+        $this->assertSame([], $result['published_secrets']);
     }
 
     public function test_dev_sidecars_are_not_harvested(): void
@@ -555,6 +875,43 @@ class RuntimeSidecarsTest extends TestCase
         $this->assertSame('from-sidecar', $env['CFG_DATABASE']);
         $this->assertSame('app', $env['CFG_A']);
         $this->assertSame('account', $env['CFG_B']);
+    }
+
+    public function test_the_apps_own_url_to_a_kept_sidecar_keeps_its_driver(): void
+    {
+        // CTFd: the generic mysql:// made SQLAlchemy load MySQLdb, which the
+        // image does not ship.
+        $result = RuntimeSidecars::fromYaml(<<<'YAML'
+        services:
+          ctfd:
+            build: .
+            environment:
+              - DATABASE_URL=mysql+pymysql://ctfd:ctfd@db/ctfd
+              - REDIS_URL=redis://cache:6379
+            volumes:
+              - .:/opt/CTFd
+          db:
+            image: mariadb:10.11
+            environment:
+              - MARIADB_ROOT_PASSWORD=ctfd
+              - MARIADB_USER=ctfd
+              - MARIADB_PASSWORD=ctfd
+              - MARIADB_DATABASE=ctfd
+          cache:
+            image: redis:4
+        YAML, false, null, 'github.com/ctfd/ctfd');
+        $merger = new DindRuntimeSidecars($this->dindForMerger());
+        $env = $merger->mergeRuntimeSidecars(['env' => []], $result)['env'];
+
+        $this->assertSame('mysql+pymysql://ctfd:ctfd@db/ctfd', $env['DATABASE_URL']);
+        $this->assertSame('redis://cache:6379', $env['REDIS_URL']);
+        // What the app did not declare still comes from the sidecar.
+        $this->assertArrayHasKey('MARIADB_URL', $env);
+
+        // A URL whose password the sidecar does not run with is not kept.
+        $result['app_env']['DATABASE_URL'] = 'mysql+pymysql://ctfd:other@db/ctfd';
+        $env = $merger->mergeRuntimeSidecars(['env' => []], $result)['env'];
+        $this->assertSame('mysql://ctfd:ctfd@db:3306/ctfd', $env['DATABASE_URL']);
     }
 
     public function test_ports_the_image_declares_are_consulted(): void
@@ -916,7 +1273,7 @@ class RuntimeSidecarsTest extends TestCase
         $this->assertSame('redis', $result['env']['REDIS_HOST']);
     }
 
-    /** godoxy's compose.example.yml (#142): the socket proxy's bind source is a variable. */
+    /** godoxy's compose.example.yml: the socket proxy's bind source is a variable. */
     public function test_a_template_bind_mount_through_a_variable_declares_no_volume(): void
     {
         $result = RuntimeSidecars::fromYaml(<<<'YAML'
@@ -938,7 +1295,7 @@ YAML, true, null, 'yusing/godoxy');
     }
 
     /**
-     * foodsoft's docker-compose.ci.yml (#108): the app service is `image: ${IMAGE}`
+     * foodsoft's docker-compose.ci.yml: the app service is `image: ${IMAGE}`
      * with no `build:`. Kept, it interpolated to nothing and compose rejected the
      * project: service "foodsoft" has neither an image nor a build context.
      */
@@ -982,6 +1339,22 @@ YAML, true, null, 'foodcoops/foodsoft');
         $this->assertSame($kept, isset($result['services']['db']));
     }
 
+    public function test_a_harvested_sidecars_mounts_are_checked_as_compose_interpolates_them(): void
+    {
+        $yaml = <<<'YAML'
+        services:
+          db:
+            image: mysql:8
+            volumes:
+              - ${DB_DIR}:/var/lib/mysql
+              - ${INIT_DIR:-./initdb}:/docker-entrypoint-initdb.d
+        YAML;
+
+        $result = RuntimeSidecars::fromYaml($yaml, true, null, 'github.com/acme/shop', null, null, null, ['DB_DIR' => ['/var/lib/docker/volumes']]);
+
+        $this->assertSame(['${INIT_DIR:-./initdb}:/docker-entrypoint-initdb.d'], $result['services']['db']['volumes']);
+    }
+
     /** @return array<string, array{string, bool}> */
     public static function imageReferences(): array
     {
@@ -992,5 +1365,115 @@ YAML, true, null, 'foodcoops/foodsoft');
             'variable tag with default' => ['postgres:${PG_TAG:-16}', true],
             'plain image' => ['postgres:16', true],
         ];
+    }
+
+    /**
+     * Meet builds two backend tags; the deploy builds `app`'s, so a worker on
+     * the development tag would be pulled from Docker Hub and fail.
+     */
+    public function test_a_service_on_a_tag_only_a_dropped_builder_makes_is_dropped(): void
+    {
+        $result = $this->extract(<<<'YAML'
+        services:
+          app-dev:
+            build:
+              context: .
+              target: backend-development
+            image: meet:backend-development
+            volumes:
+              - ./src/backend:/app
+          celery-dev:
+            image: meet:backend-development
+            command: celery worker
+            depends_on: [app-dev, redis]
+          app:
+            build:
+              context: .
+              target: backend-production
+            image: meet:backend-production
+          celery:
+            image: meet:backend-production
+            command: celery worker
+            depends_on: [app, redis]
+          redis:
+            image: redis:5
+        YAML, false);
+
+        $this->assertSame('meet:backend-production', $result['build_image']);
+        $this->assertArrayNotHasKey('celery-dev', $result['services']);
+        $this->assertArrayHasKey('celery', $result['services']);
+        $this->assertArrayHasKey('redis', $result['services']);
+    }
+
+    /** LinkAce's docker-compose.production.yml, the part the deploy keeps. */
+    private const LINKACE_PRODUCTION = <<<'YAML'
+    services:
+      app:
+        image: docker.io/linkace/linkace:latest
+        depends_on: [db, meilisearch]
+        ports:
+          - "0.0.0.0:80:80"
+      db:
+        image: docker.io/library/mariadb:12.0
+        environment:
+          - MYSQL_ROOT_PASSWORD=${DB_PASSWORD}
+          - MYSQL_USER=${DB_USERNAME}
+          - MYSQL_PASSWORD=${DB_PASSWORD}
+          - MYSQL_DATABASE=${DB_DATABASE}
+      meilisearch:
+        image: docker.io/getmeili/meilisearch:v1.16
+        environment:
+          - MEILI_ENV=production
+          - MEILI_MASTER_KEY=${MEILISEARCH_KEY}
+      redis:
+        image: docker.io/library/redis:8.2
+        command: "redis-server --requirepass ${REDIS_PASSWORD}"
+    YAML;
+
+    public function test_a_kept_sidecars_bare_secret_is_generated_for_it_and_the_app(): void
+    {
+        $result = RuntimeSidecars::fromYaml(self::LINKACE_PRODUCTION, true, null, 'github.com/kovah/linkace', null, 'account-seed');
+
+        $redisPassword = ComposePlaceholders::requiredSecretValue('REDIS_PASSWORD', 'account-seed');
+        $meiliKey = ComposePlaceholders::requiredSecretValue('MEILISEARCH_KEY', 'account-seed');
+        $this->assertSame('redis-server --requirepass ' . $redisPassword, $result['services']['redis']['command']);
+        $this->assertSame($meiliKey, $result['services']['meilisearch']['environment']['MEILI_MASTER_KEY']);
+        $this->assertGreaterThanOrEqual(16, strlen($meiliKey));
+        // The app reads the same names the file interpolated, and the URL authenticates.
+        $this->assertSame($redisPassword, $result['env']['REDIS_PASSWORD']);
+        $this->assertSame($meiliKey, $result['env']['MEILISEARCH_KEY']);
+        $this->assertSame('redis://:' . $redisPassword . '@redis:6379/0', $result['env']['REDIS_URL']);
+    }
+
+    public function test_a_bare_secret_the_projects_env_sets_is_left_for_compose(): void
+    {
+        $result = RuntimeSidecars::fromYaml(
+            self::LINKACE_PRODUCTION,
+            true,
+            null,
+            'github.com/kovah/linkace',
+            null,
+            'account-seed',
+            null,
+            ['REDIS_PASSWORD' => ['from-dotenv']]
+        );
+
+        $this->assertSame('redis-server --requirepass ${REDIS_PASSWORD}', $result['services']['redis']['command']);
+        $this->assertArrayNotHasKey('REDIS_PASSWORD', $result['env']);
+        $this->assertNotSame('', $result['services']['meilisearch']['environment']['MEILI_MASTER_KEY']);
+    }
+
+    public function test_a_bare_reference_that_names_no_secret_is_left_alone(): void
+    {
+        $result = RuntimeSidecars::fromYaml(
+            "services:\n  redis:\n    image: redis:7\n    command: redis-server --maxmemory \${REDIS_MAXMEMORY}\n",
+            true,
+            null,
+            null,
+            null,
+            'account-seed'
+        );
+
+        $this->assertSame('redis-server --maxmemory ${REDIS_MAXMEMORY}', $result['services']['redis']['command']);
     }
 }

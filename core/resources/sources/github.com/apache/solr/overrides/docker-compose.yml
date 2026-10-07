@@ -15,7 +15,7 @@ services:
       timeout: 5s
       retries: 60
       start_period: 15s
-    # 512 MB heap plus off-heap: ~705 MB measured with one collection.
+    # 512 MB heap plus off-heap memory.
     mem_limit: 1536m
 
   # No-op gate: `compose up -d` returns only once Solr answers.

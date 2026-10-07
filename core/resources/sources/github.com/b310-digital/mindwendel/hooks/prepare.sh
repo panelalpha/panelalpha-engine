@@ -8,8 +8,8 @@ cd ~/project
 
 say() { echo "[mindwendel] $*" >&2; }
 
-# ~/.panelalpha/mindwendel/ survives; ~/project is emptied on every deploy
-# (engine#173), so a secret written there is regenerated on every rebuild -- a
+# ~/.panelalpha/mindwendel/ survives; ~/project is emptied on every deploy,
+# so a secret written there is regenerated on every rebuild -- a
 # new SECRET_KEY_BASE logs every session out, a new DB password locks the app out
 # of the pgdata volume that still holds the old one. Two files: the database has
 # no business holding the app secret, and compose delivers each as its own

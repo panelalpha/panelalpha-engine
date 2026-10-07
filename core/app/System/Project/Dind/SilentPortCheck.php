@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Log;
 /**
  * Nothing answered, and nothing is restarting either: the containers are up
  * and silent. Says, per container that publishes a probed port, what it is
- * listening on instead (engine#90). {@see SilentPort}.
+ * listening on instead. {@see SilentPort}.
  */
 final class SilentPortCheck
 {
@@ -36,6 +36,11 @@ final class SilentPortCheck
             if (($result['status'] ?? null) === AppHealth::STATUS_OK) {
                 return null;
             }
+            // A port that answered a 5xx is not silent: that is an application
+            // error, which the response checks already report.
+            if (($result['http_code'] ?? null) !== null) {
+                continue;
+            }
             $silent[] = (int) ($result['port'] ?? 0);
         }
         if ($silent === []) {
@@ -49,13 +54,18 @@ final class SilentPortCheck
                 self::TIMEOUT_SECONDS
             );
             $findings = [];
+            $starting = [];
             foreach (SilentPort::publishers($ps, $silent) as $publisher) {
+                $sockets = $this->socketsOf($publisher['name']);
                 $findings[] = SilentPort::diagnose(
                     $publisher['service'],
                     $publisher['published'],
                     $publisher['target'],
-                    $this->socketsOf($publisher['name'])
+                    $sockets
                 );
+                if (SilentPort::listensOnNothing($sockets, $publisher['target'])) {
+                    $starting[] = $publisher['service'];
+                }
             }
         } catch (\Throwable $e) {
             Log::debug('Silent-port check could not run: ' . AppHealth::trimReason($e->getMessage()));
@@ -74,8 +84,24 @@ final class SilentPortCheck
             'title' => 'The application is running but does not answer on the port it publishes.',
             'detail' => implode(' ', $findings),
             'fix' => 'Its output is in the deploy log, or read it with container_service_logs.',
-            'evidence' => ['silent' => $findings],
+            // Services up but bound to nothing yet; the deploy waits on these.
+            'evidence' => ['silent' => $findings, 'starting' => array_values(array_unique($starting))],
         ];
+    }
+
+    /**
+     * The services a {@see check()} result found running with nothing bound.
+     *
+     * @param array<string, mixed>|null $check
+     * @return list<string>
+     */
+    public static function starting(?array $check): array
+    {
+        $starting = $check['evidence']['starting'] ?? [];
+
+        return is_array($check) && ($check['id'] ?? null) === self::ID && is_array($starting)
+            ? array_values(array_filter($starting, is_string(...)))
+            : [];
     }
 
     /**

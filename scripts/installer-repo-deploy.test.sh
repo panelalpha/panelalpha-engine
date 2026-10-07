@@ -120,7 +120,11 @@ mkdir -p "$STUB_BIN"
 cat >"${STUB_BIN}/docker" <<STUB
 #!/bin/bash
 if [ "\${STUB_FAIL:-0}" = 1 ]; then
-    echo 'HTTP 422: git_repo: the repository could not be read' >&2
+    # The hint on stdout; the deploy log and then the reason on stderr, last.
+    echo 'Deploy log: pae project:deploy:list'
+    echo '    0:01 Cloning https://github.com/n8n-io/n8n' >&2
+    echo '    0:02 Deploy failed: the repository could not be read.' >&2
+    echo 'github.com answered that the repository does not exist, or needs a token.' >&2
     exit 1
 fi
 # project:create --json: deploy log on stderr, JSON on stdout.
@@ -172,15 +176,13 @@ DEPLOY_FAILED=0
 DEPLOY_ERROR=''
 STUB_FAIL=1 deploy_repository >/dev/null 2>&1
 expect 'failed deploy is recorded' '1' "$DEPLOY_FAILED"
-case "$DEPLOY_ERROR" in
-*'HTTP 422:'*) pass 'failure reason from stderr' ;;
-*) fail 'failure reason from stderr' 'HTTP 422:…' "$DEPLOY_ERROR" ;;
-esac
+expect 'failure reason is the error line' \
+    'github.com answered that the repository does not exist, or needs a token.' "$DEPLOY_ERROR"
 
 reported=$(report_deployed_project 2>&1)
 case "$reported" in
-*'HTTP 422:'*) pass 'failure report shows reason' ;;
-*) fail 'failure report shows reason' 'HTTP 422:…' "$reported" ;;
+*'repository does not exist, or needs a token.'*) pass 'failure report shows reason' ;;
+*) fail 'failure report shows reason' 'the error line' "$reported" ;;
 esac
 case "$reported" in
 *'pae project:create --repo n8n-io/n8n'*) pass 'failure names the retry' ;;
@@ -211,14 +213,42 @@ case "$reported" in
 *) fail 'report shows Password line' 'Password: FixedPass…' "$reported" ;;
 esac
 
-# deploy_error_reason prefers HTTP / Deploy failed lines
+# deploy_error_reason: the command's own error line, then "Deploy failed:", then
+# the last line. Its input is stdout (the hint), a blank line, then stderr: the
+# deploy log, then the reason the console renderer prints.
+php_reason='This project needs PHP ^5.3.3, but it was built with PHP 8.3.35.'
 sample=$(printf '%s\n' \
+    'Deploy log: pae project:deploy:list' \
+    '' \
     '    0:20 Detected project type: PHP' \
-    '    1:01 Deploy failed: This project needs PHP ^5.3.3, but it was built with PHP 8.3.35.' \
-    'HTTP 422: This project needs PHP ^5.3.3, but it was built with PHP 8.3.35.')
-expect 'reason prefers HTTP line' \
-    'HTTP 422: This project needs PHP ^5.3.3, but it was built with PHP 8.3.35.' \
+    "    1:01 Deploy failed: The build failed: composer install exited with code 2." \
+    "$php_reason")
+expect 'reason prefers the error line' "$php_reason" "$(deploy_error_reason "$sample")"
+
+sample=$(printf '%s\n' \
+    '' \
+    "A project named 'taken' already exists. Choose another name." \
+    'Template directory does not exist.')
+expect 'reason is the first of several' \
+    "A project named 'taken' already exists. Choose another name." \
     "$(deploy_error_reason "$sample")"
+
+# A log line that mentions a status code is not the reason.
+sample=$(printf '%s\n' \
+    'Deploy log: pae project:deploy:list' \
+    '' \
+    '    1:30 Health check: http://127.0.0.1:8000/ answered HTTP 404' \
+    "    1:31 Deploy failed: $php_reason")
+expect 'reason falls back to Deploy failed' "$php_reason" "$(deploy_error_reason "$sample")"
+
+# An engine from before the CLI dropped its HTTP wording still reads.
+sample=$(printf '%s\n' "HTTP 422: $php_reason" '')
+expect 'reason from an older engine' "HTTP 422: $php_reason" "$(deploy_error_reason "$sample")"
+
+# An uncaught exception, as artisan renders it.
+sample=$(printf '%s\n' '' '' 'In ProjectCreator.php line 371:' '                     ' \
+    '  docker: not found  ' '                     ' '')
+expect 'reason from an uncaught exception' 'docker: not found' "$(deploy_error_reason "$sample")"
 
 # ---- decide_repo_deploy_mode -----------------------------------------------
 

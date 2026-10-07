@@ -217,7 +217,7 @@ class DeployReportTest extends TestCase
 
     /**
      * The signature was the first 600 bytes of the raw output, which on a
-     * compose deploy is pull progress: rero-ils (#112) sent layer downloads
+     * compose deploy is pull progress: rero-ils sent layer downloads
      * cut off mid-word and never the line that named the unhealthy service.
      */
     public function test_the_signature_is_the_failing_region_not_the_head_of_the_output(): void

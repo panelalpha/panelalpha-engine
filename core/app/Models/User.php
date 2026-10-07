@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Exceptions\NotFoundException;
 use App\Lib\Host\ProjectMemory;
 use App\Lib\Limits\ResourceLimit;
 use App\Lib\Project\NewProjectDetails;
@@ -12,7 +13,6 @@ use App\System\Project\Dind\AppDatabase;
 use App\System\Services\Webserver\AbstractWebserver;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
@@ -61,7 +61,23 @@ class User extends Authenticatable
     private const ENCRYPTED_SECRET_PREFIX = 'laravel-encrypted:v1:';
 
     /** Details stored as one encrypted JSON document each. */
-    private const ENCRYPTED_JSON_DETAILS = ['env_vars', 'app_credentials'];
+    private const ENCRYPTED_JSON_DETAILS = ['env_vars', 'app_credentials', 'git_deploy_key'];
+
+    /** Top-level details encrypted at rest; site_git tokens are per entry. */
+    private const SECRET_DETAILS = [
+        'git_token',
+        'cloudflare_api_token',
+        'cloudflare_tunnel_token',
+        'registry_auth',
+        'site_password_hash',
+        AppDatabase::PASSWORD_DETAIL,
+        'env_vars',
+        'app_credentials',
+    ];
+
+    /** What a project can do about its own unreadable secrets; the APP_KEY is a server matter. */
+    public const UNREADABLE_SECRETS_REMEDY = 'Set each one again: env_vars, git_update_credentials for a Git '
+        . 'token, the cloudflare-api-token or registry-auth setting, or the site password.';
 
     protected $fillable = [
         'username',
@@ -154,6 +170,7 @@ class User extends Authenticatable
             'deploy_platform',
             'deploy_checks_dir',
             'deploy_image',
+            'deploy_start_period',
             'git_commit',
             'git_branch',
         ] as $key) {
@@ -232,11 +249,8 @@ class User extends Authenticatable
 
     public static function findByUsernameOrFail(string $username): User
     {
-        $user = self::findByUsername($username);
-        if ($user === null) {
-            throw new ModelNotFoundException();
-        }
-        return $user;
+        return self::findByUsername($username)
+            ?? throw new NotFoundException("Project '{$username}' not found.", self::class);
     }
 
     public static function existsByUsername(string $username): bool
@@ -274,6 +288,9 @@ class User extends Authenticatable
         }
         if (isset($details['cloudflare_tunnel_token']) && is_string($details['cloudflare_tunnel_token'])) {
             $details['cloudflare_tunnel_token'] = $this->decryptSecretString($details['cloudflare_tunnel_token']);
+        }
+        if (isset($details['registry_auth']) && is_string($details['registry_auth'])) {
+            $details['registry_auth'] = $this->decryptSecretString($details['registry_auth']);
         }
         if (isset($details['site_password_hash']) && is_string($details['site_password_hash'])) {
             $details['site_password_hash'] = $this->decryptSecretString($details['site_password_hash']);
@@ -322,6 +339,9 @@ class User extends Authenticatable
         }
         if (isset($details['cloudflare_tunnel_token']) && is_string($details['cloudflare_tunnel_token']) && $details['cloudflare_tunnel_token'] !== '') {
             $details['cloudflare_tunnel_token'] = $this->encryptSecretString($details['cloudflare_tunnel_token']);
+        }
+        if (isset($details['registry_auth']) && is_string($details['registry_auth']) && $details['registry_auth'] !== '') {
+            $details['registry_auth'] = $this->encryptSecretString($details['registry_auth']);
         }
         if (isset($details['site_password_hash']) && is_string($details['site_password_hash']) && $details['site_password_hash'] !== '') {
             $details['site_password_hash'] = $this->encryptSecretString($details['site_password_hash']);
@@ -387,21 +407,64 @@ class User extends Authenticatable
 
     /**
      * True when the detail is stored encrypted but cannot be decrypted, as
-     * opposed to never having been stored at all.
+     * opposed to never having been stored at all. A nested detail takes its
+     * path: ('site_git', 'project', 'token').
      */
-    public function hasUnreadableSecret(string $key): bool
+    public function hasUnreadableSecret(string ...$path): bool
     {
-        $stored = $this->storedEncryptedDetail($key);
+        $stored = $this->storedEncryptedDetail(...$path);
 
         return $stored !== null && $this->decryptSecretString($stored) === null;
     }
 
-    /** The raw, still-encrypted value of a top-level detail, if it is one. */
-    private function storedEncryptedDetail(string $key): ?string
+    /**
+     * Stored secrets that cannot be decrypted, by name; a site_git token as
+     * `site_git.<path>.token`.
+     *
+     * @return list<string>
+     */
+    public function unreadableSecrets(): array
+    {
+        $names = array_values(array_filter(self::SECRET_DETAILS, fn (string $key): bool => $this->hasUnreadableSecret($key)));
+        $raw = $this->attributes['details'] ?? null;
+        $siteGit = (is_string($raw) ? json_decode($raw, true) : null)['site_git'] ?? null;
+        foreach (is_array($siteGit) ? array_keys($siteGit) : [] as $path) {
+            if ($this->hasUnreadableSecret('site_git', (string) $path, 'token')) {
+                $names[] = "site_git.{$path}.token";
+            }
+        }
+
+        return $names;
+    }
+
+    /** Names what cannot be decoded and what saving does to it, or null. Says nothing of the APP_KEY. */
+    public function unreadableSecretsWarning(): ?string
+    {
+        $names = $this->unreadableSecrets();
+        if ($names === []) {
+            return null;
+        }
+
+        $warning = 'Stored secrets cannot be decoded: ' . implode(', ', $names) . '. They read as empty, and '
+            . 'the next save of this project, a redeploy included, stores them empty. '
+            . self::UNREADABLE_SECRETS_REMEDY;
+        if (in_array(AppDatabase::PASSWORD_DETAIL, $names, true)) {
+            // AppDatabase keeps that one and refuses to deploy without it.
+            $warning .= ' The app database password is kept, and a deploy refuses while it cannot be decoded: '
+                . 'a new one would lock the app out of its database.';
+        }
+
+        return $warning;
+    }
+
+    /** The raw, still-encrypted value of a detail, if it is one. */
+    private function storedEncryptedDetail(string ...$path): ?string
     {
         $raw = $this->attributes['details'] ?? null;
-        $stored = is_string($raw) ? json_decode($raw, true) : null;
-        $value = is_array($stored) ? ($stored[$key] ?? null) : null;
+        $value = is_string($raw) ? json_decode($raw, true) : null;
+        foreach ($path as $segment) {
+            $value = is_array($value) ? ($value[$segment] ?? null) : null;
+        }
 
         return is_string($value) && str_starts_with($value, self::ENCRYPTED_SECRET_PREFIX) ? $value : null;
     }
@@ -718,7 +781,7 @@ class User extends Authenticatable
 
     /**
      * The limit the account runs with: its own, or the default for a project
-     * made before every project had one (#294).
+     * made before every project had one.
      */
     public function effectiveMemoryLimit(): int
     {
@@ -973,6 +1036,24 @@ class User extends Authenticatable
         return self::trimmed($this->getDetails()['cloudflare_api_token'] ?? null);
     }
 
+    /** This project's private registry logins, the `registry-auth` setting as stored, or null. */
+    public function getRegistryAuth(): ?string
+    {
+        return self::trimmed($this->getDetails()['registry_auth'] ?? null);
+    }
+
+    /**
+     * Container paths kept on named volumes across deploys: the `persist-paths` setting.
+     *
+     * @return list<string>
+     */
+    public function getPersistPaths(): array
+    {
+        $paths = $this->getDetails()['persist_paths'] ?? null;
+
+        return is_array($paths) ? array_values(array_filter($paths, 'is_string')) : [];
+    }
+
     /** A details value that is a non-empty string once trimmed, else null. */
     private static function trimmed(mixed $value): ?string
     {
@@ -1199,6 +1280,19 @@ class User extends Authenticatable
         $this->setDetails(['app_port' => $value]);
     }
 
+    /** 'https' when the recipe declares the app port speaks TLS, else null (plain http). */
+    public function getAppPortScheme(): ?string
+    {
+        $scheme = $this->getDetails()['app_port_scheme'] ?? null;
+
+        return $scheme === 'https' ? 'https' : null;
+    }
+
+    public function setAppPortScheme(?string $value): void
+    {
+        $this->setDetails(['app_port_scheme' => $value === 'https' ? 'https' : null]);
+    }
+
     public function getDeploymentStatus(): string
     {
         $details = $this->getDetails();
@@ -1209,6 +1303,12 @@ class User extends Authenticatable
             return $details['deployment_status'];
         }
         return 'unknown';
+    }
+
+    /** Set when a deploy failed after an earlier one had succeeded. */
+    public function hasDeployedBefore(): bool
+    {
+        return ($this->getDetails()['deployed_before'] ?? false) === true;
     }
 
     public function getDeploymentWarnings(): array
@@ -1236,10 +1336,27 @@ class User extends Authenticatable
      */
     public function markDeploySucceeded(): void
     {
+        // A failed deploy's message would otherwise sit beside the success.
         $this->setDetails([
             'deployment_status' => 'success',
             'deployment_warnings' => [],
+            'error' => null,
         ]);
+    }
+
+    /** Set by a stop/down through the API, cleared by anything that starts the app again. Saves. */
+    public function markAppStoppedByRequest(bool $stopped): void
+    {
+        if ($this->isAppStoppedByRequest() === $stopped) {
+            return;
+        }
+        $this->setDetails(['app_stopped_by_request' => $stopped ? true : null]);
+        $this->save();
+    }
+
+    public function isAppStoppedByRequest(): bool
+    {
+        return ($this->getDetails()['app_stopped_by_request'] ?? null) === true;
     }
 
     public function delete()

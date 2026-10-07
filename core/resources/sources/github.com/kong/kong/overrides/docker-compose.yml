@@ -9,7 +9,7 @@ x-kong-env: &kong-env
   KONG_PROXY_ERROR_LOG: /dev/stderr
   KONG_ADMIN_ACCESS_LOG: /dev/stdout
   KONG_ADMIN_ERROR_LOG: /dev/stderr
-  # "auto" counts every host core (engine#426); two workers fit the memory cap.
+  # "auto" counts every host core; two workers fit the memory cap.
   KONG_NGINX_WORKER_PROCESSES: "2"
 
 services:

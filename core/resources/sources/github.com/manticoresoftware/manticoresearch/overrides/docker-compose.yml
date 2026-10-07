@@ -6,12 +6,11 @@
 # manticoresearch/manticore. Nothing here builds it. The repository's only
 # compose file, docker-compose-test.yml, is a CI harness and not a deployment.
 #
-# Detection without this file read the root, found the PHP that Manticore Buddy
-# is written in, chose the `php` strategy and served the C++ checkout over
-# Apache with no index.php -- Apache's 403, which checks/php/entry-served.yaml
-# reports as serving: missing_entry. That is the whole of the verdict on
-# supported-apps#297, and it is a detection artefact rather than anything about
-# Manticore.
+# Detection without this file reads the root, finds the PHP that Manticore
+# Buddy is written in, chooses the `php` strategy and serves the C++ checkout
+# over Apache with no index.php -- Apache's 403, which
+# checks/php/entry-served.yaml reports as serving: missing_entry. It is a
+# detection artefact rather than anything about Manticore.
 services:
   # The daemon. One container, one process tree: searchd plus Manticore Buddy,
   # which the image starts alongside it and which implements roughly half the
@@ -37,7 +36,7 @@ services:
     # MANTICORE_ADMIN_USER / MANTICORE_ADMIN_PASSWORD, generated and kept by the
     # engine.
     #
-    # In a file rather than in `environment:` for two reasons. engine#173: the
+    # In a file rather than in `environment:` for two reasons. First, the
     # engine republishes ~/project/.env as .env.default at 644, and the path
     # here is relative to the project directory, so '..' is the account's home
     # and the file is outside the checkout the next deploy empties. And
@@ -80,9 +79,8 @@ services:
       retries: 40
       start_period: 10s
 
-    # Measured on a live deploy: 34.5 MiB with a 1000-document table, and
-    # 35.0 MiB after two hundred full-text searches against it -- searchd and
-    # Buddy's eight PHP workers share most of their pages. What actually
+    # The daemon itself is small -- searchd and Buddy's eight PHP workers
+    # share most of their pages. What actually
     # consumes memory here is a table's RAM chunk, and `rt_mem_limit` defaults
     # to 128 MB per table, so a handful of tables is what 1 GB is for. It is
     # also half of the 2 GB minimum an account gets (DindHostBuilder::
@@ -123,9 +121,7 @@ services:
   #
   # `docker compose up -d` starts containers; it does not wait for them, so a
   # one-shot service that exits 1 leaves it exiting 0 and the deploy green.
-  # Measured: with authentication switched off in the account's env file,
-  # `ready` printed its refusal and exited 1 and the rebuild still reported
-  # success. A `service_completed_successfully` dependency is what makes
+  # A `service_completed_successfully` dependency is what makes
   # compose wait: it blocks `up -d` on `ready` finishing and fails the command
   # with "dependency failed to start" when it finishes badly.
   #

@@ -1,0 +1,69 @@
+#11 [base 7/7] RUN bundle install --jobs 4 --retry 3  && rm -rf ~/.bundle /usr/local/bundle/ruby/*/cache
+#11 129.6 Installing selma 0.5.3 with native extensions
+#11 214.7   cargo:rerun-if-env-changed=LLVM_CONFIG_PATH
+#11 214.7   cargo:rerun-if-env-changed=LIBCLANG_PATH
+#11 214.7   cargo:rerun-if-env-changed=LIBCLANG_STATIC_PATH
+#11 214.7   cargo:rerun-if-env-changed=CLANG_PATH
+#11 214.7   cargo:rerun-if-env-changed=BINDGEN_EXTRA_CLANG_ARGS
+#11 214.7   cargo:rerun-if-env-changed=BINDGEN_EXTRA_CLANG_ARGS_x86_64-unknown-linux-gnu
+#11 214.7   cargo:rerun-if-env-changed=RUBY_ROOT
+#11 214.7   cargo:rerun-if-env-changed=RBCONFIG_ruby_version
+#11 214.7   cargo:rerun-if-env-changed=RBCONFIG_CC
+#11 214.7   cargo:rerun-if-env-changed=RBCONFIG_CFLAGS
+#11 214.7 struct rb_sys__Opaque__rb_io_internal_buffer { struct rb_io_internal_buffer
+#11 214.7 dummy; };
+#11 214.7
+#11 214.7 thread 'main' (2869) panicked at
+#11 214.7 /usr/local/bundle/ruby/3.3.0/gems/selma-0.5.3/ext/selma/.rb-sys/stable/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bindgen-0.72.1/lib.rs:616:27:
+#11 214.7 Unable to find libclang: "couldn't find any valid shared libraries matching:
+#11 214.7 ['libclang.so', 'libclang-*.so', 'libclang.so.*', 'libclang-*.so.*'], set the
+#11 214.7 `LIBCLANG_PATH` environment variable to a path where one of these files can be
+#11 214.7 found (invalid: [])"
+#11 214.7   note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+#11 214.7 warning: build failed, waiting for other jobs to finish...
+#11 214.7 make: *** [Makefile:567: target/release/libselma.so] Error 101
+#11 214.7
+#11 214.7 make failed, exit code 2
+#11 214.7
+#11 214.7 Gem files will remain installed in /usr/local/bundle/ruby/3.3.0/gems/selma-0.5.3
+#11 214.7 for inspection.
+#11 214.7 Results logged to
+#11 214.7 /usr/local/bundle/ruby/3.3.0/extensions/x86_64-linux/3.3.0/selma-0.5.3/gem_make.out
+#11 214.7
+#11 214.7   /usr/local/lib/ruby/3.3.0/rubygems/ext/builder.rb:125:in `run'
+#11 214.7   /usr/local/lib/ruby/3.3.0/rubygems/ext/builder.rb:51:in `block in make'
+#11 214.7   /usr/local/lib/ruby/3.3.0/rubygems/ext/builder.rb:43:in `each'
+#11 214.7   /usr/local/lib/ruby/3.3.0/rubygems/ext/builder.rb:43:in `make'
+#11 214.7   /usr/local/lib/ruby/3.3.0/rubygems/ext/ext_conf_builder.rb:42:in `build'
+#11 214.7   /usr/local/lib/ruby/3.3.0/rubygems/ext/builder.rb:193:in `build_extension'
+#11 214.7 /usr/local/lib/ruby/3.3.0/rubygems/ext/builder.rb:227:in `block in
+#11 214.7 build_extensions'
+#11 214.7   /usr/local/lib/ruby/3.3.0/rubygems/ext/builder.rb:224:in `each'
+#11 214.7   /usr/local/lib/ruby/3.3.0/rubygems/ext/builder.rb:224:in `build_extensions'
+#11 214.7   /usr/local/lib/ruby/3.3.0/rubygems/installer.rb:844:in `build_extensions'
+#11 214.7 /usr/local/lib/ruby/3.3.0/bundler/rubygems_gem_installer.rb:109:in
+#11 214.7 `build_extensions'
+#11 214.7   /usr/local/lib/ruby/3.3.0/bundler/rubygems_gem_installer.rb:28:in `install'
+#11 214.7   /usr/local/lib/ruby/3.3.0/bundler/source/rubygems.rb:205:in `install'
+#11 214.7   /usr/local/lib/ruby/3.3.0/bundler/installer/gem_installer.rb:55:in `install'
+#11 214.7 /usr/local/lib/ruby/3.3.0/bundler/installer/gem_installer.rb:17:in
+#11 214.7 `install_from_spec'
+#11 214.7 /usr/local/lib/ruby/3.3.0/bundler/installer/parallel_installer.rb:133:in
+#11 214.7 `do_install'
+#11 214.7 /usr/local/lib/ruby/3.3.0/bundler/installer/parallel_installer.rb:124:in
+#11 214.7 `block in worker_pool'
+#11 214.7   /usr/local/lib/ruby/3.3.0/bundler/worker.rb:62:in `apply_func'
+#11 214.7   /usr/local/lib/ruby/3.3.0/bundler/worker.rb:57:in `block in process_queue'
+#11 214.7   <internal:kernel>:187:in `loop'
+#11 214.7   /usr/local/lib/ruby/3.3.0/bundler/worker.rb:54:in `process_queue'
+#11 214.7 /usr/local/lib/ruby/3.3.0/bundler/worker.rb:90:in `block (2 levels) in
+#11 214.7 create_threads'
+#11 214.7
+#11 214.7 An error occurred while installing selma (0.5.3), and Bundler cannot continue.
+#11 214.7
+#11 214.7 In Gemfile:
+#11 214.7   publify_amazon_sidebar was resolved to 10.0.0, which depends on
+#11 214.7     publify_core was resolved to 10.0.3, which depends on
+#11 214.7       html-pipeline was resolved to 3.2.4, which depends on
+#11 214.7         selma
+#11 ERROR: process "/bin/sh -c bundle install --jobs 4 --retry 3  && rm -rf ~/.bundle /usr/local/bundle/ruby/*/cache" did not complete successfully: exit code: 5

@@ -42,8 +42,7 @@ services:
       # volume so it survives redeploy and storage reclaim. Bytebase manages a
       # subdir for pgdata, so lost+found at the mount root is harmless.
       - bytebase-data:/var/opt/bytebase
-    # Only the app publishes a port; the port scan takes 8080 as the primary
-    # (engine#231/#234).
+    # Only the app publishes a port; the port scan takes 8080 as the primary.
     ports:
       - "8080:8080"
     healthcheck:
@@ -100,7 +99,7 @@ services:
   # Starts nothing, exits 0, waits on the admin having been seeded so
   # `docker compose up -d` returns -- and the deploy reports finished -- only
   # once Bytebase answers AND its admin is claimed, not the moment the container
-  # launches (engine#204).
+  # launches.
   ready:
     image: alpine:3
     entrypoint: ["/bin/sh", "-c", "exit 0"]

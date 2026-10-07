@@ -2,7 +2,7 @@
 # engine terminates TLS), and the customer's OpenAI key from the project env.
 services:
   # One-shot: Subvert needs the customer's OpenAI key; fail the deploy naming
-  # it. Read from .env, not interpolated (engine#336).
+  # it. Read from .env, not interpolated.
   check:
     image: aschmelyun/subvert:1.0.9
     restart: "no"
@@ -41,7 +41,7 @@ services:
       start_period: 10s
     mem_limit: 768m
 
-  # No-op gate: `up` returns only once Subvert answers (engine#204).
+  # No-op gate: `up` returns only once Subvert answers.
   ready:
     image: aschmelyun/subvert:1.0.9
     restart: "no"

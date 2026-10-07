@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\DeployLog;
 
+use App\Lib\Deploy\Dind\RegistryAuth;
+
 /**
  * Turns a failed build's BuildKit output into one sentence naming the cause.
  * Rule slugs are identifiers telemetry reports, so renaming one splits that
@@ -9,9 +11,15 @@ namespace App\Lib\Deploy\DeployLog;
  */
 class DeployFailureExplainer
 {
+    /** Leads the failure of a redeploy whose new version the switch refused for an empty page. */
+    public const EMPTY_NEW_VERSION = 'The new version answers with an empty page';
+
     private const REGISTRY_ERROR = '/(?:manifest unknown|manifest for \S+ not found|pull access denied'
         . '|failed to resolve source metadata|failed to do request'
         . '|failed to resolve reference (?:"([^"\n]+)"|(\S+)))/i';
+
+    private const REGISTRY_REFUSAL = '/unauthorized|authentication required|authorization failed'
+        . '|no basic auth credentials|denied: requested access|\b40[13]\b/i';
 
     public static function explain(string $output): ?string
     {
@@ -67,9 +75,23 @@ class DeployFailureExplainer
     }
 
     /**
+     * The message a panicking Cargo build script gave, in the current
+     * (`panicked at file:l:c:` then the message) or pre-1.73 form.
+     */
+    private static function buildScriptPanic(string $output): ?string
+    {
+        if (preg_match('/panicked at [^\n]*?:\d+:\d+:[ \t]*\R(?:#\d+[ \t]+)?(?:\d+\.\d+[ \t]+)?([^\n]*\S)/', $output, $p) === 1
+            || preg_match("/panicked at '([^'\n]+)', \\S+:\\d+:\\d+/", $output, $p) === 1) {
+            return trim($p[1]);
+        }
+
+        return null;
+    }
+
+    /**
      * Whether $output shows the compose building the image $ref locally. Docker
      * compose pulls an image a sibling service builds before building it (the
-     * local-tag pattern that sidesteps engine#229), and that pull's `failed to
+     * local-tag pattern that sidesteps an image-seed NotFound), and that pull's `failed to
      * resolve reference ... not found` is benign, not a missing base image.
      * BuildKit tags what it builds with `naming to <ref>`, so that line for the
      * same repository is the signal the tag was produced here, not fetched.
@@ -93,6 +115,57 @@ class DeployFailureExplainer
     }
 
     /**
+     * The image a registry refused to hand over without a login, from the
+     * first line that is a registry's answer and not some other 401 (an npm
+     * or git one during the build). Null when no such line is in $output.
+     */
+    private static function registryRefusal(string $output): ?string
+    {
+        foreach (preg_split('/\R/', $output) ?: [] as $line) {
+            if (preg_match(self::REGISTRY_REFUSAL, $line) !== 1
+                || preg_match('#error from registry|failed to authorize|failed to resolve (?:source metadata|reference)'
+                    . '|failed to pull OCI resource|pull access denied|Error response from daemon|/v2/\S+/manifests/#i', $line) !== 1) {
+                continue;
+            }
+            $image = self::refusedImage($line);
+            if (preg_match('/pull access denied/i', $line) === 1
+                && ($image === null || RegistryAuth::registryFor($image) === 'docker.io')) {
+                continue;
+            }
+            $named = $image === null ? 'An image this project uses' : "The image {$image}";
+
+            return "{$named} could not be downloaded: its registry refused access, so it is private or needs a "
+                . "login this project does not have. Give the project one with the registry-auth setting, one "
+                . "'host username token' line per registry; if one is set, its token is wrong or cannot read this image.";
+        }
+
+        return null;
+    }
+
+    private static function refusedImage(string $line): ?string
+    {
+        foreach ([
+            '/failed to pull OCI resource "([^"]+)"/i',
+            '/failed to resolve source metadata for (\S+?):\s/i',
+            '/failed to resolve reference "([^"]+)"/i',
+            '/\bImage (\S+) Error\b/',
+        ] as $pattern) {
+            if (preg_match($pattern, $line, $m) === 1) {
+                return (string) preg_replace('#^docker\.io/(?:library/)?#', '', $m[1]);
+            }
+        }
+        if (preg_match('#https?://([^/\s"]+)/v2/(\S+?)/manifests/([^\s"]+)#', $line, $m) === 1) {
+            $host = in_array($m[1], ['registry-1.docker.io', 'index.docker.io'], true) ? '' : $m[1] . '/';
+            $path = $host === '' ? (string) preg_replace('#^library/#', '', $m[2]) : $m[2];
+            $ref = str_starts_with($m[3], 'sha256:') ? '@' . $m[3] : ':' . $m[3];
+
+            return $host . $path . $ref;
+        }
+
+        return null;
+    }
+
+    /**
      * Which of the three a failed base-image pull was, from the daemon's own
      * words, naming the image. Null when every registry error in $output is
      * the benign pull of a tag this same log builds.
@@ -112,7 +185,8 @@ class DeployFailureExplainer
                 '/pull access denied for ([^\s,]+)/i',
                 '/(\S+): failed to do request/i',
             ] as $pattern) {
-                if (preg_match($pattern, $line, $r) === 1 && $r[1] !== 'solve') {
+                // `failed to solve:` and BuildKit's `#N ERROR:` put a word, not an image, before the colon.
+                if (preg_match($pattern, $line, $r) === 1 && !in_array(strtolower($r[1]), ['solve', 'error'], true)) {
                     $ref = $r[1];
                     break;
                 }
@@ -128,7 +202,10 @@ class DeployFailureExplainer
                     . '|TLS handshake|deadline exceeded|server misbehaving/i', $line) === 1 => 'unreachable',
                 default => 'unknown',
             };
-            $found[$cause] ??= preg_replace('#^docker\.io/(?:library/)?#', '', $ref);
+            // A later line may name the image an earlier one of the same cause did not.
+            if (($found[$cause] ?? '') === '') {
+                $found[$cause] = preg_replace('#^docker\.io/(?:library/)?#', '', $ref);
+            }
         }
         if ($found === []) {
             return null;
@@ -164,6 +241,16 @@ class DeployFailureExplainer
     private static function rules(): array
     {
         return [
+            // StepWatchdog stopped a step for disk. First, like build-stalled below.
+            'disk-limit-reached' => [
+                '/' . preg_quote(StepWatchdog::DISK_MARKER, '/') . ' \((.*)\)/',
+                static fn (array $m): string =>
+                    "The deploy was stopped because {$m[1]}, and the account's unused Docker storage was cleared. "
+                        . (str_starts_with($m[1], 'the engine host')
+                            ? 'Free disk on the host and deploy again; `pae system:image:prune` removes base images no project has used recently.'
+                            : 'Raise the project\'s disk limit, or make what the deploy downloads and builds smaller.'),
+            ],
+
             // StepWatchdog killed a silent step. First: it quotes a last output line in
             // its marker, which another rule could otherwise match.
             'build-stalled' => [
@@ -172,6 +259,33 @@ class DeployFailureExplainer
                     "The build step \"{$m[1]}\" printed nothing for " . self::duration((int) $m[2])
                         . " and was stopped. Last output: {$m[3]}. It was most likely stuck on a download "
                         . 'or network call; deploy again, and if it stalls at the same point, check that step.',
+            ],
+
+            // Symfony's ProcessTimedOutException: the message is the quoted command line
+            // and nothing else, so name the step from it. Early: that command line is
+            // not output, and later rules could match words in it.
+            'clone-timed-out' => [
+                "/The process \"[^\n]*'clone'[^\n]*\" exceeded the timeout of (\\d+) seconds/",
+                static fn (array $m): string =>
+                    'The repository did not finish cloning within ' . self::duration((int) $m[1])
+                        . ' and the clone was stopped. It is most likely very large, or the link to its git '
+                        . 'host is slow. Deploy a smaller branch or an archive of the code, or ask the server '
+                        . 'administrator to raise DEPLOY_CLONE_TIMEOUT.',
+            ],
+
+            'build-timed-out' => [
+                "/The process \"[^\n]*'up'[^\n]*'--build'[^\n]*\" exceeded the timeout of (\\d+) seconds/",
+                static fn (array $m): string =>
+                    'Building and starting the application did not finish within ' . self::duration((int) $m[1])
+                        . ' and was stopped. The build output is in the deploy log; a build that runs this long '
+                        . 'is usually waiting on a package registry or download that does not answer.',
+            ],
+
+            'step-timed-out' => [
+                '/The process "[^\n]*" exceeded the timeout of (\d+) seconds/',
+                static fn (array $m): string =>
+                    'A deploy step did not finish within ' . self::duration((int) $m[1])
+                        . ' and was stopped. The full output is in the deploy log.',
             ],
 
             // A service the app depends on never came up, quoted with what it printed
@@ -187,6 +301,13 @@ class DeployFailureExplainer
                         ? $sentence . ' The full output is in the deploy log.'
                         : $sentence . ' It printed: ' . self::clip($said) . ' The full output is in the deploy log.';
                 },
+            ],
+
+            // The zero-downtime switch refused a new version serving an empty page. The
+            // sentence is already the gate's own; the rule gives the failure its name.
+            'new-version-empty-page' => [
+                '/' . preg_quote(self::EMPTY_NEW_VERSION, '/') . '[^\n]*/',
+                static fn (array $m): string => $m[0],
             ],
 
             // Language toolchain too old for what the project declares.
@@ -218,13 +339,33 @@ class DeployFailureExplainer
                         . 'The full output is in the deploy log.',
             ],
 
+            // A Rust build script or link step asked for a tool the build image lacks.
+            // Named, because "does not compile: `quote`" sends the user to their own code.
+            'rust-build-tool-missing' => [
+                '/Could not find `protoc`|Missing dependency: cmake|is `cmake` not installed'
+                    . "|Unable to find libclang|collect2: fatal error: cannot find 'ld'/",
+                static function (array $m, string $output = ''): string {
+                    $tool = match (true) {
+                        str_contains($m[0], 'protoc') => '`protoc` (the Protocol Buffers compiler)',
+                        str_contains($m[0], 'cmake') => '`cmake`',
+                        str_contains($m[0], 'libclang') => '`libclang` (for bindgen)',
+                        preg_match('/-fuse-ld=([a-z]+)/', $output, $l) === 1
+                            => "the `{$l[1]}` linker, which the project selects with `-fuse-ld={$l[1]}` in .cargo/config.toml,",
+                        default => 'the linker the project selects in .cargo/config.toml',
+                    };
+
+                    return "The Rust build needs {$tool} and the build image does not have it. "
+                        . 'The full output is in the deploy log.';
+                },
+            ],
+
             // A crate's build script needs pkg-config or the headers it queries: `The
-            // pkg-config command could not be found`, `Unable to find libclang`.
+            // pkg-config command could not be found`.
             'native-library-headers-missing' => [
-                '/(The pkg-config command could not be found|Unable to find libclang'
+                '/(The pkg-config command could not be found'
                     . '|Package \\S+ was not found in the pkg-config search path'
                     . '|Could not find \\S+ using pkg-config'
-                    // lxml's own sdist build (engine#120).
+                    // lxml's own sdist build.
                     . '|make sure the \\S+ (?:and \\S+ )?development packages are installed)/i',
                 static fn (): string =>
                     'A dependency has to be compiled and needs development headers that the build '
@@ -232,10 +373,13 @@ class DeployFailureExplainer
                         . 'output is in the deploy log, naming the dependency.',
             ],
 
+            // Composer names the package (`- vendor/pkg v1.2 requires php ^7 -> your php
+            // version ...`) or `Root composer.json`; a locked package is not the project.
             'php-version-mismatch' => [
-                '/requires php ([^\s,]+).*?your php version \(([^)]+)\)/is',
-                static fn (array $m): string =>
-                    "This project needs PHP {$m[1]}, but it was built with PHP {$m[2]}.",
+                '/(?:-\s+(\S+)\s+(\S+)\s+)?requires php ([^\s,]+).*?your php version \(([^)]+)\)/is',
+                static fn (array $m): string => ($m[1] ?? '') !== '' && $m[1] !== 'Root'
+                    ? "The locked package {$m[1]} {$m[2]} needs PHP {$m[3]}, but the project was built with PHP {$m[4]}."
+                    : "This project needs PHP {$m[3]}, but it was built with PHP {$m[4]}.",
             ],
 
             // Composer resolves against the runtime image, so the extension really is absent
@@ -298,6 +442,19 @@ class DeployFailureExplainer
                     'The build ran out of disk space. Free some space in the account or move to a larger plan.',
             ],
 
+            // An account's user namespace maps ids 0-65535 only, so restoring a
+            // higher owner fails with EINVAL. Flutter's gradle-wrapper.tgz is
+            // uid 397546 and Flutter blames the network for it.
+            'owner-id-out-of-range' => [
+                '/(?:Cannot change ownership to uid (\d+), gid (\d+)|lchown ([^\n:]+)): invalid argument/i',
+                static fn (array $m): string => (($m[1] ?? '') !== ''
+                    ? "A file in the build is owned by uid {$m[1]}, gid {$m[2]}"
+                    : 'A file in the build (' . trim($m[3]) . ') is owned by a user or group id') . ' '
+                        . 'that cannot exist in an account, which holds ids 0-65535 only. Extract archives '
+                        . 'without restoring their owner (tar --no-same-owner, or TAR_OPTIONS=--no-same-owner '
+                        . 'in the Dockerfile), or use an image whose files are owned by ids below 65536.',
+            ],
+
             // Java refusing to allocate inside the heap it was given (the fix is how the
             // engine sizes the heap), not the kernel killing a cgroup (`out-of-memory`).
             // Ranked above `out-of-memory` because one Maven log can carry both, and a
@@ -345,13 +502,15 @@ class DeployFailureExplainer
             // A host build is not in the account's cgroup, so the plan is not what ran out.
             'out-of-memory' => [
                 '/(exit code: 137|signal:\s*killed|OOMKilled'
-                    // BuildKit's form when the step's cgroup refused an allocation (engine#161).
-                    . '|ResourceExhausted:[^\n]*cannot allocate memory'
+                    // BuildKit's form when the step's cgroup refused an allocation,
+                    // in the summary and in the step's own `#N ERROR:` line.
+                    . '|(?:ResourceExhausted:|did not complete successfully:)[^\n]*cannot allocate memory'
                     . '|out of memory'
                     . '|(?:task|process)\s+"?[\w\/.-]+"?\s+killed'
                     . '|^[ \t]*(?:\[ERROR\][ \t]+)?Killed[ \t]*$'
                     . '|oom-kill)/im',
-                static fn (array $m): string => preg_match('/^\s*(?:\[ERROR\]\s+)?Killed\s*$/', $m[1]) === 1
+                static fn (array $m, string $output = ''): string => preg_match('/^\s*(?:\[ERROR\]\s+)?Killed\s*$/', $m[1]) === 1
+                    || str_contains($output, 'host build container')
                     ? 'The build ran out of memory in the engine\'s build container, which is sized for '
                         . 'the server (DEPLOY_BUILD_MEMORY, 8 GB or half its RAM by default), not by the plan. '
                         . 'Raising the project\'s memory limit does not change it. The full build output is '
@@ -378,7 +537,7 @@ class DeployFailureExplainer
 
             // A Rust `-sys` crate with no C++ compiler in the image says so about itself
             // (`CXX_... = None`), which reads as a crate fault when it is the image's.
-            // `native-library-headers-missing` above covers the pkg-config and libclang cases.
+            // `native-library-headers-missing` above covers the pkg-config case.
             'native-build-interrupted' => [
                 '/^(?:CXX?_[A-Za-z0-9_-]+ = None|CC_FORCE_DISABLE = None)$/m',
                 static fn (): string =>
@@ -387,12 +546,22 @@ class DeployFailureExplainer
             ],
 
             // Cargo's own report, naming the crate. The two specific reasons above win where
-            // they apply; this catches the long tail that says only "a build script failed".
+            // they apply; this catches the long tail that says only "a build script failed",
+            // which is not always a C library: scripts also panic on missing assets or inputs.
             'rust-build-script-failed' => [
                 '/error: failed to run custom build command for `([^`]+)`/',
-                static fn (array $m): string =>
-                    "The Rust dependency `{$m[1]}` could not be built (it compiles or links a C "
-                        . 'library). The full output is in the deploy log.',
+                static function (array $m, string $output = ''): string {
+                    // A local path (`name v1 (/app/src/data)`) is the checkout's own crate.
+                    $crate = preg_match('/\(\/[^)]*\)\s*$/', $m[1]) === 1
+                        ? "The project's Rust crate `{$m[1]}`"
+                        : "The Rust dependency `{$m[1]}`";
+                    $after = (string) strstr($output, $m[0]);
+                    $said = self::buildScriptPanic($after !== '' ? $after : $output);
+                    $said = $said === null ? '' : ' It said: ' . rtrim(self::clip($said), '.') . '.';
+
+                    return "{$crate} could not be built: its build script failed.{$said}"
+                        . ' The full output is in the deploy log.';
+                },
             ],
 
             'rust-compile-failed' => [
@@ -421,7 +590,7 @@ class DeployFailureExplainer
 
             // An uppercase image name. The daemon takes a first component it cannot read as a
             // repository for a registry host, so `HaschekSolutions/pictshare:3` failed as a DNS
-            // lookup of `HaschekSolutions` and read as an unreachable registry (#125).
+            // lookup of `HaschekSolutions` and read as an unreachable registry.
             // Above base-image-unavailable, which would otherwise claim it.
             'image-reference-invalid' => [
                 '/(?:failed to resolve reference "([^"\n]+)"'
@@ -447,11 +616,21 @@ class DeployFailureExplainer
             // found`, then builds it. A real failure that follows (an entrypoint that is not
             // there, a one-shot exiting non-zero) is the true cause and must win over that
             // noise. Confirmed on Bitpoll (init exit 1) and Limbas (missing entrypoint).
+            // runc's $PATH search skips a file without the execute bit, so this
+            // also means "there, but not executable".
             'container-entrypoint-missing' => [
                 '/exec:\s*"?([^"\n:]+)"?:\s*executable file not found/i',
                 static fn (array $m): string =>
                     "The application's container could not start: its entrypoint ({$m[1]}) was not "
-                        . 'found in the image. The full output is in the deploy log.',
+                        . 'found in the image, or is not executable (chmod +x). The full output is in the deploy log.',
+            ],
+            // An absolute-path entrypoint without the execute bit.
+            'container-entrypoint-not-executable' => [
+                '/exec:?\s*"?([^"\s:]+)"?:\s*permission denied/i',
+                static fn (array $m): string =>
+                    "The application's container could not start: its entrypoint ({$m[1]}) is not "
+                        . 'executable. Give it the execute bit (chmod +x, or RUN chmod +x in the Dockerfile). '
+                        . 'The full output is in the deploy log.',
             ],
             'container-start-failed' => [
                 '/(?:dependency failed to start:[^\n]*?exited \((\d+)\)'
@@ -471,7 +650,7 @@ class DeployFailureExplainer
             ],
 
             // runc could not reach the account daemon's libnetwork socket, so no RUN step
-            // can start (engine#111). The trailing BuildKit EOF says nothing.
+            // can start. The trailing BuildKit EOF says nothing.
             'build-daemon-fault' => [
                 '/error running prestart hook[^\n]*libnetwork\/\S+\.sock/',
                 static fn (): string =>
@@ -481,7 +660,7 @@ class DeployFailureExplainer
             ],
 
             // `FROM ${BASE_IMAGE}` with no default, the value only the repo's CI passes
-            // (livebook, engine#143). BuildKit refuses before pulling anything.
+            // (livebook). BuildKit refuses before pulling anything.
             'build-arg-unset' => [
                 '/base name \(\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?\) should not be blank/',
                 static fn (array $m): string =>
@@ -491,21 +670,30 @@ class DeployFailureExplainer
                         . 'in the Dockerfile.',
             ],
 
+            // A registry that refused an anonymous or wrong login (ghcr.io's 401, a
+            // private registry's `no basic auth credentials`). Docker Hub's own `pull
+            // access denied` is left to base-image-unavailable: it says that for a
+            // missing repository too.
+            'base-image-unauthorized' => [
+                self::REGISTRY_REFUSAL,
+                static fn (array $m, string $output = ''): ?string => self::registryRefusal($output),
+            ],
+
             // BuildKit's wording when it cannot reach the registry at all: a pruned patch tag
             // answers `not found` on its own, and a Dockerfile built for someone else's CI
             // names a registry that is not there. The `failed to resolve reference` branch is
             // the ambiguous one: it is also the benign compose pull of a locally-built tag, so
             // a ref this same log then builds (see tagBuiltLocally) is not a missing base image.
             // The sentence says which of not-found / private / unreachable the daemon
-            // reported (engine#100); the slug stays one, for telemetry's history.
+            // reported; the slug stays one, for telemetry's history.
             'base-image-unavailable' => [
                 self::REGISTRY_ERROR,
                 static fn (array $m, string $output = ''): ?string => self::baseImageFailure($output),
             ],
 
             // A base image whose distribution release is end of life: bullseye-security
-            // 404s on the +deb11uN packages its index names (engine#114), CentOS 7's
-            // mirrorlist host is gone (engine#102). The generic exit code named neither.
+            // 404s on the +deb11uN packages its index names, CentOS 7's
+            // mirrorlist host is gone. The generic exit code named neither.
             'package-archive-gone' => [
                 '/(E: Failed to fetch \S+\s+404\s+Not Found|Could not resolve host: mirrorlist\.centos\.org)/i',
                 static fn (): string =>
@@ -514,11 +702,38 @@ class DeployFailureExplainer
                         . 'reaches end of life (Debian 11, CentOS 7). The Dockerfile has to move to a supported base image.',
             ],
 
+            // node-gyp found its toolchain but could not download the Node headers (wud: the
+            // build could not reach unofficial-builds.nodejs.org). Before the toolchain rule,
+            // whose `gyp ERR!` it also prints.
+            'native-build-headers-download-failed' => [
+                '/gyp ERR! stack .*?\b(ConnectTimeoutError|ETIMEDOUT|EAI_AGAIN|ECONNRESET|ECONNREFUSED|ENOTFOUND|ENETUNREACH|EHOSTUNREACH|socket hang up)\b/i',
+                static function (array $m, string $output = ''): string {
+                    $url = preg_match('/gyp http GET (https?:\/\/\S+)/i', $output, $get) === 1 ? " ({$get[1]})" : '';
+
+                    return 'A dependency compiles a native addon during install, and node-gyp could not download '
+                        . "the Node.js headers it needs{$url}: the request failed with {$m[1]}. The build image "
+                        . 'has its toolchain; this is a network failure during the build. Deploy again; if it '
+                        . 'keeps failing, the server cannot reach that address.';
+                },
+            ],
+
             // node-gyp needs a Python interpreter and a C toolchain the slim Node images do
             // not carry. pnpm 10+ runs install scripts by default, so the first dependency
             // with a native addon ends the build with gyp output and no diagnosis.
+            // Not a bare `node-gyp rebuild`: pnpm echoes that script line for installs that succeed.
+            // Webpack 4 hashes with MD4; OpenSSL 3 (Node 17+) refuses it.
+            'webpack4-openssl-unsupported' => [
+                '/ERR_OSSL_EVP_UNSUPPORTED|error:0308010C:digital envelope routines::unsupported/',
+                static fn (): string =>
+                    'The build uses webpack 4 (react-scripts 4 or older, Vue CLI 4, laravel-mix 5), which Node 17 '
+                        . 'and newer refuse to run without the OpenSSL legacy provider. Upgrade the build toolchain '
+                        . 'to webpack 5, or set NODE_OPTIONS=--openssl-legacy-provider for the build.',
+            ],
             'native-build-toolchain-missing' => [
-                '/(gyp ERR!|Could not find any Python installation to use|node-gyp rebuild)/i',
+                // Toolchain evidence only: a bare `gyp ERR!` is any node-gyp failure.
+                '/(Could not find any Python installation to use|node-gyp: (?:command )?not found'
+                    . '|gyp ERR! stack Error: not found: (?:make|g\+\+|gcc|cc|c\+\+)\b'
+                    . '|make(?:\[\d+\])?: (?:g\+\+|gcc|cc|c\+\+): (?:Command not found|No such file or directory))/i',
                 static fn (): string =>
                     'A dependency has to be compiled during install, and this build image has no '
                         . 'Python or C toolchain for it. Name an image that does in a panelalpha.yaml, '
@@ -534,14 +749,25 @@ class DeployFailureExplainer
                         . 'and that step is not part of the automatic recipe. It needs a PanelAlpha page to describe its build.',
             ],
 
-            // A package whose every file is behind a build tag -- in practice cgo, which the
+            // A dependency whose every file is behind a build tag -- in practice cgo, which the
             // build has off: no C compiler in golang:*-alpine, or CGO_ENABLED=0 set outright.
             'go-cgo-required' => [
-                '/(?:package|imports) ([\w.\/@-]+): build constraints exclude all Go files/',
+                '/imports ([\w.\/@-]+): build constraints exclude all Go files/',
                 static fn (array $m): string =>
                     "The Go package `{$m[1]}` has no files this build can compile. That is almost always "
                         . 'because it needs cgo (a C compiler and the C library it wraps), and this build '
                         . 'compiles without it. The full output is in the deploy log.',
+            ],
+
+            // The package the build was asked for, not a dependency: a constraint such as the
+            // tools.go idiom's `//go:build tools` excludes it, which says nothing about cgo.
+            'go-package-excluded' => [
+                '/\bpackage ([\w.\/@-]+): build constraints exclude all Go files/',
+                static fn (array $m): string =>
+                    "The Go package `{$m[1]}` that this build compiles has no file the build includes: "
+                        . 'a build constraint (a `//go:build` line, such as a tag the build does not set) '
+                        . 'excludes every one of them. The program is most likely in another directory; '
+                        . 'set the build command to build that package. The full output is in the deploy log.',
             ],
 
             // Anchored to a BuildKit *output* line (#<step> <seconds>): the same words appear
@@ -576,6 +802,15 @@ class DeployFailureExplainer
                 '/(Missing script: ["\']?build|npm ERR! missing script: build)/i',
                 static fn (): string =>
                     'The project has no "build" script in package.json, so there is nothing to compile.',
+            ],
+
+            // `ng build` in a workspace with several projects and nothing to pick one by.
+            'angular-project-ambiguous' => [
+                '/(Cannot determine project(?: or target)? for command|This is a multi-project workspace)/i',
+                static fn (): string =>
+                    'The Angular workspace has several projects and the build did not name one, so '
+                        . '`ng build` refused to guess. Add a "build" script to package.json that names '
+                        . 'the project to deploy (`ng build <project>`).',
             ],
 
             // `npm ci` refuses a lockfile that no longer matches package.json and
@@ -692,7 +927,7 @@ class DeployFailureExplainer
             ],
 
             // The remote listed its refs, then refused the next request: it is
-            // readable, and a private repo is refused before that line (#188).
+            // readable, and a private repo is refused before that line.
             'repo-read-interrupted' => [
                 '/expected flush after ref listing/i',
                 static fn (): string =>
@@ -715,7 +950,7 @@ class DeployFailureExplainer
 
             // A COPY/ADD of a path the checkout does not have: a packaging Dockerfile that
             // expects CI to have built `target/` or `dist/` into the context first.
-            // Also damselfly's `dotnet publish` output (engine#133).
+            // Also damselfly's `dotnet publish` output.
             'build-context-missing' => [
                 '/failed to (?:compute cache key|calculate checksum of ref)[^\n]*?"\/?([^"\n]+)": not found/i',
                 static fn (array $m): string =>
@@ -723,6 +958,16 @@ class DeployFailureExplainer
                         . 'produced by a step that has to run before the image is built (usually CI), so the '
                         . 'image cannot be built from a clean checkout. If the repository does have it, '
                         . '.dockerignore excludes it.',
+            ],
+
+            // hitobito: a rake task requires a gem from a group the
+            // Dockerfile's own BUNDLE_WITHOUT leaves out.
+            'ruby-gem-not-loaded' => [
+                '/LoadError: cannot load such file -- (\S+)/',
+                static fn (array $m): string =>
+                    "A Ruby build step requires `{$m[1]}`, which is not in the installed bundle "
+                        . "(often a gem in a group the Dockerfile's BUNDLE_WITHOUT leaves out). The project's "
+                        . 'Dockerfile has to install it or stop requiring it.',
             ],
 
             // Generic build failure — last resort, still better than the dump.

@@ -10,6 +10,7 @@ import {
   type GitRevertRequest,
   type GitStatus,
   type GitUpdateCredentialsRequest,
+  type TaskSnapshot,
 } from '@/types';
 import { EngineApiBase } from '../engine-api-base';
 
@@ -32,6 +33,13 @@ function gitQuery(
   const encoded = query.toString();
   return encoded === '' ? '' : `?${encoded}`;
 }
+
+/**
+ * A pull, branch change or revert answers 200 with the checkout on a `site_git`
+ * checkout, and 202 with the task that changes it and rebuilds on a
+ * deploy-managed one: follow that with followDeployTask().
+ */
+type GitChangeResponse = ApiResponse<GitStatus | TaskSnapshot>;
 
 export class GitApi extends EngineApiBase {
   async gitStatus(
@@ -119,9 +127,9 @@ export class GitApi extends EngineApiBase {
   async gitChangeBranch(
     username: string,
     data: GitChangeBranchRequest
-  ): Promise<ApiResponse<GitStatus>> {
+  ): Promise<GitChangeResponse> {
     const response = await this.api.put(`projects/${username}/git/change-branch`, { data });
-    await this.assertStatus(response, 200);
+    await this.assertStatus(response, [200, 202]);
     return response.json();
   }
 
@@ -142,9 +150,9 @@ export class GitApi extends EngineApiBase {
     return response.json();
   }
 
-  async gitPull(username: string, data: GitPullRequest = {}): Promise<ApiResponse<GitStatus>> {
+  async gitPull(username: string, data: GitPullRequest = {}): Promise<GitChangeResponse> {
     const response = await this.api.post(`projects/${username}/git/pull`, { data });
-    await this.assertStatus(response, 200);
+    await this.assertStatus(response, [200, 202]);
     return response.json();
   }
 
@@ -170,9 +178,9 @@ export class GitApi extends EngineApiBase {
     return this.rawCall(response);
   }
 
-  async gitRevert(username: string, data: GitRevertRequest = {}): Promise<ApiResponse<GitStatus>> {
+  async gitRevert(username: string, data: GitRevertRequest = {}): Promise<GitChangeResponse> {
     const response = await this.api.post(`projects/${username}/git/revert`, { data });
-    await this.assertStatus(response, 200);
+    await this.assertStatus(response, [200, 202]);
     return response.json();
   }
 

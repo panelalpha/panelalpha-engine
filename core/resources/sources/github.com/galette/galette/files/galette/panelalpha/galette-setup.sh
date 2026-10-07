@@ -5,7 +5,7 @@
 #
 # Three jobs, all idempotent:
 #   1. Persist config/ and data/ onto /pa-data (~/.panelalpha), which survives the
-#      redeploy that empties ~/project (engine#173); ~/project does not.
+#      redeploy that empties ~/project; ~/project does not.
 #   2. Headless install BEFORE the site is publicly reachable: create the schema
 #      and a generated-password super-admin, so the first visitor never meets an
 #      open installer. Skipped once config.inc.php exists in persistent storage.
@@ -17,7 +17,6 @@ set -eu
 PA_DATA="/pa-data/galette"
 CFG="${PA_DATA}/config"
 DATA="${PA_DATA}/data"
-SECRETS="${PA_DATA}/secrets"
 
 if [ ! -d /pa-data ]; then
 	echo "panelalpha/galette: /pa-data is not mounted; the compose override did not apply" >&2
@@ -28,8 +27,8 @@ cd /app
 
 # --- 1. Persistent config/ + data/.
 umask 077
-mkdir -p "${PA_DATA}" "${SECRETS}"
-chmod 700 "${PA_DATA}" "${SECRETS}"
+mkdir -p "${PA_DATA}"
+chmod 700 "${PA_DATA}"
 
 # Seed persistent copies from the fresh checkout once (keeps Galette's shipped
 # data/ subdir skeleton and the deny-.htaccess/index.php guards), then replace
@@ -58,17 +57,23 @@ if [ ! -f "${CFG}/config.inc.php" ]; then
 		exit 1
 	fi
 
-	# Super-admin credentials: generated once, 0600, reused, never logged.
-	if [ ! -f "${SECRETS}/admin.txt" ]; then
-		_user="superadmin"
-		_pass="$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24)"
-		printf 'username=%s\npassword=%s\n' "${_user}" "${_pass}" > "${SECRETS}/admin.txt"
-		chmod 600 "${SECRETS}/admin.txt"
+	# The super-admin login is the engine's (`credentials:` in panelalpha.yaml),
+	# in ~/.panelalpha/app-credentials.env, mounted read-only here.
+	ADMIN_USER="$(. /pa-data/app-credentials.env; printf '%s' "${username:-}")"
+	ADMIN_PASS="$(. /pa-data/app-credentials.env; printf '%s' "${password:-}")"
+	if [ -z "${ADMIN_USER}" ] || [ -z "${ADMIN_PASS}" ]; then
+		echo "panelalpha/galette: no login in /pa-data/app-credentials.env; cannot install" >&2
+		exit 1
 	fi
-	ADMIN_USER="$(sed -n 's/^username=//p' "${SECRETS}/admin.txt")"
-	ADMIN_PASS="$(sed -n 's/^password=//p' "${SECRETS}/admin.txt")"
 
-	php /app/panelalpha/galette-console.php galette:install \
+	# Galette's own bin/console (copied in by hooks/prepare.sh) expects a galette/
+	# sibling of its bin/ directory; give it one pointing at /app.
+	CLI="$(mktemp -d)"
+	mkdir "${CLI}/bin"
+	cp /app/panelalpha/console "${CLI}/bin/console"
+	ln -s /app "${CLI}/galette"
+
+	(cd "${CLI}/bin" && php console galette:install \
 		--dbtype=mysql \
 		--dbhost="${DB_HOST}" \
 		--dbport="${DB_PORT:-3306}" \
@@ -79,10 +84,11 @@ if [ ! -f "${CFG}/config.inc.php" ]; then
 		--admin="${ADMIN_USER}" \
 		--password="${ADMIN_PASS}" \
 		--write-config \
-		--no-interaction \
+		--no-interaction) \
 		|| { echo "panelalpha/galette: headless install failed" >&2; exit 1; }
+	rm -rf "${CLI}"
 
-	echo "panelalpha/galette: install complete; super-admin credentials in ~/.panelalpha/galette/secrets/admin.txt" >&2
+	echo "panelalpha/galette: install complete" >&2
 fi
 
 # --- 3. Lock the installer. Galette's webroot/installer.php never gates on an

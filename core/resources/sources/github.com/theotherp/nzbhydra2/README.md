@@ -47,21 +47,3 @@ decides the configuration.
 Log in with the username and password `GET /projects/{name}/app-credentials`
 (MCP `app_credentials_get`) returns; the API key for the *arr apps is in
 Config > Main.
-
-## Verified (mariusz.panelalpha.tools, engine 705f250a, memory_limit 2500)
-
-- Deploy 41s, rebuild 38s; app at ~358 MB.
-- Anonymous `/` ends on `/login` (`<title>NZBHydra 2</title>`, 4.7 KB);
-  `/internalapi/config` 401, `POST /internalapi/stats` 403, `/actuator/env` 302.
-  `/internalapi/userinfos` shows `maySeeSearch/maySeeAdmin: false` and no API key.
-- `/api?apikey=wrong&t=caps` returns `<error code="100" description="Wrong api key"/>`;
-  the seeded key returns `<caps>` and an RSS search response.
-- Wrong password: 302 to `/login?error`. Seeded password: 302 to `/`, userinfos
-  `maySeeAdmin: true`, `/internalapi/config` 200 with the seeded API key.
-- Round trip through `PUT /internalapi/config`: `searching.timeout` 33,
-  `searching.userAgent`, and a disabled Newznab indexer read back; the stored
-  password stayed the seeded bcrypt hash.
-- After `rebuild`: init printed `nzbhydra.yml exists; left alone`,
-  `nzbhydra.env` checksum unchanged, login works, config values, the indexer
-  and the API key kept; the wrong key is still refused.
-- `/.env`, `/.git/config`, `/nzbhydra.yml`, `/database/nzbhydra.mv.db` all 404.

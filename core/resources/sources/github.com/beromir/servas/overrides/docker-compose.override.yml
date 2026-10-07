@@ -21,7 +21,7 @@ services:
       #   /data/app.key           the application key
       #   /data/credentials       the generated account, 0600
       #
-      # A redeploy clears and re-clones ~/project (engine#173), so a SQLite
+      # A redeploy clears and re-clones ~/project, so a SQLite
       # file under database/ -- which is where Servas's own config/database.php
       # points, and where its Dockerfile puts it -- would be destroyed by the
       # next deploy along with every bookmark in it. ~ itself is root-owned

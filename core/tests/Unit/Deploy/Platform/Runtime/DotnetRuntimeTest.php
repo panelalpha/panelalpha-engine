@@ -2,7 +2,10 @@
 
 namespace Tests\Unit\Deploy\Platform\Runtime;
 
+use App\Lib\Deploy\Detect\DeployabilityCheck;
+use App\Lib\Deploy\Platform\Probes\DotnetProjectProbe;
 use App\Lib\Deploy\Platform\ProjectContext;
+use App\Lib\Deploy\Platform\Strategies;
 use App\Lib\Deploy\Platform\Runtime\DotnetRuntime;
 use PHPUnit\Framework\TestCase;
 
@@ -142,6 +145,48 @@ class DotnetRuntimeTest extends TestCase
         $this->assertNull(DotnetRuntime::targetFramework($this->dir));
     }
 
+    /** Emby: a NuGet HintPath `sqlite3.net45.1.1.11` is not a target framework (it read as sdk:45.1). */
+    public function test_only_target_framework_elements_are_read(): void
+    {
+        $this->write('Server/Server.csproj', <<<'XML'
+<Project ToolsVersion="15.0">
+  <PropertyGroup><TargetFrameworkVersion>v4.7</TargetFrameworkVersion></PropertyGroup>
+  <Reference Include="SQLitePCLRaw.provider.sqlite3">
+    <HintPath>..\packages\SQLitePCLRaw.provider.sqlite3.net45.1.1.11\lib\net45\SQLitePCLRaw.provider.sqlite3.dll</HintPath>
+  </Reference>
+</Project>
+XML);
+        $this->write('Lib/Lib.csproj', '<Project Sdk="Microsoft.NET.Sdk"><TargetFrameworks>netstandard2.0;net8.0-windows;net9.0</TargetFrameworks></Project>');
+
+        $this->assertSame('9.0', DotnetRuntime::targetFramework($this->dir));
+
+        unlink($this->dir . '/Lib/Lib.csproj');
+        $this->assertNull(DotnetRuntime::targetFramework($this->dir));
+        $this->assertSame(DotnetRuntime::VERSION, (new DotnetRuntime())->resolve($this->context())?->version);
+    }
+
+    /** A classic .NET Framework app cannot be published by the Linux SDK; that is said before the build. */
+    public function test_a_classic_dotnet_framework_entry_project_is_refused(): void
+    {
+        $this->write('Server/Server.csproj', '<Project ToolsVersion="15.0"><PropertyGroup>'
+            . '<OutputType>Exe</OutputType><TargetFrameworkVersion>v4.7</TargetFrameworkVersion></PropertyGroup></Project>');
+
+        $this->assertSame('Server/Server.csproj targets .NET Framework v4.7', DotnetRuntime::legacyFrameworkEntry($this->dir));
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Server/Server.csproj targets .NET Framework v4.7');
+        DeployabilityCheck::assert(['strategy' => Strategies::DOTNET], $this->dir);
+    }
+
+    public function test_an_sdk_style_entry_project_is_deployable(): void
+    {
+        $this->write('Server/Server.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup>'
+            . '<TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>');
+
+        $this->assertNull(DotnetRuntime::legacyFrameworkEntry($this->dir));
+        DeployabilityCheck::assert(['strategy' => Strategies::DOTNET], $this->dir);
+    }
+
     /** global.json pins an SDK and is meant literally, so it outranks the target. */
     public function test_global_json_outranks_the_target_framework(): void
     {
@@ -172,6 +217,28 @@ class DotnetRuntimeTest extends TestCase
         $this->assertStringContainsString('dotnet publish', $build);
         $this->assertStringContainsString('-c Release', $build);
         $this->assertStringContainsString('-o ' . DotnetRuntime::PUBLISH_DIR, $build);
+    }
+
+    /**
+     * Flink sets TreatWarningsAsErrors and restore died on `error NU1903: Warning
+     * As Error` for a transitive package. The audit codes are appended to the
+     * project's own WarningsNotAsErrors from a targets file; `-p:WarningsNotAsErrors`
+     * would replace that list (measured: the project's CS0618 became an error again).
+     */
+    public function test_nuget_audit_warnings_are_not_errors_and_the_projects_own_list_is_kept(): void
+    {
+        $this->write('Flink/Flink.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup>'
+            . '<TreatWarningsAsErrors>true</TreatWarningsAsErrors></PropertyGroup></Project>');
+
+        $build = DotnetRuntime::buildCommand($this->dir);
+
+        $this->assertStringStartsWith(
+            "echo '<Project><PropertyGroup><WarningsNotAsErrors>\$(WarningsNotAsErrors);NU1900;NU1901;NU1902;NU1903;NU1904"
+                . "</WarningsNotAsErrors></PropertyGroup></Project>' > /tmp/panelalpha-nuget-audit.targets && dotnet publish 'Flink/Flink.csproj'",
+            $build
+        );
+        $this->assertStringEndsWith(' -p:CustomAfterMicrosoftCommonTargets=/tmp/panelalpha-nuget-audit.targets', $build);
+        $this->assertStringNotContainsString('-p:WarningsNotAsErrors', $build);
     }
 
     /**
@@ -221,12 +288,60 @@ class DotnetRuntimeTest extends TestCase
         $this->assertNull(DotnetRuntime::entryProject($this->dir));
     }
 
-    /** A console app with no web SDK is still an application. */
+    /** A console app hosting ASP.NET Core without the web SDK is still the application. */
     public function test_an_executable_project_is_the_entry_point(): void
     {
-        $this->write('src/Worker/Worker.csproj', '<Project Sdk="Microsoft.NET.Sdk"><OutputType>Exe</OutputType></Project>');
+        $this->write('src/Worker/Worker.csproj', '<Project Sdk="Microsoft.NET.Sdk"><OutputType>Exe</OutputType>'
+            . '<ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App" /></ItemGroup></Project>');
 
         $this->assertSame('src/Worker/Worker.csproj', DotnetRuntime::entryProject($this->dir));
+    }
+
+    /**
+     * dockersamples/example-voting-app: worker/Worker.csproj, verbatim. It moves
+     * votes from Redis to Postgres and listens on nothing, so publishing it as the
+     * app deployed something that could never answer.
+     */
+    public function test_a_console_worker_is_not_the_entry_point_and_the_repo_is_not_claimed(): void
+    {
+        $this->write('worker/Worker.csproj', '<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net7.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="StackExchange.Redis" Version="2.2.4" />
+    <PackageReference Include="Npgsql" Version="4.1.9" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+  </ItemGroup>
+</Project>');
+
+        $this->assertNull(DotnetRuntime::entryProject($this->dir));
+        $this->assertTrue(DotnetRuntime::onlyConsoleExecutables($this->dir));
+        $this->assertFalse((new DotnetProjectProbe())->evaluate($this->context()));
+    }
+
+    /** Prowlarr.Console is a plain Exe; ASP.NET Core comes in through Prowlarr.Host. */
+    public function test_an_executable_reaching_aspnet_through_a_project_reference_is_the_entry_point(): void
+    {
+        $this->write('src/NzbDrone.Console/Prowlarr.Console.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+            . '<OutputType>Exe</OutputType></PropertyGroup><ItemGroup>'
+            . '<ProjectReference Include="..\\NzbDrone.Host\\Prowlarr.Host.csproj" /></ItemGroup></Project>');
+        $this->write('src/NzbDrone.Host/Prowlarr.Host.csproj', '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup>'
+            . '<ProjectReference Include="..\\Prowlarr.Http\\Prowlarr.Http.csproj" /></ItemGroup></Project>');
+        $this->write('src/Prowlarr.Http/Prowlarr.Http.csproj', '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup>'
+            . '<PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="8.0.0" /></ItemGroup></Project>');
+
+        $this->assertSame('src/NzbDrone.Console/Prowlarr.Console.csproj', DotnetRuntime::entryProject($this->dir));
+        $this->assertTrue((new DotnetProjectProbe())->evaluate($this->context()));
+    }
+
+    public function test_a_console_app_with_its_own_http_listener_is_the_entry_point(): void
+    {
+        $this->write('Server/Server.csproj', '<Project Sdk="Microsoft.NET.Sdk"><OutputType>Exe</OutputType></Project>');
+        $this->write('Server/Program.cs', "var listener = new System.Net.HttpListener();\nlistener.Start();\n");
+
+        $this->assertSame('Server/Server.csproj', DotnetRuntime::entryProject($this->dir));
     }
 
     public function test_a_project_whose_targets_run_npm_needs_node_in_its_build(): void
@@ -266,7 +381,7 @@ class DotnetRuntimeTest extends TestCase
         $this->write(
             'src/NzbDrone.Console/Prowlarr.Console.csproj',
             '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType>'
-            . '<TargetFrameworks>net8.0</TargetFrameworks></PropertyGroup></Project>'
+            . '<TargetFrameworks>net8.0</TargetFrameworks></PropertyGroup><ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App" /></ItemGroup></Project>'
         );
 
         $this->assertStringContainsString(
@@ -282,7 +397,8 @@ class DotnetRuntimeTest extends TestCase
     public function test_a_project_inside_a_solution_is_published_with_its_solution_dir(): void
     {
         $this->write('src/Prowlarr.sln', $this->solution('NzbDrone.Console\\Prowlarr.Console.csproj'));
-        $this->write('src/NzbDrone.Console/Prowlarr.Console.csproj', '<Project Sdk="Microsoft.NET.Sdk"><OutputType>Exe</OutputType></Project>');
+        $this->write('src/NzbDrone.Console/Prowlarr.Console.csproj', '<Project Sdk="Microsoft.NET.Sdk"><OutputType>Exe</OutputType>'
+            . '<ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App" /></ItemGroup></Project>');
 
         $this->assertSame('src', DotnetRuntime::solutionDir($this->dir, 'src/NzbDrone.Console/Prowlarr.Console.csproj'));
         $this->assertStringContainsString('-p:SolutionDir="$PWD/src/"', DotnetRuntime::buildCommand($this->dir));
@@ -338,7 +454,8 @@ class DotnetRuntimeTest extends TestCase
         $this->write('src/NzbDrone.SignalR/Sonarr.SignalR.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web">'
             . '<PropertyGroup><TargetFrameworks>net10.0</TargetFrameworks><OutputType>Library</OutputType></PropertyGroup></Project>');
         $this->write('src/NzbDrone.Console/Sonarr.Console.csproj', '<Project Sdk="Microsoft.NET.Sdk">'
-            . '<PropertyGroup><OutputType>Exe</OutputType><TargetFrameworks>net10.0</TargetFrameworks></PropertyGroup></Project>');
+            . '<PropertyGroup><OutputType>Exe</OutputType><TargetFrameworks>net10.0</TargetFrameworks></PropertyGroup>'
+            . '<ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App" /></ItemGroup></Project>');
 
         $this->assertSame('src/NzbDrone.Console/Sonarr.Console.csproj', DotnetRuntime::entryProject($this->dir));
     }
@@ -364,6 +481,29 @@ class DotnetRuntimeTest extends TestCase
         $this->assertStringContainsString('dotnet publish -c Release', DotnetRuntime::buildCommand($this->dir));
     }
 
+    /** Kavita: its BenchmarkDotNet harness is an Exe too, and sorts before the server. */
+    public function test_a_benchmark_project_is_never_the_entry_project(): void
+    {
+        $this->write('Kavita.Benchmark/Kavita.Benchmark.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+            . '<OutputType>Exe</OutputType></PropertyGroup></Project>');
+        $this->write('Kavita.Server/Kavita.Server.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+            . '<OutputType>Exe</OutputType></PropertyGroup>'
+            . '<ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App" /></ItemGroup></Project>');
+
+        $this->assertSame('Kavita.Server/Kavita.Server.csproj', DotnetRuntime::entryProject($this->dir));
+
+        // Named anything, a BenchmarkDotNet reference gives it away.
+        rename($this->dir . '/Kavita.Benchmark', $this->dir . '/Perf');
+        rename($this->dir . '/Perf/Kavita.Benchmark.csproj', $this->dir . '/Perf/Perf.csproj');
+        file_put_contents($this->dir . '/Perf/Perf.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType>'
+            . '</PropertyGroup><ItemGroup><PackageReference Include="BenchmarkDotNet" Version="0.15.8" /></ItemGroup></Project>');
+        $this->write('Kavita.Server/Kavita.Server.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+            . '<OutputType>Exe</OutputType></PropertyGroup>'
+            . '<ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App" /></ItemGroup></Project>');
+
+        $this->assertSame('Kavita.Server/Kavita.Server.csproj', DotnetRuntime::entryProject($this->dir));
+    }
+
     /**
      * The entry assembly is found by its runtimeconfig, because a publish
      * directory holds dozens of library DLLs and no naming rule separates
@@ -379,6 +519,22 @@ class DotnetRuntimeTest extends TestCase
         // restart-looping behind a 502 with an empty deploy log.
         $this->assertStringContainsString('PANELALPHA:', $start);
         $this->assertStringContainsString('exit 1', $start);
+    }
+
+    /** ASP.NET looks for wwwroot under the working directory, so the app starts from out/. */
+    public function test_the_start_command_runs_the_assembly_from_the_publish_directory(): void
+    {
+        $this->write('out/Memtly.runtimeconfig.json', '{}');
+        $this->write('out/Memtly.dll', '');
+        $this->write('bin/dotnet', "#!/bin/sh\necho \"$(pwd) $*\"\n");
+        chmod($this->dir . '/bin/dotnet', 0755);
+
+        $command = 'cd ' . escapeshellarg($this->dir) . ' && PATH=' . escapeshellarg($this->dir . '/bin') . ':$PATH sh -c '
+            . escapeshellarg(DotnetRuntime::startCommand());
+        exec($command . ' 2>&1', $output, $status);
+
+        $this->assertSame(0, $status, implode("\n", $output));
+        $this->assertSame([realpath($this->dir) . '/out Memtly.dll'], $output);
     }
 
     /** The shell in the start command has to be valid, since sh runs it. */

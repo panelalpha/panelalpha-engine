@@ -4,13 +4,13 @@ A low-code platform for internal tools: a builder UI, a client runtime for the
 apps it builds, automations, and connectors to external databases. CouchDB is
 its database, Redis its cache and job queue, MinIO its object store.
 
-Detection: `railpack` — and that is the failure. The repository root is a
-13-package yarn-1 Lerna workspace whose `package.json` has no `start` script,
-and every compose file it ships lives under `hosting/` or under
-`packages/server/scripts/integrations/`, names Docker never auto-loads. Railpack
-installed the workspace, printed `No start command detected`, generated a basic
-compose around `nginx:alpine`, and the deploy "finished successfully" with the
-account serving PanelAlpha's placeholder page on 8080.
+Without the recipe, detection picks `railpack` — and that is the failure. The
+repository root is a 13-package yarn-1 Lerna workspace whose `package.json` has
+no `start` script, and every compose file it ships lives under `hosting/` or
+under `packages/server/scripts/integrations/`, names Docker never auto-loads.
+Railpack installs the workspace, finds no start command, generates a basic
+compose around `nginx:alpine`, and the deploy "finishes successfully" with the
+account serving PanelAlpha's placeholder page.
 
 ## The checkout does not build
 
@@ -48,22 +48,10 @@ LiteLLM proxy in a Python venv**, and the Node server and worker, all under pm2.
 `${DATA_DIR}/litellm/postgres` and starts the proxy unconditionally, waiting up
 to 120s for it.
 
-Measured on `mariusz`, `budibase/budibase:latest` in a 2000 MB container with no
-swap (`--memory 2000m --memory-swap 2000m`), with `BB_ADMIN_USER_*` set and
-nothing else:
-
-- image, uncompressed: **4.73 GB** (1.20 GB to pull)
-- 580 MiB at 15s, **1.952 GiB of 1.953 GiB (99.95%) by 3½ minutes**
-- `State.OOMKilled` true from ~3½ minutes on. `dmesg`: `Memory cgroup out of
-  memory: Killed process … (node)` four times and `… (python)` once — the
-  LiteLLM proxy at 434 MB anon-rss.
-- at **10 minutes**: healthcheck `unhealthy`, `curl http://localhost/` inside the
-  container still **502**. It never served a page.
-
-So it does not fit, and it is not close: the deficit is roughly the LiteLLM
-proxy plus its PostgreSQL. The split stack below is the same application without
-that pair, and it is what this recipe runs — 1441 MiB steady state, measured the
-same way.
+In a 2000 MB account with no swap it runs out of memory before it serves a
+page, and it is not close: the deficit is roughly the LiteLLM proxy plus its
+PostgreSQL. The split stack below is the same application without that pair,
+and it is what this recipe runs.
 
 ## The stack
 
@@ -87,9 +75,8 @@ and `litellm-db`.
 - **ready** — a no-op that exits 0. See *Readiness*.
 
 No LiteLLM. `waitForLiteLLMReadiness()` in `packages/server/src/startup/index.ts`
-returns immediately when `LITELLM_MASTER_KEY` is unset, so leaving it out is a
-clean 30s off every boot rather than an error — the log line reads
-`Waiting for LiteLLM readiness` and `Server ready!` in the same millisecond.
+returns immediately when `LITELLM_MASTER_KEY` is unset, so leaving it out is
+not an error and adds no wait to the boot.
 What the customer loses is Budibase's AI features, which need an LLM provider
 key nobody has configured anyway. An account that wants them adds the two
 services from `hosting/docker-compose.yaml` and the memory to run them.
@@ -99,7 +86,7 @@ services from `hosting/docker-compose.yaml` and the memory to run them.
 There is no version in this checkout to derive a tag from — see above, every
 version string in the tree is `0.0.0`. So `hooks/prepare.sh` uses upstream's own
 release channel, `stable`, confirmed to exist on Docker Hub before it is used
-and falling back to `latest` (the same digest today). The one real version in
+and falling back to `latest`. The one real version in
 the tree is `hosting/couchdb/VERSION` (`2.1.0`), which
 `charts/budibase/values.yaml` pins as well, and the CouchDB image is tagged from
 it: the database's on-disk layout is not something to have change under a
@@ -131,12 +118,13 @@ stranger to open the site becomes the admin.
 `BB_ADMIN_USER_EMAIL` / `BB_ADMIN_USER_PASSWORD` close that window rather than a
 setup service: `packages/server/src/startup/index.ts` calls
 `users.UserDB.createAdminUser` from them on first boot when `SELF_HOSTED` is set
-and `MULTI_TENANCY` is not. The password is 20 alphanumeric characters generated
-per account into `~/project/.panelalpha-admin-password` (0600), never a default.
+and `MULTI_TENANCY` is not. The login is the engine's (`credentials:` in
+`panelalpha.yaml`): app-service reads it from `~/.panelalpha/app-credentials.env`,
+and `GET /projects/{name}/app-credentials` (MCP `app_credentials_get`) returns it.
+The password is generated per account, never a default.
 There is no self-signup afterwards — Budibase self-host has no public
 registration at all, so unlike NocoDB and Mattermost nothing further has to be
-turned off. Verified on a live deploy: `POST /api/global/users/init` answers
-403 once the account is up.
+turned off: `POST /api/global/users/init` answers 403 once the account is up.
 
 ### The public address
 
@@ -148,8 +136,7 @@ invitation emails and OAuth callback URLs. The compose file ships
 rewrites — the key ends in `_URL` and the value is a bare localhost — so
 `UserComposeStrategy` substitutes the account's https URL before the stack
 starts. The deploy log says `Pointed the application address at its public URL:
-PLATFORM_URL`, and `/api/global/configs/settings` afterwards holds the account's
-real name.
+PLATFORM_URL`.
 
 The other `*_URL` keys in the file (`COUCH_DB_URL`, `WORKER_URL`, `MINIO_URL`,
 `APPS_URL`) are service addresses, not localhost, so the same rule leaves them
@@ -166,12 +153,10 @@ and creates the admin, and only then does the proxy have anything to proxy to.
 waits on app and worker, which wait on CouchDB, Redis and MinIO. A clean exit 0
 is explicitly not a crash loop to `AppHealth::isCrashing()`.
 
-### Memory, and the flag that made it fit
+### Memory, and the flag that makes it fit
 
-The first attempt at this recipe gave `app-service` 640m and failed the deploy
-outright: the container was OOM-killed mid-boot, compose saw its dependency
-restart and aborted `up -d`, and the whole deploy came back `failed` with the
-image-pull progress dump as its error message.
+At 640m `app-service` is OOM-killed mid-boot, compose sees its dependency
+restart and aborts `up -d`, and the whole deploy fails.
 
 The cause is that the Budibase server is not one process.
 `packages/server/src/threads/index.ts` starts a `worker-farm` for queries and
@@ -192,18 +177,14 @@ that flag have to be set together or the JS runner breaks.
 it. It counts threads: a JVM plus an Erlang VM plus SQS in `couchdb-service`,
 and three Node processes with their libuv pools in `app-service`.
 
-Measured steady state on a 2000 MB account, signed in, with one workspace
-created:
-
-| Service | Limit | Measured |
-|---|---|---|
-| app-service | 896m | 694 MiB |
-| couchdb-service | 640m | 413 MiB |
-| worker-service | 384m | 240 MiB |
-| minio-service | 192m | 79 MiB |
-| proxy-service | 64m | 9 MiB |
-| redis-service | 96m | 6 MiB |
-| **total** | | **~1441 MiB of 2000** |
+| Service | Limit |
+|---|---|
+| app-service | 896m |
+| couchdb-service | 640m |
+| worker-service | 384m |
+| minio-service | 192m |
+| proxy-service | 64m |
+| redis-service | 96m |
 
 The account has no swap (`MemorySwap == Memory`), so that headroom is all there
 is. An account given less than 2000 MB will not run this.
@@ -213,11 +194,8 @@ is. An account given less than 2000 MB will not run this.
 - **Mail.** Budibase boots, the admin signs in and workspaces can be built
   without it, but invitations and password resets need an SMTP server the engine
   does not provide. Configure one in the portal under Email.
-- **`overrides/app.sh`.** Not written. The worker exposes a full
-  `/api/global/users` CRUD behind a session cookie, and `JWT_SECRET` is in the
-  account's `.env`, so minting an admin cookie for `users:list` / `users:add` /
-  SSO (Pattern B, cookie `budibase:auth`) is a tractable next step; it is simply
-  not done here.
+- **No `overrides/app.sh`.** Panel user management (`users:list`,
+  `users:add`, SSO) is not provided; users are managed in the Budibase portal.
 - **Scaling.** `CLUSTER_MODE` in both images switches `docker_run.sh` to
   `pm2-runtime` with one instance per CPU. That multiplies the Node processes
   described above and does not belong on an account this size.

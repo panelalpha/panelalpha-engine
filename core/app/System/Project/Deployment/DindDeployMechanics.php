@@ -8,6 +8,11 @@ use App\Models\User as ModelsUser;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AppHealth;
+use App\System\Project\Dind\Generation\CheckoutAside;
+use App\System\Project\Dind\Generation\GenerationSweep;
+use App\System\Project\Dind\Generation\RoutingSnapshot;
+use App\System\Project\Dind\Generation\ServingImages;
+use App\System\Project\Dind\ProjectBindMounts;
 use App\System\Project\Dind\Source\EngineArtifactExclude;
 use App\System\Project\Dind\Source\GitRepository;
 use Illuminate\Support\Facades\Log;
@@ -115,7 +120,11 @@ final class DindDeployMechanics implements DeployMechanics
     public function syncHostingForSourceRebuild(?string $zipPath): void
     {
         $project = $this->aggregate();
-        $this->stopApplicationBeforeWipe();
+        $this->noteTheRunningVersion();
+        // A git re-clone stops the app itself, once the new source is in hand.
+        if (!$this->reclonesOnRebuild($zipPath)) {
+            $this->stopApplicationBeforeWipe(copyBack: true);
+        }
         $project->prepareLinuxIsolation();
         if ($zipPath !== null && $zipPath !== '') {
             $project->importProjectArchive($zipPath);
@@ -126,12 +135,28 @@ final class DindDeployMechanics implements DeployMechanics
     // prepareLinuxIsolation() clears ~/project and the re-clone lands on a new inode; any
     // container bind-mounted under the old one (n8n's ./docker, and every recipe shipping
     // overrides/) keeps reading the now-unlinked directory unless it's stopped first.
-    private function stopApplicationBeforeWipe(): void
+    // Any other app keeps serving through the build: `up -d` recreates it last. One that
+    // mounts the checkout keeps serving too when the old tree can be moved aside instead
+    // of wiped; $copyBack when the deploy builds on the files already there.
+    private function stopApplicationBeforeWipe(bool $copyBack = false): void
     {
         $app = $this->dind->app();
         if ($app === null) {
             return;
         }
+
+        $logger = $this->dind->shell()->logger();
+        $read = (new ProjectBindMounts($this->dind))->read();
+        $mounts = $read['mounts'] ?? null;
+        if ($read !== null && $read['running'] !== [] && $this->keepCheckoutForRunningApp($read, $copyBack)) {
+            return;
+        }
+        if ($mounts === []) {
+            $logger?->info('Kept the running app up during the build');
+
+            return;
+        }
+        $logger?->info('Stopped the app first: ' . ($mounts === null ? 'its mounts could not be read' : implode(', ', $mounts)));
 
         $warn = $this->aggregate()->isRunning();
 
@@ -146,11 +171,19 @@ final class DindDeployMechanics implements DeployMechanics
         );
     }
 
+    private function reclonesOnRebuild(?string $zipPath): bool
+    {
+        return $this->user()->hasGitProject() && ($zipPath === null || $zipPath === '');
+    }
+
     public function ingestForWipeRebuild(?string $zipPath): void
     {
-        if ($this->user()->hasGitProject() && ($zipPath === null || $zipPath === '')) {
+        if ($this->reclonesOnRebuild($zipPath)) {
             $this->dind->preCheckFromSources();
-            (new GitRepository($this->dind))->cloneConfiguredRepository();
+            // Cloned beside ~/project first: a failed clone must not take the running app down.
+            (new GitRepository($this->dind))->cloneConfiguredRepository(
+                fn () => $this->stopApplicationBeforeWipe(),
+            );
             // Re-clone lands on the same ~/project the wipe just cleared; bootstrap it
             // like ingestApplicationSource() does, or the app config's files never come back.
             $this->dind->prepareFromSources();
@@ -165,14 +198,69 @@ final class DindDeployMechanics implements DeployMechanics
 
     public function ingestArchive(string $zipPath): void
     {
+        $this->noteTheRunningVersion();
+        $this->keepCheckoutReadable();
         $this->aggregate()->importProjectArchive($zipPath);
         $this->dind->prepareFromSources();
     }
 
     public function reprepareApplicationFromCheckout(): void
     {
+        $this->noteTheRunningVersion();
+        $this->keepCheckoutReadable();
         $this->dind->prepareFromSources();
         $this->excludeEngineArtifacts();
+    }
+
+    /** The checkout a redeploy moved aside: back if it failed, gone once replaced. */
+    public function settleRedeploy(bool $succeeded): void
+    {
+        GenerationSweep::settleIfIdle($this->dind, $succeeded);
+    }
+
+    /** Its images and routing, before the redeploy prepares anything. */
+    private function noteTheRunningVersion(): void
+    {
+        (new ServingImages($this->dind))->remember();
+        (new RoutingSnapshot($this->dind))->take();
+    }
+
+    /** A pull or an archive builds on a copy; the running app keeps the tree it was deployed from. */
+    private function keepCheckoutReadable(): void
+    {
+        if ($this->dind->app() === null) {
+            return;
+        }
+        if ((new CheckoutAside($this->dind))->keptByThisProcess()) {
+            $this->dind->shell()->logger()?->info(
+                'Kept the running app up during the build; the checkout it was deployed from moved to ~/'
+                . CheckoutAside::DIR . ' before the change, and comes back if the new version fails'
+            );
+
+            return;
+        }
+        $read = (new ProjectBindMounts($this->dind))->read();
+        if ($read !== null && $read['running'] !== []) {
+            $this->keepCheckoutForRunningApp($read, copyBack: true);
+        }
+    }
+
+    /**
+     * @param array{mounts: list<string>, containers: list<string>, running: list<string>} $read
+     */
+    private function keepCheckoutForRunningApp(array $read, bool $copyBack): bool
+    {
+        $binds = $read['mounts'] !== [];
+        if (!(new CheckoutAside($this->dind))->moveAside($read['running'], $copyBack, $binds)) {
+            return false;
+        }
+        $this->dind->shell()->logger()?->info($binds
+            ? 'Kept the running app up during the build: ' . implode(', ', $read['mounts'])
+                . ', so the checkout it reads moved to ~/' . CheckoutAside::DIR . ' until the new version replaces it'
+            : 'Kept the running app up during the build; the checkout it was deployed from moved to ~/'
+                . CheckoutAside::DIR . ', and comes back if the new version fails');
+
+        return true;
     }
 
     public function publishDomain(DomainModel $domain): void
@@ -185,9 +273,9 @@ final class DindDeployMechanics implements DeployMechanics
         return $this->aggregate()->startUserApp();
     }
 
-    public function abortPartialDeploy(): void
+    public function abortPartialDeploy(bool $removeVolumes = false): void
     {
-        $this->aggregate()->abortRunningDeploy();
+        $this->aggregate()->abortRunningDeploy(removeVolumes: $removeVolumes);
     }
 
     public function servingWarnings(): array
@@ -218,6 +306,7 @@ final class DindDeployMechanics implements DeployMechanics
         $this->user()->setDetails([
             'deployment_warnings' => $warnings,
             'deployment_status' => 'partial',
+            'error' => null,
         ]);
         $this->user()->save();
     }

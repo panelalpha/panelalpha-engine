@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Docker's example voting app: a Python `vote` page, a Node `result` page, a
+  .NET `worker` and Redis plus PostgreSQL. The repository's docker-compose.yml
+  is a development compose (bind-mounted sources, nodemon), so detection fell
+  through to the only project file, the console worker, which listens on no
+  port. This recipe runs upstream's docker-compose.images.yml instead: the
+  published dockersamples/examplevotingapp_* images, with `vote` as the site.

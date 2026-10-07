@@ -90,7 +90,7 @@ class JavaBuildToolTest extends TestCase
     }
 
     /**
-     * engine#283: a Spring Boot app that sets `server.address=localhost` binds
+     * A Spring Boot app that sets `server.address=localhost` binds
      * 127.0.0.1 and nothing outside the container reaches it. Both Java
      * platforms put the env var that outranks it into the container.
      */

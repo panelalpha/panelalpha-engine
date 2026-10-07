@@ -70,6 +70,9 @@ final class InternalPorts
         // above one digit further out: an image that publishes it alongside
         // its web port offers the proxy a shell instead of a site.
         2222 => 'SSH (unprivileged)',
+        // A torrent client's peer port: rapidbay's `EXPOSE 6881` came before
+        // its web UI's 5000.
+        6881 => 'BitTorrent',
     ];
 
     // Deliberately absent: 9000. It is php-fpm's FastCGI socket, which is how

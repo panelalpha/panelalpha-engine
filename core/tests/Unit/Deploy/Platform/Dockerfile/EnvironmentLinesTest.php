@@ -52,7 +52,7 @@ class EnvironmentLinesTest extends TestCase
     }
 
     /**
-     * engine#48 item 23. Bare, `ENV JAVA_OPTS=-Xmx256m -XX:+UseSerialGC` fails
+     * Bare, `ENV JAVA_OPTS=-Xmx256m -XX:+UseSerialGC` fails
      * the build with "can't find = in -XX:+UseSerialGC", and quotes inside a
      * bare value are stripped by the Dockerfile parser. Each expected line was
      * built with docker and read back as the value on the left.

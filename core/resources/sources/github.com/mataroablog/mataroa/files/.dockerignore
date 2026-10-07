@@ -1,4 +1,4 @@
-# Keep the checkout's git metadata and env files out of the image (engine#420).
+# Keep the checkout's git metadata and env files out of the image.
 .git
 .env
 .env.*

@@ -36,6 +36,14 @@ final class DindHostBuilder implements HostBuilder
     /** Used only when no usable limit is handed in: an unreadable host, or direct construction in tests. */
     private const DEFAULT_MEMORY_LIMIT = '2g';
 
+    /**
+     * Printed by a failed host build whose memory cgroup OOM-killed a process.
+     * The kill itself leaves no text when the victim is not the shell's own
+     * child (yarn 4 exits 129 without a word), and the exit status alone
+     * cannot tell it apart.
+     */
+    public const OOM_REPORT = 'Out of memory: the kernel killed a process in the host build container';
+
     private string $memoryLimit;
 
     /**
@@ -73,7 +81,7 @@ final class DindHostBuilder implements HostBuilder
 
     /**
      * A build is a host resource: up to 8 GB, held to half the server's RAM
-     * and its RAM less DEPLOY_ENGINE_MEMORY (engine#295). Passed in, not read from config,
+     * and its RAM less DEPLOY_ENGINE_MEMORY. Passed in, not read from config,
      * because this class has no Laravel dependencies; see {@see DindEngine}.
      */
     public function __construct(
@@ -157,7 +165,7 @@ final class DindHostBuilder implements HostBuilder
             $image,
             'sh',
             '-c',
-            $script,
+            self::reportingOom($script),
         ];
     }
 
@@ -393,7 +401,7 @@ final class DindHostBuilder implements HostBuilder
             $image,
             '-e',
             '-c',
-            $script,
+            self::reportingOom($script),
         ];
     }
 
@@ -439,14 +447,23 @@ final class DindHostBuilder implements HostBuilder
                 'COMPOSER_ALLOW_SUPERUSER' => '1',
                 'COMPOSER_MAX_PARALLEL_HTTP' => '6',
                 'COMPOSER_HOME' => '/tmp/composer',
+                // Advisories are reported, never a reason to refuse the build ({@see PhpHostBuild::environment()}).
+                'COMPOSER_NO_BLOCKING' => '1',
                 // Why this is safe is {@see PhpHostBuild::runtimeManifest()}.
                 // Null means the project's own composer.json.
                 ...($manifest !== null ? [PhpHostBuild::MANIFEST_ENV => $manifest] : []),
             ]),
             Images::COMPOSER_IMAGE,
             '-c',
-            self::composerCommand($phpVersion),
+            self::reportingOom(self::composerCommand($phpVersion)),
         ];
+    }
+
+    /** $script, saying OOM_REPORT on the way out when it failed on an OOM kill. */
+    private static function reportingOom(string $script): string
+    {
+        return 'trap \'rc=$?; if [ "$rc" -ne 0 ] && grep -qs "^oom_kill [1-9]" /sys/fs/cgroup/memory.events; '
+            . 'then echo "' . self::OOM_REPORT . '" >&2; fi; exit "$rc"\' EXIT; ' . $script;
     }
 
     /**
@@ -518,13 +535,13 @@ final class DindHostBuilder implements HostBuilder
             // Equal to --memory: no swap on top of it, so the limit is what the build can use.
             '--memory-swap',
             $this->memoryLimit(),
-            // If the host runs out anyway, the kernel kills the build, not core or an app (engine#295).
+            // If the host runs out anyway, the kernel kills the build, not core or an app.
             '--oom-score-adj',
             '1000',
             '--pids-limit',
             '512',
             // Internet only: not the engine API, the host, its LAN or the
-            // metadata address (engine#246).
+            // metadata address.
             ...($this->network !== null ? ['--network', $this->network] : []),
         ];
     }

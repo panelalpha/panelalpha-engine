@@ -10,7 +10,7 @@ class ComposeRequiredEnvTest extends TestCase
 {
     private const SEED = 'test-seed';
 
-    /** onetimesecret (#140): the root only includes, the file it includes requires two secrets. */
+    /** onetimesecret: the root only includes, the file it includes requires two secrets. */
     private const OTS_ROOT = <<<'YAML'
 include:
   - path: docker/compose/docker-compose.simple.yml
@@ -35,7 +35,7 @@ services:
       --requirepass ${VALKEY_PASSWORD:?VALKEY_PASSWORD must be set}
 YAML;
 
-    /** kaneo (#144): postgres takes its password from `.env` and nothing puts one there. */
+    /** kaneo: postgres takes its password from `.env` and nothing puts one there. */
     private const KANEO = <<<'YAML'
 services:
   postgres:
@@ -67,6 +67,62 @@ YAML;
         $this->assertSame(['VALKEY_PASSWORD', 'SECRET'], array_keys($missing));
         // The same value ComposePlaceholders writes into `environment:`, so both agree.
         $this->assertSame(ComposePlaceholders::generatedSecret('VALKEY_PASSWORD', self::SEED), $missing['VALKEY_PASSWORD']);
+    }
+
+    public function test_a_hinted_length_matches_what_compose_placeholders_writes(): void
+    {
+        $yaml = <<<'YAML'
+services:
+  server:
+    image: rustrak/server
+    command: serve --key ${SESSION_SECRET_KEY:?generate one with openssl rand -hex 32}
+YAML;
+
+        $missing = ComposeRequiredEnv::missing([['dir' => '', 'yaml' => $yaml]], [], self::SEED);
+
+        $this->assertSame(64, strlen($missing['SESSION_SECRET_KEY']));
+        $this->assertSame(
+            ComposePlaceholders::requiredSecretValue('SESSION_SECRET_KEY', self::SEED, 64),
+            $missing['SESSION_SECRET_KEY']
+        );
+        $this->assertStringStartsWith(ComposePlaceholders::generatedSecret('SESSION_SECRET_KEY', self::SEED), $missing['SESSION_SECRET_KEY']);
+    }
+
+    public function test_a_base64_byte_hint_writes_base64_of_that_many_bytes(): void
+    {
+        $yaml = <<<'YAML'
+services:
+  api:
+    build: .
+    environment:
+      ECOMGEN_MASTER_KEY: ${ECOMGEN_MASTER_KEY:?Set a base64-encoded 32-byte key in .env}
+YAML;
+
+        $missing = ComposeRequiredEnv::missing([['dir' => '', 'yaml' => $yaml]], [], self::SEED);
+
+        $this->assertSame(32, strlen((string) base64_decode($missing['ECOMGEN_MASTER_KEY'], true)));
+        $this->assertSame(
+            ComposePlaceholders::requiredSecret('ECOMGEN_MASTER_KEY', '${ECOMGEN_MASTER_KEY:?Set a base64-encoded 32-byte key in .env}', self::SEED),
+            $missing['ECOMGEN_MASTER_KEY']
+        );
+    }
+
+    public function test_a_required_own_url_is_written_as_the_public_url(): void
+    {
+        $yaml = <<<'YAML'
+services:
+  api:
+    environment:
+      EGMA_BASE_URL: ${EGMA_BASE_URL:?no default — the whole address a browser reaches egma at}
+      REDIS_URL: ${REDIS_URL:?set it}
+YAML;
+        $files = [['dir' => '', 'yaml' => $yaml]];
+
+        $missing = ComposeRequiredEnv::missing($files, [], self::SEED, static fn (): string => 'https://egma.example.test');
+
+        $this->assertSame(['EGMA_BASE_URL' => 'https://egma.example.test'], $missing);
+        $this->assertSame([], ComposeRequiredEnv::missing($files, ['EGMA_BASE_URL' => 'https://mine.test'], self::SEED, 'https://egma.example.test'));
+        $this->assertSame([], ComposeRequiredEnv::missing($files, [], self::SEED));
     }
 
     public function test_a_value_already_set_is_left_alone(): void
@@ -128,6 +184,43 @@ YAML;
         $this->assertSame([], ComposeRequiredEnv::missing([['dir' => '', 'yaml' => $yaml('${DB_PASS:-secret}')]], [], self::SEED));
         $this->assertSame([], ComposeRequiredEnv::missing([['dir' => '', 'yaml' => $yaml('${DB_PASS}')]], ['DB_PASS' => 'x'], self::SEED));
         $this->assertSame([], ComposeRequiredEnv::missing([['dir' => '', 'yaml' => $yaml('literal')]], [], self::SEED));
+    }
+
+    /**
+     * Shynet: the database's user, password and name are bare variables the
+     * app reads from the same `.env`. Left empty, postgres fell back to its
+     * own defaults and the app connected as nobody (502 behind a success).
+     */
+    public function test_a_databases_user_and_name_variables_get_the_engines_defaults(): void
+    {
+        $yaml = <<<'YAML'
+services:
+  shynet:
+    image: milesmcc/shynet:latest
+    env_file:
+      - .env
+  db:
+    image: postgres
+    environment:
+      - "POSTGRES_USER=${DB_USER}"
+      - "POSTGRES_PASSWORD=${DB_PASSWORD}"
+      - "POSTGRES_DB=${DB_NAME}"
+YAML;
+
+        $missing = ComposeRequiredEnv::missing([['dir' => '', 'yaml' => $yaml]], [], self::SEED);
+
+        $this->assertSame('app', $missing['DB_USER']);
+        $this->assertSame('app', $missing['DB_NAME']);
+        $this->assertSame(ComposePlaceholders::generatedSecret('DB_PASSWORD', self::SEED), $missing['DB_PASSWORD']);
+        $this->assertSame(['DB_PASSWORD'], array_keys(
+            ComposeRequiredEnv::missing([['dir' => '', 'yaml' => $yaml]], ['DB_USER' => 'shynet', 'DB_NAME' => 'shynet'], self::SEED)
+        ));
+        // A default the author wrote is theirs.
+        $this->assertArrayNotHasKey('DB_USER', ComposeRequiredEnv::missing(
+            [['dir' => '', 'yaml' => str_replace('${DB_USER}', '${DB_USER:-shynet}', $yaml)]],
+            [],
+            self::SEED
+        ));
     }
 
     public function test_another_way_in_the_author_chose_is_kept(): void

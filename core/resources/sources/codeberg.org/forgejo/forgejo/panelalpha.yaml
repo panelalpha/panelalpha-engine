@@ -29,7 +29,7 @@ description: >-
 
   Behind the engine every request arrives from the proxy address; Forgejo
   trusts X-Forwarded-For only from loopback (REVERSE_PROXY_TRUSTED_PROXIES
-  default), which is left as is (engine#319), and reverse-proxy header login
+  default), which is left as is, and reverse-proxy header login
   stays disabled.
 credentials:
   login_path: /user/login

@@ -8,7 +8,7 @@ description: >-
   `network_mode: host` with no published port and bind-mounts
   /opt/docker/webthings-gateway for its data. The engine strips host
   networking and then publishes nothing, so a plain deploy is green but the
-  site answers 502 (engine#357). This recipe runs upstream's image of the
+  site answers 502. This recipe runs upstream's image of the
   current release, webthingsio/gateway:2.0.0, with port 8080 published and
   /home/node/.webthings (config, SQLite database, add-ons, logs) on a named
   volume.

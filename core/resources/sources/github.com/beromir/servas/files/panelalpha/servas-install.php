@@ -12,7 +12,7 @@
  *  1. The application key. hooks/prepare.sh keeps one per installation in
  *     ~/.panelalpha/servas/app.key -- outside ~/project, which a redeploy
  *     re-clones, and outside .env, which the engine copies to a
- *     world-readable .env.default (engine#173). It is written here because
+ *     world-readable .env.default. It is written here because
  *     this is the first moment after both of those: after that copy, and
  *     after `key:generate`, which is an install-stage command and would
  *     otherwise leave the first deploy running on a key the second deploy

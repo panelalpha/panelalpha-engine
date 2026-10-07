@@ -229,7 +229,7 @@ class RecipeDateBumpTest extends TestCase
         );
     }
 
-    /** The extensions two applications in the supported-apps series died for. */
+    /** Extensions real applications fail to install without. */
     public function test_the_extensions_real_applications_required_are_baked(): void
     {
         // ownCloud: "Root composer.json requires PHP extension ext-memcached".

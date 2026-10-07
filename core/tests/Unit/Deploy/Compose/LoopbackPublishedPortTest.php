@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Deploy\Compose;
 
+use App\Lib\Deploy\Compose\ComposeHarden;
 use App\Lib\Deploy\Compose\ServiceHardener;
 use App\Lib\Deploy\Port\ComposePortScan;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -160,5 +161,39 @@ final class LoopbackPublishedPortTest extends TestCase
             'empty default' => ['${HTTPS_BIND:-}:${HTTPS_PORT:-443}:443'],
             'templated ports only' => ['${PORT:-3000}:3000'],
         ];
+    }
+
+    /**
+     * Poznote's MCP sidecar is loopback on purpose next to the web
+     * server, whose `${HTTP_WEB_PORT}:80` has no default. The sidecar became the site.
+     */
+    public function testALoopbackSidecarBesideAWebServiceStaysLoopback(): void
+    {
+        $hardened = ComposeHarden::apply(['services' => [
+            'webserver' => ['image' => 'ghcr.io/timothepoznanski/poznote', 'ports' => ['${HTTP_WEB_PORT}:80']],
+            'mcp-server' => ['image' => 'ghcr.io/timothepoznanski/poznote-mcp', 'ports' => ['127.0.0.1:${POZNOTE_MCP_PORT:-8045}:8045']],
+        ]]);
+
+        $this->assertSame(['${HTTP_WEB_PORT:-80}:80'], $hardened['services']['webserver']['ports']);
+        $this->assertSame(['127.0.0.1:${POZNOTE_MCP_PORT:-8045}:8045'], $hardened['services']['mcp-server']['ports']);
+        $this->assertSame(['all' => [80], 'primary' => 80, 'refused' => []], ComposePortScan::ofParsed($hardened));
+    }
+
+    /** A datastore publishing its port is no front door: the app's loopback binding still opens. */
+    public function testALoopbackAppBesideAPublishedDatabaseIsStillOpened(): void
+    {
+        $hardened = ComposeHarden::apply(['services' => [
+            'app' => ['image' => 'acme/app', 'ports' => ['127.0.0.1:3000:3000']],
+            'db' => ['image' => 'postgres:16', 'ports' => ['5432:5432']],
+        ]]);
+
+        $this->assertSame(['3000:3000'], $hardened['services']['app']['ports']);
+    }
+
+    public function testAnUnsetHostPortVariableDefaultsToTheContainerPort(): void
+    {
+        $hardened = ServiceHardener::harden('app', ['image' => 'app', 'ports' => ['${PORT:-8080}:80', '$WEB:3000/tcp']]);
+
+        $this->assertSame(['${PORT:-8080}:80', '${WEB:-3000}:3000/tcp'], $hardened['ports']);
     }
 }

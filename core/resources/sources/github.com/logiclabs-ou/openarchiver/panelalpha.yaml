@@ -16,10 +16,11 @@ description: >-
   Valkey data are on named volumes. APP_URL/ORIGIN are the site's address.
   First run is upstream's: the setup page creates the first admin.
 
-  NGINX FRONT (engine#323). The engine's account vhost sends `Connection:
+  NGINX FRONT. The engine's account vhost sends `Connection:
   upgrade` on every request; the app's SvelteKit /api proxy forwards that
   header to Node's fetch(), which rejects it ("invalid connection header"),
   so every API call, setup and login included, answers 500. A small
   nginx:1-alpine `web` service (files/panelalpha/front.conf) sends `upgrade`
   only when the client sent an Upgrade header and is the only service
-  publishing a port (3000). It can be dropped once engine#323 is fixed.
+  publishing a port (3000). It can be dropped once the engine's vhost stops
+  sending `Connection: upgrade` on every request.

@@ -2,6 +2,9 @@
 
 namespace App\Console\Commands\Git;
 
+use App\Http\Requests\Git\GitConnectRequest;
+use App\Lib\Git\GitActions;
+use App\Models\User;
 use Illuminate\Console\Command;
 
 class GitConnectCommand extends Command
@@ -10,7 +13,7 @@ class GitConnectCommand extends Command
 
     protected $signature = 'git:connect
                             {username : Project username}
-                            {--path= : Directory path inside the project (defaults to project (DinD) or public_html (FPM/LiteSpeed))}
+                            {--path= : Directory path inside the project (defaults to project (DinD) or the document root of the main domain (FPM/LiteSpeed))}
                             {--repo-url= : Remote repository URL}
                             {--branch= : Branch to track}
                             {--token= : Personal access token}
@@ -54,6 +57,7 @@ class GitConnectCommand extends Command
             $params['token'] = (string) $token;
         }
 
-        return $this->dispatchGit('POST', '/git/connect', $params);
+        return $this->runGit(GitConnectRequest::class, $params,
+            fn (User $user, array $valid) => app(GitActions::class)->connectRemote($user, $valid));
     }
 }

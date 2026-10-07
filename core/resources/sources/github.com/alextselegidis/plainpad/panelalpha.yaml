@@ -88,9 +88,9 @@ description: >-
   first deploy and only then -- deliberately, since rotating the key later
   would throw away every encrypted value -- but every deploy re-clones
   ~/project, so the *second* deploy gets `{KEY}` again with nothing left to
-  replace it. Measured on a redeploy of this recipe: the application went on
-  serving, because Plainpad's API routes never resolve the encrypter, but it
-  was running on a string that is not a key. So hooks/prepare.sh generates one
+  replace it. The application goes on serving, because Plainpad's API routes
+  never resolve the encrypter, but it runs on a string that is not a key. So
+  hooks/prepare.sh generates one
   into ~/.panelalpha/plainpad-app-key (0600) and `panelalpha/install.php`
   writes it into `.env` in the install *and* upgrade stages, before `optimize`
   compiles the config cache. One key, from the first boot onwards. Teaching

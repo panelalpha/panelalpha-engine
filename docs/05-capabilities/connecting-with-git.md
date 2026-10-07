@@ -52,6 +52,18 @@ The assistant passes the token's reference, such as `vault:7`, in place of the t
 
 A project stores the token it was given. Deleting a vault entry does not take it away from projects that already used it; to change a project's token, give it the new one. Pasting again on the old link does not change a stored secret.
 
+## A deploy key instead of a token
+
+A deploy key gives the engine read access to one repository and nothing else. Ask for one:
+
+```text
+Create a deploy key for the project shop and connect git@github.com:acme/shop.git, branch main.
+```
+
+The assistant creates the project's key and shows you its public half, a line that starts with `ssh-ed25519`. Add that line to the repository as a read-only deploy key (on GitHub: **Settings > Deploy keys**), then tell the assistant you are done. The engine connects the repository over SSH and deploys it. Later pulls and rebuilds use the same key. The private half is stored encrypted and never leaves the engine.
+
+The engine checks the server's identity on every connection. It knows github.com, gitlab.com and bitbucket.org already. For your own git server, name it when the key is created, for example `git.example.com` or `git.example.com:2222`. The engine reads that server's keys once and trusts only those afterwards. If the server's key changes later, the connection is refused; delete the deploy key and create it again to trust the new one.
+
 ## A zip of files, not a repository
 
 ```text
@@ -63,6 +75,8 @@ Use this when the code is not in git. After the first deploy, updating that proj
 ## After the project is connected
 
 The engine keeps a copy of the repository. Ask the assistant to pull, switch branch, or go back to the last deployed commit. A successful pull rebuilds the site. You do not ask for the rebuild as well. Switching branch, or going back to an earlier commit, rebuilds the same way.
+
+The engine checks the request at once: the repository answers, and the branch or commit exists. The pull or switch and the rebuild then run in the background, like any rebuild, and the assistant follows them until they end. Asking again while one is still running is refused and points at the one under way. If the new version fails, or the change is cancelled, while the previous one is still running, the site keeps serving the previous one, and the project stays on the branch and commit it was on.
 
 ```text
 Pull the latest commit on this project.

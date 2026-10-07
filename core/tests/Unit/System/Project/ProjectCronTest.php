@@ -77,11 +77,15 @@ class ProjectCronTest extends TestCase
 
         $this->assertSame('/usr/bin/false', $updated['command']);
         $this->assertSame('10', $updated['minute']);
-
-        $deleted = $cron->delete($created['hash']);
-        $this->assertSame($created['hash'], $deleted['hash']);
-        $this->assertSame([], $cron->list());
+        // The hash is derived from the job's fields, so an update hands back a new one.
+        $this->assertNotSame($created['hash'], $updated['hash']);
         $this->assertFalse($cron->exists($created['hash']));
+        $this->assertTrue($cron->exists($updated['hash']));
+
+        $deleted = $cron->delete($updated['hash']);
+        $this->assertSame($updated['hash'], $deleted['hash']);
+        $this->assertSame([], $cron->list());
+        $this->assertFalse($cron->exists($updated['hash']));
     }
 
     private function userModel(string $username): ModelsUser

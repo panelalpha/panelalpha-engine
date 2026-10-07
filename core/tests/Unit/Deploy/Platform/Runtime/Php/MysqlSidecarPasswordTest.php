@@ -7,7 +7,7 @@ use App\Lib\Deploy\Sidecar\SidecarPasswords;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
-/** engine#189: the Laravel sidecar's user and root shared `app`, or root had none. */
+/** The Laravel sidecar's user and root shared `app`, or root had none. */
 class MysqlSidecarPasswordTest extends TestCase
 {
     /** @return array<string, string> */
@@ -72,7 +72,7 @@ class MysqlSidecarPasswordTest extends TestCase
     }
 
     /**
-     * withSidecar() restates DB_PASSWORD over the `.env.example` (engine#288):
+     * withSidecar() restates DB_PASSWORD over the `.env.example`:
      * it has to be the password the sidecar was started with, in both modes.
      */
     #[DataProvider('modes')]

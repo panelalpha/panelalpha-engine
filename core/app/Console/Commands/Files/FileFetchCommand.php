@@ -2,20 +2,21 @@
 
 namespace App\Console\Commands\Files;
 
-use App\Console\Commands\Concerns\DispatchesApiRoute;
+use App\Http\Requests\Files\FetchRequest;
+use App\Models\User;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
 
 class FileFetchCommand extends Command
 {
-    use DispatchesApiRoute;
-
     protected $signature = 'project:file:fetch
                             {project : Project username}
                             {--url= : http or https URL}
                             {--path= : Destination directory inside the project}
                             {--filename= : Name to store, when the URL has none}';
 
-    protected $description = 'Fetch an http or https URL into a project (POST /projects/{username}/files/fetch)';
+    protected $description = 'Fetch an http or https URL into a project';
 
     public function handle(): int
     {
@@ -37,16 +38,15 @@ class FileFetchCommand extends Command
             $params['filename'] = $filename;
         }
 
-        $response = $this->dispatchApiRoute(
-            'POST',
-            '/projects/' . rawurlencode($project) . '/files/fetch',
-            $params
-        );
+        Validator::make($params, (new FetchRequest())->rules())->validate();
+        $user = User::findByUsernameOrFail($project);
+        $dir = $user->project()->resolvePath($path);
 
-        if ($response->getStatusCode() >= 400) {
-            $this->error($this->errorMessage($response));
-
-            return 1;
+        try {
+            $user->project()->fileManager()->fetch($url, $dir, $params['filename'] ?? null);
+        } catch (\Exception $e) {
+            // The file operation's own message says what to fix.
+            throw ValidationException::withMessages(['url' => $e->getMessage()]);
         }
 
         $this->info('Fetched ' . $url . ' into ' . $path);

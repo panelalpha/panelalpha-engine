@@ -7,8 +7,14 @@ description: >-
   rewrite rules the checkout does not ship. This recipe runs the official
   yourls image of the current release (1.10.6, Apache on 8080) against
   MariaDB 11.8, configured entirely through the image's environment variables.
-  YOURLS has no user table: the admin login is YOURLS_USER / YOURLS_PASS from
-  the project env vars, and a one-shot check fails the deploy naming whichever
-  is missing. The database password and the cookie key are generated once into
+  YOURLS has no user table: the admin login is YOURLS_USER / YOURLS_PASS,
+  which the engine generates (`credentials:`, returned by
+  `GET /projects/{name}/app-credentials`; project env vars with those names
+  set before the first deploy are kept instead). The database password and the cookie key are generated once into
   ~/.panelalpha/yourls. The first visit to /admin/ offers YOURLS' own
   "Install YOURLS" button, which creates the tables.
+credentials:
+  login_path: /admin/
+  fields:
+    YOURLS_USER: {kind: username}
+    YOURLS_PASS: {kind: password}

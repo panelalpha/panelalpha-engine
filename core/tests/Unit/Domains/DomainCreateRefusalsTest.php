@@ -101,6 +101,8 @@ class DomainCreateRefusalsTest extends TestCase
             ['one.test --project=alice --type=main', "--type must be 'addon' or 'sub'."],
             ['one.test --project=nobody', "Project 'nobody' not found."],
             ['one.test --project=alice --proxy-to=nope:x', "Invalid --proxy-to 'nope:x'. Expected port (e.g. 8080) or host:port (e.g. myproject:8080)."],
+            ['one.test --project=alice --proxy-to=bob:80', "The upstream must be the project's own app, 'alice'"],
+            ['one.test --project=alice --proxy-to=172.25.0.2:3306', "The upstream must be the project's own app, 'alice'"],
             ['one.test --project=alice', 'Addon domains limit of 1 reached.'],
             ['a.alice.example.test --project=alice --type=sub', '--parent-domain is required when --type=sub.'],
             ['a.x.test --project=alice --type=sub --parent-domain=x.test', "Parent domain 'x.test' not found for project 'alice'."],

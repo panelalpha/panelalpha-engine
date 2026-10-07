@@ -2,7 +2,7 @@
 # sidecars. Secrets are interpolated from ~/project/.env, written by the prepare
 # hook from the values persisted under ~/.panelalpha/meetable/. APP_URL is left
 # local on purpose — the platform rewrites it to the public https URL before
-# start (engine#221 avoided).
+# start.
 x-app-env: &app-env
   APP_NAME: Meetable
   APP_ENV: production

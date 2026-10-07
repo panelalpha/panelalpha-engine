@@ -100,7 +100,7 @@ class AppCredentialDeliveryTest extends TestCase
         $this->assertSame($firstFile, file_get_contents($this->home . '/' . AppCredentials::ENV_FILE));
     }
 
-    public function test_an_existing_panelalpha_directory_keeps_its_mode(): void
+    public function test_an_existing_panelalpha_directory_is_made_private(): void
     {
         mkdir($this->home . '/.panelalpha', 0755);
         chmod($this->home . '/.panelalpha', 0755);
@@ -108,8 +108,26 @@ class AppCredentialDeliveryTest extends TestCase
 
         $this->dind($this->model())->prepareFromSources();
 
-        $this->assertSame(0755, fileperms($this->home . '/.panelalpha') & 0777);
+        $this->assertSame(0700, fileperms($this->home . '/.panelalpha') & 0777);
         $this->assertSame(0600, fileperms($this->home . '/' . AppCredentials::ENV_FILE) & 0777);
+    }
+
+    public function test_a_deploy_without_credentials_still_makes_it_private(): void
+    {
+        mkdir($this->home . '/.panelalpha', 0755);
+        chmod($this->home . '/.panelalpha', 0755);
+        file_put_contents($this->projectDir . '/index.html', '<!DOCTYPE html><title>x</title>');
+
+        $this->dind($this->model())->prepareFromSources();
+
+        $this->assertSame(0700, fileperms($this->home . '/.panelalpha') & 0777);
+    }
+
+    public function test_a_new_account_home_gets_a_private_panelalpha_directory(): void
+    {
+        (new ProjectAggregate($this->system, $this->model()))->createHomeDir();
+
+        $this->assertSame(0700, fileperms($this->home . '/.panelalpha') & 0777);
     }
 
     public function test_an_account_deployed_before_keeps_the_password_the_recipe_generated(): void

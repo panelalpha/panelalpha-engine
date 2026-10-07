@@ -17,7 +17,7 @@ use PHPUnit\Framework\TestCase;
  * infrastructure: nothing publishes them, they cost 30–150s to rebuild, and
  * `system:image:prewarm` exists to have them sitting there before anyone asks.
  *
- * Measured on 10.10.10.25: deleting the last Ruby account removed
+ * Deleting the last Ruby account used to remove
  * `panelalpha/ruby:3.3-slim-bookworm-pa0c53db49`, which the next Ruby deploy
  * then had to rebuild.
  */

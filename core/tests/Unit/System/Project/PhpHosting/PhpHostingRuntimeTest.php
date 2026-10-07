@@ -2,16 +2,22 @@
 
 namespace Tests\Unit\System\Project\PhpHosting;
 
+use App\Lib\Deploy\Dind\TenantNetwork;
 use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\PhpHosting;
 use App\System\Services\Webserver;
+use Illuminate\Container\Container;
+use Illuminate\Filesystem\Filesystem;
+use Illuminate\Support\Facades\Facade;
 use PHPUnit\Framework\TestCase;
 
 class PhpHostingRuntimeTest extends TestCase
 {
     private string $tmpRoot;
+
+    private mixed $previousFacadeApp = null;
 
     protected function setUp(): void
     {
@@ -19,11 +25,19 @@ class PhpHostingRuntimeTest extends TestCase
         $this->tmpRoot = sys_get_temp_dir() . '/pa-php-hosting-rt-' . bin2hex(random_bytes(4));
         $this->seedMinimalTemplate($this->tmpRoot);
         $this->setCurrentWebserver('nginx');
+        // The template copy lists files through the File facade; nothing else is booted.
+        $this->previousFacadeApp = Facade::getFacadeApplication();
+        $app = new Container();
+        $app->instance('files', new Filesystem());
+        Facade::clearResolvedInstances();
+        Facade::setFacadeApplication($app);
     }
 
     protected function tearDown(): void
     {
         $this->setCurrentWebserver(null);
+        Facade::clearResolvedInstances();
+        Facade::setFacadeApplication($this->previousFacadeApp);
         $this->removeTree($this->tmpRoot);
         parent::tearDown();
     }
@@ -97,6 +111,20 @@ class PhpHostingRuntimeTest extends TestCase
         $this->assertContains('compose-down', $system->journal);
     }
 
+    /** The account joins pash-tenants, and its port is bound once it exists. */
+    public function test_start_applies_the_tenant_network_firewall_around_compose_up(): void
+    {
+        $model = $this->userModel('erin');
+        $system = $this->recordingSystem($this->tmpRoot);
+        $project = $this->phpHosting($system, $model);
+        mkdir($system->projectDirPath('erin'), 0777, true);
+        file_put_contents($project->composeFilePath(), "services:\n  php:\n    image: test\n");
+
+        $project->start();
+
+        $this->assertSame(['tenant-firewall', 'compose-up', 'tenant-firewall'], $system->journal);
+    }
+
     private function phpHosting(System $system, ModelsUser $model): PhpHosting
     {
         $runtime = (new ProjectAggregate($system, $model))->runtime();
@@ -116,6 +144,8 @@ class PhpHostingRuntimeTest extends TestCase
             'cpu_limit' => 1.0,
             'memory_limit' => 512,
         ]);
+        // No domains yet, without asking a database that is not there.
+        $model->setRelation('domains', new \Illuminate\Database\Eloquent\Collection());
 
         return $model;
     }
@@ -145,6 +175,9 @@ class PhpHostingRuntimeTest extends TestCase
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
+                if ($cmd === TenantNetwork::firewallArgv()) {
+                    $this->journal[] = 'tenant-firewall';
+                }
                 if (str_contains($line, 'docker compose') && str_contains($line, ' up ')) {
                     $this->journal[] = 'compose-up';
                     if ($this->failOnComposeUp) {
@@ -221,8 +254,8 @@ class PhpHostingRuntimeTest extends TestCase
         mkdir($projectTemplate . '/entrypoint-init.d', 0777, true);
         mkdir($projectTemplate . '/crontabs', 0777, true);
         touch($projectTemplate . '/crontabs/www-data');
-        file_put_contents($projectTemplate . '/php/versions-available', "8.3\n");
         mkdir($projectTemplate . '/php/8.3/fpm/pool.d', 0777, true);
+        file_put_contents($projectTemplate . '/php/versions-available', "8.3\n");
         file_put_contents($projectTemplate . '/php/8.3/fpm/pool.d/www.conf', "; pool\n");
         file_put_contents($projectTemplate . '/Dockerfile-fpm', 'FROM scratch');
         file_put_contents($projectTemplate . '/docker-compose.yml-fpm', "services:\n  php:\n    image: test\n");
@@ -231,7 +264,6 @@ class PhpHostingRuntimeTest extends TestCase
     private function setCurrentWebserver(?string $webserver): void
     {
         $property = (new \ReflectionClass(Webserver::class))->getProperty('currentWebserver');
-        $property->setAccessible(true);
         $property->setValue(null, $webserver);
     }
 

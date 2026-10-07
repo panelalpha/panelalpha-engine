@@ -16,11 +16,11 @@ use Tests\TestCase;
 
 /**
  * How much memory a project may have: the host's RAM less what is kept for
- * the engine. mariusz2's MemTotal is 3809 MB.
+ * the engine. A small host's MemTotal is 3809 MB.
  */
 class HostMemoryTest extends TestCase
 {
-    private function mariusz2(): HostMemory
+    private function smallHost(): HostMemory
     {
         return new HostMemory(3809);
     }
@@ -33,7 +33,7 @@ class HostMemoryTest extends TestCase
 
     public function test_a_project_may_have_the_host_less_the_engine(): void
     {
-        $memory = $this->mariusz2();
+        $memory = $this->smallHost();
 
         $this->assertSame(512, $memory->engineMb);
         $this->assertSame(3297, $memory->maxProjectMb(), '3809 - 512');
@@ -57,7 +57,7 @@ class HostMemoryTest extends TestCase
 
     public function test_a_project_without_a_limit_gets_the_maximum(): void
     {
-        HostMemoryProbe::fake($this->mariusz2());
+        HostMemoryProbe::fake($this->smallHost());
 
         $this->assertSame(3297, ProjectMemory::defaultMb());
         $this->assertSame(3297, ProjectMemory::resolve(null));
@@ -68,10 +68,10 @@ class HostMemoryTest extends TestCase
     public function test_a_configured_default_is_kept_but_never_above_the_maximum(): void
     {
         config(['deploy.project_memory_default' => 2048]);
-        $this->assertSame(2048, ProjectMemory::defaultMb($this->mariusz2()));
+        $this->assertSame(2048, ProjectMemory::defaultMb($this->smallHost()));
 
         config(['deploy.project_memory_default' => 8192]);
-        $this->assertSame(3297, ProjectMemory::defaultMb($this->mariusz2()));
+        $this->assertSame(3297, ProjectMemory::defaultMb($this->smallHost()));
     }
 
     /** A project from before limits were required is sized like one created with the default. */
@@ -88,7 +88,7 @@ class HostMemoryTest extends TestCase
 
     public function test_no_project_may_exceed_the_maximum(): void
     {
-        $memory = $this->mariusz2();
+        $memory = $this->smallHost();
 
         $this->assertNull(ProjectMemory::problem(3297, $memory));
         $problem = ProjectMemory::problem(3298, $memory);
@@ -97,15 +97,15 @@ class HostMemoryTest extends TestCase
         $this->assertStringContainsString('greater than 3297 MB', $problem['message'] ?? '');
     }
 
-    /** No floor of ours: a tiny static site may run on very little (#296 is why it cannot go lower). */
+    /** No floor of ours: a tiny static site may run on very little. */
     public function test_any_positive_limit_that_fits_is_accepted(): void
     {
-        $this->assertNull(ProjectMemory::problem(32, $this->mariusz2()));
+        $this->assertNull(ProjectMemory::problem(32, $this->smallHost()));
     }
 
     public function test_the_rule_reports_the_problem_with_its_code(): void
     {
-        $rule = new AccountMemoryLimit($this->mariusz2());
+        $rule = new AccountMemoryLimit($this->smallHost());
         $failed = null;
         $rule->validate('memory_limit', 4096, function (string $m) use (&$failed) {
             $failed = $m;
@@ -119,7 +119,7 @@ class HostMemoryTest extends TestCase
     /** Through the create request: an omitted limit becomes the maximum, and passes. */
     public function test_a_created_project_without_a_limit_gets_the_maximum(): void
     {
-        HostMemoryProbe::fake($this->mariusz2());
+        HostMemoryProbe::fake($this->smallHost());
         $request = UserStoreRequest::create('/api/users', 'POST', ['username' => 'shop4a2f', 'email' => 'ops@example.com']);
         $request->setContainer($this->app);
         $request->validateResolved();
@@ -130,7 +130,7 @@ class HostMemoryTest extends TestCase
     /** Through the create request: the maximum passes, one MB more does not. */
     public function test_the_create_request_refuses_only_above_the_maximum(): void
     {
-        HostMemoryProbe::fake($this->mariusz2());
+        HostMemoryProbe::fake($this->smallHost());
         $validator = function (int $mb) {
             $request = UserStoreRequest::create('/api/users', 'POST', ['username' => 'shop4a2f', 'memory_limit' => $mb]);
             $request->setContainer($this->app);
@@ -146,7 +146,7 @@ class HostMemoryTest extends TestCase
     /** A clone or staging copy keeps its source's limit; it is refused only when that no longer fits. */
     public function test_a_copy_is_refused_only_above_the_maximum(): void
     {
-        HostMemoryProbe::fake($this->mariusz2());
+        HostMemoryProbe::fake($this->smallHost());
         ProjectMemory::assertFits(3297);
 
         try {
@@ -159,7 +159,7 @@ class HostMemoryTest extends TestCase
 
     public function test_the_metrics_report_the_ceiling_and_the_default(): void
     {
-        HostMemoryProbe::fake($this->mariusz2());
+        HostMemoryProbe::fake($this->smallHost());
         $data = (new ServerMetricsController())->current()->getData(true)['data'];
 
         $this->assertSame([

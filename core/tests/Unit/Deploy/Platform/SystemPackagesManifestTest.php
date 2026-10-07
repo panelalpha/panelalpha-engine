@@ -11,7 +11,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * `system_packages:` — the one way a recipe adds a binary such as ffmpeg to
- * its PHP image (engine#193). Allowlisted and PHP-only, refused at load
+ * its PHP image. Allowlisted and PHP-only, refused at load
  * rather than ignored: a video site deployed without ffmpeg looks healthy.
  */
 class SystemPackagesManifestTest extends TestCase

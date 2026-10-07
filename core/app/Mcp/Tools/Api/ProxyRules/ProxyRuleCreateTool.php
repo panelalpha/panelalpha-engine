@@ -67,13 +67,13 @@ class ProxyRuleCreateTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'owner_scope' => $schema->string()->description('Who owns the rule. Defaults to user. One of: system, user.'),
+            'owner_scope' => $schema->string()->description('Who owns the rule. Defaults to user. A user rule reaches its own project\'s app only; a system rule is the operator\'s and may point anywhere the host reaches. One of: system, user.'),
             'name' => $schema->string()->description('Project the rule belongs to. Required when owner_scope is user.'),
             'transport' => $schema->string()->description('One of: http, tcp, udp.')->required(),
             'listen_ip' => $schema->string(),
             'listen_port' => $schema->integer()->required(),
-            'server_name' => $schema->string(),
-            'upstream_host' => $schema->string()->description('Example: 127.0.0.1.')->required(),
+            'server_name' => $schema->string()->description('For a user rule, empty or one of the project\'s own domains or aliases. A system rule may name any host.'),
+            'upstream_host' => $schema->string()->description('For a user rule, the project\'s own name. A system rule may name any host or address. Example: shop.')->required(),
             'upstream_port' => $schema->integer()->required(),
             'upstream_protocol' => $schema->string(),
             'enabled' => $schema->boolean(),

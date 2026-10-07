@@ -19,7 +19,7 @@ use App\Lib\Deploy\Sidecar\SidecarDialects;
 final class ComposeRequiredEnv
 {
     /** `${NAME:?msg}` / `${NAME?msg}`; `$${...}` is compose's escape, not a reference. */
-    private const REQUIRED_REFERENCE = '/(?<!\$)\$\{([A-Za-z_][A-Za-z0-9_]*):?\?/';
+    private const REQUIRED_REFERENCE = '/(?<!\$)\$\{([A-Za-z_][A-Za-z0-9_]*):?\?([^}$]*)(\})?/';
 
     /** A whole value that is one reference: `${NAME}`, `${NAME:-default}`, `${NAME:?msg}`. */
     private const WHOLE_REFERENCE = '/^\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:?[-?])([^}]*))?\}$/';
@@ -30,25 +30,49 @@ final class ComposeRequiredEnv
      * @param list<array{dir: string, yaml: string}> $files the compose file and
      *        everything it includes, each with its directory relative to the project
      * @param array<string, string> $env what `.env` (and the account) already set
+     * @param string|(\Closure(): ?string)|null $publicUrl the account's address, for a
+     *        required variable naming the app's own URL; a closure is asked only when one does
      * @return array<string, string> NAME => value, for the keys `.env` must gain
      */
-    public static function missing(array $files, array $env, string $seed): array
+    public static function missing(array $files, array $env, string $seed, string|\Closure|null $publicUrl = null): array
     {
         $needed = [];
+        $base64 = [];
+        $urls = [];
         foreach ($files as $file) {
-            foreach (self::requiredSecretNames($file['yaml']) as $name) {
-                $needed[$name] = true;
+            foreach (self::requiredOwnUrlNames($file['yaml']) as $name => $_) {
+                if (trim((string) ($env[$name] ?? '')) === '') {
+                    $urls[$name] = true;
+                }
+            }
+            foreach (self::requiredSecretNames($file['yaml']) as $name => [$length, $bytes]) {
+                $needed[$name] = max((int) ($needed[$name] ?? 0), $length);
+                $base64[$name] = max($base64[$name] ?? 0, $bytes);
             }
             foreach (self::datastorePasswordNames($file['yaml'], $file['dir'], $env) as $name) {
-                $needed[$name] = true;
+                $needed[$name] ??= 0;
+            }
+            foreach (self::datastoreInitNames($file['yaml']) as $name) {
+                $needed[$name] ??= false;
             }
         }
 
         $out = [];
-        foreach (array_keys($needed) as $name) {
-            if (trim((string) ($env[$name] ?? '')) === '') {
-                $out[(string) $name] = ComposePlaceholders::generatedSecret((string) $name, $seed);
+        $publicUrl = $urls !== [] && $publicUrl instanceof \Closure ? $publicUrl() : $publicUrl;
+        if (is_string($publicUrl) && $publicUrl !== '') {
+            foreach (array_keys($urls) as $name) {
+                $out[(string) $name] = $publicUrl;
             }
+        }
+        foreach ($needed as $name => $length) {
+            if (trim((string) ($env[$name] ?? '')) !== '') {
+                continue;
+            }
+            // A user or database name gets the engine's usual `app`, as a kept
+            // sidecar does ({@see SidecarCredentials::pinSidecarCredentials()}).
+            $out[(string) $name] = $length !== false || ComposePlaceholders::isSecretKey((string) $name)
+                ? ComposePlaceholders::requiredSecretValue((string) $name, $seed, (int) $length, $base64[$name] ?? 0)
+                : 'app';
         }
 
         return $out;
@@ -121,15 +145,38 @@ final class ComposeRequiredEnv
      * Required variables anywhere in the file that name a credential. A
      * required hostname or port is not something to invent.
      *
-     * @return list<string>
+     * @return array<string, array{0: int, 1: int}> name => the hex length and base64 bytes its message asks for, or 0
      */
     private static function requiredSecretNames(string $yaml): array
     {
-        preg_match_all(self::REQUIRED_REFERENCE, $yaml, $m);
+        preg_match_all(self::REQUIRED_REFERENCE, $yaml, $m, PREG_SET_ORDER);
         $names = [];
-        foreach (array_unique($m[1] ?? []) as $name) {
-            if (ComposePlaceholders::isSecretKey($name)) {
-                $names[] = $name;
+        foreach ($m as $ref) {
+            if (ComposePlaceholders::isSecretKey($ref[1])) {
+                // A message ComposePlaceholders cannot read whole gives no hint, as there.
+                $message = ($ref[3] ?? '') === '}' ? $ref[2] : '';
+                $names[$ref[1]] = [
+                    max($names[$ref[1]][0] ?? 0, ComposePlaceholders::hintedLength($message)),
+                    max($names[$ref[1]][1] ?? 0, ComposePlaceholders::hintedBase64Bytes($message)),
+                ];
+            }
+        }
+
+        return $names;
+    }
+
+    /**
+     * Required variables naming the app's own address (`${EGMA_BASE_URL:?}`).
+     *
+     * @return array<string, true>
+     */
+    private static function requiredOwnUrlNames(string $yaml): array
+    {
+        preg_match_all(self::REQUIRED_REFERENCE, $yaml, $m, PREG_SET_ORDER);
+        $names = [];
+        foreach ($m as $ref) {
+            if (ComposePlaceholders::isRequiredOwnUrlKey($ref[1])) {
+                $names[$ref[1]] = true;
             }
         }
 
@@ -167,6 +214,47 @@ final class ComposeRequiredEnv
             $name = self::passwordSource($service, $vocabulary, $dir, $env);
             if ($name !== null) {
                 $names[] = $name;
+            }
+        }
+
+        return $names;
+    }
+
+    /**
+     * Variables a datastore's other init settings are written as, bare
+     * (Shynet: `POSTGRES_USER=${DB_USER}`, `POSTGRES_DB=${DB_NAME}`). Nothing
+     * sets them, so compose resolves them to empty strings: the database
+     * falls back to its own default while the app, reading the same names,
+     * connects as nobody.
+     *
+     * @return list<string>
+     */
+    private static function datastoreInitNames(string $yaml): array
+    {
+        $parsed = ComposeYaml::parse($yaml);
+        $services = is_array($parsed) ? ($parsed['services'] ?? null) : null;
+        if (!is_array($services)) {
+            return [];
+        }
+
+        $names = [];
+        foreach ($services as $service) {
+            if (!is_array($service)) {
+                continue;
+            }
+            $engine = SidecarDialects::canonical(ComposeService::familyOf((string) ($service['image'] ?? '')));
+            if ($engine === null) {
+                continue;
+            }
+            $passwords = SidecarDialects::passwordVariablesFor($engine)['passwords'] ?? [];
+            $declared = self::environmentOf($service['environment'] ?? null);
+            foreach (array_diff(SidecarDialects::initVariablesFor($engine), $passwords) as $key) {
+                // Only the bare form: a default or a `:?` is the author's own choice.
+                if (preg_match(self::WHOLE_REFERENCE, trim((string) ($declared[$key] ?? '')), $m) === 1
+                    && ($m[2] ?? '') === ''
+                ) {
+                    $names[] = $m[1];
+                }
             }
         }
 

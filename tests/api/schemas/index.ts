@@ -7,11 +7,6 @@ export {
 export {
   cronJobListSchema,
   cronJobSchema,
-  csfConfigResponseSchema,
-  csfConfigSchema,
-  csfRuleSchema,
-  csfRulesResponseSchema,
-  csfRulesSchema,
   eximConfigResponseSchema,
   eximConfigSchema,
   fileEntrySchema,
@@ -52,6 +47,18 @@ export {
   deployHookShowResponseSchema,
 } from './deploy-hook.schemas';
 export { fileExistsResponseSchema, fileStatSchema } from './files.schemas';
+export {
+  firewallLogEntrySchema,
+  firewallLogsResponseSchema,
+  firewallRuleResponseSchema,
+  firewallRuleSchema,
+  firewallRulesResponseSchema,
+  firewallStatusResponseSchema,
+  firewallStatusSchema,
+  trustedAddressResponseSchema,
+  trustedAddressSchema,
+  trustedAddressesResponseSchema,
+} from './firewall.schemas';
 export {
   bandwidthSeriesSchema,
   visitorBreakdownSchema,

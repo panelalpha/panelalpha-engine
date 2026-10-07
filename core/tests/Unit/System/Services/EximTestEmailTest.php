@@ -103,4 +103,41 @@ class EximTestEmailTest extends TestCase
         $this->assertFalse($result['delivered']);
         $this->assertStringContainsString('Connection refused', $result['stderr']);
     }
+
+    /**
+     * The test used to be sent from wordpress@userdomain.com, a registered
+     * domain nobody here controls, and every failure bounced there.
+     */
+    public function test_the_test_email_names_no_third_party_sender_and_cannot_bounce(): void
+    {
+        $system = new class extends System {
+            /** @var array<int, string> */
+            public array $cmd = [];
+
+            public function __construct()
+            {
+            }
+
+            public function composeFilePath(): string
+            {
+                return '/dev/null';
+            }
+
+            public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                $this->cmd = (array) $cmd;
+                $process = Process::fromShellCommandline('true');
+                $process->run();
+
+                return $process;
+            }
+        };
+
+        (new Exim($system))->sendTestEmail('a@example.org');
+
+        $script = (string) end($system->cmd);
+        $this->assertStringNotContainsString('userdomain.com', $script);
+        $this->assertStringContainsString('From: PanelAlpha Engine <noreply@example.invalid>', $script);
+        $this->assertStringContainsString("exim4 -v -odf -f '<>' 'a@example.org'", $script);
+    }
 }

@@ -19,7 +19,7 @@ description: >-
   assets, and adding an npm build step would be a repair, out of scope. So this
   recipe seeds the project's official Docker Hub image carlnewton/habitat:1.6.0
   (== latest, built prod: APP_ENV=prod baked, assets precompiled). Docker Hub is
-  pulled normally and sidesteps engine#229 (the GHCR image-seeding NotFound).
+  pulled normally and sidesteps the GHCR image-seeding NotFound.
 
   WHY COMPOSE-REPLACE, NOT `dockerfile`. Habitat needs PostgreSQL beside the app
   (Doctrine over pdo_pgsql; there is no MySQL/SQLite production path) and the
@@ -31,7 +31,7 @@ description: >-
   one-shot `init` that migrates to completion before the app is allowed to serve
   (a failed migration fails the deploy instead of publishing a 500 site), the
   app on 8080:80 with Caddy in plain-HTTP mode (SERVER_NAME=:80) because the
-  engine terminates TLS, and a `ready` gate (engine#204) so the deploy turns
+  engine terminates TLS, and a `ready` gate so the deploy turns
   green only once the site actually answers. Mercure and the messenger worker
   are dropped: no application code references Mercure (it is dead template
   scaffolding) and messenger has no async routing (config/packages/messenger.yaml

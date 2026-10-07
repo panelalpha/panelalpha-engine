@@ -8,11 +8,11 @@ Invidious companion, which talks to YouTube for video streams.
 No variables are required. Other options take the upstream top-level
 `INVIDIOUS_<KEY>` env vars (e.g. `INVIDIOUS_REGISTRATION_ENABLED=false`).
 
-Video playback needs YouTube to accept the server's IP. On
-mariusz.panelalpha.tools (a datacenter address) the companion's PO-token
-check got only non-200 answers from YouTube, restarted every minute or so, and
-`/watch` answered 500 "Companion is starting"; home, search and channel pages
-worked. That is YouTube's behaviour towards the host, not the recipe; see
+Video playback needs YouTube to accept the server's IP. From a datacenter
+address the companion's PO-token check can get only non-200 answers from
+YouTube; the companion then keeps restarting and `/watch` answers 500
+"Companion is starting", while home, search and channel pages work. That is
+YouTube's behaviour towards the host, not the recipe; see
 docs.invidious.io/youtube-errors-explained.
 
 ## What the recipe does

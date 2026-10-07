@@ -2,7 +2,7 @@
 # replicas. This runs the same three published images of the current releases
 # behind Caddy doing upstream's path routing on one public port:
 #   /api/draw/ -> draw, /api -> api, everything else -> ui.
-# (Caddy, not Traefik: the engine drops any traefik service, engine#334.)
+# (Caddy, not Traefik: the engine drops any traefik service.)
 services:
   proxy:
     image: docker.io/library/caddy:2.11.4-alpine
@@ -33,7 +33,7 @@ services:
       DATABASE_MODE: sqlite3
       # Rate limits and bans key on the visitor, not the shared proxy address.
       # X-Real-Ip is set by the engine proxy; X-Forwarded-For's first entry is
-      # client-supplied (engine#319).
+      # client-supplied.
       BEHIND_PROXY: "true"
       IP_HEADER: X-Real-Ip
     volumes:

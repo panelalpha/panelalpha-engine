@@ -1,6 +1,8 @@
 # Upstream's docker/docker-compose.yml with its image pins. Credentials come from
 # taskingai.env (hooks/prepare.sh), data from named volumes instead of ./data.
 # Health checks use python: the images ship no curl, so upstream's never pass.
+# The backends wait for inference and plugin to be healthy: the API syncs its
+# model schema from inference at boot and exits if it is not listening yet.
 services:
   frontend:
     image: taskingai/taskingai-console:v0.3.0
@@ -19,6 +21,7 @@ services:
       interval: 15s
       timeout: 10s
       retries: 5
+      start_period: 60s
 
   backend-plugin:
     image: taskingai/taskingai-plugin:v0.2.10
@@ -55,9 +58,9 @@ services:
       cache:
         condition: service_healthy
       backend-inference:
-        condition: service_started
+        condition: service_healthy
       backend-plugin:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/v1/health_check')"]
       interval: 15s
@@ -83,9 +86,9 @@ services:
       cache:
         condition: service_healthy
       backend-inference:
-        condition: service_started
+        condition: service_healthy
       backend-plugin:
-        condition: service_started
+        condition: service_healthy
     # Served under /api/v1; upstream probes /v1 with curl, which the image lacks.
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/api/v1/health_check')"]

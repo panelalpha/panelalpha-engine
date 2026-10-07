@@ -8,7 +8,7 @@ use App\System\Project\Dind\HostDiskGuard;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The pre-deploy host disk check (engine#87): a nearly full host refuses the
+ * The pre-deploy host disk check: a nearly full host refuses the
  * deploy by name instead of failing it later on ENOSPC.
  */
 class HostDiskGuardTest extends TestCase

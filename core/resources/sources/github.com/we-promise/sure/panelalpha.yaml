@@ -15,5 +15,5 @@ description: >-
   on because the engine terminates TLS. Uploads, the database and Redis
   live on named volumes. POSTGRES_USER/POSTGRES_DB sit in that env file,
   not in the compose environment, so the engine does not take web/worker
-  for Postgres servers (engine#419). The first visit shows Sure's own registration
+  for Postgres servers. The first visit shows Sure's own registration
   page; everything else is upstream's default.

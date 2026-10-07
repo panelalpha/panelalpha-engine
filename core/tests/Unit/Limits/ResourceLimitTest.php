@@ -101,7 +101,7 @@ class ResourceLimitTest extends TestCase
 
     /**
      * Every project has a memory limit, so it is the one limit the table
-     * refuses to take a clearing value for (#294).
+     * refuses to take a clearing value for.
      */
     public function test_memory_is_the_only_limit_that_cannot_be_cleared(): void
     {

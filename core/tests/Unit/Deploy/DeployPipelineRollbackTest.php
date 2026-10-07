@@ -91,17 +91,17 @@ class DeployPipelineRollbackTest extends SqliteTaskTestCase
         $this->assertStringStartsWith('Deploy failed: A build step failed', (string) end($seen));
     }
 
-    /** A cancelled template deploy is rolled back without the hook: it never kept that log tail. */
-    public function test_a_cancelled_template_deploy_does_not_run_the_hook(): void
+    /** The rollback deletes the log on a cancel too, so the hook keeps the tail first. */
+    public function test_a_cancelled_template_deploy_keeps_the_log_tail_before_the_rollback(): void
     {
         $logger = DeployLogger::start($this->username);
-        $ran = false;
+        $seen = null;
 
         try {
             $this->failingDeployment(new DeployCancelledException('operator cancelled'))->run(
                 $logger,
-                function () use (&$ran): void {
-                    $ran = true;
+                function (DeployLogger $cancelled) use (&$seen): void {
+                    $seen = array_column($cancelled->tail(150), 'msg');
                 },
             );
             $this->fail('Expected the cancelled deploy to throw');
@@ -109,7 +109,8 @@ class DeployPipelineRollbackTest extends SqliteTaskTestCase
             $this->assertSame('deploy_cancelled', $e->problems[0]['code'] ?? null);
         }
 
-        $this->assertFalse($ran);
+        $this->assertIsArray($seen, 'the hook did not run before the rollback');
+        $this->assertStringContainsString('operator cancelled', implode("\n", $seen));
     }
 
     public function test_failing_hook_does_not_mask_the_deploy_error(): void

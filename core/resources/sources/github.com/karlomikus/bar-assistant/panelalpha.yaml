@@ -13,7 +13,7 @@ description: >-
   salt-rim image bakes the built SPA. Building the server from the clone would
   reinstall composer and re-download the data repo on every deploy, and the
   clone has no Salt Rim source at all (a different repository). Docker Hub is
-  pulled normally, which also sidesteps engine#229 (the GHCR/quay seed stub).
+  pulled normally, which also sidesteps the GHCR/quay image-seed stub.
 
   WHY COMPOSE-REPLACE. Detection reads the repo as `laravel` (composer.json +
   artisan), and the repo's only compose file is a local dev stack (build:
@@ -33,7 +33,7 @@ description: >-
   add a fourth container it IS the gateway: files/.../salt-rim.conf serves the
   SPA at / and proxies /bar/ to the server (:8080) and /search/ to Meilisearch
   (:7700), each with its prefix stripped. Only Salt Rim publishes a port, so
-  the engine's scan takes it as the primary app (engine#231/#234); the server,
+  the engine's scan takes it as the primary app; the server,
   Meilisearch and the seeder declare no ports and no expose.
 
   RUNTIME-DERIVED SUBPATH URLS. The three public URLs (server APP_URL, and Salt
@@ -74,7 +74,7 @@ description: >-
   and session set to file, queue stays sync as upstream's own prod does), so
   there is no unauthenticated datastore in the stack at all. A no-op `ready`
   service gated on Salt Rim healthy AND the owner seeded makes `docker compose
-  up -d` (run without --wait, engine#204) return only once the site answers.
+  up -d` (run without --wait) return only once the site answers.
 credentials:
   adopt_from: .panelalpha/bar-assistant/owner.env
   fields:

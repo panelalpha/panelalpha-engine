@@ -60,7 +60,7 @@ class DomainUpdateRequestTest extends TestCase
         }
     }
 
-    // engine#7: the vhost templates write the root unquoted, so anything that
+    // The vhost templates write the root unquoted, so anything that
     // ends a directive there must never reach them.
     public function test_characters_that_end_a_config_directive_fail(): void
     {

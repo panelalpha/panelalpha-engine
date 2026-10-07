@@ -6,6 +6,7 @@ use App\Models\Domain;
 use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Project\PhpHosting;
+use App\System\Project\PhpHosting\Services\Service;
 use Illuminate\Support\Str;
 
 final class FpmApacheStack implements PhpStack
@@ -36,16 +37,22 @@ final class FpmApacheStack implements PhpStack
 
     public function entrypointInitScripts(PhpHosting $project): array
     {
-        $scripts = [];
-        $scripts['10-remoteip.sh'] = 'a2enmod remoteip 2>/dev/null || true';
-        $scripts['20-apache.sh'] = 'apache2ctl start';
-
-        return $scripts;
+        return ['10-remoteip.sh' => 'a2enmod remoteip 2>/dev/null || true'];
     }
 
-    public function entrypointBackgroundScripts(PhpHosting $project): array
+    public function services(PhpHosting $project): array
     {
-        return (new FpmStack($this->system, $this->model))->entrypointBackgroundScripts($project);
+        $services = (new FpmStack($this->system, $this->model))->services($project);
+        // apache2ctl's own setup, then Apache in the foreground.
+        $services[] = new Service(
+            'apache2',
+            '. /etc/apache2/envvars' . "\n"
+                . 'mkdir -p "$APACHE_RUN_DIR" "$APACHE_LOCK_DIR" "$APACHE_LOG_DIR"' . "\n"
+                . 'exec apache2 -DFOREGROUND',
+            ['20-apache.sh' => 'apache2ctl start'],
+        );
+
+        return $services;
     }
 
     public function waitForAllRunning(PhpHosting $project, int $tries = 12, int $intervalSeconds = 5): void
@@ -106,13 +113,13 @@ final class FpmApacheStack implements PhpStack
 
         $phpVersion = $domain->getPhpVersion();
         if ($phpVersion) {
-            // Through the runner, never `service ... restart`: that starts a
-            // master the runner cannot see, and every later INI change missed it.
+            // Through the account's services, never `service ... restart`: that
+            // starts a master they cannot see, and every later INI change missed it.
             try {
                 $this->restartPhpHandler($project, $phpVersion);
             } catch (PhpHandlerNotRunning) {
-                // A PHP version switch lands here before the runner scripts are
-                // written; the runner's `sync --all` that follows starts it.
+                // A PHP version switch lands here before the services are
+                // written; the sync that follows starts it.
             }
         }
 

@@ -1,7 +1,6 @@
 # Castopod
 
-<https://code.castopod.org/adaures/castopod> — tracker issue
-[#1374](https://git.modulesgarden.tech/panelalpha/playground/supported-apps/-/work_items/1374).
+<https://code.castopod.org/adaures/castopod>
 
 A podcast hosting platform: CodeIgniter 4.7 over MySQL, a Vite/Tailwind
 frontend, an admin area at `/cp-admin`, ActivityPub federation, and an RSS feed
@@ -37,7 +36,7 @@ the compose override bind-mounts at `/data`:
 The database is the account's own MySQL database (`database: mysql`), so it is
 in the panel, in phpMyAdmin and in the account's backup.
 
-A redeploy clears and re-clones `~/project` (engine#173). Nothing in the list
+A redeploy clears and re-clones `~/project`. Nothing in the list
 above is in it, and the prepare hook rebuilds the symlink on the way back.
 `~/project/.env` holds the database password and the salt and is written 0600 by
 the install stage, inside the container, *after* the engine has taken its
@@ -62,27 +61,18 @@ the keys it owns.
   application for the analytics rollups and the fediverse outbox. There is no
   cron on a hosting account, so those do not run. The site, the admin area,
   publishing and the feed are unaffected.
-* **Video clips.** `Modules\MediaClipper` shells out to ffmpeg, which is not in
-  the shared PHP base image. Audio, artwork and the feed do not need it.
+* **Video clips, automatically.** `Modules\MediaClipper` renders a clip queued
+  in the admin area when the scheduled `video-clips:generate` task runs, and
+  there is no scheduler here. ffmpeg is in the image (`system_packages:
+  [ffmpeg]` in `panelalpha.yaml`), so running
+  `php spark video-clips:generate` in the app container renders the queue.
 
-## Measured
+## Uploads
 
-A clean deploy on the test host, from an empty account:
+PHP's compiled-in `post_max_size` is 8M and the base image loads no php.ini,
+so the recipe ships its own php.ini to accept episode-sized audio
+uploads. Media is stored under `~/.panelalpha/castopod/media`, never in the
+checkout.
 
-* deploy `completed`, `serving: ok`, HTTP 200
-* signed in over public HTTPS with the generated credential
-* created a podcast (1500×1500 PNG cover), published it
-* uploaded a **14,367,328-byte MP3** as an episode and published it — the
-  upload is what the php.ini file exists for; PHP's compiled-in
-  `post_max_size` is 8M, and the base image loads no php.ini (engine#185)
-* fetched `/@patest2/feed.xml`: HTTP 200, `application/xml`, one `<item>`,
-  `<enclosure url="…/audio/@patest2/episode-one.mp3" length="14367328"
-  type="audio/mpeg">`
-* fetched that enclosure URL back: 200, 14,367,328 bytes, byte-identical to
-  what was uploaded
-* `/cp-install` → 404
-* every byte of it under `~/.panelalpha/castopod/media`, nothing in the checkout
-
-engine#170 applies: the multipart POSTs all fail through the
-`*.panelalpha.online` tunnel edge and succeed against the account's own address
-(`--resolve <domain>:443:<host ip>`).
+Multipart uploads fail through the `*.panelalpha.online` tunnel edge;
+they work against the account's own address.

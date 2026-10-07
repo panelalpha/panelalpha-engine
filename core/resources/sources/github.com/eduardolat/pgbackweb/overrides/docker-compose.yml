@@ -76,7 +76,7 @@ services:
         echo "[bootstrap] ERROR: admin could not be seeded or logged in"; exit 1
     mem_limit: 64m
 
-  # Lets `compose up -d` return only once the admin exists (engine#204).
+  # Lets `compose up -d` return only once the admin exists.
   ready:
     image: curlimages/curl:8.11.1
     entrypoint: ["/bin/sh", "-c", "exit 0"]

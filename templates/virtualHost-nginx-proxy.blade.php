@@ -8,6 +8,13 @@ server {
     listen [{{ $ip }}]:80;
 @endforeach
     server_name  {{ $domain }}@if (!empty($aliases)) {{ implode(' ', $aliases) }}@endif;
+{{-- The *.panelalpha.online front: the visitor is the last X-Forwarded-For entry it sent. --}}
+@foreach ($trusted_fronts ?? [] as $front)
+    set_real_ip_from {{ $front }};
+@endforeach
+@if (!empty($trusted_fronts))
+    real_ip_header X-Forwarded-For;
+@endif
     access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/access.log combined;
     access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/bytes.log bytes;
     error_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/error.log error;
@@ -17,6 +24,12 @@ server {
         default_type text/plain;
     }
 @endif
+    # Connection: upgrade only when the client asked to upgrade. Set per server,
+    # not in a main-config map, so a vhost never needs a newer nginx.conf.
+    set $pa_connection_upgrade "";
+    if ($http_upgrade) {
+        set $pa_connection_upgrade upgrade;
+    }
     location / {
         @if(!empty($suspended))
             error_page 503 /account-suspended.html;
@@ -36,12 +49,12 @@ server {
             proxy_http_version 1.1;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-For $remote_addr;
             proxy_set_header X-Forwarded-Proto $scheme;
             proxy_set_header X-Forwarded-Host $host;
             proxy_set_header X-Forwarded-Port $server_port;
             proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection "upgrade";
+            proxy_set_header Connection $pa_connection_upgrade;
             proxy_read_timeout 3600s;
             proxy_send_timeout 3600s;
             set $userhost {{ $user }};
@@ -80,7 +93,7 @@ server {
         set $enginehost core.shared-hosting.palocal;
         proxy_set_header   Host              $host;
         proxy_set_header   X-Real-IP         $remote_addr;
-        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-For   $remote_addr;
         proxy_set_header   X-Forwarded-Proto $scheme;
         set $ssopass 0;
         if ($arg_token) {
@@ -103,12 +116,24 @@ server {
 @endforeach
         http2 on;
         server_name  {{ $domain }}@if (!empty($aliases)) {{ implode(' ', $aliases) }}@endif;
+@foreach ($trusted_fronts ?? [] as $front)
+        set_real_ip_from {{ $front }};
+@endforeach
+@if (!empty($trusted_fronts))
+        real_ip_header X-Forwarded-For;
+@endif
         ssl_certificate {{ $ssl_cert_pem_file }};
         ssl_certificate_key {{ $ssl_cert_key_file }};
         proxy_hide_header Strict-Transport-Security;
         access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/access.log combined;
         access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/bytes.log bytes;
         error_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/error.log error;
+        # Connection: upgrade only when the client asked to upgrade. Set per server,
+        # not in a main-config map, so a vhost never needs a newer nginx.conf.
+        set $pa_connection_upgrade "";
+        if ($http_upgrade) {
+            set $pa_connection_upgrade upgrade;
+        }
         location / {
             @if(!empty($suspended))
                 error_page 503 /account-suspended.html;
@@ -126,12 +151,12 @@ server {
                 proxy_http_version 1.1;
                 proxy_set_header Host $host;
                 proxy_set_header X-Real-IP $remote_addr;
-                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-For $remote_addr;
                 proxy_set_header X-Forwarded-Proto $scheme;
                 proxy_set_header X-Forwarded-Host $host;
                 proxy_set_header X-Forwarded-Port $server_port;
                 proxy_set_header Upgrade $http_upgrade;
-                proxy_set_header Connection "upgrade";
+                proxy_set_header Connection $pa_connection_upgrade;
                 proxy_read_timeout 3600s;
                 proxy_send_timeout 3600s;
                 proxy_ssl_server_name on;
@@ -176,7 +201,7 @@ server {
             set $enginehost core.shared-hosting.palocal;
             proxy_set_header   Host              $host;
             proxy_set_header   X-Real-IP         $remote_addr;
-            proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header   X-Forwarded-For   $remote_addr;
             proxy_set_header   X-Forwarded-Proto $scheme;
             set $ssopass 0;
             if ($arg_token) {

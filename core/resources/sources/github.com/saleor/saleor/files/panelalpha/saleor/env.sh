@@ -35,7 +35,7 @@ else
 fi
 
 # settings.py:516. Empty or wrong, Django answers 400 DisallowedHost on every
-# path -- the failure the control deploy shows.
+# path -- the failure a deploy without this recipe shows.
 if [ -z "${ALLOWED_HOSTS:-}" ]; then
     ALLOWED_HOSTS="${default_hosts}"
 fi

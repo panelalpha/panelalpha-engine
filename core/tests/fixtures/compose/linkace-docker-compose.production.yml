@@ -1,0 +1,52 @@
+---
+services:
+  # --- LinkAce
+  app:
+    image: docker.io/linkace/linkace:latest
+    restart: unless-stopped
+    depends_on:
+      - db
+      - meilisearch
+    ports:
+      - "0.0.0.0:80:80"
+      # Remove the hash of the following line if you want to use HTTPS for this container
+      #- "0.0.0.0:443:443"
+    volumes:
+      - ./.env:/app/.env
+      #- ./backups:/app/storage/app/backups
+      # Remove the hash of the following lines if you want to use HTTPS for this container
+      #- ./caddy-data:/home/www-data/.local/share/caddy
+      #- ./ssl.Caddyfile:/etc/caddy/Caddyfile
+
+  # --- Database
+  db:
+    image: docker.io/library/mariadb:12.0
+    restart: unless-stopped
+    environment:
+      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD}
+      - MYSQL_USER=${DB_USERNAME}
+      - MYSQL_PASSWORD=${DB_PASSWORD}
+      - MYSQL_DATABASE=${DB_DATABASE}
+    volumes:
+      - db:/var/lib/mysql
+
+  # --- Search Engine
+  meilisearch:
+    image: docker.io/getmeili/meilisearch:v1.16
+    restart: unless-stopped
+    environment:
+      - MEILI_ENV=production
+      - MEILI_NO_ANALYTICS=true
+      - MEILI_MASTER_KEY=${MEILISEARCH_KEY}
+    volumes:
+      - meilisearch:/meili_data
+
+  # --- Cache
+  redis:
+    image: docker.io/library/redis:8.2
+    command: "redis-server --requirepass ${REDIS_PASSWORD}"
+    restart: unless-stopped
+
+volumes:
+  db:
+  meilisearch:

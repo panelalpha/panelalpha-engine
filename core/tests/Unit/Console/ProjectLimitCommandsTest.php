@@ -108,7 +108,7 @@ class ProjectLimitCommandsTest extends TestCase
         $this->assertSame(-1, $user->getDiskSpaceLimit());
     }
 
-    /** Every project has a memory limit, so -1 is refused rather than stored (#294). */
+    /** Every project has a memory limit, so -1 is refused rather than stored. */
     public function test_memory_cannot_be_cleared(): void
     {
         $this->makeUser('alice', ['memory_limit' => 256]);

@@ -47,7 +47,7 @@ description: >-
   cannot be turned on by accident. Federation is left on (normal for Matrix).
 
   Persistence. The RocksDB at /data is all the state - accounts, rooms,
-  messages, media - and ~/project is wiped every redeploy (engine#173), so it
+  messages, media - and ~/project is wiped every redeploy, so it
   is bind-mounted to ~/.panelalpha/continuwuity/data, which the wipe never
   touches. The pinned server_name lives beside it. A redeploy rebuilds the
   image and reuses the volume, so a registered user still logs in and their

@@ -12,7 +12,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
- * `_baseline/not-an-open-installer` against real pages (#200).
+ * `_baseline/not-an-open-installer` against real pages.
  *
  * Every fixture is the first ProbedResponse::SAMPLE_BYTES of a page captured
  * on 2026-09-24 from the application's own image: dolibarr/dolibarr 24.0.0,
@@ -29,16 +29,16 @@ class OpenInstallerCheckTest extends TestCase
     }
 
     /** @return array{serving: string, result: CheckResult} */
-    private function ask(string $fixture, string $path, int $status = 200): array
+    private function ask(string $fixture, string $path, int $status = 200, string $check = self::CHECK): array
     {
         $response = new ProbedResponse($status, $this->fixture($fixture), 'http://127.0.0.1:8000' . $path, 0.05, $path);
         $runner = CheckRunner::for(null);
         foreach ($runner->results($response, null) as $result) {
-            if ($result->check->id === self::CHECK) {
+            if ($result->check->id === $check) {
                 return ['serving' => $runner->run($response, null)['serving'], 'result' => $result];
             }
         }
-        $this->fail('the baseline has no ' . self::CHECK . ' check');
+        $this->fail('the baseline has no ' . $check . ' check');
     }
 
     /** @return array<string, array{0: string, 1: string}> */
@@ -102,6 +102,47 @@ class OpenInstallerCheckTest extends TestCase
     public function test_installer_markers_at_the_root_are_not_asked(): void
     {
         $this->assertFalse($this->ask('dolibarr-install.html', '/')['result']->failed());
+    }
+
+    /**
+     * Installers that answer `/` with a 200 and no redirect, captured on
+     * 2026-10-02 from matomo:apache 5.14.0 and nextcloud:apache 35.0.1 with no
+     * configuration. The landing-gated check above never asks them.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function installersAtTheRoot(): array
+    {
+        return [
+            'Matomo, no config.ini.php' => ['matomo-install.html'],
+            'Nextcloud, no administrator yet' => ['nextcloud-install.html'],
+        ];
+    }
+
+    #[DataProvider('installersAtTheRoot')]
+    public function test_an_installer_served_at_the_root_is_reported(string $fixture): void
+    {
+        $asked = $this->ask($fixture, '/', 200, 'not-an-open-installer-at-root');
+
+        $this->assertTrue($asked['result']->failed(), "{$fixture} at / must be reported");
+        $this->assertSame('unclaimed_install', $asked['serving']);
+        $this->assertSame(HealthCheck::SEVERITY_WARNING, $asked['result']->check->severity);
+    }
+
+    /** @return array<string, array{0: string, 1: string, 2: int}> */
+    public static function everyPageThatIsNotAnInstaller(): array
+    {
+        return self::notInstallers() + [
+            'Dolibarr installer markers' => ['dolibarr-install.html', '/', 200],
+            'WordPress installer markers' => ['wordpress-install.html', '/', 200],
+        ];
+    }
+
+    /** The root check has no landing gate, so its markers must not match anything else. */
+    #[DataProvider('everyPageThatIsNotAnInstaller')]
+    public function test_the_root_check_ignores_every_other_page(string $fixture, string $path, int $status): void
+    {
+        $this->assertFalse($this->ask($fixture, $path, $status, 'not-an-open-installer-at-root')['result']->failed());
     }
 
     /** A warning puts nothing in the warnings that make a deploy partial. */

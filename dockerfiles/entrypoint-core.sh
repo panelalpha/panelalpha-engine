@@ -13,6 +13,15 @@ if [ "${DB_CONNECTION:-sqlite}" = "sqlite" ]; then
     touch /var/www/html/storage/database/core.sqlite
 fi
 chown -R www-data:www-data /var/www/html/storage
+# Statistics config and data are written by php-fpm and the workers, which run
+# as www-data; the install leaves both directories owned by root, and a
+# from-source install does not create them at all.
+if [ -d /opt/panelalpha/shared-hosting ]; then
+    for d in /opt/panelalpha/shared-hosting/awstats-config /opt/panelalpha/shared-hosting/awstats-data; do
+        mkdir -p "$d"
+        chown -R www-data:www-data "$d"
+    done
+fi
 mkdir -p /var/tmp/panelalpha-backup
 chown www-data:www-data /var/tmp/panelalpha-backup
 chmod 1777 /var/tmp/panelalpha-backup
@@ -38,13 +47,20 @@ write_trusted_proxy_conf() {
 }
 write_trusted_proxy_conf
 
-# On a CSF host every `csf -r` drops Docker's DNAT, and :2011 then reaches core
-# through docker-proxy, from the gateway, for every client. The host script
-# puts the DNAT back for this container's address: csfpost.sh runs it after
-# CSF, this after a (re)start that may have moved the address. No-op without CSF.
-publish_script=/opt/panelalpha/shared-hosting/scripts/csf-publish-core.sh
-if [ -f "$publish_script" ]; then
-    timeout 30 nsenter --target 1 --all sh "$publish_script" "$(hostname -i | awk '{print $1}')" || true
+# ufw does not filter ports Docker publishes on its own; the host firewall's
+# hook in DOCKER-USER does. ufw puts it in place whenever it starts; this is
+# the backstop for a host where Docker came up after it.
+firewall_script=/opt/panelalpha/shared-hosting/scripts/firewall.sh
+if [ -f "$firewall_script" ]; then
+    timeout 30 nsenter --target 1 --all bash "$firewall_script" --apply || true
+fi
+
+# The accounts' firewall lives in the host's iptables, which a
+# reboot empties. Core starts with the host, and accounts started by Docker
+# itself do not go through the engine.
+tenant_script=/opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh
+if [ -f "$tenant_script" ]; then
+    timeout 60 nsenter --target 1 --all sh "$tenant_script" || true
 fi
 
 exec s6-svscan /run/service

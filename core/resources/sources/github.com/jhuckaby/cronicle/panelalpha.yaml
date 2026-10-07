@@ -26,14 +26,14 @@ commands:
   - id: npm-install
     stage: build
     role: dependencies
-    # {{js.install}} is not resolved in a recipe (engine#351); the repo ships package-lock.json.
+    # {{js.install}} is not resolved in a recipe; the repo ships package-lock.json.
     run: 'npm ci --no-audit --no-fund'
   - id: cronicle-build
     stage: build
     run: 'node bin/build.js dist'
     description: "Upstream's own build: writes conf/ from sample_conf and bundles the web UI."
   # Not `serve`: under that id the node platform swaps the command for
-  # package.json's `bin` (bin/control.sh, a shell script) - engine#350.
+  # package.json's `bin` (bin/control.sh, a shell script).
   - id: cronicle-serve
     stage: start
     serve: true

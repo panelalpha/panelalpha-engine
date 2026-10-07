@@ -20,11 +20,11 @@ description: >-
   compose-usable probe claims it at priority 980 against php's 930, and
   PlatformSelector::fromSource() resolves this file ahead of the detection
   walk, which is what pins `php` instead. hooks/prepare.sh still moves
-  compose.yaml out of the project root, because engine defect #166 mines a
+  compose.yaml out of the project root, because the engine mines a
   root compose file's services as runtime sidecars whichever strategy runs --
   and those sidecars are a root/root database and a public Adminer.
 
-  **No composer.lock, so symfony/runtime never ran** -- engine defect #168.
+  **No composer.lock, so symfony/runtime never ran** -- an engine defect.
   `/composer.lock` is in this repository's .gitignore. The php manifest
   installs with `--no-plugins` and PhpHostBuild::mayRunPlugins() lifts that
   only for a project whose lock pins nothing but installer plugins, so with no
@@ -76,7 +76,7 @@ description: >-
   success in 52s with RSS peaking near 2.5GB. The cgroup in question is *not*
   the account's `--memory-limit`: DindHostBuilder takes it from
   DindEngine::buildMemory(), i.e. DEPLOY_BUILD_MEMORY or 8192MB, never more than
-  half the host's RAM (engine#295). On an engine with less than ~5.3GB of RAM
+  half the host's RAM. On an engine with less than ~5.3GB of RAM
   that is under 2700MB and it cannot, whatever the account is sized at. build-assets.sh reads the cgroup and skips the
   administration below 2700MB deliberately, saying so in the deploy log, rather
   than spending 51s and 1.2GB of node_modules to arrive at a kill that

@@ -99,9 +99,10 @@ class FireflySourceRecipeTest extends TestCase
     {
         $install = $this->ids(PlatformStage::INSTALL);
 
-        foreach (['key-generate', 'migrate', 'storage-link'] as $kept) {
+        foreach (['key-generate', 'migrate'] as $kept) {
             $this->assertContains($kept, $install, "the laravel recipe's {$kept} was lost");
         }
+        $this->assertContains('storage-link', $this->ids(PlatformStage::START), "the laravel recipe's storage-link was lost");
     }
 
     /**
@@ -135,6 +136,18 @@ class FireflySourceRecipeTest extends TestCase
         foreach ($this->appConfig()->commands() as $command) {
             $this->assertStringContainsString('php artisan firefly-iii:', $command->run);
         }
+    }
+
+    /**
+     * Firefly's Vite frontend is the resources/assets/v3 workspace; the root
+     * package.json has no build script, so the default pass compiles nothing.
+     */
+    public function test_the_frontend_is_built_from_its_workspace(): void
+    {
+        $recipe = SourceRecipes::for(self::URL);
+
+        $this->assertNotNull($recipe);
+        $this->assertSame('npm run build --workspace resources/assets/v3', $recipe->frontendBuild);
     }
 
     public function test_the_extended_recipe_is_the_shipped_laravel_one(): void

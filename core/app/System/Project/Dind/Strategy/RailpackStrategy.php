@@ -172,6 +172,7 @@ class RailpackStrategy
                 'set -e' . "\n" .
                 "cleanup() { rm -f " . escapeshellarg($planPath) . "; }" . "\n" .
                 'trap cleanup EXIT' . "\n" .
+                self::dockerConfigLine($this->dind->registryLogin()->configDir()) .
                 'cd ' . escapeshellarg($projectDir) . "\n" .
                 "timeout --foreground --kill-after=30 {$innerTimeout}" .
                 ' docker buildx build' .
@@ -262,5 +263,11 @@ class RailpackStrategy
         }
 
         return $port;
+    }
+
+    /** The build pulls the plan's images itself; with logins held, it reads them from there. */
+    public static function dockerConfigLine(?string $configDir): string
+    {
+        return $configDir === null ? '' : 'export DOCKER_CONFIG=' . escapeshellarg($configDir) . "\n";
     }
 }

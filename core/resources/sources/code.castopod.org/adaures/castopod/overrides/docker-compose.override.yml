@@ -28,7 +28,7 @@ services:
       #                           to be the same on the next deploy or every
       #                           returning listener counts as a new one.
       #
-      # A redeploy clears and re-clones ~/project (engine#173), so a podcast
+      # A redeploy clears and re-clones ~/project, so a podcast
       # host that kept its episodes under the document root would lose every
       # one of them on the next deploy -- and the database rows that point at
       # them would survive, so the feed would keep advertising audio that is no
@@ -47,7 +47,7 @@ services:
     environment:
       # The one way to give this container a php.ini. The base image loads none
       # at all and scans /usr/local/etc/php/conf.d, a directory inside the image
-      # that the account uid cannot write to (engine#185). PHP reads
+      # that the account uid cannot write to. PHP reads
       # PHP_INI_SCAN_DIR from its own environment at startup whatever the SAPI,
       # so naming a second directory here reaches the Apache module and the CLI
       # both -- and both need it: the CLI runs the migrations, the Apache module
@@ -132,7 +132,7 @@ services:
   # own, but it does block on a `depends_on` health condition -- so a service
   # that waits for the app is what makes `up -d` return only once Castopod has
   # migrated, seeded, created its owner and answered /health, and what the
-  # health probe then meets (engine#90). alpine:3 rather than a datastore image:
+  # health probe then meets. alpine:3 rather than a datastore image:
   # anything the sidecar miner recognises as a backing service here produces
   # `dependency cycle detected: app -> ready -> app`. A clean exit 0 is not a
   # crash loop as far as AppHealth is concerned.

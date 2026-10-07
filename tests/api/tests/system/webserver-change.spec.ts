@@ -1,6 +1,11 @@
 import { expect, test } from '@/fixtures/test-options';
 import { changeWebserverAndWait } from '@/helpers/webserver-change';
-import { VALID_SLUGS, getWebserverInfo, type WebserverSlug } from '@/helpers/webserver-helpers';
+import {
+  VALID_SLUGS,
+  getWebserverInfo,
+  switchingDisabledReason,
+  type WebserverSlug,
+} from '@/helpers/webserver-helpers';
 
 /**
  * Switches the engine to the webserver named in `WEBSERVER` and waits until it
@@ -29,13 +34,22 @@ test('the engine changes to the webserver named in WEBSERVER', async ({
     'LiteSpeed Enterprise cannot start without LITESPEED_SERIAL_NUMBER.'
   );
 
-  await changeWebserverAndWait({
-    api,
-    http: anonymousRequest,
-    target: target as WebserverSlug,
-    setupUser,
-    timeoutMs: settings.timing.webserverChangeTimeout,
-  });
+  try {
+    await changeWebserverAndWait({
+      api,
+      http: anonymousRequest,
+      target: target as WebserverSlug,
+      setupUser,
+      timeoutMs: settings.timing.webserverChangeTimeout,
+    });
+  } catch (error) {
+    // The engine's 422 for a switch it refuses on purpose, as webserver.spec.ts skips it.
+    const disabled = switchingDisabledReason(
+      error instanceof Error ? error.message : String(error)
+    );
+    test.skip(disabled !== null, disabled ?? '');
+    throw error;
+  }
 
   // changeWebserverAndWait already gated on the site serving; this records what
   // /system/info believes, which can legitimately lag behind on a stale cache.

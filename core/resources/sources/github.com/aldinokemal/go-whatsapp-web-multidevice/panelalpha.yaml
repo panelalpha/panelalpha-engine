@@ -16,12 +16,3 @@ description: >-
   the dashboard is open until APP_BASIC_AUTH (user:pass[,user:pass]) is set,
   as upstream ships it. The dashboard HTML is downloaded from upstream's
   gowa-ui GitHub release at start (APP_UI_AUTO_UPDATE).
-
-  == Verified on 10.10.10.25 (engine 705f250a), memory_limit 2000 ==
-
-  Fresh create: health :3000 200 in 53 s; / 200, <title>gowa-ui, 1154824
-  bytes (dashboard v1.7.0 fetched at start); /devices 200 JSON; /.env and
-  /.git/config 400 from the app, not served. A device added with POST
-  /devices was still listed after POST /rebuild (storages volume kept).
-  With APP_BASIC_AUTH set as a project env var: /devices 401 without and
-  200 with the credentials.

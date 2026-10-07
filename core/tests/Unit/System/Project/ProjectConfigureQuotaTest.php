@@ -11,7 +11,7 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 
 /**
- * #244: with quota off on the host filesystem setquota fails, and its exit code
+ * With quota off on the host filesystem setquota fails, and its exit code
  * was ignored -- a project with a disk limit looked limited and was not.
  */
 class ProjectConfigureQuotaTest extends TestCase

@@ -10,3 +10,9 @@ description: >-
   profile while app still depends_on it, which merges into a dangling
   dependency compose refuses.
 extends: dockerfile
+# The server listens on 3000 (the Dockerfile's EXPOSE); a recipe that extends
+# dockerfile otherwise takes the platform's port 80.
+port: 3000
+env:
+  # The server refuses to start in production without its public origin.
+  DOMAIN: '${PA_PUBLIC_URL}'

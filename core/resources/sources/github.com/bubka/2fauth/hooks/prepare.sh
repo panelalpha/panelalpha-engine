@@ -3,7 +3,7 @@
 # up`. Mint APP_KEY once, keep it where a redeploy cannot reach, and
 # materialise the ~/project/.env that docker compose interpolates ${VAR} from.
 # The admin login is the engine's (`credentials:` in panelalpha.yaml), in
-# ~/.panelalpha/app-credentials.env. ~/project is wiped on every deploy (engine#173); ~/.panelalpha is
+# ~/.panelalpha/app-credentials.env. ~/project is wiped on every deploy; ~/.panelalpha is
 # not.
 set -e
 cd ~/project

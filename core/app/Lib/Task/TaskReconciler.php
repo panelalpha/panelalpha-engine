@@ -18,11 +18,10 @@ use Illuminate\Support\Facades\Log;
  * reads `running` for good and every poller waits on a job that no longer
  * exists.
  *
- * Observed on 2.29.1.58: a reboot at 15:34 left 8 tasks `running` with a null
- * pid, and a batch runner polled them for 25 minutes before anyone noticed
- * the work had died with the previous boot. `task:prune` cannot help -- it
- * skips non-terminal rows by design, since deleting an in-flight task would
- * be worse than a stuck one.
+ * A reboot leaves tasks `running` with a null pid, and a poller waits on them
+ * indefinitely though the work died with the previous boot. `task:prune`
+ * cannot help -- it skips non-terminal rows by design, since deleting an
+ * in-flight task would be worse than a stuck one.
  *
  * **The queue is the evidence, not the deploy log.** A job keeps its row in
  * the `jobs` table while it is pending or reserved by a worker, and loses it
@@ -32,14 +31,14 @@ use Illuminate\Support\Facades\Log;
  * The read must go through the *payload*, not the uuid: the uuid is a field
  * inside it. A lookup keyed by the bare uuid silently misses every time --
  * which is what the first version of this class did against Redis, and it
- * retired nothing at all on 2.29.1.58 and 178.104.84.45. {@see queueCheck()}
+ * retired nothing at all. {@see queueCheck()}
  *
  * The deploy log looks like evidence and is not. It is written *by* the work,
  * so it cannot outlive it -- and it is deleted with the account on rollback,
  * which is the last thing every failed deploy does. An earlier version of
  * this class read a missing log as "the work died", and a sweep run by hand
  * with no grace period then cancelled two deploys that were mid-rollback and
- * very much alive (flowfuse, operationalco). A signal that is absent both
+ * very much alive. A signal that is absent both
  * when a job died *and* when it is finishing normally cannot be the signal.
  *
  * The log is still worth reading once the queue has said the job is gone: its
@@ -48,13 +47,13 @@ use Illuminate\Support\Facades\Log;
  *
  * Fails *closed* at every step. An unreadable queue, a non-deploy job with no
  * recorded pid, a job still reserved -- all leave the row alone. Retiring a
- * live deploy would tell a customer their deploy stopped while it runs.
+ * live deploy would tell a customer their deploy stopped while it runs. The
+ * one exception is a reserved job whose recorded worker process has died: the
+ * row stays reserved until retry_after, a day, though nothing runs it.
  */
 final class TaskReconciler
 {
-    public const ORPHAN_MESSAGE =
-        'The deploy stopped without finishing — the engine process running it is gone. '
-        . 'This usually means the host restarted or ran out of memory. Deploy again to retry.';
+    public const ORPHAN_MESSAGE = DeployLogger::INTERRUPTED_MESSAGE;
 
     /**
      * @param null|callable(Task): ?bool $isPending overrides the queue check
@@ -75,7 +74,7 @@ final class TaskReconciler
 
         $retired = [];
         foreach ($query->get() as $task) {
-            $latest = self::latestDeployLog($task);
+            $latest = self::deployLogOf($task);
             $decision = self::decide($task, $latest, $isPending);
 
             if ($decision === null) {
@@ -88,9 +87,42 @@ final class TaskReconciler
             }
 
             self::apply($task, $decision, $latest);
+            if (self::workerGone($task)) {
+                self::dropReservedJob($task);
+            }
         }
 
         return $retired;
+    }
+
+    /**
+     * The dead worker's queue row, still reserved: recorded as failed and
+     * deleted, so a worker does not run the job's failed() a day later, at
+     * retry_after. That would act on whatever has the job's names by then --
+     * CreateStaging's destroys the staging project, which may have been
+     * created again since this task was retired.
+     */
+    private static function dropReservedJob(Task $task): void
+    {
+        $jobId = $task->job_id;
+        if (!is_string($jobId) || $jobId === '') {
+            return;
+        }
+        $table = config('queue.connections.database.table') ?? 'jobs';
+        $queue = is_string($task->queue) && $task->queue !== '' ? $task->queue : 'default';
+
+        try {
+            foreach (DB::table($table)->where('queue', $queue)->get(['id', 'payload']) as $row) {
+                if (self::memberUuid((string) $row->payload) !== $jobId) {
+                    continue;
+                }
+                // Deleted first: the failed_jobs record is only for the record.
+                DB::table($table)->where('id', $row->id)->delete();
+                app('queue.failer')->log('database', $queue, (string) $row->payload, new \RuntimeException(self::ORPHAN_MESSAGE));
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Could not drop the queue row of retired task ' . $task->id . ': ' . $e->getMessage());
+        }
     }
 
     /**
@@ -109,6 +141,15 @@ final class TaskReconciler
                 DeployLogger::STATUS_SUCCESS, DeployLogger::STATUS_PARTIAL => Task::STATUS_COMPLETED,
                 default => Task::STATUS_FAILED,
             };
+        }
+
+        if (self::workerGone($task)) {
+            // Its queue row stays reserved until retry_after, a day later, but
+            // nothing runs it. Unless a child it started still holds its
+            // deploy's lock: the log is closed with a verdict once that ends.
+            return $latest !== null && DeployLogger::isLockedFor((string) $task->username)
+                ? null
+                : Task::STATUS_CANCELLED;
         }
 
         $pending = ($isPending ?? self::queueCheck())($task);
@@ -154,6 +195,22 @@ final class TaskReconciler
         $task->markCancelled();
         Log::warning('Task ' . $task->id . ' for ' . $task->username
             . ' was retired: its job is no longer in the queue and nothing finished it.');
+    }
+
+    /**
+     * Whether the worker process that took this task has died. False when no
+     * worker was recorded (a task from before it was), since that is not
+     * evidence of anything. Workers and this sweep share the core container,
+     * so the pid and its start time are read from the same process table.
+     */
+    public static function workerGone(Task $task): bool
+    {
+        $worker = $task->details[Task::WORKER] ?? null;
+        if (!is_array($worker) || !is_int($worker['pid'] ?? null) || !is_string($worker['start'] ?? null)) {
+            return false;
+        }
+
+        return !ProcessIdentity::isStillRunning($worker['pid'], $worker['start']);
     }
 
     /**
@@ -246,9 +303,13 @@ final class TaskReconciler
      * one that wrote it. A task judged by an *older* deploy's log would adopt
      * a verdict that says nothing about its own work.
      *
+     * A task that recorded the deploy it runs is matched by that id: a rebuild
+     * or an archive deploy resumes the log a create left waiting for files,
+     * which started long before the task did.
+     *
      * @return array<string, mixed>|null
      */
-    private static function latestDeployLog(Task $task): ?array
+    public static function deployLogOf(Task $task): ?array
     {
         if (!$task->isDeploy()) {
             return null;
@@ -269,6 +330,11 @@ final class TaskReconciler
 
         if (!is_array($latest)) {
             return null;
+        }
+
+        $deployId = $task->details['deploy_id'] ?? null;
+        if (is_string($deployId) && $deployId !== '') {
+            return ($latest['id'] ?? null) === $deployId ? $latest : null;
         }
 
         // Started well before this task did, so it belongs to an earlier

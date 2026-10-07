@@ -6,6 +6,8 @@ use App\Exceptions\TaskCancelledException;
 use App\Models\Task;
 use App\Models\TaskLog;
 use Illuminate\Contracts\Queue\Job as QueueJob;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\DB;
 use LogicException;
 use Mockery;
 use RuntimeException;
@@ -126,6 +128,71 @@ class AttachTaskTest extends SqliteTaskTestCase
         $this->assertFalse($called);
         $this->assertSame(Task::STATUS_CANCELLED, $task->refresh()->status);
         $this->assertNull($task->job_id);
+    }
+
+    /**
+     * A worker killed right after it took the task has still named itself on
+     * it, so the reconciler and a delete can tell the task stopped.
+     */
+    public function test_the_worker_is_recorded_by_the_write_that_takes_the_task(): void
+    {
+        $pid = getmypid();
+        if (!is_int($pid) || !is_readable('/proc/' . $pid . '/stat')) {
+            $this->markTestSkipped('/proc is required to record the worker');
+        }
+        $task = Task::start(jobType: StubTaskJob::class, queue: 'default');
+        $job = $this->jobWithQueueId($task, 'h-5');
+        $killed = false;
+        DB::listen(static function (QueryExecuted $query) use (&$killed): void {
+            if (!$killed && str_starts_with($query->sql, 'update "tasks"')) {
+                $killed = true;
+                throw new RuntimeException('worker killed');
+            }
+        });
+
+        try {
+            $job->markRunning();
+        } catch (RuntimeException) {
+            // Nothing after that write ran.
+        }
+
+        $task->refresh();
+        $this->assertTrue($killed);
+        $this->assertSame(Task::STATUS_RUNNING, $task->status);
+        $this->assertSame($pid, $task->details[Task::WORKER]['pid'] ?? null);
+    }
+
+    /** The worker read the task while it was queued; a cancel landed before it took it. */
+    public function test_a_cancel_written_after_the_worker_read_the_task_stays(): void
+    {
+        $task = Task::start(jobType: StubTaskJob::class, queue: 'default', details: ['action' => 'rebuild']);
+        $job = new class (Task::find($task->id)) extends StubTaskJob {
+            public function __construct(private ?Task $read)
+            {
+            }
+
+            public function task(): ?Task
+            {
+                $copy = $this->read ?? parent::task();
+                $this->read = null;
+
+                return $copy;
+            }
+        };
+        $job->attachTask($task);
+        Task::find($task->id)->markCancelled();
+
+        $job->markRunning();
+        $called = false;
+        $job->runTask(function () use (&$called): void {
+            $called = true;
+        });
+
+        $task->refresh();
+        $this->assertFalse($called);
+        $this->assertSame(Task::STATUS_CANCELLED, $task->status);
+        $this->assertNull($task->started_at);
+        $this->assertSame(['action' => 'rebuild'], $task->details, 'no worker written onto it');
     }
 
     public function test_run_task_cancel_exception_does_not_rethrow(): void

@@ -60,7 +60,7 @@ These settings live in `/opt/panelalpha/shared-hosting/.env-core`. If you edit t
 
 | Value | What the assistant can do |
 |---|---|
-| `readonly` | Look at what is switched on, change nothing. Inspecting a repository still works. The tools that hand out a password or a login (`csf_ui_credentials`, `system_exim_config_get`, `app_sso_login`, `app_credentials_get`) are not offered. |
+| `readonly` | Look at what is switched on, change nothing. Inspecting a repository still works. The tools that hand out a password or a login (`system_exim_config_get`, `app_credentials_get`) are not offered. |
 | `modify` | Create and change things, but not delete them. |
 | `full` | Everything, including deletion. **This is the default.** |
 
@@ -106,7 +106,7 @@ A tool has to be in an enabled group (or named in `MCP_TOOLS`), allowed by the p
 
 ### How many tools the assistant loads
 
-The full list is 197 tools, and an assistant loads every listed tool's description when it connects. That is about 95 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
+The full list is 204 tools, and an assistant loads every listed tool's description when it connects. That is about 95 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
 
 - `search_tools` finds any other tool by what it does, for example `mysql user` or `cron`.
 - `execute_tools` runs the tool it found.
@@ -115,7 +115,7 @@ The assistant does this on its own when you ask for something that is not in the
 
 ```bash
 MCP_TOOL_SEARCH=true
-MCP_DIRECT_TOOLS=project_get,project_create,project_rebuild,deploy_log_get
+MCP_DIRECT_TOOLS=project_get,project_create,project_rebuild,task_get,deploy_log_get
 ```
 
 `MCP_DIRECT_TOOLS` is the short list, comma-separated, with `*` wildcards. To list every tool directly, as older engines did, set `MCP_TOOL_SEARCH=false`. Left unset, the short list is:
@@ -174,7 +174,7 @@ List the users on this WordPress site.
 Update all plugins on this site.
 ```
 
-WP-CLI, backups and domains work on WordPress that is already on this engine. The WordPress user, install and one-click-login actions need a WordPress site in its own container. Traditional PHP hosting can still change PHP and use WP-CLI: [If WordPress is already on this engine](../05-capabilities/wordpress-and-apps.md#if-wordpress-is-already-on-this-engine).
+Backups and domains work on WordPress that is already on this engine. The WordPress user, install and one-click-login actions need a WordPress site in its own container. WP-CLI and changing PHP need traditional PHP hosting: [If WordPress is already on this engine](../05-capabilities/wordpress-and-apps.md#if-wordpress-is-already-on-this-engine).
 
 **Change the PHP version on traditional WordPress**
 
@@ -322,7 +322,7 @@ Your assistant is using a list it loaded earlier. Restart your assistant, then r
 
 ## Every tool
 
-This is every MCP tool the engine ships: **197** tools, grouped by area. You do not type these names. You describe the work in chat, and the assistant picks the tool.
+This is every MCP tool the engine ships: **204** tools, grouped by area. You do not type these names. You describe the work in chat, and the assistant picks the tool.
 
 A **project** is one hosting account. Every tool takes it as `name`; what the tools return still calls that value `username`, the REST API's name for it.
 
@@ -338,7 +338,7 @@ pae mcp:tool:list
 |---|---|---|---|
 | [Engine summaries](#engine-summaries) | `engine` | On | 2 |
 | [Projects](#projects) | `projects` | On | 18 |
-| [Domains](#domains) | `domains` | On | 7 |
+| [Domains](#domains) | `domains` | On | 8 |
 | [Domain PHP](#domain-php) | `domainphp` | On | 4 |
 | [Domain ACME](#domain-acme) | `domainacme` | On | 5 |
 | [Domain log files](#domain-log-files) | `domainlogfiles` | On | 2 |
@@ -353,22 +353,22 @@ pae mcp:tool:list
 | [Files](#files) | `files` | On | 14 |
 | [PHP](#php) | `php` | On | 3 |
 | [Containers](#containers) | `containers` | On | 5 |
-| [App users](#app-users) | `appusers` | On | 9 |
+| [App users](#app-users) | `appusers` | On | 8 |
 | [Usage](#usage) | `usage` | On | 5 |
 | [WP-CLI](#wp-cli) | `wpcli` | On | 1 |
 | [Deploy](#deploy) | `deploy` | On | 4 |
 | [Proxy rules](#proxy-rules) | `proxyrules` | On | 5 |
 | [System](#system) | `system` | On | 11 |
 | [Server metrics](#server-metrics) | `servermetrics` | On | 5 |
-| [CSF firewall](#csf-firewall) | `csf` | On | 9 |
+| [Firewall](#firewall) | `firewall` | On | 12 |
 | [IP management](#ip-management) | `ipmanagement` | On | 6 |
-| [ModSecurity](#modsecurity) | `modsecurity` | On | 9 |
+| [ModSecurity](#modsecurity) | `modsecurity` | On | 11 |
 | [Lighthouse](#lighthouse) | `lighthouse` | On | 1 |
 | [Backup stores](#backup-stores) | `backupcontainers` | On | 6 |
 | [Bug reports](#bug-reports) | `bugreports` | On | 1 |
 | [Backups](#backups) | `backups` | On | 5 |
 | [Tunnels](#tunnels) | `tunnels` | On | 3 |
-| [Git](#git) | `git` | On | 14 |
+| [Git](#git) | `git` | On | 16 |
 | [Project settings](#project-settings) | `projectsettings` | On | 4 |
 | [SSH](#ssh) | `ssh` | On | 1 |
 | [Tasks](#tasks) | `tasks` | On | 3 |
@@ -413,6 +413,7 @@ pae mcp:tool:list
 | `domain_find` | Get a domain by name (system-wide) |
 | `domain_get` | Get a domain |
 | `domain_list` | List domains of a project |
+| `domain_mail_dns_get` | List and check the mail DNS records of a domain |
 | `domain_update` | Update a domain |
 | `ssl_cert_request` | Request a Let's Encrypt certificate for a domain |
 
@@ -556,7 +557,6 @@ pae mcp:tool:list
 | `app_info` | Get app info and capabilities |
 | `app_install` | Install the app (e.g. run WordPress installer) |
 | `app_role_list` | List available app roles |
-| `app_sso_login` | Consume an SSO token and redirect into the app (no bearer auth) |
 | `app_user_create` | Create an app user |
 | `app_user_delete` | Delete an app user |
 | `app_user_list` | List app users (e.g. WordPress users) |
@@ -571,7 +571,7 @@ pae mcp:tool:list
 | `project_bandwidth` | Project transfer over a date range (`start`, `end`, `group_by` day or month), in bytes |
 | `domain_bandwidth` | Transfer over a date range for one domain |
 | `domain_visitors` | Visitor overview for a domain. `start`/`end` clip daily hits and visits; unique visitors, session length, and breakdowns are overlapping calendar months. Period aliases such as last-week stay in the client. |
-| `domain_visitors_breakdown` | Visitor breakdown by pages, countries, continents, regions, referrers, os, or browsers (month grain) |
+| `domain_visitors_breakdown` | Visitor breakdown by pages, countries, continents, regions, referrers, os, or browsers (month grain), or requests and bytes per HTTP status (`status_codes`, exact range) |
 
 ## WP-CLI
 
@@ -624,19 +624,22 @@ pae mcp:tool:list
 | `metrics_last_hour` | Get metrics for the last hour |
 | `metrics_last_hour_averages` | Get last hour metric averages |
 
-## CSF firewall
+## Firewall
 
 | Tool | What it does |
 |---|---|
-| `csf_disable` | Disable CSF firewall |
-| `csf_enable` | Enable CSF firewall |
-| `csf_restart` | Restart CSF firewall |
-| `csf_rule_create` | Add a CSF firewall rule |
-| `csf_rule_delete` | Delete a CSF firewall rule |
-| `csf_rule_list` | List CSF firewall rules |
-| `csf_rule_update` | Edit a CSF firewall rule |
-| `csf_status` | Get CSF firewall status |
-| `csf_ui_credentials` | Get CSF UI credentials |
+| `firewall_disable` | Disable the firewall |
+| `firewall_enable` | Enable the firewall |
+| `firewall_log_list` | Read what the firewall blocked and banned |
+| `firewall_reload` | Reload the firewall |
+| `firewall_rule_create` | Add a firewall rule |
+| `firewall_rule_delete` | Delete a firewall rule |
+| `firewall_rule_list` | List firewall rules |
+| `firewall_rule_update` | Edit a firewall rule |
+| `firewall_status` | Get the firewall status |
+| `firewall_trusted_add` | Trust an address |
+| `firewall_trusted_delete` | Stop trusting an address |
+| `firewall_trusted_list` | List trusted addresses |
 
 ## IP management
 
@@ -656,6 +659,8 @@ pae mcp:tool:list
 | `modsec_audit_log_download` | Download a ModSecurity audit log file |
 | `modsec_audit_log_list` | List ModSecurity audit log files |
 | `modsec_audit_log_tail` | Tail a ModSecurity audit log file |
+| `modsec_custom_rules_get` | Get the custom ModSecurity rules |
+| `modsec_custom_rules_set` | Replace the custom ModSecurity rules |
 | `modsec_mode_get` | Get ModSecurity mode |
 | `modsec_mode_set` | Set ModSecurity mode |
 | `modsec_ruleset_configs_set` | Toggle ModSecurity ruleset config files |
@@ -716,6 +721,8 @@ pae mcp:tool:list
 | `git_deploy_hook_delete` | Delete a push-to-deploy hook |
 | `git_deploy_hook_rotate` | Rotate a push-to-deploy hook |
 | `git_deploy_hook_show` | Show a push-to-deploy hook |
+| `git_deploy_key_create` | Create a git deploy key |
+| `git_deploy_key_delete` | Delete a git deploy key |
 | `git_disconnect` | Disconnect git from a directory |
 | `git_pull` | Pull from the git remote |
 | `git_push` | Push local git changes |

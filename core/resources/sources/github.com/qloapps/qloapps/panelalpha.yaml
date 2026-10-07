@@ -14,7 +14,7 @@ description: >-
   review images) are named volumes, seeded from the checkout without
   overwriting by a one-shot service. composer.json requires ext-mcrypt, which
   the engine bakes into a variant PHP base; on a host that has not built that
-  variant yet the first deploy fails and a redeploy succeeds (engine#342).
+  variant yet the first deploy fails and a redeploy succeeds.
 extends: php
 database: mysql
 commands:

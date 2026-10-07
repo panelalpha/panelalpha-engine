@@ -90,11 +90,12 @@ final class PlatformStage
      * The phase an account is in, given whether it has ever deployed.
      *
      * A partial deploy still created the schema and counts as deployed: INSTALL
-     * again would seed a database that already has rows.
+     * again would seed a database that already has rows. So does an account
+     * whose later redeploy failed ($deployedBefore).
      */
-    public static function phaseFor(?string $deploymentStatus): string
+    public static function phaseFor(?string $deploymentStatus, bool $deployedBefore = false): string
     {
-        return in_array($deploymentStatus, ['success', 'partial'], true)
+        return $deployedBefore || in_array($deploymentStatus, ['success', 'partial'], true)
             ? self::UPGRADE
             : self::INSTALL;
     }

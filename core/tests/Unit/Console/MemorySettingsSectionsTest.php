@@ -2,11 +2,9 @@
 
 namespace Tests\Unit\Console;
 
-use App\Console\Wizard\Sections\CsfUiSection;
 use App\Console\Wizard\Sections\SitesDbSection;
 use App\Lib\Host\HostMemory;
 use App\Lib\Host\HostMemoryProbe;
-use App\Support\CsfUi;
 use App\Support\SitesDbCaches;
 use App\System;
 use Laravel\Prompts\Key;
@@ -17,7 +15,7 @@ use RuntimeException;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
-/** `pae configure sites-db` and `pae configure csf-ui`, against a fake engine dir and host. */
+/** `pae configure sites-db`, against a fake engine dir and host. */
 class MemorySettingsSectionsTest extends TestCase
 {
     private string $dir;
@@ -29,7 +27,7 @@ class MemorySettingsSectionsTest extends TestCase
         parent::setUp();
         $this->dir = sys_get_temp_dir() . '/pae-mem-' . bin2hex(random_bytes(4));
         mkdir($this->dir);
-        file_put_contents($this->dir . '/.env', "COMPOSE_PROFILES=full\n#SITES_DB_INNODB_BUFFER_POOL_SIZE=32M\nCSF_UI_PASSWORD=s3cret\n");
+        file_put_contents($this->dir . '/.env', "COMPOSE_PROFILES=full\n#SITES_DB_INNODB_BUFFER_POOL_SIZE=32M\n");
 
         // An artisan command run earlier in the suite switches every prompt to its fallback.
         $this->fallback = (new ReflectionProperty(Prompt::class, 'shouldFallback'))->getValue();
@@ -46,13 +44,13 @@ class MemorySettingsSectionsTest extends TestCase
     }
 
     /** A System rooted at $this->dir that records commands; sites-db answers $mariadb, or is down when null. */
-    private function system(?string $mariadb = "33554432\t8388608\t8388608", string $csfConf = "UI = \"0\"\n"): System
+    private function system(?string $mariadb = "33554432\t8388608\t8388608"): System
     {
-        return new class ($this->dir, $mariadb, $csfConf) extends System {
+        return new class ($this->dir, $mariadb) extends System {
             /** @var list<string> */
             public array $ran = [];
 
-            public function __construct(private string $dir, private ?string $mariadb, private string $csfConf)
+            public function __construct(private string $dir, private ?string $mariadb)
             {
             }
 
@@ -67,9 +65,6 @@ class MemorySettingsSectionsTest extends TestCase
                 $this->ran[] = $line;
                 if (str_contains($line, ' exec -T sites-db ')) {
                     return $this->mariadb ?? throw new RuntimeException('service "sites-db" is not running');
-                }
-                if (str_contains($line, 'cat /etc/csf/csf.conf')) {
-                    return $this->csfConf;
                 }
 
                 return '';
@@ -119,7 +114,7 @@ class MemorySettingsSectionsTest extends TestCase
         $result = (new SitesDbCaches($system))->apply(['SITES_DB_INNODB_BUFFER_POOL_SIZE' => '64m']);
 
         $this->assertSame(['changed' => ['SITES_DB_INNODB_BUFFER_POOL_SIZE'], 'recreated' => true], $result);
-        $this->assertSame("COMPOSE_PROFILES=full\nSITES_DB_INNODB_BUFFER_POOL_SIZE=64M\nCSF_UI_PASSWORD=s3cret\n", file_get_contents($this->dir . '/.env'));
+        $this->assertSame("COMPOSE_PROFILES=full\nSITES_DB_INNODB_BUFFER_POOL_SIZE=64M\n", file_get_contents($this->dir . '/.env'));
         $this->assertContains("sudo docker compose --project-directory {$this->dir} up -d --no-deps sites-db", $system->ran);
     }
 
@@ -146,30 +141,4 @@ class MemorySettingsSectionsTest extends TestCase
         $this->assertSame($before, file_get_contents($this->dir . '/.env'));
     }
 
-    public function test_turning_the_csf_ui_on_writes_env_and_csf_conf_and_restarts_lfd(): void
-    {
-        $system = $this->system();
-        $ui = new CsfUi($system);
-
-        $this->assertFalse($ui->enabled());
-        $this->assertFalse($ui->configured());
-        $ui->set(true);
-
-        $this->assertTrue($ui->configured());
-        $this->assertStringContainsString("CSF_UI=1\n", file_get_contents($this->dir . '/.env'));
-        $this->assertContains('sed -i s/^UI = ".*/UI = "1"/ /etc/csf/csf.conf', $system->ran);
-        $this->assertContains('systemctl restart lfd', $system->ran);
-        $this->assertSame('s3cret', $ui->password());
-    }
-
-    public function test_the_csf_section_prints_the_login_when_turned_on(): void
-    {
-        Prompt::fake(['y', Key::ENTER, Key::ENTER]);
-
-        (new ReflectionMethod(CsfUiSection::class, 'toggle'))
-            ->invoke(new CsfUiSection(new CsfUi($this->system())), true, false);
-
-        Prompt::assertOutputContains('CSF UI turned on.');
-        Prompt::assertOutputContains('user panelalpha, password s3cret');
-    }
 }

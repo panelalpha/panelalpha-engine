@@ -6,8 +6,8 @@ use App\Lib\Deploy\Compose\ComposePlaceholders;
 use PHPUnit\Framework\TestCase;
 
 /**
- * How a compose stack the engine did not write learns the account's address
- * (engine#192): under the engine's own names, by substitution, and in the
+ * How a compose stack the engine did not write learns the account's address:
+ * under the engine's own names, by substitution, and in the
  * keys the author left blank for whoever deploys it.
  */
 class ComposePublicUrlTest extends TestCase
@@ -67,18 +67,68 @@ class ComposePublicUrlTest extends TestCase
     }
 
     /** cmintey/wishlist's shape: `ORIGIN=` set and empty kills adapter-node. */
+    /**
+     * Invio runs its backend on :3000 beside the frontend it publishes on
+     * :8000; BACKEND_URL is a hop inside the container, not the site.
+     */
+    public function test_a_localhost_url_on_a_port_nothing_publishes_is_left_alone(): void
+    {
+        $result = $this->fill([
+            'app' => ['image' => 'invio', 'ports' => ['8000:8000'], 'environment' => [
+                'BACKEND_URL' => 'http://localhost:3000',
+                'ORIGIN' => 'http://localhost:8000',
+                'BASE_URL' => 'http://localhost',
+            ]],
+            'admin' => ['image' => 'x', 'ports' => [['target' => 9000, 'published' => '9090']], 'environment' => [
+                'ADMIN_URL' => 'http://localhost:9090',
+            ]],
+        ]);
+        $services = $result['compose']['services'];
+
+        $this->assertSame('http://localhost:3000', $services['app']['environment']['BACKEND_URL']);
+        $this->assertSame(self::URL, $services['app']['environment']['ORIGIN']);
+        $this->assertSame(self::URL, $services['app']['environment']['BASE_URL']);
+        $this->assertSame(self::URL, $services['admin']['environment']['ADMIN_URL']);
+        $this->assertSame(['ORIGIN', 'BASE_URL', 'ADMIN_URL'], $result['urls']);
+    }
+
+    public function test_a_stack_that_publishes_nothing_is_rewritten_as_before(): void
+    {
+        $result = $this->fill(['app' => ['image' => 'x', 'environment' => ['APP_URL' => 'http://localhost:3000']]]);
+
+        $this->assertSame(self::URL, $result['compose']['services']['app']['environment']['APP_URL']);
+    }
+
     public function test_an_empty_public_url_key_is_filled(): void
     {
         $result = $this->fill([
-            'app' => ['image' => 'x', 'environment' => ['ORIGIN=', 'APP_URL=', 'WEBHOOK_URL=', 'DATABASE_URL=']],
+            'app' => ['image' => 'x', 'environment' => ['ORIGIN=', 'APP_URL=', 'WEBHOOK_URL=', 'DATABASE_URL=', 'BASE_URL=']],
         ]);
 
         $environment = $result['compose']['services']['app']['environment'];
         $this->assertContains('ORIGIN=' . self::URL, $environment);
         $this->assertContains('APP_URL=' . self::URL, $environment);
+        // A blank BASE_URL is a sub-path prefix meaning "root" in many apps.
+        $this->assertContains('BASE_URL=', $environment);
         // Someone else's address, or a sidecar's: not ours to invent.
         $this->assertContains('WEBHOOK_URL=', $environment);
         $this->assertContains('DATABASE_URL=', $environment);
+    }
+
+    /** Titra: `ROOT_URL=${ROOT_URL}` and nothing sets it; Meteor refuses to start without one. */
+    public function test_a_whole_url_key_left_to_an_unset_variable_is_filled(): void
+    {
+        $services = [
+            'titra' => ['image' => 'titraio/titra', 'environment' => ['ROOT_URL=${ROOT_URL}', 'APP_URL=${APP_URL:-http://x}', 'WEBHOOK_URL=${HOOK}']],
+        ];
+        $environment = $this->fill($services)['compose']['services']['titra']['environment'];
+        $this->assertContains('ROOT_URL=' . self::URL, $environment);
+        $this->assertContains('APP_URL=${APP_URL:-http://x}', $environment);
+        $this->assertContains('WEBHOOK_URL=${HOOK}', $environment);
+
+        // The account setting the variable keeps it.
+        $own = ComposePlaceholders::fill(['services' => $services], 'seed', self::URL, ['ROOT_URL' => 'https://mine.example']);
+        $this->assertContains('ROOT_URL=${ROOT_URL}', $own['compose']['services']['titra']['environment']);
     }
 
     public function test_without_a_domain_nothing_changes(): void

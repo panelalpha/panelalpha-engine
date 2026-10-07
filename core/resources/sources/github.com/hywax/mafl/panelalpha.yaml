@@ -32,7 +32,7 @@ description: >-
 
   Where it lives is the other half. Upstream bind-mounts ./config.yml from
   inside the checkout, and a redeploy clears and re-clones ~/project
-  (engine#173) -- so the customer's entire homepage, which is the only thing
+  -- so the customer's entire homepage, which is the only thing
   they ever author here, would be destroyed by the next deploy. It is
   ~/.panelalpha/mafl/data/config.yml instead, mounted as the whole `data`
   directory so nitro's fs storage and its file watcher both sit outside the
@@ -49,7 +49,7 @@ description: >-
   cannot plant one in the account's ~/.panelalpha either. 0600 in a 0700
   directory, because a service entry may carry `secrets:` (an OpenWeatherMap
   API key) and the generated compose file beside it is 0644 and readable by
-  every other tenant (engine#173).
+  every other tenant.
 
   The image is built from the checkout rather than pulled. hywax/mafl:latest on
   Docker Hub is v0.15.4 from 2024-07-13 and upstream has cut no release since,
@@ -71,7 +71,7 @@ description: >-
   a bundle that was already in the cache. With .git excluded, the next redeploy
   was 11s, 8 of 12 layers cached, and the measurement was repeated three times.
 
-  No `ready` gate (engine#90). Nitro binds :3000 about a second after the
+  No `ready` gate. Nitro binds :3000 about a second after the
   container starts and the config task runs immediately behind it; the deploy's
   own first probe came back `serving: ok`, HTTP 200. That still holds on the
   11s redeploy, where there is no build to hide the boot behind: health polled

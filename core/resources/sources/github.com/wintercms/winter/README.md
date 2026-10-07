@@ -5,8 +5,8 @@ Content management system — pages, themes and plugins, with a backend at
 enough for it: the whole install migrates and seeds in well under a second.
 
 Detection reads it as `laravel` — `composer.json` and `artisan` — and the
-runtime half of that is right. The rest is not, and the deploy before this
-recipe ended `serving-unknown` with the container restart-looping on exit 1.
+runtime half of that is right. The rest is not, and without this recipe the
+container restart-loops on exit 1.
 
 ## Why this is a manifest and not `extends: laravel`
 
@@ -68,7 +68,7 @@ Serving from the root is safe here because the committed `.htaccess` is a real
 front controller, and the engine's vhost gives it `AllowOverride All` with
 `mod_rewrite` enabled. Its catch-all rule sends every existing file that is not
 an asset under `themes/`, `plugins/`, `modules/` or `storage/app/{uploads/public,media,resized}`
-into `index.php`. Measured on the deployed account:
+into `index.php`:
 
 | Request | Result |
 |---|---|
@@ -87,10 +87,9 @@ symlinks to directories outside it, and the vhost's `<Directory />` is
 ## SQLite, and why the .env is written before anything reads it
 
 `.env.example` ships `DB_CONNECTION=mysql`, and
-`EnvSidecars::specFromDbConnection()` reads exactly that: the first deploy of
-this repository got a `mariadb:11` sidecar and a `project_dbdata` volume for an
-application that does not need either. On a 3.7 GB host with the account capped
-at 1800 MB that is worth not doing.
+`EnvSidecars::specFromDbConnection()` reads exactly that: left alone, a deploy
+of this repository gets a `mariadb:11` sidecar and a `project_dbdata` volume for
+an application that does not need either — memory and disk worth not spending.
 
 `hooks/prepare.sh` writes `.env` with `DB_CONNECTION=sqlite`. Two things make
 that the whole fix:
@@ -221,7 +220,7 @@ The following password has been automatically generated for the "admin"
 account: n3Jm6Rtq47GnxtSIbUX8RB
 ```
 
-That is a better default than several of the apps tested alongside this one —
+That is a better default than many applications have —
 a fresh Winter is *not* open to whoever finds the address; `/backend` redirects
 an anonymous client to the login form. But the only copy of that password is in
 the deploy log, which is not where an account's credentials live.
@@ -248,7 +247,7 @@ to place them at `modules/<name>/`. The repository *also* commits those three
 directories — 3 000 files of them — so a clone is already complete.
 
 There is no `composer.lock`, so the engine installs with `--no-plugins`
-(engine#168: a Composer plugin is arbitrary PHP out of a customer repository
+(a Composer plugin is arbitrary PHP out of a customer repository
 and the install runs on the host daemon). `composer/installers` is a plugin, so
 it does not run, and the three packages land in `vendor/winter/wn-*-module`
 instead — 47 MB of second copy, and `autoload_psr4.php` maps `System\`,
@@ -258,20 +257,20 @@ The effect is smaller than it looks but it is real. `config/app.php` names
 `System\ServiceProvider`, which Composer resolves to the vendor copy; that
 provider then calls
 `ClassLoader::autoloadPackage('System\\', 'modules/system/')` and Winter's own
-loader answers everything after it. Counted on a booted console kernel: three
-classes come from `vendor/winter/wn-*-module` — `System\ServiceProvider`,
+loader answers everything after it. On a booted console kernel three classes
+come from `vendor/winter/wn-*-module` — `System\ServiceProvider`,
 `Backend\ServiceProvider`, `Cms\ServiceProvider` — and every other module class
 comes from `modules/`. Views, translations, migrations and web assets are all
 read from `modules/` by path.
 
-It works, and it is verified working below. It is still two trees resolved at
+It works. It is still two trees resolved at
 two different moments (the clone is the monorepo's `develop`; the packages are
 whatever the split repositories' `dev-develop` tips are when Composer runs), so
 a provider could in principle register something the other tree does not have.
 
-Fixing it here was tried and rejected: dropping the three requires from
+Fixing it here is not worth it: dropping the three requires from
 `composer.json` and adding a `psr-4` map to `modules/` does produce a single
-clean tree — verified — but it means rewriting an upstream `composer.json` with
+clean tree, but it means rewriting an upstream `composer.json` with
 `awk` on every deploy, and Winter's lowercase directory names (`modules/backend/behaviors/`)
 are not PSR-4, so `--optimize-autoloader` skips them with a screen of warnings
 and correctness then rests entirely on Winter's own class loader. The engine
@@ -299,53 +298,3 @@ routing table the CMS expects to rebuild.
 | `hooks/prepare.sh` | keeps APP_KEY, the SQLite database and `storage/app` in `~/.panelalpha/winter`, writes `.env` (SQLite, before the sidecar inference reads it) and creates the empty database file Laravel refuses to create |
 | `files/panelalpha/set-admin-password.sh` | replaces the seeded password that only the deploy log has, and records the new one |
 | `overrides/docker-compose.override.yml` | mounts `~/.panelalpha/winter` at `/pa-data` and over `storage/app`, plus a two-request healthcheck and a `ready` gate, so the deploy waits for the migration and the seeders |
-
-## Verified
-
-**Redeploy survival** (2026-09-29, mariusz.panelalpha.tools, engine 705f250a).
-With the previous recipe a rebuild changed the APP_KEY hash, dropped a backend
-user, a CMS page and a media file created before it, and rotated the admin
-password. With this one, after `POST /projects/<name>/rebuild` (which re-clones
-into an emptied `~/project`): APP_KEY hash, admin-password hash, the backend
-user, the page (stored in `cms_theme_templates`, served 200 at its URL) and the
-media file are all unchanged, and the stored admin password still logs in.
-
-On a 2-core / 3.7 GB engine, account capped at 1800 MB: `deploy-ok`, deploy
-75.3s with the shared PHP base image already on the host, port probe HTTP 200
-in 34 ms, domain 200, `serving: ok`, every baseline check passing, and the
-public domain answering 200 with the title *Winter CMS - Demonstration*. One
-service in the generated compose — `app` — plus the `ready` gate, which exited
-0; no database sidecar and no MySQL database provisioned for the account. The
-app container sat at 81 MiB and `storage/database.sqlite` at 324 KB.
-
-Beyond the status code:
-
-- `POST /backend/backend/auth/signin` with the password from
-  `~/project/.panelalpha-admin-password` → 302 to `/backend/backend`, and
-  `/backend` then renders the dashboard (200). `/backend/cms`,
-  `/backend/cms/themes`, `/backend/backend/users` and
-  `/backend/system/settings` are all 200 for that session and 302 to the login
-  form for an anonymous client. A wrong password leaves the form at 200 with no
-  session, and `/backend` stays 302.
-- `/storage/database.sqlite`, `/composer.json`, `/config/database.php`,
-  `/vendor/autoload.php` and `/panelalpha/set-admin-password.sh` all 404
-  through the committed `.htaccess`; `/.env` is 403 from the vhost.
-- The container log shows the whole install stage: migration table, System,
-  Backend and Cms modules migrated, System and Backend seeded, the Winter.Demo
-  plugin migrated, `Migration complete`, then
-  `[panelalpha] admin password written to ~/project/.panelalpha-admin-password`.
-
-One note for whoever tests the next recipe on a *running* engine. The first run
-of this recipe after `rsync` deployed with no `panelalpha-entrypoint.sh` at all
-— the container logged `panelalpha: no /app/panelalpha-entrypoint.sh on the
-mount; serving directly`, Apache came up against an empty database and every
-page was a `no such table: system_settings` 500. Detection had found the recipe
-(`Recipe named by github.com/wintercms/winter`) and the decision recorded
-`deploy_platform: wintercms`, but `EntrypointWriter::write()` resolves the
-manifest again through `PlatformRegistry::find()` → `SourceRecipes::findById()`
-→ `SourceRecipes::all()`, whose static `$allCache` had been filled by a
-queue worker that started hours before the directory existed. `find()` returned
-null, `write()` returned false, and every stage command was dropped silently.
-`SourceRecipes::for()` — the slug lookup detection uses — has its own cache and
-was fresh, which is why the two disagreed. `php artisan queue:restart` in the
-core container fixed it with no change to the recipe.

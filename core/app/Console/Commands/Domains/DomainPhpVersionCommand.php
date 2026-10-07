@@ -2,13 +2,14 @@
 
 namespace App\Console\Commands\Domains;
 
-use App\Console\Commands\Concerns\CallsEngineApi;
+use App\Http\Requests\DomainSetPhpVersionRequest;
+use App\Lib\Domains\DomainPhpVersion;
+use App\Models\Domain;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Validator;
 
 class DomainPhpVersionCommand extends Command
 {
-    use CallsEngineApi;
-
     protected $signature = 'domain:php-version
         {domain : Canonical domain name}
         {version? : Installed PHP version to set}';
@@ -25,26 +26,20 @@ class DomainPhpVersionCommand extends Command
         }
 
         $version = $this->argument('version');
-        if (is_string($version) && $version !== '') {
-            $response = $this->dispatchEngine('PUT', "/domains/{$domain}/php-version", [
-                'version' => $version,
-            ]);
-            if ($response->getStatusCode() >= 400) {
-                return $this->rejectEngineResponse($response);
-            }
+        $setting = is_string($version) && $version !== '';
+        if ($setting) {
+            Validator::make(['version' => $version], (new DomainSetPhpVersionRequest())->rules())->validate();
+        }
+
+        $domainModel = Domain::findByNameOrFail($domain);
+
+        if (!$setting) {
+            $this->line($domainModel->getPhpVersion() ?? '');
 
             return 0;
         }
 
-        $response = $this->dispatchEngine('GET', "/domains/{$domain}/php-version");
-        if ($response->getStatusCode() >= 400) {
-            return $this->rejectEngineResponse($response);
-        }
-
-        /** @var mixed $payload */
-        $payload = json_decode((string) $response->getContent(), true);
-        $value = is_array($payload) ? ($payload['data'] ?? '') : '';
-        $this->line(is_scalar($value) ? (string) $value : '');
+        (new DomainPhpVersion())->set($domainModel, (string) $version);
 
         return 0;
     }

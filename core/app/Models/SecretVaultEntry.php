@@ -58,6 +58,9 @@ class SecretVaultEntry extends Model
      */
     public const TYPE_CLOUDFLARE_API_TOKEN = 'cloudflare_api_token';
 
+    /** The `registry-auth` setting: private registry logins, one per line. */
+    public const TYPE_REGISTRY_AUTH = 'registry_auth';
+
     /**
      * The types that ship with a help file of their own. Anything else is
      * still a valid type -- the form falls back to the default help -- but
@@ -69,6 +72,7 @@ class SecretVaultEntry extends Model
     public const TYPES_WITH_HELP = [
         self::TYPE_GIT_TOKEN,
         self::TYPE_CLOUDFLARE_API_TOKEN,
+        self::TYPE_REGISTRY_AUTH,
     ];
 
     /** Usable by one project only: the first one it is given to. */

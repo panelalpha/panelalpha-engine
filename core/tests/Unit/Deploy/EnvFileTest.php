@@ -22,6 +22,18 @@ class EnvFileTest extends TestCase
         parent::tearDown();
     }
 
+    public function test_an_env_file_is_normalised_to_utf8(): void
+    {
+        $text = "# comment\r\nPORT=3000\r\nNAME=Zażółć\r\n";
+
+        $this->assertSame($text, EnvFile::asUtf8("\xFF\xFE" . mb_convert_encoding($text, 'UTF-16LE', 'UTF-8')));
+        $this->assertSame($text, EnvFile::asUtf8("\xFE\xFF" . mb_convert_encoding($text, 'UTF-16BE', 'UTF-8')));
+        $this->assertSame($text, EnvFile::asUtf8("\xEF\xBB\xBF" . $text));
+        $this->assertSame($text, EnvFile::asUtf8($text));
+        // UTF-16 with no BOM, or any other NUL-bearing bytes: not an env file.
+        $this->assertNull(EnvFile::asUtf8(mb_convert_encoding($text, 'UTF-16LE', 'UTF-8')));
+    }
+
     public function test_nested_env_example_copies_api_and_skips_existing_file(): void
     {
         mkdir($this->tmpDir . '/api', 0777, true);
@@ -36,6 +48,17 @@ class EnvFileTest extends TestCase
         sort($relative);
 
         $this->assertSame(['.env', 'api/.env'], $relative);
+    }
+
+    public function test_nested_env_sample_is_copied_when_there_is_no_env_example(): void
+    {
+        mkdir($this->tmpDir . '/api', 0777, true);
+        file_put_contents($this->tmpDir . '/api/.env.sample', "API=1\n");
+
+        $copies = EnvFile::nestedEnvExampleCopies($this->tmpDir);
+
+        $this->assertSame([$this->tmpDir . '/api/.env.sample'], array_column($copies, 'example'));
+        $this->assertSame(['api/.env'], array_column($copies, 'relative'));
     }
 
     public function test_env_local_from_example_and_from_env_when_mentioned(): void
@@ -178,7 +201,7 @@ class EnvFileTest extends TestCase
     /**
      * Servas's prepare hook writes a 0600 `.env` choosing SQLite. Read as the
      * engine's user it was invisible and `.env.example`'s mysql won, which
-     * added a MariaDB sidecar the app never used (engine#186).
+     * added a MariaDB sidecar the app never used.
      */
     public function test_database_settings_read_env_through_the_given_reader(): void
     {
@@ -231,6 +254,29 @@ class EnvFileTest extends TestCase
         $this->assertSame('raw \n stays', $values['SINGLE'], 'single quotes are literal');
         $this->assertSame("line\nbreak", $values['DOUBLE'], 'double quotes expand escapes');
         $this->assertSame('', $values['EMPTY']);
+    }
+
+    public function test_parse_ignores_spaces_around_the_equals_sign(): void
+    {
+        $rows = EnvFile::parse("HATSU_LOG = \"info,tokio::net=debug\"\nHATSU_DOMAIN =  hatsu.local\nSINGLE = 'a b'\n");
+        $values = array_column($rows, 'value', 'key');
+
+        $this->assertSame('info,tokio::net=debug', $values['HATSU_LOG']);
+        $this->assertSame('hatsu.local', $values['HATSU_DOMAIN']);
+        $this->assertSame('a b', $values['SINGLE']);
+    }
+
+    public function test_merge_does_not_corrupt_spaced_example_lines(): void
+    {
+        $merged = EnvFile::merge(
+            "HATSU_LOG = \"info,tokio::net=debug,sqlx::query=warn\"\nHATSU_DOMAIN = \"hatsu.local\"\n",
+            ['HATSU_PRIMARY_ACCOUNT' => 'blog.rust-lang.org']
+        );
+
+        $this->assertSame(
+            "HATSU_LOG=info,tokio::net=debug,sqlx::query=warn\nHATSU_DOMAIN=hatsu.local\nHATSU_PRIMARY_ACCOUNT=blog.rust-lang.org\n",
+            $merged
+        );
     }
 
     public function test_serialise_round_trips_and_quotes_only_when_needed(): void
@@ -292,9 +338,38 @@ class EnvFileTest extends TestCase
         );
     }
 
+    public function test_merge_keeps_a_dollar_in_a_given_value_away_from_compose_interpolation(): void
+    {
+        $hash = 'admin:$2y$10$NBMM7ztxyz';
+
+        $this->assertSame(
+            "TINYAUTH_AUTH_USERS='admin:\$2y\$10\$NBMM7ztxyz'\n",
+            EnvFile::merge('', ['TINYAUTH_AUTH_USERS' => $hash])
+        );
+        $this->assertSame(
+            "PASS=\"it's \$\$HOME\"\n",
+            EnvFile::merge("PASS=old\n", ['PASS' => "it's \$HOME"]),
+            'a value with a quote as well falls back to compose\'s $$ escape'
+        );
+        $this->assertSame($hash, EnvFile::parse(EnvFile::merge('', ['A' => $hash]))[0]['value']);
+    }
+
+    public function test_merge_leaves_the_repository_interpolation_alone(): void
+    {
+        $merged = EnvFile::merge(
+            "DATABASE_URL=postgres://\${DB_USER}@db/app\nSINGLE='lit\$eral'\n",
+            ['DB_USER' => 'app']
+        );
+
+        $this->assertSame(
+            "DATABASE_URL=postgres://\${DB_USER}@db/app\nSINGLE='lit\$eral'\nDB_USER=app\n",
+            $merged
+        );
+    }
+
     public function test_shell_lines_compose_refuses_are_commented_out(): void
     {
-        // saltcorn's .env.example, lines 20-22 and 26 (engine#135).
+        // saltcorn's .env.example, lines 20-22 and 26.
         $example = "# stale values\n"
             . "unset DATABASE_URL SQLITE_FILEPATH SALTCORN_DB_DRIVER SALTCORN_DEFAULT_SCHEMA\n"
             . "unset PGHOST PGPORT PGUSER PGPASSWORD PGDATABASE\n"

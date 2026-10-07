@@ -171,25 +171,50 @@ class ImageTransfer
     }
 
     /**
-     * A reference safe to hand to docker. Accepts a tag or a digest; rejects a
-     * leading dash, which docker would read as a flag.
+     * A reference safe to hand to docker. Accepts a tag, a digest or both, as
+     * recipes pin images (`name:tag@sha256:…`); rejects a leading dash, which
+     * docker would read as a flag.
      */
     public static function isSafeImageRef(string $image): bool
     {
         if ($image === '' || $image[0] === '-') {
             return false;
         }
-        // [registry[:port]/]repository[:tag|@sha256:…]
+        // [registry[:port]/]repository[:tag][@sha256:…], at least one of the two
         $registry = '(?:[a-z0-9.-]+(?::[0-9]+)?/)?';
         $repository = '[a-z0-9._-]+(?:/[a-z0-9._-]+)*';
+        $digest = '@sha256:[a-f0-9]{64}';
 
-        return preg_match('#^' . $registry . $repository . '(?::[a-z0-9._-]+|@sha256:[a-f0-9]{64})$#i', $image) === 1;
+        return preg_match(
+            '#^' . $registry . $repository . '(?::[a-z0-9._-]+(?:' . $digest . ')?|' . $digest . ')$#i',
+            $image
+        ) === 1;
     }
 
     /**
-     * Spell out the implicit :latest so the ref matches what `docker save` on
-     * the host produces. Null for an unexpanded ${VAR}, or a reference docker
-     * would not accept.
+     * `name:tag@sha256:…` as `name@sha256:…`, anything else unchanged: docker
+     * pulls and stores a reference carrying both by its digest alone.
+     */
+    public static function preferDigest(string $image): string
+    {
+        $at = strpos($image, '@');
+        if ($at === false) {
+            return $image;
+        }
+        $name = substr($image, 0, $at);
+        $slash = strrpos($name, '/');
+        $colon = strrpos($name, ':');
+        if ($colon !== false && ($slash === false || $colon > $slash)) {
+            $name = substr($name, 0, $colon);
+        }
+
+        return $name . substr($image, $at);
+    }
+
+    /**
+     * Spell out the implicit :latest, and drop a tag beside a digest, so the
+     * ref matches what docker records. Null for an unexpanded ${VAR}, or a
+     * reference docker would not accept.
      */
     public static function normalizeImageRef(mixed $image): ?string
     {
@@ -205,6 +230,6 @@ class ImageTransfer
             $image .= ':latest';
         }
 
-        return self::isSafeImageRef($image) ? $image : null;
+        return self::isSafeImageRef($image) ? self::preferDigest($image) : null;
     }
 }

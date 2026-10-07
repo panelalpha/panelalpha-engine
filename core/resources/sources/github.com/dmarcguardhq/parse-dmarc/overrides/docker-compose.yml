@@ -2,7 +2,7 @@
 # the published app image the way the upstream README's `docker run` does.
 services:
   # One-shot: parse-dmarc exits without its IMAP mailbox. Values are read from
-  # .env (the project's env vars), not interpolated (engine#336). Also hands
+  # .env (the project's env vars), not interpolated. Also hands
   # the data volume to the image's nonroot user (65532); it is created
   # root-owned and the release image does not ship /data.
   init:

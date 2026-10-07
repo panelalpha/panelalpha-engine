@@ -9,7 +9,7 @@ use App\System\Project\Dind\Strategy\AccountSecrets;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#432: `${PA_PUBLIC_HOST}` in a laravel/php recipe's `env:` reached the
+ * `${PA_PUBLIC_HOST}` in a laravel/php recipe's `env:` reached the
  * generated compose literally, and the container got ''. Every generated
  * compose goes through composeDecision(), so that is where it is resolved.
  */

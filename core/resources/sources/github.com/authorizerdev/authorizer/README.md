@@ -5,12 +5,10 @@ dashboard at `/dashboard/`, OIDC discovery at `/.well-known/openid-configuration
 
 ## Deploying
 
-Set one project environment variable:
-
-- `AUTHORIZER_ADMIN_SECRET`: the admin dashboard password.
-
-Without it the deploy fails with
-`authorizer: missing project environment variable AUTHORIZER_ADMIN_SECRET`.
+Deploy as is. The engine generates `AUTHORIZER_ADMIN_SECRET`, the admin
+dashboard password, and returns it from `GET /projects/{name}/app-credentials`
+(MCP `app_credentials_get`). A project env var with that name, set before the
+first deploy, is used instead.
 
 ## What the recipe does
 
@@ -19,5 +17,6 @@ Without it the deploy fails with
   them from env; SQLite is on the named volume `data`.
 - `hooks/prepare.sh` generates the client ID, client secret, JWT secret and
   encryption key once into `~/.panelalpha/authorizer/secrets.env`.
-- `env-check` fails the deploy while the admin secret is unset; `ready` makes
+- The admin secret reaches the app through
+  `env_file: ../.panelalpha/app-credentials.env`; `ready` makes
   `compose up -d` wait for `/healthz`.

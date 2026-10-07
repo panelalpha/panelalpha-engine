@@ -11,7 +11,7 @@
 # the app service's volumes, depends_on and limits would be silently dropped.
 services:
   app:
-    # Written into .env by hooks/prepare.sh; see there (engine#413).
+    # Written into .env by hooks/prepare.sh; see there.
     build:
       args:
         RELEASE_VERSION: ${RELEASE_VERSION:-dev}

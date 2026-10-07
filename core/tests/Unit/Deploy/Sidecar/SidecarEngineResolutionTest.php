@@ -2,10 +2,12 @@
 
 namespace Tests\Unit\Deploy\Sidecar;
 
+use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Compose\ComposeHarden;
 use App\Lib\Deploy\Sidecar\SidecarEngine;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Yaml\Yaml;
 
 /**
  * The evidence ranking in SidecarEngine, layer by layer.
@@ -86,6 +88,61 @@ class SidecarEngineResolutionTest extends TestCase
         $this->assertFalse(SidecarEngine::isKnownDatastore('backup', $backup));
     }
 
+    public function test_an_app_reaching_postgres_through_libpq_variables_is_not_a_database(): void
+    {
+        // AdventureLog: POSTGRES_* for its client, the host as libpq's PGHOST.
+        $app = [
+            'image' => 'ghcr.io/seanmorley15/adventurelog:latest',
+            'environment' => [
+                'POSTGRES_PASSWORD' => 'pw',
+                'PGHOST' => 'db',
+                'POSTGRES_DB' => 'database',
+                'POSTGRES_USER' => 'adventure',
+            ],
+            'ports' => ['8015:80'],
+        ];
+        $this->assertNotSame('postgres', SidecarEngine::resolve('app', $app));
+        $this->assertFalse(ComposeFileInspector::isSidecarsOnlyComposeYaml(
+            Yaml::dump(['services' => ['app' => $app, 'db' => ['image' => 'postgis/postgis:16-3.5']]], 4)
+        ));
+
+        $withUrl = ['image' => 'acme/api', 'environment' => [
+            'MYSQL_USER' => 'u', 'MYSQL_PASSWORD' => 'p', 'DATABASE_URL' => 'mysql://u:p@db/app',
+        ]];
+        $this->assertNotSame('mysql', SidecarEngine::resolve('api', $withUrl));
+    }
+
+    /** Zabbix's frontend names its database host under another prefix. */
+    public function test_a_client_told_its_server_under_another_prefix_is_not_a_database(): void
+    {
+        $web = [
+            'image' => 'zabbix/zabbix-web-nginx-mysql:alpine-7.0-latest',
+            'environment' => [
+                'DB_SERVER_HOST' => 'mysql',
+                'MYSQL_USER' => 'zabbix',
+                'MYSQL_PASSWORD' => 'zabbix_pwd',
+                'MYSQL_DATABASE' => 'zabbix',
+            ],
+        ];
+
+        $this->assertFalse(SidecarEngine::isKnownDatastore('zabbix-web', $web));
+        $this->assertFalse(SidecarEngine::isKnownDatastore('zabbix-server', [
+            'image' => 'zabbix/zabbix-server-mysql:alpine-7.0-latest',
+            'environment' => ['DB_SERVER_HOST=mysql', 'MYSQL_USER=zabbix', 'MYSQL_PASSWORD=pw'],
+        ]));
+    }
+
+    /** A wildcard or a local address is the server's own setting, not a client's target. */
+    public function test_a_servers_own_host_setting_does_not_make_it_a_client(): void
+    {
+        $service = [
+            'image' => 'myorg/our-own-fork:1',
+            'environment' => ['ALLOWED_HOST' => '%', 'MYSQL_USER' => 'u', 'MYSQL_PASSWORD' => 'p', 'BIND_HOST' => 'localhost'],
+        ];
+
+        $this->assertSame('mysql', SidecarEngine::resolve('db', $service));
+    }
+
     public function test_one_shared_variable_is_not_enough_to_claim_an_engine(): void
     {
         $service = [
@@ -94,6 +151,38 @@ class SidecarEngineResolutionTest extends TestCase
         ];
 
         $this->assertNotSame('postgres', SidecarEngine::resolve('reports', $service));
+    }
+
+    /** The server's own setting for where root may log in from; not a client's address. */
+    #[DataProvider('mysqlServersDeclaringRootHost')]
+    public function test_a_server_setting_named_like_a_host_is_not_a_client_marker(array $service): void
+    {
+        $this->assertSame('mysql', SidecarEngine::resolve('db', $service));
+        $this->assertTrue(SidecarEngine::isKnownDatastore('db', $service));
+    }
+
+    /** @return array<string, array{array<string, mixed>}> */
+    public static function mysqlServersDeclaringRootHost(): array
+    {
+        $env = ['MYSQL_ROOT_PASSWORD' => 'x', 'MYSQL_DATABASE' => 'app', 'MYSQL_USER' => 'u', 'MYSQL_PASSWORD' => 'p'];
+
+        return [
+            'repo build' => [['build' => './docker/mysql', 'environment' => $env + ['MYSQL_ROOT_HOST' => '%']]],
+            'unrecognised image' => [[
+                'image' => 'container-registry.oracle.com/mysql/community-server:8.4',
+                'environment' => $env + ['MYSQL_ROOT_HOST' => '%'],
+            ]],
+            'mariadb names' => [['build' => '.', 'environment' => [
+                'MARIADB_ROOT_PASSWORD' => 'x', 'MARIADB_USER' => 'u', 'MARIADB_PASSWORD' => 'p', 'MARIADB_ROOT_HOST' => '%',
+            ]]],
+        ];
+    }
+
+    public function test_a_real_host_setting_still_marks_a_mysql_client(): void
+    {
+        $client = ['build' => '.', 'environment' => ['MYSQL_HOST' => 'db', 'MYSQL_USER' => 'u', 'MYSQL_PASSWORD' => 'p']];
+
+        $this->assertFalse(SidecarEngine::isKnownDatastore('app', $client));
     }
 
     // --- layer 3: ports ------------------------------------------------
@@ -439,7 +528,7 @@ class SidecarEngineResolutionTest extends TestCase
                     $this->assertIsString($entry[$optional], "{$engine}.{$optional}");
                 }
             }
-            foreach (['aliases', 'init_vars'] as $list) {
+            foreach (['aliases', 'init_vars', 'server_settings'] as $list) {
                 if (isset($entry[$list])) {
                     $this->assertIsArray($entry[$list], "{$engine}.{$list}");
                 }

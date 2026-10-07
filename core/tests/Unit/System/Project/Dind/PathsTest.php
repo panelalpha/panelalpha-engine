@@ -114,6 +114,19 @@ class PathsTest extends TestCase
         $this->assertTrue(Paths::isEngineComposeFile($this->appDir('gina').'/'.EngineArtifacts::RUN_CLIENT_OVERRIDE));
     }
 
+    public function test_under_a_replacing_app_config_compose_only_the_hardened_copy_is_layered(): void
+    {
+        $dind = $this->dindProject('hana', Strategies::COMPOSE);
+        $this->writeRunFile('hana');
+        file_put_contents($this->appDir('hana').'/'.EngineArtifacts::APP_CONFIG_COMPOSE, "services:\n  app:\n    image: acme/app\n");
+        file_put_contents($this->appDir('hana').'/'.Paths::CLIENT_OVERRIDE_FILENAME, "services:\n  web: {}\n");
+
+        $this->assertNotContains($this->appDir('hana').'/'.Paths::CLIENT_OVERRIDE_FILENAME, $this->composeFileArgs($dind));
+
+        file_put_contents($this->appDir('hana').'/'.EngineArtifacts::RUN_CLIENT_OVERRIDE, "services:\n  app: {}\n");
+        $this->assertContains($this->appDir('hana').'/'.EngineArtifacts::RUN_CLIENT_OVERRIDE, $this->composeFileArgs($dind));
+    }
+
     public function test_compose_files_never_layers_the_client_override_for_a_recipe_strategy(): void
     {
         $dind = $this->dindProject('bob', 'express');
@@ -150,6 +163,48 @@ class PathsTest extends TestCase
         $this->assertContains(
             $this->appDir('faye').'/'.Paths::CLIENT_OVERRIDE_FILENAME,
             $this->composeFileArgs($dind)
+        );
+    }
+
+    /** SyncTube binds `${PWD}/user`: compose must see PWD as the project, as by hand. */
+    public function test_every_compose_command_runs_with_pwd_set_to_the_project(): void
+    {
+        $dind = $this->dindProject('pia', Strategies::COMPOSE);
+        $this->writeRunFile('pia');
+        $dir = $this->tmpRoot.'/staging';
+        mkdir($dir, 0777, true);
+
+        $this->assertSame(['env', 'PWD='.$this->appDir('pia'), 'docker', 'compose'], array_slice($dind->userAppComposeCommand(['up']), 0, 4));
+        $this->assertSame(['env', 'PWD='.$dir, 'docker', 'compose'], array_slice((new Paths($dind))->composeCommandForDirectory($dir), 0, 4));
+    }
+
+    /**
+     * Generated `${X:?}` secrets live in `.env.panelalpha`, out of `.env` and
+     * so out of a build context: compose has to interpolate from both files,
+     * and naming one replaces its default `.env`.
+     */
+    public function test_compose_interpolates_from_env_panelalpha_beside_env_when_it_exists(): void
+    {
+        $dind = $this->dindProject('lena', Strategies::COMPOSE);
+        $this->writeRunFile('lena');
+        $app = $this->appDir('lena');
+
+        $this->assertNotContains('--env-file', $dind->userAppComposeCommand(['up']));
+        $this->assertArrayNotHasKey('COMPOSE_ENV_FILES', $dind->userAppComposeEnv());
+
+        file_put_contents($app.'/'.EngineArtifacts::ENV_OVERRIDES, "DB_PASSWORD=x\n");
+        $this->assertSame([$app.'/'.EngineArtifacts::ENV_OVERRIDES], (new Paths($dind))->envFiles(), 'an absent .env is not named');
+
+        file_put_contents($app.'/.env', "SITE=demo\n");
+        $command = $dind->userAppComposeCommand(['up']);
+        $this->assertSame(['env', 'PWD='.$app, 'docker', 'compose'], array_slice($command, 0, 4));
+        $this->assertSame(
+            ['--env-file', $app.'/.env', '--env-file', $app.'/'.EngineArtifacts::ENV_OVERRIDES],
+            array_slice($command, 6, 4)
+        );
+        $this->assertSame(
+            $app.'/.env,'.$app.'/'.EngineArtifacts::ENV_OVERRIDES,
+            $dind->userAppComposeEnv()['COMPOSE_ENV_FILES']
         );
     }
 

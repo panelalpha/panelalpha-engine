@@ -2,6 +2,8 @@
 
 namespace App\Console\Commands\Users;
 
+use App\Exceptions\ProjectBusyException;
+use App\Lib\Project\ProjectDeleter;
 use App\Models\User;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -63,8 +65,11 @@ class Delete extends Command
             
             if ($shouldDelete) {
                 try{
-                    $user->project()->destroy();
+                    (new ProjectDeleter())->delete($user);
                     $this->info("User `{$username}` deleted.");
+                } catch (ProjectBusyException $e) {
+                    $this->error($e->plainMessage());
+                    $failed = true;
                 } catch (\Exception $e) {
                     Log::warning(
                         "Could not delete user '{$user->username}': " . $e->getMessage(),

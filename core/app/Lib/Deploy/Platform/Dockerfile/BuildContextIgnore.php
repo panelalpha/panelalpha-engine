@@ -18,11 +18,11 @@ use App\Lib\Deploy\Platform\DockerfileBuilder;
  *   `install` to `upgrade` on the second deploy, so `COPY . .` missed;
  * - `.git`: every deploy is a fresh clone, and two clones of one commit have
  *   different `.git` bytes, so `COPY . .` missed on every deploy;
- * - `.env.panelalpha`: the account's env_vars, which must not be baked into
- *   an image;
+ * - `.env.panelalpha`: secrets the engine generated, and a tracked .env's
+ *   env_vars, which must not be baked into an image;
  * - an empty `.env` the engine created for `env_file:`, when the Dockerfile
  *   does not copy it by name: Apache Guacamole's RAT license check failed on
- *   it and on the compose file (engine#162). See {@see excludesEnv()}.
+ *   it and on the compose file. See {@see excludesEnv()}.
  */
 final class BuildContextIgnore
 {
@@ -118,6 +118,10 @@ final class BuildContextIgnore
             EngineArtifacts::RUN_COMPOSE_OVERRIDE,
             EngineArtifacts::APP_CONFIG_COMPOSE,
             EngineArtifacts::ENV_OVERRIDES,
+            // The engine's 0600 copy of the base .env, generated secrets included.
+            EngineArtifacts::ENV_DEFAULT,
+            EngineArtifacts::RUN_PASSWD,
+            EngineArtifacts::RUN_GROUP,
             DockerfileBuilder::FILENAME,
             self::pathFor(DockerfileBuilder::FILENAME),
             self::pathFor($dockerfile),

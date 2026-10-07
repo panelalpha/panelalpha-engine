@@ -57,7 +57,8 @@ class ChangeWebserverWebserverTest extends TestCase
         $this->assertSame('warn', trim((string) $info['tail_stderr']));
         $this->assertSame('nginx', $info['from_version']);
         $this->assertSame('litespeed', $info['to_version']);
-        $this->assertSame($latest, $info['logs_path']);
+        // The fixture is read through a mapped filesystem; the path reported is the host's.
+        $this->assertSame('/opt/panelalpha/log/change-webserver/latest', $info['logs_path']);
     }
 
     public function test_run_change_webserver_script_without_serial(): void

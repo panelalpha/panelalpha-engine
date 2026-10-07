@@ -56,7 +56,7 @@ services:
       # postgres; this holds runtime bank-scraping state. Named volume so it
       # survives a redeploy.
       - kresus_data:/home/user/data
-    # engine#234: an only-expose'd port makes the proxy 502; publish it so the
+    # An only-expose'd port makes the proxy 502; publish it so the
     # engine learns the app port is 9876 (host binding is re-wired by the proxy).
     ports:
       - "9876:9876"
@@ -73,7 +73,7 @@ services:
       start_period: 40s
 
   # No-op gate: `up` waits for kresus to be healthy before starting this, and
-  # the engine calls the deploy finished when `up` returns (engine#90). Reuses
+  # the engine calls the deploy finished when `up` returns. Reuses
   # the already-pulled image with a trivial entrypoint so it pulls nothing extra
   # and runs no woob install.
   ready:

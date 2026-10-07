@@ -24,7 +24,7 @@ DATA=/data
 # `database.default.hostname` and the rest. Writing it here rather than in the
 # prepare hook is what keeps the database password and the analytics salt out
 # of the world-readable .env.default copy the engine takes of the checkout
-# (engine#173) -- that copy is of the placeholder the hook left behind.
+# -- that copy is of the placeholder the hook left behind.
 #
 # Rewritten on every install and upgrade, deliberately: APP_URL and the
 # database credentials are the deploy's to decide, and a redeploy that moved
@@ -214,8 +214,7 @@ done
 #       themes/cp_app/home.php(32)
 #
 # -- so the home page, the admin area and the login form are all HTTP 500 while
-# /health answers 200, because /health renders no view. Measured: 385 files
-# scanned, 161 icons, about a second.
+# /health answers 200, because /health renders no view.
 #
 # It has to run on every deploy and not just the first: the file is inside
 # vendor/, which the build rewrites from scratch.
@@ -277,9 +276,9 @@ admin_user="${CASTOPOD_ADMIN_USERNAME:-admin}"
 # The address has to be one CodeIgniter's `valid_email` accepts, and that rule
 # is filter_var(FILTER_VALIDATE_EMAIL), which wants a dot in the domain --
 # `admin@localhost` is rejected and the command aborts with `Super admin
-# creation aborted`, leaving /cp-install open on a public address. Measured on
-# the deploy before this line existed. The engine's value is admin@<the
-# account's domain>, which has one; this derivation is only the fallback.
+# creation aborted`, leaving /cp-install open on a public address. The engine's
+# value is admin@<the account's domain>, which has one; this derivation is only
+# the fallback.
 admin_email="${CASTOPOD_ADMIN_EMAIL:-}"
 if [ -z "${admin_email}" ]; then
     admin_host=$(printf '%s' "${base_url}" | sed -e 's|^[a-z][a-z0-9+.-]*://||' -e 's|[:/].*$||')

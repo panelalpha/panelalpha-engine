@@ -10,7 +10,7 @@ description: >-
   SEED THE OFFICIAL IMAGE, DO NOT BUILD. FitTrackee publishes an official image
   on Docker Hub, fittrackee/fittrackee, tagged per release; this recipe pins the
   current stable v1.3.5 (v1.4.0b1 is a beta and is not used). Seeding a Docker
-  Hub image also sidesteps engine#229 (image-seed NotFound). The container runs
+  Hub image also sidesteps the image-seed NotFound. The container runs
   the app's own docker-entrypoint.sh: it applies migrations (`ftcli db upgrade`)
   then execs gunicorn on :5000.
 
@@ -34,7 +34,7 @@ description: >-
       the app out of its own database;
     - Postgres data, GPX/avatar uploads, the staticmap cache and logs each on a
       named volume, so users, workouts and uploaded files survive a redeploy;
-    - only the app service publishing a port (engine#231/#234).
+    - only the app service publishing a port.
 
   DOMAIN + HTTPS. FitTrackee builds absolute links (share URLs, email links)
   from UI_URL. The compose carries UI_URL=http://localhost:5000, which the engine
@@ -53,8 +53,8 @@ description: >-
   email verification is needed). It is idempotent: on a redeploy the account
   already exists, so the password is left untouched and only the role is re-
   asserted -- sessions are not invalidated. The `ready` gate blocks the deploy
-  from turning green until the site answers AND the admin has been seeded
-  (engine#204), so the deploy never finishes without an owner account.
+  from turning green until the site answers AND the admin has been seeded,
+  so the deploy never finishes without an owner account.
   Self-registration is left at the app default (enabled): new accounts see only
   their own data plus workouts explicitly made public, so open sign-up does not
   expose the owner's private data; the owner can disable it from Administration ->

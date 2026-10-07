@@ -7,7 +7,7 @@ description: >-
   deploy; the project also publishes a ready official image on Docker Hub
   (`nelkinsky/shipshipship`), so this recipe REPLACES the build compose with a
   one-service stack that pulls that image instead. Docker Hub images seed onto
-  the account without the wrapper build that engine#229 would otherwise force,
+  the account without the wrapper build that the image-seeding bug would otherwise force,
   and building a CGO/SQLite Go stage plus a Node stage on a 2-core host is slow
   and needless when the maintainer already ships the artifact.
 

@@ -13,7 +13,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * The engine writes `<Dockerfile>.dockerignore` into the account's checkout,
- * never touching a file the project owns. #208 / #197.
+ * never touching a file the project owns.
  */
 class BuildContextIgnoreWriterTest extends TestCase
 {
@@ -67,6 +67,19 @@ class BuildContextIgnoreWriterTest extends TestCase
 
         $this->assertDoesNotMatchRegularExpression('/^\.git$/m', $this->read('Dockerfile.dockerignore'));
         $this->assertMatchesRegularExpression('/^docker-compose\.panelalpha\.yml$/m', $this->read('Dockerfile.dockerignore'));
+    }
+
+    public function test_a_script_file_the_install_runs_that_reads_history_keeps_git(): void
+    {
+        mkdir($this->project . '/tools');
+        $this->put('Dockerfile', "FROM node:22\nCOPY . /app/\nRUN yarn\n");
+        $this->put('package.json', '{"scripts":{"postinstall":"run build:writefile","build:writefile":"tsx ./tools/w.mts"}}');
+        $this->put('tools/w.mts', "import { v } from './lib.mts'\n");
+        $this->put('tools/lib.mts', "await \$`git rev-parse --short=10 HEAD`\n");
+
+        $this->writer()->write($this->project, 'Dockerfile', false, null);
+
+        $this->assertDoesNotMatchRegularExpression('/^\.git$/m', $this->read('Dockerfile.dockerignore'));
     }
 
     public function test_a_projects_own_dockerfile_ignore_is_left_alone(): void

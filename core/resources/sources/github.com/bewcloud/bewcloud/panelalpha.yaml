@@ -5,7 +5,7 @@ description: >-
   Upstream's docker-compose.yml needs a hand-written .env (`env_file: .env,
   required: true`) and bewcloud.config.ts, keeps files in ./data-files, and
   its README runs `make migrate-db` by hand after the first `up`; the plain
-  deploy failed at "Network project_default Creating". This recipe runs the
+  deploy fails at "Network project_default Creating". This recipe runs the
   same images (ghcr.io/bewcloud/bewcloud:v4.15.0, the current release,
   postgres:18.4, tomsquest/docker-radicale:3.7.6.0) with: DB password,
   JWT_SECRET, PASSWORD_SALT and MFA key/salt generated once by
@@ -16,18 +16,7 @@ description: >-
   website waits for. As upstream ships it, the first sign-up creates the
   admin and further sign-ups are closed.
   Upstream's radicale service drops ALL capabilities and adds back four; the
-  engine strips cap_add but keeps cap_drop (engine#349), so that pair is left
+  engine strips cap_add but keeps cap_drop, so that pair is left
   out and Docker's defaults apply. Postgres' `ulimits: memlock: -1` is left
-  out too: raising RLIMIT_MEMLOCK is not permitted inside the account
-  (engine#346), and it is what failed the plain deploy on this host.
-
-  == Verified on 10.10.10.25 (engine 705f250a), memory_limit 2000 ==
-
-  Fresh create: success (health :8000 ok), migrate ran all migrations,
-  radicale healthy. / 303 -> /login, <title>Login - bewCloud</title>;
-  /signup 200. First sign-up + login set the bewcloud-app-v1 cookie on the
-  account domain, /files 200 "Files - bewCloud", a file upload stored it.
-  Rebuild: success, migrate "No migrations to run!", the same user logs in
-  and the file opens (volumes kept). /.env, /.git/config and
-  /bewcloud.config.ts 404. Idle: website 62 MiB, postgres 26 MiB, radicale
-  22 MiB.
+  out too: raising RLIMIT_MEMLOCK is not permitted inside the account,
+  and it is what fails the plain deploy.

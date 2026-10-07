@@ -191,7 +191,9 @@ class ProjectFactoryTest extends TestCase
 
     private function phpHostingModel(string $username): ModelsUser
     {
-        $model = new ModelsUser();
+        // No main domain: git falls back to ~/public_html, and no database is asked.
+        $model = self::getStubBuilder(ModelsUser::class)->onlyMethods(['getMainDomain'])->getStub();
+        $model->method('getMainDomain')->willReturn(null);
         $model->username = $username;
 
         return $model;

@@ -17,7 +17,7 @@ description: >-
   credentials) and app.env (SALTCORN_SESSION_SECRET), both 0600. The app does not read the project's .env: the engine seeds it
   from upstream's .env.example, a local-testing file that sets
   SQLITE_FILEPATH (which would put the database inside the container) and a
-  published SALTCORN_SESSION_SECRET (engine#218). The file
+  published SALTCORN_SESSION_SECRET. The file
   store and installed plugins (/root/.local/share) and the database are on
   named volumes, so they survive a redeploy. Saltcorn forks one worker per
   CPU (about 200 MB each, 4 workers used 794 MB here); SALTCORN_NWORKERS

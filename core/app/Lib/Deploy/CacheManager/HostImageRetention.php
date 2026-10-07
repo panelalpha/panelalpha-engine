@@ -9,8 +9,9 @@ use App\Lib\Deploy\Dind\DindImageStore;
  *
  * Only images the deploy path puts on the host are in scope: the bases the
  * engine builds (`panelalpha/php:*-x…` variants, Ruby/Python bases, superseded
- * recipe dates) and anything from a repository `config/core/images.yaml`
- * resolves runtimes from (golang, node, python, dotnet, …). The engine's own
+ * recipe dates), anything from a repository `config/core/images.yaml`
+ * resolves runtimes from (golang, node, python, dotnet, …), and the Railpack
+ * images a Railpack deploy fetches for its accounts. The engine's own
  * images and a repo's compose sidecars are never touched here; the sidecars are
  * account teardown's ({@see \App\Lib\Deploy\Dind\DindAccountCleanup}).
  *
@@ -52,7 +53,7 @@ final class HostImageRetention
      */
     public static function inScope(string $ref, array $catalog): bool
     {
-        if (BuiltImage::isOurs($ref)) {
+        if (BuiltImage::isOurs($ref) || RailpackCache::isRailpackImage($ref)) {
             return true;
         }
         $repository = self::repository($ref);

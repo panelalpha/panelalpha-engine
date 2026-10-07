@@ -20,14 +20,14 @@ description: >-
   which is why a fresh `docker compose up -d` works in the upstream docs and why
   this recipe does not add its own migrate step. Pinned to `0.18`, the current
   maintained release line (composer.json is 0.18.0); a Hub-published tag, so the
-  engine pulls it normally and the from-source seed path (engine#229) never
+  engine pulls it normally and the from-source seed path never
   applies.
 
   Storage is SQLite on a named volume by design: it is the app's default, it
   needs no datastore sidecar, and Many Notes keeps note bodies in the database
   while attachments live under storage/app/private. Three named volumes hold
-  everything that must outlive a redeploy (~/project is wiped every deploy,
-  engine#173): the SQLite database directory, the private attachment store, and
+  everything that must outlive a redeploy (~/project is wiped every deploy):
+  the SQLite database directory, the private attachment store, and
   the Typesense index. The database volume is where the notes actually live;
   losing it would lose the notes.
 
@@ -54,6 +54,6 @@ description: >-
   is no credential to generate or print.
 
   A no-op `ready` service gated on the app's healthcheck makes `docker compose
-  up -d` return only once Many Notes actually answers (engine#204): the app
+  up -d` return only once Many Notes actually answers: the app
   healthcheck hits /up (framework liveness) and /login (which renders only once
   migrations have created the sessions table and APP_KEY is valid).

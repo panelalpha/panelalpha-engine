@@ -68,7 +68,7 @@ class GitRemoteProbe
         $branch = $branch === null || trim($branch) === '' ? null : trim($branch);
 
         // With a branch, the same ls-remote also says whether the remote has
-        // it, so a typo is a 422 instead of a deploy that fails at clone (#83).
+        // it, so a typo is a 422 instead of a deploy that fails at clone.
         return $branch === null
             ? $this->check($repoField, $repoUrl, $token, $tokenField)->problem
             : $this->probe($repoField, $repoUrl, $token, $tokenField, $branch, $branchField)->problem;
@@ -123,6 +123,10 @@ class GitRemoteProbe
             $attempt = 0;
             do {
                 $run = $this->run($command);
+                // As the account's clone and fetches do ({@see GitUrl::overHttp11()}).
+                if (!$run['ok'] && GitUrl::refusedOverHttp2($run['stderr'])) {
+                    $run = $this->run(GitUrl::overHttp11($command));
+                }
             } while ($run['timedOut'] && ++$attempt < $this->attempts);
 
             $result = $this->interpret($run, $repoField, $repoUrl, $hasToken, $tokenField);
@@ -153,7 +157,7 @@ class GitRemoteProbe
      * @param list<string> $command
      * @return array{timedOut: bool, ok: bool, stderr: string}
      */
-    private function run(array $command): array
+    protected function run(array $command): array
     {
         $this->lastOutput = '';
 
@@ -289,7 +293,7 @@ class GitRemoteProbe
      * @param list<string> $heads
      * @param list<string> $tags
      */
-    private static function closestRef(string $branch, array $heads, array $tags): ?string
+    public static function closestRef(string $branch, array $heads, array $tags): ?string
     {
         $short = (string) preg_replace('#^refs/(heads|tags)/#', '', $branch);
         $best = null;

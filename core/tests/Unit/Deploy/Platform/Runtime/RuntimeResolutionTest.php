@@ -74,8 +74,34 @@ class RuntimeResolutionTest extends TestCase
         ];
     }
 
+    /** With a lock the packages are pinned, so the floor is enough. */
     #[\PHPUnit\Framework\Attributes\DataProvider('phpConstraints')]
     public function test_php_picks_the_lowest_minor_satisfying_the_constraint(string $constraint, string $expected): void
+    {
+        $this->write('composer.json', json_encode(['require' => ['php' => $constraint]]));
+        $this->write('composer.lock', json_encode(['packages' => []]));
+
+        $this->assertSame($expected, RuntimeRegistry::get('php')->resolve($this->context())?->version);
+    }
+
+    /** @return array<string, array{0: string, 1: string}> */
+    public static function locklessPhpConstraints(): array
+    {
+        return [
+            'caret 8.1'      => ['^8.1', '8.3'],
+            'gte 7.4'        => ['>=7.4', '8.3'],
+            'caret 8.4'      => ['^8.4', '8.4'],
+            'bounded range'  => ['>=8.1 <8.3', '8.1'],
+        ];
+    }
+
+    /**
+     * Aimeos: `^8.1` with no lock resolved to 8.1, and the fresh `composer
+     * update` then failed on laravel/framework ^13, which needs 8.3. Without a
+     * lock the default minor wins whenever the constraint allows it.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('locklessPhpConstraints')]
+    public function test_a_project_without_a_lock_gets_the_default_minor_its_floor_allows(string $constraint, string $expected): void
     {
         $this->write('composer.json', json_encode(['require' => ['php' => $constraint]]));
 
@@ -194,7 +220,7 @@ class RuntimeResolutionTest extends TestCase
         $this->assertNull(PhpRuntime::lockedPlatform(json_encode(['platform-overrides' => ['php' => '7.2']])));
 
         // No lock, no statement: the constraint path stays in charge.
-        $this->write('composer.json', json_encode(['require' => ['php' => '^8.2']]));
+        $this->write('composer.json', json_encode(['require' => ['php' => '~8.2.0']]));
         $this->assertSame('8.2', RuntimeRegistry::get('php')->resolve($this->context())?->version);
     }
 
@@ -227,6 +253,29 @@ class RuntimeResolutionTest extends TestCase
             'packages' => [['name' => 'bad/b', 'require' => ['php' => '~8.4.0']]],
         ])));
         $this->assertFalse(PhpRuntime::lockedPhpContradicted(null));
+    }
+
+    public function test_a_locked_package_rejecting_the_minor_composer_json_allows_is_named(): void
+    {
+        $lock = (string) json_encode([
+            'platform' => ['php' => '^8.3.0'],
+            'packages' => [['name' => 'paragonie/random_compat', 'version' => 'v9.99.99', 'require' => ['php' => '^7']]],
+        ]);
+        $json = (string) json_encode(['require' => ['php' => '^8.3.0']]);
+
+        $this->assertSame(
+            'paragonie/random_compat v9.99.99 (php ^7)',
+            PhpRuntime::lockedPackageRejecting($json, $lock, '8.3')
+        );
+        // The root rules 8.3 out itself: that project needs another PHP, not a relaxed install.
+        $this->assertNull(PhpRuntime::lockedPackageRejecting((string) json_encode(['require' => ['php' => '^7.1']]), $lock, '8.3'));
+        // No root requirement: nothing says the lock is the stale side.
+        $this->assertNull(PhpRuntime::lockedPackageRejecting('{}', $lock, '8.3'));
+        // A lock pinning a minor is lockedPhpContradicted()'s question.
+        $this->assertNull(PhpRuntime::lockedPackageRejecting($json, (string) json_encode([
+            'platform' => ['php' => '8.3'],
+            'packages' => [['name' => 'old/x', 'require' => ['php' => '^7']]],
+        ]), '8.3'));
     }
 
     /**
@@ -274,6 +323,31 @@ class RuntimeResolutionTest extends TestCase
         $requirement = RuntimeRegistry::get('python')->resolve($this->context());
         $this->assertSame('3.13', $requirement?->version);
         $this->assertSame('python:3.13-slim', RuntimeRegistry::get('python')->image($requirement));
+    }
+
+    /**
+     * index-tts: requires-python ">=3.10,<3.12" with .python-version 3.11.13.
+     * The 3.10 image made uv rebuild .venv on a CPython of its own that the
+     * run container does not have.
+     */
+    public function test_python_version_pin_wins_over_requires_python(): void
+    {
+        $this->write('pyproject.toml', "[project]\nrequires-python = \">=3.10,<3.12\"\n");
+        $this->write('.python-version', "3.11.13\n");
+
+        $requirement = RuntimeRegistry::get('python')->resolve($this->context());
+        $this->assertSame('3.11', $requirement?->version);
+        $this->assertSame('.python-version', $requirement?->source);
+    }
+
+    public function test_python_version_pin_forms(): void
+    {
+        $this->write('requirements.txt', "flask\n");
+        foreach (["3.12\n" => '3.12', "# comment\ncpython@3.13\n" => '3.13',
+            "cpython-3.10.4-linux-x86_64-gnu\n" => '3.10', "system\n" => '3.12'] as $pin => $expected) {
+            $this->write('.python-version', $pin);
+            $this->assertSame($expected, RuntimeRegistry::get('python')->resolve($this->context())?->version, $pin);
+        }
     }
 
     public function test_ruby_reads_ruby_version_and_strips_an_engine_prefix(): void

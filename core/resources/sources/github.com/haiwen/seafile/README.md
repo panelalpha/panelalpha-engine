@@ -3,16 +3,17 @@
 **This repository is the Seafile desktop sync client daemon, not the Seafile
 server.** It is an autotools C/Vala tree — `configure.ac`, `autogen.sh`,
 `daemon/seaf-daemon.c`, `lib/`, `app/seaf-cli`, a Visual Studio solution and a
-`vcpkg.json` — that builds `libseafile`, `seaf-daemon` and `seaf-cli`. 217
-files, no HTTP server, no compose file, no Dockerfile, no `.env`. Its own
+`vcpkg.json` — that builds `libseafile`, `seaf-daemon` and `seaf-cli`. No HTTP
+server, no compose file, no Dockerfile, no `.env`. Its own
 README says it in as many words:
 
 > Sync client daemon (this repository): https://github.com/haiwen/seafile
 > Server core: https://github.com/haiwen/seafile-server
 > Server web UI: https://github.com/haiwen/seahub
 
-Detection: **Unknown**, strategy `fallback`, `nginx:alpine` over the checkout →
-`serving-placeholder`. That verdict was correct about the tree.
+Without the recipe, detection finds nothing it knows: strategy `fallback`,
+`nginx:alpine` over the checkout, a placeholder page. That is correct about the
+tree.
 
 ## Why there is a recipe here anyway
 
@@ -87,7 +88,7 @@ environment **on every boot** and rebuilds `SERVICE_URL` and
 renamed project follows its domain on the next redeploy with no reinstall.
 
 Without it the site still answers (`ALLOWED_HOSTS = ['*']` in `settings.py`, so
-the loopback health probe is never a 400 — engine#165 does not bite here), but
+the loopback health probe is never a 400), but
 every absolute link it generates — share links, upload endpoints, avatar URLs —
 points at `localhost`. The script logs a warning when that happens.
 
@@ -99,8 +100,6 @@ dedicated server. The init script patches the generator (so first boot writes
 2) and the generated file (so every boot after keeps 2), which makes the
 ordering irrelevant. Override with `SEAHUB_WORKERS` / `SEAHUB_THREADS`.
 
-Measured idle after a first boot on mariusz: seafile 433 MB, db 132 MB, cache
-8 MB — 573 MB of a 2000 MB account.
 `mem_limit`s are 1280/384/96/64 m — 1824 m inside a 2000 m account, with the
 headroom on the seafile service where uploads and thumbnailing need it.
 
@@ -143,18 +142,14 @@ fails on it.
 
 ## Uploads and the tunnel edge (not this recipe)
 
-Verified working: sign-in, library creation, upload through `/seafhttp` and
-download, over the account's own address. Over a `*.panelalpha.online` tunnel
-domain the upload POST hangs and the edge answers
+Uploads through `/seafhttp` work over the account's own address. Over a
+`*.panelalpha.online` tunnel domain the upload POST hangs and the edge answers
 `302 → withoutdns.com/internal-server-error.html`.
 
-That is **not Seafile**. On the same host a bare `-F a=b` POST to two unrelated
-projects (bugsink, swingmusic) also times out, while `GET` and
-`application/x-www-form-urlencoded` POSTs to the same URLs answer normally, and
-`GET /seafhttp/protocol-version` through the tunnel returns `{"version": 2}`.
-Every `multipart/form-data` request on that edge stalls, for every app. It
-matters more here than elsewhere only because uploading files is what Seafile
-is for.
+That is **not Seafile**: every `multipart/form-data` request on that edge
+stalls, for every app, while `GET` and `application/x-www-form-urlencoded`
+POSTs answer normally. It matters more here than elsewhere only because
+uploading files is what Seafile is for.
 
 ## Not configured
 

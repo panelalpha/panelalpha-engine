@@ -44,7 +44,8 @@ class BuildContextIgnoreWriter
         $reason = GitHistoryUse::reason(
             $generated ? null : $tree->readIn($projectDir, $dockerfile),
             $projectIgnore,
-            $manifests
+            $manifests,
+            fn (string $file): ?string => $tree->readIn($projectDir, $file)
         );
 
         $excludeEnv = !$generated && $this->emptyEnvIsUnread($projectDir, $dockerfile);

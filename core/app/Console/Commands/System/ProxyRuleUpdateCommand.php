@@ -2,11 +2,21 @@
 
 namespace App\Console\Commands\System;
 
+use App\Console\Commands\Concerns\AppliesProxyRules;
 use App\Models\ProxyRule;
+use App\Rules\UpstreamHost;
+use App\System;
+use App\System\Services\Webserver\ProxyListenPort;
+use App\System\Services\Webserver\ProxyRuleServerName;
+use App\System\Services\Webserver\ProxyRuleUpstream;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 
 class ProxyRuleUpdateCommand extends Command
 {
+    use AppliesProxyRules;
+
     /** The old spelling still answers, so nothing scripted against it breaks. */
     protected $aliases = ['proxy-rule:update'];
 
@@ -62,14 +72,51 @@ class ProxyRuleUpdateCommand extends Command
             return 1;
         }
 
+        // The same rules as PUT /proxy-rules/{id}: these go into the shared proxy config verbatim.
+        $validator = Validator::make($updates, [
+            'upstream_host' => [new UpstreamHost()],
+            'upstream_protocol' => [Rule::in(['http', 'https'])],
+        ]);
+        if ($validator->fails()) {
+            foreach ($validator->errors()->all() as $message) {
+                $this->error($message);
+            }
+            return 1;
+        }
+
+        // Its port is the rule's own while it is enabled; only switching it on takes a new one.
+        if (($updates['enabled'] ?? false) && !$rule->enabled) {
+            $refusal = (new ProxyListenPort(app(System::class)))
+                ->refusal($rule->transport, $rule->listen_ip ?? '*', $rule->listen_port);
+            if ($refusal !== null) {
+                $this->error($refusal);
+                return 1;
+            }
+        }
+
+        // As the API: checked whenever the rule stays or goes live.
+        if ($updates['enabled'] ?? $rule->enabled) {
+            $host = (string) ($updates['upstream_host'] ?? $rule->upstream_host);
+            $refusal = ProxyRuleUpstream::refusal($rule->owner_scope, $rule->username, $host)
+                ?? ProxyRuleServerName::refusal($rule->owner_scope, $rule->username, $rule->server_name);
+            if ($refusal !== null) {
+                $this->error($refusal);
+                return 1;
+            }
+        }
+
         $this->info('Current values:');
         $this->line("  Upstream Host: " . $rule->upstream_host);
         $this->line("  Upstream Port: " . $rule->upstream_port);
         $this->line("  Upstream Protocol: " . ($rule->upstream_protocol ?? '-'));
         $this->line("  Enabled: " . ($rule->enabled ? 'Yes' : 'No'));
 
-        $this->info('\nNew values:');
+        $this->newLine();
+        $this->info('New values:');
         foreach ($updates as $key => $value) {
+            if (is_bool($value)) {
+                $value = $value ? 'Yes' : 'No';
+            }
             $this->line("  " . ucfirst(str_replace('_', ' ', $key)) . ": $value");
         }
 
@@ -80,6 +127,7 @@ class ProxyRuleUpdateCommand extends Command
 
         $rule->update($updates);
         $this->info('Rule updated successfully.');
+        $this->applyProxyRules();
 
         return 0;
     }

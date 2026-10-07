@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('container_service_logs')]
 #[Description(<<<'MARKDOWN'
     Get logs from a Docker service
+
+    The last `lines` lines (at most 5000), optionally limited to `since` / `until`.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -49,6 +51,8 @@ class ContainerServiceLogsTool extends ApiTool
     {
         return [
             'lines',
+            'since',
+            'until',
         ];
     }
 
@@ -70,7 +74,9 @@ class ContainerServiceLogsTool extends ApiTool
         return [
             'name' => $schema->string()->required(),
             'service' => $schema->string()->required(),
-            'lines' => $schema->integer(),
+            'lines' => $schema->integer()->min(1)->max(5000),
+            'since' => $schema->string()->description('Only lines written after this: an RFC 3339 time (2026-10-03T12:00:00Z) or a duration back from now (10m, 2h, 1h30m).'),
+            'until' => $schema->string()->description('Only lines written before this: an RFC 3339 time (2026-10-03T12:00:00Z) or a duration back from now (10m, 2h, 1h30m).'),
         ];
     }
 }

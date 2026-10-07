@@ -31,5 +31,5 @@ SSH/Telnet host with that host's own credentials.
   and `SSHWIFTY_ONLYALLOWPRESETREMOTES=yes` to the env file and redeploy.
 - To rotate the key: edit `sharedkey.env` and redeploy.
 - On `*.panelalpha.online` test names the shared edge strips the websocket
-  `Upgrade` header (engine#170), so the page loads and the key is accepted but
+  `Upgrade` header, so the page loads and the key is accepted but
   connections fail. On the account's own domain it works.

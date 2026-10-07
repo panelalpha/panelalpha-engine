@@ -5,6 +5,7 @@ namespace App\System\Services\Webserver;
 use App\Models\Domain;
 use App\Models\ProxyRule;
 use App\System as EngineSystem;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Nginx-proxy routing compiler.
@@ -58,7 +59,22 @@ class RoutingCompiler
 
     private function loadPersistedRules(): void
     {
-        $this->persistedRules = ProxyRule::getEnabled();
+        $owners = ProxyRuleServerName::owners();
+        $this->persistedRules = array_values(array_filter(ProxyRule::getEnabled(), static function (ProxyRule $rule) use ($owners): bool {
+            // Stored before these were checked: neither served nor given a port.
+            if (!ProxyRuleUpstream::serves($rule)) {
+                Log::warning("Proxy rule {$rule->id} of {$rule->username} is not served: "
+                    . "its upstream {$rule->upstream_host} is not the project's own app.");
+                return false;
+            }
+            if (!ProxyRuleServerName::serves($rule, $owners)) {
+                Log::warning("Proxy rule {$rule->id} of {$rule->username} is not served: "
+                    . "its server name {$rule->server_name} is not one of the project's own domains.");
+                return false;
+            }
+
+            return true;
+        }));
     }
 
     /**

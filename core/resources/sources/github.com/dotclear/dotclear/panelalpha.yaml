@@ -15,8 +15,8 @@ description: >-
      probe would serve as a 403 (see PhpDocroot's own note). This HEAD ships no
      public/ at all, so detection already resolves the root -- `docroot: "."`
      just says it out loud and pins it against the media symlink below creating
-     a public/ later. Measured against stock mariusz2
-     (LATE_CANDIDATES = ['src']); src/ has no index.php so it never wins.
+     a public/ later. PhpDocroot's LATE_CANDIDATES is ['src'], and src/ has
+     no index.php so it never wins.
 
   2. **The installer is first-visitor-wins.** admin/install/ is a web wizard
      that lets whoever reaches it first create the super-admin. The setup script
@@ -32,7 +32,7 @@ description: >-
      --db* flags), so the script feeds the interactive prompts over stdin
      instead -- upstream is left untouched.
 
-  3. **~/project is emptied every deploy (engine#173).** Dotclear keeps its
+  3. **~/project is emptied every deploy.** Dotclear keeps its
      config, its master key and all uploaded media inside the tree, so they must
      move out. inc/config.php, public/ (media), cache/ and var/ live under
      ~/.panelalpha/dotclear/ and are symlinked back in on every boot; the
@@ -49,12 +49,12 @@ description: >-
   SOURCE: this recipe is keyed to github.com/dotclear/dotclear, Dotclear's
   official public GitHub mirror. The canonical git.dotclear.org returns a
   bare nginx 403 to anonymous clones, so a project must be created from the
-  mirror URL; supported-apps#1351 (canonical) is Rejected and points here.
+  mirror URL.
 extends: php
 docroot: "."
 database: mysql
 env:
-  # The base image loads no php.ini (engine#185): turn display_errors off and
+  # The base image loads no php.ini: turn display_errors off and
   # give media uploads room. The LEADING COLON is load-bearing -- it keeps PHP's
   # compiled-in scan dir (which is what enables mysqli/pdo_mysql via conf.d) and
   # only adds ours. A bare "/app/.pa-php" replaces that dir and silently drops

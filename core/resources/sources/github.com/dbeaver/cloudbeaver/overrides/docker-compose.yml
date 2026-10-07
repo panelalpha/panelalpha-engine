@@ -30,8 +30,7 @@ services:
       # storage reclaim. The entrypoint chowns it to the dbeaver uid on start, so
       # an empty volume is fine; lost+found at the mount root is harmless.
       - cloudbeaver-workspace:/opt/cloudbeaver/workspace
-    # Only the app publishes a port; the port scan takes 8978 as the primary
-    # (engine#231/#234).
+    # Only the app publishes a port, so the port scan takes 8978 as the primary.
     ports:
       - "8978:8978"
     healthcheck:
@@ -56,7 +55,7 @@ services:
   # admin has been claimed and the setup wizard is closed -- then exits. Runs on
   # the internal network with its own curl image (the app image has no curl).
   # The `ready` gate makes `docker compose up -d` return, and the deploy report
-  # finished, only once that is true (engine#204). If it never configures (the
+  # finished, only once that is true. If it never configures (the
   # wizard would be left open to the public) this fails the deploy on purpose.
   ready:
     image: curlimages/curl:8.11.1

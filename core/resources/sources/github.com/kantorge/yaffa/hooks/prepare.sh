@@ -10,7 +10,7 @@ if [ -f pa-bin/mysql ]; then
 fi
 
 # YAFFA keeps uploads (receipts, imported files, AI documents) under
-# storage/app. The checkout is wiped on every redeploy (engine#173), so create
+# storage/app. The checkout is wiped on every redeploy, so create
 # the persistent, rebuild-surviving directory the compose override binds there
 # (relative to ~/project, i.e. ~/.panelalpha/yaffa/storage-app) before Docker
 # would create it root-owned. storage/app/public is Laravel's public disk,

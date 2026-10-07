@@ -13,7 +13,7 @@ if [ ! -f "${STORE_DIR}/back.env" ]; then
     (
         umask 077
         echo "POSTGRES_PASSWORD=${PG}" > "${STORE_DIR}/db.env"
-        # POSTGRES_* live here, not in the compose file (engine#419).
+        # POSTGRES_* live here, not in the compose file.
         cat > "${STORE_DIR}/back.env" <<ENV
 POSTGRES_DB=taiga
 POSTGRES_USER=taiga

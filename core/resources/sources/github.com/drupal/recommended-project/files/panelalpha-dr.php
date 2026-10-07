@@ -14,7 +14,7 @@
  *     Failed to open stream: No such file or directory
  *
  * and after the install stage removes that leftover directory the path is gone
- * for good. Measured on this host.
+ * for good.
  *
  * `web/core/scripts/dr` cannot simply be run instead: it reaches for
  * `$GLOBALS['_composer_autoload_path']`, which only Composer's own bin proxy

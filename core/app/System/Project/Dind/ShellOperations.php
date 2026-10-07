@@ -3,6 +3,7 @@
 namespace App\System\Project\Dind;
 
 use App\Exceptions\BuildStalledException;
+use App\Exceptions\DiskLimitException;
 use App\Exceptions\DeployCancelledException;
 use App\Exceptions\DockerErrorException;
 use App\Lib\Deploy\DeployLog\DeployLogger;
@@ -27,11 +28,23 @@ final class ShellOperations
      */
     private const BUSY_CPU_PERCENT = 20.0;
 
+    /**
+     * Runs inside dind: its uptime and the CPU time of its whole cgroup, two
+     * seconds apart. Under sysbox `docker stats` reads only the container's
+     * init.scope, while every BuildKit step runs in a sibling cgroup; the
+     * container's cgroup root holds both.
+     */
+    private const CGROUP_CPU_SCRIPT = 'u() { echo "$(cut -d" " -f1 /proc/uptime) $(sed -n "s/^usage_usec //p" /sys/fs/cgroup/cpu.stat)"; }; '
+        . 'echo "$(u)"; sleep 2; echo "$(u)"';
+
     /** Runs inside dind: TERM, then KILL, every process carrying the tag ($1) in its env. */
     private const KILL_TAGGED_SCRIPT = 'for sig in TERM KILL; do '
         . 'for d in /proc/[0-9]*; do '
         . 'tr "\0" "\n" < "$d/environ" 2>/dev/null | grep -qxF "$1" && kill -s $sig "${d#/proc/}" 2>/dev/null; '
         . 'done; [ $sig = TERM ] && sleep 3; done; true';
+
+    /** A hook's shell needs these itself; a project env var of the same name is not exported to it. */
+    private const HOOK_RESERVED_ENV = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'PWD', 'IFS', 'BASH_ENV', 'ENV'];
 
     public function __construct(
         private DindProject $project,
@@ -45,14 +58,16 @@ final class ShellOperations
         } catch (\Throwable $e) {
             return null;
         }
-        if ($logger === null) {
-            return null;
+        if ($logger === null || $logger->isRunning()) {
+            return $logger;
         }
-        if (!$logger->isRunning() && !$logger->isCancelled()) {
-            return null;
+        // Cancelled: every command throws until the deploy winds down. Once it
+        // has finished, or its process is gone, commands run again.
+        if ($logger->isCancelled() && !$logger->isFinished() && DeployLogger::isLockedFor($this->project->username())) {
+            return $logger;
         }
 
-        return $logger;
+        return null;
     }
 
     /**
@@ -136,6 +151,101 @@ final class ShellOperations
         return $this->exec(['su', '-s', '/bin/bash', $username, '-c', $cmdStr], $env, $timeout);
     }
 
+    /**
+     * Run as the account user and hand each chunk of output to $onOutput as it arrives.
+     * $onIdle is called after every $idleSeconds without output; throwing from it stops the run.
+     *
+     * @param list<string> $cmd
+     * @param callable(string, string): void $onOutput
+     * @param ?callable(): void $onIdle
+     */
+    public function followAsUser(array $cmd, int $timeout, callable $onOutput, ?callable $onIdle = null, int $idleSeconds = 2): void
+    {
+        $username = $this->project->username();
+        $cmdStr = implode(' ', array_map('escapeshellarg', $cmd));
+
+        $lastOutput = microtime(true);
+        $output = function (string $type, string $data) use ($onOutput, &$lastOutput): void {
+            $lastOutput = microtime(true);
+            $onOutput($type, $data);
+        };
+        // Process::wait() returns to us only when output arrives, and a quiet
+        // service may print nothing for minutes; poll here instead. The process
+        // is started without a callback, so its output is read here too.
+        $poll = $onIdle === null ? null : function (Process $process) use ($output, $onIdle, $idleSeconds, &$lastOutput): void {
+            do {
+                $running = $process->isRunning();
+                $process->checkTimeout();
+                $out = $process->getIncrementalOutput();
+                $err = $process->getIncrementalErrorOutput();
+                $process->clearOutput()->clearErrorOutput();
+                if ($out !== '') {
+                    $output(Process::OUT, $out);
+                }
+                if ($err !== '') {
+                    $output(Process::ERR, $err);
+                }
+                if ($running && microtime(true) - $lastOutput >= $idleSeconds) {
+                    $lastOutput = microtime(true);
+                    $onIdle();
+                }
+                if ($running) {
+                    usleep(100_000);
+                }
+            } while ($running);
+        };
+
+        $this->project->system()->runProcessWithCallbacks(
+            $this->wrap(['su', '-s', '/bin/bash', $username, '-c', $cmdStr]),
+            [],
+            $timeout,
+            $poll,
+            $output,
+        );
+    }
+
+    /**
+     * execAsUser() with the project's env vars exported, so a recipe hook can
+     * check them (a precheck refusing a deploy for a missing token). The values
+     * go through a 0600 file in the home, never argv or the deploy log.
+     *
+     * @param list<string> $cmd
+     */
+    public function execAsUserWithProjectEnv(array $cmd, int $timeout = 600): string
+    {
+        $user = $this->project->userModel();
+        $lines = [];
+        foreach ($user->getEnvVars() as $key => $value) {
+            if (!in_array($key, self::HOOK_RESERVED_ENV, true)) {
+                $lines[] = $key . '=' . escapeshellarg((string) $value);
+            }
+        }
+        if ($lines === []) {
+            return $this->execAsUser($cmd, [], $timeout);
+        }
+
+        $path = rtrim($this->project->homeDirPath(), '/') . '/.panelalpha-hook-env-' . bin2hex(random_bytes(8));
+        $this->project->system()->filesystem()->filePutContents(
+            $path,
+            implode("\n", $lines) . "\n",
+            $user->getChownString() ?: $this->project->username(),
+            '600',
+        );
+        try {
+            return $this->execAsUser(
+                ['bash', '-c', 'set -a && . "$1" && set +a && shift && exec "$@"', 'hook-env', $path, ...$cmd],
+                [],
+                $timeout,
+            );
+        } finally {
+            try {
+                $this->execQuiet(['rm', '-f', $path]);
+            } catch (\Throwable) {
+                // The hook's own outcome matters more; the file is the account's, 0600.
+            }
+        }
+    }
+
     public function runShellAsUser(string $command, ?string $cwd = null, int $timeout = 300): Process
     {
         $username = $this->project->username();
@@ -178,13 +288,14 @@ final class ShellOperations
     public function streamProcess(array $cmd, array $env, int $timeout, DeployLogger $logger): Process
     {
         $idle = (int) config('deploy.step_idle_timeout', 900);
-        $tag = $idle > 0 ? bin2hex(random_bytes(6)) : null;
+        $diskFull = $this->diskLimitProbe();
+        $tag = $idle > 0 || $diskFull !== null ? bin2hex(random_bytes(6)) : null;
         $watchdog = null;
         if ($tag !== null) {
             $label = self::stepLabel($cmd);
             $cmd = $this->tagStep($cmd, $tag);
             $tagged = $cmd;
-            $watchdog = new StepWatchdog($idle, $label, fn (): bool => $this->stepIsBusy($tagged, $tag));
+            $watchdog = new StepWatchdog(max(0, $idle), $label, fn (): bool => $this->stepIsBusy($tagged, $tag), $diskFull);
         }
 
         try {
@@ -205,12 +316,35 @@ final class ShellOperations
             $logger->error($e->getMessage());
             $this->stopTaggedStep($cmd, (string) $tag);
             throw $e;
+        } catch (DiskLimitException $e) {
+            $logger->flushBuffers();
+            $logger->error($e->getMessage());
+            $this->stopTaggedStep($cmd, (string) $tag);
+            // Give back what the step took, a half-done pull included.
+            try {
+                $this->project->innerDocker()->reclaimStorageAfterDiskLimit();
+            } catch (\Throwable $reclaim) {
+                $logger->warn('Could not reclaim the account\'s Docker storage: ' . $reclaim->getMessage());
+            }
+            throw $e;
         } finally {
             $logger->setPid(null);
             $logger->flushBuffers();
         }
 
         return $process;
+    }
+
+    /** @return ?\Closure(): ?string */
+    private function diskLimitProbe(): ?\Closure
+    {
+        try {
+            $limit = StepDiskLimit::for($this->project);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return $limit === null ? null : static fn (): ?string => $limit->reason();
     }
 
     /**
@@ -254,10 +388,10 @@ final class ShellOperations
     }
 
     /**
-     * Is a silent step still working? Its container's CPU, from `docker stats`:
-     * the account's DinD for a build inside it (BuildKit is not a child of the
-     * exec, so the process tree says nothing), the tagged container for a host
-     * build. A download stalled on the network sits near 0%, a compile at 100%.
+     * Is a silent step still working? Its container's CPU: the account's DinD
+     * cgroup for a build inside it (BuildKit is not a child of the exec, so the
+     * process tree says nothing), `docker stats` of the tagged container for a
+     * host build. A download stalled on the network sits near 0%, a compile at 100%.
      *
      * @param list<string> $cmd
      */
@@ -266,6 +400,14 @@ final class ShellOperations
         $system = $this->project->system();
         $stats = ['sudo', 'docker', 'stats', '--no-stream', '--format', '{{.CPUPerc}}'];
         if ($this->isDindExec($cmd)) {
+            try {
+                $percent = self::cgroupCpuPercent($system->exec($this->wrap(['sh', '-c', self::CGROUP_CPU_SCRIPT]), [], 30));
+            } catch (\Throwable) {
+                $percent = null;
+            }
+            if ($percent !== null) {
+                return $percent >= self::BUSY_CPU_PERCENT;
+            }
             $argv = ['sudo', 'docker', 'compose', '-f', $this->project->composeFilePath(), ...array_slice($stats, 2), 'dind'];
         } elseif (self::isHostDockerRun($cmd)) {
             $ids = preg_split('/\s+/', trim($system->exec(
@@ -283,6 +425,24 @@ final class ShellOperations
         }
 
         return self::cpuPercent($system->exec($argv, [], 30)) >= self::BUSY_CPU_PERCENT;
+    }
+
+    /**
+     * CPU percent (100 = one core) from two `<uptime> <usage_usec>` lines of
+     * {@see CGROUP_CPU_SCRIPT}; null when they cannot be read.
+     */
+    public static function cgroupCpuPercent(string $samples): ?float
+    {
+        if (preg_match_all('/^\s*([0-9]+(?:\.[0-9]+)?)\s+([0-9]+)\s*$/m', $samples, $m) !== 2) {
+            return null;
+        }
+        $elapsed = (float) $m[1][1] - (float) $m[1][0];
+        $used = (int) $m[2][1] - (int) $m[2][0];
+        if ($elapsed <= 0 || $used < 0) {
+            return null;
+        }
+
+        return $used / 1_000_000 / $elapsed * 100;
     }
 
     /** Sum of `docker stats` CPUPerc lines, e.g. "102.15%". */

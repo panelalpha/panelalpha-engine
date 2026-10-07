@@ -3,7 +3,7 @@
 # (barassistant/server, pinned 6.8.0), Meilisearch (getmeili/meilisearch:v1.50)
 # and the Salt Rim SPA (barassistant/salt-rim, pinned 5.7.0), which doubles as
 # the single public origin. Only salt-rim publishes a host port, so the
-# engine's port scan takes it as the primary app (engine#231/#234); no other
+# engine's port scan takes it as the primary app; no other
 # service declares ports or expose. Secrets come from env_files that
 # hooks/prepare.sh writes into ~/.panelalpha/bar-assistant (../.panelalpha
 # resolves from ~/project).
@@ -145,8 +145,8 @@ services:
       start_period: 15s
     mem_limit: 192m
 
-  # Starts nothing, exits 0. `docker compose up -d` runs without --wait
-  # (engine#204), so this gates the deploy on the site actually answering AND
+  # Starts nothing, exits 0. `docker compose up -d` runs without --wait,
+  # so this gates the deploy on the site actually answering AND
   # the owner being seeded, not merely on containers having been started.
   ready:
     image: docker.io/library/alpine:3

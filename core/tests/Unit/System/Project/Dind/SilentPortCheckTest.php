@@ -11,7 +11,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * The check the deploy-time probe adds when every port stayed silent and no
- * container is restarting (engine#90).
+ * container is restarting.
  */
 class SilentPortCheckTest extends TestCase
 {
@@ -53,6 +53,22 @@ class SilentPortCheckTest extends TestCase
         $this->assertStringContainsString('app listens on 4000 on 127.0.0.1 only', $check['detail']);
     }
 
+    /** The deploy waits on these, and only these. */
+    public function test_a_container_bound_to_nothing_yet_is_named_as_starting(): void
+    {
+        $ps = '{"Name":"project-app-1","Service":"app","State":"running","Publishers":[{"TargetPort":8080,"PublishedPort":8080}]}';
+        $results = [['port' => 8080, 'status' => AppHealth::STATUS_FAIL]];
+
+        // Only Docker's embedded DNS on loopback: nothing of the app's own.
+        $starting = $this->check($results, $ps, "  sl  local_address rem_address   st\n   0: 0B00007F:A1B2 00000000:0000 0A 00000000:00000000 00:00000000 00000000  0 0 1 1\n");
+        $this->assertStringContainsString('listens on no TCP port yet', $starting['detail']);
+        $this->assertSame(['app'], SilentPortCheck::starting($starting));
+
+        $wrongPort = $this->check($results, $ps, "  sl  local_address rem_address   st\n   0: 00000000:0BB8 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000 0 1 1\n");
+        $this->assertSame([], SilentPortCheck::starting($wrongPort), 'listening elsewhere is not still starting');
+        $this->assertSame([], SilentPortCheck::starting(null));
+    }
+
     public function test_an_answering_port_needs_no_explanation(): void
     {
         $this->assertNull($this->check(
@@ -60,6 +76,33 @@ class SilentPortCheckTest extends TestCase
             '',
             ''
         ));
+    }
+
+    public function test_a_port_that_answered_a_server_error_is_not_silent(): void
+    {
+        // foodsoft, Memtly: HTTP 500 on the port, and the check told them it
+        // "may expect HTTPS".
+        $this->assertNull($this->check(
+            [['port' => 3000, 'status' => AppHealth::STATUS_FAIL, 'http_code' => 500]],
+            '{"Name":"project-app-1","Service":"app","State":"running","Publishers":[{"TargetPort":3000,"PublishedPort":3000}]}',
+            "  sl  local_address rem_address   st\n   0: 00000000:0BB8 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000 0 1 1\n"
+        ));
+    }
+
+    public function test_a_silent_port_is_still_explained_beside_one_that_answered_500(): void
+    {
+        $check = $this->check(
+            [
+                ['port' => 3000, 'status' => AppHealth::STATUS_FAIL, 'http_code' => 500],
+                ['port' => 4000, 'status' => AppHealth::STATUS_FAIL, 'http_code' => null],
+            ],
+            '{"Name":"project-app-1","Service":"app","State":"running","Publishers":[{"TargetPort":3000,"PublishedPort":3000},{"TargetPort":4000,"PublishedPort":4000}]}',
+            "  sl  local_address rem_address   st\n   0: 00000000:0BB8 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000 0 1 1\n"
+        );
+
+        $this->assertSame(SilentPortCheck::ID, $check['id']);
+        $this->assertStringContainsString('app listens on 3000, not on 4000', $check['detail']);
+        $this->assertStringNotContainsString('may expect HTTPS', $check['detail']);
     }
 
     public function test_no_container_publishing_the_port_means_no_verdict(): void

@@ -58,7 +58,7 @@ services:
       start_period: 20s
     mem_limit: 1024m
 
-  # No-op gate: `up` returns only once the site answers (engine#204).
+  # No-op gate: `up` returns only once the site answers.
   ready:
     image: ghcr.io/raylabshq/gitea-mirror:v3.40.3
     restart: "no"

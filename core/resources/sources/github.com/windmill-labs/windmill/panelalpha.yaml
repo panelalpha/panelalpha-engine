@@ -8,8 +8,7 @@ description: >-
   deploy the database comes up with a generated POSTGRES_PASSWORD while the
   repo's .env still hands every Windmill service DATABASE_URL with
   "changeme", so the server and all workers crash-loop on "password
-  authentication failed for user postgres" and the site answers 502
-  (engine#363).
+  authentication failed for user postgres" and the site answers 502.
 
   This recipe runs upstream's stack on the published image of the current
   release, ghcr.io/windmill-labs/windmill:1.820.0, sized for one account:

@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Deploy\Platform;
 
+use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Detect\DeployabilityCheck;
 use App\Lib\Deploy\DetectProjectStrategy;
 use App\Lib\Deploy\Platform\ManifestException;
@@ -417,7 +418,7 @@ class SourceRecipeTest extends TestCase
     }
 
     /**
-     * Regression for #232: a recipe that ships its own check must resolve it at
+     * Regression: a recipe that ships its own check must resolve it at
      * selection time. `fromSource()` dropped the recipe's `checks/` directory,
      * so a `check:` naming a recipe-owned check was refused as unknown here even
      * though `SourceRecipes::at()` threads the same directory correctly.
@@ -449,7 +450,7 @@ class SourceRecipeTest extends TestCase
     }
 
     /**
-     * engine#221 / #183: `extends: compose` from a recipe directory. The file
+     * `extends: compose` from a recipe directory. The file
      * bootstrap wrote is there, and the decision has to say where.
      */
     public function test_a_recipe_extending_compose_carries_its_compose_path(): void
@@ -473,23 +474,83 @@ class SourceRecipeTest extends TestCase
         DeployabilityCheck::assert($decision, $project);
     }
 
-    /** Other strategies are untouched: no probe fills a dockerfile recipe's decision. */
-    public function test_a_recipe_extending_dockerfile_gets_no_probe_data(): void
+    /** A recipe whose application is a datastore (Qdrant) names its port, and its compose is used. */
+    public function test_a_compose_recipe_with_a_port_keeps_its_datastore_stack(): void
     {
-        $project = $this->tmpDir . '/image';
+        $project = $this->tmpDir . '/qdrant';
         mkdir($project . '/' . AppConfigDirectory::DIRNAME, 0777, true);
         file_put_contents(
             $project . '/' . AppConfigDirectory::DIRNAME . '/' . AppConfigDirectory::CONFIG,
-            "id: acme-image\nextends: dockerfile\n"
+            "id: acme-qdrant\nextends: compose\nport: 6333\n"
         );
-        file_put_contents($project . '/Dockerfile.prod', "FROM nginx:1.27\n");
+        file_put_contents(
+            $project . '/' . EngineArtifacts::APP_CONFIG_COMPOSE,
+            "services:\n  app:\n    image: qdrant/qdrant:v1.19.1\n    ports:\n      - \"6333:6333\"\n"
+            . "  ready:\n    image: qdrant/qdrant:v1.19.1\n"
+        );
+
+        $decision = DetectProjectStrategy::detect($project, 'https://github.com/acme/qdrant');
+
+        $this->assertSame('compose', $decision['strategy']);
+        $this->assertSame($project . '/' . EngineArtifacts::APP_CONFIG_COMPOSE, $decision['compose_path']);
+        $this->assertSame(6333, $decision['port_hint']);
+        DeployabilityCheck::assert($decision, $project);
+    }
+
+    /**
+     * A recipe that extends `dockerfile` gets the Dockerfile probe's path and
+     * EXPOSE, as the same checkout without a recipe does. It used to keep
+     * dockerfile.yaml's port 80, and Digiboard (EXPOSE 3000) answered 502.
+     */
+    public function test_a_recipe_extending_dockerfile_reads_the_dockerfile_and_its_expose(): void
+    {
+        $project = $this->dockerfileRecipe("id: acme-image\nextends: dockerfile\n", "FROM node:22-alpine\nEXPOSE 3000\n");
         file_put_contents($project . '/docker-compose.yml', "services:\n  web:\n    image: nginx:1.27\n");
 
         $decision = DetectProjectStrategy::detect($project, 'https://github.com/acme/image');
 
         $this->assertSame('dockerfile', $decision['strategy']);
+        $this->assertSame('acme-image', $decision['platform']);
         $this->assertNull($decision['compose_path']);
-        $this->assertNull($decision['dockerfile']);
+        $this->assertSame('Dockerfile', $decision['dockerfile']);
+        $this->assertSame(3000, $decision['port_hint']);
+    }
+
+    /** A `port:` the recipe states itself still beats the Dockerfile's EXPOSE (Kimai: 8001 over 9000). */
+    public function test_a_recipe_port_outranks_the_dockerfile_expose(): void
+    {
+        $project = $this->dockerfileRecipe("id: acme-image\nextends: dockerfile\nport: 8001\n", "FROM php:8.3-fpm\nEXPOSE 9000\n");
+
+        $decision = DetectProjectStrategy::detect($project, 'https://github.com/acme/image');
+
+        $this->assertSame(8001, $decision['port_hint']);
+        $this->assertSame('Dockerfile', $decision['dockerfile']);
+    }
+
+    /** What a recipe states under `extra:` still wins over the probe. */
+    public function test_a_recipe_extra_dockerfile_and_port_hint_win_over_the_probe(): void
+    {
+        $project = $this->dockerfileRecipe(
+            "id: acme-image\nextends: dockerfile\nextra:\n  dockerfile: docker/Dockerfile\n  port_hint: 8080\n",
+            "FROM node:22-alpine\nEXPOSE 3000\n"
+        );
+        mkdir($project . '/docker');
+        file_put_contents($project . '/docker/Dockerfile', "FROM node:22-alpine\nEXPOSE 8080\n");
+
+        $decision = DetectProjectStrategy::detect($project, 'https://github.com/acme/image');
+
+        $this->assertSame('docker/Dockerfile', $decision['dockerfile']);
+        $this->assertSame(8080, $decision['port_hint']);
+    }
+
+    private function dockerfileRecipe(string $config, string $dockerfile): string
+    {
+        $project = $this->tmpDir . '/image';
+        mkdir($project . '/' . AppConfigDirectory::DIRNAME, 0777, true);
+        file_put_contents($project . '/' . AppConfigDirectory::DIRNAME . '/' . AppConfigDirectory::CONFIG, $config);
+        file_put_contents($project . '/Dockerfile', $dockerfile);
+
+        return $project;
     }
 
     private function write(string $contents): void

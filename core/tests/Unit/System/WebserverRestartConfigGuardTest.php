@@ -5,6 +5,7 @@ namespace Tests\Unit\System;
 use App\System;
 use App\System as EngineSystem;
 use App\System\Services\Webserver;
+use Illuminate\Support\Facades\Log;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
@@ -12,14 +13,13 @@ use Tests\TestCase;
 /**
  * A restart is the one webserver path with no fallback.
  *
- * Issue #63: sites-http crash-looped for a whole audit window, and every
- * operation that reaches into it answered 422 `container is restarting`. A
- * reload is not the cause -- a master handed an unusable config keeps serving
- * the one it booted with. A *restart* is: the container exits on the `[emerg]`
- * and loops under `restart: always`. Measured on the app-nginx image, a vhost
- * naming a certificate that went with a deleted account takes it down with
- * `cannot load certificate`, which is the breakage `pruneDomainConfigs()`
- * exists to remove.
+ * sites-http crash-looped, and every operation that reaches into it
+ * answered 422 `container is restarting`. A reload is not the cause -- a master
+ * handed an unusable config keeps serving the one it booted with. A *restart*
+ * is: the container exits on the `[emerg]` and loops under `restart: always`.
+ * On the app-nginx image, a vhost naming a certificate that went with a deleted
+ * account takes it down with `cannot load certificate`, which is the breakage
+ * `pruneDomainConfigs()` exists to remove.
  *
  * So every path that restarts the container tests the config first -- the
  * queued one included, where the test has to run next to the restart. The
@@ -137,6 +137,19 @@ class WebserverRestartConfigGuardTest extends TestCase
         $this->assertStringNotContainsString('nginx -t', $commands[0]);
     }
 
+    /** A host without `at` never runs the job, and nothing else would say so. */
+    public function test_a_job_the_host_could_not_queue_is_logged(): void
+    {
+        Log::spy();
+        $commands = [];
+        $this->system('nginx-proxy', $commands, 'echo "bash: line 1: at: command not found" >&2; exit 127')
+            ->webserver()->scheduleWebserverReloadInBackground();
+
+        Log::shouldHaveReceived('warning')
+            ->once()
+            ->withArgs(fn (string $message) => str_contains($message, 'at: command not found'));
+    }
+
     #[DataProvider('guardedRestartCases')]
     public function test_the_queued_guard_refuses_only_on_a_verdict(string $testOutput, int $testExit, bool $expectRestart): void
     {
@@ -170,17 +183,17 @@ class WebserverRestartConfigGuardTest extends TestCase
      * `exec()` is a hard failure so a detection that slipped back onto the host
      * reads as such rather than as a missing command.
      */
-    private function system(string $webserver, array &$commands): System
+    private function system(string $webserver, array &$commands, string $hostAnswers = 'true'): System
     {
-        $host = new class ($commands) extends System {
-            public function __construct(private array &$commands)
+        $host = new class ($commands, $hostAnswers) extends System {
+            public function __construct(private array &$commands, private string $hostAnswers)
             {
             }
 
             public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
                 $this->commands[] = is_array($cmd) ? implode(' ', $cmd) : $cmd;
-                $process = new Process(['true']);
+                $process = Process::fromShellCommandline($this->hostAnswers);
                 $process->run();
 
                 return $process;

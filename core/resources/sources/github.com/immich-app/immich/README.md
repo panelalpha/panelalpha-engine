@@ -19,5 +19,5 @@ first visit opens Immich's admin sign-up (upstream behaviour).
   `~/.panelalpha/immich/secrets.env`.
 - Data: `library` (/data, uploads and thumbnails), `database`, `model-cache`
   named volumes. A `ready` gate waits for `immich-healthcheck`.
-- On a `*.panelalpha.online` test domain, uploads fail at the test edge
-  (engine#170); they work through the host's own webserver.
+- On a `*.panelalpha.online` test domain, uploads fail at the test edge;
+  they work through the host's own webserver.

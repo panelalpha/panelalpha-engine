@@ -25,7 +25,7 @@ description: >-
   WEBSOCKETS. Every interactive screen (event creation, polls, the attendee
   room) is a Phoenix LiveView over /live/websocket, and Claper ships no
   long-poll fallback. The engine vhost upgrades it (101); the shared
-  *.panelalpha.online test edge strips Upgrade (engine#170), so on a test name
+  *.panelalpha.online test edge strips Upgrade, so on a test name
   pages render but do not react. Use a domain that points at the host.
 credentials:
   login_path: /users/log_in

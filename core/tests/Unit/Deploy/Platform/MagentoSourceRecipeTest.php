@@ -139,10 +139,10 @@ class MagentoSourceRecipeTest extends TestCase
         $service = Yaml::parse((string) $this->appConfig()->compose())['services']['opensearch'];
         $this->assertSame('1536m', $service['mem_limit']);
 
-        // An account is a Sysbox container; its nested containers cannot
-        // raise RLIMIT_MEMLOCK above the parent's, and asking is fatal --
-        // "error setting rlimit type 8: operation not permitted", before the
-        // container starts. Measured on the engine, not guessed.
+        // An account is a Sysbox container; its nested containers cannot raise
+        // RLIMIT_MEMLOCK above the parent's, and asking is fatal -- "error
+        // setting rlimit type 8: operation not permitted", before the container
+        // starts.
         $this->assertArrayNotHasKey('memlock', $service['ulimits'] ?? []);
     }
 

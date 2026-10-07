@@ -4,7 +4,7 @@ description: >-
   API (:3333), the Next.js web UI (:5487) and a bundled S3-compatible storage
   server (:9379) under supervisord, with SQLite. The repo's compose publishes
   all three ports and the engine routes the domain to the lowest one, the
-  optional API, so the site answers 404 (engine#352).
+  optional API, so the site answers 404.
 
   This recipe runs the published image of the current release
   (kyantech/palmr:v3.3.2-beta) and publishes only the web interface, with the

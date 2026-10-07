@@ -117,6 +117,23 @@ class DindDeployMechanicsTest extends TestCase
         );
     }
 
+    // A git rebuild hands the stop to the clone, which runs it only once the new source is fetched.
+    public function test_git_rebuild_stops_the_app_only_after_the_clone(): void
+    {
+        $source = file_get_contents(
+            $this->coreAppRoot . '/System/Project/Deployment/DindDeployMechanics.php'
+        );
+
+        $sync = self::methodBody($source, 'syncHostingForSourceRebuild');
+        $this->assertStringContainsString('if (!$this->reclonesOnRebuild($zipPath))', $sync);
+
+        $ingest = self::methodBody($source, 'ingestForWipeRebuild');
+        $this->assertMatchesRegularExpression(
+            '/cloneConfiguredRepository\(\s*fn \(\) => \$this->stopApplicationBeforeWipe\(\)/',
+            $ingest
+        );
+    }
+
     // A wipe rebuild deletes ~/project while containers may still be bind-mounted under it;
     // the app must be stopped first or those mounts go stale.
     public function test_wipe_rebuild_stops_the_app_before_deleting_its_directory(): void

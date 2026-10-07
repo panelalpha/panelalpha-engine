@@ -1,5 +1,5 @@
 # Compose-replace: upstream's compose, with data/uploads on named volumes (not
-# ./ binds, which a redeploy wipes) and without cap_drop/cap_add (engine#349
+# ./ binds, which a redeploy wipes) and without cap_drop/cap_add (the engine
 # keeps the drop but strips the add, so gosu cannot switch to `node`).
 services:
   app:

@@ -9,6 +9,7 @@ use App\Http\Requests\SourceInspectRequest;
 use App\Exceptions\ProblemException;
 use App\Lib\Deploy\Inspect\AppInspector;
 use App\Lib\Deploy\Inspect\DeploymentSnapshot;
+use App\Lib\Deploy\Inspect\GitHubTree;
 use App\Lib\Deploy\Inspect\InspectException;
 use App\Lib\Deploy\Inspect\RecipeFileOverlay;
 use App\Lib\Deploy\Inspect\ResolvedSource;
@@ -35,16 +36,16 @@ use OpenApi\Attributes as OA;
  */
 class SourceInspectionController extends Controller
 {
-    /** Seconds a clone may take before the inspection gives up. */
-    private const CLONE_TIMEOUT = 180;
-
     #[OA\Post(
         path: '/source/inspect',
         summary: 'Inspect an application source and report its stack, ports and services',
         description: 'Detects what an application is without deploying it. The source may be a Git '
             . 'repository URL, an absolute path on this server, or the username of an existing '
-            . 'project (its files under the account home directory). Git sources are cloned '
-            . 'shallow into a temporary directory and removed again. Values from .env files are '
+            . 'project (its files under the account home directory). A public github.com '
+            . 'repository is read from its file list and only the files detection reads are '
+            . 'fetched; any other Git source, or one that cannot be read that way, is cloned '
+            . 'shallow into a temporary directory and removed again. `source.method` says which '
+            . '(`tree` or `clone`). Values from .env files are '
             . 'never returned - only the variable names. A project username returns the same '
             . 'report as GET /projects/{username}/inspect, including the `deployment` snapshot '
             . 'its last deploy froze and the `drift` between that and the files on disk - so a '
@@ -146,7 +147,12 @@ class SourceInspectionController extends Controller
             // git_token may be a global `vault:<id>`: an inspection belongs
             // to no project. No token clones anonymously.
             $resolved = $type === SourceResolver::TYPE_GIT
-                ? $this->resolver()->fromGit($source, $params['branch'] ?? null, RequestVault::get('git_token', null))
+                ? $this->resolver()->fromGit(
+                    $source,
+                    $params['branch'] ?? null,
+                    RequestVault::get('git_token', null),
+                    $params['subdirectory'] ?? null
+                )
                 : $this->resolver()->fromDirectory(SourceResolver::TYPE_PATH, $source, $source);
         } catch (InspectException $e) {
             throw ProblemException::of([$e->toProblem()]);
@@ -219,13 +225,13 @@ class SourceInspectionController extends Controller
         ?DeployPlan $plan = null,
         ?string $recipe = null
     ): JsonResponse {
-        $user = $this->projectOr404($username, 'Project not found');
+        $user = $this->projectOr404($username);
 
         try {
             // getHomeDir() honours an account whose home was recorded
             // somewhere other than /home/<username>, and falls back to it.
             $home = rtrim($user->getHomeDir(), '/');
-            $directory = $this->projectDirectory($user, $home, $relative);
+            $directory = SourceResolver::projectDirectory($home, $user->getMainDomain()?->getDocumentRoot(), $relative);
             $resolved = $this->resolver()->fromDirectory(SourceResolver::TYPE_PROJECT, $username, $directory);
 
             return $this->report(
@@ -292,40 +298,15 @@ class SourceInspectionController extends Controller
 
     private function resolver(): SourceResolver
     {
-        return new SourceResolver(storage_path('app/source-inspect'), self::CLONE_TIMEOUT);
+        return new SourceResolver(storage_path('app/source-inspect'), self::cloneTimeout(), new GitHubTree());
     }
 
-    /**
-     * Where a hosting project keeps the application's files.
-     *
-     * `~/project` for a container project, the main domain's document root for
-     * the classic PHP templates. Both are checked because the endpoint takes a
-     * username, not a template. `$relative` overrides the guess, and may not
-     * leave the home directory.
-     *
-     * @throws InspectException
-     */
-    private function projectDirectory(User $user, string $home, ?string $relative): string
+    /** As long as a deploy's clone may take (DEPLOY_CLONE_TIMEOUT), so inspect accepts what a deploy would. */
+    private static function cloneTimeout(): int
     {
-        $relative = trim((string) $relative);
-        if ($relative !== '') {
-            return SourceResolver::descend($home, SourceResolver::underRoot($home, $relative));
-        }
+        $seconds = (int) config('deploy.clone_timeout', 600);
 
-        $appDir = $home . '/project';
-        if (is_dir($appDir)) {
-            return $appDir;
-        }
-
-        $domain = $user->getMainDomain();
-        if ($domain !== null) {
-            $documentRoot = $home . $domain->getDocumentRoot();
-            if (is_dir($documentRoot)) {
-                return $documentRoot;
-            }
-        }
-
-        return $appDir;
+        return $seconds > 0 ? $seconds : 600;
     }
 
     /**
@@ -360,6 +341,8 @@ class SourceInspectionController extends Controller
                 'branch' => $resolved->meta['branch'] ?? null,
                 'commit' => $resolved->meta['commit'] ?? null,
             ],
+            // `tree` or `clone` for a git source; a directory was simply read.
+            'method' => $resolved->meta['method'] ?? null,
         ];
     }
 }

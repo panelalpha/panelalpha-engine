@@ -4,12 +4,11 @@
 # single hosting account.
 #
 # Plausible runs from ghcr.io/plausible/community-edition rather than from this
-# checkout because building it per account costs eight and a half minutes and
-# gigabytes of layers: `mix deps.get --only ce && mix deps.compile` alone is 398
-# seconds, then an npm install for two frontends, an esbuild/tailwind asset
-# pipeline and `mix release`. The measured dockerfile-strategy build of this
-# repository was 502.8s with a zero cache hit ratio, to arrive at an image the
-# project publishes on every release.
+# checkout because building it per account costs many minutes and gigabytes of
+# layers: `mix deps.get --only ce && mix deps.compile` is most of it, then an
+# npm install for two frontends, an esbuild/tailwind asset pipeline and
+# `mix release` -- to arrive at an image the project publishes on every
+# release.
 services:
   plausible_db:
     # The name upstream's compose uses, which is also what the recipe's
@@ -116,11 +115,10 @@ services:
       TMPDIR: /var/lib/plausible/tmp
       # A BEAM release starts epmd, which binds 0.0.0.0:4369 the instant the VM
       # comes up — while this container is still running createdb and the
-      # ClickHouse migrations, so :8000 does not exist yet. That is what the
-      # first, unassisted deploy of this repository tripped over: the engine
-      # logged "Application is listening on port 4369, not 8000; forwarding
-      # there instead" and republished the account onto the Erlang port mapper,
-      # which answers HTTP with an empty reply forever. AppPortAlignment only
+      # ClickHouse migrations, so :8000 does not exist yet. Deployed without
+      # this recipe, the engine logs "Application is listening on port 4369,
+      # not 8000; forwarding there instead" and republishes the account onto
+      # the Erlang port mapper, which answers HTTP with an empty reply forever. AppPortAlignment only
       # runs against a compose file the engine generated, so a recipe with its
       # own compose file is already out of that path — but Plausible CE has no
       # use for distribution either (libcluster is started `on_ee` only, and

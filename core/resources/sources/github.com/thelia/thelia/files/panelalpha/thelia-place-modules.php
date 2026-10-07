@@ -12,8 +12,7 @@
  * core/bootstrap.php defines THELIA_MODULE_DIR as `vendor/thelia/modules/`,
  * and DatabaseSetup::registerAndApplyModules() scans that and local/modules/
  * and nothing else — so the shop installs with no payment module, no delivery
- * module and no template engine. Measured on the deploy before this file
- * existed: `0 module(s) registered`.
+ * module and no template engine: `0 module(s) registered`.
  *
  * ## Why a symlink and not a move
  *
@@ -21,8 +20,8 @@
  * 2 resolves a package's own autoload rules, and the `--no-dev` reachability
  * walk that decides which packages reach the autoloader at all, against the
  * install path it recorded — and a package it cannot find is dropped along
- * with everything reachable only through it. Moving the directories cost two
- * things, both measured:
+ * with everything reachable only through it. Moving the directories costs two
+ * things:
  *
  *   - thelia/tiptap-module declares psr-4 `Tiptap\` at its own root, so the
  *     optimized classmap pointed at the directory it had just been moved out

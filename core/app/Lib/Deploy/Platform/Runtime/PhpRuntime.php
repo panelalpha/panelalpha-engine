@@ -14,7 +14,8 @@ use App\Lib\Deploy\Platform\ProjectContext;
  *
  * Sources in precedence: `composer.lock` `platform-overrides`, then
  * `platform`, then the constraints, then `require.php`. Of the minors
- * satisfying every constraint the **lowest** wins, and an unrecognised
+ * satisfying every constraint the **lowest** wins, except that a project with
+ * no lock gets the default minor when it satisfies them; an unrecognised
  * constraint disqualifies a minor instead of passing it.
  */
 final class PhpRuntime implements Runtime
@@ -111,19 +112,19 @@ final class PhpRuntime implements Runtime
 
         $constraints = self::phpConstraints($composerJson, $composerLock);
         if ($constraints !== []) {
+            // Without a lock the build runs `composer update`, which takes the
+            // newest releases, and those routinely need more than the project's
+            // floor (Aimeos: `^8.1` beside laravel/framework ^13, which needs
+            // 8.3). The default minor when the floor allows it, as for Node.
+            $default = self::defaultMinor();
+            if (self::decodeObject($composerLock) === []
+                && in_array($default, self::minors(), true)
+                && self::allowsMinor($constraints, $default)
+            ) {
+                return new Requirement('php', $default, implode(', ', $constraints), self::sourceFor($composerJson, $composerLock));
+            }
             foreach (self::minors() as $minor) {
-                $candidate = $minor . '.999999';
-                $compatible = true;
-                foreach ($constraints as $constraint) {
-                    // An unrecognised constraint disqualifies the minor. Reading
-                    // it as compatible would let a garbage `require.php` select
-                    // the *oldest* PHP the engine ships.
-                    if (self::constraintAllowsVersion($constraint, $candidate) !== true) {
-                        $compatible = false;
-                        break;
-                    }
-                }
-                if ($compatible) {
+                if (self::allowsMinor($constraints, $minor)) {
                     return new Requirement(
                         'php',
                         $minor,
@@ -149,6 +150,23 @@ final class PhpRuntime implements Runtime
         }
 
         return new Requirement('php', "{$major}.{$minor}", implode(', ', $constraints), 'composer.json require.php');
+    }
+
+    /**
+     * @param list<string> $constraints
+     */
+    private static function allowsMinor(array $constraints, string $minor): bool
+    {
+        foreach ($constraints as $constraint) {
+            // An unrecognised constraint disqualifies the minor. Reading it as
+            // compatible would let a garbage `require.php` select the *oldest*
+            // PHP the engine ships.
+            if (self::constraintAllowsVersion($constraint, $minor . '.999999') !== true) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -218,6 +236,41 @@ final class PhpRuntime implements Runtime
         }
 
         return false;
+    }
+
+    /**
+     * The locked package that rejects $minor, as `name version (php X)`, when
+     * the lock states no exact minor of its own and composer.json's
+     * `require.php` allows $minor. `platform.php` is then the root constraint
+     * (`^8.3.0`), so {@see lockedPhpContradicted()} has nothing to compare:
+     * personal-management-system locks random_compat v9.99.99 (`^7`) under
+     * `^8.3.0` and the install failed on its platform check.
+     *
+     * Null when the root says nothing about PHP, or rules $minor out itself:
+     * that project really needs another PHP.
+     */
+    public static function lockedPackageRejecting(?string $composerJson, ?string $composerLock, string $minor): ?string
+    {
+        if (self::lockedPhpMinors($composerLock) !== null) {
+            return null;
+        }
+        $root = self::decodeObject($composerJson)['require']['php'] ?? null;
+        if (!is_string($root) || trim($root) === ''
+            || self::constraintAllowsVersion(trim($root), $minor . '.999999') !== true
+        ) {
+            return null;
+        }
+
+        foreach (self::decodedPackages($composerLock) as $package) {
+            $requires = $package['require']['php'] ?? null;
+            if (is_string($requires) && trim($requires) !== ''
+                && self::constraintAllowsVersion(trim($requires), $minor . '.999999') === false
+            ) {
+                return trim(($package['name'] ?? '?') . ' ' . ($package['version'] ?? '')) . ' (php ' . trim($requires) . ')';
+            }
+        }
+
+        return null;
     }
 
     /**

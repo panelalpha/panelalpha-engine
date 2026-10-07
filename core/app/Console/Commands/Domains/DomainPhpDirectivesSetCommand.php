@@ -2,13 +2,14 @@
 
 namespace App\Console\Commands\Domains;
 
-use App\Console\Commands\Concerns\CallsEngineApi;
+use App\Http\Requests\DomainReplacePhpDirectivesRequest;
+use App\Models\Domain;
+use App\System;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Validator;
 
 class DomainPhpDirectivesSetCommand extends Command
 {
-    use CallsEngineApi;
-
     protected $signature = 'domain:php-directives:set
         {domain : Canonical domain name}
         {--settings= : JSON object replacing the whole directive map}
@@ -30,12 +31,10 @@ class DomainPhpDirectivesSetCommand extends Command
             return 1;
         }
 
-        $response = $this->dispatchEngine('PUT', "/domains/{$domain}/php-directives", [
-            'settings' => $settings,
-        ]);
-        if ($response->getStatusCode() >= 400) {
-            return $this->rejectEngineResponse($response);
-        }
+        Validator::make(['settings' => $settings], (new DomainReplacePhpDirectivesRequest())->rules())->validate();
+
+        $domainModel = Domain::findByNameOrFail($domain);
+        $domainModel->user->project(app(System::class))->php()->replaceDomainDirectives($domainModel, $settings);
 
         return 0;
     }

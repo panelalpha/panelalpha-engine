@@ -10,6 +10,13 @@ server {
     listen [{{ $ip }}]:80;
 @endforeach
     server_name  {{ $domain }}@if (!empty($aliases)) {{ implode(' ', $aliases) }}@endif;
+{{-- The *.panelalpha.online front: the visitor is the last X-Forwarded-For entry it sent. --}}
+@foreach ($trusted_fronts ?? [] as $front)
+    set_real_ip_from {{ $front }};
+@endforeach
+@if (!empty($trusted_fronts))
+    real_ip_header X-Forwarded-For;
+@endif
     access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/access.log combined;
     access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/bytes.log bytes;
     error_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/error.log error;
@@ -19,6 +26,12 @@ server {
         default_type text/plain;
     }
 @endif
+    # Connection: upgrade only when the client asked to upgrade. Set per server,
+    # not in a main-config map, so a vhost never needs a newer nginx.conf.
+    set $pa_connection_upgrade "";
+    if ($http_upgrade) {
+        set $pa_connection_upgrade upgrade;
+    }
     location / {
         @if(!empty($suspended))
             error_page 503 /account-suspended.html;
@@ -38,14 +51,17 @@ server {
             proxy_http_version 1.1;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-For $remote_addr;
             proxy_set_header X-Forwarded-Proto $scheme;
             proxy_set_header X-Forwarded-Host $host;
             proxy_set_header X-Forwarded-Port $server_port;
             proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection "upgrade";
+            proxy_set_header Connection $pa_connection_upgrade;
             proxy_read_timeout 3600s;
             proxy_send_timeout 3600s;
+            # nginx still honours it for its own buffering; passing it on lets a
+            # front such as the panelalpha.online tunnel stream the answer too.
+            proxy_pass_header X-Accel-Buffering;
             set $proxyupstream {{ $proxy_http['host'] }};
             proxy_pass {{ $proxy_http['protocol'] ?? 'http' }}://$proxyupstream:{{ $proxy_http['port'] }};
             # An absolute redirect built upstream (Apache's DirectorySlash, a
@@ -92,7 +108,7 @@ server {
         set $enginehost core.shared-hosting.palocal;
         proxy_set_header   Host              $host;
         proxy_set_header   X-Real-IP         $remote_addr;
-        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-For   $remote_addr;
         proxy_set_header   X-Forwarded-Proto $scheme;
         set $ssopass 0;
         if ($arg_token) {
@@ -115,12 +131,24 @@ server {
 @endforeach
         http2 on;
         server_name  {{ $domain }}@if (!empty($aliases)) {{ implode(' ', $aliases) }}@endif;
+@foreach ($trusted_fronts ?? [] as $front)
+        set_real_ip_from {{ $front }};
+@endforeach
+@if (!empty($trusted_fronts))
+        real_ip_header X-Forwarded-For;
+@endif
         ssl_certificate {{ $ssl_cert_pem_file }};
         ssl_certificate_key {{ $ssl_cert_key_file }};
         proxy_hide_header Strict-Transport-Security;
         access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/access.log combined;
         access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/bytes.log bytes;
         error_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/error.log error;
+        # Connection: upgrade only when the client asked to upgrade. Set per server,
+        # not in a main-config map, so a vhost never needs a newer nginx.conf.
+        set $pa_connection_upgrade "";
+        if ($http_upgrade) {
+            set $pa_connection_upgrade upgrade;
+        }
         location / {
             @if(!empty($suspended))
                 error_page 503 /account-suspended.html;
@@ -138,17 +166,33 @@ server {
                 proxy_http_version 1.1;
                 proxy_set_header Host $host;
                 proxy_set_header X-Real-IP $remote_addr;
-                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-For $remote_addr;
                 proxy_set_header X-Forwarded-Proto $scheme;
                 proxy_set_header X-Forwarded-Host $host;
                 proxy_set_header X-Forwarded-Port $server_port;
                 proxy_set_header Upgrade $http_upgrade;
-                proxy_set_header Connection "upgrade";
+                proxy_set_header Connection $pa_connection_upgrade;
                 proxy_read_timeout 3600s;
                 proxy_send_timeout 3600s;
+                proxy_pass_header X-Accel-Buffering;
                 proxy_ssl_server_name on;
                 proxy_ssl_name $host;
                 set $proxyupstream {{ $proxy_https['host'] }};
+                # proxy_pass speaks HTTP/1.1 upstream, which loses gRPC's trailers
+                # (grpc-status). gRPC-Web (application/grpc-web*) stays on proxy_pass.
+                grpc_read_timeout 3600s;
+                grpc_send_timeout 3600s;
+                grpc_set_header Host $host;
+                grpc_set_header X-Real-IP $remote_addr;
+                grpc_set_header X-Forwarded-For $remote_addr;
+                grpc_set_header X-Forwarded-Proto $scheme;
+                grpc_set_header X-Forwarded-Host $host;
+                grpc_set_header X-Forwarded-Port $server_port;
+                grpc_ssl_server_name on;
+                grpc_ssl_name $host;
+                if ($http_content_type ~* "^application/grpc(\+[^;]*)?\s*(;|$)") {
+                    grpc_pass {{ ($proxy_https['protocol'] ?? 'http') === 'https' ? 'grpcs' : 'grpc' }}://$proxyupstream:{{ $proxy_https['port'] }};
+                }
                 @if(($proxy_https['protocol'] ?? 'http') === 'https')
                 proxy_pass https://$proxyupstream:{{ $proxy_https['port'] }};
                 @else
@@ -199,7 +243,7 @@ server {
             set $enginehost core.shared-hosting.palocal;
             proxy_set_header   Host              $host;
             proxy_set_header   X-Real-IP         $remote_addr;
-            proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header   X-Forwarded-For   $remote_addr;
             proxy_set_header   X-Forwarded-Proto $scheme;
             set $ssopass 0;
             if ($arg_token) {
@@ -222,8 +266,20 @@ server {
     listen [{{ $ip }}]:{{ $extra['listen_port'] }};
 @endforeach
     server_name  {{ $domain }}@if (!empty($aliases)) {{ implode(' ', $aliases) }}@endif;
+@foreach ($trusted_fronts ?? [] as $front)
+    set_real_ip_from {{ $front }};
+@endforeach
+@if (!empty($trusted_fronts))
+    real_ip_header X-Forwarded-For;
+@endif
     access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/access.log combined;
     error_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/error.log error;
+    # Connection: upgrade only when the client asked to upgrade. Set per server,
+    # not in a main-config map, so a vhost never needs a newer nginx.conf.
+    set $pa_connection_upgrade "";
+    if ($http_upgrade) {
+        set $pa_connection_upgrade upgrade;
+    }
     location / {
         @if(!empty($suspended))
             return 503;
@@ -235,12 +291,13 @@ server {
             proxy_http_version 1.1;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-For $remote_addr;
             proxy_set_header X-Forwarded-Proto $scheme;
             proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection "upgrade";
+            proxy_set_header Connection $pa_connection_upgrade;
             proxy_read_timeout 3600s;
             proxy_send_timeout 3600s;
+            proxy_pass_header X-Accel-Buffering;
             set $proxyupstream {{ $extra['host'] }};
             proxy_pass {{ $extra['protocol'] ?? 'http' }}://$proxyupstream:{{ $extra['port'] }};
             proxy_redirect {{ $extra['protocol'] ?? 'http' }}://$host:{{ $extra['port'] }}/ /;

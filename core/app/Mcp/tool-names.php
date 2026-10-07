@@ -75,6 +75,7 @@ return [
     'GET /projects/{username}/domains/{domain}' => 'domain_get',
     'PUT /projects/{username}/domains/{domain}' => 'domain_update',
     'DELETE /projects/{username}/domains/{domain}' => 'domain_delete',
+    'GET /projects/{username}/domains/{domain}/mail-dns' => 'domain_mail_dns_get',
 
     // Project settings -- values the engine holds for a project, such as the
     // Cloudflare API token a cloudflare tunnel needs. Secrets read back
@@ -175,6 +176,8 @@ return [
     'POST /projects/{username}/git/pull' => 'git_pull',
     'POST /projects/{username}/git/push' => 'git_push',
     'POST /projects/{username}/git/revert' => 'git_revert',
+    'POST /projects/{username}/git/deploy-key' => 'git_deploy_key_create',
+    'DELETE /projects/{username}/git/deploy-key' => 'git_deploy_key_delete',
     'POST /projects/{username}/git/deploy-hook' => 'git_deploy_hook_create',
     'GET /projects/{username}/git/deploy-hook' => 'git_deploy_hook_show',
     'POST /projects/{username}/git/deploy-hook/rotate' => 'git_deploy_hook_rotate',
@@ -206,7 +209,6 @@ return [
     'GET /projects/{username}/app/info' => 'app_info',
     'POST /projects/{username}/app/install' => 'app_install',
     'GET /projects/{username}/app/roles' => 'app_role_list',
-    'GET /projects/{username}/app/sso-token' => 'app_sso_login',
     'GET /projects/{username}/app/users' => 'app_user_list',
     'POST /projects/{username}/app/users' => 'app_user_create',
     'DELETE /projects/{username}/app/users/{userId}' => 'app_user_delete',
@@ -263,16 +265,19 @@ return [
     'GET /metrics/last-12-hours' => 'metrics_last_12_hours',
     'GET /metrics/last-hour-averages' => 'metrics_last_hour_averages',
 
-    // CSF firewall
-    'GET /csf/rules' => 'csf_rule_list',
-    'POST /csf/rules/{type}' => 'csf_rule_create',
-    'PUT /csf/rules/{type}/{lineMd5}' => 'csf_rule_update',
-    'DELETE /csf/rules/{type}/{lineMd5}' => 'csf_rule_delete',
-    'GET /csf/status' => 'csf_status',
-    'GET /csf/ui-credentials' => 'csf_ui_credentials',
-    'PUT /csf/restart' => 'csf_restart',
-    'PUT /csf/enable' => 'csf_enable',
-    'PUT /csf/disable' => 'csf_disable',
+    // Host firewall
+    'GET /firewall/status' => 'firewall_status',
+    'PUT /firewall/enable' => 'firewall_enable',
+    'PUT /firewall/disable' => 'firewall_disable',
+    'PUT /firewall/reload' => 'firewall_reload',
+    'GET /firewall/logs' => 'firewall_log_list',
+    'GET /firewall/trusted' => 'firewall_trusted_list',
+    'POST /firewall/trusted' => 'firewall_trusted_add',
+    'DELETE /firewall/trusted/{id}' => 'firewall_trusted_delete',
+    'GET /firewall/rules' => 'firewall_rule_list',
+    'POST /firewall/rules' => 'firewall_rule_create',
+    'PUT /firewall/rules/{id}' => 'firewall_rule_update',
+    'DELETE /firewall/rules/{id}' => 'firewall_rule_delete',
 
     // IP management
     'GET /ip/subnets' => 'ip_subnet_list',
@@ -289,6 +294,8 @@ return [
     'PUT /modsec/rulesets/{name}/enable' => 'modsec_ruleset_enable',
     'PUT /modsec/rulesets/{name}/disable' => 'modsec_ruleset_disable',
     'PUT /modsec/rulesets/{name}/config-files' => 'modsec_ruleset_configs_set',
+    'GET /modsec/custom-rules' => 'modsec_custom_rules_get',
+    'PUT /modsec/custom-rules' => 'modsec_custom_rules_set',
     'GET /modsec/audit-log/files' => 'modsec_audit_log_list',
     'GET /modsec/audit-log/files/{filename}' => 'modsec_audit_log_download',
     'GET /modsec/audit-log/files/{filename}/tail' => 'modsec_audit_log_tail',

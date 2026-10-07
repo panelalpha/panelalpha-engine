@@ -80,7 +80,7 @@ class PhpMountedRuntimeTest extends TestCase
     {
         file_put_contents(
             $this->dir . '/composer.json',
-            (string) json_encode(['require' => ['php' => '^8.2']])
+            (string) json_encode(['require' => ['php' => '~8.2.0']])
         );
 
         $this->assertSame(

@@ -75,6 +75,88 @@ class RubyDockerfileTest extends TestCase
         $this->assertGreaterThan($nodeEnvPos, $buildPos);
     }
 
+    /** Production Rails does not compile assets on the fly; the image has to carry them. */
+    public function test_a_rails_app_on_the_asset_pipeline_precompiles_its_assets(): void
+    {
+        $dir = $this->projectDir([
+            'Gemfile' => "source 'https://rubygems.org'\ngem 'rails', '~> 7.2'\ngem 'sprockets-rails'\n",
+            'config/application.rb' => "module App; end\n",
+        ]);
+
+        $dockerfile = RubyDockerfile::generate($dir, ['gemfile' => true], 3000);
+
+        $this->assertStringContainsString('RUN SECRET_KEY_BASE_DUMMY=1 SECRET_KEY_BASE=panelalpha-assets-precompile bundle exec rails assets:precompile', $dockerfile);
+        // Rails before 7.1 ignores the DUMMY switch and refuses to boot without a key.
+        // After the source is in place, and not fatal for an app that cannot boot without its database.
+        $this->assertGreaterThan(strpos($dockerfile, 'COPY . .'), strpos($dockerfile, 'assets:precompile'));
+        $this->assertStringContainsString('|| echo "PANELALPHA: rails assets:precompile failed', $dockerfile);
+    }
+
+    /**
+     * railsdevs.com: jsbundling-rails + cssbundling-rails write app/assets/builds
+     * from `build` and `build:css`, and their precompile hooks call yarn, which
+     * the Ruby app stage does not have.
+     */
+    public function test_a_jsbundling_app_builds_js_and_css_in_node_and_precompiles_without_it(): void
+    {
+        $dir = $this->projectDir([
+            'Gemfile' => "source 'https://rubygems.org'\ngem 'rails', '~> 7.0'\ngem 'cssbundling-rails'\ngem 'jsbundling-rails'\ngem 'sprockets-rails'\n",
+            'package.json' => (string) json_encode(['scripts' => [
+                'build' => 'esbuild app/javascript/*.* --bundle --outdir=app/assets/builds',
+                'build:css' => 'tailwindcss -i ./app/assets/stylesheets/application.tailwind.css -o ./app/assets/builds/application.css',
+            ]]),
+            'yarn.lock' => "# yarn lockfile v1\n",
+            'config/application.rb' => "module App; end\n",
+        ]);
+
+        $docker = RubyDockerfile::generate($dir, ['gemfile' => true, 'package.json' => true, 'yarn.lock' => true], 3000);
+
+        $this->assertStringContainsString('RUN yarn build && yarn build:css && mkdir -p app/assets/builds', $docker);
+        $this->assertStringContainsString('COPY --from=assets /app/app/assets/builds ./app/assets/builds', $docker);
+        $this->assertStringContainsString('SKIP_JS_BUILD=1 SKIP_CSS_BUILD=1 SECRET_KEY_BASE_DUMMY=1 SECRET_KEY_BASE=panelalpha-assets-precompile bundle exec rails assets:precompile', $docker);
+        $this->assertStringContainsString('PATH=/tmp/pa-js-built:$PATH', $docker);
+        $this->assertSame(1, substr_count($docker, 'bundle exec rails assets:precompile'));
+        $this->assertGreaterThan(
+            strpos($docker, 'COPY --from=assets /app/app/assets/builds'),
+            strpos($docker, 'bundle exec rails assets:precompile')
+        );
+    }
+
+    /** A cssbundling app on importmap has `build:css` and no `build`. */
+    public function test_a_css_only_bundling_app_still_gets_its_node_stage(): void
+    {
+        $dir = $this->projectDir([
+            'Gemfile' => "source 'https://rubygems.org'\ngem 'rails', '~> 7.1'\ngem 'cssbundling-rails'\ngem 'propshaft'\n",
+            'package.json' => (string) json_encode(['scripts' => ['build:css' => 'sass ./app/assets/stylesheets/application.scss:./app/assets/builds/application.css']]),
+            'package-lock.json' => '{}',
+            'config/application.rb' => "module App; end\n",
+        ]);
+
+        $docker = RubyDockerfile::generate($dir, ['gemfile' => true, 'package.json' => true, 'package-lock.json' => true], 3000);
+
+        $this->assertStringContainsString('RUN npm run build:css && mkdir -p app/assets/builds', $docker);
+        $this->assertStringContainsString('COPY --from=assets /app/app/assets/builds ./app/assets/builds', $docker);
+    }
+
+    /** Rails 6/7.0 pull sprockets-rails in through the rails gem, so only the lockfile names it. */
+    public function test_the_asset_pipeline_is_also_found_in_the_lockfile(): void
+    {
+        $dir = $this->projectDir([
+            'Gemfile' => "source 'https://rubygems.org'\ngem 'rails', '~> 7.0'\n",
+            'Gemfile.lock' => "GEM\n  specs:\n    rails (7.0.8)\n      sprockets-rails (>= 2.0.0)\n    sprockets-rails (3.4.2)\n",
+            'config/application.rb' => "module App; end\n",
+        ]);
+        $withPipeline = RubyDockerfile::generate($dir, ['gemfile' => true], 3000);
+
+        $apiOnly = $this->projectDir([
+            'Gemfile' => "source 'https://rubygems.org'\ngem 'rails', '~> 8.0'\n",
+            'config/application.rb' => "module App; end\n",
+        ]);
+
+        $this->assertStringContainsString('assets:precompile', $withPipeline);
+        $this->assertStringNotContainsString('assets:precompile', RubyDockerfile::generate($apiOnly, ['gemfile' => true], 3000));
+    }
+
     public function test_is_rails_app_requires_gemfile_and_application_rb(): void
     {
         $dir = $this->projectDir([
@@ -99,6 +181,22 @@ class RubyDockerfileTest extends TestCase
 
         $this->assertStringContainsString('EXPOSE 8080', $docker);
         $this->assertStringContainsString('"-p","8080"', $docker);
+    }
+
+    /** Bundler reads `ruby file: ".ruby-version"` while parsing the Gemfile, before the source is copied. */
+    public function test_version_files_are_in_place_before_bundle_install(): void
+    {
+        $dir = $this->projectDir([
+            '.ruby-version' => "3.3.6\n",
+            'Gemfile' => "source 'https://rubygems.org'\nruby file: \".ruby-version\"\ngem 'rails'\n",
+            'config/application.rb' => "module App; end\n",
+        ]);
+
+        $dockerfile = RubyDockerfile::generate($dir, ['gemfile' => true], 3000);
+
+        $copy = strpos($dockerfile, 'COPY .ruby-version* .tool-versions* ./');
+        $this->assertNotFalse($copy);
+        $this->assertLessThan(strpos($dockerfile, 'RUN bundle install'), $copy);
     }
 
     public function test_deployment_mode_only_when_a_lockfile_is_present(): void

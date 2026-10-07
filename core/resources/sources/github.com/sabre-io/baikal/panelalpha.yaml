@@ -4,8 +4,8 @@ description: >-
   server over SQLite or MySQL. Detection reads the checkout correctly -- a
   composer.json with no artisan, so the `php` platform on the `php` strategy,
   and PhpRuntime picks 8.2 out of `require.php: ^8.2` -- Composer resolves the
-  dependency tree on the host in 15 s, and every request then answers 403:
-  `serving-missing_entry`. Three things fix it, and only the first is the
+  dependency tree on the host, and every request then answers 403. Three
+  things fix it, and only the first is the
   document root.
 
   **The document root is `html/`, and the probe cannot reach it.**
@@ -16,8 +16,7 @@ description: >-
   `composer.json`, `phpstan.neon`, `run_tests.py` and no index at all -- so
   `detect()` falls through every candidate, emits no `PA_DOCROOT`, the base
   image serves `/app`, and Apache answers 403. `docroot: html` is a plain
-  relative path, so unlike `.` it survives `PlatformManifest::readDocroot()`
-  and engine #172 does not bite.
+  relative path, so unlike `.` it survives `PlatformManifest::readDocroot()`.
 
   Serving `html/` is also what makes this application safe to host. `Core/`
   (the whole framework, including the admin controllers), `config/`,
@@ -31,7 +30,6 @@ description: >-
   document root `Options -Indexes +FollowSymLinks`; Apache matches its
   `<Directory>` blocks on the request path rather than on the symlink target,
   so the `<Directory />` `Require all denied` above them does not apply.
-  Measured: `/admin/` renders.
 
   **The install wizard is first-visitor-wins, and it is the whole of the
   security story.** A deployed Baikal with no `config/baikal.yaml` sends
@@ -63,7 +61,7 @@ description: >-
   ships as `Core/Resources/Db/SQLite/db.sql`, and `pdo_sqlite` is baked into
   the shared base image (`PhpBaseImage::EXTENSIONS`). So there is no sidecar,
   no second container, and no volume the panel cannot see -- the account's
-  calendars are one 110 KB file. `database: mysql` was the alternative and is
+  calendars are one file. `database: mysql` was the alternative and is
   a worse fit here: it would provision a panel-visible database, but at the
   price of a MySQL wait and a second service for an application whose upstream
   treats SQLite as the default rather than as the fallback.
@@ -73,14 +71,14 @@ description: >-
   `BAIKAL_PATH_CONFIG` and `BAIKAL_PATH_SPECIFIC` from the environment and, only
   failing those, falls back to `config/` and `Specific/` inside the repository
   (Core/Frameworks/Flake/Framework.php:180-195). The engine empties `~/project`
-  before every clone (engine #173), so the in-repository default would destroy
+  before every clone, so the in-repository default would destroy
   the configuration *and every calendar in the account* on each redeploy. The
   compose override points both at `/data`, a bind mount from
   `~/.panelalpha/baikal` -- so persistence here is upstream's own mechanism
   rather than a symlink or a copy-back, and the SQLite file is somewhere the
   account owner can find, read and copy.
 
-  **No php.ini reaches this image** (engine #185): `php --ini` answers "Loaded
+  **No php.ini reaches this image**: `php --ini` answers "Loaded
   Configuration File: (none)", so `display_errors` is On, `expose_php` is On and
   `post_max_size` is 8M. Baikal's `index.php` and `dav.php` each set
   `display_errors` to 0 themselves, but `admin/index.php` and
@@ -100,16 +98,15 @@ docroot: html
 commands:
   # No `id:`, deliberately. A stale detection cache drops every stage command
   # from a recipe that carries one while the log still reports "Recipe named by
-  # ..." (engine #169); omitting it and extending a shipped manifest is the
+  # ..."; omitting it and extending a shipped manifest is the
   # mitigation.
   #
   # Declaring `commands:` replaces what php.yaml declared, top level by top
   # level (SourceRecipes::fromAppConfig uses array_merge), so `composer-install`
-  # is gone from here. That is safe and checked: PhpHostBuild::script() falls
-  # back to DEFAULT_INSTALL whenever the manifest names no dependency-role
-  # build command and the project ships a composer.json
-  # (PhpHostBuild.php:159), which is this case. Verified on the deploy --
-  # "Resolving PHP dependencies on host", and vendor/ present in the account.
+  # is gone from here. That is safe: PhpHostBuild::script() falls back to
+  # DEFAULT_INSTALL whenever the manifest names no dependency-role build
+  # command and the project ships a composer.json (PhpHostBuild.php:159),
+  # which is this case.
   - stage:
       - install
       - upgrade
@@ -122,7 +119,7 @@ commands:
       Idempotent: on the upgrade stage a database that is already complete and
       a config that already carries an admin password cost one SELECT and
       nothing else, which is what makes a redeploy safe. On the build stage it
-      would not run at all (engine #171).
+      would not run at all.
     run: 'php /app/panelalpha-baikal-setup.php'
     timeout: 300
 credentials:

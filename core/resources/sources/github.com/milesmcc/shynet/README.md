@@ -33,14 +33,6 @@ restarts forever too. The third service, a bundled `nginx` whose conf is
 hardcoded to `server_name example.com`, stays up and answers 502 to
 everything, which is what the port probe and the domain probe both see.
 
-Measured on a control deploy of the unmodified repository: **78 s to
-`Deploy finished successfully`, then 502 continuously**, with
-`shynet_database` in `Restarting (1)` and `shynet_main` under a second old on
-every look. **This is not a boot race.** The steady state is 502, not a
-window. For comparison, the same stack under this recipe, with the `ready`
-gate removed, answers 2.0 s after `docker compose up -d` returns — the window
-exists and is two seconds wide, which could never produce this verdict.
-
 `ComposePlaceholders` does not rescue it. It fills `${VAR:?message}`, Compose's
 fail-closed form (`REQUIRED_VAR_PATTERN`, `ComposePlaceholders.php:87`); a bare
 `${VAR}` is left as the empty string it interpolates to.
@@ -64,10 +56,8 @@ ALLOWED_HOSTS = (os.getenv("ALLOWED_HOSTS") or "localhost,127.0.0.1").split(",")
 ```
 
 `edge` is what `.github/workflows/build-docker-edge.yml` pushes on every commit
-to master, and its `org.opencontainers.image.revision` label is
-`ca35caba3af2b888acc990b99152c500a1c44461` — the exact commit a plain
-`git clone` of this repository checks out. Verified with `docker image
-inspect`. So the recipe runs the code the customer cloned, and `latest` would
+to master, and its `org.opencontainers.image.revision` label is the master
+commit a plain `git clone` of this repository checks out. So the recipe runs the code the customer cloned, and `latest` would
 mean quietly deploying a two-and-a-half-year-old build with Host validation
 turned off.
 
@@ -96,13 +86,6 @@ Four things nothing else can.
      — the check written for exactly this failure — cannot run for a Django
      app deployed as `compose`, which is how a Django app that ships a compose
      file is always deployed.
-
-   Measured, not inferred: rebuilding a working deploy with
-   `env_vars: {"ALLOWED_HOSTS": "127.0.0.1,localhost"}` makes the public
-   domain answer `400 Bad Request (400)` on `/` while the engine reports
-   `healthy: true`, `serving: "ok"`, no failed checks, and
-   `domain: {"verdict": "ok", "http_code": 400}`. Seven checks ran, all of
-   them `_baseline`.
 3. **A `DJANGO_SECRET_KEY`.** `settings.py:36` otherwise falls back to the
    literal `onlyusethisindev`, which ships in every copy of the repository and
    would sign every session cookie and password-reset token.
@@ -131,8 +114,7 @@ Four things nothing else can.
   makes the deploy finish when the site answers rather than when containers
   have been started.
 
-**The chain fails the deploy, and that was tested by breaking it.** Blanking
-`POSTGRES_PASSWORD` in `db.env` and rebuilding gives
+**The chain fails the deploy.** A blank `POSTGRES_PASSWORD` in `db.env` gives
 `status: failed`, `dependency failed to start: container project-db-1` — the
 same broken precondition the unmodified repository has, reported as a failure
 instead of as a success in front of a 502.
@@ -145,7 +127,7 @@ request that collected the hit. `celeryworker.sh` exists but is for a
 deployment that sets `CELERY_BROKER_URL`; there is no beat schedule anywhere
 in the tree. Redis is optional in the same way — `settings.py:233` only builds
 a Redis cache when `REDIS_CACHE_LOCATION` is set. So this is two long-running
-containers, not the five the tracker row's "PostgreSQL + Redis" implies.
+containers, with no Redis and no worker.
 
 Because the beacon is handled inline, `NUM_WORKERS` matters: the image's
 default of 1 sync gunicorn worker serves one request at a time, and a tracked
@@ -190,7 +172,7 @@ otherwise be handed an https URL that does not answer.
 
 ## Exposure
 
-Checked over the public domain on a running account:
+What the public domain answers:
 
 | Path | Answer |
 |---|---|
@@ -205,14 +187,8 @@ Checked over the public domain on a running account:
 One finding that is not a URL. **With no SMTP configured, a password-reset
 mail is printed to the app container's log, reset link included.**
 `settings.py:297` falls back to Django's console backend whenever `EMAIL_HOST`
-is unset, which is the default. Measured: posting the reset form for
-`admin@localhost` put
-
-```
-http://<domain>/accounts/password/reset/key/1-df82k7-080f7133a43ee8e1c021559dbcaf7e3d/
-```
-
-into `docker logs` for the app. Anyone who can read that log can take the
+is unset, which is the default, so the reset link lands in `docker logs` for
+the app. Anyone who can read that log can take the
 administrator account over without the password. It is upstream's behaviour and
 the fix is to configure SMTP, and this is the reason the recipe does not advertise
 password reset as working. (The link is `http://` because Shynet sets no
@@ -221,35 +197,6 @@ false behind the proxy.)
 
 The dashboard holds visitor IP-derived data — ASN, country, city, user agent —
 so the 302s above are the line that matters, and they hold.
-
-## Verified
-
-On `mariusz.panelalpha.tools`, over the real public HTTPS domain:
-
-- Deploy **63 s** with the image already on the host cache, **143 s** on a
-  cold account that had to pull it (93 s of that was account preparation on a
-  busy host; the `running` stage, image pull included, was 46 s). Both
-  `serving: ok`, `healthy: true`, HTTP 200 — `/` 302s to `/dashboard/`, which
-  302s to `/accounts/login/`, which is 200 and renders. The control (same
-  repository, no recipe) was 78 s, `serving: error_page`, HTTP 502.
-- Rebuilding the *control* account, which had been serving 502, with the
-  recipe in place: 49 s and `serving: ok`.
-- Logged in as the generated administrator; created a Service; took its
-  snippet; served it on a second PanelAlpha account and loaded four pages in a
-  real browser.
-- The dashboard then showed **4 sessions, 9 hits**, per-page hit counts for
-  `/`, `/about.html` and `/pricing.html`, `Chrome`, `Linux`, `Desktop`, a live
-  "online" badge, load time, bounce rate, and the ASN and country flag of the
-  visiting network — so `X-Forwarded-For` survives the proxy chain and the
-  bundled MaxMind databases resolve.
-- `POST /projects/shyrec/rebuild`: **29 s**, and afterwards the Service, the
-  users, the recorded sessions and hits were all still there, the three files
-  in `~/.panelalpha/shynet/` were byte-identical (same sha256), `init` logged
-  `an account already exists; leaving it alone`, and **a session cookie issued
-  before the rebuild still authenticated** — which is the cheap proof that
-  `DJANGO_SECRET_KEY` did not move, since Django signs session *data* with it.
-- Memory at idle: `app` 113 MiB of 768, `db` 61 MiB of 256, 209 MiB for the
-  whole account.
 
 ## Known rough edges
 

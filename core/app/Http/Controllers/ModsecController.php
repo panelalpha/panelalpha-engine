@@ -3,12 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Http\Resources\ModsecRulesetCollection;
+use App\Lib\Modsec\AuditLogFiles;
 use App\System;
 use App\System\Services\Modsec;
 use App\Models\Setting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use OpenApi\Attributes as OA;
 
@@ -206,6 +208,87 @@ class ModsecController extends Controller
     }
 
     #[OA\Get(
+        path: '/modsec/custom-rules',
+        summary: 'Get the custom ModSecurity rules',
+        security: [['bearerAuth' => []]],
+        tags: ['ModSecurity'],
+        responses: [
+            new OA\Response(response: 200, description: 'Custom rules', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', ref: '#/components/schemas/ModsecCustomRules')],
+            )),
+        ],
+    )]
+    public function getCustomRules(): JsonResponse
+    {
+        return new JsonResponse([
+            'data' => $this->customRulesData(new System()),
+        ]);
+    }
+
+    #[OA\Put(
+        path: '/modsec/custom-rules',
+        summary: 'Replace the custom ModSecurity rules',
+        description: 'The rules go live only after the webserver config test parses them with every enabled ruleset, '
+            . 'and, when they are loaded, passes the live config with them in place; '
+            . 'otherwise the call answers 422 with what the test said and the live rules stay as they were. '
+            . 'On nginx the test also runs them, and refuses rules that would switch ModSecurity off or to detection-only, '
+            . 'stop the rules around them or the reading of request bodies, or deny an ordinary request; '
+            . 'SecRuleEngine and ctl:ruleEngine are refused '
+            . 'anywhere in the rules, skip is refused, and a skipAfter must name a SecMarker after it. '
+            . 'An operator ModSecurity does not know is refused too, since ModSecurity would read it as a regular expression. '
+            . 'Rule ids must be in ' . Modsec::CUSTOM_ID_MIN . '-' . Modsec::CUSTOM_ID_MAX . '. '
+            . 'They apply once the `custom` ruleset is enabled and the mode is not off.',
+        security: [['bearerAuth' => []]],
+        tags: ['ModSecurity'],
+        requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
+            required: ['rules'],
+            properties: [new OA\Property(
+                property: 'rules',
+                type: 'string',
+                nullable: true,
+                description: 'The whole rule file: SecRule, SecAction, SecMarker and SecRuleRemove/Update directives. Empty clears it.',
+                example: 'SecRule REQUEST_URI "@beginsWith /xyz" "id:1100001,phase:1,deny,status:403,log"',
+            )],
+        )),
+        responses: [
+            new OA\Response(response: 200, description: 'Custom rules', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', ref: '#/components/schemas/ModsecCustomRules')],
+            )),
+            new OA\Response(response: 422, description: 'Rules refused', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+        ],
+    )]
+    public function setCustomRules(Request $request): JsonResponse
+    {
+        /** @var array{rules: ?string} $params */
+        $params = $request->validate([
+            'rules' => 'present|nullable|string|max:' . Modsec::CUSTOM_RULES_MAX_BYTES,
+        ]);
+
+        $system = new System();
+        try {
+            $system->modsec()->saveCustomRules($params['rules'] ?? '');
+        } catch (\InvalidArgumentException $e) {
+            throw ValidationException::withMessages(['rules' => $e->getMessage()]);
+        }
+
+        return new JsonResponse([
+            'data' => $this->customRulesData($system),
+        ]);
+    }
+
+    /**
+     * @return array{rules: string, enabled: bool, id_range: array{0: int, 1: int}}
+     */
+    private function customRulesData(System $system): array
+    {
+        return [
+            'rules' => $system->modsec()->customRules(),
+            'enabled' => $system->modsec()->customRulesEnabled(),
+            'id_range' => [Modsec::CUSTOM_ID_MIN, Modsec::CUSTOM_ID_MAX],
+        ];
+    }
+
+    #[OA\Get(
         path: '/modsec/audit-log/files',
         summary: 'List ModSecurity audit log files',
         security: [['bearerAuth' => []]],
@@ -218,11 +301,8 @@ class ModsecController extends Controller
     )]
     public function listAuditLogFiles(): JsonResponse
     {
-        $system = new System();
-        $files = $system->modsec()->listAuditLogFiles();
-
         return new JsonResponse([
-            'data' => $files,
+            'data' => (new AuditLogFiles())->list(),
         ]);
     }
 
@@ -238,17 +318,11 @@ class ModsecController extends Controller
     )]
     public function downloadAuditLogFile(string $filename): BinaryFileResponse
     {
-        $system = new System();
-        $files = $system->modsec()->listAuditLogFiles();
-
-        foreach ($files as $file) {
-            if ($file['file'] == $filename) {
-                return new BinaryFileResponse($file['path']);
-            }
-        }
-        abort(new JsonResponse([
+        $path = (new AuditLogFiles())->path($filename) ?? abort(new JsonResponse([
             'message' => 'File not found',
         ], 404));
+
+        return new BinaryFileResponse($path);
     }
 
     #[OA\Get(
@@ -265,36 +339,12 @@ class ModsecController extends Controller
     )]
     public function tailAuditLogFile(string $filename): JsonResponse
     {
-        $system = new System();
-        $files = $system->modsec()->listAuditLogFiles();
-
-        $tailSize = 1024 * 50;
-
-        foreach ($files as $file) {
-            if ($file['file'] == $filename) {
-
-                $file = fopen($file['path'], 'r');
-                fseek($file, -$tailSize, SEEK_END);
-                $data = fread($file, $tailSize);
-                fclose($file);
-
-                $logs = [];
-                $lines = explode("\n", $data);
-                for ($i = count($lines)-1; $i >=0; $i--) {
-                    /** @var mixed */
-                    $log = @json_decode($lines[$i]);
-                    if ($log) {
-                        /** @var mixed */
-                        $logs[] = $log;
-                    }
-                }
-                return new JsonResponse([
-                    'data' => $logs,
-                ]);
-            }
-        }
-        abort(new JsonResponse([
+        $logs = (new AuditLogFiles())->tail($filename) ?? abort(new JsonResponse([
             'message' => 'File not found',
         ], 404));
+
+        return new JsonResponse([
+            'data' => $logs,
+        ]);
     }
 }

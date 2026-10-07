@@ -218,7 +218,7 @@ class MarketRadarSourceRecipeTest extends TestCase
     }
 
     /**
-     * engine#221: the recipe is found by its URL, so no detect ran and nothing
+     * The recipe is found by its URL, so no detect ran and nothing
      * told the decision where the compose file is. The deployability check then
      * refused a checkout that has one.
      */

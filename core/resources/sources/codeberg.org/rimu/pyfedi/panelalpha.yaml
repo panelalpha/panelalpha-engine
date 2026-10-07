@@ -4,7 +4,7 @@ description: >-
   alternative): gunicorn on :5000, PostgreSQL for data, Redis for cache and the
   Celery broker. This recipe is the compose-REPLACE pattern (calcom/n8n/cannery):
   no platform block is declared, so detection runs via fromWalk, the compose
-  strategy takes over, engine#221 does not bite, and ComposePlaceholders
+  strategy takes over, the fromSource platform-declaration trap does not bite, and ComposePlaceholders
   rewrites the one PA_PUBLIC_URL below from localhost to the account's public
   https address.
 
@@ -25,14 +25,17 @@ description: >-
   so a redeploy never re-seeds or wipes) and a `ready` gate so the deploy
   returns only once the site actually answers.
 
-  SECRETS + ADMIN, PERSISTED ONCE. hooks/prepare.sh generates SECRET_KEY, the
-  postgres password and the first admin's password once into
-  ~/.panelalpha/pyfedi/ (0600 in 0700, the only writable place a redeploy does
-  not delete) and records them in credentials.txt. A rebuild reuses them: a new
-  SECRET_KEY logs everyone out and invalidates JWTs, a new DB password locks the
-  app out of the pgdata volume that still holds the old one. init-db sets the
-  seeded admin verified=True, so the owner can log in immediately with no email
-  round-trip. SERVER_NAME is the account domain (unknown until deploy): the app
+  SECRETS PERSISTED ONCE, ADMIN FROM THE ENGINE. hooks/prepare.sh generates
+  SECRET_KEY and the postgres password once into ~/.panelalpha/pyfedi/ (0600 in
+  0700, the only writable place a redeploy does not delete). A rebuild reuses
+  them: a new SECRET_KEY logs everyone out and invalidates JWTs, a new DB
+  password locks the app out of the pgdata volume that still holds the old one.
+  The first admin's login is the engine's (`credentials:` below), delivered to
+  the init service as ~/.panelalpha/app-credentials.env and returned by
+  GET /projects/{name}/app-credentials (MCP app_credentials_get); an account
+  seeded before keeps its password, adopted from the old app.env. init-db sets
+  the seeded admin verified=True, so the owner can log in immediately with no
+  email round-trip. SERVER_NAME is the account domain (unknown until deploy): the app
   and init wrappers derive it from PA_PUBLIC_URL (which the engine rewrites to
   the public https URL) by stripping the scheme, because PieFed's SERVER_NAME is
   a bare hostname, not a URL.
@@ -41,6 +44,13 @@ description: >-
   communities, posts, the alpha API) work. Outbound ActivityPub delivery runs in
   a Celery worker that this lean stack does not start, so cross-instance
   federation is not exercised. Image upload is multipart and stalls through the
-  shared panelalpha.online (WithoutDNS) tunnel (engine#170); it works against
+  shared panelalpha.online (WithoutDNS) tunnel; it works against
   the account's own address/container. Both are engine/tunnel limitations to
   report, not recipe or app failures.
+credentials:
+  login_path: /auth/login
+  # The old recipe wrote the admin into app.env under these names.
+  adopt_from: .panelalpha/pyfedi/app.env
+  fields:
+    ADMIN_USER: {kind: username, value: paadmin}
+    ADMIN_PASSWORD: {kind: password}

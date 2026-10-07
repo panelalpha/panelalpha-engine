@@ -1,0 +1,55 @@
+# The repository's Dockerfile downloads an Envoy binary and builds the UI and
+# the Go binary; this runs upstream's published image of the current release
+# instead. Pomerium routes the site's own address to a placeholder page until
+# UPSTREAM points it at the application to protect.
+services:
+  pomerium:
+    image: pomerium/pomerium:v0.33.4@sha256:dc0a59dc2709f64463f970bf66484a00e91f9af0d6468b493cc4c89ee83c70fd
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      # SHARED_SECRET / COOKIE_SECRET, generated once by hooks/prepare.sh, so
+      # a redeploy keeps everyone signed in.
+      - ../.panelalpha/pomerium/secrets.env
+    environment:
+      # TLS ends at the hosting proxy.
+      INSECURE_SERVER: "true"
+      ADDRESS: ":8080"
+    volumes:
+      - config:/pomerium:ro
+    depends_on:
+      config:
+        condition: service_completed_successfully
+      backend:
+        condition: service_started
+    mem_limit: 512m
+
+  # Writes the route: the site's public address is only known to compose, not
+  # to the prepare hook. No identity provider is configured, so Pomerium uses
+  # its hosted authenticate service.
+  config:
+    image: alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+    restart: "no"
+    environment:
+      FROM_URL: ${PA_PUBLIC_URL}
+      TO_URL: ${UPSTREAM:-http://backend:80}
+    volumes:
+      - config:/pomerium
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        printf 'routes:\n  - from: %s\n    to: %s\n    allow_any_authenticated_user: true\n' "$$FROM_URL" "$$TO_URL" > /pomerium/config.yaml
+    mem_limit: 32m
+
+  # What a fresh deploy protects until UPSTREAM is set: one static page.
+  backend:
+    image: nginx:alpine@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2
+    restart: unless-stopped
+    volumes:
+      - ./panelalpha/pomerium:/usr/share/nginx/html:ro
+    mem_limit: 64m
+
+volumes:
+  config: {}

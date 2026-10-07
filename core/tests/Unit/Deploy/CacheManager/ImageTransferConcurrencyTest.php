@@ -80,6 +80,19 @@ class ImageTransferConcurrencyTest extends TestCase
         $this->assertSame($digest, ImageTransfer::normalizeImageRef($digest));
     }
 
+    public function test_a_recipe_pinned_image_is_accepted_and_kept_by_its_digest(): void
+    {
+        $digest = 'sha256:' . str_repeat('a', 64);
+
+        $this->assertTrue(ImageTransfer::isSafeImageRef("sharelatex/sharelatex:6.3.0@{$digest}"));
+        $this->assertTrue(ImageTransfer::isSafeImageRef("ghcr.io/meeb/tubesync:v0.18.4@{$digest}"));
+        $this->assertTrue(ImageTransfer::isSafeImageRef("registry.internal:5000/ns/pg:16@{$digest}"));
+        $this->assertSame("sharelatex/sharelatex@{$digest}", ImageTransfer::normalizeImageRef("sharelatex/sharelatex:6.3.0@{$digest}"));
+        $this->assertSame("registry.internal:5000/ns/pg@{$digest}", ImageTransfer::preferDigest("registry.internal:5000/ns/pg:16@{$digest}"));
+        $this->assertSame("registry.internal:5000/ns/pg@{$digest}", ImageTransfer::preferDigest("registry.internal:5000/ns/pg@{$digest}"));
+        $this->assertSame('registry.internal:5000/ns/pg:16', ImageTransfer::preferDigest('registry.internal:5000/ns/pg:16'));
+    }
+
     public function test_a_private_registry_with_a_port_is_seeded_like_any_other(): void
     {
         $this->assertTrue(ImageTransfer::isSafeImageRef('registry.internal:5000/ns/pg:16'));
@@ -105,6 +118,10 @@ class ImageTransferConcurrencyTest extends TestCase
             'whitespace' => ['post gres:16'],
             'shell metacharacter' => ['postgres:16;id'],
             'empty' => [''],
+            'short digest beside a tag' => ['postgres:16@sha256:abc'],
+            'empty tag before a digest' => ['postgres:@sha256:' . str_repeat('a', 64)],
+            'tag after a digest' => ['postgres@sha256:' . str_repeat('a', 64) . ':16'],
+            'two digests' => ['postgres@sha256:' . str_repeat('a', 64) . '@sha256:' . str_repeat('b', 64)],
         ];
     }
 

@@ -19,4 +19,4 @@ description: >-
 
   The image is built by a one-shot `deps` service and run by `app`, because
   the engine refuses a service that both builds and mounts the checkout as a
-  workstation dev compose (engine#430).
+  workstation dev compose.

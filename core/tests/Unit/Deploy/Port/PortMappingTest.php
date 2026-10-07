@@ -69,6 +69,27 @@ class PortMappingTest extends TestCase
         $this->assertNull(PortMapping::parse('${APP_PORT}:8000'));
     }
 
+    /** BorgWarehouse: Compose refuses to start without it, so it is set; read it as the container port. */
+    public function test_a_required_host_port_reads_as_the_container_port(): void
+    {
+        $mapping = PortMapping::parse('${WEB_SERVER_PORT:?WEB_SERVER_PORT variable missing}:3000');
+        $this->assertSame(3000, $mapping->hostPort);
+        $this->assertSame(3000, $mapping->containerPort);
+
+        $mapping = PortMapping::parse('0.0.0.0:${WEB_PORT?unset}:8000/tcp');
+        $this->assertSame(8000, $mapping->hostPort);
+        $this->assertSame(8000, $mapping->containerPort);
+
+        $mapping = PortMapping::parse(['target' => 3000, 'published' => '${WEB_SERVER_PORT:?missing}']);
+        $this->assertSame(3000, $mapping->hostPort);
+    }
+
+    public function test_a_required_container_port_is_still_not_a_mapping(): void
+    {
+        $this->assertNull(PortMapping::parse('${PORT:?missing}'));
+        $this->assertNull(PortMapping::parse('8080:${PORT:?missing}')?->containerPort);
+    }
+
     public function test_a_zero_or_negative_port_is_not_a_mapping(): void
     {
         $this->assertNull(PortMapping::parse(0));
@@ -78,10 +99,31 @@ class PortMappingTest extends TestCase
 
     public function test_a_non_scalar_entry_is_not_a_mapping(): void
     {
-        // Compose's long syntax, `{target: 80, published: 8080}`. Not handled
-        // here; the caller reads that shape separately.
-        $this->assertNull(PortMapping::parse(['target' => 80, 'published' => 8080]));
         $this->assertNull(PortMapping::parse(null));
+        $this->assertNull(PortMapping::parse(['published' => 8080]));
+    }
+
+    /** PhantomBot publishes with the long syntax and was routed to 8080. */
+    public function test_the_long_syntax_is_a_mapping(): void
+    {
+        $mapping = PortMapping::parse(['target' => 25000, 'published' => 25000, 'protocol' => 'tcp']);
+        $this->assertSame(25000, $mapping->hostPort);
+        $this->assertSame(25000, $mapping->containerPort);
+
+        $mapping = PortMapping::parse(['target' => '80', 'published' => '${WEB_PORT:-8081}']);
+        $this->assertSame(8081, $mapping->hostPort);
+        $this->assertSame(80, $mapping->containerPort);
+
+        $mapping = PortMapping::parse(['target' => 3000]);
+        $this->assertSame(3000, $mapping->hostPort);
+        $this->assertNull($mapping->containerPort);
+    }
+
+    public function test_a_long_syntax_loopback_binding_publishes_nothing(): void
+    {
+        $this->assertNull(PortMapping::parse(['target' => 80, 'published' => 8080, 'host_ip' => '127.0.0.1']));
+        $this->assertNull(PortMapping::parse(['target' => 80, 'published' => 8080, 'host_ip' => '::1']));
+        $this->assertSame(8080, PortMapping::parse(['target' => 80, 'published' => 8080, 'host_ip' => '0.0.0.0'])->hostPort);
     }
 
     public function test_surrounding_whitespace_is_tolerated(): void

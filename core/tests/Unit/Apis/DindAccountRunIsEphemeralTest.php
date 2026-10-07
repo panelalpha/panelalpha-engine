@@ -75,8 +75,9 @@ class DindAccountRunIsEphemeralTest extends TestCase
         // over /run/docker.sock, which is root on the host. tmpfs shares
         // nothing; a bind would share everything.
         foreach ((array) ($this->service()['volumes'] ?? []) as $volume) {
-            $this->assertStringNotContainsString(':/run', (string) $volume);
-            $this->assertStringNotContainsString('docker.sock', (string) $volume);
+            $volume = is_array($volume) ? ($volume['source'] ?? '') . ':' . ($volume['target'] ?? '') : (string) $volume;
+            $this->assertStringNotContainsString(':/run', $volume);
+            $this->assertStringNotContainsString('docker.sock', $volume);
         }
     }
 
@@ -84,6 +85,13 @@ class DindAccountRunIsEphemeralTest extends TestCase
     {
         // A guard on the isolation boundary generally, not just /run.
         foreach ((array) ($this->service()['volumes'] ?? []) as $volume) {
+            // lxcfs's virtualised /proc files, read-only, are the one exception:
+            // each file over /proc, and the directory for the account's own containers.
+            if (is_array($volume)) {
+                $this->assertStringStartsWith('/var/lib/lxcfs/proc', (string) ($volume['source'] ?? ''));
+                $this->assertTrue($volume['read_only'] ?? false, 'an lxcfs file must be mounted read-only');
+                continue;
+            }
             $source = explode(':', (string) $volume)[0];
 
             $this->assertTrue(

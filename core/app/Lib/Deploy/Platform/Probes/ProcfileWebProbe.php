@@ -43,6 +43,29 @@ final class ProcfileWebProbe implements PlatformProbe
         return $command !== '' ? $command : null;
     }
 
+    /**
+     * The Procfile's other processes, name => command: a worker, a clock, a
+     * `release` run before the app starts. Lower-cased names, as compose
+     * service names; the first line for a name wins.
+     *
+     * @return array<string, string>
+     */
+    public static function otherProcesses(string $procfile): array
+    {
+        $processes = [];
+        foreach (preg_split('/\R/', $procfile) ?: [] as $line) {
+            if (preg_match('/^\s*([A-Za-z0-9][A-Za-z0-9_-]*)\s*:\s*(\S.*?)\s*$/', $line, $m) !== 1) {
+                continue;
+            }
+            $name = strtolower($m[1]);
+            if ($name !== 'web' && !isset($processes[$name])) {
+                $processes[$name] = $m[2];
+            }
+        }
+
+        return $processes;
+    }
+
     private static function readProjectFile(string $projectDir, string $name): ?string
     {
         $projectDir = rtrim($projectDir, '/');

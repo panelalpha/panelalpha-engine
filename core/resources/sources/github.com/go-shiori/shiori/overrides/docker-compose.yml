@@ -45,7 +45,7 @@ services:
       start_period: 5s
     mem_limit: 384m
 
-  # `up -d` runs without --wait (engine#204); this blocks it until Shiori answers.
+  # `up -d` runs without --wait; this blocks it until Shiori answers.
   ready:
     image: ghcr.io/go-shiori/shiori:alpine-v1.8.0
     restart: "no"

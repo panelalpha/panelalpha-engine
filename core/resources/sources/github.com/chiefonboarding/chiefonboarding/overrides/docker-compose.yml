@@ -11,7 +11,7 @@ services:
       ALLOWED_HOSTS: ${PA_PUBLIC_HOST}
       BASE_URL: ${PA_PUBLIC_URL}
       # Login lockout (django-axes) keys on the client IP. Upstream reads the
-      # leftmost X-Forwarded-For entry, which the visitor sets (engine#319);
+      # leftmost X-Forwarded-For entry, which the visitor sets;
       # X-Real-IP is the peer the engine vhost saw and cannot be spoofed.
       AXES_USE_FORWARDED_FOR: "False"
       AXES_IPWARE_META_PRECEDENCE_ORDER: HTTP_X_REAL_IP,REMOTE_ADDR

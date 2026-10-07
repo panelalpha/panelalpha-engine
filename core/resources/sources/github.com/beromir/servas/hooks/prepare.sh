@@ -2,7 +2,7 @@
 # Runs on the account after the clone and before the build.
 #
 # Everything here exists because a Servas checkout cannot say where its data
-# goes. A redeploy clears and re-clones ~/project (engine#173), so the database,
+# goes. A redeploy clears and re-clones ~/project, so the database,
 # the application key and the account's credentials all have to live outside
 # it. ~ is root-owned 0755 and nothing can be created there; ~/.panelalpha is
 # created with the account and belongs to it, so the data directory is a child
@@ -74,7 +74,7 @@ chmod 600 "${DB_FILE}"
 #
 # And it is not written into the .env below, because the engine copies whatever
 # .env this hook leaves into .env.default at mode 644 -- readable by every
-# other tenant on the host (engine#173). files/panelalpha/servas-install.php
+# other tenant on the host. files/panelalpha/servas-install.php
 # puts it into .env on the install and upgrade stages, after that copy has been
 # taken.
 if [ ! -f "${DATA_HOME}/app.key" ]; then
@@ -158,9 +158,9 @@ mkdir -p storage/framework/cache/data storage/framework/sessions storage/framewo
 # 0600, which is a real trap here: EnvSidecars::variableMap() reads .env with
 # plain file_get_contents() as www-data rather than through the account's file
 # layer, so a 0600 .env is invisible to it and it falls back to .env.example --
-# which says DB_CONNECTION=mysql. Measured: a MariaDB container appeared beside
-# the app and its DB_* landed in the compose `environment:` block, where they
-# beat env_file for `php artisan` while the web request went on reading .env.
+# which says DB_CONNECTION=mysql. A MariaDB container then appears beside the
+# app and its DB_* land in the compose `environment:` block, where they beat
+# env_file for `php artisan` while the web request goes on reading .env.
 # One database for the migration and another for the site. There is nothing
 # secret in this file; the application key is added to it from inside the
 # container, by panelalpha/servas-install.php, which chmods it 0600 then.
@@ -183,10 +183,9 @@ SERVAS_SHOW_APP_VERSION=true
 
 # ~/.panelalpha/servas, bind-mounted at /data by the compose override. Outside
 # the checkout on purpose: a redeploy re-clones ~/project and would otherwise
-# take every bookmark with it (engine#173). Servas reads DB_DATABASE straight
+# take every bookmark with it. Servas reads DB_DATABASE straight
 # into the connection -- config/database.php does not wrap it in
-# database_path() -- so an absolute path is used as written (engine#167 does
-# not apply here).
+# database_path() -- so an absolute path is used as written.
 DB_CONNECTION=sqlite
 DB_DATABASE=/data/database.sqlite
 DB_FOREIGN_KEYS=true

@@ -3,6 +3,7 @@
 namespace Tests\Unit\System\Project;
 
 use App\System\Project\Git\Exception as GitException;
+use App\Models\Domain as DomainModel;
 use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Project;
@@ -26,9 +27,24 @@ class ProjectGitTest extends TestCase
         $this->assertSame('project', $git->pathKey());
     }
 
-    public function test_default_path_for_php_hosting_is_public_html(): void
+    /** A fresh PHP-hosting project serves its main domain from /<domain>/public_html, not ~/public_html. */
+    public function test_default_path_for_php_hosting_is_the_main_domains_document_root(): void
     {
-        $git = $this->project($this->phpHostingModel())->git();
+        $domain = new DomainModel();
+        $domain->domain = 'example.com';
+        $git = $this->project($this->phpHostingModelWithMainDomain($domain))->git();
+
+        $this->assertSame('/home/alice/example.com/public_html', $git->absolutePath());
+        $this->assertSame('example.com/public_html', $git->pathKey());
+
+        $domain->setDocumentRoot('/public_html');
+        $git = $this->project($this->phpHostingModelWithMainDomain($domain))->git();
+        $this->assertSame('/home/alice/public_html', $git->absolutePath());
+    }
+
+    public function test_default_path_without_a_main_domain_is_public_html(): void
+    {
+        $git = $this->project($this->phpHostingModelWithMainDomain(null))->git();
 
         $this->assertSame('/home/alice/public_html', $git->absolutePath());
         $this->assertSame('public_html', $git->pathKey());
@@ -126,11 +142,13 @@ class ProjectGitTest extends TestCase
         ];
         $git = $this->testable($model, 'public_html', $runner);
 
-        $git->connect('https://github.com/org/repo.git', 'main', 'pat-secret');
+        $status = $git->connect('https://github.com/org/repo.git', 'main', 'pat-secret');
 
         $joined = $this->joined($runner);
-        $this->assertTrue($this->commandsContain($joined, 'fetch origin'));
+        $this->assertTrue($this->commandsContain($joined, 'fetch --depth=1 origin main'), 'one branch, shallow, as the deploy clones');
         $this->assertTrue($this->commandsContain($joined, 'reset --hard origin/main'));
+        $this->assertTrue($this->commandsContain($joined, 'config --unset panelalpha.connecting'));
+        $this->assertArrayNotHasKey('sync_error', $status);
         $this->assertTrue($this->commandsContain($joined, 'branch --set-upstream-to=origin/main main'));
         $this->assertFalse($this->commandsContain($joined, 'clean -fd'), 'connect() must not delete untracked files the way pull(force) does');
     }
@@ -150,13 +168,111 @@ class ProjectGitTest extends TestCase
             'branch --show-current' => "main\n",
             'rev-parse --abbrev-ref @{upstream}' => '',
         ];
-        $runner->failIfContains = ['fetch origin'];
+        $runner->failIfContains = ['fetch --depth=1'];
         $git = $this->testable($model, 'public_html', $runner);
 
         $status = $git->connect('https://github.com/org/repo.git', 'main', 'pat-secret');
 
         $this->assertTrue($status['connected']);
         $this->assertNotNull($model->getSiteGit('public_html'));
+        // ...but it says the work tree is empty instead of leaving the caller to find out.
+        $this->assertStringStartsWith('Connected, but fetching main failed', $status['sync_error'] ?? '');
+    }
+
+    /**
+     * WordPress/WordPress took longer than the client's timeout to connect, and
+     * every git call meanwhile answered "Git is not connected." -- which reads as
+     * broken, not as "wait".
+     */
+    public function test_calls_during_a_running_connect_are_told_to_wait(): void
+    {
+        $model = $this->phpHostingModel();
+        $runner = new FakeGitRunner();
+        $runner->stdout = [
+            'rev-parse --is-inside-work-tree' => "true\n",
+            'config --get panelalpha.connecting' => (time() - 30) . "\n",
+        ];
+        $git = $this->testable($model, 'public_html', $runner);
+
+        foreach ([
+            'pull' => fn () => $git->pull(),
+            'repair' => fn () => $git->connect('https://github.com/org/repo.git', 'main', null, true),
+            'connect' => fn () => $git->connect('https://github.com/org/repo.git', 'main', null),
+        ] as $call => $run) {
+            try {
+                $run();
+                $this->fail("{$call} must refuse while the first connect runs");
+            } catch (GitException $e) {
+                $this->assertSame(409, $e->httpStatus, $call);
+                $this->assertStringContainsString('still fetching', $e->getMessage(), $call);
+            }
+        }
+        $this->assertNull($model->getSiteGit('public_html'));
+    }
+
+    /** A client that timed out on connect polls status; it must read "wait", not "not connected". */
+    public function test_status_reports_a_running_connect(): void
+    {
+        $since = time() - 30;
+        $runner = new FakeGitRunner();
+        $runner->stdout = $this->connectedRepoStdout([
+            'config --get panelalpha.connecting' => $since . "\n",
+        ]);
+        $git = $this->testable($this->phpHostingModel(), 'public_html', $runner);
+
+        $status = $git->status();
+
+        $this->assertFalse($status['connected']);
+        $this->assertTrue($status['connecting']);
+        $this->assertSame(date(DATE_ATOM, $since), $status['connecting_since']);
+    }
+
+    public function test_status_without_a_running_connect_is_not_connecting(): void
+    {
+        $runner = new FakeGitRunner();
+        $runner->stdout = $this->connectedRepoStdout([
+            'config --get panelalpha.connecting' => (time() - 7200) . "\n",
+        ]);
+        $git = $this->testable($this->connectedPhpHostingModel(), 'public_html', $runner);
+
+        $status = $git->status();
+
+        $this->assertTrue($status['connected']);
+        $this->assertFalse($status['connecting']);
+        $this->assertNull($status['connecting_since']);
+        $this->assertFalse($this->testable($this->phpHostingModel(), 'public_html', new FakeGitRunner())->status()['connecting']);
+    }
+
+    public function test_a_stale_connect_marker_is_ignored(): void
+    {
+        $runner = new FakeGitRunner();
+        $runner->stdout = [
+            'rev-parse --is-inside-work-tree' => "true\n",
+            'config --get panelalpha.connecting' => (time() - 7200) . "\n",
+        ];
+        $git = $this->testable($this->phpHostingModel(), 'public_html', $runner);
+
+        try {
+            $git->pull();
+            $this->fail('Expected GitException');
+        } catch (GitException $e) {
+            $this->assertSame(422, $e->httpStatus);
+            $this->assertSame('Git is not connected.', $e->getMessage());
+        }
+    }
+
+    /** A bare `fetch origin` on the shallow checkout connect leaves pulls every branch's full history. */
+    public function test_pull_fetches_only_the_connected_branch(): void
+    {
+        $runner = new FakeGitRunner();
+        $runner->stdout = $this->connectedRepoStdout();
+        $git = $this->testable($this->connectedPhpHostingModel(), 'public_html', $runner);
+
+        $git->pull();
+
+        $fetches = array_values(array_filter($this->joined($runner), fn (string $c): bool => str_contains($c, ' fetch ')));
+        $this->assertCount(1, $fetches);
+        $this->assertStringEndsWith('fetch origin +refs/heads/main:refs/remotes/origin/main', $fetches[0]);
     }
 
     public function test_disconnect_blocked_on_deploy_managed_checkout(): void
@@ -253,6 +369,42 @@ class ProjectGitTest extends TestCase
         $flat = implode(' ', $runner->commands[0]);
         $this->assertStringNotContainsString(' -C ', ' ' . $flat . ' ');
         $this->assertStringNotContainsString('pat-secret', $flat);
+    }
+
+    public function test_full_history_unshallows_with_tags(): void
+    {
+        $dir = sys_get_temp_dir() . '/pa-project-git-full-' . bin2hex(random_bytes(4));
+        mkdir($dir, 0755, true);
+        $runner = new FakeGitRunner();
+        $runner->stdout = [
+            'rev-parse --is-inside-work-tree' => "true\n",
+            'rev-parse --is-shallow-repository' => "true\n",
+        ];
+        $git = $this->testable($this->dindModel(), 'project', $runner, $dir);
+
+        $git->fetchFullHistory('pat-secret');
+
+        $last = end($runner->commands);
+        $this->assertSame(['fetch', '--unshallow', '--tags', 'origin'], array_slice($last, -4));
+        @rmdir($dir);
+    }
+
+    /** A history with nothing cut off is not shallow; only the tags are fetched. */
+    public function test_full_history_of_a_complete_clone_fetches_tags_only(): void
+    {
+        $dir = sys_get_temp_dir() . '/pa-project-git-full-' . bin2hex(random_bytes(4));
+        mkdir($dir, 0755, true);
+        $runner = new FakeGitRunner();
+        $runner->stdout = [
+            'rev-parse --is-inside-work-tree' => "true\n",
+            'rev-parse --is-shallow-repository' => "false\n",
+        ];
+        $git = $this->testable($this->dindModel(), 'project', $runner, $dir);
+
+        $git->fetchFullHistory(null);
+
+        $this->assertSame(['fetch', '--tags', 'origin'], array_slice(end($runner->commands), -3));
+        @rmdir($dir);
     }
 
     public function test_init_submodules_fetches_when_gitmodules_present(): void
@@ -375,6 +527,15 @@ class ProjectGitTest extends TestCase
     {
         $model = new ModelsUser();
         $model->username = 'alice';
+
+        return $model;
+    }
+
+    private function phpHostingModelWithMainDomain(?DomainModel $domain): ModelsUser
+    {
+        $model = self::getStubBuilder(ModelsUser::class)->onlyMethods(['getMainDomain'])->getStub();
+        $model->username = 'alice';
+        $model->method('getMainDomain')->willReturn($domain);
 
         return $model;
     }

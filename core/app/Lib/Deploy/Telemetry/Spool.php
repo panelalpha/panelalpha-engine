@@ -399,14 +399,16 @@ class Spool
 
         // `pae` mkdir -p as root leaves storage/app and telemetry as root:700;
         // cron (www-data) cannot traverse those parents. Claim the outbox and
-        // its parents up through …/storage/app (outbox → telemetry → app).
+        // its parents up through …/storage/app (outbox → telemetry → app), but
+        // only in that layout: a custom TELEMETRY_SPOOL_DIR's parent is not ours.
         $this->fixOwnership($this->dir);
         $telemetry = dirname($this->dir);
-        $app = dirname($telemetry);
-        if ($telemetry !== '' && $telemetry !== '/' && $telemetry !== $this->dir) {
-            $this->fixOwnership($telemetry);
+        if (basename($telemetry) !== 'telemetry') {
+            return true;
         }
-        if ($app !== '' && $app !== '/' && basename($app) === 'app') {
+        $this->fixOwnership($telemetry);
+        $app = dirname($telemetry);
+        if (basename($app) === 'app') {
             $this->fixOwnership($app);
         }
 

@@ -45,6 +45,8 @@ Rebuild this project.
 
 Use it after you change files directly, after you change an environment variable, or when a site has degraded and you want it put back the way it shipped.
 
+A rebuild runs in the background, and so does deploying an uploaded archive. The engine answers the assistant at once and the assistant follows the deploy until it ends, however long the build takes. Asking again while one is still running is refused and points at the one already under way, so a slow deploy is never started twice.
+
 A rebuild does not wipe what the application keeps. For applications with a ready-made recipe, the passwords and keys the engine generated and the files people uploaded stay as they were. A project you set up yourself keeps only the storage you declared for it.
 
 A rebuild judges itself on what the site is actually serving afterwards, not merely on whether the process started. So a rebuild that "succeeded" but left a broken page will be marked `partial` and tell you why. See [What the engine checks](monitoring-and-logs.md#what-the-engine-checks).
@@ -178,6 +180,9 @@ You did not rebuild. See [Environment variables](#environment-variables).
 
 **I raised the memory limit and the application still runs out.**
 You did not rebuild, or the application needs more than the limit you set. See [Limits](#limits). The application gets a little less than the number you chose. If it is the *build* that runs out, check the deploy log for `Host build container memory`: it says whether the build was sized by the server or by `DEPLOY_BUILD_MEMORY`. See [Limits](#limits).
+
+**The assistant says stored secrets cannot be decoded.**
+Ask the assistant to list the affected secrets and check the engine's system information. The engine's encryption key, `APP_KEY` in `/opt/panelalpha/shared-hosting/.env-core`, may be invalid or may have changed since the secrets were stored. The project's environment variables, Git token, Cloudflare token, registry login or site password then read as empty, and the next save of the project, a redeploy included, stores them empty. Put the previous `APP_KEY` back before you change or redeploy the project. If you no longer have it, ask the assistant to set each named secret again. The application's database password is the exception: it is kept, and deploys are refused until it can be read, because a new one would lock the application out of its own database.
 
 ## From the server
 

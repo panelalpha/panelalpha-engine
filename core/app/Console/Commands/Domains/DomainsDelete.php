@@ -91,7 +91,7 @@ class DomainsDelete extends Command
             $domain->projectDomain()->delete();
             $domain->delete();
             $user->project()->syncPhpHandlersScripts();
-            $user->project()->runEntrypointScriptsSync();
+            $user->project()->syncServices();
         } catch (\Throwable $e) {
             $this->error('Domain delete failed: ' . $e->getMessage());
             return 1;

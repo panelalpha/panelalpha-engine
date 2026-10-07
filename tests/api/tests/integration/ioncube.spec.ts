@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { expect, test } from '@/fixtures/test-options';
+import { getDomainBasePath } from '@/helpers/file-path-helpers';
 import { waitForCondition } from '@/helpers/retry';
 import { wpCliUnavailableReason, wpPath } from '@/helpers/wpcli-helpers';
 
@@ -31,7 +32,9 @@ test('an ionCube-encoded plugin runs on PHP 8.1', async ({
   const original = (await api.getDomainPhpVersion(setupUser.domain)).data;
   test.skip(!original, `Could not read the current PHP version for ${setupUser.domain}.`);
 
-  const remoteZip = `/home/${setupUser.username}/${PLUGIN_ZIP}`;
+  // The home root is root-owned; the domain's document root is the user's to write.
+  const remoteDir = getDomainBasePath(setupUser.domain);
+  const remoteZip = `/home/${setupUser.username}${remoteDir}/${PLUGIN_ZIP}`;
 
   try {
     if (original !== target) {
@@ -46,7 +49,7 @@ test('an ionCube-encoded plugin runs on PHP 8.1', async ({
       );
     }
 
-    await api.uploadFile(setupUser.username, '/', localZip, { mimeType: 'application/zip' });
+    await api.uploadFile(setupUser.username, remoteDir, localZip, { mimeType: 'application/zip' });
     expect((await api.fileExists(setupUser.username, remoteZip)).exists).toBe(true);
 
     const installed = await api.executeWpCliCommand(setupUser.username, [

@@ -77,6 +77,23 @@ class McpActivityLogMiddlewareTest extends TestCase
         $this->assertSame('boom', $row->error_message);
     }
 
+    public function test_a_failed_direct_call_answered_as_a_plain_response_is_logged_as_an_error(): void
+    {
+        // What laravel/mcp's HttpTransport returns for a single reply: HTTP 200,
+        // an Illuminate Response rather than a JsonResponse, isError in the body.
+        $reply = response(json_encode(['jsonrpc' => '2.0', 'id' => 1, 'result' => [
+            'content' => [['type' => 'text', 'text' => '{"status":422,"data":{"message":"The name field is required."}}']],
+            'isError' => true,
+        ]]), 200, ['Content-Type' => 'application/json']);
+
+        (new McpActivityLogMiddleware())->handle($this->request('file_write', ['path' => 'a.txt']), fn () => $reply);
+
+        $row = McpActivityLog::sole();
+        $this->assertSame('file_write', $row->tool_name);
+        $this->assertSame('error', $row->status);
+        $this->assertStringContainsString('422', (string) $row->error_message);
+    }
+
     public function test_execute_tools_is_logged_as_the_tools_it_ran_once_the_stream_is_sent(): void
     {
         $summary = json_encode(['ok' => false, 'results' => [

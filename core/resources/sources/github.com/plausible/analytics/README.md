@@ -4,25 +4,25 @@ Privacy-friendly web analytics. An Elixir/Phoenix release serving the dashboard
 and the ingestion endpoint on :8000, PostgreSQL for users, sites and goals, and
 ClickHouse for the event stream.
 
-Detection: `dockerfile` — the repository ships a root `Dockerfile` and no compose
-file, so the image builds correctly and then starts alone. Everything that makes
+Without this recipe detection picks `dockerfile` — the repository ships a root
+`Dockerfile` and no compose file, so the image builds correctly and then starts
+alone. Everything that makes
 Plausible run is outside the Dockerfile:
 
 - `config/runtime.exs` raises without `BASE_URL`, and again without a
-  `SECRET_KEY_BASE` of at least 32 bytes. The deploy created an empty `.env`.
+  `SECRET_KEY_BASE` of at least 32 bytes.
 - the image's entrypoint understands `run` and `db <script>` and nothing else,
   and `run` is only `bin/plausible start` — no migration step, and no database
   to migrate.
 - `CLICKHOUSE_DATABASE_URL` defaults to a host named `plausible_events_db` that
-  did not exist.
+  does not exist.
 
-So the deploy reported success after an 8½-minute build and nothing answered on
-8000. What the engine *did* find was epmd: a BEAM release binds `0.0.0.0:4369`
-as soon as the VM comes up, `AppPortAlignment` polled for 24s, saw a reachable
-port that was not 8000, logged `Application is listening on port 4369, not 8000;
-forwarding there instead` and republished the account onto the Erlang port
-mapper, which answers HTTP with an empty reply. Verdict: `serving-unknown`,
-HTTP 502 through the proxy.
+So nothing answers on 8000. What the engine *does* find is epmd: a BEAM
+release binds `0.0.0.0:4369` as soon as the VM comes up, and `AppPortAlignment`
+sees a reachable port that is not 8000, logs `Application is listening on port
+4369, not 8000; forwarding there instead` and republishes the account onto the
+Erlang port mapper, which answers HTTP with an empty reply — a 502 through the
+proxy.
 
 ## The published image, not this checkout
 
@@ -30,9 +30,8 @@ HTTP 502 through the proxy.
 rewritten for a single hosting account. The stack that runs Plausible has always
 lived in that second repository; this one is the source.
 
-Building the source per account is what the failed deploy already measured:
-502.8s, 35 layers, zero cache hits — `mix deps.get --only ce && mix deps.compile`
-is 398s of it, then `npm install` for two frontends, the esbuild/tailwind asset
+Building the source per account takes many minutes — `mix deps.get --only ce &&
+mix deps.compile` is most of it, then `npm install` for two frontends, the esbuild/tailwind asset
 pipeline, the country database download and `mix release`. The result is the
 image the project publishes on every release, so the recipe pulls it.
 
@@ -78,30 +77,27 @@ below what a BEAM plus ClickHouse needs:
 
 Postgres is small on purpose: it holds users, sites and goals, not the events.
 
-Measured on an idle deploy just after the migrations: plausible 381 MiB,
-ClickHouse 89 MiB, Postgres 62 MiB. The ceilings are headroom for an account
+The ceilings are headroom for an account
 that actually collects events — ClickHouse's resident size follows its parts and
 merges, not its idle startup.
 
 ## `pids_limit`
 
-Both long-running services raise it above `ServiceHardener`'s 256, which is one
-of the two things that stopped this recipe deploying:
+Both long-running services raise it above `ServiceHardener`'s 256:
 
 - **ClickHouse, 1024.** `BackgroundSchedulePool`'s constructor allocates all of
-  its threads at once and the default pool is 512, so the server aborted at
-  startup with `Couldn't get 512 threads from global thread pool: Not enough
-  threads` and the deploy failed on `dependency failed to start: container
+  its threads at once and the default pool is 512, so under 256 the server
+  aborts at startup with `Couldn't get 512 threads from global thread pool: Not
+  enough threads` and the deploy fails on `dependency failed to start: container
   project-plausible_events_db-1 is unhealthy`. The config drop-in cuts the pool
   to 32 as well — a container that *may* create a thousand threads still should
   not.
 - **plausible, 512.** The BEAM sizes its scheduler and async pools off the
-  host's core count rather than the account's `cpus` share. Not observed to
-  fail, but 256 is close enough to be worth not finding out.
+  host's core count rather than the account's `cpus` share, and 256 is too
+  close for comfort.
 
-The other failure was self-inflicted and is recorded in
-`files/clickhouse/low-resources.xml`: `background_pool_size: 4` refuses to start
-because `number_of_free_entries_in_pool_to_execute_mutation` (20) is validated
+`files/clickhouse/low-resources.xml` records one more trap:
+`background_pool_size: 4` on its own refuses to start because `number_of_free_entries_in_pool_to_execute_mutation` (20) is validated
 against `background_pool_size * background_merges_mutations_concurrency_ratio`.
 
 ## Secrets and `BASE_URL`
@@ -109,10 +105,9 @@ against `background_pool_size * background_merges_mutations_concurrency_ratio`.
 `hooks/prepare.sh` writes the secrets once into `~/.panelalpha/plausible/`
 (0600 files in a 0700 dir) and the compose file reads them with `env_file:`.
 They cannot live in `~/project/.env`: the engine empties `~/project` on every
-deploy, dotfiles included. An earlier version of this recipe did keep them in
-`.env`, and a rebuild regenerated all three — Plausible then failed with
-`FATAL 28P01 (invalid_password)` against the Postgres volume created with the
-old password.
+deploy, dotfiles included. Regenerated on a rebuild, they would make Plausible
+fail with `FATAL 28P01 (invalid_password)` against the Postgres volume created
+with the old password.
 
 - `db.env`: `POSTGRES_PASSWORD` — hex, because it is embedded in `DATABASE_URL`
   and a base64 `/` or `+` would have to be percent-encoded there.
@@ -156,11 +151,6 @@ clean exit 0 is explicitly not a crash loop to `AppHealth::isCrashing()`.
 The health check is `/api/health`, Plausible's own readiness endpoint:
 `SELECT 1` on both databases plus the critical caches. `start_period: 300s`
 covers the first boot.
-
-Observed with the images already on the host: `docker compose up -d` returns in
-38 s, whole deploy 75 s, and the account then answers `HTTP 200` on the loopback
-port and `302` to `/register` through the proxy. `/api/health` returns
-`{"sessions":"ok","postgres":"ok","clickhouse":"ok","sites_cache":"ok"}`.
 
 ## `RELEASE_DISTRIBUTION=none`
 

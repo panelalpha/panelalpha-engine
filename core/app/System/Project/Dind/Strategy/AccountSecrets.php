@@ -19,6 +19,9 @@ class AccountSecrets
 {
     private DindProject $dind;
 
+    /** @var array<string, true> generated names this deploy's log has already given */
+    private array $announced = [];
+
     public function __construct(DindProject $dind)
     {
         $this->dind = $dind;
@@ -67,5 +70,21 @@ class AccountSecrets
             $purpose . ':' . $this->dind->userModel()->username,
             (string) config('app.key')
         );
+    }
+
+    /**
+     * Of these generated names, the ones this deploy's log has not named yet,
+     * now counted as named. The run file and .env fill a compose file's
+     * `${VAR:?}` with the same value, and one value deserves one log line.
+     *
+     * @param list<string> $names
+     * @return list<string>
+     */
+    public function notYetAnnounced(array $names): array
+    {
+        $new = array_values(array_filter($names, fn (string $name): bool => !isset($this->announced[$name])));
+        $this->announced += array_fill_keys($new, true);
+
+        return $new;
     }
 }

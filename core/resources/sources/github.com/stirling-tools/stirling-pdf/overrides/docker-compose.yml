@@ -1,4 +1,4 @@
-# The Gradle build cannot be run by the Java recipe (engine#333, engine#131);
+# The Gradle build cannot be run by the Java recipe;
 # this runs the official image of the current release on named volumes.
 services:
   app:

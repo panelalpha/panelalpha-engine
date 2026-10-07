@@ -125,7 +125,7 @@ class AppManagerTest extends TestCase
             'COMPOSE_FILE='.implode(':', $deployFiles),
             $dind->apps()->scriptCommand('info')[1]
         );
-        $this->assertSame($dir, $deploy[3], 'project directory is the first file\'s directory');
+        $this->assertSame($dir, $deploy[array_search('--project-directory', $deploy, true) + 1], 'project directory is the first file\'s directory');
     }
 
     public function test_the_script_runs_as_the_account_user_inside_dind_with_the_compose_env(): void

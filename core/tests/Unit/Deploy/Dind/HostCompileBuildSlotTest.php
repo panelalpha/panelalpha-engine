@@ -21,7 +21,7 @@ use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
 /**
- * engine#184/#295: every host build container may take the server's RAM less
+ * Every host build container may take the server's RAM less
  * the engine's share, so the builds run one at a time and the deploy log says
  * what the container got and why.
  */
@@ -205,7 +205,7 @@ class HostCompileBuildSlotTest extends TestCase
         $this->assertContains(HostCompile::buildMemoryLine(1024), $this->logLines($logger));
     }
 
-    /** engine#295: unset, a build gets 8 GB once the host has 16 GB. */
+    /** Unset, a build gets 8 GB once the host has 16 GB. */
     public function test_a_large_host_gives_the_build_8_gb(): void
     {
         $logger = DeployLogger::start($this->username);
@@ -222,7 +222,7 @@ class HostCompileBuildSlotTest extends TestCase
         );
     }
 
-    /** engine#295: and never more than half the host. */
+    /** Never more than half the host. */
     public function test_a_small_host_holds_the_build_to_half_its_ram(): void
     {
         $logger = DeployLogger::start($this->username);

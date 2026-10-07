@@ -78,7 +78,7 @@ services:
     image: bitpoll-local:latest
     restart: unless-stopped
     # uWSGI's http-socket is :3009 (docker_files/uwsgi-bitpoll.ini); publish it
-    # on 8080 so the engine's port scan takes 8080 as the primary (engine#231).
+    # on 8080 so the engine's port scan takes 8080 as the primary.
     ports:
       - "8080:3009"
     depends_on:
@@ -113,8 +113,7 @@ services:
 
   # Starts nothing, exits 0, waits on app's healthcheck. `docker compose up -d`
   # blocks on a depends_on health condition, so this makes `up` return only once
-  # the site actually answers, rather than the moment containers start
-  # (engine#204).
+  # the site actually answers, rather than the moment containers start.
   ready:
     image: docker.io/library/alpine:3
     entrypoint: ["/bin/sh", "-c", "exit 0"]

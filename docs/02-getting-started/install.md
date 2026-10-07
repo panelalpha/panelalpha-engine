@@ -183,6 +183,11 @@ The engine itself is up. Read the message at the end of the install, or run `pae
 **The installer warned that project disk limits will not be enforced.**
 The installer turns on disk quota for the disk that holds `/home`, so a project's disk and file-count limits actually stop it writing. It adds a quota option to that disk's line in `/etc/fstab`, and keeps a copy of the old file next to it. It only does this itself on ext4. On XFS the warning tells you the one setting to add and asks for a restart. On anything else, or inside a container, limits are recorded but not enforced. To leave quota off on purpose, install with `--no-quota`.
 
+**A container project's disk limit and its own Docker storage.**
+Disk quota counts the files a project writes as its own user. The images and build layers of a container project are written by its own Docker, which quota does not count. The engine covers that during a deploy instead: it measures every 15 seconds, and stops the deploy when the project passes its disk limit or the server falls below `DEPLOY_HOST_MIN_FREE` (3G by default). It then clears the project's unused Docker storage. A running application that grows its own data after the deploy is still bounded only by quota.
+
+For a hard limit that also covers Docker storage, use ext4 project quota. It needs the `project` feature, which can only be turned on while the disk is unmounted, so plan it on a fresh server before you install, with `/home` on its own ext4 disk: `tune2fs -O project,quota -Q prjquota /dev/<disk>`, then mount it with `prjquota` in `/etc/fstab`. Per project, tag its home and set the limit, in KB: `chattr -R -p <uid> +P /home/<project>` and `setquota -P <uid> 0 <limit-in-KB> 0 0 /home`. The engine does not do these two steps itself.
+
 **I want a different webserver.**
 Not supported. Sites are served through nginx-proxy only.
 

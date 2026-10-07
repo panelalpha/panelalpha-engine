@@ -18,14 +18,5 @@ description: >-
   data-init service creates the directories owned by the account's uid, since
   the app runs unprivileged. Redis and MQTT stay off, as upstream defaults.
   The first account registered on the login page is the administrator.
-
-  == Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 2500 ==
-
-  Create: success in 45-60s; / is <title>Emoncms - user login </title> (15.5 KB).
-  Registered user 1, logged in, created a PHPFina feed and inserted 123.4:
-  phpfina/1.dat and 1.meta appeared on the volume; /feed/view and
-  /admin/info render. Rebuild: success in 29s, the same login works and
-  /feed/data.json returns the point [1790698340000,123.4]. /.env and
-  /.git/config answer 403; /settings.php executes to an empty body.
 extends: php
 database: mysql

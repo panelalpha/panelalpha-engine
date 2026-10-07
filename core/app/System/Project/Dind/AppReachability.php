@@ -63,17 +63,17 @@ final class AppReachability
      */
     private function probe(array $ports, int $timeout): array
     {
-        $domain = $this->dind->userModel()->getMainDomain()?->domain;
+        $main = $this->dind->userModel()->getMainDomain();
+        $domain = $main?->domain;
         if ($domain === null || $domain === '') {
             return self::skipped(null, 'the project has no domain yet');
         }
 
         $served = self::firstAnsweringPort($ports);
         if ($served === null) {
-            // Nothing answered in the container, which report() has already
-            // said. Routing cannot be judged against a silent application, and
-            // saying "unreachable" here would blame the proxy for the app.
-            return self::skipped($domain, 'the application is not answering, so there is nothing to compare');
+            // No port served a page (silent, or a 5xx), which report() has
+            // already said. Saying "unreachable" here would blame the proxy for the app.
+            return self::skipped($domain, 'no port served a page, so there is nothing to compare');
         }
 
         // The address the vhost listens on, which is the address a visitor
@@ -83,13 +83,13 @@ final class AppReachability
         $app = self::parseFingerprint($this->dind->shell()->execQuiet(
             ['bash', '-c', self::appProbeScript((string) $served['scheme'], (int) $served['port'], $timeout, $domain)],
             [],
-            $timeout + 10
+            2 * $timeout + 10
         ));
 
         return self::awaitRoute(
             $domain,
             fn (): array => self::parseFingerprint($this->dind->system()->execOnHost(
-                ['bash', '-c', self::edgeProbeScript($domain, $ip, $timeout)],
+                ['bash', '-c', self::edgeProbeScript($domain, $ip, $timeout, $main->sslEnabled())],
             )),
             $app
         );
@@ -129,6 +129,18 @@ final class AppReachability
      * @return array{verdict: string, domain: ?string, http_code: ?int, detail: string}
      */
     public static function compareFingerprints(string $domain, array $edge, array $app): array
+    {
+        $scheme = ($edge['scheme'] ?? '') === 'https' ? 'https' : 'http';
+
+        return self::compare($domain, $edge, $app) + ['scheme' => $scheme];
+    }
+
+    /**
+     * @param array{code: int, hash: string, default404: bool} $edge
+     * @param array{code: int, hash: string, default404: bool} $app
+     * @return array{verdict: string, domain: ?string, http_code: ?int, detail: string}
+     */
+    private static function compare(string $domain, array $edge, array $app): array
     {
         if ($edge['code'] === 0) {
             return [
@@ -172,6 +184,19 @@ final class AppReachability
             ];
         }
 
+        // The mirror image: the vhost forwards a plain-http request as
+        // `X-Forwarded-Proto: http`, and an app that knows its https URL
+        // (OpenCloud's 308) upgrades it. Visitors arrive over https and are
+        // served, so an upgrade to this same address is the healthy answer.
+        if ($edge['code'] >= 300 && $edge['code'] < 400 && self::upgradesToHttps($domain, (string) ($edge['location'] ?? ''))) {
+            return [
+                'verdict' => self::OK,
+                'domain' => $domain,
+                'http_code' => $edge['code'],
+                'detail' => $edge['code'] . ' (a redirect to https://' . $domain . '/, where visitors arrive)',
+            ];
+        }
+
         // The application does not reproduce its own bytes, so a difference
         // between it and the edge says nothing. Comparing what is left --
         // the status code -- still catches the domain that answers with
@@ -195,6 +220,20 @@ final class AppReachability
             'http_code' => $edge['code'],
             'detail' => "answered {$edge['code']} with a different response than the application itself",
         ];
+    }
+
+    /** Whether $location is https://$domain/ -- the edge's own `/`, only upgraded. */
+    private static function upgradesToHttps(string $domain, string $location): bool
+    {
+        $url = parse_url($location);
+        if (!is_array($url) || strtolower($url['scheme'] ?? '') !== 'https') {
+            return false;
+        }
+
+        return strtolower($url['host'] ?? '') === strtolower($domain)
+            && in_array($url['port'] ?? 443, [443], true)
+            && in_array($url['path'] ?? '/', ['', '/'], true)
+            && !isset($url['query']);
     }
 
     /** @return array{verdict: string, domain: ?string, http_code: ?int, detail: string} */
@@ -224,22 +263,39 @@ final class AppReachability
      * No DNS: the Host header carries the name and the address is the one the
      * vhost binds, so the check works for a domain whose DNS has not been
      * pointed here yet -- which is most of them, most of the time.
+     *
+     * Over https when the domain has TLS, as visitors arrive: over http the
+     * vhost forwards `X-Forwarded-Proto: http`, and an app that insists on a
+     * secure request answers that with a 500 nobody visiting ever gets. Plain
+     * http only when nothing answered on https.
      */
-    public static function edgeProbeScript(string $domain, string $ip, int $timeout = 5): string
+    public static function edgeProbeScript(string $domain, string $ip, int $timeout = 5, bool $https = false): string
     {
         $timeout = max(1, $timeout);
         $domain = escapeshellarg($domain);
         $ip = escapeshellarg($ip);
+        $secure = $https ? 1 : 0;
 
         return <<<SH
 set -u
 host={$domain}
 addr={$ip}
 f=\$(mktemp)
-code=\$(curl -sS -m {$timeout} -o "\$f" -w '%{http_code}' -H "Host: \$host" "http://\$addr/" 2>/dev/null) || code=000
+scheme=http
+out=000
+if [ {$secure} = 1 ]; then
+  out=\$(curl -sS -k -m {$timeout} -o "\$f" -w '%{http_code} %{redirect_url}' --resolve "\$host:443:\$addr" "https://\$host/" 2>/dev/null) || out=000
+  [ "\${out%% *}" = 000 ] || scheme=https
+fi
+if [ "\$scheme" = http ]; then
+  out=\$(curl -sS -m {$timeout} -o "\$f" -w '%{http_code} %{redirect_url}' -H "Host: \$host" "http://\$addr/" 2>/dev/null) || out=000
+fi
+code=\${out%% *}
+location=\$(printf '%s' "\${out#* }" | tr -d '\t\r\n')
+[ "\$location" = "\$out" ] && location=
 marker=no
 if [ "\$code" = "404" ] && grep -q 'Page Not Found' "\$f" && grep -q 'error-page' "\$f"; then marker=yes; fi
-printf '%s\t%s\t%s' "\${code:-000}" "\$(head -c 2048 "\$f" | sha256sum | cut -d' ' -f1)" "\$marker"
+printf '%s\t%s\t%s\t\t%s\t%s' "\${code:-000}" "\$(head -c 2048 "\$f" | sha256sum | cut -d' ' -f1)" "\$marker" "\$location" "\$scheme"
 rm -f "\$f"
 exit 0
 SH;
@@ -261,14 +317,19 @@ SH;
     {
         $timeout = max(1, $timeout);
         $scheme = $scheme === 'https' ? 'https' : 'http';
+        // The headers the vhost forwards for a visitor on https, as the health
+        // probe sends them: an app that needs them answers 403 or 500 without.
         // Same Host as the edge fetch, so an app that echoes it into the page still matches.
-        $host = $domain !== null && $domain !== '' ? '-H ' . escapeshellarg("Host: {$domain}") . ' ' : '';
+        $host = AppHealth::visitorHeaders($domain !== '' ? $domain : null);
 
         return <<<SH
 set -u
 f=\$(mktemp)
 g=\$(mktemp)
 code=\$(curl -sS -k -m {$timeout} {$host}-o "\$f" -w '%{http_code}' '{$scheme}://127.0.0.1:{$port}/' 2>/dev/null) || code=000
+# A second apart: a page stamping the current second (Immich Kiosk) must not
+# read as reproducible because both fetches landed in the same second.
+sleep 1
 curl -sS -k -m {$timeout} {$host}-o "\$g" '{$scheme}://127.0.0.1:{$port}/' >/dev/null 2>&1 || :
 printf '%s\t%s\t%s\t%s' "\${code:-000}" "\$(head -c 2048 "\$f" | sha256sum | cut -d' ' -f1)" "no" "\$(head -c 2048 "\$g" | sha256sum | cut -d' ' -f1)"
 rm -f "\$f" "\$g"
@@ -277,7 +338,7 @@ SH;
     }
 
     /**
-     * @return array{code: int, hash: string, default404: bool, hash2: string}
+     * @return array{code: int, hash: string, default404: bool, hash2: string, location: string, scheme: string}
      */
     public static function parseFingerprint(string $raw): array
     {
@@ -290,6 +351,10 @@ SH;
             // Only the application probe sends this: the hash of a second,
             // identical fetch. Empty from the edge probe, which fetches once.
             'hash2' => trim($parts[3] ?? ''),
+            // Only the edge probe sends this: where a redirect pointed.
+            'location' => trim($parts[4] ?? ''),
+            // Only the edge probe sends this: which scheme it answered on.
+            'scheme' => trim($parts[5] ?? ''),
         ];
     }
 
@@ -317,7 +382,7 @@ SH;
      */
     public static function describe(array $result): string
     {
-        $url = 'http://' . ($result['domain'] ?? '?') . '/';
+        $url = ($result['scheme'] ?? 'http') . '://' . ($result['domain'] ?? '?') . '/';
 
         return match ($result['verdict']) {
             self::OK => "Reachable: {$url} answered {$result['detail']} through the webserver",

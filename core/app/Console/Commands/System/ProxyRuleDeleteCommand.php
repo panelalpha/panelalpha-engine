@@ -2,11 +2,14 @@
 
 namespace App\Console\Commands\System;
 
+use App\Console\Commands\Concerns\AppliesProxyRules;
 use App\Models\ProxyRule;
 use Illuminate\Console\Command;
 
 class ProxyRuleDeleteCommand extends Command
 {
+    use AppliesProxyRules;
+
     /** The old spelling still answers, so nothing scripted against it breaks. */
     protected $aliases = ['proxy-rule:delete'];
 
@@ -45,6 +48,7 @@ class ProxyRuleDeleteCommand extends Command
 
         $rule->delete();
         $this->info('Rule deleted successfully.');
+        $this->applyProxyRules();
 
         return 0;
     }

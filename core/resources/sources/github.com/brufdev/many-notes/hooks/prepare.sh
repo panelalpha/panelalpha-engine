@@ -7,7 +7,7 @@ set -e
 cd ~/project
 
 # ~/.panelalpha/many-notes survives a redeploy; ~/project is emptied every
-# deploy (engine#173). An APP_KEY written under ~/project would be regenerated
+# deploy. An APP_KEY written under ~/project would be regenerated
 # on every rebuild -- a new key logs everyone out and makes every encrypted
 # column and session unreadable.
 STORE_DIR="${HOME}/.panelalpha/many-notes"

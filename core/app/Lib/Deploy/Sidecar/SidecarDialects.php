@@ -118,6 +118,19 @@ final class SidecarDialects
         return ['passwords' => $list($entry['passwords'] ?? null), 'waivers' => $list($entry['waivers'] ?? null)];
     }
 
+    /**
+     * Variables the server image reads that are named like a client's
+     * connection settings (`MYSQL_ROOT_HOST`).
+     *
+     * @return list<string>
+     */
+    public static function serverSettingsFor(string $engine): array
+    {
+        $vars = self::entry($engine)['server_settings'] ?? [];
+
+        return is_array($vars) ? array_values(array_map('strval', $vars)) : [];
+    }
+
     /** How much memory an engine needs, or null when the catalogue is silent. */
     public static function memoryLimitFor(string $engine): ?string
     {

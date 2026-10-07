@@ -121,6 +121,22 @@ class VisitorsApiTest extends TestCase
         )->assertOk()->assertExactJson([]);
     }
 
+    public function test_status_codes_breakdown_carries_bytes(): void
+    {
+        $user = $this->makeProject();
+        $this->statistics->breakdowns['example.com:status_codes'] = [
+            ['label' => '200/304', 'visits' => 19, 'code' => '200/304', 'bytes' => 893],
+            ['label' => '404', 'visits' => 6, 'code' => '404', 'bytes' => 2034],
+        ];
+
+        $this->getJson(
+            "/api/projects/{$user->username}/domains/example.com/visitors/status_codes?start=2026-10-03&end=2026-10-03"
+        )->assertOk()->assertExactJson([
+            ['label' => '200/304', 'visits' => 19, 'code' => '200/304', 'bytes' => 893],
+            ['label' => '404', 'visits' => 6, 'code' => '404', 'bytes' => 2034],
+        ]);
+    }
+
     public function test_unknown_dimension_is_a_validation_error(): void
     {
         $user = $this->makeProject();

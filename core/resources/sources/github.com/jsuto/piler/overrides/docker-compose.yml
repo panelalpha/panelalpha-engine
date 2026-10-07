@@ -165,7 +165,7 @@ services:
       PA_PUBLIC_URL: http://localhost
     # MYSQL_DATABASE, MYSQL_USER and MYSQL_PASSWORD. Restated nowhere in
     # `environment:` above on purpose: a bare ${VAR} there is rewritten to a
-    # literal by SidecarCredentials (engine#166), and these three have to stay
+    # literal by SidecarCredentials, and these three have to stay
     # equal to what the db service was created with.
     env_file:
       - ../.panelalpha/piler.env
@@ -186,7 +186,7 @@ services:
     # Not upstream's `curl -s smtp://localhost/`, which probes the SMTP receiver
     # this deployment does not publish and says nothing about the web UI. This
     # asks nginx for the front page and greps for the login form's own body id,
-    # so a PHP fatal rendered with a 200 -- the shape engine#185's
+    # so a PHP fatal rendered with a 200 -- the shape the base image's
     # display_errors=1 tends to produce -- does not pass. The vhost the .deb
     # installs is the only server block in the container (the Dockerfile removes
     # Debian's default), so it answers a loopback Host header.
@@ -254,7 +254,7 @@ services:
     mem_limit: 128m
 
   # Does nothing and exits 0. It exists because the engine runs
-  # `docker compose up -d` without `--wait` (engine#90) and takes the deploy to
+  # `docker compose up -d` without `--wait` and takes the deploy to
   # be finished when that returns, which is when the containers have been
   # *started*. Here that gap is the whole first boot: MariaDB initialises a data
   # directory, Manticore opens four empty RT indexes, then Piler's start.sh

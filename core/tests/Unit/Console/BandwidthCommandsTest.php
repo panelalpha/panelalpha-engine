@@ -11,21 +11,18 @@ use Tests\TestCase;
 
 class BandwidthCommandsTest extends TestCase
 {
-    public function test_usage_and_bandwidth_commands_dispatch_the_get_routes(): void
+    public function test_usage_and_bandwidth_help_names_no_http_route(): void
     {
-        $this->assertStringContainsString('GET /projects/{username}/usage', (new ProjectUsageCommand())->getDescription());
-        $this->assertStringContainsString('GET /projects/{username}/bandwidth', (new ProjectBandwidthCommand())->getDescription());
-        $this->assertStringContainsString(
-            'GET /projects/{username}/domains/{domain}/bandwidth',
-            (new DomainBandwidthCommand())->getDescription()
-        );
-        $this->assertStringContainsString(
-            'GET /projects/{username}/domains/{domain}/visitors',
-            (new DomainVisitorsCommand())->getDescription()
-        );
-        $this->assertStringContainsString(
-            'GET /projects/{username}/domains/{domain}/visitors/{dimension}',
-            (new DomainVisitorsBreakdownCommand())->getDescription()
-        );
+        $commands = [
+            new ProjectUsageCommand(),
+            new ProjectBandwidthCommand(),
+            new DomainBandwidthCommand(),
+            new DomainVisitorsCommand(),
+            new DomainVisitorsBreakdownCommand(),
+        ];
+        foreach ($commands as $command) {
+            $this->assertDoesNotMatchRegularExpression('#\b(GET|POST|PUT|DELETE)\b|/projects/#', $command->getDescription(), $command->getName() ?? '');
+        }
+        $this->assertSame('Show resource usage for a project', (new ProjectUsageCommand())->getDescription());
     }
 }

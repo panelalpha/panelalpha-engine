@@ -2,32 +2,30 @@
 
 namespace App\Console\Commands\Usage;
 
-use App\Console\Commands\Concerns\DispatchesApiRoute;
-use Illuminate\Console\Command;
+use App\Http\Requests\VisitorsBreakdownRequest;
+use App\Integrations\Statistics\Statistics;
+use App\Lib\Usage\ProjectUsage;
 
-class DomainVisitorsBreakdownCommand extends Command
+class DomainVisitorsBreakdownCommand extends UsageCommand
 {
-    use DispatchesApiRoute;
-
     protected $signature = 'project:domain:visitors-breakdown
                             {project : Project username}
                             {domain : Domain hostname}
-                            {dimension : pages, countries, continents, regions, referrers, os, or browsers}
+                            {dimension : pages, countries, continents, regions, referrers, os, browsers, or status_codes}
                             {--start= : Range start (Y-m-d)}
                             {--end= : Range end (Y-m-d)}';
 
-    protected $description = 'Show a visitor breakdown for a domain (GET /projects/{username}/domains/{domain}/visitors/{dimension})';
+    protected $description = 'Show a visitor breakdown for a domain';
 
-    public function handle(): int
+    public function handle(ProjectUsage $usage, Statistics $statistics): int
     {
-        $project = rawurlencode((string) $this->argument('project'));
-        $domain = rawurlencode((string) $this->argument('domain'));
-        $dimension = rawurlencode((string) $this->argument('dimension'));
-        $response = $this->dispatchApiRoute('GET', "/projects/{$project}/domains/{$domain}/visitors/{$dimension}", [
+        $input = $this->validated([
             'start' => $this->option('start'),
             'end' => $this->option('end'),
-        ]);
+            'dimension' => $this->argument('dimension'),
+        ], (new VisitorsBreakdownRequest())->rules());
+        $domain = $this->domain($usage, $this->project());
 
-        return $this->writeResponseBody($response, null);
+        return $this->printJson($statistics->domainVisitorBreakdown($domain->domain, $input['dimension'], $input['start'], $input['end']));
     }
 }

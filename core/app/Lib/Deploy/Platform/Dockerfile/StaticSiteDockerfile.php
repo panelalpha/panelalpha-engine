@@ -38,7 +38,10 @@ final class StaticSiteDockerfile implements DockerfileWriter
             // heap declaration belongs there and nowhere else -- the nginx
             // stage that ships copies files and inherits nothing.
             'env' => EnvironmentLines::buildArgs($this->recipe->nodeHeapBuildArg()),
-            'build_command' => $this->recipe->buildCommandOr(self::DEFAULT_BUILD),
+            'build_command' => NodeRuntime::withLegacyOpenssl(
+                $this->recipe->buildCommandOr(self::DEFAULT_BUILD),
+                $this->recipe->projectDir
+            ),
             'nginx_image' => Images::NGINX_IMAGE,
             'nginx_conf' => NginxConfig::FILENAME,
             'output_directory' => $this->outputDirectory(),

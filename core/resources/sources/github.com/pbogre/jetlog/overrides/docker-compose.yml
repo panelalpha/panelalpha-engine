@@ -34,7 +34,7 @@ services:
       start_period: 30s
 
   # No-op gate: `up` waits for jetlog to be healthy before starting this, and
-  # the engine calls the deploy finished when `up` returns (engine#90). Reuses
+  # the engine calls the deploy finished when `up` returns. Reuses
   # the already-pulled image so it needs no extra download.
   ready:
     image: pbogre/jetlog:latest

@@ -43,9 +43,7 @@ function smokeArguments(username: string, domain: string): Record<string, unknow
  * name in it is how coverage quietly shrinks.
  */
 const NOT_SMOKE_CALLABLE: Record<string, string> = {
-  app_sso_login: 'mints a single-use SSO token — a read by verb, a side effect in practice',
   file_download: 'returns file contents; needs a path fixture and can be large',
-  csf_ui_credentials: 'returns live firewall UI credentials',
   modsec_audit_log_download: 'streams a whole audit log file',
 };
 

@@ -16,7 +16,7 @@ description: >-
   ComposeFileInspector::COMPOSE_FILE_CANDIDATES is four basenames joined to the
   project root with a single '/', and the only glob is RuntimeSidecars'
   `$projectDir . '/docker-compose.*.yml'` and three siblings, with no `**`. So
-  server/docker-compose.yml is neither auto-loaded nor mined -- engine#166 does
+  server/docker-compose.yml is neither auto-loaded nor mined -- sidecar mining does
   not arise here, because there is nothing at the root for it to be greedy
   about. overrides/docker-compose.yml supplies the stack instead.
 
@@ -67,9 +67,9 @@ description: >-
   Encryption defaults to new_noop() and every endpoint signing secret is stored
   in Postgres in the clear, and the Postgres password. All three live in
   ~/.panelalpha/ rather than in ~/project, because every deploy empties the
-  checkout and the engine republishes its .env at 644 (engine#173).
+  checkout and the engine republishes its .env at 644.
 
-  Nothing here is derived from the account's filesystem path (engine#175). Svix
+  Nothing here is derived from the account's filesystem path. Svix
   reads config.toml relative to its own working directory, which in the
   published image is / and not the /app every account is mounted at, and this
   recipe does not bind-mount the checkout into the server container at all.

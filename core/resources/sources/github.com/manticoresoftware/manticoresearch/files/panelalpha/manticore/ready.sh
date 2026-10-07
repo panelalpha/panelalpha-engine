@@ -11,8 +11,8 @@
 #
 # Either one failing exits non-zero. On its own that would change nothing --
 # `docker compose up -d` starts containers without waiting for them, and a
-# one-shot service exiting 1 leaves it exiting 0 and the deploy green, which is
-# measured, not theoretical. The `verified` service is what closes that: its
+# one-shot service exiting 1 leaves it exiting 0 and the deploy green. The
+# `verified` service is what closes that: its
 # `service_completed_successfully` dependency on this one makes compose wait
 # here and fail with "dependency failed to start".
 #

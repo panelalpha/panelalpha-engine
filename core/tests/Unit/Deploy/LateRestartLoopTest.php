@@ -8,12 +8,12 @@ use App\System\Project\Dind\AppHealth;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#90: a container that answers once and then keeps restarting.
+ * A container that answers once and then keeps restarting.
  *
  * MintHCM (CMD `start.sh; exec bash`, no TTY) answered 200, exited 0 a second
  * later and restarted 11 times in three minutes behind a 502, while the deploy
  * said "Deploy finished successfully". Rows are the engine's inspect format as
- * the test host printed them for that container.
+ * the engine prints them for that container.
  */
 class LateRestartLoopTest extends TestCase
 {
@@ -29,7 +29,26 @@ class LateRestartLoopTest extends TestCase
         $this->assertSame(AppHealth::CHECK_RESTART_LOOPING, $check['id']);
         $this->assertSame(CheckResult::STATUS_FAIL, $check['status']);
         $this->assertSame(HealthCheck::SEVERITY_ERROR, $check['severity'], 'error severity is what makes the deploy partial');
-        $this->assertStringContainsString('app (running, last exit 0, restarted 1 time)', $check['detail']);
+        // Running again: Docker has reset ExitCode to 0, which is not the crash's.
+        $this->assertStringContainsString('app (running, last exit unknown, restarted 1 time)', $check['detail']);
+    }
+
+    public function test_the_exit_code_is_quoted_while_the_container_is_down(): void
+    {
+        $after = '{"name":"/project-app-1","service":"app","state":"restarting","exit":1,"restarts":4}';
+
+        $check = AppHealth::restartLoopBetween(self::JUST_STARTED, $after);
+
+        $this->assertStringContainsString('app (restarting, last exit 1, restarted 4 times)', $check['detail']);
+    }
+
+    public function test_a_running_container_never_reads_as_a_clean_exit(): void
+    {
+        $after = '{"name":"/project-app-1","service":"app","state":"running","exit":0,"restarts":3}';
+
+        $check = AppHealth::restartLoopBetween(self::JUST_STARTED, $after);
+
+        $this->assertStringNotContainsString('last exit 0', $check['detail']);
     }
 
     public function test_the_state_the_host_actually_reported_is_a_loop(): void
@@ -88,6 +107,32 @@ class LateRestartLoopTest extends TestCase
     {
         $this->assertNull(AppHealth::restartLoopBetween(null, ''));
         $this->assertNull(AppHealth::restartLoopBetween('garbage', "not json\n{}"));
+    }
+
+    /** Only the sidecar loops, so the verdict names it, not the application. */
+    public function test_a_looping_sidecar_beside_a_steady_app_is_named_as_the_sidecar(): void
+    {
+        $before = self::JUST_STARTED . "\n" . '{"name":"/project-db-1","service":"db","state":"running","exit":0,"restarts":0}';
+        $after = self::JUST_STARTED . "\n" . '{"name":"/project-db-1","service":"db","state":"restarting","exit":1,"restarts":4}';
+
+        $check = AppHealth::restartLoopBetween($before, $after, ['app']);
+
+        $this->assertSame(AppHealth::CHECK_RESTART_LOOPING, $check['id']);
+        $this->assertSame(HealthCheck::SEVERITY_ERROR, $check['severity'], 'still partial, not a failed deploy');
+        $this->assertSame('A backing service is restarting: db (restarting, last exit 1, restarted 4 times).', $check['title']);
+        $this->assertStringNotContainsString('application is restarting', $check['title'] . $check['detail']);
+        $this->assertStringContainsString('db', $check['fix']);
+    }
+
+    public function test_the_app_looping_with_a_sidecar_is_still_the_application(): void
+    {
+        $after = '{"name":"/project-app-1","service":"app","state":"restarting","exit":1,"restarts":4}' . "\n"
+            . '{"name":"/project-db-1","service":"db","state":"restarting","exit":1,"restarts":4}';
+
+        $this->assertSame('The application is restarting, not running.', AppHealth::restartLoopBetween(self::JUST_STARTED, $after, ['app'])['title']);
+        // Not knowing which service is the app keeps the old verdict.
+        $db = '{"name":"/project-db-1","service":"db","state":"restarting","exit":1,"restarts":4}';
+        $this->assertSame('The application is restarting, not running.', AppHealth::restartLoopBetween(null, $db)['title']);
     }
 
     /** The flattened check is what servingWarnings() turns into a partial deploy. */

@@ -211,12 +211,14 @@ class StageScriptTest extends TestCase
         $ids = static fn (array $cs): array => array_map(static fn ($c) => $c->id, $cs);
 
         $this->assertSame(['composer-install', 'package-discover', 'asset-publish'], $ids($laravel->stage(PlatformStage::BUILD)));
-        $this->assertSame(['key-generate', 'storage-link', 'migrate'], $ids($laravel->stage(PlatformStage::INSTALL)));
+        $this->assertSame(['key-generate', 'migrate'], $ids($laravel->stage(PlatformStage::INSTALL)));
         $this->assertSame(['migrate'], $ids($laravel->stage(PlatformStage::UPGRADE)));
         // No `serve` among the declared commands any more: a PHP manifest
         // says where its document root is and the image knows how to serve
         // it, so the serve command is supplied rather than written out.
-        $this->assertSame(['optimize'], $ids($laravel->stage(PlatformStage::START)));
+        // storage-link on every start: a redeploy re-clones the checkout and
+        // drops the public/storage symlink; install alone ran it once.
+        $this->assertSame(['storage-link', 'optimize'], $ids($laravel->stage(PlatformStage::START)));
         $this->assertNotNull($laravel->serveCommand());
         $this->assertSame(PhpBaseImage::SERVE_PATH, $laravel->serveCommand()->run);
     }

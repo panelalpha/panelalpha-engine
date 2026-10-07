@@ -29,7 +29,7 @@ description: >-
 
   Persistence and state: the SQLite database (rw-sqlite -> /app/receipt-wrangler-
   api/sqlite) and the uploaded receipt images (rw-data -> .../data) live on named
-  volumes, so they survive the redeploy that wipes ~/project (engine#173); only
+  volumes, so they survive the redeploy that wipes ~/project; only
   account deletion or a failed-deploy rollback clears them.
 
   Security model: a fresh database auto-creates a bootstrap admin with the public

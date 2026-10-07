@@ -24,7 +24,7 @@ class EngineAddressSectionTest extends TestCase
         return [
             'empty means the default' => ['', true],
             'a hostname' => ['panel.example.com', true],
-            'a dashed panelalpha.direct name' => ['178-104-84-45.panelalpha.direct', true],
+            'a dashed panelalpha.direct name' => ['203-0-113-45.panelalpha.direct', true],
             'one label is not a hostname' => ['q', false],
             'still not, with more letters' => ['localhost', false],
             'no leading dot' => ['.example.com', false],

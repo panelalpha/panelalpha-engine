@@ -12,7 +12,7 @@ use App\Lib\Deploy\Inspect\Report\AppConfigOrigin;
  * The deploy copies them into ~/project before detection runs, so a recipe can
  * supply what the repository lacks -- ESMira's root package.json shim is what
  * lets its runtime resolve at all. Inspect read the bare clone instead, and
- * reported a deployable app as undeployable (engine#270). The compose file
+ * reported a deployable app as undeployable. The compose file
  * is what detection reads ahead of the repository's own: without it inspect
  * called github.com/WordPress/WordPress `php` while the deploy ran compose.
  *

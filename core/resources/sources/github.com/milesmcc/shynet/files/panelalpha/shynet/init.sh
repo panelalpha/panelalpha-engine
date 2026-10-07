@@ -59,9 +59,9 @@ python manage.py migrate --noinput
 # `manage.py shell -c` prints whatever the Django app registry prints on
 # import as well as what the snippet prints -- Django 4.1 has no --no-imports
 # to quiet it, and an app that logs a line on ready() would turn a bare
-# `print(count)` into something that is not a number. Measured on this image
-# the output is clean, but reading a marker out of the stream costs nothing
-# and cannot be fooled by a line appearing later.
+# `print(count)` into something that is not a number. The output is clean
+# today, but reading a marker out of the stream costs nothing and cannot be
+# fooled by a line appearing later.
 count_users() {
     python manage.py shell -c \
         'from core.models import User; print("PACOUNT:%d" % User.objects.count())' 2>/dev/null \

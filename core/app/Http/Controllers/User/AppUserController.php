@@ -23,7 +23,7 @@ class AppUserController extends Controller
      */
     private function appManager(string $username): AppManager
     {
-        $user = $this->projectOr404($username, 'Not found');
+        $user = $this->projectOr404($username);
         if ($user->getTemplate() !== 'dind') {
             abort(new JsonResponse(['message' => 'App user management is only available for dind users'], 403));
         }
@@ -70,7 +70,7 @@ class AppUserController extends Controller
             new OA\Response(response: 200, description: 'List of app users', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'array', items: new OA\Items(ref: '#/components/schemas/AppUser'))],
             )),
-            new OA\Response(response: 404, description: 'User not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     public function index(string $username): JsonResponse
@@ -261,6 +261,9 @@ class AppUserController extends Controller
         path: '/projects/{username}/app/sso-token',
         summary: 'Consume an SSO token and redirect into the app (no bearer auth)',
         tags: ['App Users'],
+        // A browser redeems this; as a tool it burns the single-use token and
+        // hands the session cookie to the agent. app_user_sso_create is the login.
+        x: ['mcp-hide' => true],
         parameters: [
             new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'token', in: 'query', required: true, schema: new OA\Schema(type: 'string')),

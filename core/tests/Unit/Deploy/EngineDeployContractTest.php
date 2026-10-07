@@ -55,7 +55,7 @@ class EngineDeployContractTest extends TestCase
         file_put_contents($this->tmpDir . '/my-app/index.html', '<h1>nope</h1>');
         file_put_contents($this->tmpDir . '/my-app/package.json', '{}');
 
-        $root = ProjectArchive::resolveProjectRoot($this->tmpDir);
+        $root = ProjectArchive::resolveProjectRoot($this->tmpDir, "d my-app\0");
         $decision = DetectProjectStrategy::detect($root);
 
         $this->assertSame($this->tmpDir . '/my-app', $root);
@@ -67,7 +67,7 @@ class EngineDeployContractTest extends TestCase
     {
         file_put_contents($this->tmpDir . '/index.html', '<h1>hi</h1>');
 
-        $root = ProjectArchive::resolveProjectRoot($this->tmpDir);
+        $root = ProjectArchive::resolveProjectRoot($this->tmpDir, "f index.html\0");
         $decision = DetectProjectStrategy::detect($root);
 
         $this->assertSame(Strategies::STATIC, $decision['strategy']);
@@ -83,7 +83,7 @@ class EngineDeployContractTest extends TestCase
         ]));
         file_put_contents($this->tmpDir . '/web/next.config.mjs', 'export default {};');
 
-        $root = ProjectArchive::resolveProjectRoot($this->tmpDir);
+        $root = ProjectArchive::resolveProjectRoot($this->tmpDir, "d web\0");
         $decision = DetectProjectStrategy::detect($root);
 
         $this->assertSame($this->tmpDir . '/web', $root);

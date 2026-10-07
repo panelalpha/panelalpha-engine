@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Show a push-to-deploy hook
 
-    Show the Deploy Hook of a checkout: its `url` and when it was created or last rotated. Never includes the secret, which is shown only when the hook is created or rotated. `registered_url` is the address this hook was last created or rotated under; `url_changed_since_registration` is true once the engine's own address has moved on from it (an IP a domain certificate replaced), meaning the git host still calls `registered_url` and the hook has to be re-registered at `url`. `tls` reports the same certificate state POST .../deploy-hook does. `deliveries` lists the 20 most recent accepted Hook Deliveries and the 5 most recent rejected ones, newest first:`outcome` is what the request was answered with (queued, ignored, rejected, coalesced) and `result` is what the queued work then reached (deployed, partial, deploy_failed, pull_refused, superseded), null while still queued or for a delivery that queued nothing. `detail` carries the reason for a refused pull or a failure; `deploy_id` points at the full build log (`php artisan project:deploy:log <project> --id=<deploy_id>`) for a delivery that started one. Optional `path` defaults to `project` on DinD and `public_html` on FPM/LiteSpeed. 404 when the checkout has no hook.
+    Show the Deploy Hook of a checkout: its `url` and when it was created or last rotated. Never includes the secret, which is shown only when the hook is created or rotated. `registered_url` is the address this hook was last created or rotated under; `url_changed_since_registration` is true once the engine's own address has moved on from it (an IP a domain certificate replaced), meaning the git host still calls `registered_url` and the hook has to be re-registered at `url`. `tls` reports the same certificate state POST .../deploy-hook does. `deliveries` lists the 20 most recent accepted Hook Deliveries and the 5 most recent rejected ones, newest first:`outcome` is what the request was answered with (queued, ignored, rejected, coalesced) and `result` is what the queued work then reached (deployed, partial, deploy_failed, pull_refused, superseded), null while still queued or for a delivery that queued nothing. `detail` carries the reason for a refused pull or a failure; `deploy_id` points at the full build log (`php artisan project:deploy:log <project> --id=<deploy_id>`) for a delivery that started one. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. 404 when the checkout has no hook.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -70,7 +70,7 @@ class GitDeployHookShowTool extends ApiTool
     {
         return [
             'name' => $schema->string()->required(),
-            'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).'),
+            'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).'),
         ];
     }
 }

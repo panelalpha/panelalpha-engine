@@ -3,7 +3,7 @@ services:
   app:
     volumes:
       # The SQLite database, session.key and local-git store. Bound to
-      # ~/.panelalpha, which survives redeploy (engine#173) and rollback where
+      # ~/.panelalpha, which survives redeploy and rollback where
       # ~/project does not — this is what makes a login and a saved bookmark
       # durable across project_rebuild.
       - ../.panelalpha/gobookmarks:/var/lib/gobookmarks

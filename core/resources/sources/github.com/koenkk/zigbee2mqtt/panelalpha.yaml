@@ -12,7 +12,7 @@ description: >-
   internal Eclipse Mosquitto broker (no published port) that Zigbee2MQTT is
   pointed at through ZIGBEE2MQTT_CONFIG_MQTT_SERVER. The broker's config is
   written to /etc/mosquitto because a host AppArmor profile for
-  /usr/sbin/mosquitto blocks the image's /mosquitto/config (engine#366).
+  /usr/sbin/mosquitto blocks the image's /mosquitto/config.
 
   First run is upstream's onboarding page: pick the Zigbee adapter and
   save. The account has no USB, so the coordinator must be network-attached

@@ -246,7 +246,7 @@ if (!tableExists($db, 'llx_const')) {
 // DOL_DATA_ROOT/install.lock, and install/inc.php:319-335 refuses every page
 // under install/ while that file exists. DOL_DATA_ROOT is /data/documents,
 // outside the checkout, so the lock survives the redeploy that empties
-// ~/project (engine #173) — which is the difference between locking the
+// ~/project — which is the difference between locking the
 // wizard and locking it until Tuesday.
 
 $code = codeVersion();

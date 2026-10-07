@@ -137,7 +137,8 @@ class PanelAlphaConnectTest extends TestCase
 
     public function test_delete_site_treats_404_as_success(): void
     {
-        Setting::clearRuntimeSettings();
+        // Runtime settings, so the license key is not read from the settings table.
+        Setting::setRuntimeSettings(['license_key' => 'TEST-KEY-123']);
         config(['connect.url' => 'https://connect.panelalpha.com']);
 
         Http::fake([
@@ -145,7 +146,9 @@ class PanelAlphaConnectTest extends TestCase
         ]);
 
         (new PanelAlphaConnect())->deleteSite('missing.panelalpha.online');
-        $this->assertTrue(true);
+
+        Http::assertSent(fn ($request) => $request->method() === 'DELETE'
+            && str_ends_with($request->url(), '/api/without-dns/sites/missing.panelalpha.online'));
     }
 
     public function test_no_connect_configured_is_an_error_not_a_relative_url(): void
@@ -205,7 +208,7 @@ class PanelAlphaConnectTest extends TestCase
     public function test_a_different_local_domain_is_not_serving_its_own_name(): void
     {
         $this->assertFalse(PanelAlphaConnect::servesItsOwnPublicName(
-            'shop.178-104-84-45.panelalpha.direct',
+            'shop.203-0-113-45.panelalpha.direct',
             'shop.panelalpha.online',
             'panelalpha'
         ));

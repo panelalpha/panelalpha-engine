@@ -80,7 +80,7 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     # Publish the app's HTTP port on 8080 so the engine's port scan takes 8080 as
-    # the primary (engine#231).
+    # the primary.
     ports:
       - "8080:80"
     healthcheck:
@@ -96,8 +96,7 @@ services:
 
   # Starts nothing, exits 0, waits on the app's healthcheck. `docker compose up
   # -d` blocks on a depends_on health condition, so this makes `up` return only
-  # once the site actually answers, not the moment the container starts
-  # (engine#204).
+  # once the site actually answers, not the moment the container starts.
   ready:
     image: docker.io/library/alpine:3
     entrypoint: ["/bin/sh", "-c", "exit 0"]

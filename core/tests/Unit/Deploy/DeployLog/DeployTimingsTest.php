@@ -8,9 +8,9 @@ use PHPUnit\Framework\TestCase;
 /**
  * Where a deploy spent its time, and whether the cache did anything.
  *
- * The fixtures are real BuildKit output shapes from a Matomo deploy on
- * 10.10.10.25 — the one that spent 123.7s compiling PHP extensions because the
- * shared base image was missing, and the same deploy once it was present.
+ * The fixtures are real BuildKit output shapes from a Matomo deploy — the one
+ * that spent 123.7s compiling PHP extensions because the shared base image was
+ * missing, and the same deploy once it was present.
  */
 class DeployTimingsTest extends TestCase
 {
@@ -120,7 +120,7 @@ class DeployTimingsTest extends TestCase
      */
     private function matomoLog(): array
     {
-        // Real milestones from a Matomo deploy on 10.10.10.25, 2026-08-28.
+        // Real milestones from a Matomo deploy.
         return [
             ['ts' => 1000, 'msg' => 'Deploy started (source: git, repo: https://github.com/matomo-org/matomo)'],
             ['ts' => 1000, 'msg' => 'Starting stage: preparing'],
@@ -192,6 +192,22 @@ class DeployTimingsTest extends TestCase
         )['phases'];
 
         $this->assertSame(13.0, array_column($phases, 'seconds', 'name')['image_transfer']);
+    }
+
+    public function test_a_shared_image_line_closes_the_transfer(): void
+    {
+        // A shared base announces itself once, after a dim "Fetching" line.
+        $phases = DeployTimings::summarize(
+            ['started_at' => 0, 'finished_at' => 60],
+            [
+                ['ts' => 0, 'msg' => 'Starting stage: running'],
+                ['ts' => 1, 'level' => 'dim', 'msg' => 'Fetching base image panelalpha/php:8.4-pa1'],
+                ['ts' => 9, 'msg' => 'Using shared base image panelalpha/php:8.4-pa1 (from the cache registry)'],
+                ['ts' => 20, 'msg' => 'Starting application (docker compose up -d)'],
+            ]
+        )['phases'];
+
+        $this->assertSame(8.0, array_column($phases, 'seconds', 'name')['image_transfer']);
     }
 
     public function test_phases_absent_from_a_log_are_omitted_not_zeroed(): void

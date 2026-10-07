@@ -2,9 +2,11 @@
 
 namespace App\System\Project\Dind;
 
+use App\Lib\Deploy\Dind\TenantNetwork;
 use App\Models\MysqlDatabase;
 use App\Models\MysqlUser;
 use App\Models\User;
+use App\System\Project\Dind as DindProject;
 use App\System\Services\Mysql;
 use Illuminate\Support\Str;
 
@@ -82,14 +84,46 @@ final class AppDatabase
      * @return list<string> a compose `extra_hosts` list, empty when the name
      *                      resolves to nothing worth pinning
      */
-    public static function extraHosts(): array
+    public static function extraHosts(?DindProject $account = null): array
     {
         $host = self::hostname();
-        $address = gethostbyname($host);
+        $address = ($account !== null && $host === self::FALLBACK_HOST ? self::tenantNetworkAddress($account) : null)
+            ?? gethostbyname($host);
 
         return $address === $host || filter_var($address, FILTER_VALIDATE_IP) === false
             ? []
             : ["{$host}:{$address}"];
+    }
+
+    /**
+     * $yaml with every `extra_hosts` pin of the database name moved to
+     * $address. An account changing network leaves its app
+     * pinned to an address it can no longer reach.
+     */
+    public static function repinned(string $yaml, string $address): string
+    {
+        // A database of the operator's own is not sites-db and did not move.
+        if (self::hostname() !== self::FALLBACK_HOST) {
+            return $yaml;
+        }
+        $name = preg_quote(self::hostname(), '/');
+
+        return (string) preg_replace('/(?<=' . $name . ':)\d{1,3}(?:\.\d{1,3}){3}\b/', $address, $yaml);
+    }
+
+    /**
+     * Core resolves sites-db on its own network, which an account on
+     * pash-tenants cannot reach; there it has a pinned address.
+     */
+    private static function tenantNetworkAddress(DindProject $account): ?string
+    {
+        try {
+            return TenantNetwork::sitesDbAddressFor(
+                $account->system()->exec(TenantNetwork::accountNetworksArgv($account->username()), [], 30)
+            );
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     public static function nameFor(User $user): string
@@ -110,7 +144,7 @@ final class AppDatabase
      * the old one in its own config file -- Matomo's config.ini.php,
      * WordPress's wp-config.php -- and the site would come back up unable to
      * reach a database that was working a minute earlier. For the same reason
-     * a stored password that cannot be decrypted is an error, never a reason
+     * a stored password that cannot be decoded is an error, never a reason
      * to generate a new one.
      */
     private static function password(User $user): string
@@ -122,8 +156,8 @@ final class AppDatabase
         }
         if ($user->hasUnreadableSecret(self::PASSWORD_DETAIL)) {
             throw new \RuntimeException(
-                "The application database password stored for '{$user->username}' cannot be decrypted "
-                    . '(APP_KEY changed?). Restore the previous APP_KEY; a new password would lock the '
+                "The application database password stored for '{$user->username}' cannot be decoded. "
+                    . 'It is kept, and deploys stop until it can be decoded again: a new password would lock the '
                     . 'application out of its own database.'
             );
         }

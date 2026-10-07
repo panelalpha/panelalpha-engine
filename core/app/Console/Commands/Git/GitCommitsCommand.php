@@ -2,6 +2,9 @@
 
 namespace App\Console\Commands\Git;
 
+use App\Http\Requests\Git\GitCommitsRequest;
+use App\Lib\Git\GitActions;
+use App\Models\User;
 use Illuminate\Console\Command;
 
 class GitCommitsCommand extends Command
@@ -10,7 +13,7 @@ class GitCommitsCommand extends Command
 
     protected $signature = 'git:commits
                             {username : Project username}
-                            {--path= : Directory path inside the project (defaults to project (DinD) or public_html (FPM/LiteSpeed))}
+                            {--path= : Directory path inside the project (defaults to project (DinD) or the document root of the main domain (FPM/LiteSpeed))}
                             {--branch= : Branch to list commits from}
                             {--limit=50 : Maximum number of commits}';
 
@@ -26,6 +29,7 @@ class GitCommitsCommand extends Command
             $params['branch'] = $branch;
         }
 
-        return $this->dispatchGit('GET', '/git/commits', $params);
+        return $this->runGit(GitCommitsRequest::class, $params,
+            fn (User $user, array $valid) => app(GitActions::class)->commits($user, $valid));
     }
 }

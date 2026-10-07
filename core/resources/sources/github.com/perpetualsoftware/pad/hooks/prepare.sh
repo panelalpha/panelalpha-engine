@@ -1,6 +1,6 @@
 #!/bin/bash
 # Pad needs a 64-hex-char PAD_ENCRYPTION_KEY; the engine's generated secrets
-# are 48 (engine#338). Written once outside ~/project, which every deploy wipes.
+# are 48. Written once outside ~/project, which every deploy wipes.
 set -e
 STORE_DIR="${HOME}/.panelalpha/pad"
 KEY_ENV="${STORE_DIR}/encryption.env"

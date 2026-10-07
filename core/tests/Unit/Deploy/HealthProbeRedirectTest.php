@@ -11,9 +11,8 @@ use PHPUnit\Framework\TestCase;
  * The probe fetched `/` and stopped. Firefly III answers `/` with a 302 to
  * `/login` and `/login` with a 500, so the probe saw a 302, called it healthy,
  * and `app_health_check` returned twelve passing checks on a site that served
- * an error page to every visitor. Four applications in the supported-apps
- * series passed every check while serving nothing usable; this is the half of
- * that a status code can catch.
+ * an error page to every visitor. An application can pass every check while
+ * serving nothing usable; this is the half of that a status code can catch.
  *
  * Runs the generated script against a real server rather than asserting on its
  * text: the script is shell, and what matters is what it does.
@@ -187,7 +186,7 @@ class HealthProbeRedirectTest extends TestCase
     /**
      * Django's ALLOWED_HOSTS, Laravel's TrustHosts, Phorge's site URIs: the app
      * refuses any Host it was not configured for. Probed as `127.0.0.1` it
-     * answered 400/500 while its domain served fine (#165, #190).
+     * answered 400/500 while its domain served fine.
      */
     public function test_it_asks_with_the_project_domain_as_host(): void
     {

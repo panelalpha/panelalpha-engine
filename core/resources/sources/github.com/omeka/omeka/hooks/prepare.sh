@@ -7,8 +7,8 @@ set -e
 cd ~/project
 
 # Everything this account accumulates that must outlive a redeploy lives here.
-# A redeploy empties and re-clones ~/project (engine#173:
-# System/Project/Dind/Source/GitRepository.php:90 calls
+# A redeploy empties and re-clones ~/project
+# (System/Project/Dind/Source/GitRepository.php:90 calls
 # `tree()->clearContents($gitProjectDir)` before `clone`), so an Omeka site
 # that kept its uploads under the checkout would lose every file on the next
 # deploy while the `files` rows pointing at them survived. ~ itself is
@@ -43,7 +43,7 @@ if [ ! -f .htaccess ] && [ -f .htaccess.changeme ]; then
     # `docker-compose.override.yml` is the recipe's own overlay. The generated
     # vhost denies `^(?:docker-compose\.ya?ml|panelalpha[-.])`, and that
     # pattern does not match it -- `docker-compose.override.yml` has
-    # `override` where the regex wants `yml` (engine#181). It names the base
+    # `override` where the regex wants `yml`. It names the base
     # image, the account uid, the bind mounts and every environment variable
     # the project was given.
     #
@@ -161,8 +161,8 @@ ln -sfn /data/files files
 # ---------------------------------------------------------------------------
 # 5. A php.ini, on a platform that loads none.
 #
-#    `php --ini` in the base image answers "Loaded Configuration File: (none)"
-#    (engine#185), so what is in force is PHP's compiled-in defaults --
+#    `php --ini` in the base image answers "Loaded Configuration File: (none)",
+#    so what is in force is PHP's compiled-in defaults --
 #    including `upload_max_filesize = 2M`, and an Omeka item *is* a file
 #    someone uploaded. What the file says and why is in its own comments.
 #

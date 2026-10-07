@@ -1,5 +1,5 @@
 # Compose-replace: upstream's deployment/docker-compose on the release image
-# instead of the repo's source build (which runs test suites); MongoDB 7.0 (engine#146).
+# instead of the repo's source build (which runs test suites); MongoDB 7.0.
 services:
   notifo:
     image: squidex/notifo:1.3.0

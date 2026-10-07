@@ -48,7 +48,7 @@ final class NewProjectDetails
 
         foreach (ResourceLimit::all() as $limit) {
             $value = $params[$limit->key] ?? ($limit->storesUnlimitedAsMinusOne ? -1 : null);
-            // A limit that cannot be unset takes the host default (#294).
+            // A limit that cannot be unset takes the host default.
             $details[$limit->key] = $limit->alwaysApplies
                 ? ProjectMemory::resolve($value === null ? null : (int) $value)
                 : $value;
@@ -96,7 +96,7 @@ final class NewProjectDetails
         foreach (ResourceLimit::all() as $limit) {
             $value = $source[$limit->key] ?? ($limit->storesUnlimitedAsMinusOne ? -1 : null);
             // Copying a project made before every project had a memory limit
-            // gives the copy the default rather than nothing (#294).
+            // gives the copy the default rather than nothing.
             $details[$limit->key] = $limit->alwaysApplies
                 ? ProjectMemory::resolve($value === null ? null : (int) $value)
                 : $value;

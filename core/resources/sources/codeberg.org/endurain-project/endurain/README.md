@@ -31,8 +31,8 @@ back to same-origin `/api/v1` — the correct shape for a single origin behind
 the hosting proxy. Set (via the account's `env_vars`) when a split origin is
 wanted; `start.sh` then rewrites `env.js` and hardens the index CSP on boot.
 
-Data lives in bind mounts under `${LOCAL_PATH:-/var/opt/endurain}`; the hook
-sets `LOCAL_PATH=$HOME/endurain-data` and creates `backend/data`,
+Data lives in bind mounts under `${LOCAL_PATH:-../.panelalpha/endurain}`; the
+hook sets `LOCAL_PATH=$HOME/.panelalpha/endurain` and creates `backend/data`,
 `backend/logs`, `postgres` and `redis` there, owned by the account user, which
 is the uid the container runs as (1000). Migrations run at startup (Alembic in
 the FastAPI lifespan); the first boot waits on both sidecars' healthchecks.

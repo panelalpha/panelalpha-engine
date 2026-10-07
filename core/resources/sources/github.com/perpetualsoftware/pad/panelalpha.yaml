@@ -5,7 +5,7 @@ description: >-
   repository's docker-compose.yml builds the image from source (a Node web
   build plus a Go build) and requires PAD_ENCRYPTION_KEY as a 64-character hex
   string; the plain deploy fills it with the engine's 48-character generated
-  secret (engine#338), so Pad exits with "encryption key must be a
+  secret, so Pad exits with "encryption key must be a
   64-character hex string" and restarts forever.
 
   This recipe runs upstream's three services on the published image of the

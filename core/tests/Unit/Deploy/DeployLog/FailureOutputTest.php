@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\DeployLog;
 
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\DeployLog\FailureOutput;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -11,10 +12,9 @@ use PHPUnit\Framework\TestCase;
  *
  * A host build prints thousands of lines, most of them advisory, and the whole
  * stream used to be handed over -- so the headline was whichever recognised
- * line came first. Measured on real deploys, that was an npm deprecation
- * warning three times: galette, glpi and octobercms all reported
- * "npm warn deprecated <package>" as the cause of a build that had failed
- * somewhere else entirely.
+ * line came first. That was an npm deprecation warning: galette, glpi and
+ * octobercms all reported "npm warn deprecated <package>" as the cause of a
+ * build that had failed somewhere else entirely.
  */
 class FailureOutputTest extends TestCase
 {
@@ -39,6 +39,67 @@ class FailureOutputTest extends TestCase
         $this->assertStringNotContainsString('npm warn deprecated', $selected);
         // What the failure said next is kept; it is usually the detail.
         $this->assertStringContainsString('_resolveFilename', $selected);
+    }
+
+    /**
+     * ntfy's Makefile asks git for a version in a build context with no .git,
+     * and those `fatal:` lines led the headline twelve lines above the reason.
+     */
+    public function test_a_go_toolchain_refusal_leads_not_gits_missing_repository(): void
+    {
+        $output = <<<'OUT'
+        #40 [builder 34/34] RUN --mount=type=cache,target=/go/pkg/mod make VERSION=dev COMMIT=unknown cli-linux-server
+        #40 0.688 fatal: not a git repository (or any of the parent directories): .git
+        #40 0.690 fatal: not a git repository (or any of the parent directories): .git
+        #40 0.695 mkdir -p server/docs server/site
+        #40 0.697 touch server/docs/index.html server/site/app.html
+        #40 0.707 # This is a target to build the CLI (including the server) manually.
+        #40 0.709 # Use this for development, if you really don't want to install GoReleaser ...
+        #40 0.709 mkdir -p dist/ntfy_linux_server server/docs
+        #40 0.712 CGO_ENABLED=1 go build \
+        #40 0.712 	-o dist/ntfy_linux_server/ntfy \
+        #40 0.712 	-tags sqlite_omit_load_extension,osusergo,netgo \
+        #40 0.712 	-ldflags \
+        #40 0.712 	"-linkmode=external -extldflags=-static -s -w -X main.version=dev -X main.commit=unknown -X main.date=1790933091"
+        #40 0.724 go: go.mod requires go >= 1.26.0 (running go 1.25.14; GOTOOLCHAIN=local)
+        #40 0.725 make: *** [Makefile:201: cli-linux-server] Error 1
+        #40 ERROR: process "/bin/sh -c make VERSION=$VERSION COMMIT=$COMMIT cli-linux-server" did not complete successfully: exit code: 2
+        OUT;
+
+        $selected = FailureOutput::select($output);
+
+        $this->assertStringStartsWith('#40 0.724 go: go.mod requires go >= 1.26.0', $selected);
+        $this->assertSame(
+            'This project needs Go 1.26.0, but it was built with Go 1.25.14.',
+            DeployFailureExplainer::explain($selected)
+        );
+    }
+
+    public function test_a_real_git_failure_still_leads(): void
+    {
+        $this->assertStringStartsWith(
+            'fatal: repository',
+            FailureOutput::select("Cloning into 'x'...\nfatal: repository 'https://github.com/a/b/' not found")
+        );
+    }
+
+    /** mydia's Flutter precache: the tar lines, not BuildKit's summary below them, name the cause. */
+    public function test_an_owner_id_out_of_range_leads_the_region(): void
+    {
+        $output = <<<'OUT'
+        #18 141.6 [2/11] Gradle Wrapper                                               46ms
+        #18 141.7 /usr/bin/tar: gradlew: Cannot change ownership to uid 397546, gid 5000: Invalid argument
+        #18 141.7 /usr/bin/tar: Exiting with failure status due to previous errors
+        #18 141.7 Flutter could not download and/or extract https://storage.googleapis.com/gradle-wrapper.tgz. Ensure you have network connectivity.
+        #18 141.7 The original exception was: ProcessException: The command failed with exit code 2
+        #18 ERROR: process "/bin/sh -c flutter precache --web" did not complete successfully: exit code: 1
+        ------
+        failed to solve: process "/bin/sh -c flutter precache --web" did not complete successfully: exit code: 1
+        OUT;
+
+        $match = DeployFailureExplainer::match(FailureOutput::select($output));
+
+        $this->assertSame('owner-id-out-of-range', $match['rule'] ?? null);
     }
 
     public function test_the_kernel_writing_npm_warnings_is_the_same_case(): void
@@ -151,6 +212,26 @@ class FailureOutputTest extends TestCase
     }
 
     /**
+     * qdrant: rustc was killed compiling several crates, and the compile
+     * errors were further above the memory failure than the region reaches.
+     */
+    public function test_a_step_that_ran_out_of_memory_leads_over_the_compile_errors_it_caused(): void
+    {
+        $lines = ['#22 177.7 error: could not compile `segment` (lib)'];
+        for ($i = 0; $i < 20; $i++) {
+            $lines[] = "#22 177.7 error: could not compile `crate{$i}` (lib)";
+        }
+        $lines[] = '#22 ERROR: process "/bin/sh -c cargo build --release" did not complete successfully: cannot allocate memory';
+        $lines[] = '------';
+        $lines[] = 'failed to solve: ResourceExhausted: process "/bin/sh -c cargo build --release" did not complete successfully: cannot allocate memory';
+
+        $region = FailureOutput::select(implode("\n", $lines));
+
+        $this->assertStringStartsWith('#22 ERROR: process', $region);
+        $this->assertSame('out-of-memory', DeployFailureExplainer::match($region)['rule'] ?? null);
+    }
+
+    /**
      * The daemon refusing to create a container -- akkoma's shape, where the
      * app's own image builds and sysbox will not run it.
      */
@@ -229,14 +310,14 @@ class FailureOutputTest extends TestCase
      * the cause.
      *
      * The engine compiles Java on the *host*, as the account. The image's HOME
-     * is /root, so its entrypoint cannot create the directory it wants and
-     * says so -- and then says the same thing itself, in the line above, as
-     * `Can not write to /root/.m2/copy_reference_file.log ... Carrying on
-     * ...`. Being the first cause-looking line in a reactor build, the mkdir
-     * won the selector while the real failure sat thousands of lines later:
-     * measured on openmeetings, whose deploy log is 1381 lines, the selected
-     * region opened on a compose banner and Maven's `[ERROR] Failed to
-     * execute goal org.apache.rat:...` was never reached.
+     * is /root, so its entrypoint cannot create the directory it wants and says
+     * so -- and then says the same thing itself, in the line above, as `Can not
+     * write to /root/.m2/copy_reference_file.log ... Carrying on ...`. Being
+     * the first cause-looking line in a reactor build, the mkdir won the
+     * selector while the real failure sat thousands of lines later: in
+     * openmeetings's 1381-line deploy log the selected region opened on a
+     * compose banner and Maven's `[ERROR] Failed to execute goal
+     * org.apache.rat:...` was never reached.
      *
      * {@see DeployFailureExplainer} already documents this decoy -- "twelve
      * Java apps were once filed under it" -- so this asserts the selector
@@ -330,7 +411,7 @@ class FailureOutputTest extends TestCase
     /**
      * AppLauncher's shape: the failed step's `#N` lines, then compose's stderr.
      * `Image ... Building` is noise, so without this the region kept the pull
-     * error and lost the proof the tag is built here (live deploy, #235).
+     * error and lost the proof the tag is built here.
      */
     public function test_the_pull_of_a_tag_compose_builds_is_not_the_reason(): void
     {
@@ -362,7 +443,7 @@ OUT;
 
     /**
      * `docker compose up -d` on a stack whose datastore never turned healthy,
-     * captured from Compose on Docker 29.8.1 and trimmed. rero-ils (#112) was
+     * captured from Compose on Docker 29.8.1 and trimmed. rero-ils was
      * reported by the layer downloads above the one line that said why.
      */
     public const COMPOSE_UNHEALTHY_DEPENDENCY = <<<'OUT'
@@ -436,10 +517,9 @@ OUT;
     }
 
     /**
-     * tigase-server on develop, 2026-09-23: the host compile's stderr is only
-     * the maven image's mkdir and the JVM banner, and Maven's own failure is on
-     * stdout. The deploy said "Failed to start app: mkdir: cannot create
-     * directory '/root'" (#86).
+     * tigase-server: the host compile's stderr is only the maven image's mkdir
+     * and the JVM banner, and Maven's own failure is on stdout. The deploy said
+     * "Failed to start app: mkdir: cannot create directory '/root'".
      */
     private const TIGASE_STDERR = "mkdir: cannot create directory ‘/root’: Permission denied\nPicked up JAVA_TOOL_OPTIONS: -Xmx3641m\n";
 
@@ -483,10 +563,289 @@ OUT;
     }
 
     /** Rust's best-effort `apt-get update` as the account, wrapped in `|| true`. */
+    /**
+     * technomancy-dev/00 on a Debian 11 base: apt says why above `#8 ERROR:`, and
+     * the region started at that line, so the deploy read "A build step failed".
+     * Real streams of `docker compose up --build`, joined as AppLauncher does.
+     */
+    public function test_apts_own_error_lines_lead_a_failed_package_install(): void
+    {
+        $stdout = "#8 3.263 Get:9 http://deb.debian.org/debian bullseye/main amd64 libncurses5 amd64 6.2+20201114-2+deb11u2 [96.8 kB]\n"
+            . "#8 3.264 Get:10 http://deb.debian.org/debian bullseye/main amd64 pandoc-data all 2.9.2.1-1+deb11u1 [377 kB]\n"
+            . "#8 3.278 Get:11 http://deb.debian.org/debian bullseye/main amd64 pandoc amd64 2.9.2.1-1+deb11u1 [18.5 MB]\n"
+            . "#8 3.445 Fetched 19.5 MB in 0s (81.8 MB/s)\n"
+            . "#8 3.445 E: Failed to fetch http://deb.debian.org/debian-security/pool/updates/main/o/openssl/openssl_1.1.1w-0%2bdeb11u8_amd64.deb  404  Not Found [IP: 151.101.2.132 80]\n"
+            . "#8 3.445 E: Failed to fetch http://deb.debian.org/debian-security/pool/updates/main/c/ca-certificates/ca-certificates_20250419%7edeb12u1%7edeb11u1_all.deb  404  Not Found [IP: 151.101.2.132 80]\n"
+            . "#8 3.445 E: Failed to fetch http://deb.debian.org/debian-security/pool/updates/main/g/glibc/libc-l10n_2.31-13%2bdeb11u14_all.deb  404  Not Found [IP: 151.101.2.132 80]\n"
+            . "#8 3.445 E: Failed to fetch http://deb.debian.org/debian-security/pool/updates/main/g/glibc/locales_2.31-13%2bdeb11u14_all.deb  404  Not Found [IP: 151.101.2.132 80]\n"
+            . "#8 3.445 E: Unable to fetch some archives, maybe run apt-get update or try with --fix-missing?\n"
+            . "#8 ERROR: process \"/bin/sh -c apt-get update -y &&     apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates pandoc     && apt-get clean && rm -f /var/lib/apt/lists/*_*\" did not complete successfully: exit code: 100\n";
+        $stderr = " Image project-app Building \n"
+            . "Dockerfile:77\n"
+            . "\n"
+            . "--------------------\n"
+            . "\n"
+            . "  76 |     \n"
+            . "\n"
+            . "  77 | >>> RUN apt-get update -y && \\\n"
+            . "\n"
+            . "  78 | >>>     apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates pandoc \\\n"
+            . "\n"
+            . "  79 | >>>     && apt-get clean && rm -f /var/lib/apt/lists/*_*\n"
+            . "\n"
+            . "  80 |     \n"
+            . "\n"
+            . "--------------------\n"
+            . "\n"
+            . "failed to solve: process \"/bin/sh -c apt-get update -y &&     apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates pandoc     && apt-get clean && rm -f /var/lib/apt/lists/*_*\" did not complete successfully: exit code: 100\n"
+            . "\n";
+        $raw = FailureOutput::failedBuildStep($stdout) . "\n" . $stderr;
+
+        $region = FailureOutput::select($raw);
+
+        $this->assertStringStartsWith('#8 3.445 E: Failed to fetch', $region);
+        $this->assertSame('package-archive-gone', DeployFailureExplainer::match($region)['rule'] ?? null);
+    }
+
+    public function test_a_bare_apt_error_leads(): void
+    {
+        $this->assertStringStartsWith(
+            "E: Unable to locate package libfoo-dev",
+            FailureOutput::select("Reading package lists...\nE: Unable to locate package libfoo-dev\nexit code: 100")
+        );
+    }
+
     public function test_apt_lists_permission_line_is_noise(): void
     {
         $this->assertSame('', FailureOutput::select(
             'E: List directory /var/lib/apt/lists/partial is missing. - Acquire (13: Permission denied)'
         ));
+    }
+
+    /** OpenSourcePOS's host frontend build: stderr of `docker run node:22-bookworm`, gulp failing. */
+    private const HOST_BUILD_PULL_STDERR = <<<'ERR'
+        Unable to find image 'node:22-bookworm' locally
+        22-bookworm: Pulling from library/node
+        0c06829c34ad: Pulling fs layer
+        105754cf457c: Pulling fs layer
+        0c06829c34ad: Download complete
+        105754cf457c: Pull complete
+        Digest: sha256:363e1587494626837fa7f9a23bdb453d13b0ff3c67c705c2805cfc69c2d2fad7
+        Status: Downloaded newer image for node:22-bookworm
+        npm warn deprecated gulp-util@3.0.8: gulp-util is deprecated
+        [18:02:31] 'update-licenses' errored after 24 ms
+        [18:02:31] Error: Command `composer licenses --format=json --no-dev > public/license/composer.LICENSES` exited with code 127
+            at ChildProcess.handleSubShellExit (/app/node_modules/gulp-run/command.js:166:13)
+        [18:02:31] 'default' errored after 38 ms
+        ERR;
+
+    /**
+     * electerm-web's out-of-sync lockfile on npm 11: the usage text after EUSAGE
+     * is longer than WINDOW, so the region began mid-usage and the deploy quoted
+     * it. Real stderr of the host build.
+     */
+    public function test_an_npm_error_block_longer_than_the_window_leads_from_its_start(): void
+    {
+        $stderr = <<<'NPMUSAGE'
+Unable to find image 'node:24-bookworm' locally
+24-bookworm: Pulling from library/node
+4cc81be23c06: Pulling fs layer
+240de4f9ec20: Pulling fs layer
+496e07b192ff: Pulling fs layer
+7f25c0042239: Pulling fs layer
+26d180362d43: Download complete
+4cc81be23c06: Download complete
+f133ed9f16b1: Download complete
+496e07b192ff: Download complete
+7f25c0042239: Download complete
+7f25c0042239: Pull complete
+240de4f9ec20: Download complete
+240de4f9ec20: Pull complete
+4cc81be23c06: Pull complete
+496e07b192ff: Pull complete
+Digest: sha256:64af3819f9275802414d7cdc38c27e9d82bd564dec4d4da87d008255d36c63b4
+Status: Downloaded newer image for node:24-bookworm
+npm error code EUSAGE
+npm error
+npm error `npm ci` can only install packages when your package.json and package-lock.json or npm-shrinkwrap.json are in sync. Please update your lock file with `npm install` before continuing.
+npm error
+npm error Missing: @types/react@19.3.0 from lock file
+npm error
+npm error Clean install a project
+npm error
+npm error Usage:
+npm error npm ci
+npm error
+npm error Options:
+npm error [--install-strategy <hoisted|nested|shallow|linked>] [--legacy-bundling]
+npm error [--global-style] [--omit <dev|optional|peer> [--omit <dev|optional|peer> ...]]
+npm error [--include <prod|dev|optional|peer> [--include <prod|dev|optional|peer> ...]]
+npm error [--strict-peer-deps] [--foreground-scripts] [--ignore-scripts]
+npm error [--allow-directory <all|none|root>] [--allow-file <all|none|root>]
+npm error [--allow-git <all|none|root>] [--allow-remote <all|none|root>]
+npm error [--allow-scripts <package-list> [--allow-scripts <package-list> ...]]
+npm error [--strict-allow-scripts] [--dangerously-allow-all-scripts] [--no-audit]
+npm error [--no-bin-links] [--no-fund] [--dry-run]
+npm error [-w|--workspace <workspace-name> [-w|--workspace <workspace-name> ...]]
+npm error [--workspaces] [--include-workspace-root] [--install-links]
+npm error
+npm error   --install-strategy
+npm error     Sets the strategy for installing packages in node_modules.
+npm error
+npm error   --legacy-bundling
+npm error     Instead of hoisting package installs in `node_modules`, install packages
+npm error
+npm error   --global-style
+npm error     Only install direct dependencies in the top level `node_modules`,
+npm error
+npm error   --omit
+npm error     Dependency types to omit from the installation tree on disk.
+npm error
+npm error   --include
+npm error     Option that allows for defining which types of dependencies to install.
+npm error
+npm error   --strict-peer-deps
+npm error     If set to `true`, and `--legacy-peer-deps` is not set, then _any_
+npm error
+npm error   --foreground-scripts
+npm error     Run all build scripts (ie, `preinstall`, `install`, and
+npm error
+npm error   --ignore-scripts
+npm error     If true, npm does not run scripts specified in package.json files.
+npm error
+npm error   --allow-directory
+npm error     Limits the ability for npm to install dependencies from directories.
+npm error
+npm error   --allow-file
+npm error     Limits the ability for npm to install dependencies from tarball files.
+npm error
+npm error   --allow-git
+npm error     Limits the ability for npm to fetch dependencies from git references.
+npm error
+npm error   --allow-remote
+npm error     Limits the ability for npm to fetch dependencies from urls.
+npm error
+npm error   --allow-scripts
+npm error     Comma-separated list of packages whose install-time lifecycle scripts
+npm error
+npm error   --strict-allow-scripts
+npm error     If `true`, turn the install-script policy from a warning into a hard
+npm error
+npm error   --dangerously-allow-all-scripts
+npm error     If `true`, bypass the `allowScripts` policy entirely and run every
+npm error
+npm error   --audit
+npm error     When "true" submit audit reports alongside the current npm command to the
+npm error
+npm error   --bin-links
+npm error     Tells npm to create symlinks (or `.cmd` shims on Windows) for package
+npm error
+npm error   --fund
+npm error     When "true" displays the message at the end of each `npm install`
+npm error
+npm error   --dry-run
+npm error     Indicates that you don't want npm to make any changes and that it should
+npm error
+npm error   -w|--workspace
+npm error     Enable running a command in the context of the configured workspaces of the
+npm error
+npm error   --workspaces
+npm error     Set to true to run the command in the context of **all** configured
+npm error
+npm error   --include-workspace-root
+npm error     Include the workspace root when workspaces are enabled for a command.
+npm error
+npm error   --install-links
+npm error     When set file: protocol dependencies will be packed and installed as
+npm error
+npm error aliases: clean-install, ic, install-clean, isntall-clean
+npm error
+npm error Run "npm help ci" for more info
+npm error A complete log of this run can be found in: /var/cache/pa-js/npm/_logs/2026-10-02T08_57_27_453Z-debug-0.log
+NPMUSAGE;
+
+        $region = FailureOutput::select($stderr);
+
+        $this->assertStringStartsWith('npm error code EUSAGE', $region);
+        $match = DeployFailureExplainer::match($region);
+        $this->assertSame('npm-lockfile-out-of-sync', $match['rule'] ?? null);
+        $this->assertStringContainsString('(npm: Missing: @types/react@19.3.0 from lock file)', $match['message']);
+    }
+
+    public function test_an_npm_error_block_inside_the_window_is_unchanged(): void
+    {
+        $output = "> build\nnpm error code ELIFECYCLE\nnpm error errno 1\nnpm error app@1.0.0 build: `vite build`";
+
+        $this->assertStringStartsWith('npm error code ELIFECYCLE', FailureOutput::select($output));
+    }
+
+    public function test_docker_runs_image_pull_is_not_the_reason(): void
+    {
+        $region = FailureOutput::select(self::HOST_BUILD_PULL_STDERR);
+
+        $this->assertStringStartsWith("[18:02:31] 'update-licenses' errored", $region);
+        $this->assertStringNotContainsString('Pulling', $region);
+        $this->assertStringNotContainsString('Digest:', $region);
+    }
+
+    public function test_an_unexplained_host_build_failure_leads_with_what_the_build_said(): void
+    {
+        $text = FailureOutput::withoutNoise(FailureOutput::fromStreams(self::HOST_BUILD_PULL_STDERR, "added 574 packages\n"));
+
+        $this->assertStringStartsWith("[18:02:31] 'update-licenses' errored", $text);
+        $this->assertStringContainsString('exited with code 127', $text);
+        $this->assertStringNotContainsString('Unable to find image', $text);
+        $this->assertStringNotContainsString('npm warn', $text);
+    }
+
+    public function test_without_noise_keeps_every_line_that_says_something(): void
+    {
+        $sentence = "Failed to start app: build failed\nnpm error code 1\nnpm error path /app | Set FOO";
+
+        $this->assertSame($sentence, FailureOutput::withoutNoise($sentence));
+        $this->assertSame('Deploy failed on purpose', FailureOutput::withoutNoise("  Deploy failed on purpose\n"));
+        // All noise: the output itself, not nothing.
+        $this->assertSame('npm warn deprecated x', FailureOutput::withoutNoise('npm warn deprecated x'));
+    }
+
+    /**
+     * flexisip (CentOS 7 base) and publify (selma's bindgen): the cause is in
+     * the failed step's own output above `#N ERROR:`, which is where the
+     * region used to start, so both read "A build step failed".
+     *
+     * @return array<string, array{string, string, string}>
+     */
+    public static function stepCauses(): array
+    {
+        return [
+            'yum mirrorlist gone' => ['flexisip', 'package-archive-gone', 'Could not resolve host: mirrorlist.centos.org'],
+            'bindgen without libclang' => ['publify', 'rust-build-tool-missing', 'Unable to find libclang'],
+        ];
+    }
+
+    #[DataProvider('stepCauses')]
+    public function test_the_failed_steps_own_cause_leads_over_its_exit_code(string $app, string $rule, string $line): void
+    {
+        $dir = dirname(__DIR__, 3) . '/fixtures/failure-output/';
+        // As AppLauncher::failureOutput() hands it over: the step, then stderr.
+        $raw = FailureOutput::failedBuildStep((string) file_get_contents($dir . $app . '.stdout'))
+            . "\n" . file_get_contents($dir . $app . '.stderr');
+
+        $region = FailureOutput::select($raw);
+
+        $this->assertStringContainsString($line, $region);
+        $this->assertSame($rule, DeployFailureExplainer::match($region)['rule'] ?? null);
+    }
+
+    public function test_a_step_whose_output_names_nothing_keeps_the_error_line_region(): void
+    {
+        $output = "#7 1.2 doing things\n#7 1.3 still doing things\n"
+            . "#7 ERROR: process \"/bin/sh -c make\" did not complete successfully: exit code: 2\n"
+            . "failed to solve: process \"/bin/sh -c make\" did not complete successfully: exit code: 2";
+
+        $region = FailureOutput::select($output);
+
+        $this->assertStringStartsWith('#7 ERROR:', $region);
+        $this->assertSame('build-step-failed', DeployFailureExplainer::match($region)['rule'] ?? null);
     }
 }

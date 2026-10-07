@@ -7,27 +7,19 @@ description: >-
   Two things stop the plain Vite deploy. The host compile bind-mounts the
   account's node_modules cache over /app/node_modules, and Yarn 4's default
   Plug'n'Play linker deletes node_modules in its link step, so the install
-  died on `EBUSY: resource busy or locked, rmdir '/app/node_modules'`.
+  dies on `EBUSY: resource busy or locked, rmdir '/app/node_modules'`.
   YARN_NODE_LINKER=node-modules keeps Yarn installing into node_modules,
-  which the mount is built for (engine#435). And vite.config.ts pins `base:
+  which the mount is built for. And vite.config.ts pins `base:
   '/secretsanta/'` (the GitHub Pages sub-path), so a default build asks for
   /secretsanta/assets/* and routes under /secretsanta/; the build passes
   `--base=/`, which Vite's CLI lets override the config file, so the site
   serves from the domain root.
-
-  == Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 2500 ==
-
-  HEAD bb6c56e7 (upstream publishes no release tags). Create: success in 48s
-  (yarn install 8.6s, vite build 7.5s). / is <title>Secret Santa Planner</title>;
-  its JS (760 KB), CSS and icon answer 200, a deep route falls back to the
-  SPA, and a browser renders the participants form with no console errors.
-  Rebuild: success in 24s, same page. /.env and /.git/config answer 403.
 extends: vite
 commands:
   - id: npm-install
     stage: build
     role: dependencies
-    # Spelled out (engine#351): restating a build command leaves {{js.install}}
+    # Spelled out: restating a build command leaves {{js.install}}
     # unresolved. package.json pins yarn@4.5.1, which corepack activates.
     run: >-
       sh -c 'command -v corepack >/dev/null 2>&1 || npm install -g corepack'

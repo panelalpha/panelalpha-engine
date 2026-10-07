@@ -6,7 +6,7 @@ use Tests\TestCase;
 
 /**
  * Artisan lives in the core container; the operator is on the host, where only
- * `pae` / `pae-artisan` exist. A printed `php artisan …` cannot be pasted (#52).
+ * `pae` / `pae-artisan` exist. A printed `php artisan …` cannot be pasted.
  */
 class HostCommandHintsTest extends TestCase
 {

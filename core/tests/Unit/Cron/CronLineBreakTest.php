@@ -98,13 +98,33 @@ class CronLineBreakTest extends TestCase
             ->assertJsonValidationErrors('command');
     }
 
-    public function test_a_spaced_schedule_answers_422_before_anything_is_written(): void
+    /** @return array<string, array{string, string, string}> */
+    public static function badSchedules(): array
+    {
+        return [
+            'spaced hour list' => ['hour', '9 , 17', 'Whitespace is not allowed inside a field'],
+            'minute out of range' => ['minute', '61', 'Value 61 out of bounds (0-59)'],
+        ];
+    }
+
+    /**
+     * Schedule errors are keyed by field like every other validation error,
+     * not a bare list of "<field>: <message>" strings.
+     */
+    #[DataProvider('badSchedules')]
+    public function test_a_bad_schedule_answers_422_under_its_field(string $field, string $value, string $message): void
     {
         $this->user();
+        $job = $this->job([$field => $value]);
 
-        $this->postJson('/api/projects/alice/cron-jobs', $this->job(['hour' => '9 , 17']))
-            ->assertStatus(422)
-            ->assertJsonFragment(['hour: whitespace is not allowed inside a field']);
+        foreach ([
+            $this->postJson('/api/projects/alice/cron-jobs', $job),
+            $this->putJson('/api/projects/alice/cron-jobs/abc', $job),
+        ] as $response) {
+            $response->assertStatus(422)
+                ->assertJsonValidationErrors([$field => $message])
+                ->assertJsonPath('errors', [$field => [$message]]);
+        }
     }
 
     /**

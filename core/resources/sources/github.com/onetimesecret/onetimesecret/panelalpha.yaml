@@ -6,7 +6,7 @@ description: >-
   root docker-compose.yml only `include:`s it from docker/compose/, and the
   engine reads neither ports nor services through `include:`, so the plain
   deploy starts the stack unhardened and routes the domain to the default
-  8080 (502, engine#368).
+  8080 (502).
 
   This recipe is that simple stack written out at the root: the published
   image of the current release (onetimesecret/onetimesecret:v0.26.13, the

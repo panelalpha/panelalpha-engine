@@ -12,7 +12,7 @@ use Illuminate\Validation\ValidationException;
 use Symfony\Component\Process\Process;
 
 /**
- * engine#7: a git_token paste is tried against the repository named at mint
+ * A git_token paste is tried against the repository named at mint
  * time, by the same probe project_create uses, before it is stored.
  *
  * Offline on purpose: a local bare repository over file:// answers, a missing

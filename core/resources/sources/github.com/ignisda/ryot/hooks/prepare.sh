@@ -9,8 +9,8 @@ set -e
 
 say() { echo "[ryot] $*" >&2; }
 
-# ~/.panelalpha survives a redeploy; ~/project is emptied every deploy
-# (engine#173). The DB password and the admin access token must live here and
+# ~/.panelalpha survives a redeploy; ~/project is emptied every deploy.
+# The DB password and the admin access token must live here and
 # stay stable: on a redeploy the role already exists in the pgdata volume with
 # the old password. The owner login is the engine's (`credentials:` in
 # panelalpha.yaml), in ~/.panelalpha/app-credentials.env.

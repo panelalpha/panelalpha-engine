@@ -42,8 +42,8 @@ class CheckAppCommand extends Command
             return 1;
         }
 
-        $project = $user->project();
-        if (!$project instanceof Dind) {
+        $project = self::dindOf($user);
+        if ($project === null) {
             $this->error("'{$username}' does not run on the dind project driver");
             return 1;
         }
@@ -89,5 +89,13 @@ class CheckAppCommand extends Command
 
         $this->error("'{$username}' did not answer on every published port");
         return 1;
+    }
+
+    /** User::project() is the System\Project wrapper; the DinD driver is its runtime(). */
+    private static function dindOf(User $user): ?Dind
+    {
+        $runtime = $user->project()->runtime();
+
+        return $runtime instanceof Dind ? $runtime : null;
     }
 }

@@ -1,0 +1,158 @@
+services:
+  zerobyte-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: zerobyte-dev
+    restart: unless-stopped
+    devices:
+      - /dev/fuse:/dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    env_file:
+      - .env.local
+    environment:
+      - NODE_ENV=development
+    ports:
+      - "${PORT:-3000}:3000"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /var/lib/zerobyte:/var/lib/zerobyte
+      - ./app:/app/app
+      - ~/.config/rclone:/root/.config/rclone:ro
+      - ./tmp/:/test-data
+
+  zerobyte-prod:
+    # image: ghcr.io/nicotsx/zerobyte:v0.22.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+      args:
+        - APP_VERSION=0.20.0
+    container_name: zerobyte-prod
+    restart: unless-stopped
+    devices:
+      - /dev/fuse:/dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    ports:
+      - "4096:4096"
+    environment:
+      - APP_SECRET=94bad4678ce84a60b9789bd2114a6bf780aeb38df426f7352c941c66e25d5c2b
+      - BASE_URL=http://localhost:4096
+      - PORT=4096
+      - LOG_LEVEL=debug
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ~/.config/rclone:/root/.config/rclone:ro
+      - ./tmp:/test-data
+      - ./data:/var/lib/zerobyte
+
+  zerobyte-e2e:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: zerobyte-e2e
+    restart: unless-stopped
+    environment:
+      - DISABLE_RATE_LIMITING=true
+      - APP_SECRET=94bad4678ce84a60b9789bd2114a6bf780aeb38df426f7352c941c66e25d5c2b
+      - BASE_URL=http://localhost:4096
+      - TRUSTED_ORIGINS=https://tinyauth.example.com:5557,https://localhost:5557
+      - WEBHOOK_ALLOWED_ORIGINS=http://host.docker.internal:18080
+      - NODE_EXTRA_CA_CERTS=/tinyauth-ca/caddy/pki/authorities/local/root.crt
+      - SSL_CERT_FILE=/tinyauth-ca/caddy/pki/authorities/local/root.crt
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    devices:
+      - /dev/fuse:/dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    ports:
+      - "4096:4096"
+    depends_on:
+      tinyauth:
+        condition: service_healthy
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./playwright/data:/var/lib/zerobyte/data
+      - ./playwright/temp:/test-data
+      - ./playwright/tinyauth/caddy-data:/tinyauth-ca:ro
+
+  zerobyte-e2e-proxied:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    restart: unless-stopped
+    environment:
+      - DISABLE_RATE_LIMITING=true
+      - APP_SECRET=94bad4678ce84a60b9789bd2114a6bf780aeb38df426f7352c941c66e25d5c2b
+      - BASE_URL=https://zerobyte.example.com:5558
+      - TRUST_PROXY=true
+      - TRUSTED_ORIGINS=https://tinyauth.example.com:5557
+      - NODE_EXTRA_CA_CERTS=/tinyauth-ca/caddy/pki/authorities/local/root.crt
+      - SSL_CERT_FILE=/tinyauth-ca/caddy/pki/authorities/local/root.crt
+    depends_on:
+      tinyauth:
+        condition: service_healthy
+    volumes:
+      - ./playwright/tinyauth/caddy-data:/tinyauth-ca:ro
+
+  zerobyte-e2e-https:
+    image: caddy:2-alpine
+    depends_on:
+      - zerobyte-e2e-proxied
+    ports:
+      - "5558:5558"
+    volumes:
+      - ./playwright/reverse-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+
+  tinyauth-app:
+    image: ghcr.io/steveiliop56/tinyauth:v5
+    restart: unless-stopped
+    environment:
+      - TINYAUTH_APPURL=https://tinyauth.example.com:5557
+      - TINYAUTH_SERVER_PORT=3000
+      - TINYAUTH_SERVER_ADDRESS=0.0.0.0
+      - TINYAUTH_DATABASE_PATH=/data/tinyauth.db
+      - TINYAUTH_AUTH_USERSFILE=/config/users.txt
+      - TINYAUTH_OIDC_PRIVATEKEYPATH=/data/tinyauth_oidc_key
+      - TINYAUTH_OIDC_PUBLICKEYPATH=/data/tinyauth_oidc_key.pub
+      - TINYAUTH_OIDC_CLIENTS_ZEROBYTE_CLIENTID=zerobyte-test
+      - TINYAUTH_OIDC_CLIENTS_ZEROBYTE_CLIENTSECRET=test-secret-12345
+      - TINYAUTH_OIDC_CLIENTS_ZEROBYTE_TRUSTEDREDIRECTURIS=http://localhost:4096/api/auth/sso/callback/test-oidc-register,http://localhost:4096/api/auth/sso/callback/test-oidc-uninvited,http://localhost:4096/api/auth/sso/callback/test-oidc-invited,http://localhost:4096/api/auth/sso/callback/test-oidc-autolink,http://localhost:4096/api/auth/sso/callback/test-oidc-existing-member,https://zerobyte.example.com:5558/api/auth/sso/callback/test-oidc-proxy
+      - TINYAUTH_OIDC_CLIENTS_ZEROBYTE_NAME=Zerobyte Test
+      - TINYAUTH_LOG_LEVEL=debug
+      - TINYAUTH_LOG_JSON=true
+    volumes:
+      - ./playwright/tinyauth/users.txt:/config/users.txt:ro
+      - ./playwright/tinyauth/app-data:/data
+
+  tinyauth:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - tinyauth-app
+    ports:
+      - "5557:5557"
+    volumes:
+      - ./playwright/tinyauth/caddy.json:/etc/caddy/caddy.json:ro
+      - ./playwright/tinyauth/caddy-data:/data
+    command: caddy run --config /etc/caddy/caddy.json
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "test -f /data/caddy/pki/authorities/local/root.crt && wget -qO- --no-check-certificate https://localhost:5557/.well-known/openid-configuration >/dev/null",
+        ]
+      interval: 1s
+      timeout: 5s
+      retries: 30
+    networks:
+      default:
+        aliases:
+          - tinyauth.example.com

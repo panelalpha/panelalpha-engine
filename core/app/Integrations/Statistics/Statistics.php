@@ -48,9 +48,10 @@ interface Statistics
     public function domainVisitors(string $domain, string $start, string $end): array;
 
     /**
-     * Visitor breakdown for a domain and dimension.
+     * Visitor breakdown for a domain and dimension. `status_codes` rows also
+     * carry `bytes`.
      *
-     * @return list<array{label: string, visits: int, code?: string}>
+     * @return list<array{label: string, visits: int, code?: string, bytes?: int}>
      */
     public function domainVisitorBreakdown(string $domain, string $dimension, string $start, string $end): array;
 

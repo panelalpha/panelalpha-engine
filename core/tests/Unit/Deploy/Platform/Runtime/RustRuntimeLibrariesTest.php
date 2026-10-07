@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * A Rust binary compiled in rust:1-bookworm links libraries rust:1-slim-bookworm
- * does not have (#92: focus_flow_cloud's diesel links libpq.so.5). The scripts
+ * does not have (focus_flow_cloud's diesel links libpq.so.5). The scripts
  * run here against a fake `ldd` and `ldconfig` that answer from two directories
  * standing in for the two images.
  */

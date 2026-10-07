@@ -16,7 +16,7 @@ description: >-
   base image falls back to `/app`. `/app` holds `README`, `INSTALL`, `Makefile`,
   `ChangeLog` and no index, so Apache answers 403 and the report says the entry
   point is missing. `docroot: htdocs` is a plain relative path, so unlike `.` it
-  survives `PlatformManifest::readDocroot()` and engine #172 does not bite.
+  survives `PlatformManifest::readDocroot()`.
 
   **Serving `htdocs/` is also what makes this application safe to host.** Every
   directory that matters is a *sibling* of the document root: `inc/` (the whole
@@ -137,13 +137,13 @@ docroot: htdocs
 # No `database:` key. PlatformManifest::DATABASES accepts only `mysql` and this
 # application is PostgreSQL to its stored procedures; the connection comes from
 # the sidecar in overrides/docker-compose.override.yml instead. The side effect
-# is that PhpStrategy does mine the checkout for sidecars (engine #166), which
+# is that PhpStrategy does mine the checkout for sidecars, which
 # is why hooks/prepare.sh moves a compose file by name if a future release ever
 # adds one.
 commands:
   # No `id:`, deliberately. A stale detection cache drops every stage command
   # from a recipe that carries one while the log still reports "Recipe named by
-  # ..." (engine #169); omitting it and extending a shipped manifest is the
+  # ..."; omitting it and extending a shipped manifest is the
   # mitigation.
   - stage:
       - install

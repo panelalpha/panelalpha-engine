@@ -128,8 +128,8 @@ class GitWorkTreeSharedTest extends TestCase
             $syncs = $which === 'panel api';
             $this->assertSame(
                 $syncs,
-                $this->contains($joined, 'fetch origin'),
-                "{$which}: fetch origin on a fresh init"
+                $this->contains($joined, 'fetch --depth=1 origin main'),
+                "{$which}: shallow fetch of the branch on a fresh init"
             );
             $this->assertSame(
                 $syncs,

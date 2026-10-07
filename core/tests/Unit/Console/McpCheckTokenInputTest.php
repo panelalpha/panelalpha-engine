@@ -9,7 +9,7 @@ use Symfony\Component\Console\Tester\CommandTester;
 use Tests\TestCase;
 
 /**
- * engine#48 item 23: `mcp:check {token}` took the secret as an argument, where
+ * `mcp:check {token}` took the secret as an argument, where
  * `ps` and the shell history both keep it. The argument still works, with a
  * deprecation notice; the token can also come from stdin or a prompt.
  */

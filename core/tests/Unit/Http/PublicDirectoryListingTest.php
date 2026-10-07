@@ -7,7 +7,7 @@ use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 
 /**
- * engine#48 item 23: public/test-report/.htaccess turned directory listings
+ * public/test-report/.htaccess turned directory listings
  * on. Core serves public/ through nginx, which ignores .htaccess, so it was
  * inert -- until someone fronts core with Apache, or copies the file.
  */

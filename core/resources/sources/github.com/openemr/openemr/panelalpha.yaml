@@ -7,11 +7,10 @@ description: >-
   strategy, PHP 8.3 (composer.json pins `config.platform.php` to 8.3 beside
   `require.php >=8.3.0`), the shared Apache base image with ~/project
   bind-mounted and `composer install` on the host. The deploy finished
-  successfully, `composer install` resolved 187 packages and the webpack theme
-  build ran, and every request still answered HTTP 500. That is the
-  `serving-error_page` verdict this recipe exists to fix.
+  successfully, `composer install` and the webpack theme build ran, and every
+  request still answered HTTP 500, which is what this recipe exists to fix.
 
-  **The 500, reproduced:** `PHP Fatal error: Uncaught UnexpectedValueException:
+  **The 500:** `PHP Fatal error: Uncaught UnexpectedValueException:
   Could not detect environment name. Searched envvars: ENVIRONMENT, ENV` out of
   `vendor/firehed/container/src/AutoDetect.php:51`, reached from
   `bootstrap.php:48` from `public/index.php:20`. PhpDocroot had pointed Apache
@@ -43,8 +42,7 @@ description: >-
   `docroot: .` does **not** fix it, and that is worth knowing before you write
   it: `PlatformManifest::readDocroot()` folds both `''` and `'.'` into `''`,
   and `PhpDocroot::environment()` reads `''` as "not declared" and runs the
-  probe. Measured -- with `docroot: .` in this file, the generated compose file
-  still said `PA_DOCROOT: /app/public`. Nor does leaving it out: the base
+  probe. Nor does leaving it out: the base
   image's own `panelalpha-serve.sh` falls back to `/app/public` whenever that
   directory exists. So the document root is set as `PA_DOCROOT: /app` in
   overrides/docker-compose.override.yml, which is the one lever a recipe has,
@@ -62,8 +60,8 @@ description: >-
   `database: mysql` is the manifest key that answers this (the same one Matomo
   and Omeka S need, for the same reason): the engine provisions a database and
   user on the account's own MySQL server -- visible in the panel, openable in
-  phpMyAdmin, inside the account's backup, and costing this 3.7 GB host neither
-  a container nor a volume -- and hands the container DB_HOST, DB_PORT,
+  phpMyAdmin, inside the account's backup, and costing the host neither a
+  container nor a volume -- and hands the container DB_HOST, DB_PORT,
   DB_DATABASE, DB_USERNAME and DB_PASSWORD.
 
   **The first administrator.** OpenEMR seeds no user. Until the installer has
@@ -87,9 +85,9 @@ description: >-
   `NativeSessionStorage::start()` refuses with "Failed to start the session
   because headers have already been sent" whenever `headers_sent()` is true,
   which under the CLI SAPI it becomes on the first byte PHP writes to stdout.
-  Measured: one `echo` before `quick_install()` killed the deploy with an
-  uncaught RuntimeException out of `Gacl->__construct()` *after* the schema,
-  the language pack, the globals and the version row were all written -- a
+  One `echo` before `quick_install()` kills the deploy with an uncaught
+  RuntimeException out of `Gacl->__construct()` *after* the schema, the
+  language pack, the globals and the version row are all written -- a
   half-installed database with no ACLs and no administrator. Every message in
   panelalpha-install.php therefore goes to stderr through `fwrite(STDERR, ...)`,
   which bypasses PHP's output layer. Upstream's own two CLI entry points print
@@ -102,13 +100,12 @@ description: >-
   language pack, `contrib/util/language_translations/currentLanguage_utf8.sql`,
   is 23.6 MB and **237,511 single-row INSERTs** that
   `initialize_dumpfile_list()` loads unconditionally -- there is no switch that
-  skips it, and deleting the file fails the install outright. Measured on this
-  host, all of that is about 20 seconds and `quick_install()` returns in about
-  30: `database-users.shared-hosting.palocal` is one bridge away rather than a
+  skips it, and deleting the file fails the install outright.
+  `database-users.shared-hosting.palocal` is one bridge away rather than a
   real network hop, and the whole load runs inside a single transaction with
   autocommit off. The healthcheck's `start_period` is 600s anyway, because a
-  check that passes inside the start period costs nothing and this host is
-  usually building something else at the same time.
+  check that passes inside the start period costs nothing and the host may be
+  building something else at the same time.
 
   **A redeploy re-clones ~/project, and `sites/default/sqlconf.php` is a
   committed file.** So every redeploy resets it to `$config = 0` and

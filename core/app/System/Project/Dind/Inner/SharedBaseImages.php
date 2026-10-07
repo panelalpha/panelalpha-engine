@@ -9,6 +9,7 @@ use App\Lib\Deploy\CacheManager\NodeBuildImage;
 use App\Lib\Deploy\CacheManager\PhpBaseImage;
 use App\Lib\Deploy\CacheManager\PythonBaseImage;
 use App\Lib\Deploy\CacheManager\RubyBaseImage;
+use App\Lib\Deploy\CacheManager\RustBuildToolsImage;
 use App\Lib\Deploy\Platform\Runtime\RuntimeImageCatalog;
 use App\Lib\Deploy\Telemetry\Telemetry;
 
@@ -52,10 +53,12 @@ class SharedBaseImages
      * @param list<string> $extras extensions to bake in on top of the standard
      *                             set, so the account never compiles them
      * @param list<string> $packages the manifest's `system_packages:`
+     * @param list<string> $required extensions the project's composer files
+     *                               require: a variant carrying one is not deferred
      * @return array{tag: ?string, baked: list<string>} baked is what $tag has
      *         beyond the standard set, so the caller knows what not to install
      */
-    public function ensurePhp(string $phpImage, array $extras = [], array $packages = []): array
+    public function ensurePhp(string $phpImage, array $extras = [], array $packages = [], array $required = []): array
     {
         $extras = PhpBaseImage::normalizeExtras($extras);
         $packages = PhpBaseImage::normalizeSystemPackages($packages);
@@ -64,7 +67,8 @@ class SharedBaseImages
         }
         if ($extras !== []) {
             $tag = PhpBaseImage::tag($phpImage, $extras);
-            if ($tag !== null && $this->providePhp($tag, $phpImage, $extras)) {
+            $needed = array_values(array_intersect($extras, array_map('strtolower', $required)));
+            if ($tag !== null && $this->providePhp($tag, $phpImage, $extras, [], $needed)) {
                 return ['tag' => $tag, 'baked' => $extras];
             }
         }
@@ -72,6 +76,16 @@ class SharedBaseImages
         $tag = PhpBaseImage::tag($phpImage);
         if ($tag !== null && $this->providePhp($tag, $phpImage)) {
             return ['tag' => $tag, 'baked' => []];
+        }
+        // The base is the runtime: the stock image has no Composer, Apache
+        // configuration or entrypoint, so falling back to it fails later as `composer: not found`.
+        if ($tag !== null && RuntimeImageCatalog::runnable('php')) {
+            throw new \RuntimeException(
+                "The shared PHP base image {$tag} could not be built or loaded on this server; see the lines above. "
+                . "A PHP app runs on that image (Composer, the Apache configuration and the entrypoint are baked "
+                . "into it), and the stock {$phpImage} has none of them. Deploy again once the cause above is "
+                . 'fixed; `php artisan system:image:prewarm` builds the base ahead of a deploy.'
+            );
         }
 
         // All the way down to the stock image: this account is about to compile
@@ -89,7 +103,7 @@ class SharedBaseImages
     /**
      * A variant carrying system packages is never deferred and never swapped
      * for the plain base: the plain base has no ffmpeg, so a green deploy on it
-     * accepts uploads it can never convert (ClipBucket, engine#193). The first
+     * accepts uploads it can never convert (ClipBucket). The first
      * deploy of a set waits for the build; one that cannot get it fails.
      *
      * @param list<string> $extras
@@ -189,7 +203,8 @@ class SharedBaseImages
             return null;
         }
 
-        if (!$this->hostHasImage($tag)) {
+        $announced = !$this->hostHasImage($tag);
+        if ($announced) {
             // The catalogue decides whether a deploy waits. Ruby does not: its
             // per-project Dockerfile installs the same packages. Python does,
             // the base being the only place those headers exist — deferring it
@@ -204,12 +219,12 @@ class SharedBaseImages
             $this->inner->host()->logInfo(
                 "Shared Python base image {$tag} has not been built on this host yet; building it now. "
                 . 'Later deploys on this Python version and dependency set load it in seconds. '
-                . '`php artisan system:image:prewarm` builds it ahead of time.'
+                . '`pae configure prewarm` can keep it built ahead of time.'
             );
         }
 
         try {
-            $this->buildAndLoad('Python', $tag, $dockerfile);
+            $this->buildAndLoad('Python', $tag, $dockerfile, $announced);
         } catch (\Exception $e) {
             // Not fatal: the stock image installs everything that ships a
             // wheel, and the rest get a clear pip error rather than a deploy
@@ -246,11 +261,52 @@ class SharedBaseImages
             return $tag;
         }
 
+        // Our own PHP bases exist only on this host: --pull would look for
+        // them on Docker Hub and fail.
+        $pull = !$this->hostHasImage($image);
         try {
-            $host->cancellable($this->inner->imageStore()->hostBuildCommand($tag, $dockerfile), self::BUILD_TIMEOUT_SECONDS);
+            $host->cancellable(
+                $this->inner->imageStore()->hostBuildCommand($tag, $dockerfile, false, $pull),
+                self::BUILD_TIMEOUT_SECONDS
+            );
         } catch (\Exception $e) {
             $host->failDeployIfDiskFull($e->getMessage());
             $host->logInfo("Could not build {$tag}, building without Node: " . $e->getMessage());
+
+            return null;
+        }
+
+        return $tag;
+    }
+
+    /**
+     * $image with the apt packages a Rust build script needs ({@see RustBuildToolsImage}).
+     * Host only, built now: without them cargo fails every time. Null means
+     * compile in $image as before.
+     *
+     * @param list<string> $packages
+     */
+    public function ensureRustBuild(string $image, array $packages): ?string
+    {
+        $tag = RustBuildToolsImage::tag($image, $packages);
+        $dockerfile = RustBuildToolsImage::dockerfile($image, $packages);
+        if ($tag === null || $dockerfile === null) {
+            return null;
+        }
+        $host = $this->inner->host();
+        $host->logInfo('The Rust build needs ' . implode(', ', $packages) . "; building in {$tag}");
+        if ($this->hostHasImage($tag)) {
+            return $tag;
+        }
+
+        try {
+            $host->cancellable(
+                $this->inner->imageStore()->hostBuildCommand($tag, $dockerfile, false, !$this->hostHasImage($image)),
+                self::BUILD_TIMEOUT_SECONDS
+            );
+        } catch (\Exception $e) {
+            $host->failDeployIfDiskFull($e->getMessage());
+            $host->logInfo("Could not build {$tag}, compiling in {$image}: " . $e->getMessage());
 
             return null;
         }
@@ -264,9 +320,15 @@ class SharedBaseImages
      *
      * @param list<string> $extras
      * @param list<string> $packages
+     * @param list<string> $required the extras composer will refuse to install without
      */
-    public function providePhp(string $tag, string $phpImage, array $extras = [], array $packages = []): bool
-    {
+    public function providePhp(
+        string $tag,
+        string $phpImage,
+        array $extras = [],
+        array $packages = [],
+        array $required = []
+    ): bool {
         if (!ImageTransfer::isSafeImageRef($tag)) {
             return false;
         }
@@ -291,22 +353,26 @@ class SharedBaseImages
         // nothing to run. Better a first deploy on this minor that waits for
         // the compile and says so than a green deploy serving nothing.
         // System packages are not deferrable either: the plain base lacks them.
-        if (!$this->hostHasImage($tag) && $extras !== [] && $packages === []) {
+        // Nor is an extension the project requires: composer's platform check
+        // aborts on the plain base (Wallabag's ext-tidy).
+        if (!$this->hostHasImage($tag) && $extras !== [] && $packages === [] && $required === []) {
             $this->queueBackgroundBuild('PHP', $tag, $dockerfile);
 
             return false;
         }
-        if (!$this->hostHasImage($tag)) {
+        $announced = !$this->hostHasImage($tag);
+        if ($announced) {
             $this->inner->host()->logInfo(
                 "Shared PHP base image {$tag} has not been built on this host yet; building it now"
-                . ($packages === [] ? '' : ' with ' . implode(', ', $packages)) . '. '
+                . ($packages === [] ? '' : ' with ' . implode(', ', $packages))
+                . ($required === [] ? '' : ', since this project requires ' . implode(', ', $required)) . '. '
                 . 'Later deploys on this PHP version load it in seconds. '
-                . '`php artisan system:image:prewarm` builds it ahead of time.'
+                . '`pae configure prewarm` can keep it built ahead of time.'
             );
         }
 
         try {
-            $this->buildAndLoad('PHP', $tag, $dockerfile);
+            $this->buildAndLoad('PHP', $tag, $dockerfile, $announced);
         } catch (\Exception $e) {
             $host = $this->inner->host();
             $host->failDeployIfDiskFull($e->getMessage());
@@ -314,8 +380,8 @@ class SharedBaseImages
             // registry is the only way in: fail with the cause, not a later side effect.
             if (str_contains($e->getMessage(), DindImageStore::REGISTRY_DOWN)) {
                 throw new \RuntimeException(
-                    'The image cache (panelalpha-cache-registry) is not running, and a PHP deploy '
-                    . 'cannot get its base image without it. Start it with `docker compose up -d cache-registry`.'
+                    'The image cache (panelalpha-cache-registry or its writer) is not running, and a PHP deploy '
+                    . 'cannot get its base image without it. Start it with `docker compose up -d cache-registry cache-registry-writer`.'
                 );
             }
             $host->logInfo(
@@ -350,12 +416,14 @@ class SharedBaseImages
      * differently: PHP has a stock image to fall back to and a disk-full to
      * re-raise, Ruby only has the packages to install itself.
      */
-    private function buildAndLoad(string $language, string $tag, string $dockerfile): void
+    private function buildAndLoad(string $language, string $tag, string $dockerfile, bool $announced = false): void
     {
         $host = $this->inner->host();
         $store = $this->inner->imageStore();
 
-        $host->logInfo("Preparing shared {$language} base image {$tag}");
+        // Still the image_transfer marker; dim once the caller has said it is building.
+        $preparing = "Preparing shared {$language} base image {$tag}";
+        $announced ? $host->logDim($preparing) : $host->logInfo($preparing);
         $host->cancellable($store->hostBuildCommand($tag, $dockerfile), self::BUILD_TIMEOUT_SECONDS);
         $host->cancellable(
             $store->loadFromHostCommand($this->inner->dind()->engineAccount(), $tag),

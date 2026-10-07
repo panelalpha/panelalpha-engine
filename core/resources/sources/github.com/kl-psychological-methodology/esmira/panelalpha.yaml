@@ -7,19 +7,18 @@ description: >-
   response and the account file are plain files on disk.
 
   Detection reads the checkout the way the checkout asks to be read and still
-  cannot host it. Measured on a control deploy with no recipe:
-  `serving-missing_entry`, HTTP 403, 45.1 s. Three separate things are wrong
-  and the document root is only the last of them.
+  cannot host it: without a recipe the deploy ends in `serving-missing_entry`,
+  HTTP 403. Three separate things are wrong and the document root is only the
+  last of them.
 
   **This repository is a meta repository.** github.com/KL-Psychological-Methodology/ESMira
   is four files, an `about/` directory of screenshots and a `.gitmodules`: the
   server is the `ESMira-web` submodule and the phone client is `ESMira-apps`.
   The engine does fetch them -- `git submodule update --init --depth=1
-  --recursive` after the clone, GitRepository.php:137-151, measured at 3.9 s
-  for 11.8 MB -- but it *swallows* a failure into a warn line
-  (GitRepository.php:589-607), which is right for a repository whose submodules
-  are optional and fatal for one where the submodule is the entire application.
-  hooks/prepare.sh turns that into an error.
+  --recursive` after the clone, GitRepository.php:137-151 -- but it *swallows* a
+  failure into a warn line (GitRepository.php:589-607), which is right for a
+  repository whose submodules are optional and fatal for one where the submodule
+  is the entire application. hooks/prepare.sh turns that into an error.
 
   **The application has to be compiled, and the engine will not do it by
   itself.** ESMira-web is TypeScript and webpack: `npm run prod` writes
@@ -32,7 +31,7 @@ description: >-
   a `scripts.build` (HostCompile.php:188-201) -- and ESMira satisfies neither:
   its package.json is one level down, and its production script is called
   `prod`. files/package.json is a four-line shim that satisfies both and
-  delegates. Measured: 132 s on a 2-core host, 24 s of it webpack.
+  delegates.
 
   **The document root is `ESMira-web/dist`, and the probe cannot reach it.**
   `PhpDocroot::CANDIDATES` is `['public', 'web', 'public_html', 'webroot']`,
@@ -40,15 +39,14 @@ description: >-
   (PhpDocroot.php:25-95). ESMira's front controller is two levels down, at
   `ESMira-web/dist/index.php`, so `detect()` falls through everything, returns
   `''`, and `environment()` emits no `PA_DOCROOT` at all. panelalpha-serve.sh
-  then falls back to `/app` (serve script lines 18-27, measured:
-  `PA_DOCROOT=/app` in the container's `/proc/1/environ`), the checkout root
+  then falls back to `/app` (serve script lines 18-27), the checkout root
   has no index file, and `Options -Indexes` in apache-vhost.stub answers 403 to
   every request. `ESMira-web/dist` is a plain relative path, so unlike `.` it
-  survives `PlatformManifest::readDocroot()` and engine #172 does not bite.
+  survives `PlatformManifest::readDocroot()`.
 
   Serving `dist/` is also most of what makes this application safe to host.
-  The checkout root, `ESMira-apps/` (5.4 MB of Kotlin), `ESMira-web/src/`,
-  `ESMira-web/node_modules/` (218 MB), the engine's own `docker-compose.yml`,
+  The checkout root, `ESMira-apps/` (Kotlin), `ESMira-web/src/`,
+  `ESMira-web/node_modules/`, the engine's own `docker-compose.yml`,
   `.env` and entrypoint, and this recipe's own setup script are all *outside*
   the document root and have no URL by construction rather than by an
   `.htaccess` rule.
@@ -77,8 +75,7 @@ description: >-
   `.htaccess` holding `Deny from all` that the initialiser writes
   (ESMiraInitializerFS::createDataFolder()). Two things are wrong with that
   here. It is one `AllowOverride` away from being a no-op, on data about human
-  research participants. And `~/project` is emptied before every clone (engine
-  #173), so it would not survive a redeploy. `dataFolder_path` is a *config*
+  research participants. And `~/project` is emptied before every clone, so it would not survive a redeploy. `dataFolder_path` is a *config*
   value (backend/fileSystem/PathsFS.php:21), so the recipe points it at `/data`
   -- a bind mount of `~/.panelalpha/esmira/data` -- which removes the URL
   instead of denying it and keeps the studies across redeploys.
@@ -89,7 +86,7 @@ description: >-
   into the document root, which is where upstream's own Dockerfile mounts it.
   It holds no credential.
 
-  **No php.ini reaches this image** (engine #185): `php --ini` answers "Loaded
+  **No php.ini reaches this image**: `php --ini` answers "Loaded
   Configuration File: (none)", so `display_errors` is On and `expose_php` is
   On. ESMira never overrides either -- its own error handling writes traces
   into the data folder for the administrator, not into the response -- so on
@@ -120,7 +117,7 @@ requires:
 commands:
   # No `id:`, deliberately. A stale detection cache drops every stage command
   # from a recipe that carries one while the log still reports "Recipe named by
-  # ..." (engine #169); omitting it and extending a shipped manifest is the
+  # ..."; omitting it and extending a shipped manifest is the
   # mitigation.
   #
   # Declaring `commands:` replaces what php-plain.yaml declared, top level by
@@ -129,7 +126,7 @@ commands:
   # *without* Composer, and ESMira has no composer.json.
   #
   # Nothing on the `build` stage. A source recipe's build-stage commands are
-  # inert (engine #171), and the compile this application needs is not a stage
+  # inert, and the compile this application needs is not a stage
   # command at all: it is the engine's own host Node build, reached through
   # files/package.json.
   - stage:
@@ -143,8 +140,7 @@ commands:
       in esmira_data/.logins. On the upgrade stage an already-initialised
       server is left alone apart from MigrationManager::autoRun(), which is the
       same call upstream's docker-entrypoint.sh makes on every boot -- that is
-      what makes a redeploy safe. On the build stage it would not run at all
-      (engine #171).
+      what makes a redeploy safe. On the build stage it would not run at all.
     run: 'php /app/panelalpha-esmira-setup.php'
     timeout: 300
 credentials:

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Generate APP_KEY once, where a redeploy will not wipe it (~/project is
-# emptied on every deploy, engine#173), and seed .env. The admin login is the
+# emptied on every deploy), and seed .env. The admin login is the
 # engine's (`credentials:` in panelalpha.yaml), in ~/.panelalpha/app-credentials.env.
 set -e
 cd ~/project

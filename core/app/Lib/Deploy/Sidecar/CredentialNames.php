@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Sidecar;
 
+use App\Lib\Deploy\Port\EnvVarDefault;
+
 /**
  * Reading a datastore's variables by the shape of their names.
  *
@@ -30,6 +32,17 @@ final class CredentialNames
      * @var list<string>
      */
     private const CLIENT_MARKERS = ['_HOST', '_HOSTNAME', '_URL', '_URI', '_DSN', '_ADDR', '_ENDPOINT'];
+
+    /**
+     * Client settings named outside the prefix: libpq's own PGHOST beside
+     * POSTGRES_USER is an app configuring its client (AdventureLog).
+     *
+     * @var array<string, list<string>>
+     */
+    private const UNPREFIXED_CLIENT_MARKERS = [
+        'POSTGRES' => ['PGHOST', 'PGHOSTADDR'],
+        '' => ['DATABASE_URL'],
+    ];
 
     /**
      * Suffixes naming the *administrative* account rather than the
@@ -142,14 +155,42 @@ final class CredentialNames
      */
     public static function isClientPrefix(string $prefix, array $keys): bool
     {
+        foreach (self::UNPREFIXED_CLIENT_MARKERS as $family => $markers) {
+            if (str_starts_with($prefix, $family) && array_intersect($markers, $keys) !== []) {
+                return true;
+            }
+        }
         foreach ($keys as $key) {
             if (!str_starts_with($key, $prefix)) {
                 continue;
             }
             foreach (self::CLIENT_MARKERS as $marker) {
-                if (str_ends_with($key, $marker)) {
+                if (str_ends_with($key, $marker) && !in_array($key, SidecarDialects::serverSettingsFor($prefix), true)) {
                     return true;
                 }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether any `*_HOST` names another host by name: the service connects to
+     * a server rather than being one. Zabbix's frontend carries `MYSQL_USER`
+     * and `MYSQL_PASSWORD` beside `DB_SERVER_HOST: mysql`. A wildcard or a
+     * local address (`MYSQL_ROOT_HOST: '%'`) is a server's own setting.
+     *
+     * @param array<string, string> $environment uppercased names
+     */
+    public static function namesARemoteHost(array $environment): bool
+    {
+        foreach ($environment as $key => $value) {
+            if (!str_ends_with($key, '_HOST') && !str_ends_with($key, '_HOSTNAME')) {
+                continue;
+            }
+            $host = strtolower(trim(EnvVarDefault::resolve($value), " \"'"));
+            if (preg_match('/^[a-z][a-z0-9_.-]*$/', $host) === 1 && $host !== 'localhost') {
+                return true;
             }
         }
 

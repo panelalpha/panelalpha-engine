@@ -440,7 +440,7 @@ class Telemetry
     private static function record(array $report): void
     {
         // Run on a host, the suite would otherwise write its fixtures into the
-        // operator's telemetry log as if they were real deploys (engine#276).
+        // operator's telemetry log as if they were real deploys.
         if (self::underTest()) {
             return;
         }

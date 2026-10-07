@@ -172,14 +172,26 @@ class ProxyRuleRetargetTest extends TestCase
 
     public function test_project_update_retargets_proxy_rules_before_creating_the_new_vhost(): void
     {
-        $source = file_get_contents(app_path('Http/Controllers/UserController.php'));
-        $this->assertIsString($source);
-
-        $updatePos = strpos($source, 'function update($username, UserUpdateRequest $request)');
+        $controller = file_get_contents(app_path('Http/Controllers/UserController.php'));
+        $this->assertIsString($controller);
+        $updatePos = strpos($controller, 'function update($username, UserUpdateRequest $request)');
         $this->assertNotFalse($updatePos);
-        $suspendPos = strpos($source, 'function suspend(string $username)', $updatePos);
+        $suspendPos = strpos($controller, 'function suspend(string $username)', $updatePos);
         $this->assertNotFalse($suspendPos);
-        $updateBlock = substr($source, $updatePos, $suspendPos - $updatePos);
+        $this->assertStringContainsString(
+            'MainDomainRename::apply(',
+            substr($controller, $updatePos, $suspendPos - $updatePos),
+            'project_update must rename the main domain through MainDomainRename'
+        );
+
+        // The rename itself lives in MainDomainRename::apply().
+        $source = file_get_contents(app_path('Lib/Domains/MainDomainRename.php'));
+        $this->assertIsString($source);
+        $applyPos = strpos($source, 'public static function apply(User $user, string $newFqdn)');
+        $this->assertNotFalse($applyPos);
+        $nextPos = strpos($source, 'public static function replacement(', $applyPos);
+        $this->assertNotFalse($nextPos);
+        $updateBlock = substr($source, $applyPos, $nextPos - $applyPos);
 
         $retargetPos = strpos($updateBlock, 'ProxyRule::retargetServerName');
         $createPos = strpos($updateBlock, 'projectDomain()->create()');
@@ -196,6 +208,91 @@ class ProxyRuleRetargetTest extends TestCase
             'domain rename must not re-run deploy-time port detection'
         );
         $this->assertStringContainsString('ensureGeneratedHttpPair', $updateBlock);
+    }
+
+    public function test_sync_keeps_an_operators_https_switch_on_the_generated_rule(): void
+    {
+        $this->seedGeneratedPair('nodedemo', 'app.example.test', 3000);
+        $https = ProxyRule::forUser('nodedemo')->where('listen_port', 443)->firstOrFail();
+        $https->update(['upstream_protocol' => 'https']);
+
+        ProxyRule::syncGeneratedHttpPair('nodedemo', 'app.example.test', 8443);
+
+        $rules = ProxyRule::forUser('nodedemo')->orderBy('listen_port')->get();
+        $this->assertCount(2, $rules);
+        $this->assertSame($https->id, $rules[1]->id);
+        $this->assertSame('https', $rules[1]->upstream_protocol);
+        $this->assertSame('http', $rules[0]->upstream_protocol);
+        $this->assertSame([8443, 8443], $rules->pluck('upstream_port')->all());
+    }
+
+    public function test_sync_leaves_a_hand_made_rule_for_the_same_port_alone(): void
+    {
+        $this->seedGeneratedPair('shop', 'shop.example.test', 3000);
+        $hand = ProxyRule::create([
+            'owner_scope' => 'user',
+            'username' => 'shop',
+            'enabled' => true,
+            'transport' => 'http',
+            'listen_ip' => '10.0.0.5',
+            'listen_port' => 443,
+            'server_name' => 'shop.example.test',
+            'upstream_host' => 'backend',
+            'upstream_port' => 9443,
+            'upstream_protocol' => 'https',
+            'is_generated' => false,
+        ]);
+
+        ProxyRule::syncGeneratedHttpPair('shop', 'shop.example.test', 3000);
+
+        $on443 = ProxyRule::forUser('shop')->where('listen_port', 443)->get();
+        $this->assertCount(1, $on443, 'no generated rival next to the hand rule');
+        $rule = $on443->first();
+        $this->assertSame($hand->id, $rule->id);
+        $this->assertFalse($rule->is_generated);
+        $this->assertSame('10.0.0.5', $rule->listen_ip);
+        $this->assertSame('backend', $rule->upstream_host);
+        $this->assertSame('https', $rule->upstream_protocol);
+        $this->assertTrue(ProxyRule::forUser('shop')->where('listen_port', 80)->value('is_generated'));
+    }
+
+    public function test_upsert_does_not_take_over_a_hand_made_rule_with_the_same_key(): void
+    {
+        $hand = ProxyRule::create([
+            'owner_scope' => 'user',
+            'username' => 'shop',
+            'enabled' => true,
+            'transport' => 'http',
+            'listen_ip' => '*',
+            'listen_port' => 443,
+            'server_name' => 'shop.example.test',
+            'upstream_host' => 'backend',
+            'upstream_port' => 9443,
+            'upstream_protocol' => 'https',
+            'is_generated' => false,
+        ]);
+
+        ProxyRule::upsertGeneratedHttpRule('shop', 'shop.example.test', 443, 3000, true);
+
+        $rule = ProxyRule::findOrFail($hand->id);
+        $this->assertFalse($rule->is_generated);
+        $this->assertSame('backend', $rule->upstream_host);
+        $this->assertSame('https', $rule->upstream_protocol);
+        $this->assertSame(1, ProxyRule::forUser('shop')->count());
+    }
+
+    public function test_sync_drops_stale_generated_rows_but_not_other_projects(): void
+    {
+        $this->seedGeneratedPair('nodedemo', 'old.example.test', 3000);
+        $this->seedGeneratedPair('other', 'other.example.test', 3000);
+
+        ProxyRule::syncGeneratedHttpPair('nodedemo', 'new.example.test', 3000);
+
+        $this->assertSame(
+            ['new.example.test', 'new.example.test'],
+            ProxyRule::forUser('nodedemo')->pluck('server_name')->all()
+        );
+        $this->assertSame(2, ProxyRule::forUser('other')->count());
     }
 
     private function seedGeneratedPair(string $username, string $fqdn, int $upstreamPort): void

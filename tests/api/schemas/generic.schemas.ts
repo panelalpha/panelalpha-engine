@@ -20,15 +20,6 @@ export const looseEntityEnvelopeSchema = z
   })
   .passthrough();
 
-export const csfConfigSchema = z
-  .object({
-    enabled: z.boolean(),
-    version: z.string(),
-  })
-  .passthrough();
-
-export const csfConfigResponseSchema = z.object({ data: csfConfigSchema });
-
 export const ftpAccountSchema = z
   .object({
     user: z.string(),
@@ -88,27 +79,6 @@ export const modSecurityConfigSchema = z
 export const modSecurityConfigResponseSchema = z.object({
   data: modSecurityConfigSchema,
 });
-
-export const csfRuleSchema = z.object({
-  line_md5: z.string().optional(),
-  protocol: z.string().optional(),
-  direction: z.string().optional(),
-  port_prefix: z.string().optional(),
-  port: z.string().optional(),
-  target_prefix: z.string().optional(),
-  target: z.string(),
-  comment: z.string().optional(),
-});
-
-export const csfRulesSchema = z
-  .object({
-    allow: z.array(csfRuleSchema).optional(),
-    deny: z.array(csfRuleSchema).optional(),
-    ignore: z.array(csfRuleSchema).optional(),
-  })
-  .passthrough();
-
-export const csfRulesResponseSchema = z.object({ data: csfRulesSchema });
 
 export const ipamAssignedIpSchema = z
   .object({

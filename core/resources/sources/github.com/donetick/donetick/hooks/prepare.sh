@@ -6,8 +6,8 @@
 set -e
 cd ~/project
 
-# ~/.panelalpha/donetick survives a redeploy; ~/project is emptied every deploy
-# (engine#173). The JWT secret written under ~/project would be regenerated on
+# ~/.panelalpha/donetick survives a redeploy; ~/project is emptied every deploy.
+# The JWT secret written under ~/project would be regenerated on
 # every rebuild, and a new secret invalidates every session token.
 STORE_DIR="${HOME}/.panelalpha/donetick"
 ENV_FILE="${STORE_DIR}/donetick.env"

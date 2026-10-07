@@ -26,7 +26,7 @@ services:
       #
       # Both live inside the checkout upstream -- src/config.json and
       # src/hp_assets/img/ -- and both are in src/.gitignore, so a redeploy,
-      # which clears and re-clones ~/project (engine#173), would delete the
+      # which clears and re-clones ~/project, would delete the
       # account's entire configuration. index.php reads `config.json` as a
       # relative path with no way to redirect it, so prepare.sh symlinks
       # src/config.json at /data/config.json rather than moving it: the

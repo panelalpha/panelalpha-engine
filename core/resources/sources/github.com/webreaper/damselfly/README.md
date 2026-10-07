@@ -19,6 +19,6 @@ on `damselfly-config` (`/config`), thumbnails on `damselfly-thumbs`.
   building the repo Dockerfile (it needs CI-built `publish/` and `Models/`).
 - `hooks/prepare.sh` deletes the repo's Visual Studio `docker-compose.override.yml`
   (service `damselfly.web`, dev https ports): the engine still layers it over
-  a replaced compose file (engine#416).
+  a replaced compose file.
 - A 2 GB memory limit for indexing and the ML models.
 - A no-op `ready` service holds the deploy until port 6363 accepts.

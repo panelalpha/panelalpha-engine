@@ -5,7 +5,7 @@ description: >-
   by PostgreSQL WITH THE POSTGIS extension (event geolocation). It is one
   product delivered as one official image. This recipe is the compose-REPLACE
   pattern (cannery/passit): no platform block is declared, so detection runs via
-  fromWalk and engine#221 does not bite; ComposePlaceholders rewrites the one
+  fromWalk and the fromSource platform-declaration trap does not bite; ComposePlaceholders rewrites the one
   PA_PUBLIC_URL value below to the account's public https address.
 
   IMAGE, OFFICIAL PREBUILT. Upstream builds and publishes an official image on
@@ -28,7 +28,7 @@ description: >-
   the secrets default to "changethis", so a bare deploy cannot start. This
   override replaces it with a working stack: a postgis/postgis:16-3.5 database on
   a NAMED volume, the official app image, a one-shot `init` that migrates and
-  seeds a confirmed admin, and a `ready` gate (engine#204) so `docker compose up
+  seeds a confirmed admin, and a `ready` gate so `docker compose up
   -d` returns only once the site answers on :4000. PLAIN postgres will not work
   -- Mobilizon's first migration runs CREATE EXTENSION postgis and every event
   address is a PostGIS geometry; the postgis image ships the extension and its
@@ -38,7 +38,7 @@ description: >-
   password, MOBILIZON_INSTANCE_SECRET_KEY_BASE (endpoint/session signing),
   MOBILIZON_INSTANCE_SECRET_KEY (Guardian auth/JWT signing) under
   ~/.panelalpha/mobilizon/ (0600 in 0700), the only
-  writable place a deploy does not delete (engine#173: ProjectTree::clearContents
+  writable place a deploy does not delete (ProjectTree::clearContents
   empties ~/project on every rebuild). A rebuild reuses them: a new
   SECRET_KEY_BASE/SECRET_KEY logs everyone out and invalidates outstanding
   confirmation/reset tokens, and a new DB password locks the app out of the
@@ -98,7 +98,7 @@ description: >-
 
   ENGINE CAVEAT (NOT A RECIPE FAULT). Media upload is multipart and Mobilizon's
   live UI opens an Absinthe GraphQL WebSocket; the shared panelalpha.online
-  (WithoutDNS) tunnel does not reliably carry multipart/upgrade (engine#170), so
+  (WithoutDNS) tunnel does not reliably carry multipart/upgrade, so
   upload and live subscriptions are verified against the account's own address.
   On an account with its own domain pointed straight at the engine the whole UI
   works. Report as engine/tunnel limitation, not a recipe or app failure.

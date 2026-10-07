@@ -1,1 +1,27 @@
+# nginx ships no Brotli module. Build ngx_brotli as dynamic modules against the
+# same nginx source the image below runs, with brotli itself linked in statically.
+FROM nginx:1.31.1 AS brotli
+ARG NGINX_SHA256=9fcaaeb8f22544b09a19a761f3412c4112215422401634bebdd1296a403cc4bc
+ARG NGX_BROTLI_COMMIT=a71f9312c2deb28875acc7bacfdd5695a111aa53
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates cmake curl git gcc make libc6-dev libpcre2-dev zlib1g-dev \
+    && curl -fsSL -o /tmp/nginx.tar.gz "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
+    && echo "${NGINX_SHA256}  /tmp/nginx.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/nginx.tar.gz -C /usr/src \
+    && git clone https://github.com/google/ngx_brotli /usr/src/ngx_brotli \
+    && git -C /usr/src/ngx_brotli checkout "${NGX_BROTLI_COMMIT}" \
+    && git -C /usr/src/ngx_brotli submodule update --init \
+    && cmake -S /usr/src/ngx_brotli/deps/brotli -B /usr/src/ngx_brotli/deps/brotli/out \
+        -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    && cmake --build /usr/src/ngx_brotli/deps/brotli/out --target brotlienc \
+    && cd "/usr/src/nginx-${NGINX_VERSION}" \
+    && ./configure --with-compat --add-dynamic-module=/usr/src/ngx_brotli \
+    && make modules \
+    && mkdir /out \
+    && cp objs/ngx_http_brotli_filter_module.so objs/ngx_http_brotli_static_module.so /out/
+
 FROM nginx:1.31.1
+COPY --from=brotli /out/ /usr/lib/nginx/modules/
+# The nginx-proxy config includes these by glob, so it also starts on an image without them.
+COPY nginx/modules-enabled/ /etc/nginx/modules-enabled/
+COPY nginx/modules-http/ /etc/nginx/modules-http/

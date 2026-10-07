@@ -18,7 +18,7 @@ services:
     # CRAFT_SECURITY_KEY encrypts what is in the database and must be the same
     # value on every deploy, so it cannot live in ~/project -- which is
     # re-cloned each time -- and it must not live in .env, which the engine
-    # copies to a world-readable .env.default (engine#173). hooks/prepare.sh
+    # copies to a world-readable .env.default. hooks/prepare.sh
     # writes it to ~/.panelalpha/craft.env at 0600 and it is read from there.
     #
     # `.env` is restated rather than left to be inherited: Compose merges some
@@ -33,7 +33,7 @@ services:
 
     # Three directories that hold data and must not be inside the checkout,
     # because GitRepository::cloneConfiguredRepository() empties ~/project
-    # before every deploy (engine#173). All three are under ~/.panelalpha/craft,
+    # before every deploy. All three are under ~/.panelalpha/craft,
     # created by hooks/prepare.sh and owned by the account, whose home is
     # bind-mounted into its own DinD container at the same path -- which is what
     # makes a relative `..` source resolve on both sides.
@@ -70,7 +70,7 @@ services:
     # up` and a cache clear. The engine runs `docker compose up -d` without
     # --wait and probes as soon as it returns, which is while that is still
     # going: nothing is listening and the probe reads `Failed to connect to
-    # 127.0.0.1 port 8000` (engine#90).
+    # 127.0.0.1 port 8000`.
     #
     #   1. GET /            templates/index.twig, rendered. A 200 means the
     #                       schema exists, Craft booted against it and Twig

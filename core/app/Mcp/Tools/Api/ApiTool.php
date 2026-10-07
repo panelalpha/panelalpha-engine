@@ -4,7 +4,9 @@ namespace App\Mcp\Tools\Api;
 
 use App\Mcp\Tools\Concerns\OmitsTitle;
 use Illuminate\Http\Request as HttpRequest;
+use Illuminate\JsonSchema\JsonSchema as JsonSchemaFactory;
 use Illuminate\Routing\Router;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -173,6 +175,9 @@ abstract class ApiTool extends Tool
 
         $body = $this->decode($response);
         $status = $response->getStatusCode();
+        if ($status >= 400 && $status < 500 && is_array($body)) {
+            $body = $this->withArgumentNames($body);
+        }
 
         $payload = ['status' => $status, 'data' => $body];
 
@@ -192,6 +197,54 @@ abstract class ApiTool extends Tool
         return $status >= 400
             ? Response::error($this->encode($payload))
             : Response::json($payload);
+    }
+
+    /**
+     * An error body names fields as the API knows them; the caller sent the
+     * tool's names. Rename `errors` keys, `problems[].field` and the field
+     * prefix of `problems[].code` back (`username_invalid` -> `name_invalid`).
+     *
+     * @param array<mixed> $body
+     * @return array<mixed>
+     */
+    protected function withArgumentNames(array $body): array
+    {
+        $toTool = array_flip($this->argumentNames());
+        if ($toTool === []) {
+            return $body;
+        }
+        $rename = static function (string $field) use ($toTool): string {
+            $head = explode('.', $field, 2);
+
+            return isset($toTool[$head[0]]) ? $toTool[$head[0]] . (isset($head[1]) ? '.' . $head[1] : '') : $field;
+        };
+
+        if (is_array($body['errors'] ?? null)) {
+            $errors = [];
+            foreach ($body['errors'] as $field => $messages) {
+                $errors[$rename((string) $field)] = $messages;
+            }
+            $body['errors'] = $errors;
+        }
+        if (is_array($body['problems'] ?? null)) {
+            foreach ($body['problems'] as $i => $problem) {
+                if (!is_array($problem) || !is_string($problem['field'] ?? null)) {
+                    continue;
+                }
+                $from = $problem['field'];
+                $to = $rename($from);
+                if ($to === $from) {
+                    continue;
+                }
+                $body['problems'][$i]['field'] = $to;
+                $prefix = Str::snake($from) . '_';
+                if (is_string($problem['code'] ?? null) && str_starts_with($problem['code'], $prefix)) {
+                    $body['problems'][$i]['code'] = Str::snake($to) . '_' . substr($problem['code'], strlen($prefix));
+                }
+            }
+        }
+
+        return $body;
     }
 
     /**
@@ -346,10 +399,34 @@ abstract class ApiTool extends Tool
      */
     private function only(array $input, array $keys): array
     {
+        // A null is dropped like an omitted argument, unless the schema admits
+        // null for that argument: there the API gives null a meaning of its own.
+        $nullable = array_flip($this->nullableParams());
+
         return array_filter(
             array_intersect_key($input, array_flip($keys)),
-            fn (mixed $v): bool => $v !== null
+            fn (mixed $v, int|string $k): bool => $v !== null || isset($nullable[$k]),
+            ARRAY_FILTER_USE_BOTH
         );
+    }
+
+    /**
+     * API names of the parameters whose schema admits null.
+     *
+     * @return array<int, string>
+     */
+    private function nullableParams(): array
+    {
+        $properties = JsonSchemaFactory::object($this->schema(...))->toArray()['properties'] ?? [];
+        $renamed = $this->argumentNames();
+        $names = [];
+        foreach ((array)$properties as $argument => $definition) {
+            if (in_array('null', (array)($definition['type'] ?? []), true)) {
+                $names[] = $renamed[$argument] ?? $argument;
+            }
+        }
+
+        return $names;
     }
 
     /**

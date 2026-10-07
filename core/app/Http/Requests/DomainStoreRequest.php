@@ -2,10 +2,13 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\ReportsProblems;
 use Illuminate\Foundation\Http\FormRequest;
 
 class DomainStoreRequest extends FormRequest
 {
+    use ReportsProblems;
+
     public function authorize(): bool
     {
         return true;
@@ -43,6 +46,17 @@ class DomainStoreRequest extends FormRequest
             'no_ssl' => 'boolean|nullable',
             'aliases' => 'array|nullable',
             'aliases.*' => 'string|nullable',
+        ];
+    }
+
+    protected function expectations(): array
+    {
+        $hostname = ['expected' => 'a hostname, lowercase, without scheme or path', 'examples' => ['shop.example.com']];
+
+        return [
+            'domain' => $hostname,
+            'parent_domain' => $hostname,
+            'type' => ['expected' => 'one of: addon, subdomain', 'examples' => ['addon', 'subdomain']],
         ];
     }
 }

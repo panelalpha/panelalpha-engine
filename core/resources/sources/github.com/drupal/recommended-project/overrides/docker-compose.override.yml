@@ -22,9 +22,9 @@ services:
     # strategy wrote rather than replacing it.
     environment:
       # The only way to give this container a php.ini. The base image loads
-      # none at all -- `php --ini` says "Loaded Configuration File: (none)",
-      # measured -- and scans /usr/local/etc/php/conf.d, a directory inside the
-      # image the account uid cannot write to (engine #185). PHP reads
+      # none at all -- `php --ini` says "Loaded Configuration File: (none)"
+      # -- and scans /usr/local/etc/php/conf.d, a directory inside the
+      # image the account uid cannot write to. PHP reads
       # PHP_INI_SCAN_DIR from its own environment at startup whatever the SAPI,
       # so naming a second directory here reaches the Apache module and the CLI
       # both, and both need it: the CLI runs the install stage, the Apache
@@ -39,12 +39,12 @@ services:
 
     # The hash salt, and the administrator login the engine generated and keeps
     # (DRUPAL_ADMIN_USER / DRUPAL_ADMIN_PASS), by paths that climb out of the
-    # checkout. ~/.panelalpha survives the clone; ~/project does not
-    # (engine #173), and both files are written before compose runs.
+    # checkout. ~/.panelalpha survives the clone; ~/project does not,
+    # and both files are written before compose runs.
     #
     # env_file rather than `environment:` because nothing else sets these keys,
     # so nothing outranks the file -- and because .env would put the
-    # administrator password into .env.default at mode 644 (engine #173).
+    # administrator password into .env.default at mode 644.
     #
     # Compose appends the override's env_file entries to the generated file's
     # `- .env`, so both are read and `environment:` still outranks both.
@@ -56,7 +56,7 @@ services:
     #
     # Everything else in ~/project is rebuilt from the repository and from
     # Composer on every deploy, and `ProjectTree::clearContents()` deletes the
-    # lot before the clone (engine #173). These two directories are what a
+    # lot before the clone. These two directories are what a
     # Drupal site holds that is not in the database:
     #
     #   files/    the public file system. Every uploaded image and document,
@@ -90,17 +90,15 @@ services:
     #      on that page is minted from settings.php's hash_salt on every
     #      request, uncached.
     #
-    #   2. / must be a 200. Measured, this is the check that would have caught
-    #      the second bug in this recipe's history: installed from the bare
-    #      `standard` *profile* the site bootstrapped, served /user/login
-    #      perfectly, and answered 403 Access denied on the front page to every
-    #      anonymous visitor, because no recipe had granted `access content`.
-    #      curl -f turns that into a failure.
+    #   2. / must be a 200. Installed from the bare `standard` *profile* the
+    #      site bootstraps, serves /user/login perfectly, and answers 403
+    #      Access denied on the front page to every anonymous visitor, because
+    #      no recipe has granted `access content`. curl -f turns that into a
+    #      failure.
     #
-    # start_period is 120s, not 300. Measured on this host: the install stage
-    # is ~25 s of Composer plus a 6 s install_drupal(), and Apache bound 11 s
-    # after the container started on the deploy that was timed. 120 leaves room
-    # for a cold Composer cache without letting a genuinely broken install sit
+    # start_period is 120s, not 300. The install stage is a Composer install
+    # plus install_drupal(), well under that. 120 leaves room for a cold
+    # Composer cache without letting a genuinely broken install sit
     # unreported for five minutes.
     healthcheck:
       test:

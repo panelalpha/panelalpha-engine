@@ -1,5 +1,5 @@
 # Upstream docker/docker-compose.yaml pinned to the current release. JWT_SECRET is
-# a required variable the engine generates per account; mongo:7.0 (engine#146).
+# a required variable the engine generates per account; mongo:7.0.
 services:
   checkmate:
     image: ghcr.io/bluewave-labs/checkmate:3.12.0

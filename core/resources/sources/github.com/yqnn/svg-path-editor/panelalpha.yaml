@@ -5,19 +5,12 @@ description: >-
 
   The repository's Dockerfile is a development container (CMD `npx ng serve
   --host 0.0.0.0 --port 4200`). The Angular dev server rejects any Host it
-  does not know, so the plain deploy answered 200 with the 19-byte body
-  "Invalid Host header" through the project's domain. Upstream publishes
+  does not know, so through the project's domain it answers 200 with the body
+  "Invalid Host header". Upstream publishes
   with `npm run build-prod` (ng build, production configuration) to GitHub
   Pages; this recipe uses the Angular platform instead of that Dockerfile:
   `npm ci`, the project's own `npm run build` (ng build, production by
   default, base href /) and nginx serving dist/svg-path-editor, the browser
   builder's outputPath in angular.json.
-
-  == Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 2500 ==
-
-  Tag 1.0.4 (= HEAD 937d75a8). Create: success in 79s (ng build 27.5s).
-  / is <title>SvgPathEditor</title> (40804 bytes); main, polyfills, runtime,
-  styles, manifest.webmanifest and ngsw.json answer 200. Rebuild: success in
-  59s, same page. /.env and /.git/config answer 403.
 extends: angular
 output_directory: dist/svg-path-editor

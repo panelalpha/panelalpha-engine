@@ -9,6 +9,14 @@ use Tests\TestCase;
 
 class SitePasswordProtectionTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+        // The stored hash is encrypted and the cookie signed with the app key; a bare run has none.
+        config(['app.key' => 'base64:' . base64_encode(str_repeat('k', 32))]);
+        $this->app->forgetInstance('encrypter');
+    }
+
     public function test_password_from_basic_header_ignores_username(): void
     {
         $encoded = base64_encode('anyone:s3cret');

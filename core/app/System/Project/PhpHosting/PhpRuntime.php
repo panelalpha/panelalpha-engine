@@ -45,10 +45,7 @@ final class PhpRuntime
 
     public function syncPhpHandlersScripts(): void
     {
-        (new EnvironmentSetup())->syncEntrypointBackgroundScripts(
-            $this->project,
-            $this->project->stackVariant(),
-        );
+        $this->project->services()->write($this->project->stackVariant()->services($this->project));
     }
 
     /**

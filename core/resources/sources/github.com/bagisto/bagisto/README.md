@@ -14,9 +14,9 @@ database password.
 - `overrides/docker-compose.override.yml`:
   - `mysql` mounts only its data volume. Sail also mounts
     `vendor/laravel/sail/.../create-testing-database.sh`, and Sail is a dev
-    dependency that `--no-dev` never installs (engine#439).
+    dependency that `--no-dev` never installs.
   - `elasticsearch` is a one-shot no-op with its ulimits reset: the memlock
-    ulimit fails in an account (engine#346), and Bagisto's catalog search
+    ulimit fails in an account, and Bagisto's catalog search
     defaults to the database.
   - `storage-init` seeds the `bagisto-storage` volume with the repo's
     `storage/app` (import samples) without overwriting and hands it to the

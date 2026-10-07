@@ -34,7 +34,7 @@ services:
     volumes:
       - donetick-data:/data
     # The binary EXPOSEs and listens on 2021; publish it so the port scan takes
-    # it as the primary (engine#231/#234). No other service publishes a port.
+    # it as the primary. No other service publishes a port.
     ports:
       - "2021:2021"
     healthcheck:
@@ -51,7 +51,7 @@ services:
   # Starts nothing, exits 0, waits on the app's healthcheck. `docker compose
   # up -d` blocks on a depends_on health condition, so this makes `up` return
   # only once Donetick actually answers rather than the moment the container
-  # starts (engine#204). Reuses the already-pulled image, no extra download.
+  # starts. Reuses the already-pulled image, no extra download.
   ready:
     image: donetick/donetick:v0.1.79
     entrypoint: ["/bin/sh", "-c", "exit 0"]

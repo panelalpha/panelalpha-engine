@@ -16,7 +16,7 @@ class DeployLogController extends Controller
 {
     private function getDindUser(string $username): User
     {
-        $user = $this->projectOr404($username, 'Not found');
+        $user = $this->projectOr404($username);
         if ($user->getTemplate() !== 'dind') {
             abort(new JsonResponse(['message' => 'Deploy logs are only available for dind users'], 403));
         }

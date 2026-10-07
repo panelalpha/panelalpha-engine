@@ -8,8 +8,8 @@ cd ~/project
 
 say() { echo "[bugsink] $*" >&2; }
 
-# ~/.panelalpha/bugsink/ survives a redeploy; ~/project is emptied every deploy
-# (engine#173). A secret written under ~/project would be regenerated on every
+# ~/.panelalpha/bugsink/ survives a redeploy; ~/project is emptied every deploy.
+# A secret written under ~/project would be regenerated on every
 # rebuild -- a new SECRET_KEY logs everyone out, and a new admin password would
 # not even take effect (CREATE_SUPERUSER only runs when the DB has no users, and
 # the DB lives on a named volume that outlives the deploy).

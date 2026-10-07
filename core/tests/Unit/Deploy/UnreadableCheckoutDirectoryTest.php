@@ -15,7 +15,7 @@ use App\Lib\Deploy\Telemetry\SourceBundle;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#191: the account owns its checkout and may chmod 700 a directory in
+ * The account owns its checkout and may chmod 700 a directory in
  * it (Phorge's conf/local). The engine walks the tree as another user, so every
  * walker must skip what it cannot read rather than fail the deploy on
  * `scandir(...): Failed to open directory: Permission denied`.

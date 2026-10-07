@@ -4,8 +4,8 @@ description: >-
   and the scheduler under supervisord, Chrome for PDFs). Deployed from source
   the engine detects Laravel and fails before start: it re-serialises
   .env.example's single-quoted COMPOSER_AUTH='{... "${{ secrets.GITHUB_TOKEN }}"}'
-  into double quotes, and compose rejects it as an invalid template
-  (engine#326). This recipe runs upstream's own Docker setup
+  into double quotes, and compose rejects it as an invalid template.
+  This recipe runs upstream's own Docker setup
   (invoiceninja/dockerfiles, debian): the official
   invoiceninja/invoiceninja-debian image of the current release, 5.13.43,
   behind nginx, with MySQL 8 and Redis, public/ and storage/ on named volumes.

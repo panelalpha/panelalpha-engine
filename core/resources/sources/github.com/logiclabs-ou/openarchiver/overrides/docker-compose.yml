@@ -98,7 +98,8 @@ services:
     restart: unless-stopped
     mem_limit: 512m
 
-  # Front proxy for engine#323 (files/panelalpha/front.conf); the only published port.
+  # Front proxy (files/panelalpha/front.conf) that sends `Connection: upgrade`
+  # only for real upgrades; the only published port.
   web:
     image: nginx:1-alpine
     restart: unless-stopped

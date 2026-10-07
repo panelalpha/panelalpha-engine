@@ -3,6 +3,7 @@
 namespace App\Lib\Lighthouse;
 
 use App\Models\Domain;
+use App\System\ComposeProject;
 use Closure;
 use Illuminate\Validation\ValidationException;
 
@@ -36,11 +37,11 @@ final class LighthouseTarget
         // The engine's own services, by the names Docker's DNS answers to
         // on the network the lighthouse container shares with them.
         '*.palocal',
-        'shared-hosting-*',
+        ComposeProject::NAME . '-*',
         'panelalpha-*',
         'core', 'core-db', 'mail', 'metrics', 'sites-dns', 'sites-db',
         'sites-phpmyadmin', 'sites-http', 'ftp', 'sftp', 'cache-registry',
-        'registry-proxy', 'lighthouse',
+        'cache-registry-writer', 'registry-proxy', 'lighthouse',
     ];
 
     /** @param Closure(string): bool $isOwnDomain */

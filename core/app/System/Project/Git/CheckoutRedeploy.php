@@ -5,6 +5,8 @@ namespace App\System\Project\Git;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
+use App\System\Project\Dind\Generation\CheckoutAside;
+use App\System\Project\Dind\Generation\GenerationSweep;
 use App\System\Project\Git as ProjectGit;
 
 /**
@@ -29,6 +31,29 @@ class CheckoutRedeploy
         }
 
         $this->rebuild($project, $source, $commit, $deployLogger);
+    }
+
+    /**
+     * Runs a change to a Deploy-managed checkout and the redeploy after it
+     * with the running app's tree kept aside: an app that mounts the checkout
+     * would otherwise read the new files before they passed the health check,
+     * and keep them after a failed deploy. Put back or removed afterwards.
+     *
+     * @template T
+     * @param callable(): T $work
+     * @return T
+     */
+    public function keepingTheServedTree(ProjectGit $git, ProjectAggregate $project, callable $work): mixed
+    {
+        $runtime = $git->isDeployManaged() ? $project->runtime() : null;
+        $kept = $runtime instanceof Dind && (new CheckoutAside($runtime))->keepForRunningApp() !== null;
+        try {
+            return $work();
+        } finally {
+            if ($kept) {
+                GenerationSweep::settleIfIdle($runtime);
+            }
+        }
     }
 
     protected function rebuild(ProjectAggregate $project, string $source = 'git', ?string $commit = null, ?DeployLogger $deployLogger = null): void

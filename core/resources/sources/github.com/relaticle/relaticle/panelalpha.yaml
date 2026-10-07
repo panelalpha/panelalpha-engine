@@ -4,7 +4,7 @@ description: >-
   Horizon, a scheduler, PostgreSQL and Redis). A plain deploy runs the
   repository's compose.yml on ghcr.io/relaticle/relaticle:latest, but its
   `${APP_KEY:?}` is filled with a generated hex string that is not a valid
-  Laravel key ("Unsupported cipher or incorrect key length", engine#336), and
+  Laravel key ("Unsupported cipher or incorrect key length"), and
   APP_URL falls back to http://localhost, so every page redirects there.
 
   Compose-REPLACE with the same services on the current release image

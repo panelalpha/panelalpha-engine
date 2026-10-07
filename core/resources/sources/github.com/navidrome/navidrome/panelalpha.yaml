@@ -26,7 +26,7 @@ description: >-
   address, so the web login rate limit (5 attempts per 20s, per IP) is shared by
   all visitors. ExtAuth.TrustedSources is deliberately left unset: setting it
   would also enable reverse-proxy header login (Remote-User) and trust a
-  client-supplied X-Forwarded-For (engine#319).
+  client-supplied X-Forwarded-For.
 
   Adding music: copy files into the navidrome-music volume, e.g.
   `docker compose -p project cp <dir> app:/music/`, then scan from the web UI

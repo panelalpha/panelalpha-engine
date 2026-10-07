@@ -157,7 +157,7 @@ class EnvFileTest extends TestCase
         $this->assertSame("MCP_PERMISSION_MODE=full\n", file_get_contents($this->path . EnvFile::BACKUP_SUFFIX));
     }
 
-    /** engine#48 item 23: the backup holds the same secrets, so it gets the same mode. */
+    /** The backup holds the same secrets, so it gets the same mode. */
     public function test_the_backup_is_no_more_readable_than_the_file(): void
     {
         $this->write("MCP_PERMISSION_MODE=full\n");

@@ -69,6 +69,39 @@ class StatsUpdateCommandTest extends TestCase
         $this->assertSame(['example.com', 'other.com'], $fake->ingested);
     }
 
+    public function test_a_domain_that_fails_does_not_stop_the_ones_after_it(): void
+    {
+        $fake = new FakeStatistics();
+        $fake->failures['broken.com'] = new \ErrorException('file_put_contents(awstats.broken.com.conf): Permission denied');
+        $this->app->instance(Statistics::class, $fake);
+        $this->app->instance(System::class, $this->systemDouble('/engine', 'nginx-proxy'));
+
+        $rows = collect(['broken.com', 'other.com'])->map(static function (string $name): Domain {
+            $domain = new Domain();
+            $domain->domain = $name;
+
+            return $domain;
+        });
+        $command = new class ($rows) extends StatsUpdateCommand {
+            public function __construct(private Collection $rows)
+            {
+                parent::__construct();
+            }
+
+            protected function candidateDomains(): Collection
+            {
+                return $this->rows;
+            }
+        };
+        $command->setLaravel($this->app);
+        $output = new BufferedOutput();
+        $status = $command->run(new ArrayInput([]), $output);
+
+        $this->assertSame(['other.com'], $fake->ingested);
+        $this->assertSame(1, $status);
+        $this->assertStringContainsString('broken.com: file_put_contents', $output->fetch());
+    }
+
     public function test_overlapping_run_is_skipped(): void
     {
         $fake = new FakeStatistics();

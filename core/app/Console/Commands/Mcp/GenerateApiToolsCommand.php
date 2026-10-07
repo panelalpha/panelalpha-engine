@@ -668,6 +668,18 @@ class GenerateApiToolsCommand extends Command
             default => '$schema->string()',
         };
 
+        // The bounds the API documents, so a client can check them before calling.
+        [$lower, $upper] = in_array($type, ['integer', 'number'], true)
+            ? ['minimum', 'maximum']
+            : ['minLength', 'maxLength'];
+        if (in_array($type, ['integer', 'number', 'string'], true)) {
+            foreach ([$lower => 'min', $upper => 'max'] as $key => $method) {
+                if (is_int($definition[$key] ?? null)) {
+                    $call .= "->{$method}({$definition[$key]})";
+                }
+            }
+        }
+
         // The tool's own wording, where the API docs need more than a model does.
         if (is_string($definition['x-mcp-description'] ?? null)) {
             $description = $definition['x-mcp-description'];
@@ -701,6 +713,12 @@ class GenerateApiToolsCommand extends Command
 
         if ($required) {
             $call .= '->required()';
+        }
+
+        // x-mcp-nullable: null means something to the API (clear, reset), so the
+        // tool forwards it. Elsewhere a null argument is dropped like an omitted one.
+        if (($definition['x-mcp-nullable'] ?? false) === true) {
+            $call .= '->nullable()';
         }
 
         return "            '{$name}' => {$call},";

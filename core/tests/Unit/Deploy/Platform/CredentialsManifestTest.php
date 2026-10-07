@@ -157,4 +157,59 @@ class CredentialsManifestTest extends TestCase
         );
         $this->assertStringNotContainsString('openssl rand', (string) file_get_contents($dir . '/hooks/prepare.sh'));
     }
+
+    /** @return array<string, array{string, list<string>, string, string}> */
+    public static function lastMigratedRecipes(): array
+    {
+        return [
+            'pyfedi' => ['codeberg.org/rimu/pyfedi', ['ADMIN_USER', 'ADMIN_PASSWORD'], 'overrides/docker-compose.yml', 'ADMIN_PASSWORD='],
+            'jarr' => ['git.1pxsolidblack.pl/fcxs/jarr', ['JARR_ADMIN_LOGIN', 'JARR_ADMIN_PASSWORD'], 'overrides/docker-compose.yml', 'ADMIN_PASSWORD='],
+            'concretecms' => [
+                'github.com/concretecms/concretecms',
+                ['PA_CONCRETE_ADMIN_USER', 'PA_CONCRETE_ADMIN_EMAIL', 'PA_CONCRETE_ADMIN_PASSWORD'],
+                'overrides/docker-compose.override.yml',
+                'PA_CONCRETE_ADMIN_PASSWORD=',
+            ],
+            'galette' => ['github.com/galette/galette', ['username', 'password'], 'overrides/docker-compose.override.yml', 'urandom'],
+            'budibase' => ['github.com/budibase/budibase', ['BB_ADMIN_USER_EMAIL', 'BB_ADMIN_USER_PASSWORD'], 'overrides/docker-compose.yml', 'BB_ADMIN_USER_PASSWORD='],
+        ];
+    }
+
+    /**
+     * These recipes generated the admin password themselves and never told the
+     * customer; the engine now generates it and the app reads its env file.
+     *
+     * @param list<string> $fields
+     */
+    #[DataProvider('lastMigratedRecipes')]
+    public function test_the_last_seeding_recipes_take_their_login_from_the_engine(
+        string $recipe,
+        array $fields,
+        string $compose,
+        string $generatedHere
+    ): void {
+        $dir = SourceRecipes::defaultDirectory() . '/' . $recipe;
+        $config = AppConfig::fromYaml((string) file_get_contents($dir . '/panelalpha.yaml'));
+
+        $this->assertSame($fields, array_keys($config?->credentials()?->fields ?? []), $recipe);
+        $this->assertStringContainsString(
+            '../.panelalpha/app-credentials.env',
+            (string) file_get_contents($dir . '/' . $compose),
+            $recipe
+        );
+        foreach (glob($dir . '/{hooks,files/*,files/*/*,files/*/*/*}/*.sh', GLOB_BRACE) ?: [] as $script) {
+            $this->assertStringNotContainsString($generatedHere, (string) file_get_contents($script), $script);
+        }
+    }
+
+    public function test_pyfedi_seeds_its_admin_without_a_terminal(): void
+    {
+        // init-db reads the password through pwinput, which fails without a TTY.
+        $init = (string) file_get_contents(
+            SourceRecipes::defaultDirectory() . '/codeberg.org/rimu/pyfedi/files/panelalpha/pyfedi/init.sh'
+        );
+
+        $this->assertStringNotContainsString('| flask init-db', $init);
+        $this->assertStringContainsString('pwinput.pwinput = lambda prompt="", mask="*": input(prompt)', $init);
+    }
 }

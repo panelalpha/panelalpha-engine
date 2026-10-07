@@ -2,7 +2,9 @@
 
 namespace App\System;
 
+use App\Integrations\Statistics\Statistics;
 use App\Integrations\Tunnels\Cloudflare;
+use App\Lib\Deploy\DeployLog\DeployLock;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Models\Domain as DomainModel;
 use App\Models\User as ModelsUser;
@@ -166,7 +168,10 @@ class Project
     public function runWpCli(array $args): array
     {
         if (!$this->runtime instanceof PhpHosting) {
-            throw new \RuntimeException('WP-CLI is only supported for PHP hosting projects.');
+            throw new \RuntimeException(
+                'WP-CLI runs only on traditional PHP hosting projects. For WordPress in its own container, '
+                . 'use the app endpoints (users, install, one-click login) or run the command with ssh/command.'
+            );
         }
 
         return $this->runtime->phpRuntime()->runWpCli($args);
@@ -179,10 +184,10 @@ class Project
         }
     }
 
-    public function runEntrypointScriptsSync(): void
+    public function syncServices(): void
     {
         if ($this->runtime instanceof PhpHosting) {
-            $this->runtime->runEntrypointScriptsSync();
+            $this->runtime->syncServices();
         }
     }
 
@@ -263,14 +268,27 @@ class Project
      * Product delete: every resource owned by this Project, including the users row.
      * Distinct from delete()/deprovision(), which tear down host isolation only.
      */
+    /**
+     * Domain::delete() forgets a domain's statistics; the bulk delete here did
+     * not, so the next project given the same domain inherited its traffic.
+     *
+     * @param list<string> $domainNames
+     */
+    protected function forgetDomainsStatistics(array $domainNames): void
+    {
+        foreach ($domainNames as $name) {
+            try {
+                app(Statistics::class)->forgetDomain($name);
+            } catch (\Throwable $e) {
+                Log::warning("Statistics cleanup during project delete failed for {$name}: " . $e->getMessage());
+            }
+        }
+    }
+
     public function destroy(): void
     {
+        $this->assertDeletable();
         $user = $this->model;
-        if ($user->stagingUser()->exists()) {
-            throw new \Exception(
-                "Cannot delete project '{$user->username}' while staging '{$user->stagingUser->username}' exists. Delete the staging project first."
-            );
-        }
 
         foreach ($user->backups()->with('container')->get() as $record) {
             $backupId = $record->id;
@@ -300,6 +318,7 @@ class Project
         $domainNames = $user->domains->pluck('domain')->all();
         $user->domains()->delete();
         $this->system->webserver()->deleteDomainsConfigs($domainNames);
+        $this->forgetDomainsStatistics($domainNames);
         if (!config('env.KEEP_WEBSERVER_LOGS_FOR_DELETED_DOMAINS')) {
             $this->system->webserver()->deleteDomainsLogsDirs($domainNames);
         }
@@ -354,9 +373,20 @@ class Project
         $this->deleteAccountRow($user);
     }
 
+    /** A live project goes after its staging copy, never before it. */
+    public function assertDeletable(): void
+    {
+        $user = $this->model;
+        if ($user->stagingUser()->exists()) {
+            throw new \Exception(
+                "Cannot delete project '{$user->username}' while staging '{$user->stagingUser->username}' exists. Delete the staging project first."
+            );
+        }
+    }
+
     /**
      * The row goes before the proxy rebuild, and the rebuild is best-effort: a
-     * sites-http that is down or restarting left the deleted project's row behind (#63).
+     * sites-http that is down or restarting left the deleted project's row behind.
      */
     public function deleteAccountRow(ModelsUser $user): void
     {
@@ -437,8 +467,15 @@ class Project
             return;
         }
 
-        $this->prepareLinuxIsolation();
-        $this->recreateOuterCompose();
+        // The lock a DinD rebuild takes through its deploy log: a delete holds
+        // it, and this would otherwise recreate the account it is removing.
+        $lock = DeployLock::acquireFor($this->username());
+        try {
+            $this->prepareLinuxIsolation();
+            $this->recreateOuterCompose();
+        } finally {
+            $lock->release();
+        }
     }
 
     public function prepareLinuxIsolation(): void
@@ -607,10 +644,10 @@ class Project
         $this->runtime->networking()->detectAndCreateProxyRules($this->model);
     }
 
-    public function abortRunningDeploy(bool $stopInnerDocker = true): void
+    public function abortRunningDeploy(bool $stopInnerDocker = true, bool $removeVolumes = false): void
     {
         if ($this->runtime instanceof Dind) {
-            $this->runtime->abortRunningDeploy($stopInnerDocker);
+            $this->runtime->abortRunningDeploy($stopInnerDocker, $removeVolumes);
         }
     }
 
@@ -768,7 +805,7 @@ class Project
 
     /**
      * False when a limit was asked for and setquota refused it -- typically
-     * because quota is off on the host filesystem (#244), so it is not enforced.
+     * because quota is off on the host filesystem, so it is not enforced.
      */
     public function configureQuota(): bool
     {
@@ -871,6 +908,9 @@ class Project
         if ($this->model->getTemplate() === 'dind' && $this->system->filesystem()->directoryExists($dockerDir)) {
             $this->system->runProcess("sudo chown root:root {$dockerDir}");
         }
+        if ($this->system->filesystem()->directoryExists("{$home}/.panelalpha")) {
+            $this->system->runProcess(['sudo', 'chmod', '700', "{$home}/.panelalpha"]);
+        }
 
         foreach ($this->model->getDomains() as $domain) {
             $lscacheDir = $home . '/' . $domain->domain . '/.lscache';
@@ -914,6 +954,8 @@ class Project
         $this->system->exec("sudo mkdir -p {$home}");
         $this->system->exec("sudo chown root:root {$home}");
         $this->system->exec("sudo mkdir -p {$home}/.panelalpha");
+        // Generated secrets and tunnel tokens: the account only.
+        $this->system->exec("sudo chmod 700 {$home}/.panelalpha");
         $this->system->exec("sudo mkdir -p {$home}/.wp-cli");
     }
 

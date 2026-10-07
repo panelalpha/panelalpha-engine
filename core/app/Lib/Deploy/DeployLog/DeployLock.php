@@ -14,8 +14,31 @@ final class DeployLock
     /** @var resource|null */
     private $handle = null;
 
+    /** acquireFor() made the account's directory just for this lock; release() removes it. */
+    private bool $ownsDirectory = false;
+
     public function __construct(private readonly DeployLogPaths $paths)
     {
+    }
+
+    /**
+     * Take an account's lock for work that writes no deploy log: a delete, or
+     * the rebuild of a project on a plain template.
+     *
+     * @throws DeployAlreadyRunningException
+     */
+    public static function acquireFor(string $username): self
+    {
+        $paths = new DeployLogPaths($username);
+        $created = !is_dir($paths->directory());
+        LogStorage::ensureDirectory(DeployLogPaths::base());
+        LogStorage::ensureDirectory($paths->directory());
+
+        $lock = new self($paths);
+        $lock->acquire();
+        $lock->ownsDirectory = $created;
+
+        return $lock;
     }
 
     /**
@@ -64,6 +87,11 @@ final class DeployLock
     public function release(): void
     {
         if (is_resource($this->handle)) {
+            if ($this->ownsDirectory) {
+                // An account that writes no deploy log keeps no directory for one.
+                @unlink($this->paths->lock());
+                @rmdir($this->paths->directory());
+            }
             flock($this->handle, LOCK_UN);
             fclose($this->handle);
         }

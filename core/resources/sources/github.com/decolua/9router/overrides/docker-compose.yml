@@ -1,6 +1,6 @@
 # Compose-replace: upstream's two services at their current release images, with
 # only the app publishing a port. Upstream also publishes headroom's 8787, and
-# the engine routes the domain to it (engine#425), which answers 421.
+# the engine routes the domain to it, which answers 421.
 services:
   9router:
     image: decolua/9router:0.5.91

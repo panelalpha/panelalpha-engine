@@ -19,6 +19,9 @@ final class PortMapping
     /** @var list<string> */
     private const LOOPBACK_HOSTS = ['127.0.0.1', '::1', 'localhost'];
 
+    /** `${VAR:?err}` or `${VAR?err}`: a variable Compose refuses to start without. */
+    private const REQUIRED_VARIABLE = '\$\{[A-Za-z_][A-Za-z0-9_]*:?\?[^}]*\}';
+
     private function __construct(public readonly int $hostPort, public readonly ?int $containerPort)
     {
     }
@@ -31,15 +34,56 @@ final class PortMapping
         if (is_int($mapping)) {
             return $mapping > 0 ? new self($mapping, null) : null;
         }
+        if (is_array($mapping)) {
+            return self::fromLongSyntax($mapping);
+        }
 
         return is_string($mapping) ? self::fromString($mapping) : null;
+    }
+
+    /**
+     * `{target: 25000, published: "25000", host_ip: 127.0.0.1}`. Without
+     * `published` it reads like a bare `25000`.
+     *
+     * @param array<array-key, mixed> $mapping
+     */
+    private static function fromLongSyntax(array $mapping): ?self
+    {
+        $hostIp = $mapping['host_ip'] ?? null;
+        if (is_string($hostIp) && in_array(trim($hostIp, '[] '), self::LOOPBACK_HOSTS, true)) {
+            return null;
+        }
+        $target = self::scalarPort($mapping['target'] ?? null);
+        if ($target <= 0) {
+            return null;
+        }
+        $published = $mapping['published'] ?? null;
+        if ($published === null || $published === '') {
+            return new self($target, null);
+        }
+        if (is_string($published) && preg_match('/^\s*' . self::REQUIRED_VARIABLE . '\s*$/', $published) === 1) {
+            return new self($target, $target);
+        }
+        $hostPort = self::scalarPort($published);
+
+        return $hostPort > 0 ? new self($hostPort, $target) : null;
+    }
+
+    /** A port given as int or string, env defaults resolved; a range reads as its first port. */
+    private static function scalarPort(mixed $value): int
+    {
+        if (is_int($value)) {
+            return $value;
+        }
+
+        return is_string($value) ? self::portOf(EnvVarDefault::resolve($value)) : 0;
     }
 
     private static function fromString(string $mapping): ?self
     {
         // Env-var defaults are resolved before the split, so
         // "${APP_PORT:-8090}:8000" becomes "8090:8000" rather than nonsense.
-        $parts = explode(':', trim(EnvVarDefault::resolve($mapping)));
+        $parts = explode(':', trim(EnvVarDefault::resolve(self::withRequiredHostPortDefaulted($mapping))));
         if (self::isLoopbackBinding($parts)) {
             return null;
         }
@@ -52,6 +96,20 @@ final class PortMapping
         $hostPort = self::portOf((string) array_shift($parts));
 
         return $hostPort > 0 ? new self($hostPort, $containerPort ?: null) : null;
+    }
+
+    /**
+     * `${WEB_SERVER_PORT:?missing}:3000` has no default, but Compose does not
+     * start without it, so it is set; the container port is the best guess,
+     * as the hardener defaults a bare `${PORT}:3000` (BorgWarehouse).
+     */
+    private static function withRequiredHostPortDefaulted(string $mapping): string
+    {
+        return (string) preg_replace_callback(
+            '#' . self::REQUIRED_VARIABLE . '(?=:(\d+)(?:/[a-z]+)?\s*$)#',
+            static fn (array $m): string => $m[1],
+            $mapping
+        );
     }
 
     /**

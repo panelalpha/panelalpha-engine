@@ -6,7 +6,7 @@
 #     restart (the image otherwise regenerates random ones every boot).
 #  2. Seed the owner admin through yarnd's gated /setup wizard on localhost,
 #     BEFORE the port is publicly reachable, closing the first-visitor-wins
-#     window (engine#200). Idempotent: once setup is complete /setup 302s to /.
+#     window. Idempotent: once setup is complete /setup 302s to /.
 #  3. Hand the container over to yarnd in the foreground.
 set -eu
 

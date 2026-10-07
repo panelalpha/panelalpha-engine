@@ -121,6 +121,8 @@ check "served key is a real file, mode 600" "[ ! -L '$(crt server.key)' ] && [ \
 check "cert_domain setting records the name" "[ \"\$(cat '$FAKE_SETTINGS_DIR/cert_domain')\" = 203-0-113-7.panelalpha.direct ]"
 check "webserver stopped for the challenge and stack restored" \
     "grep -q 'down sites-http' '$FAKE_DOCKER_LOG' && grep -q 'up -d' '$FAKE_DOCKER_LOG'"
+check "certbot answers the challenge on the host network, not a published port" \
+    "grep -q -- 'run .*--network host .*certbot/certbot certonly' '$FAKE_DOCKER_LOG' && ! grep -q -- '-p 80:80' '$FAKE_DOCKER_LOG'"
 check "core's nginx reloaded so it loads the new pair" "grep -q 'exec -T core nginx -s reload' '$FAKE_DOCKER_LOG'"
 check "core is never restarted" "! grep -qE 'restart( [a-z-]+)* core( |\$)' '$FAKE_DOCKER_LOG'"
 check "queue workers told to reread APP_URL" "grep -q 'exec -T core php artisan queue:restart' '$FAKE_DOCKER_LOG'"

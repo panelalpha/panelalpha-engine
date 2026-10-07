@@ -41,8 +41,8 @@ services:
       # backend.php and prefs.php are all at the top and there is no public/,
       # web/ or webroot/ directory. PhpDocroot probes exactly those names and
       # then falls back to the root, so it reaches the same answer -- but
-      # `docroot: .` in a manifest is folded away rather than honoured (engine
-      # #172), and this is the value that actually decides which files are one
+      # `docroot: .` in a manifest is folded away rather than honoured,
+      # and this is the value that actually decides which files are one
       # GET away. Said explicitly so it is not a probe order away from
       # changing.
       PA_DOCROOT: /app
@@ -79,8 +79,8 @@ services:
       #
       # on every feed, while the web interface stays perfectly healthy and
       # answers 200 -- an account whose deploy, health probe and HTTP check
-      # all pass and whose feeds never once update. Measured on this host, and
-      # the reason upstream's own Dockerfile sets TTRSS_PHP_EXECUTABLE too.
+      # all pass and whose feeds never once update. It is the reason
+      # upstream's own Dockerfile sets TTRSS_PHP_EXECUTABLE too.
       TTRSS_PHP_EXECUTABLE: /usr/local/bin/php
 
       # The updater runs in this container beside Apache, one job at a time,
@@ -106,7 +106,7 @@ services:
 
     # The two secrets the application itself needs, by a path that climbs out
     # of the document root. ~/.panelalpha survives the clone; ~/project does
-    # not (engine #173), and hooks/prepare.sh rewrites this file on every
+    # not, and hooks/prepare.sh rewrites this file on every
     # deploy before compose runs.
     #
     # env_file rather than `environment:` because nothing else sets these two
@@ -125,11 +125,11 @@ services:
 
     # Apache with mod_php, plus the update daemon and whatever a feed fetch
     # pulls into memory. The hardener's figure for an unlisted service would
-    # be lower; 1024 + 512 + 64 fits the 2000 MB this was tested at.
+    # be lower; 1024 + 512 + 64 fits a 2000 MB account.
     mem_limit: 1024m
 
     # The engine runs `docker compose up -d` without `--wait` and probes as
-    # soon as it returns (engine #90), which here is while the install stage
+    # soon as it returns, which here is while the install stage
     # is still loading a 150-migration schema into an empty database. Without
     # this the probe reads `Failed to connect to 127.0.0.1 port 8000`.
     #
@@ -187,14 +187,14 @@ services:
     # unresolvable value into the literal string `app`. So the generated file
     # ends up declaring `POSTGRES_PASSWORD: app` as `environment:`, compose
     # gives `environment:` precedence over `env_file:`, and the database would
-    # initialise with a password the application was never told -- measured:
+    # initialise with a password the application was never told:
     # `password authentication failed for user "ttrss"`.
     #
     # Naming them here fixes it, because this file is the *last* `-f` compose
     # is given, so its `environment:` wins the merge, and `${...}` is
     # interpolated from the project's own `.env` at that point rather than by
     # the engine. The password is therefore in `.env` -- and, through
-    # ProjectEnvironment::apply(), in `.env.default` at mode 644 (engine #173)
+    # ProjectEnvironment::apply(), in `.env.default` at mode 644
     # -- which the generated vhost denies along with every other dotfile. The
     # admin password, which is a login credential rather than an internal one,
     # stays out of both and travels by env_file above.
@@ -231,7 +231,7 @@ services:
   # gated on the app is what makes `up -d` return only once tt-rss has loaded
   # its schema, rotated the admin password and answered a request. A clean
   # exit 0 is not a crash loop as far as AppHealth is concerned. This is the
-  # engine #90 workaround.
+  # readiness-gate workaround.
   #
   # alpine:3, and the image is load-bearing rather than a size preference.
   # Reusing postgres:17-alpine here -- already being pulled for this stack --

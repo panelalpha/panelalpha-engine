@@ -4,7 +4,7 @@ description: >-
   and API backends, inference and plugin services behind nginx on :8080).
   The engine finds docker/docker-compose.yml but runs it from the repository
   root, so none of the values in docker/.env reach it and the backends exit
-  with "Env OBJECT_STORAGE_TYPE is not set" (engine#443). This recipe runs the same
+  with "Env OBJECT_STORAGE_TYPE is not set". This recipe runs the same
   services on the same image pins from overrides/docker-compose.yml, with
   local object storage, Postgres (pgvector) and Redis on named volumes and
   HOST_URL set to the site's address. hooks/prepare.sh generates the AES and

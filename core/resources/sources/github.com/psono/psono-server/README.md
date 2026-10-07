@@ -20,7 +20,7 @@ answers (no `settings.yaml`, no client).
   20/day) otherwise see every visitor as 127.0.0.1 (the image's own nginx).
   The engine vhost appends the visitor and the image's nginx appends the
   vhost, so the visitor is the 2nd entry from the right; a client-supplied
-  `X-Forwarded-For` stays in front of it (engine#319) and is ignored.
+  `X-Forwarded-For` stays in front of it and is ignored.
 - `hooks/prepare.sh` writes what `manage.py generateserverkeys` would print
   (`SECRET_KEY`, `ACTIVATION_LINK_SECRET`, `DB_SECRET`, `EMAIL_SECRET_SALT`,
   the NaCl `PRIVATE_KEY`/`PUBLIC_KEY` as raw X25519 hex) plus the database

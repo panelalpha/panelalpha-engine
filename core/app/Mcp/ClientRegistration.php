@@ -6,7 +6,7 @@ use InvalidArgumentException;
 
 /**
  * Every MCP client spells registration differently, and getting it wrong costs
- * the operator a search. Print the exact command for each one instead (#53).
+ * the operator a search. Print the exact command for each one instead.
  */
 class ClientRegistration
 {
@@ -42,7 +42,7 @@ class ClientRegistration
             'claude-desktop' => [
                 'label' => 'Claude Desktop',
                 // The desktop app runs Claude Code itself, so the same install is
-                // asked for in a sentence instead of on a command line (#61).
+                // asked for in a sentence instead of on a command line.
                 'note' => 'a prompt to paste into Claude Desktop, whose Claude Code mode does the installing',
                 'lines' => [
                     sprintf(
@@ -72,7 +72,7 @@ class ClientRegistration
             'chatgpt-desktop' => [
                 'label' => 'ChatGPT Desktop',
                 // ChatGPT Desktop runs Codex itself, so the same two steps are
-                // asked for in a sentence instead of on a command line (#61).
+                // asked for in a sentence instead of on a command line.
                 'note' => 'a prompt to paste into ChatGPT Desktop, whose Codex mode runs the command for you',
                 'lines' => [
                     sprintf(

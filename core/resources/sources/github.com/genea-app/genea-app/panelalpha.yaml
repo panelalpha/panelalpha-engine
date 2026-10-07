@@ -10,6 +10,6 @@ description: >-
 
   output_directory is `.` because a package.json makes the engine host-run
   `npm install` for an nginx recipe and then require <output>/index.html
-  (default dist/, which this repo never produces) (engine#341).
+  (default dist/, which this repo never produces).
 extends: static
 output_directory: .

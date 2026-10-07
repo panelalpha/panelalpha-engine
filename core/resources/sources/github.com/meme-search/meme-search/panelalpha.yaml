@@ -3,7 +3,7 @@ description: >-
   Meme Search, a self-hosted meme search engine (Rails + Solid Queue on
   PostgreSQL/pgvector). The repository's compose also starts the local
   image-to-text generator and publishes its port, so the site served the
-  generator's 24-byte JSON instead of the app (engine#425); Rails answered
+  generator's 24-byte JSON instead of the app; Rails answered
   403 to the public host because MEME_SEARCH_ALLOWED_HOSTS was empty; and the
   generator is OOM-killed while describing a single image even at 3.1 GB
   (upstream sizes it at 12 GB), more than a 4 GB account can hold.

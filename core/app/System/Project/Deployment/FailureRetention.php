@@ -13,10 +13,7 @@ final class FailureRetention
     public static function retainAfterDeployFailure(ModelsUser $user, string $message): void
     {
         try {
-            $user->setDetails([
-                'error' => $message,
-                'deployment_status' => 'failed',
-            ]);
+            $user->setDetails(self::failedDetails($user, $message));
             $user->save();
         } catch (\Throwable $e) {
             Log::warning(
@@ -25,13 +22,26 @@ final class FailureRetention
         }
     }
 
+    /**
+     * A failed redeploy does not undo the install: the flag keeps the next
+     * deploy in the upgrade phase ({@see \App\Lib\Deploy\Platform\PlatformStage::phaseFor()}).
+     *
+     * @return array<string, mixed>
+     */
+    private static function failedDetails(ModelsUser $user, string $message): array
+    {
+        $details = ['error' => $message, 'deployment_status' => 'failed'];
+        if (in_array($user->getDeploymentStatus(), ['success', 'partial'], true)) {
+            $details['deployed_before'] = true;
+        }
+
+        return $details;
+    }
+
     public static function retainAfterDeployCancelled(ModelsUser $user, string $message): void
     {
         try {
-            $user->setDetails([
-                'error' => $message,
-                'deployment_status' => 'failed',
-            ]);
+            $user->setDetails(self::failedDetails($user, $message));
             $user->save();
         } catch (\Throwable $e) {
             Log::warning(

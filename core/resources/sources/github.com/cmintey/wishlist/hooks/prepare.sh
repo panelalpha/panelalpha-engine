@@ -5,10 +5,9 @@
 # owns the installation.
 #
 # Upstream's compose file bind-mounts ./data and ./uploads -- inside the
-# checkout. A redeploy clears and re-clones ~/project (engine#173), so every
+# checkout. A redeploy clears and re-clones ~/project, so every
 # list, item, claim and uploaded image would be destroyed by the next deploy.
-# Measured on the stock deploy: both directories were created inside
-# ~/project, root-owned, with prod.db in one of them. They live in
+# They live in
 # ~/.panelalpha/wishlist instead; ~ is root-owned 0755 and nothing can be
 # created there, while ~/.panelalpha is created with the account and belongs to
 # it.
@@ -99,8 +98,8 @@ chmod 600 "${CREDENTIALS}"
 # 0644, the mode the engine writes its own .env with. Nothing in it is secret
 # -- the password is in ~/.panelalpha/wishlist/credentials -- and a 0600 .env
 # is invisible to EnvSidecars::variableMap(), which reads it with plain
-# file_get_contents() as www-data and silently falls back to .env.example
-# (engine#186), putting `ORIGIN=` right back.
+# file_get_contents() as www-data and silently falls back to .env.example,
+# putting `ORIGIN=` right back.
 cat > .env <<'EOF'
 # Written by PanelAlpha. The admin account for this installation is in
 # ~/.panelalpha/wishlist/credentials .

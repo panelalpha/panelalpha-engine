@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Console;
 
+use App\Console\Commands\System\PruneHostImages;
 use App\Console\Kernel;
 use App\Lib\Deploy\CacheManager\BuiltImage;
 use App\Lib\Deploy\CacheManager\HostPrewarmPlan;
@@ -13,8 +14,8 @@ use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
 /**
- * `system:image:prune` against a host double and real deploy log files
- * (engine#87): what it removes, what it keeps, and that it keeps out of the
+ * `system:image:prune` against a host double and real deploy log files:
+ * what it removes, what it keeps, and that it keeps out of the
  * way of a deploy in flight.
  */
 class PruneHostImagesCommandTest extends TestCase
@@ -22,6 +23,8 @@ class PruneHostImagesCommandTest extends TestCase
     private string $storage;
 
     private string $plain;
+
+    private string $plainId;
 
     /** @var object{calls: list<list<string>>, images: array<string, int>, containers: list<string>} */
     private object $host;
@@ -31,9 +34,12 @@ class PruneHostImagesCommandTest extends TestCase
         parent::setUp();
         $this->storage = sys_get_temp_dir() . '/pa-image-prune-' . bin2hex(random_bytes(4));
         mkdir($this->storage . '/logs/deploy', 0777, true);
+        mkdir($this->storage . '/app', 0777, true);
         $this->app->useStoragePath($this->storage);
 
         $this->plain = $this->plainPhpBase();
+        // Prewarming is opt-in; select the plain base so it is the protected one.
+        config(['deploy.prewarm_images' => $this->plainId]);
         $now = time();
         // tag => seconds since it was pulled or built on the host
         $this->host = $this->hostDouble([
@@ -79,6 +85,16 @@ class PruneHostImagesCommandTest extends TestCase
         );
     }
 
+    /** Not selected for prewarming, it is just another deploy image. */
+    public function test_an_unselected_base_is_removed_once_unused(): void
+    {
+        config(['deploy.prewarm_images' => '']);
+
+        Artisan::call('system:image:prune');
+
+        $this->assertContains($this->plain, $this->removed());
+    }
+
     public function test_a_recent_deploy_log_keeps_an_image_it_names(): void
     {
         $this->deployLog('bob', '20260923-000000-cccccc', 'FROM docker.io/library/golang:1.99-alpine', 3600);
@@ -90,7 +106,7 @@ class PruneHostImagesCommandTest extends TestCase
         $this->assertContains($this->plain . '-x0123abcd', $this->removed());
     }
 
-    public function test_defers_entirely_while_a_deploy_is_in_flight(): void
+    public function test_defers_images_but_not_build_cache_while_a_deploy_is_in_flight(): void
     {
         $this->deployLog('carol', '20260924-000000-eeeeee', 'Cloning repository', 60, latest: true);
         $lock = fopen($this->storage . '/logs/deploy/carol/.deploy.lock', 'c');
@@ -105,7 +121,34 @@ class PruneHostImagesCommandTest extends TestCase
 
         $this->assertSame(0, $exit);
         $this->assertStringContainsString('Deferred: deploy in flight for carol', Artisan::output());
-        $this->assertSame([], $this->host->calls);
+        $this->assertSame([['sudo', 'docker', 'buildx', 'prune', '-af', '--filter', 'until=86400s']], $this->host->calls);
+        $this->assertNull(PruneHostImages::lastCompleted());
+    }
+
+    public function test_due_after_skips_images_until_the_window_passes(): void
+    {
+        Artisan::call('system:image:prune', ['--due-after' => '20h']);
+        $this->assertNotSame([], $this->removed());
+        $this->assertEqualsWithDelta(time(), PruneHostImages::lastCompleted(), 5);
+
+        $this->host->calls = [];
+        Artisan::call('system:image:prune', ['--due-after' => '20h']);
+        $this->assertStringContainsString('Image prune not due', Artisan::output());
+        $this->assertSame([], $this->removed());
+        // The build cache half is cheap and still runs every time.
+        $this->assertCount(1, $this->host->calls);
+
+        PruneHostImages::recordCompleted(time() - 21 * 3600);
+        $this->host->calls = [];
+        Artisan::call('system:image:prune', ['--due-after' => '20h']);
+        $this->assertNotSame([], $this->removed());
+    }
+
+    public function test_a_dry_run_does_not_count_as_completed(): void
+    {
+        Artisan::call('system:image:prune', ['--dry-run' => true, '--due-after' => '20h']);
+
+        $this->assertNull(PruneHostImages::lastCompleted());
     }
 
     public function test_dry_run_and_off_remove_nothing(): void
@@ -121,7 +164,7 @@ class PruneHostImagesCommandTest extends TestCase
         $this->assertSame([], $this->host->calls);
     }
 
-    public function test_it_is_scheduled_daily_without_overlapping(): void
+    public function test_it_is_scheduled_hourly_with_a_due_window_without_overlapping(): void
     {
         $schedule = new Schedule();
         (new ReflectionMethod(Kernel::class, 'schedule'))->invoke(app(Kernel::class), $schedule);
@@ -131,7 +174,8 @@ class PruneHostImagesCommandTest extends TestCase
         );
 
         $this->assertNotNull($event);
-        $this->assertSame('45 4 * * *', $event->expression);
+        $this->assertSame('0 * * * *', $event->expression);
+        $this->assertStringContainsString('--due-after=20h', (string) $event->command);
         $this->assertTrue($event->withoutOverlapping);
     }
 
@@ -208,9 +252,11 @@ class PruneHostImagesCommandTest extends TestCase
 
     private function plainPhpBase(): string
     {
-        foreach (HostPrewarmPlan::catalog() as $item) {
+        foreach (HostPrewarmPlan::available() as $item) {
             $ref = (string) $item['ref'];
             if (BuiltImage::runtimeFor($ref) === 'php' && !BuiltImage::isVariant($ref)) {
+                $this->plainId = $item['id'];
+
                 return $ref;
             }
         }

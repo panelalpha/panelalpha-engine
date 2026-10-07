@@ -1,11 +1,15 @@
 # Persist Galette's config/ (config.inc.php, holding the DB password) and data/
 # (member photos, attachments, exports, logs) across the redeploy that empties
-# ~/project (engine#173). The account home survives, so mount ~/.panelalpha
-# (../.panelalpha relative to this file, which sits in ~/project) into the app
-# container; galette-setup.sh seeds /pa-data and symlinks /app/config + /app/data
-# onto it. The volume list merges into the engine-generated `app` service, whose
-# base mount is ./galette:/app (app_root: galette).
+# ~/project. The account home survives, so mount
+# ~/.panelalpha/galette (../.panelalpha relative to this file, which sits in
+# ~/project; hooks/prepare.sh creates it) into the app container at
+# /pa-data/galette; galette-setup.sh seeds it and symlinks /app/config +
+# /app/data onto it. Never the whole ~/.panelalpha: it is private to the
+# account; the engine's login file is mounted on its own, read-only. The volume
+# list merges into the engine-generated `app` service, whose base mount is
+# ./galette:/app (app_root: galette).
 services:
   app:
     volumes:
-      - '../.panelalpha:/pa-data'
+      - '../.panelalpha/galette:/pa-data/galette'
+      - '../.panelalpha/app-credentials.env:/pa-data/app-credentials.env:ro'

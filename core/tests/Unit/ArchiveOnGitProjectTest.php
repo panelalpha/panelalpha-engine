@@ -9,7 +9,7 @@ use ReflectionMethod;
 use Tests\TestCase;
 
 /**
- * engine#269: an archive deployed into a project that deploys from git failed
+ * An archive deployed into a project that deploys from git failed
  * with "Git HEAD is not readable after clone" -- after it had already replaced
  * ~/project. It is refused up front now, with what to do instead.
  */
@@ -56,10 +56,12 @@ class ArchiveOnGitProjectTest extends TestCase
 
         foreach (['public function deployArchive(', 'public function rebuild(string $username'] as $entry) {
             $body = substr($source, (int) strpos($source, $entry));
+            $body = substr($body, 0, (int) strpos($body, '$this->startRedeploy('));
             $refuse = strpos($body, 'self::refuseArchiveOnGitProject($user)');
-            $work = strpos($body, 'DeployPlanInput::arm($request)');
+            $work = strpos($body, 'EnvVarOverrides::applyIncoming(');
 
             $this->assertNotFalse($refuse, "{$entry} does not refuse an archive into a git project");
+            $this->assertNotFalse($work, "{$entry} no longer applies env_vars before it queues");
             $this->assertLessThan($work, $refuse, "{$entry} refuses only after it has started work");
         }
     }

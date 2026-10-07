@@ -8,7 +8,7 @@
 # the app from ~/.panelalpha/app-credentials.env.
 set -e
 
-# ~/project is wiped every deploy (engine#173); ~/.panelalpha survives, so the
+# ~/project is wiped every deploy; ~/.panelalpha survives, so the
 # secrets live there and are generated only on the first deploy.
 STORE="$HOME/.panelalpha/weblate"
 mkdir -p "$STORE"

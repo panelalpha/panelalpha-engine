@@ -11,8 +11,10 @@
 #     project needs -- `requires: {php: runtime}` -- and a Runtime class reads
 #     the project for a version. This file turns `php` at `8.3` into an image.
 #
-#   which of those does this host hold before any deploy asks?
-#     `prewarm` on a version, read by `system:image:prewarm`.
+#   which of those may this host hold before any deploy asks?
+#     `prewarm` on a version, read by `system:image:prewarm`. That makes an
+#     image selectable, not warmed: a host warms only what `pae configure
+#     prewarm` selected (DEPLOY_PREWARM_IMAGES), which is nothing by default.
 #
 # It was three files. dind-image-cache.yaml and prewarm.yaml described
 # overlapping halves of the second question and were merged; runtime-images.yaml
@@ -43,7 +45,8 @@
 #       versions:                   # oldest first -- resolution walks them in
 #         - version: "8.3"          # this order and takes the first that fits
 #           prewarm: 870            # host warm priority, higher first;
-#                                   # omit and this version is never warmed
+#                                   # omit and this version cannot be
+#                                   # selected for warming at all
 #           why: "..."              # shown in the prewarm plan
 #
 #   extras:                         # images no runtime describes
@@ -239,9 +242,9 @@ runtimes:
         # packages come from. Ruby's per-project Dockerfile installs them
         # itself, so the stock image is a complete answer. Python has no
         # per-project Dockerfile: this image is the only place the headers
-        # exist. Measured: with this false, the first deploy of a Django
-        # project with psycopg2 failed on `pg_config executable not found`
-        # while the base built in the background, and only the retry succeeded.
+        # exist. With this false, the first deploy of a Django project with
+        # psycopg2 fails on `pg_config executable not found` while the base
+        # builds in the background, and only the retry succeeds.
         runnable: true
     # Walked oldest-first: the lowest listed minor satisfying `requires-python`
     # wins. A project asking for something newer is still honoured and pulled
@@ -325,11 +328,11 @@ runtimes:
       # would suggest an operator could pick a minor here. They cannot.
       from: "rust:1-slim-bookworm"
       # ...but the slim tag is only right for *running* the binary. A host
-      # compile runs as the account and cannot apt-get anything, and measured
-      # on this host slim has no g++, no pkg-config, no openssl headers and no
-      # libssl -- so every crate whose build script probes for one of them
-      # fails the deploy. The full tag is 2.2GB against 1.23GB and is loaded
-      # once on the host for every deploy to share.
+      # compile runs as the account and cannot apt-get anything, and slim has no
+      # g++, no pkg-config, no openssl headers and no libssl -- so every crate
+      # whose build script probes for one of them fails the deploy. The full tag
+      # is 2.2GB against 1.23GB and is loaded once on the host for every deploy
+      # to share.
       build_from: "rust:1-bookworm"
     # Listed but not warmed: a project reaching this is rare enough that the
     # host pull it costs beats the disk to hold it. Being listed is still what
@@ -403,21 +406,16 @@ extras:
 
   # Railpack's own build infrastructure. Only reached when every recipe has
   # declined -- now that every runtime has one, that is a library with no entry
-  # point or a language we have no recipe for. These tags follow Railpack's own
-  # release calendar; an account is given whatever its plan names, so a stale
-  # one here costs a host pull rather than the wrong image.
-  - image: "ghcr.io/railwayapp/railpack-runtime:mise-2026.8.16"
-    runtime: railpack
-    prewarm: 830
-    why: "Railpack runtime base (mise runtime shims)"
+  # point or a language we have no recipe for. Only the frontend is named here:
+  # it is the one tag the engine passes itself. The builder and runtime tags
+  # come from the plan the account's railpack writes and change with every
+  # Railpack release, so a deploy fetches them onto the host the first time a
+  # plan names them, and every account after that gets them from the cache
+  # registry.
   - image: "ghcr.io/railwayapp/railpack-frontend:latest"
     runtime: railpack
     prewarm: 820
     why: "Railpack buildkit frontend"
-  - image: "ghcr.io/railwayapp/railpack-builder:mise-2026.8.16"
-    runtime: railpack
-    prewarm: 800
-    why: "Railpack builder base (mise + build deps)"
 
   - image: "composer:2"
     runtime: php
@@ -429,6 +427,7 @@ extras:
     prewarm: 750
     why: "host build path for bun.lock projects"
 
+# DEPLOY_PREWARM_BUDGET and DEPLOY_PREWARM_RESERVE in .env override both.
 host:
   # Accounts live on the same filesystem, so warming never takes the host below
   # this much free space, whatever the budget says.

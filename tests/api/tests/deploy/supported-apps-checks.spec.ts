@@ -9,13 +9,10 @@ import {
   waitForBackupDeleted,
   waitForBackupPhase,
 } from '@/helpers/backup-helpers';
-import {
-  containerIsRunning,
-  DEFAULT_DEPLOY_GIT_REPO,
-  waitForDeploy,
-} from '@/helpers/deploy-helpers';
+import { containerIsRunning, DEFAULT_DEPLOY_GIT_REPO } from '@/helpers/deploy-helpers';
 import { expectOneOf } from '@/helpers/expect-one-of';
 import { rand } from '@/helpers/random';
+import { taskIdFromBody } from '@/helpers/task-helpers';
 import {
   stagingPushPhase,
   stagingUserPayload,
@@ -249,21 +246,29 @@ test.describe('around a deployed application', () => {
     skipUnless(user, 'DinD is not available on this engine.');
     skipUnlessOnline(user.domain);
 
-    await api.createDirectory(user.username, '/site', true);
+    // The home root is root-owned; /project is the account's writable tree, and the
+    // archive deploy replaces it, so staging there leaves nothing behind.
+    await api.createDirectory(user.username, '/project/site', true);
     await api.putFileContents(
       user.username,
-      '/site/index.html',
+      '/project/site/index.html',
       '<!doctype html><title>home</title>home\n'
     );
     await api.putFileContents(
       user.username,
-      '/site/about.html',
+      '/project/site/about.html',
       '<!doctype html><title>about</title>about\n'
     );
-    await api.zipFiles(user.username, '/project/app.zip', '/site', true);
+    await api.zipFiles(user.username, '/project/app.zip', '/project/site', true);
     const started = await api.deployArchiveRaw(user.username, { zip_path: '/project/app.zip' });
-    expectOneOf(started.status, [200, 201]);
-    await waitForDeploy(api, user.username);
+    expect(started.status).toBe(202);
+    const taskId = taskIdFromBody(started.body);
+    expect(taskId).toEqual(expect.any(Number));
+    // A second deploy while this one is queued or running names it instead of starting.
+    const again = await api.rebuildUserRaw(user.username);
+    expect(again.status).toBe(409);
+    expect((again.body as { task_id?: unknown }).task_id).toBe(taskId);
+    await api.followDeployTask(started.body, 'POST deploy-archive');
 
     // A deploy never yields a static site without an entry: detection serves the first page it
     // finds when nothing is called index. The check exists for a front page that disappears

@@ -14,7 +14,7 @@ services:
     image: docker.io/sintan1729/chhoto-url:7.8.1-alpine
     restart: unless-stopped
     # The app (frontend + JSON API + redirects) listens on 4567. Only this
-    # service publishes a port (engine#234); the engine's scan takes it as the
+    # service publishes a port; the engine's scan takes it as the
     # primary.
     ports:
       - "4567:4567"

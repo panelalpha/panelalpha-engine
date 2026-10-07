@@ -29,7 +29,19 @@ class ComposeFileInspector
      * was accepted as deployable and then died on `useradd: invalid user ID
      * '-d'` once the empty argument shifted the rest of the command along.
      */
-    private const HOST_UID_VARS = 'WWWGROUP|WWWUSER|PUID|PGID|USER_ID|GROUP_ID|HOST_UID|HOST_GID|UID|GID';
+    private const HOST_UID_VARS = 'WWWGROUP|WWWUSER|PUID|PGID|USER_ID|GROUP_ID|USERID|GROUPID|USER_UID|USER_GID'
+        . '|HOST_UID|HOST_GID|HOSTUID|HOSTGID|UID|GID';
+
+    /** @var list<string> */
+    private const PROJECT_ROOT_SOURCES = ['.', './', '${PWD}', '$PWD'];
+
+    /**
+     * Datastores and storage emulators with no sidecar dialect: never the
+     * application, which is all the sidecars-only test needs to know.
+     */
+    private const DIALECTLESS_DATASTORE_IMAGES = '#^(?:mcr\.microsoft\.com/(?:mssql/|azure-storage/azurite$|azure-sql-edge$)'
+        . '|(?:[^/]+/)*cockroachdb/cockroach$|(?:[^/]+/)*gvenzl/oracle-|container-registry\.oracle\.com/database/'
+        . '|(?:[^/]+/)*[^/]*oracle[^/]*-xe)#';
 
     /**
      * Docker Compose V2 filename priority.
@@ -338,7 +350,7 @@ class ComposeFileInspector
     /**
      * A Compose v1 file: services at the top level, no `services:` mapping.
      * Compose v2 refuses the whole file (`additional properties 'rapidbay'
-     * not allowed`, #122), so running it can only fail.
+     * not allowed`), so running it can only fail.
      */
     public static function isLegacyV1Compose(string $composePath): bool
     {
@@ -368,6 +380,56 @@ class ComposeFileInspector
         }
 
         return false;
+    }
+
+    /**
+     * Why `docker compose up` starts nothing from this file as written: every
+     * service sits behind a profile nobody activates (NextChat), or one has
+     * neither image nor build (poke) and Compose rejects the project. Null when
+     * it can start something.
+     *
+     * @param list<string> $activeProfiles COMPOSE_PROFILES the repository sets
+     */
+    public static function startsNothingReasonYaml(string $raw, array $activeProfiles = []): ?string
+    {
+        try {
+            $parsed = ComposeYaml::parse($raw);
+        } catch (\Throwable) {
+            return null;
+        }
+        if (!is_array($parsed) || !is_array($parsed['services'] ?? null) || isset($parsed['include'])) {
+            return null;
+        }
+
+        $startable = false;
+        foreach ($parsed['services'] as $name => $service) {
+            if (!is_array($service)) {
+                continue;
+            }
+            if (!isset($service['image']) && !isset($service['build']) && !isset($service['extends'])) {
+                return "service `{$name}` has neither an image nor a build";
+            }
+            $profiles = is_array($service['profiles'] ?? null) ? $service['profiles'] : [];
+            if ($profiles === [] || array_intersect($profiles, $activeProfiles) !== []) {
+                $startable = true;
+            }
+        }
+
+        return $startable || $parsed['services'] === [] ? null : 'every service is behind a profile';
+    }
+
+    /**
+     * COMPOSE_PROFILES as the repository's committed `.env` sets it.
+     *
+     * @return list<string>
+     */
+    public static function profilesFromEnvFile(?string $env): array
+    {
+        if ($env === null || preg_match('/^\s*COMPOSE_PROFILES\s*=\s*["\']?([^"\'\n#]*)/m', $env, $m) !== 1) {
+            return [];
+        }
+
+        return array_values(array_filter(array_map('trim', explode(',', $m[1]))));
     }
 
     /**
@@ -419,14 +481,30 @@ class ComposeFileInspector
             // ships five database servers, Elasticsearch, Redis, Keycloak,
             // Jaeger, Loki and Grafana, and not one line of Vendure -- so
             // deploying it would run a stack that contains no application.
-            if (!SidecarEngine::isKnownDatastore((string) $name, $service)
+            // A published port's number alone does not make one: OpenCloud
+            // serves on 9200, Elasticsearch's port.
+            $identity = isset($service['ports']) ? array_diff_key($service, ['ports' => true, 'expose' => true]) : $service;
+            if (!SidecarEngine::isKnownDatastore((string) $name, $identity)
                 && !DevServices::isDevSidecar((string) $name, $service)
+                && !self::isDialectlessDatastore($service)
             ) {
                 return false;
             }
         }
 
         return $seen > 0;
+    }
+
+    /** @param array<string, mixed> $service */
+    private static function isDialectlessDatastore(array $service): bool
+    {
+        $image = $service['image'] ?? null;
+        if (!is_string($image) || trim($image) === '') {
+            return false;
+        }
+        $repository = preg_replace('#:[^/]*$#', '', explode('@', strtolower(trim($image)), 2)[0]);
+
+        return preg_match(self::DIALECTLESS_DATASTORE_IMAGES, (string) $repository) === 1;
     }
 
     /**
@@ -445,7 +523,7 @@ class ComposeFileInspector
     }
 
     /**
-     * Dockerfile that maps a host UID/GID with no numeric ARG default.
+     * Dockerfile that maps a host UID/GID with no numeric ARG or ENV default.
      * Nested copies of local-dev runtimes (docker/8.x, docker/Dockerfile)
      * must not win over PHP/JS/Railpack recipes.
      */
@@ -466,9 +544,11 @@ class ComposeFileInspector
         if (preg_match('/\$(?:\{)?(' . self::HOST_UID_VARS . ')\b/i', $raw, $match) !== 1) {
             return false;
         }
-        $var = $match[1];
+        $var = preg_quote($match[1], '/');
 
-        return preg_match('/^\s*ARG\s+' . preg_quote($var, '/') . '\s*=\s*\d+/mi', $raw) !== 1;
+        // Koillection's `ENV PUID=1001` sets it as surely as an ARG default.
+        return preg_match('/^\s*ARG\s+' . $var . '\s*=\s*\d+/mi', $raw) !== 1
+            && preg_match('/^\s*ENV\s+(?:(?:\S+=\S+\s+)*' . $var . '\s*=\s*["\']?\d+|' . $var . '\s+["\']?\d+)/mi', $raw) !== 1;
     }
 
     /**
@@ -499,6 +579,24 @@ class ComposeFileInspector
     }
 
     /**
+     * The service mounts the whole checkout (`.`/`./`/`${PWD}`), with or
+     * without `build:`: it runs the repository's own code from a laptop's
+     * working tree.
+     *
+     * @param array<string, mixed> $service
+     */
+    public static function mountsWholeProjectRoot(array $service): bool
+    {
+        foreach ((array) ($service['volumes'] ?? []) as $volume) {
+            if (in_array(self::readBindVolume($volume)[0], self::PROJECT_ROOT_SOURCES, true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * @param array<string, mixed> $service
      */
     private static function serviceBindsProjectRoot(array $service): bool
@@ -518,9 +616,9 @@ class ComposeFileInspector
      * it is read-only, or a single generated file: that is a recipe injecting
      * one artifact (an entrypoint/config/answer file, as Centreon, Saleor and
      * Socioboard do), and demoting the whole compose over it wrote the wrong
-     * container topology. A datastore's `./data:/var/lib/mysql` is not reached
-     * here: that service carries an `image:`, and the caller only asks about
-     * services that `build:`.
+     * container topology. Nor when it is a log directory. A datastore's
+     * `./data:/var/lib/mysql` is not reached here: that service carries an
+     * `image:`, and the caller only asks about services that `build:`.
      *
      * @param array<string, mixed> $service
      */
@@ -535,13 +633,13 @@ class ComposeFileInspector
             if ($source === null) {
                 continue;
             }
-            if (in_array($source, ['.', './', '${PWD}', '$PWD'], true)) {
+            if (in_array($source, self::PROJECT_ROOT_SOURCES, true)) {
                 return $source;
             }
             if (!str_starts_with($source, './')) {
                 continue;
             }
-            if ($readOnly || self::mountsSingleFile($source, $target)) {
+            if ($readOnly || self::mountsSingleFile($source, $target) || self::mountsLogDirectory($source, $target)) {
                 continue;
             }
 
@@ -549,6 +647,26 @@ class ComposeFileInspector
         }
 
         return null;
+    }
+
+    /**
+     * `./nginx/log:/var/log/nginx`, `./logs:/app/logs`: a directory the
+     * service only writes its logs to. It holds no source and the stack runs
+     * with it empty, so it says nothing about a workstation.
+     */
+    private static function mountsLogDirectory(string $source, string $target): bool
+    {
+        $target = rtrim($target, '/');
+        if ($target === '/var/log' || str_starts_with($target, '/var/log/')) {
+            return true;
+        }
+        foreach ([$source, $target] as $path) {
+            if (preg_match('/^logs?$/i', basename(rtrim($path, '/'))) === 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

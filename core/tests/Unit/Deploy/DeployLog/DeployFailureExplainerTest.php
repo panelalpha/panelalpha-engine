@@ -3,12 +3,13 @@
 namespace Tests\Unit\Deploy\DeployLog;
 
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
+use App\Lib\Deploy\DeployLog\FailureOutput;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 class DeployFailureExplainerTest extends TestCase
 {
-    /** The failure that made github.com/henrygd/beszel fail on a live host. */
+    /** The failure that made github.com/henrygd/beszel fail. */
     public function test_explains_a_too_old_go_toolchain(): void
     {
         $output = <<<'OUT'
@@ -86,8 +87,15 @@ OUT;
             'missing image' => ['manifest for golang:1.99-alpine not found', 'could not be downloaded'],
             'no build script' => ['npm ERR! Missing script: "build"', 'no "build" script'],
             'dependency conflict' => ['npm ERR! code ERESOLVE', 'dependencies conflict'],
+            'angular multi-project workspace' => [
+                "Error: Cannot determine project for command.\n"
+                . 'This is a multi-project workspace and more than one project supports this command. '
+                . 'Run "ng build [project]" to execute the command for a specific project.',
+                'refused to guess',
+            ],
+            'angular project or target' => ['Cannot determine project or target for command.', 'refused to guess'],
             'private repo' => ['fatal: could not read Username for https://github.com', 'access token'],
-            // A 2026-09-20 sweep clone of github.com/BookStackApp/BookStack (#188).
+            // A clone of github.com/BookStackApp/BookStack.
             'interrupted clone' => [
                 "Cloning into '/home/bookstackwdtu/project'...\n"
                 . "error: unable to read askpass response from '/bin/false'\n"
@@ -95,10 +103,30 @@ OUT;
                 . 'fatal: expected flush after ref listing',
                 'not the repository',
             ],
+            // Mydia's flutter-builder stage: Flutter's own message blames the network.
+            'owner id above the account range' => [
+                "#23 54.46 /usr/bin/tar: gradle/wrapper/gradle-wrapper.jar: Cannot change ownership to uid 397546, gid 5000: Invalid argument\n"
+                . "#23 54.49 Flutter could not download and/or extract https://storage.googleapis.com/x/gradle-wrapper.tgz. Ensure you have network connectivity\n"
+                . 'failed to solve: process "/bin/sh -c flutter precache --web" did not complete successfully: exit code: 1',
+                'owned by uid 397546, gid 5000',
+            ],
+            'layer owned above the account range' => [
+                'failed to register layer: lchown /opt/app/bin: invalid argument',
+                'ids 0-65535',
+            ],
             'missing repo' => ['fatal: repository https://github.com/x/y not found', 'was not found'],
             'php too old' => [
                 'requires php ^8.4 but your php version (8.1.2) does not satisfy',
                 'needs PHP ^8.4',
+            ],
+            'php too old for the root' => [
+                '  - Root composer.json requires php ^8.4 but your php version (8.1.2) does not satisfy that requirement.',
+                'This project needs PHP ^8.4, but it was built with PHP 8.1.2.',
+            ],
+            'php too new for a locked package' => [
+                "  - paragonie/random_compat v9.99.99 requires php ^7 -> your php version (8.3.35) does not satisfy that requirement.\n"
+                . '    - ramsey/uuid 3.9.3 requires paragonie/random_compat ^1 | ^2 | 9.99.99',
+                'The locked package paragonie/random_compat v9.99.99 needs PHP ^7, but the project was built with PHP 8.3.35.',
             ],
             'generic' => [
                 'failed to solve: process "/bin/sh -c make" did not complete successfully: exit code: 2',
@@ -156,7 +184,25 @@ OUT;
             ],
             'rust crate needs libclang' => [
                 'Unable to find libclang: "couldn\'t find any valid shared libraries matching: [\'libclang.so\']"',
-                'development headers',
+                '`libclang` (for bindgen)',
+            ],
+            'rust crate needs protoc' => [
+                "error: failed to run custom build command for `chirpstack_api v4.20.0-test.2 (/app/api/rust)`\n"
+                . 'Error: Custom { kind: NotFound, error: "Could not find `protoc`. If `protoc` is installed, try setting the `PROTOC` environment variable',
+                '`protoc` (the Protocol Buffers compiler)',
+            ],
+            'rust crate needs cmake' => [
+                "error: failed to run custom build command for `aws-lc-sys v0.41.0`\n"
+                . "Missing dependency: cmake\n"
+                . 'called `Result::unwrap()` on an `Err` value: "Required build dependency is missing. Halting build."',
+                'needs `cmake`',
+            ],
+            'rust link step wants mold' => [
+                "error: linking with `cc` failed: exit status: 1\n"
+                . '  = note: LC_ALL="C" PATH="/usr/local/cargo/bin" "cc" "-m64" "-fuse-ld=mold" "-nodefaultlibs"' . "\n"
+                . "  = note: collect2: fatal error: cannot find 'ld'\n"
+                . "error: could not compile `quote` (build script) due to 1 previous error",
+                'the `mold` linker, which the project selects with `-fuse-ld=mold`',
             ],
             'rust crate names itself' => [
                 'error: failed to run custom build command for `openssl-sys v0.9.117`',
@@ -260,6 +306,26 @@ OUT;
     }
 
     /**
+     * audioserve: rustc linking two LTO binaries ran the build out of memory.
+     * The failing region ends at BuildKit's step line, before the
+     * `ResourceExhausted` summary, and read as Rust code that does not compile.
+     */
+    public function test_a_step_that_could_not_allocate_memory_is_out_of_memory(): void
+    {
+        $output = <<<'OUT'
+        #12 790.0 error: could not compile `audioserve` (test "test_binary")
+        #12 790.0   process didn't exit successfully: `rustc --crate-name test_binary -C opt-level=3 -C lto -C codegen-units=1`
+        #12 790.0 error: could not compile `audioserve` (bin "audioserve")
+        #12 ERROR: process "/bin/sh -c cargo build --release && cargo test --release" did not complete successfully: cannot allocate memory
+        OUT;
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('out-of-memory', $match['rule'] ?? null);
+        $this->assertStringContainsString('ran out of memory', $match['message']);
+    }
+
+    /**
      * ...and the same for Rust, where the decoy is apt's permission error from
      * a `systemPackages()` best effort that runs as the account.
      */
@@ -276,6 +342,46 @@ OUT;
             'rust-librocksdb-sys',
             (string) DeployFailureExplainer::explain($output)
         );
+    }
+
+    /**
+     * rauthy: the project's own crate's build script panicked on a missing
+     * data file, and the panic says what to run. It was reported as a
+     * dependency that "compiles or links a C library", without that line.
+     */
+    public function test_a_panicking_build_script_is_quoted_and_the_project_crate_named(): void
+    {
+        $output = <<<'OUT'
+        #14 118.2 error: failed to run custom build command for `rauthy-data v0.37.0-20260917 (/app/src/data)`
+        #14 118.2
+        #14 118.2 Caused by:
+        #14 118.2   process didn't exit successfully: `/app/target/release/build/rauthy-data-1f/build-script-build` (exit status: 101)
+        #14 118.2   --- stderr
+        #14 118.2
+        #14 118.2   thread 'main' (19722) panicked at src/data/build.rs:48:5:
+        #14 118.2   assets/fido_mds/dataset.bin is missing and this is a release build. Run `just fido-mds-prep` to fetch it, then build again.
+        #14 118.2   note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+        OUT;
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('rust-build-script-failed', $match['rule'] ?? null);
+        $this->assertStringContainsString("The project's Rust crate `rauthy-data", $match['message']);
+        $this->assertStringContainsString('Run `just fido-mds-prep` to fetch it', $match['message']);
+        $this->assertStringNotContainsString('C library', $match['message']);
+    }
+
+    /** The pre-1.73 panic form, from a registry dependency. */
+    public function test_an_old_style_build_script_panic_is_quoted(): void
+    {
+        $output = "error: failed to run custom build command for `ring v0.16.20`\n"
+            . "--- stderr\n"
+            . "thread 'main' panicked at 'failed to execute command: No such file or directory', build.rs:12:5\n";
+
+        $message = (string) DeployFailureExplainer::explain($output);
+
+        $this->assertStringContainsString('The Rust dependency `ring v0.16.20`', $message);
+        $this->assertStringContainsString('It said: failed to execute command: No such file or directory.', $message);
     }
 
     /**
@@ -431,7 +537,7 @@ OUT;
     }
 
     /**
-     * pictshare's compose (#125) names `HaschekSolutions/pictshare:3`. The
+     * pictshare's compose names `HaschekSolutions/pictshare:3`. The
      * daemon takes the capitalised first component for a registry host and
      * fails on DNS, which read as "may not exist, may be private, or its
      * registry may be unreachable" -- none of which is what went wrong.
@@ -488,7 +594,7 @@ OUT;
         $this->assertSame('registry-rate-limited', DeployFailureExplainer::match($output)['rule']);
     }
 
-    /** Foodsoft (engine#285): the image exists, a layer came back corrupted from the mirror. */
+    /** Foodsoft: the image exists, a layer came back corrupted from the mirror. */
     public function test_a_layer_digest_mismatch_is_not_a_missing_base_image(): void
     {
         $output = 'failed commit on ref "layer-sha256:5c1e0a5b4f2b": commit failed: unexpected commit digest '
@@ -520,13 +626,145 @@ OUT;
         $this->assertStringContainsString('compiled during install', $match['message']);
     }
 
+    /** React-Messenger-Clone (react-scripts 3.4.3) on Node 22. */
+    public function test_webpack4_on_openssl3_is_named(): void
+    {
+        $output = "Error: error:0308010C:digital envelope routines::unsupported\n"
+            . "    at module.exports (/app/node_modules/webpack/lib/util/createHash.js:135:53)\n"
+            . "  code: 'ERR_OSSL_EVP_UNSUPPORTED'\n"
+            . "Node.js v22.23.3\nerror Command failed with exit code 1.";
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('webpack4-openssl-unsupported', $match['rule']);
+        $this->assertStringContainsString('webpack 4', $match['message']);
+    }
+
     /** It outranks the generic build failure, being the more specific answer. */
     public function test_it_wins_over_the_generic_build_rule(): void
+    {
+        $output = "gyp ERR! stack Error: not found: make\n"
+            . "gyp ERR! not ok\n"
+            . 'ERROR: process "/bin/sh -c pnpm install" did not complete successfully: exit code: 1';
+
+        $this->assertSame('native-build-toolchain-missing', DeployFailureExplainer::match($output)['rule']);
+    }
+
+    /** A bare `gyp ERR!` is any node-gyp failure, not proof the toolchain is missing. */
+    public function test_a_gyp_failure_without_toolchain_evidence_is_not_a_missing_toolchain(): void
     {
         $output = "gyp ERR! not ok\n"
             . 'ERROR: process "/bin/sh -c pnpm install" did not complete successfully: exit code: 1';
 
+        $this->assertNotSame('native-build-toolchain-missing', DeployFailureExplainer::match($output)['rule'] ?? null);
+    }
+
+    /**
+     * wud: Python and g++ were installed, but the build could not reach
+     * unofficial-builds.nodejs.org for the Node headers.
+     */
+    public function test_a_failed_headers_download_is_not_a_missing_toolchain(): void
+    {
+        $output = "#8 12.98 (13/30) Installing musl-dev (1.2.6-r2)\n"
+            . "#17 29.45 npm error gyp info find Python using Python version 3.14.7 found at \"/usr/bin/python3\"\n"
+            . "#17 29.45 npm error gyp http GET https://unofficial-builds.nodejs.org/download/release/v24.21.0/node-v24.21.0-headers.tar.gz\n"
+            . "#17 29.45 npm error gyp ERR! stack ConnectTimeoutError: Connect Timeout Error (attempted addresses: 45.55.98.129:443, timeout: 10000ms)\n"
+            . '#17 ERROR: process "/bin/sh -c npm ci" did not complete successfully: exit code: 1';
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('native-build-headers-download-failed', $match['rule']);
+        $this->assertStringContainsString('node-v24.21.0-headers.tar.gz', $match['message']);
+        $this->assertStringContainsString('ConnectTimeoutError', $match['message']);
+        $this->assertStringNotContainsString('no Python or C toolchain', $match['message']);
+    }
+
+    /** The other ways node's fetch reports an unreachable host. */
+    public function test_other_network_errors_from_node_gyp_are_a_failed_download(): void
+    {
+        foreach ([
+            'gyp ERR! stack FetchError: request to https://nodejs.org/x failed, reason: getaddrinfo EAI_AGAIN nodejs.org',
+            'gyp ERR! stack Error: read ECONNRESET',
+            'gyp ERR! stack Error: connect ETIMEDOUT 104.20.22.46:443',
+        ] as $line) {
+            $this->assertSame('native-build-headers-download-failed', DeployFailureExplainer::match($line)['rule'], $line);
+        }
+    }
+
+    /** make running without a compiler is the missing toolchain. */
+    public function test_a_missing_compiler_under_node_gyp_is_explained(): void
+    {
+        $output = "gyp info spawn make\n"
+            . "make: g++: No such file or directory\n"
+            . "gyp ERR! build error\n"
+            . 'gyp ERR! stack Error: `make` failed with exit code: 2';
+
         $this->assertSame('native-build-toolchain-missing', DeployFailureExplainer::match($output)['rule']);
+    }
+
+    /**
+     * keystone: pnpm echoes every install script's command line, including a
+     * native build that fell back to a prebuilt binary. The failure was the
+     * project's own postinstall, and the echo must not be blamed for it.
+     */
+    public function test_an_echoed_node_gyp_command_is_not_a_missing_toolchain(): void
+    {
+        $output = "#12 5.1 node_modules/better-sqlite3 install\$ prebuild-install || node-gyp rebuild --release\n"
+            . "#12 7.4 node_modules/better-sqlite3 install: Done\n"
+            . "#12 9.0 . postinstall\$ keystone postinstall\n"
+            . "#12 9.8 . postinstall: Error: Region is missing\n"
+            . "#12 9.9 . postinstall: Failed\n"
+            . '#12 ERROR: process "/bin/sh -c pnpm install" did not complete successfully: exit code: 1';
+
+        $this->assertNotSame('native-build-toolchain-missing', DeployFailureExplainer::match($output)['rule'] ?? null);
+    }
+
+    /** node-gyp itself absent from the image is still the missing toolchain. */
+    public function test_a_missing_node_gyp_binary_is_explained(): void
+    {
+        $output = "better-sqlite3 install\$ node-gyp rebuild\n"
+            . "sh: 1: node-gyp: not found\n"
+            . '[ELIFECYCLE] Command failed with exit code 127.';
+
+        $this->assertSame('native-build-toolchain-missing', DeployFailureExplainer::match($output)['rule']);
+    }
+
+    /**
+     * Symfony's timeout text is the whole message: a quoted command line. These
+     * are the two from the ToolJet clone and the jellyfin build.
+     */
+    public function test_a_clone_that_ran_out_of_time_is_named_as_such(): void
+    {
+        $output = "The process \"'sudo' 'docker' 'compose' '-f' '/opt/panelalpha/shared-hosting/users/rp098/docker-compose.yml' "
+            . "'exec' '-T' 'dind' 'su' '-s' '/bin/bash' 'rp098' '-c' 'env' 'GIT_TERMINAL_PROMPT=0' 'git' '-c' "
+            . "'safe.directory=/home/rp098/project' 'clone' '--depth=1' '--branch' 'main' "
+            . "'https://github.com/ToolJet/ToolJet.git' '/home/rp098/project'\" exceeded the timeout of 600 seconds.";
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('clone-timed-out', $match['rule'] ?? null);
+        $this->assertStringStartsWith('The repository did not finish cloning within 10 minutes', $match['message']);
+    }
+
+    public function test_a_build_that_ran_out_of_time_is_named_as_such(): void
+    {
+        $output = "The process \"'sudo' 'docker' 'compose' '-f' '/opt/panelalpha/shared-hosting/users/rp1/docker-compose.yml' "
+            . "'exec' '-T' 'dind' 'su' '-s' '/bin/bash' 'rp1' '-c' 'docker' 'compose' '-p' 'project' "
+            . "'up' '-d' '--remove-orphans' '--build'\" exceeded the timeout of 3600 seconds.";
+
+        // As the deploy reports a start failure: the selected region, then the explainer.
+        $match = DeployFailureExplainer::match(trim(FailureOutput::select($output)));
+
+        $this->assertSame('build-timed-out', $match['rule'] ?? null);
+        $this->assertStringStartsWith('Building and starting the application did not finish within 60 minutes', $match['message']);
+    }
+
+    public function test_any_other_step_that_ran_out_of_time_is_still_explained(): void
+    {
+        $match = DeployFailureExplainer::match("The process \"'sudo' 'docker' 'pull' 'redis:8'\" exceeded the timeout of 300 seconds.");
+
+        $this->assertSame('step-timed-out', $match['rule'] ?? null);
+        $this->assertSame('A deploy step did not finish within 5 minutes and was stopped. The full output is in the deploy log.', $match['message']);
     }
 
     /**
@@ -596,7 +834,7 @@ OUT;
     }
 
     /**
-     * The real Alfresco Community deploy (#1117): Maven ran out of heap in
+     * The real Alfresco Community deploy: Maven ran out of heap in
      * the host build container, reported `Java heap space -> [Help 1]`, and
      * the deploy was then filed under `build-step-failed` quoting the maven
      * image's own entrypoint warning -- `mkdir: cannot create directory
@@ -677,7 +915,7 @@ OUT;
      * The same shape for V8, and the same reason it has to be named: the
      * Node form carries no exit 137 and no `Killed`, so before this it was
      * caught by `out-of-memory` — "needs more RAM than the plan allows" —
-     * when the real answer is the engine's heap cap. The dub #462 deploy
+     * when the real answer is the engine's heap cap. The dub deploy
      * reported exactly this, and the one-line summary it produced named
      * neither Node nor the heap.
      */
@@ -734,7 +972,7 @@ OUT;
     }
 
     /**
-     * farmOS (#129): every drupal/* requirement is unknown because the repo is a
+     * farmOS: every drupal/* requirement is unknown because the repo is a
      * Drupal profile with no packages.drupal.org. That is not a version conflict,
      * and the old sentence said it was.
      */
@@ -778,7 +1016,7 @@ OUT;
     }
 
     /**
-     * ActivityWatch #528. The project is a Poetry application, not a package,
+     * ActivityWatch. The project is a Poetry application, not a package,
      * so pip asking poetry-core to build a wheel of it can never work. The
      * engine now installs such a project with `poetry install --no-root`, but
      * a project it does not detect still deserves the sentence rather than the
@@ -804,12 +1042,12 @@ OUT;
     }
 
     /**
-     * engine#235. A compose that builds the app image to a local tag and has a
+     * A compose that builds the app image to a local tag and has a
      * sibling reference it makes `docker compose up` PULL that tag first: it
      * fails with a benign `failed to resolve reference ... not found`, then
      * builds it (`naming to ... done`). The container then dies on a missing
-     * entrypoint -- Limbas (supported-apps#1195) -- and that, not the benign
-     * pull, is the cause the reader needs.
+     * entrypoint -- Limbas -- and that, not the benign pull, is the cause the
+     * reader needs.
      */
     public function test_a_missing_entrypoint_wins_over_the_benign_local_build_pull(): void
     {
@@ -830,9 +1068,48 @@ OUT;
         $this->assertStringNotContainsString('base image', (string) DeployFailureExplainer::explain($output));
     }
 
+    /** A bare-name entrypoint that is there but not executable reads the same as a missing one. */
+    public function test_a_path_search_miss_also_suggests_the_execute_bit(): void
+    {
+        $output = 'Error response from daemon: failed to create task for container: OCI runtime create failed: '
+            . 'runc create failed: unable to start container process: exec: "entrypoint.sh": executable file not found in $PATH: unknown';
+
+        $this->assertStringContainsString('or is not executable (chmod +x)', (string) DeployFailureExplainer::explain($output));
+    }
+
+    /** @return array<string, array{0: string}> */
+    public static function nonExecutableEntrypoints(): array
+    {
+        return [
+            'runc, quoted' => ['Error response from daemon: failed to create task for container: failed to create shim task: '
+                . 'OCI runtime create failed: runc create failed: unable to start container process: exec: "/entrypoint.sh": permission denied: unknown'],
+            'container output' => ['app-1  | exec /entrypoint.sh: permission denied'],
+            // As a current Docker prints it, verbatim but for the path.
+            'runc, error during init' => ['docker: Error response from daemon: failed to create task for container: failed to create shim task: '
+                . 'OCI runtime create failed: runc create failed: unable to start container process: error during container init: exec: "/entrypoint.sh": permission denied'],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('nonExecutableEntrypoints')]
+    public function test_an_absolute_entrypoint_without_the_execute_bit_is_named(string $output): void
+    {
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('container-entrypoint-not-executable', $match['rule'] ?? null);
+        $this->assertStringContainsString('(/entrypoint.sh) is not executable', $match['message'] ?? '');
+        $this->assertStringContainsString('chmod +x', $match['message'] ?? '');
+    }
+
+    public function test_a_permission_denied_that_names_no_file_is_not_an_entrypoint(): void
+    {
+        $match = DeployFailureExplainer::match('exec user process caused: permission denied');
+
+        $this->assertNotSame('container-entrypoint-not-executable', $match['rule'] ?? null);
+    }
+
     /**
      * The same shape with a one-shot exiting non-zero rather than a bad
-     * entrypoint -- Bitpoll (supported-apps#1085), whose init container exits 1.
+     * entrypoint -- Bitpoll, whose init container exits 1.
      */
     public function test_a_one_shot_exit_wins_over_the_benign_local_build_pull(): void
     {
@@ -856,7 +1133,7 @@ OUT;
     /**
      * The local build itself fails, so BuildKit never prints `naming to`.
      * Compose's own `Image <ref> Building` is what says the tag is built here.
-     * Real `docker compose up` output (Compose v5.5.1) from a live deploy.
+     * Real `docker compose up` output (Compose v5.5.1).
      */
     public function test_a_failed_local_build_is_not_a_missing_base_image(): void
     {
@@ -905,7 +1182,7 @@ OUT;
         $this->assertSame('build-step-failed', DeployFailureExplainer::match($output)['rule'] ?? null);
     }
 
-    /** url-to-png (engine#100): the host import says "access denied", the pull says "not found". */
+    /** url-to-png: the host import says "access denied", the pull says "not found". */
     public function test_a_removed_image_is_named_and_reported_as_missing(): void
     {
         $output = <<<'OUT'
@@ -925,7 +1202,7 @@ OUT;
         $this->assertStringNotContainsString('private', $match['message']);
     }
 
-    /** Open Food Network (engine#127): a tag that was never published. */
+    /** Open Food Network: a tag that was never published. */
     public function test_a_tag_that_does_not_exist_names_the_tag(): void
     {
         $output = 'failed to solve: ruby:3.4.8-alpine3.19: failed to resolve source metadata for '
@@ -959,6 +1236,61 @@ OUT;
         $this->assertStringContainsString('refused access', $message);
     }
 
+    /** CoreShop: compose pulled a private ghcr.io image anonymously. */
+    public function test_a_registry_401_names_the_image_and_the_setting(): void
+    {
+        $output = 'time="2026-09-19T17:02:31Z" level=info msg="fetch failed" error="failed to authorize: failed to fetch '
+            . 'anonymous token: unexpected status from GET request to https://ghcr.io/token?scope=repository%3Acors-gmbh'
+            . '%2Fdev-compose%3Apull&service=ghcr.io: 401 Unauthorized" host=ghcr.io method=HEAD '
+            . 'url="https://ghcr.io/v2/cors-gmbh/dev-compose/manifests/pimcore2026.1"' . "\n"
+            . 'failed to pull OCI resource "ghcr.io/cors-gmbh/dev-compose:pimcore2026.1": failed to authorize: '
+            . 'failed to fetch anonymous token: unexpected status: 401 Unauthorized';
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('base-image-unauthorized', $match['rule'] ?? null);
+        $this->assertStringContainsString('ghcr.io/cors-gmbh/dev-compose:pimcore2026.1', $match['message']);
+        $this->assertStringContainsString('registry-auth', $match['message']);
+    }
+
+    public function test_a_registrys_unauthorized_answer_is_read_from_its_manifest_url(): void
+    {
+        $output = 'Error response from daemon: Head "https://registry.example.com/v2/acme/app/manifests/1.2": unauthorized';
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('base-image-unauthorized', $match['rule'] ?? null);
+        $this->assertStringContainsString('registry.example.com/acme/app:1.2', $match['message']);
+    }
+
+    /** A registry with basic auth, as the account's daemon reports an anonymous pull from it. */
+    public function test_a_registry_asking_for_basic_auth_names_the_image(): void
+    {
+        $output = 'Image 127.0.0.1:5000/test/whoami:1 Error failed to resolve reference "127.0.0.1:5000/test/whoami:1": '
+            . 'pull access denied, repository does not exist or may require authorization: authorization failed: '
+            . 'no basic auth credentials';
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('base-image-unauthorized', $match['rule'] ?? null);
+        $this->assertStringContainsString('The image 127.0.0.1:5000/test/whoami:1 could not be downloaded', $match['message']);
+    }
+
+    public function test_docker_hubs_pull_access_denied_stays_ambiguous(): void
+    {
+        $output = 'Error response from daemon: pull access denied for acme/private-base, repository does not exist '
+            . 'or may require \'docker login\': denied: requested access to the resource is denied';
+
+        $this->assertSame('base-image-unavailable', DeployFailureExplainer::match($output)['rule'] ?? null);
+    }
+
+    public function test_a_401_from_something_other_than_a_registry_is_not_taken_for_one(): void
+    {
+        $output = "npm error code E401\nnpm error 401 Unauthorized - GET https://npm.pkg.github.com/@acme%2fui";
+
+        $this->assertNotSame('base-image-unauthorized', DeployFailureExplainer::match($output)['rule'] ?? null);
+    }
+
     public function test_an_unreachable_registry_says_so_and_names_the_image(): void
     {
         $output = 'failed to solve: localhost:5000/base-php:amd64: failed to do request: '
@@ -971,7 +1303,28 @@ OUT;
         $this->assertStringContainsString('could not be reached from this server', $message);
     }
 
-    /** Livebook (engine#143): `FROM ${BASE_IMAGE}` that only its CI fills in. */
+    /**
+     * pelican-dev/panel: BuildKit's plain progress prints the step's own
+     * `#N ERROR: failed to do request` before the `failed to solve` summary,
+     * and the image was named "ERROR".
+     */
+    public function test_buildkits_error_prefix_is_not_taken_for_the_image(): void
+    {
+        $output = '#6 ERROR: failed to do request: Head "https://localhost:5000/v2/base-php/manifests/amd64": '
+            . "dial tcp [::1]:5000: connect: connection refused\n"
+            . "> [internal] load metadata for localhost:5000/base-php:amd64:\n"
+            . "11 | >>> FROM --platform=\$TARGETOS/\$TARGETARCH localhost:5000/base-php:\$TARGETARCH AS composer\n"
+            . 'failed to solve: localhost:5000/base-php:amd64: failed to do request: '
+            . 'Head "https://localhost:5000/v2/base-php/manifests/amd64": '
+            . 'dial tcp [::1]:5000: connect: connection refused';
+
+        $message = (string) DeployFailureExplainer::explain($output);
+
+        $this->assertStringContainsString('The base image localhost:5000/base-php:amd64 could not be downloaded', $message);
+        $this->assertStringNotContainsString('ERROR', $message);
+    }
+
+    /** Livebook: `FROM ${BASE_IMAGE}` that only its CI fills in. */
     public function test_an_unset_build_arg_in_from_is_named(): void
     {
         $output = <<<'OUT'
@@ -989,7 +1342,7 @@ OUT;
         $this->assertStringContainsString('build argument BASE_IMAGE', $match['message']);
     }
 
-    /** Damselfly (engine#133): COPY of `dotnet publish` output nothing in the Dockerfile produces. */
+    /** Damselfly: COPY of `dotnet publish` output nothing in the Dockerfile produces. */
     public function test_a_copy_of_a_path_the_repository_lacks_is_named(): void
     {
         $output = <<<'OUT'
@@ -1007,7 +1360,7 @@ OUT;
     }
 
     /**
-     * qpixel (engine#114) on Debian 11 and flexisip (engine#102) on CentOS 7: the
+     * qpixel on Debian 11 and flexisip on CentOS 7: the
      * release's archive is gone, which the generic exit code never said.
      */
     #[DataProvider('endOfLifeArchiveProvider')]
@@ -1038,7 +1391,7 @@ OUT;
         ];
     }
 
-    /** kibitzr (engine#120): lxml's sdist build names the headers it lacks. */
+    /** kibitzr: lxml's sdist build names the headers it lacks. */
     public function test_lxml_missing_its_headers_is_a_headers_problem(): void
     {
         $output = <<<'OUT'
@@ -1051,7 +1404,7 @@ OUT;
         $this->assertSame('native-library-headers-missing', DeployFailureExplainer::match($output)['rule'] ?? null);
     }
 
-    /** Ghostfolio (engine#161): BuildKit's own wording for a step its cgroup starved. */
+    /** Ghostfolio: BuildKit's own wording for a step its cgroup starved. */
     public function test_buildkits_resource_exhausted_is_out_of_memory(): void
     {
         $output = 'failed to solve: ResourceExhausted: process "/bin/sh -c npm run build:production" '
@@ -1060,7 +1413,7 @@ OUT;
         $this->assertSame('out-of-memory', DeployFailureExplainer::match($output)['rule'] ?? null);
     }
 
-    /** minthcm (engine#111): the account daemon's libnetwork socket was missing. */
+    /** minthcm: the account daemon's libnetwork socket was missing. */
     public function test_a_missing_libnetwork_socket_is_a_server_fault(): void
     {
         $output = <<<'OUT'
@@ -1076,7 +1429,7 @@ OUT;
     }
 
     /**
-     * engine#126: Automad's `npm ci`, verbatim apart from the log path. The
+     * Automad's `npm ci`, verbatim apart from the log path. The
      * ERESOLVE lines are warnings npm resolved; the failure is the lockfile.
      */
     public function test_an_out_of_sync_lockfile_is_not_a_dependency_conflict(): void
@@ -1120,7 +1473,7 @@ OUT;
         $this->assertSame('dependency-conflict', DeployFailureExplainer::match($output)['rule'] ?? null);
     }
 
-    /** Vite's `--debug` config dump prints `createResolver` (Sunshine, engine#148). */
+    /** Vite's `--debug` config dump prints `createResolver` (Sunshine). */
     public function test_a_word_containing_eresolve_is_not_a_dependency_conflict(): void
     {
         $output = "  createResolver: [Function: createResolver],\nStatic build finished but dist/index.html is missing\n";

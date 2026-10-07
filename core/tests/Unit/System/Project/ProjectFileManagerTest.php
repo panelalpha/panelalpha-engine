@@ -193,7 +193,7 @@ class ProjectFileManagerTest extends TestCase
         $this->assertSame('restored', file_get_contents($this->homeDir . '/tar-out/note.txt'));
     }
 
-    /** engine#244: the file manager refused nothing a deploy would refuse. */
+    /** The file manager refused nothing a deploy would refuse. */
     public function test_unzip_refuses_an_archive_that_unpacks_past_the_cap(): void
     {
         $this->requireCommand('tar');

@@ -9,7 +9,7 @@ use Illuminate\Validation\ValidationException;
 use Mockery;
 use Tests\TestCase;
 
-// #48 item 22: the serial number was written without the check LiteSpeed runs.
+// The serial number was written without the check LiteSpeed runs.
 class OpenlitespeedSerialNumberTest extends TestCase
 {
     public function test_a_serial_that_fails_validation_is_never_installed(): void

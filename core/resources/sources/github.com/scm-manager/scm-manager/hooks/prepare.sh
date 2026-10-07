@@ -2,7 +2,7 @@
 # Runs on the account, in ~/project, after the clone and before the build.
 #
 # SCM-Manager keeps ALL state (the H2 db, every hosted repo, config, plugins)
-# under /var/lib/scm, and ~/project is emptied on every deploy (engine#173). So
+# under /var/lib/scm, and ~/project is emptied on every deploy. So
 # the data lives in ~/.panelalpha/scm-manager, the only writable dir the wipe
 # never touches, and the compose override bind-mounts it. The admin login is the
 # engine's (`credentials:` in panelalpha.yaml): SCM_ADMIN_USER /
@@ -17,7 +17,7 @@ chmod 700 "${HOME}/.panelalpha" "$STATE"
 
 # The dockerfile strategy declares env_file: .env and interpolates ${...} in the
 # override from this same file. Writing .env here also stops ProjectEnvironment
-# from copying a repo .env.example over it (engine#218).
+# from copying a repo .env.example over it.
 {
   echo "CONTAINER_UID=$(id -u)"
   echo "SCM_DATA=${DATA}"

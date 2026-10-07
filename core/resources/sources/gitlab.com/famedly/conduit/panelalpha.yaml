@@ -49,7 +49,7 @@ description: >-
   becomes the server admin. Federation is left on (normal for Matrix).
 
   Persistence. The RocksDB at /data is all the state - accounts, rooms,
-  messages, media - and ~/project is wiped every redeploy (engine#173), so it is
+  messages, media - and ~/project is wiped every redeploy, so it is
   bind-mounted to ~/.panelalpha/conduit/data, which the wipe never touches. The
   pinned server_name lives beside it. A redeploy rebuilds the image and reuses
   the volume, so a registered user still logs in and their messages persist.

@@ -28,7 +28,7 @@ STORE="$STORE_DIR/partdb.env"
 # every session by rotating APP_SECRET.
 #
 # Not in .env, and that is not fastidiousness: ProjectEnvironment::apply()
-# copies .env to a world-readable .env.default (engine#173), and the
+# copies .env to a world-readable .env.default, and the
 # Dockerfile's `COPY .env* ./` would bake both into an image layer. The
 # container reads this file as a second env_file instead -- see
 # overrides/docker-compose.override.yml.

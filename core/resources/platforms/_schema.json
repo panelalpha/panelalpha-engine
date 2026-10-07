@@ -58,9 +58,14 @@
       "pattern": "^[^/].*$"
     },
     "port": {
+      "description": "The port the application listens on. Under the compose strategy it is the port the site is routed to, ahead of the port the engine reads from the compose file: that scan never routes an image-named datastore, so a recipe whose application is one (Qdrant, MinIO, CouchDB, Meilisearch) states its port here. The compose file must publish it.",
       "type": "integer",
       "minimum": 1,
       "maximum": 65535
+    },
+    "port_scheme": {
+      "description": "What the application's published port speaks. `https` for an app that serves only TLS on its port (UniFi's 8443, self-signed): the account's generated :80 and :443 proxy rules then reach it over https, without verifying its certificate. Omit it (or `http`) for everything else. Applies to the port the engine routes the domain to, whatever the strategy; kept on the project, so a rename or a later rule sync keeps it, and re-read on every deploy.",
+      "enum": ["http", "https"]
     },
     "build_args": {
       "type": "object",

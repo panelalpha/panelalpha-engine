@@ -11,7 +11,7 @@ description: >-
   WHY COMPOSE-REPLACE ON THE OFFICIAL DOCKER HUB IMAGE. Upstream ships a clean
   multi-arch image on Docker Hub (jensknipper/re-director:0.0.11, the latest
   release), which the engine seeds fine (Docker Hub, not the GHCR case of
-  engine#229). The `dockerfile` strategy is not usable here: the app needs
+  the image-seed NotFound). The `dockerfile` strategy is not usable here: the app needs
   server.port and the /data datastore path from the baked `live` Spring profile
   and a persistent /data, which is a compose concern. The repo's own
   docker/docker-compose.yml is the bare `image + one volume` example; this
@@ -44,7 +44,7 @@ description: >-
 
   PORT. The app listens on 80 (live profile). Published as 8080:80 so the
   engine's port scan takes host port 8080 as the primary (host port 80 is the
-  proxy's own), which for a Spring app must equal the primary (engine#231).
+  proxy's own), which for a Spring app must equal the primary.
 credentials:
   login_path: /login
   adopt_from: .panelalpha/re-director/admin.env

@@ -14,10 +14,8 @@ namespace App\Lib\Ssl;
  * goes dark: no `GET /system/info`, no MCP, no deploys. It looks like a
  * network fault and is a file mismatch.
  *
- * Measured on 2.29.1.58 after a certificate rotation:
- *
- *     server.cert      + server.key      -> MISMATCH   (cert CN=172.31.66.10)
- *     server.cert.bak  + server.key.bak  -> MATCH       (CN=2.29.1.58)
+ * A certificate rotation can leave exactly that: a mismatched
+ * `server.cert` + `server.key`, with the matching pair only in the `.bak` files.
  *
  * `le_install_lineage()` copies a lineage's `fullchain.pem` and `privkey.pem`
  * over those two files and reloads `core`'s nginx. It backs the old pair up

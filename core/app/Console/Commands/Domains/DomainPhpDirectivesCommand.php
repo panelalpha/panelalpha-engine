@@ -2,12 +2,14 @@
 
 namespace App\Console\Commands\Domains;
 
-use App\Console\Commands\Concerns\CallsEngineApi;
+use App\Console\Commands\Concerns\PrintsPhpSettings;
+use App\Models\Domain;
+use App\System;
 use Illuminate\Console\Command;
 
 class DomainPhpDirectivesCommand extends Command
 {
-    use CallsEngineApi;
+    use PrintsPhpSettings;
 
     protected $signature = 'domain:php-directives
         {domain : Canonical domain name}';
@@ -23,35 +25,11 @@ class DomainPhpDirectivesCommand extends Command
             return 1;
         }
 
-        $response = $this->dispatchEngine('GET', "/domains/{$domain}/php-directives");
-        if ($response->getStatusCode() >= 400) {
-            return $this->rejectEngineResponse($response);
-        }
+        $domainModel = Domain::findByNameOrFail($domain);
+        $settings = $domainModel->user->project(app(System::class))->php()->getDomainDirectives($domainModel);
 
-        $this->printDirectiveMap($this->directiveMap($response->getContent()));
+        $this->printDirectiveMap($settings);
 
         return 0;
-    }
-
-    /**
-     * @return array<string, string>
-     */
-    private function directiveMap(string|false $body): array
-    {
-        /** @var mixed $payload */
-        $payload = json_decode(is_string($body) ? $body : '', true);
-        $data = is_array($payload) ? ($payload['data'] ?? []) : [];
-        if (!is_array($data)) {
-            return [];
-        }
-
-        $map = [];
-        foreach ($data as $key => $value) {
-            if (is_string($key) && is_string($value)) {
-                $map[$key] = $value;
-            }
-        }
-
-        return $map;
     }
 }

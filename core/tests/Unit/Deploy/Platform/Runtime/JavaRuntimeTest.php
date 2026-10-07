@@ -179,16 +179,21 @@ class JavaRuntimeTest extends TestCase
      * pipeline *does*, and a test that only greps the string cannot see it.
      *
      * @param array<string, int> $files relative path => size in bytes
+     * @param list<string> $withoutMain jars written with no Main-Class
      */
-    private function jarChosenIn(array $files): string
+    private function jarChosenIn(array $files, array $withoutMain = [], bool $needsFind = true): string
     {
-        $this->requireGnuFind();
+        if ($needsFind) {
+            $this->requireGnuFind();
+        }
         $root = sys_get_temp_dir() . '/java-jar-' . bin2hex(random_bytes(6));
         mkdir($root . '/target', 0o777, true);
         foreach ($files as $path => $size) {
             $full = $root . '/' . $path;
-            mkdir(dirname($full), 0o777, true);
-            file_put_contents($full, str_repeat('x', $size));
+            if (!is_dir(dirname($full))) {
+                mkdir(dirname($full), 0o777, true);
+            }
+            $this->writeJar($full, $size, !in_array($path, $withoutMain, true));
         }
 
         $command = str_replace(
@@ -205,6 +210,48 @@ class JavaRuntimeTest extends TestCase
         // The refusal path prints its one-line message and exits 1, so a
         // non-zero status is "it would not start anything" rather than a jar.
         return $process->isSuccessful() ? $output : '';
+    }
+
+    /** A real jar, stored uncompressed so its size on disk follows $size. */
+    private function writeJar(string $path, int $size, bool $main): void
+    {
+        $zip = new \ZipArchive();
+        $zip->open($path, \ZipArchive::CREATE | \ZipArchive::OVERWRITE);
+        $zip->addFromString('META-INF/MANIFEST.MF', "Manifest-Version: 1.0\r\n" . ($main ? "Main-Class: app.Main\r\n" : ''));
+        $zip->addFromString('payload.bin', str_repeat('x', $size));
+        $zip->setCompressionName('payload.bin', \ZipArchive::CM_STORE);
+        $zip->close();
+    }
+
+    /**
+     * CommaFeed: the React client is packaged as a 4 MB webjar with no
+     * Main-Class, the Quarkus server as a 694-byte launcher. The webjar ran and
+     * the container crash-looped on "no main manifest attribute".
+     */
+    public function test_a_quarkus_fast_jar_launcher_is_started(): void
+    {
+        $this->assertSame('commafeed-server/target/quarkus-app/quarkus-run.jar', $this->jarChosenIn([
+            'commafeed-client/target/commafeed-client-7.3.2.jar' => 4000000,
+            'commafeed-server/target/quarkus-app/quarkus-run.jar' => 694,
+            'commafeed-server/target/quarkus-app/lib/main/io.quarkus.quarkus-core.jar' => 900000,
+        ], ['commafeed-client/target/commafeed-client-7.3.2.jar'], false));
+    }
+
+    public function test_a_jar_without_a_main_class_is_passed_over(): void
+    {
+        $this->assertSame('target/app.jar', $this->jarChosenIn([
+            'target/app-webjar.jar' => 400000,
+            'target/app.jar' => 40000,
+        ], ['target/app-webjar.jar'], false));
+    }
+
+    /** The reactor fallback, too: shallowest first, but only a runnable one. */
+    public function test_a_module_jar_without_a_main_class_is_passed_over(): void
+    {
+        $this->assertSame('./server/target/server.jar', $this->jarChosenIn([
+            'client/target/client.jar' => 400000,
+            'server/target/server.jar' => 40000,
+        ], ['client/target/client.jar']));
     }
 
     public function test_a_build_that_produced_no_jar_says_so_rather_than_starting_nothing(): void

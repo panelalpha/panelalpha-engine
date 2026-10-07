@@ -213,7 +213,7 @@ services:
     # SOLIDINVOICE_DOCKER=true, and serverconfig.BuildServerName then makes the
     # Caddy site address `http://:8765` -- a port with no hostname, which
     # matches any Host. That is what lets the engine's health probe reach it on
-    # 127.0.0.1:8765 without a 400 (engine#165).
+    # 127.0.0.1:8765 without a 400.
     ports:
       - "8765:8765"
     environment:

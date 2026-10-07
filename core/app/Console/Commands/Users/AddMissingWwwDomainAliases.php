@@ -24,6 +24,7 @@ class AddMissingWwwDomainAliases extends ProjectFleetCommand
 
     protected function applyTo(User $user): void
     {
+        $taken = [];
         foreach ($user->domains as $domain) {
             $this->info("  Checking domain {$domain->domain}...");
             $skip = $this->reasonToSkip($domain);
@@ -32,11 +33,22 @@ class AddMissingWwwDomainAliases extends ProjectFleetCommand
                 continue;
             }
 
+            // Refused as PUT .../domains/{domain} refuses it; the other domains still get theirs.
+            $holder = $this->takenBy($domain);
+            if ($holder !== null) {
+                $taken[] = "  www.{$domain->domain} is already on this engine ({$holder}), not added.";
+                continue;
+            }
+
             $this->info('    Adding www. alias and rebuilding domain...');
             $domain->addAlias('www.' . $domain->domain);
             $domain->projectDomain()->rebuild();
             $domain->save();
             $this->info('    Domain rebuilt.');
+        }
+
+        if ($taken !== []) {
+            throw new \RuntimeException(implode("\n", $taken));
         }
     }
 
@@ -53,16 +65,26 @@ class AddMissingWwwDomainAliases extends ProjectFleetCommand
             return 'It already has www. alias, skipping.';
         }
 
-        $found = $domain->findOtherDomainByNameOrAlias($alias);
-        if (!$found) {
+        return null;
+    }
+
+    /** What already holds this domain's www. name, as the API's alias check sees it, or null when it is free. */
+    private function takenBy(Domain $domain): ?string
+    {
+        $alias = 'www.' . $domain->domain;
+        if ($domain->isAliasAvailable($alias)) {
             return null;
         }
 
+        $found = $domain->findOtherDomainByNameOrAlias($alias);
+        if ($found === null) {
+            return 'a tunnel hostname';
+        }
         $owner = $found->getUser()->username;
 
         return $found->domain === $alias
-            ? "It already exists as {$found->type} domain under user {$owner}, skipping."
-            : "It already exists as alias of {$found->domain} domain under user {$owner}, skipping.";
+            ? "{$found->type} domain of project {$owner}"
+            : "alias of {$found->domain}, project {$owner}";
     }
 
     protected function afterAll(): void

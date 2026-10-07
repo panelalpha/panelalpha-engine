@@ -2,7 +2,7 @@
 # (not the .override.yml) is what makes this a compose project: the app config is
 # applied before detection, the compose platform outranks the walk match, and no
 # platform block is declared, so ComposePlaceholders rewrites PA_PUBLIC_URL below
-# from localhost to the account's public https URL and engine#221 never applies.
+# from localhost to the account's public https URL and the fromSource platform-declaration trap never applies.
 # The app image is PieFed's own Dockerfile, built from the clone. Both build
 # services mount only named volumes (no ./ bind), so ComposeUsableProbe does not
 # read this as a workstation stack and fall back to the dockerfile strategy.
@@ -77,11 +77,13 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    # .env carries the account-overridable tunables; app.env carries SECRET_KEY,
-    # DATABASE_URL (with the db password) and the seeded admin's credentials.
+    # .env carries the account-overridable tunables; app.env carries SECRET_KEY
+    # and DATABASE_URL (with the db password); app-credentials.env is the seeded
+    # admin's login, which the engine generates (`credentials:`).
     env_file:
       - .env
       - ../.panelalpha/pyfedi/app.env
+      - ../.panelalpha/app-credentials.env
     environment:
       # Rewritten to the account's public https URL before the stack starts (key
       # ends in _URL, value is a bare localhost). The script strips the scheme
@@ -130,7 +132,7 @@ services:
     mem_limit: 1536m
 
   # Starts nothing, exits 0, waits on the app's healthcheck. The engine runs
-  # `docker compose up -d` without --wait (engine#204), so without this gate the
+  # `docker compose up -d` without --wait, so without this gate the
   # deploy is "done" the moment containers start and the probe lands while
   # gunicorn is still booting. A clean exit 0 is not a crash loop to AppHealth.
   ready:

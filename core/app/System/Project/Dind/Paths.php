@@ -165,7 +165,12 @@ final class Paths
     private function clientOverrideIn(string $appDir): ?string
     {
         $fs = $this->project->system()->filesystem();
-        foreach ([EngineArtifacts::RUN_CLIENT_OVERRIDE, self::CLIENT_OVERRIDE_FILENAME] as $name) {
+        // Under an app config's replacing compose file only the copy counts:
+        // the deploy leaves none when the override is the repository's own.
+        $names = $fs->fileExists($appDir . '/' . EngineArtifacts::APP_CONFIG_COMPOSE)
+            ? [EngineArtifacts::RUN_CLIENT_OVERRIDE]
+            : [EngineArtifacts::RUN_CLIENT_OVERRIDE, self::CLIENT_OVERRIDE_FILENAME];
+        foreach ($names as $name) {
             if ($fs->fileExists($appDir . '/' . $name)) {
                 return $appDir . '/' . $name;
             }
@@ -191,12 +196,7 @@ final class Paths
      */
     public function composeCommand(array $rest): array
     {
-        $command = [
-            'docker',
-            'compose',
-            '--project-directory',
-            $this->appDir(),
-        ];
+        $command = $this->composePrefix($this->appDir());
         foreach ($this->composeFiles() as $file) {
             $command[] = '-f';
             $command[] = $file;
@@ -206,18 +206,68 @@ final class Paths
     }
 
     /**
+     * `docker exec` sets no PWD, so a `${PWD}/data` bind interpolated to
+     * `/data`; compose run by hand from the project has it as the project.
+     *
+     * @return list<string>
+     */
+    private function composePrefix(string $appDir): array
+    {
+        $command = ['env', 'PWD=' . $appDir, 'docker', 'compose', '--project-directory', $appDir];
+        foreach ($this->envFiles($appDir) as $file) {
+            $command[] = '--env-file';
+            $command[] = $file;
+        }
+
+        return $command;
+    }
+
+    /**
+     * The files compose interpolates from, when the engine keeps values in
+     * `.env.panelalpha` (generated secrets, a tracked .env's overrides). Naming
+     * any env file replaces the default `.env`, so it is named too. Empty when
+     * there is no `.env.panelalpha`: compose's own default then applies.
+     *
+     * @return list<string>
+     */
+    public function envFiles(?string $appDir = null): array
+    {
+        $appDir = rtrim($appDir ?? $this->appDir(), '/');
+        $fs = $this->project->system()->filesystem();
+        if (!$fs->fileExists($appDir . '/' . EngineArtifacts::ENV_OVERRIDES)) {
+            return [];
+        }
+
+        $files = [];
+        foreach (['.env', EngineArtifacts::ENV_OVERRIDES] as $name) {
+            // Compose refuses a named env file that does not exist.
+            if ($fs->fileExists($appDir . '/' . $name)) {
+                $files[] = $appDir . '/' . $name;
+            }
+        }
+
+        return $files;
+    }
+
+    /**
      * {@see composeCommand()} as environment, for scripts that call a bare
      * `docker compose`: with the first file in appDir(), compose derives the
      * same project directory and name the deploy used.
      *
-     * @return array{COMPOSE_FILE: string, COMPOSE_PATH_SEPARATOR: string}
+     * @return array<string, string> COMPOSE_FILE, COMPOSE_PATH_SEPARATOR and, with {@see envFiles()}, COMPOSE_ENV_FILES
      */
     public function composeEnv(): array
     {
-        return [
+        $env = [
             'COMPOSE_FILE' => implode(':', $this->composeFiles()),
             'COMPOSE_PATH_SEPARATOR' => ':',
         ];
+        $envFiles = $this->envFiles();
+        if ($envFiles !== []) {
+            $env['COMPOSE_ENV_FILES'] = implode(',', $envFiles);
+        }
+
+        return $env;
     }
 
     /**
@@ -227,12 +277,7 @@ final class Paths
     {
         $appDir = rtrim($appDir, '/');
         $files = $this->composeFilesIn($appDir);
-        $command = [
-            'docker',
-            'compose',
-            '--project-directory',
-            $appDir,
-        ];
+        $command = $this->composePrefix($appDir);
         foreach ($files as $file) {
             $command[] = '-f';
             $command[] = $file;

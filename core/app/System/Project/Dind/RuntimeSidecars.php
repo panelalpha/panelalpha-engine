@@ -5,6 +5,7 @@ namespace App\System\Project\Dind;
 use App\System\Project\Dind as DindProject;
 use App\Lib\Deploy\Compose\ComposeHarden;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
+use App\Lib\Deploy\Compose\RuntimeSidecars as ComposeSidecars;
 use App\Lib\Deploy\Compose\GeneratedCompose;
 use App\Lib\Deploy\Compose\ServiceDependencies;
 use App\Lib\Deploy\Sidecar\EnvSidecars;
@@ -65,11 +66,29 @@ class RuntimeSidecars
                 $this->projectIdentity(),
                 $this->accountMemoryMb(),
                 $this->placeholderSeed(),
-                $this->passwords()
+                $this->passwords(),
+                $this->dind->environment()->forInterpolation(),
+                $this->dind->userModel()->username,
+                $this->dind->userAppDirPath()
             );
-            if ($extracted['services'] !== []) {
-                $names = implode(', ', array_keys($extracted['services']));
-                $this->dind->shell()->logger()?->info("Keeping runtime services from compose: {$names}");
+            $this->logDroppedProxies($extracted);
+            $this->logDroppedTestServices($extracted, $candidate);
+            // Every service it kept was a test suite: still the app's own
+            // settings, as when the suite was kept (Zerobyte's APP_SECRET).
+            $suiteOnly = $extracted['services'] === [] && self::droppedATestSuite($extracted);
+            if ($extracted['services'] !== [] || $suiteOnly) {
+                if ($extracted['services'] !== []) {
+                    $names = implode(', ', array_keys($extracted['services']));
+                    $this->dind->shell()->logger()?->info("Keeping runtime services from compose: {$names}");
+                }
+                foreach ($extracted['dropped_mounts'] ?? [] as $mount) {
+                    $this->dind->shell()->logger()?->info("Dropped the bind {$mount}: installed dependencies are not in a deployment's checkout");
+                }
+                $this->warnOfPublishedSecrets($extracted['published_secrets'] ?? []);
+                foreach ($extracted['replaced_mounts'] ?? [] as $mount) {
+                    $this->dind->shell()->logger()?->info("Moved the datastore bind {$mount} to a named volume: its data does not belong in the checkout");
+                }
+                $this->logHardeningRemovals($extracted);
 
                 return $extracted;
             }
@@ -107,6 +126,7 @@ class RuntimeSidecars
      */
     private function fromTemplates(string $projectDir, array $candidates, string $note = ''): ?array
     {
+        $rootBuildNames = $this->rootBuildNames($projectDir);
         foreach ($candidates as $candidate) {
             $raw = $this->dind->projectTree()->read($projectDir . '/' . $candidate);
             if ($raw === null) {
@@ -119,19 +139,101 @@ class RuntimeSidecars
                 $this->projectIdentity(),
                 $this->accountMemoryMb(),
                 $this->placeholderSeed(),
-                $this->passwords()
+                $this->passwords(),
+                $this->dind->environment()->forInterpolation(),
+                $this->dind->userModel()->username,
+                $this->dind->userAppDirPath(),
+                $rootBuildNames
             );
+            $this->logDroppedProxies($extracted);
+            $this->logDroppedTestServices($extracted, $candidate);
             if ($extracted['services'] !== []) {
                 $names = implode(', ', array_keys($extracted['services']));
                 $this->dind->shell()->logger()?->info(
                     "Adding backing services described in {$candidate}{$note}: {$names}"
                 );
+                $this->warnOfPublishedSecrets($extracted['published_secrets'] ?? []);
+                $this->logHardeningRemovals($extracted);
 
                 return $extracted;
             }
         }
 
         return null;
+    }
+
+    /**
+     * A secret-like variable harvested with its literal value still tells
+     * every deploy of this repository the same thing an attacker can already
+     * read from it.
+     *
+     * @param array<string, list<string>> $byService
+     */
+    private function warnOfPublishedSecrets(array $byService): void
+    {
+        foreach ($byService as $service => $keys) {
+            $vars = implode(', ', $keys);
+            $this->dind->shell()->logger()?->warn(
+                "Compose service {$service} sets {$vars} to a literal value: it is published in the repository and shared by every deploy of it"
+            );
+        }
+    }
+
+    /**
+     * @param array{dropped_proxies?: list<string>} $extracted
+     */
+    private function logDroppedProxies(array $extracted): void
+    {
+        foreach ($extracted['dropped_proxies'] ?? [] as $proxy) {
+            $this->dind->shell()->logger()?->info("Dropped service {$proxy}: the engine's proxy routes traffic to this app");
+        }
+    }
+
+    /**
+     * @param array{dropped_test_services?: list<string>, dropped_test_matrix?: array{engines: int, databases?: list<string>, services: list<string>}|null} $extracted
+     */
+    private static function droppedATestSuite(array $extracted): bool
+    {
+        return ($extracted['dropped_test_services'] ?? []) !== [] || ($extracted['dropped_test_matrix'] ?? null) !== null;
+    }
+
+    /**
+     * @param array{dropped_test_services?: list<string>, dropped_test_matrix?: array{engines: int, databases?: list<string>, services: list<string>}|null} $extracted
+     */
+    private function logDroppedTestServices(array $extracted, string $file): void
+    {
+        $names = $extracted['dropped_test_services'] ?? [];
+        if ($names !== []) {
+            $this->dind->shell()->logger()?->info('Dropped test-suite services: ' . implode(', ', $names));
+        }
+        $matrix = $extracted['dropped_test_matrix'] ?? null;
+        if ($matrix !== null) {
+            $this->dind->shell()->logger()?->info(self::droppedTestMatrixLine($matrix, $file));
+        }
+    }
+
+    /**
+     * The count is of the databases listed; what went with them is listed apart.
+     *
+     * @param array{engines: int, databases?: list<string>, services: list<string>} $matrix
+     */
+    public static function droppedTestMatrixLine(array $matrix, string $file): string
+    {
+        $databases = $matrix['databases'] ?? $matrix['services'];
+        $others = array_values(array_diff($matrix['services'], $databases));
+        $line = "Dropped a test matrix from {$file} (" . count($databases) . ' SQL engines, none configured): ' . implode(', ', $databases);
+
+        return $others === [] ? $line : $line . '; with them: ' . implode(', ', $others);
+    }
+
+    /**
+     * @param array{hardening_removed?: list<string>} $extracted
+     */
+    private function logHardeningRemovals(array $extracted): void
+    {
+        foreach ($extracted['hardening_removed'] ?? [] as $what) {
+            $this->dind->shell()->logger()?->warn(ComposeHarden::REMOVED_SOURCE . ": {$what}");
+        }
     }
 
     /**
@@ -252,16 +354,63 @@ class RuntimeSidecars
             $decision['app_aliases'] = $sidecars['app_aliases'];
         }
         if ($sidecars['services'] === []) {
+            // Only a file whose kept services were all a test suite gets here
+            // with app env; it ranks below what the strategy generates, as below.
+            if (($sidecars['app_env'] ?? []) !== []) {
+                $decision['env'] = array_merge($sidecars['app_env'], $decision['env'] ?? []);
+            }
+
             return $decision;
         }
         $decision['sidecars'] = array_merge($sidecars['services'], $decision['sidecars'] ?? []);
         $decision['volumes'] = array_merge($sidecars['volumes'], $decision['volumes'] ?? []);
         // Harvested app env < what the strategy generates < sidecar connection
         // env; the account's env_vars go on top later, in composeDecision().
+        $generated = $decision['env'] ?? [];
         $decision['env'] = array_merge($sidecars['app_env'] ?? [], $decision['env'] ?? [], $sidecars['env']);
+        // Except a connection URL the app's own service declared for a kept
+        // sidecar with the credentials it runs with: it carries the driver the
+        // app ships (CTFd's mysql+pymysql://), which the generic one drops.
+        foreach (self::urlsToKeptSidecars($sidecars['app_env'] ?? [], array_keys($sidecars['services'])) as $key => $url) {
+            if (isset($sidecars['env'][$key]) && !isset($generated[$key])
+                && self::sameCredentials($url, $sidecars['env'][$key])
+            ) {
+                $decision['env'][$key] = $url;
+            }
+        }
         $decision['depends_on'] = array_keys($sidecars['services']);
 
         return $decision;
+    }
+
+    private static function sameCredentials(string $a, string $b): bool
+    {
+        foreach ([PHP_URL_USER, PHP_URL_PASS] as $part) {
+            if (rawurldecode((string) parse_url($a, $part)) !== rawurldecode((string) parse_url($b, $part))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * @param array<string, string> $env
+     * @param list<int|string> $services
+     * @return array<string, string>
+     */
+    private static function urlsToKeptSidecars(array $env, array $services): array
+    {
+        $names = array_map(static fn ($name): string => strtolower((string) $name), $services);
+        $urls = [];
+        foreach ($env as $key => $value) {
+            $host = str_contains($value, '://') ? parse_url($value, PHP_URL_HOST) : null;
+            if (is_string($host) && in_array(strtolower($host), $names, true)) {
+                $urls[(string) $key] = $value;
+            }
+        }
+
+        return $urls;
     }
 
     /**
@@ -290,7 +439,7 @@ class RuntimeSidecars
     }
 
     /**
-     * The password a database sidecar gets when nobody set one (engine#189):
+     * The password a database sidecar gets when nobody set one:
      * per account, unless the account's databases were initialised under the
      * old `app` and would lock the app out if it changed. Decided on the
      * first deploy that asks and stored with the account.
@@ -357,6 +506,26 @@ class RuntimeSidecars
         $repoUrl = (string) $this->dind->userModel()->getGitRepo();
 
         return $repoUrl === '' ? null : GitUrl::ownerAndRepo($repoUrl);
+    }
+
+    /**
+     * What the repository's compose files call the app they build from its
+     * root, so a template naming it is not started beside our build without
+     * a repository URL to match (an archive or upload deploy).
+     *
+     * @return list<string>
+     */
+    private function rootBuildNames(string $projectDir): array
+    {
+        $names = [];
+        foreach (array_unique([...Paths::composeFileCandidates(), ...self::exampleComposeFilenames($projectDir)]) as $candidate) {
+            $raw = $this->dind->projectTree()->read($projectDir . '/' . $candidate);
+            if ($raw !== null) {
+                $names = [...$names, ...ComposeSidecars::rootBuildServiceNames($raw)];
+            }
+        }
+
+        return array_values(array_unique($names));
     }
 
     /**

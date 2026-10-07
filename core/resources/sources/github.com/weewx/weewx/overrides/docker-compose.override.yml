@@ -11,7 +11,7 @@ services:
       retries: 45
       start_period: 10s
     # weewxd prints every LOOP packet (upstream's StdPrint); the account's
-    # dockerd does not rotate logs (engine#24).
+    # dockerd does not rotate logs.
     logging:
       driver: json-file
       options:

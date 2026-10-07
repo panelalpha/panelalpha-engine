@@ -15,7 +15,7 @@ description: >-
   swagger docs, then `rake assets:precompile` against a nulldb adapter, all at
   build time) that yields a Puma server on :3000 serving its own precompiled
   assets (RAILS_SERVE_STATIC_FILES=true). This recipe builds that Dockerfile
-  locally in DinD, which also sidesteps engine#229 (image-seeding NotFound): the
+  locally in DinD, which also sidesteps the image-seeding NotFound: the
   app image carries `build:` plus a local tag, and imageRefs recognises a
   same-file-built tag and never asks a registry for it.
 
@@ -29,7 +29,7 @@ description: >-
   only (bind-mounted source, a mailcatcher, no persisted data), so this override
   supplies the real stack: mariadb:11 and redis:7 on named volumes, a one-shot
   `init` that loads the schema and seeds the admin before the app is allowed to
-  answer, web/worker/cron on the built image, and a `ready` gate (engine#204) so
+  answer, web/worker/cron on the built image, and a `ready` gate so
   the deploy turns green only once the site actually answers.
 
   CONFIG. The built image already contains a working config/app_config.yml (from

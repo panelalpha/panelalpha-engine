@@ -3,8 +3,8 @@ description: >-
   Open Source Point of Sale (CodeIgniter 4, PHP 8.2 + Apache) with MariaDB.
   Deployed from source the engine picks the repository's Dockerfile over its
   compose file and builds the final stage, ospos_dev, which runs
-  `adduser --uid $USERID` with no USERID build arg and fails (exit 51,
-  engine#412). This recipe does what upstream's docker-compose.yml does,
+  `adduser --uid $USERID` with no USERID build arg and fails (exit 51).
+  This recipe does what upstream's docker-compose.yml does,
   running the official jekkos/opensourcepos image of the current release,
   3.4.2, with MariaDB (10.11 LTS rather than the file's end-of-life 10.5).
   Instead of the file's fixed database passwords the prepare hook generates

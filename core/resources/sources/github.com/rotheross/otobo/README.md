@@ -10,7 +10,7 @@ Help desk / ITSM ticketing system.
   `rotheross/otobo-elasticsearch:rel-11_0_18` (512 MB heap),
   `mariadb:11.8` with upstream's server flags and `redis:8-bookworm`, plus a
   `ready` gate on the web container's `/robots.txt` health check.
-  `cap_drop`/`cap_add` are removed (engine#349 would keep only the drop).
+  `cap_drop`/`cap_add` are removed (the engine would keep only the drop).
 - `hooks/prepare.sh` generates the MariaDB root password once into
   `~/.panelalpha/otobo/db.env`.
 - Volumes: `opt_otobo` (`/opt/otobo`: the installation and its config),

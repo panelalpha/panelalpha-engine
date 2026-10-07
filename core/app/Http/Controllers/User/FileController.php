@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\User;
 
+use App\Exceptions\NotFoundException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\FileExistsRequest;
 use App\Http\Requests\FileRemoveRequest;
@@ -17,12 +18,12 @@ use App\Http\Requests\Files\StatRequest;
 use App\Http\Requests\Files\UploadRequest;
 use App\Http\Requests\Files\ZipRequest;
 use App\System as EngineSystem;
-use App\Lib\Helpers\FileStreamWrapper;
+use App\Lib\Project\ProjectFiles;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\UploadedFile;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
-use Illuminate\Support\Facades\Log;
+use Symfony\Component\HttpFoundation\File\Exception\FileNotFoundException;
 use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 
@@ -43,7 +44,7 @@ class FileController extends Controller
             )),
         ],
     )]
-    public function exists(string $username, FileExistsRequest $request): JsonResponse
+    public function exists(string $username, FileExistsRequest $request, EngineSystem $system): JsonResponse
     {
         $user = $this->projectOr404($username);
 
@@ -51,9 +52,9 @@ class FileController extends Controller
          * @var array{path: string}
          */
         $params = $request->validated();
-        $path = $user->project()->resolvePath($params['path']);
+        $path = $user->project($system)->resolvePath($params['path']);
 
-        $fileMan = $user->project()->fileManager();
+        $fileMan = $user->project($system)->fileManager();
         try {
             $exists = $fileMan->exists($path);
         } catch (\Exception $e) {
@@ -96,26 +97,20 @@ class FileController extends Controller
          */
         $params = $request->validated();
         $path = $user->project($system)->resolvePath($params['path']);
-        if (!file_exists($path)) {
-            return new JsonResponse([
-                'message' => 'Invalid path',
-            ], 404);
-        }
-
-        // Otherwise rm answers a bare "Is a directory" with a 400.
-        if (empty($params['recursive']) && is_dir($path) && !is_link(rtrim($path, '/'))) {
-            throw ValidationException::withMessages([
-                'recursive' => 'The path is a directory. Set recursive to true to delete it and everything in it.',
-            ]);
-        }
 
         $fileMan = $user->project($system)->fileManager();
 
         try {
             $fileMan->remove($path, !empty($params['recursive']));
             if (basename($path) === '.htaccess') {
-                $this->handleHtaccess($path);
+                ProjectFiles::htaccessChanged($path);
             }
+        } catch (NotFoundException) {
+            return new JsonResponse([
+                'message' => 'Invalid path',
+            ], 404);
+        } catch (ValidationException $e) {
+            throw $e;
         } catch (\Exception $e) {
             return new JsonResponse([
                 'message' => $e->getMessage(),
@@ -447,10 +442,10 @@ class FileController extends Controller
         try {
             $fileMan->mv($sourcePath, $destPath);
             if (basename($sourcePath) === '.htaccess') {
-                $this->handleHtaccess($sourcePath);
+                ProjectFiles::htaccessChanged($sourcePath);
             }
             if (basename($destPath) === '.htaccess') {
-                $this->handleHtaccess($destPath);
+                ProjectFiles::htaccessChanged($destPath);
             }
         } catch (\Exception $e) {
             return new JsonResponse([
@@ -498,7 +493,7 @@ class FileController extends Controller
         try {
             $fileMan->cp($sourcePath, $destPath);
             if (basename($destPath) === '.htaccess') {
-                $this->handleHtaccess($destPath);
+                ProjectFiles::htaccessChanged($destPath);
             }
         } catch (\Exception $e) {
             return new JsonResponse([
@@ -532,7 +527,7 @@ class FileController extends Controller
             )),
         ],
     )]
-    public function stat(string $username, StatRequest $request): JsonResponse
+    public function stat(string $username, StatRequest $request, EngineSystem $system): JsonResponse
     {
         $user = $this->projectOr404($username);
 
@@ -542,16 +537,15 @@ class FileController extends Controller
          * }
          */
         $params = $request->validated();
-        $path = $user->project()->resolvePath($params['path']);
-        if (!file_exists($path)) {
+        $path = $user->project($system)->resolvePath($params['path']);
+
+        $fileMan = $user->project($system)->fileManager();
+        try {
+            $result = $fileMan->stat($path);
+        } catch (NotFoundException) {
             return new JsonResponse([
                 'message' => 'Invalid path',
             ], 404);
-        }
-
-        $fileMan = $user->project()->fileManager();
-        try {
-            $result = $fileMan->stat($path);
         } catch (\Exception $e) {
             return new JsonResponse([
                 'message' => $e->getMessage(),
@@ -598,12 +592,8 @@ class FileController extends Controller
         $path = $user->project()->resolvePath($params['path']);
         /** @var \Illuminate\Http\UploadedFile */
         $file = $request->file('file');
-        $fileMan = $user->project()->fileManager();
         try {
-            $fileMan->moveUploadedFile($path, $file);
-            if ($file->getClientOriginalName() === '.htaccess') {
-                $this->handleHtaccess($path);
-            }
+            ProjectFiles::upload($user, $path, $file);
         } catch (\Exception $e) {
             return new JsonResponse([
                 'message' => $e->getMessage(),
@@ -632,7 +622,7 @@ class FileController extends Controller
     /**
      * @return BinaryFileResponse|JsonResponse
      */
-    public function download(string $username, DownloadRequest $request)
+    public function download(string $username, DownloadRequest $request, EngineSystem $system)
     {
         $user = $this->projectOr404($username);
 
@@ -642,22 +632,24 @@ class FileController extends Controller
          * }
          */
         $params = $request->validated();
-        $path = $user->project()->resolvePath($params['path']);
+        $path = $user->project($system)->resolvePath($params['path']);
 
-        $system = new EngineSystem();
-        if (!$system->filesystem()->fileExists($path)) {
+        $source = ProjectFiles::readablePath($user, $path, $system);
+        if ($source === null) {
             return new JsonResponse([
                 'message' => 'Invalid path',
             ], 404);
         }
 
-        FileStreamWrapper::register();
-        // The path is confined as a string only; the read runs as root and
-        // follows symlinks, so the helper re-checks the resolved file.
-        FileStreamWrapper::confineTo($user->project()->homeDirPath());
-
-        /** @var BinaryFileResponse */
-        return response()->download('sudophp://' . $path);
+        try {
+            /** @var BinaryFileResponse */
+            return response()->download($source);
+        } catch (FileNotFoundException) {
+            // `test -f` follows a symlink out of the home; the wrapper refuses it.
+            return new JsonResponse([
+                'message' => 'Invalid path',
+            ], 404);
+        }
     }
 
     #[OA\Put(
@@ -694,7 +686,7 @@ class FileController extends Controller
         try {
             $fileMan->putContents($path, $params['contents']);
             if (basename($path) === '.htaccess') {
-                $this->handleHtaccess($path);
+                ProjectFiles::htaccessChanged($path);
             }
         } catch (\Exception $e) {
             return new JsonResponse([
@@ -705,18 +697,6 @@ class FileController extends Controller
         return new JsonResponse([
             'success' => true,
         ]);
-    }
-
-    private function handleHtaccess(string $path): void
-    {
-        try {
-            $system = new EngineSystem();
-            if ($system->webserver()->getCurrentWebserver() === 'openlitespeed') {
-                $system->webserver()->scheduleWebserverReloadInBackground();
-            }
-        } catch (\Exception $e) {
-            Log::warning('Failed to schedule OpenLiteSpeed reload after .htaccess change', ['path' => $path, 'error' => $e->getMessage()]);
-        }
     }
 
 }

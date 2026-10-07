@@ -3,7 +3,7 @@ description: >-
   Nutify, a web dashboard for UPS monitoring on top of NUT (Flask +
   Socket.IO, SQLite, on :5050). The repository's docker-compose.yaml runs
   dartsteven/nutify:latest-amd64 with cap_drop ALL plus a cap_add list; the
-  engine keeps the drop and strips the add (engine#349), so the entrypoint
+  engine keeps the drop and strips the add, so the entrypoint
   cannot chown /etc/nut or write its settings file and the container
   crash-loops. It also binds /dev/bus/usb and /run/udev and keeps its state
   in ./Nutify inside ~/project, which every deploy wipes.

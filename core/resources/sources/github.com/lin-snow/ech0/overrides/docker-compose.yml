@@ -29,7 +29,7 @@ services:
     volumes:
       - ech0-data:/app/data
     # The binary EXPOSEs and listens on 6277; publish it so the port scan takes
-    # it as the primary (engine#231/#234). No other service publishes a port.
+    # it as the primary. No other service publishes a port.
     ports:
       - "6277:6277"
     healthcheck:
@@ -93,7 +93,7 @@ services:
   # SUCCESSFULLY. `docker compose up -d` blocks on a service_completed_successfully
   # dependency and errors if it failed, so this makes the engine's deploy return
   # only once Ech0 answers AND the Owner is seeded, and turns a failed seed into
-  # a failed deploy (engine#204).
+  # a failed deploy.
   ready:
     image: docker.io/library/alpine:3
     entrypoint: ["/bin/sh", "-c", "exit 0"]

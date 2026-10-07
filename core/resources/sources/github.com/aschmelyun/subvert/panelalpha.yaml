@@ -14,7 +14,7 @@ description: >-
 
   OPENAI_API_KEY is the customer's own key, set in the project's environment
   variables. A one-shot `check` service fails the deploy with a message naming
-  it when it is missing (read from .env, not interpolated: engine#336 would
+  it when it is missing (read from .env, not interpolated: the engine would
   generate a value for a *_KEY variable). APP_DEBUG is off (upstream's
   .env.example has it on) so an error page does not print the key; the built
   Vite assets are linked by relative path, so they load over https as is.

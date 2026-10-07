@@ -2,6 +2,9 @@
 
 namespace App\Console\Commands\Git;
 
+use App\Http\Requests\Git\GitChangeBranchRequest;
+use App\Lib\Git\GitActions;
+use App\Models\User;
 use Illuminate\Console\Command;
 
 class GitChangeBranchCommand extends Command
@@ -10,7 +13,7 @@ class GitChangeBranchCommand extends Command
 
     protected $signature = 'git:change-branch
                             {username : Project username}
-                            {--path= : Directory path inside the project (defaults to project (DinD) or public_html (FPM/LiteSpeed))}
+                            {--path= : Directory path inside the project (defaults to project (DinD) or the document root of the main domain (FPM/LiteSpeed))}
                             {--branch= : Branch to switch to}';
 
     protected $description = 'Change the tracked git branch';
@@ -26,9 +29,9 @@ class GitChangeBranchCommand extends Command
             return 1;
         }
 
-        return $this->dispatchGit('PUT', '/git/change-branch', [
+        return $this->runGit(GitChangeBranchRequest::class, [
             'path' => $path,
             'branch' => $branch,
-        ]);
+        ], fn (User $user, array $params) => app(GitActions::class)->changeBranch($user, $params));
     }
 }

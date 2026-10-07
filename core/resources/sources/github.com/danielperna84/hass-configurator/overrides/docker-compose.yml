@@ -33,7 +33,7 @@ services:
       start_period: 3s
     mem_limit: 256m
 
-  # `up -d` runs without --wait (engine#204); this blocks it until the app listens.
+  # `up -d` runs without --wait; this blocks it until the app listens.
   ready:
     # The Dockerfile's own base, already present after the build.
     image: python:3-alpine

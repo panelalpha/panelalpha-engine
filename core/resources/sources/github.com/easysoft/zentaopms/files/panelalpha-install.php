@@ -47,7 +47,7 @@ if (PHP_SAPI !== 'cli') {
 // Anything PHP has to say goes to stderr. `check` and `version` print shell
 // assignments that the caller eval's, and a warning on stdout would be eval'd
 // with them -- a message containing an apostrophe becomes an unterminated
-// string in the calling shell rather than a readable failure. #185 leaves the
+// string in the calling shell rather than a readable failure. The shared PHP base image leaves the
 // platform with display_errors=1 and no php.ini to fix it centrally, so this
 // is not theoretical.
 ini_set('display_errors', 'stderr');
@@ -86,7 +86,7 @@ if ($mode === 'config') {
 
     // Deliberately a file of getenv() calls rather than of values: the database
     // password is handed to the container in its environment already, and
-    // writing it into the checkout as well would put it in a file that #173
+    // writing it into the checkout as well would put it in a file that every deploy
     // then re-clones over -- and that a backup, a `git status` or a stray
     // archive could carry off. config/ is outside the document root (www/), so
     // this file is not web-readable either way, but there is no reason for the

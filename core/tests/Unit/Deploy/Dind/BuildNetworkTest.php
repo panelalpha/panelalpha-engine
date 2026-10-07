@@ -10,7 +10,7 @@ use App\Lib\Deploy\Platform\Runtime\Images;
 use Tests\TestCase;
 
 /**
- * engine#246: a host build ran the customer's scripts on Docker's default
+ * A host build ran the customer's scripts on Docker's default
  * bridge, from where it reached the engine API (bridge gateway and public
  * address), the host's private network and 169.254.169.254. Builds now run on
  * a network the firewall script limits to the internet.
@@ -79,7 +79,7 @@ class BuildNetworkTest extends TestCase
         // icc=false would make Docker load br_netfilter host-wide.
         $this->assertNotContains('com.docker.network.bridge.enable_icc=false', $argv);
         $this->assertSame('panelalpha-build', $argv[array_key_last($argv)]);
-        // br- so engine#241's DNAT for :2011 leaves it to docker-proxy like any bridge.
+        // br- so the DNAT for :2011 leaves it to docker-proxy like any bridge.
         $this->assertStringStartsWith('br-', BuildNetwork::BRIDGE);
         $this->assertLessThanOrEqual(15, strlen(BuildNetwork::BRIDGE), 'Linux interface names stop at 15');
     }
@@ -108,20 +108,14 @@ class BuildNetworkTest extends TestCase
         $this->assertStringContainsString('iptables -I INPUT -i "$bridge" -j REJECT', $script);
         // The chain Docker evaluates first and keeps across a daemon restart.
         $this->assertStringContainsString('for parent in DOCKER-USER FORWARD', $script);
-        // Egress still works after CSF has removed Docker's own NAT.
+        // Egress still works after a flush has removed Docker's own NAT.
         $this->assertStringContainsString('-j MASQUERADE', $script);
-        // The installers make the network while Docker's chains are fresh.
+        // The installer makes the network while Docker's chains are fresh. int-updater.sh is now only a
+        // redirect to updater.sh; HostCompile creates the network on demand before a host build.
         $this->assertStringContainsString('--create', $script);
-        foreach (['installer.sh', 'int-updater.sh'] as $installer) {
-            $this->assertStringContainsString(
-                'build-network-firewall.sh --create panelalpha-build',
-                (string) file_get_contents(dirname($path) . '/' . $installer),
-                $installer
-            );
-        }
-
-        $csf = (string) file_get_contents(dirname($path) . '/csf.sh');
-        $this->assertStringContainsString('panelalpha-build-network', $csf);
-        $this->assertStringContainsString('build-network-firewall.sh panelalpha-build', $csf);
+        $this->assertStringContainsString(
+            'build-network-firewall.sh --create panelalpha-build',
+            (string) file_get_contents(dirname($path) . '/installer.sh')
+        );
     }
 }

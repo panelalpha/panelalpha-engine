@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Platform;
 
+use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Yaml;
 
@@ -195,6 +196,29 @@ final class PlatformRegistry
         $id = $decision['platform'] ?? null;
 
         return is_string($id) && $id !== '' ? self::find($id, $directory) : null;
+    }
+
+    /**
+     * forDecision(), else the manifest the project's own app config describes
+     * when detection chose it: a repository's `.panelalpha/panelalpha.yaml`
+     * with an `id:` of its own is registered nowhere, so the id alone finds
+     * nothing and its install, upgrade and start commands were dropped.
+     *
+     * @param array<string, mixed> $decision
+     */
+    public static function forDecisionOrAppConfig(array $decision, ?AppConfig $appConfig): ?PlatformManifest
+    {
+        $manifest = self::forDecision($decision);
+        if ($manifest !== null || $appConfig === null) {
+            return $manifest;
+        }
+        try {
+            $own = SourceRecipes::fromAppConfig($appConfig, 'project');
+        } catch (ManifestException) {
+            return null;
+        }
+
+        return $own !== null && $own->id === ($decision['platform'] ?? null) ? $own : null;
     }
 
     /** Drop the cache. Tests that write manifests to a temp dir need this. */

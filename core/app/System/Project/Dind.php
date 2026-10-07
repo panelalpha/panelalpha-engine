@@ -35,6 +35,7 @@ use App\System\Project\Dind\Paths;
 use App\System\Project\Dind\PrepareFromSource;
 use App\System\Project\Dind\ProjectEnvironment;
 use App\System\Project\Dind\ProjectFiles;
+use App\System\Project\Dind\RegistryLogin;
 use App\System\Project\Dind\ShellOperations;
 use App\System\Project\Dind\Services\S6ServiceManager;
 use App\System\Project\Dind\Services\ServiceManager;
@@ -70,6 +71,7 @@ class Dind implements DeployableDindProject, Runtime
     private ?PrepareFromSource $prepareFromSource = null;
     private ?ProjectEnvironment $projectEnvironment = null;
     private ?AppCredentialDelivery $appCredentials = null;
+    private ?RegistryLogin $registryLogin = null;
 
     public function __construct(
         private readonly ProjectAggregate $project,
@@ -253,9 +255,23 @@ class Dind implements DeployableDindProject, Runtime
         return $this->containerOperations()->serviceAction($service, $action);
     }
 
-    public function getServiceLogs(string $service, int $lines = 200): string
+    public function getServiceLogs(string $service, int $lines = 200, ?string $since = null, ?string $until = null): string
     {
-        return $this->containerOperations()->getServiceLogs($service, $lines);
+        return $this->containerOperations()->getServiceLogs($service, $lines, $since, $until);
+    }
+
+    public function assertServiceExists(string $service): void
+    {
+        $this->containerOperations()->assertServiceExists($service);
+    }
+
+    /**
+     * @param callable(string, ?string): void $onLine
+     * @param ?callable(): void $onIdle
+     */
+    public function followServiceLogs(string $service, int $lines, ?string $since, callable $onLine, ?callable $onIdle = null): void
+    {
+        $this->containerOperations()->followServiceLogs($service, $lines, $since, $onLine, $onIdle);
     }
 
     public function appCertificate(): AppCertificate
@@ -263,9 +279,9 @@ class Dind implements DeployableDindProject, Runtime
         return $this->appCertificate ??= new AppCertificate($this);
     }
 
-    public function abortRunningDeploy(bool $stopInnerDocker = true): void
+    public function abortRunningDeploy(bool $stopInnerDocker = true, bool $removeVolumes = false): void
     {
-        $this->accountTeardown()->abortRunningDeploy($stopInnerDocker);
+        $this->accountTeardown()->abortRunningDeploy($stopInnerDocker, $removeVolumes);
     }
 
     public function preCheckFromSources(): void
@@ -277,7 +293,7 @@ class Dind implements DeployableDindProject, Runtime
     public function prepareFromSources(): void
     {
         $this->assertHostHasRoomToDeploy();
-        $this->prepareFromSource()->prepare();
+        $this->registryLogin()->during(fn () => $this->prepareFromSource()->prepare());
     }
 
     /**
@@ -304,9 +320,15 @@ class Dind implements DeployableDindProject, Runtime
         (new SourceFiles($this))->importProjectArchive($zipPath);
     }
 
-    public function applyProjectEnvVars(): void
+    public function applyProjectEnvVars(?string $composePath = null): void
     {
-        $this->projectEnvironment()->apply();
+        $this->projectEnvironment()->apply($composePath);
+    }
+
+    /** The project's private registry logins, held only while a deploy pulls and builds. */
+    public function registryLogin(): RegistryLogin
+    {
+        return $this->registryLogin ??= new RegistryLogin($this);
     }
 
     /** The login a manifest's `credentials:` declares, written into the account. */
@@ -361,6 +383,16 @@ class Dind implements DeployableDindProject, Runtime
     }
 
     /**
+     * The files `docker compose` is run with, in layering order.
+     *
+     * @return list<string>
+     */
+    public function userAppComposeFiles(): array
+    {
+        return $this->paths()->composeFiles();
+    }
+
+    /**
      * @param list<string> $rest
      * @return list<string>
      */
@@ -370,7 +402,7 @@ class Dind implements DeployableDindProject, Runtime
     }
 
     /**
-     * @return array{COMPOSE_FILE: string, COMPOSE_PATH_SEPARATOR: string}
+     * @return array<string, string>
      */
     public function userAppComposeEnv(): array
     {
@@ -517,12 +549,12 @@ class Dind implements DeployableDindProject, Runtime
      * `failed to connect to the docker API at unix:///var/run/docker.sock`,
      * which reads as a broken daemon rather than as "too early".
      *
-     * Measured on 10.10.10.25: the socket appears 5-6s after the container
-     * starts, and the deploy path is slow enough (preparing, os user, dirs,
-     * quota) not to notice. `Projects::copy()` is not: it copies the home dir
-     * and prepares volumes five seconds in, inside the window. Issue #58 --
-     * every staging copy of a DinD project failed there and the job deleted
-     * the destination account, so the whole feature was unusable.
+     * The socket appears 5-6s after the container starts, and the deploy path
+     * is slow enough (preparing, os user, dirs, quota) not to notice.
+     * `Projects::copy()` is not: it copies the home dir and prepares volumes
+     * five seconds in, inside the window. Every staging copy of a
+     * DinD project failed there and the job deleted the destination account, so
+     * the whole feature was unusable.
      *
      * Deliberately silent and deliberately bounded. It runs on paths that have
      * no deploy log to write into, and the caller's own error is a better
@@ -570,6 +602,11 @@ class Dind implements DeployableDindProject, Runtime
 
     public function isRunning(): bool
     {
+        // No outer compose file, nothing running to ask about; recreateOuterCompose() writes it back.
+        if (!$this->exists()) {
+            return false;
+        }
+
         $command = "sudo docker compose -f {$this->composeFilePath()} ps --services --filter status=running";
         $result = trim($this->system()->exec($command));
 
@@ -633,16 +670,62 @@ class Dind implements DeployableDindProject, Runtime
         $this->outerLifecycle()->tearDown();
     }
 
+    /**
+     * Each script is replaced by renaming a temp file over it,
+     * never by removing everything up front and writing the real names back
+     * in -- a tenant who still has entrypoint.d mounted read-write could
+     * otherwise put a symlink where a name briefly did not exist and have
+     * this write through it. Names this account no longer needs (e.g. the
+     * egress guard once it is off) are cleared with a plain unlink, which
+     * never opens whatever is there.
+     */
     public function setupEntrypointInitScripts(): void
     {
         $scriptFiles = $this->accountTemplate()->entrypointInitScripts();
         $dir = $this->projectDirPath() . '/entrypoint.d';
-        $this->system()->runProcess("sudo mkdir -p {$dir} && sudo rm -f {$dir}/*.sh");
+        $fs = $this->system()->filesystem();
+        $this->system()->runProcess("sudo mkdir -p {$dir}");
         foreach ($scriptFiles as $name => $script) {
-            $this->system()->filesystem()->filePutContents("{$dir}/{$name}", $script);
+            $fs->writeFileReplacingPath("{$dir}/{$name}", $script);
+        }
+        foreach (['useradd.sh', TenantEgressGuard::FILE] as $name) {
+            if (!isset($scriptFiles[$name])) {
+                $this->system()->runProcess("sudo rm -f {$dir}/{$name}");
+            }
         }
         // The guard runs once at boot from entrypoint.d; its service keeps it applied.
         $this->services()->configure(TenantEgressGuard::SERVICE, isset($scriptFiles[TenantEgressGuard::FILE]));
+    }
+
+    public function daemonJsonPath(): string
+    {
+        return $this->projectDirPath() . '/daemon.json';
+    }
+
+    public function daemonJsonContents(): string
+    {
+        return $this->accountTemplate()->daemonJson();
+    }
+
+    /** Renders the current daemon.json to the host: a fresh account, or one without the bind mount yet. */
+    public function setupDaemonJson(): void
+    {
+        $this->system()->filesystem()->writeFileReplacingPath($this->daemonJsonPath(), $this->daemonJsonContents());
+    }
+
+    /**
+     * For an account whose compose already bind-mounts daemon.json: a rename
+     * would swap in a new inode the mount would not show until the container
+     * is recreated, so this writes the existing file's content in place
+     * instead. Refuses when the path is a symlink -- the mount
+     * itself is read-only, so only an account from before it existed could
+     * still have one there.
+     *
+     * @return bool whether it wrote
+     */
+    public function rewriteDaemonJsonInPlace(): bool
+    {
+        return $this->system()->filesystem()->overwriteFileUnlessSymlink($this->daemonJsonPath(), $this->daemonJsonContents());
     }
 
     protected function requireUserModel(): ModelsUser

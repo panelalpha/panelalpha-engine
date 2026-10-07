@@ -8,7 +8,7 @@
 # The image is FROM scratch: no shell, curl or wget inside, so it carries no
 # internal healthcheck and cannot run a `/bin/sh -c` one-shot. Readiness is a
 # curl sidecar that polls the public UI, with a `ready` gate that makes
-# `docker compose up` block until the app answers (engine#204).
+# `docker compose up` block until the app answers.
 services:
   app:
     image: traggo/server:0.8.3
@@ -36,7 +36,7 @@ services:
       # runs as root, so the fresh volume is writable with no chown.
       - traggo-data:/opt/traggo/data
     # The binary EXPOSEs and listens on 3030; publish it so the port scan takes
-    # it as the primary (engine#234). No other service publishes a port.
+    # it as the primary. No other service publishes a port.
     ports:
       - "3030:3030"
     mem_limit: 512m
@@ -64,8 +64,7 @@ services:
 
   # Starts nothing, exits 0, waits on the health probe. `docker compose up -d`
   # blocks on a depends_on completion condition, so `up` returns -- and the
-  # engine reports the deploy finished -- only after Traggo actually answers
-  # (engine#204).
+  # engine reports the deploy finished -- only after Traggo actually answers.
   ready:
     image: alpine:3
     entrypoint: ["/bin/sh", "-c", "exit 0"]

@@ -25,7 +25,6 @@ class ProjectFleetCommandTest extends TestCase
         SpyFleetCommand::$touched = [];
         SpyFleetCommand::$afterAllRuns = 0;
         SpyFleetCommand::$failOn = [];
-        SpyFleetCommand::$fatal = true;
         SpyFleetCommand::$beforeAllThrows = false;
         SpyFleetCommand::$beforeAllSawTouched = null;
 
@@ -122,14 +121,14 @@ class ProjectFleetCommandTest extends TestCase
         $this->assertSame(0, SpyFleetCommand::$afterAllRuns);
     }
 
-    /** The Apache module commands opt out: they have always exited 0. */
-    public function test_a_command_that_opts_out_reports_success_despite_failures(): void
+    /** A script checking the exit code must see a module that was not changed. */
+    public function test_the_apache_commands_fail_when_a_project_failed(): void
     {
         $this->makeUser('alice');
-        SpyFleetCommand::$failOn = ['alice'];
-        SpyFleetCommand::$fatal = false;
+        $this->app[\Illuminate\Contracts\Console\Kernel::class]->registerCommand(new FailingApacheModCommand());
 
-        $this->assertSame(0, Artisan::call('spy:fleet', ['--all' => true]));
+        $this->assertSame(1, Artisan::call('spy:apache-mod', ['mod' => 'rewrite', '--all' => true]));
+        $this->assertStringContainsString("rewrite exploded for alice", Artisan::output());
     }
 
     public function test_before_all_runs_ahead_of_every_project(): void
@@ -196,8 +195,6 @@ class SpyFleetCommand extends ProjectFleetCommand
     /** @var list<string> */
     public static array $failOn = [];
 
-    public static bool $fatal = true;
-
     public static bool $beforeAllThrows = false;
 
     /** @var ?list<string> what had been touched when beforeAll() ran */
@@ -233,9 +230,25 @@ class SpyFleetCommand extends ProjectFleetCommand
     {
         self::$afterAllRuns++;
     }
+}
 
-    protected function failuresAreFatal(): bool
+/** @internal */
+class FailingApacheModCommand extends \App\Console\Commands\Apache\ApacheModCommand
+{
+    protected $signature = 'spy:apache-mod {mod}' . ProjectOptions::SIGNATURE;
+
+    protected function doing(): string
     {
-        return self::$fatal;
+        return 'Enabling';
+    }
+
+    protected function done(): string
+    {
+        return 'enabled';
+    }
+
+    protected function applyMod(User $user, string $mod): void
+    {
+        throw new \RuntimeException("{$mod} exploded for {$user->username}");
     }
 }

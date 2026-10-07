@@ -14,7 +14,13 @@ How much data did this project transfer between 2026-09-01 and 2026-09-30, by da
 Break down shop.example.com's visitors by pages and browsers for September 2026.
 ```
 
+```text
+Which HTTP status codes did shop.example.com answer with yesterday?
+```
+
 Hits and visits follow the dates you name. Unique visitors, how long a visit lasts, and every breakdown are counted by calendar month. A range that sits inside a month still reports that whole month for those. Breakdowns are pages, browsers, operating systems, referrers, countries, continents, or regions.
+
+The status-code breakdown is the exception: it follows the dates you name and gives requests and bytes per HTTP status, so a spike of 502s shows on the day it happened. 200 and 304 share one row, because the logs are counted that way.
 
 Transfer counts every response, including crawlers, so it is higher than the visitor chart for the same days. Only traffic logged after you update is counted. Older logs are left out.
 

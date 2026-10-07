@@ -29,7 +29,7 @@ return [
     /*
     | Toolsets to enable, comma-separated, matched case-insensitively against
     | the tool's group: the OpenAPI tag its endpoint is documented under
-    | (projects, domains, files, csf, modsecurity, system, ...) or "engine" for
+    | (projects, domains, files, firewall, modsecurity, system, ...) or "engine" for
     | the two hand-written summary tools. "all" enables every group.
     |
     | The default is every group: an install exposes the whole surface, and
@@ -69,8 +69,8 @@ return [
     | The ceiling on what an enabled tool may do:
     |
     |   readonly  only tools that read. Nothing can change server state, and
-    |             the reads that hand out a live credential (the CSF UI
-    |             password, the mail smarthost settings, app SSO) are held
+    |             the reads that hand out a live credential (the mail
+    |             smarthost settings, app logins, app SSO) are held
     |             back too -- ToolPolicy::CREDENTIAL_TOOLS.
     |   modify    reads, plus create and update. No deletes.
     |   full      everything, including deletes.

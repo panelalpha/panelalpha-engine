@@ -15,7 +15,7 @@ services:
       # TLS ends at the engine's proxy.
       PROXY_TLS: "false"
       # Not upstream's 9200: the engine takes 9200 for Elasticsearch and
-      # skips the binding (engine#438).
+      # skips the binding.
       PROXY_HTTP_ADDR: 0.0.0.0:8080
       OC_INSECURE: "false"
       OC_LOG_LEVEL: info

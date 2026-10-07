@@ -23,12 +23,18 @@ final class EngineArtifacts
     /** The compose file the engine runs. */
     public const RUN_COMPOSE = 'docker-compose.panelalpha.yml';
 
+    /**
+     * The run file inlines env_vars, database passwords and PA_INSTANCE_SECRET,
+     * and ~/project is traversable by every uid on the host.
+     */
+    public const RUN_COMPOSE_MODE = '600';
+
     /** An app config's compose file in `override` mode, layered over the run file. */
     public const RUN_COMPOSE_OVERRIDE = 'docker-compose.panelalpha.override.yml';
 
     /**
      * The repository's own `docker-compose.override.yml` with its escapes
-     * removed, layered in its place (engine#48, item 9).
+     * removed, layered in its place.
      */
     public const RUN_CLIENT_OVERRIDE = 'docker-compose.panelalpha.client-override.yml';
 
@@ -40,6 +46,11 @@ final class EngineArtifacts
 
     /** The base `.env` the project shipped, before `env_vars` were merged. */
     public const ENV_DEFAULT = '.env.default';
+
+    /** passwd/group with the account uid, mounted over a PHP base image's own. */
+    public const RUN_PASSWD = 'panelalpha.passwd';
+
+    public const RUN_GROUP = 'panelalpha.group';
 
     public const RAILS_HOST_INITIALIZER = 'config/initializers/zz_panelalpha_hosts.rb';
 
@@ -74,6 +85,8 @@ final class EngineArtifacts
             self::RUN_COMPOSE_OVERRIDE,
             self::RUN_CLIENT_OVERRIDE,
             self::APP_CONFIG_COMPOSE,
+            self::RUN_PASSWD,
+            self::RUN_GROUP,
             self::RAILS_HOST_INITIALIZER,
         ]);
     }

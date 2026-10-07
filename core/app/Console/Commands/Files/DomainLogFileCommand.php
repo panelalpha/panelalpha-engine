@@ -2,12 +2,14 @@
 
 namespace App\Console\Commands\Files;
 
-use App\Console\Commands\Concerns\DispatchesApiRoute;
+use App\Console\Commands\Concerns\StreamsFileToOutput;
+use App\Lib\Domains\DomainLogFiles;
+use App\Models\User;
 use Illuminate\Console\Command;
 
 class DomainLogFileCommand extends Command
 {
-    use DispatchesApiRoute;
+    use StreamsFileToOutput;
 
     /** Older spellings still answer, so nothing scripted against them breaks. */
     protected $aliases = ['domain:log:show', 'domains:log-file'];
@@ -19,31 +21,24 @@ class DomainLogFileCommand extends Command
                             {--all-webservers : Include log files from every webserver, not just the active one}
                             {--out= : Local file to write (default: stdout)}';
 
-    protected $description = 'List or download a domain log file (GET /projects/{username}/domains/{domain}/log-files)';
+    protected $description = 'List or download a domain log file';
 
     public function handle(): int
     {
-        $project = rawurlencode((string) $this->argument('project'));
-        $domain = rawurlencode((string) $this->argument('domain'));
         $filename = $this->argument('filename');
         $out = $this->option('out');
+        $all = (bool) $this->option('all-webservers');
 
-        $params = [];
-        if ($this->option('all-webservers')) {
-            $params['all_webservers'] = 1;
-        }
+        $user = User::findByUsernameOrFail((string) $this->argument('project'));
+        $logFiles = DomainLogFiles::findOrFail($user, (string) $this->argument('domain'));
 
         if (!is_string($filename) || $filename === '') {
-            $response = $this->dispatchApiRoute('GET', "/projects/{$project}/domains/{$domain}/log-files", $params);
-            return $this->writeResponseBody($response, null);
+            $this->output->write(json_encode(['data' => $logFiles->list($all)], JSON_THROW_ON_ERROR));
+            return 0;
         }
 
-        $response = $this->dispatchApiRoute(
-            'GET',
-            "/projects/{$project}/domains/{$domain}/log-files/" . rawurlencode($filename),
-            $params
-        );
+        $source = $logFiles->pathOrFail($filename, $all);
 
-        return $this->writeResponseBody($response, is_string($out) && $out !== '' ? $out : null);
+        return $this->streamFile($source, is_string($out) && $out !== '' ? $out : null);
     }
 }

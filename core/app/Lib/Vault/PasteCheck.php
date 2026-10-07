@@ -15,7 +15,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Checks a pasted secret before the form stores it (engine#7).
+ * Checks a pasted secret before the form stores it.
  *
  * The details to check against (`verify_with`) are given when the link is
  * minted. A git_token goes through the same GitRepoInput, GitTokenInput and

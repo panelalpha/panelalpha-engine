@@ -3,6 +3,7 @@
 namespace App\System\Project\PhpHosting;
 
 use App\System\Project\PhpHosting;
+use App\System\Project\PhpHosting\Services\Service;
 
 /**
  * Private PHP handler stack inside the project container (fpm / lsphp / apache-in-container).
@@ -21,9 +22,11 @@ interface PhpStack
     public function entrypointInitScripts(PhpHosting $project): array;
 
     /**
-     * @return array<string, string>
+     * The account's long-running processes.
+     *
+     * @return list<Service>
      */
-    public function entrypointBackgroundScripts(PhpHosting $project): array;
+    public function services(PhpHosting $project): array;
 
     public function waitForAllRunning(PhpHosting $project, int $tries = 12, int $intervalSeconds = 5): void;
 

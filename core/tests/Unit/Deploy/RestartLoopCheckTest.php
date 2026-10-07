@@ -17,11 +17,10 @@ use PHPUnit\Framework\TestCase;
  * `health_failed_checks: []` -- and the deploy's own message invites the
  * reader to shrug: "a worker or queue-only app can ignore this".
  *
- * Two applications in the supported-apps series were not workers. PocketBase
- * ran its binary with no subcommand, printed its help and exited 0 seven
- * times in ninety seconds. Miniflux exited on `dial tcp [::1]:5432: connect:
- * connection refused`, having been given no PostgreSQL. Both were reported
- * with an empty check list.
+ * Not every such account is a worker. PocketBase runs its binary with no
+ * subcommand, prints its help and exits 0 in a loop. Miniflux exits on `dial
+ * tcp [::1]:5432: connect: connection refused`, when given no PostgreSQL. Both
+ * were reported with an empty check list.
  *
  * Docker knew the difference the whole time and was never asked: a worker
  * sits in `running`, these sit in `restarting`.

@@ -10,7 +10,8 @@ class RebuildEximConfig extends Command
     /** The old spelling still answers, so nothing scripted against it breaks. */
     protected $aliases = ['system:rebuild-exim-config'];
 
-    protected $signature = 'system:exim:rebuild';
+    protected $signature = 'system:exim:rebuild
+        {--networks : Only re-read the addresses Exim listens on and relays for from Docker}';
 
     protected $description = 'Recreate configuration files for exim4 from database.';
 
@@ -18,7 +19,11 @@ class RebuildEximConfig extends Command
     {
         try {
             $system = new System();
-            $system->exim()->rebuildEximConfig();
+            if ($this->option('networks')) {
+                $system->exim()->rebuildNetworks();
+            } else {
+                $system->exim()->rebuildEximConfig();
+            }
         } catch (\Exception $e) {
             $this->error($e->getMessage());
         }

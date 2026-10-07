@@ -3,7 +3,7 @@
 namespace Tests\Unit;
 
 use App\Exceptions\ProblemException;
-use App\Http\Controllers\UserController;
+use App\Lib\Project\ProjectCreator;
 use App\Models\Domain;
 use App\Models\User;
 use Illuminate\Database\Schema\Blueprint;
@@ -14,7 +14,7 @@ use RuntimeException;
 use Tests\TestCase;
 
 /**
- * engine#8: two creates of one name both pass provision()'s checks, and the
+ * Two creates of one name both pass provision()'s checks, and the
  * loser's insert hit the unique index as an unhandled 500.
  */
 class ConcurrentProjectCreateTest extends TestCase
@@ -72,7 +72,7 @@ class ConcurrentProjectCreateTest extends TestCase
         ]);
 
         /** @var Domain */
-        return (new ReflectionMethod(UserController::class, 'saveNewProject'))->invoke(null, $user, $mainDomain, $nameField);
+        return (new ReflectionMethod(ProjectCreator::class, 'saveNewProject'))->invoke(null, $user, $mainDomain, $nameField);
     }
 
     private function user(string $username, string $domain): User

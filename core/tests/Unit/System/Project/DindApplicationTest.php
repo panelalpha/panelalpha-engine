@@ -131,12 +131,14 @@ class DindApplicationTest extends TestCase
 
         $this->assertSame(
             [
+                'env',
+                'PWD=' . $this->homeRoot . '/alice/project',
                 'docker',
                 'compose',
                 '--project-directory',
                 $this->homeRoot . '/alice/project',
                 '-f',
-                $inner,
+                $this->homeRoot . '/alice/project/docker-compose.panelalpha.yml',
                 'ps',
             ],
             $project->userAppComposeCommand(['ps'])

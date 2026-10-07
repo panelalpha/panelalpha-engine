@@ -20,7 +20,7 @@ project env vars.
   secrets from `~/.panelalpha/plausible-ce/` instead of a hand-written `.env`.
 - `hooks/prepare.sh` writes `SECRET_KEY_BASE` (`openssl rand -base64 48`, 64
   characters; Phoenix needs 64 bytes, more than the engine's generated
-  48-character secrets, engine#338) and the PostgreSQL password once. They are
+  48-character secrets) and the PostgreSQL password once. They are
   never regenerated: the database volume keeps the first password.
 - A `ready` service waits on `/api/health` (PostgreSQL + ClickHouse), so the
   deploy finishes once the site answers.

@@ -12,7 +12,7 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * engine#175: every account's app is at `/app`, so a secret an app derives
+ * Every account's app is at `/app`, so a secret an app derives
  * from its own path is the same on every tenant. The platform hands each
  * account a stable secret of its own instead.
  */

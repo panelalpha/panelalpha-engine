@@ -13,7 +13,7 @@ use ReflectionMethod;
 use Tests\TestCase;
 
 /**
- * The engine's prompts are framed in orange (#61). The default renderer paints
+ * The engine's prompts are framed in orange. The default renderer paints
  * the frame through a method named by the colour it is handed, so the theme is
  * only correct if `box()` asks for a colour that exists - a typo there is an
  * `Error: Call to undefined method`, not a colour that is quietly ignored.

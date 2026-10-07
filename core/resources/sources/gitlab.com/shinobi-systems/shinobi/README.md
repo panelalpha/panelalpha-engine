@@ -47,4 +47,4 @@ the dashboard on `/` and the Superuser console on `/super`, port 8080.
   account's own domain the request completes.
 - Every redeploy leaves the previous image's anonymous `/home/Shinobi` volume
   (~330 MB, the upstream Dockerfile's `VOLUME`) behind until the engine prunes
-  it (engine#324).
+  it.

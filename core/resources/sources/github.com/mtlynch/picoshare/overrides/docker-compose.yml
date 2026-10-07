@@ -6,7 +6,7 @@
 # admin passphrase generated once and fed from a redeploy-surviving store (never
 # a hardcoded dummy), the SQLite DB + uploaded bytes on a named volume, and the
 # port published. Pulling a Docker Hub image (not building) keeps detection on
-# `compose` and sidesteps engine#229 (image-seed NotFound is the GHCR case, not
+# `compose` and sidesteps the image-seed NotFound (the GHCR case, not
 # Hub).
 #
 # SECURITY: PS_SHARED_SECRET is the admin passphrase. main.go log.Fatal's if it
@@ -42,7 +42,7 @@ services:
       # fresh named volume is writable with no chown.
       - picoshare_data:/data
     # The app listens on 4001; publish it so the port scan takes it as the
-    # primary (engine#234). No other service publishes a port.
+    # primary. No other service publishes a port.
     ports:
       - "4001:4001"
     mem_limit: 512m
@@ -70,8 +70,7 @@ services:
 
   # Starts nothing, exits 0, waits on the health probe. `docker compose up -d`
   # blocks on a depends_on completion condition, so `up` returns -- and the
-  # engine reports the deploy finished -- only after PicoShare actually answers
-  # (engine#204).
+  # engine reports the deploy finished -- only after PicoShare actually answers.
   ready:
     image: alpine:3
     entrypoint: ["/bin/sh", "-c", "exit 0"]

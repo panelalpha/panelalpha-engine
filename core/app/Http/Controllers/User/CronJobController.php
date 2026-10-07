@@ -7,7 +7,6 @@ use App\Http\Requests\CronJobStoreRequest;
 use App\Http\Requests\CronJobUpdateRequest;
 use App\Http\Resources\CronJobCollection;
 use App\Http\Resources\CronJobResource;
-use App\Lib\Helpers\CronSchedule;
 use App\Models\User;
 use App\System\Project\Dind;
 use Illuminate\Http\JsonResponse;
@@ -26,7 +25,7 @@ class CronJobController extends Controller
             new OA\Response(response: 200, description: 'List of cron jobs', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'array', items: new OA\Items(ref: '#/components/schemas/CronJob'))],
             )),
-            new OA\Response(response: 404, description: 'User not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     /**
@@ -35,20 +34,9 @@ class CronJobController extends Controller
      */
     public function index($username)
     {
-        $user = $this->projectOr404($username, 'Not found');
+        $user = $this->projectOr404($username);
 
         return new CronJobCollection($user->project()->cron()->list());
-    }
-
-    /**
-     * @param array<string, mixed> $req
-     * @return bool|list<string> true when valid, the problems otherwise
-     */
-    private function validateCronSchedule(array $req): bool|array
-    {
-        $errors = CronSchedule::errors($req);
-
-        return $errors === [] ? true : $errors;
     }
 
     #[OA\Post(
@@ -81,7 +69,7 @@ class CronJobController extends Controller
      */
     public function store($username, CronJobStoreRequest $request)
     {
-        $user = $this->projectOr404($username, 'Not found');
+        $user = $this->projectOr404($username);
         $this->rejectDind($user);
 
         /**
@@ -95,11 +83,6 @@ class CronJobController extends Controller
          * }
          */
         $params = $request->validated();
-        $errors = $this->validateCronSchedule($params);
-        if (is_array($errors) && !empty($errors)) {
-            throw ValidationException::withMessages($errors);
-        }
-
         $cron = $user->project()->cron();
         $job = $cron->create($params);
         $user->project()->reloadCron();
@@ -141,7 +124,7 @@ class CronJobController extends Controller
      */
     public function update($username, $hash, CronJobUpdateRequest $request)
     {
-        $user = $this->projectOr404($username, 'Not found');
+        $user = $this->projectOr404($username);
         $this->rejectDind($user);
 
         /**
@@ -155,11 +138,6 @@ class CronJobController extends Controller
          * }
          */
         $params = $request->validated();
-        $errors = $this->validateCronSchedule($params);
-        if (is_array($errors) && !empty($errors)) {
-            throw ValidationException::withMessages($errors);
-        }
-
         $cron = $user->project()->cron();
         if (!$cron->exists($hash)) {
             abort(new JsonResponse([
@@ -193,7 +171,7 @@ class CronJobController extends Controller
      */
     public function destroy($username, $hash)
     {
-        $user = $this->projectOr404($username, 'Not found');
+        $user = $this->projectOr404($username);
 
         $cron = $user->project()->cron();
         if (!$cron->exists($hash)) {

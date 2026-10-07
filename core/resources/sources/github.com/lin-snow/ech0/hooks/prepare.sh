@@ -7,8 +7,8 @@
 set -e
 cd ~/project
 
-# ~/.panelalpha/ech0 survives a redeploy; ~/project is emptied every deploy
-# (engine#173). Secrets written under ~/project would be regenerated on every
+# ~/.panelalpha/ech0 survives a redeploy; ~/project is emptied every deploy.
+# Secrets written under ~/project would be regenerated on every
 # rebuild -- a new JWT secret logs everyone out.
 STORE_DIR="${HOME}/.panelalpha/ech0"
 ENV_FILE="${STORE_DIR}/ech0.env"

@@ -102,9 +102,8 @@ services:
   #
   # Without it a fresh account opens on a permanent red "Zabbix agent is not
   # available" problem and eleven unsupported items, because that host's
-  # interface points at 127.0.0.1:10050 and nothing there listens. Measured on
-  # the first build of this recipe: 11 unsupported items, one Average-severity
-  # problem, on an account nobody had configured yet. With the agent, the stock
+  # interface points at 127.0.0.1:10050 and nothing there listens. With the
+  # agent, the stock
   # "Linux by Zabbix agent" template collects CPU, memory, filesystem and
   # network from minute one -- of this container, which is the account's own
   # view and not the host's. A tenant cannot see the machine underneath, and
@@ -178,12 +177,11 @@ services:
       # InternalPorts::isDatastore() says the service is a datastore, and that
       # asks SidecarEngine::resolve(), which matches on the image name: the
       # official frontend image is called zabbix-web-nginx-**mysql**, so the
-      # only published port in the stack was filtered out, ComposePortScan
-      # returned no ports at all, and Networking::detectAndCreateProxyRules()
-      # fell back to its 8080 default -- a proxy rule pointing at a port
-      # nothing in the account listens on. Measured: `Detected application
-      # port: 8080` in the deploy log, HTTP 200 on 127.0.0.1:8000 inside the
-      # account, HTTP 502 on the public name.
+      # only published port in the stack is filtered out, ComposePortScan
+      # returns no ports at all, and Networking::detectAndCreateProxyRules()
+      # falls back to its 8080 default -- a proxy rule pointing at a port
+      # nothing in the account listens on (`Detected application port: 8080`
+      # in the deploy log, and HTTP 502 on the public name).
       #
       # A MYSQL_HOST makes CredentialNames::isClientPrefix() true, which is
       # what the classifier means by "this service talks to a MySQL rather than
@@ -205,8 +203,8 @@ services:
       start_period: 30s
     mem_limit: 384m
 
-  # Does nothing and exits 0. `docker compose up -d` runs without --wait
-  # (engine#204), so the deploy would otherwise be called finished when the
+  # Does nothing and exits 0. `docker compose up -d` runs without --wait,
+  # so the deploy would otherwise be called finished when the
   # containers had been created. Compose *does* block on a depends_on health
   # condition, so waiting here makes `up -d` return only once Zabbix answers.
   # A clean exit 0 is explicitly not a crash loop to AppHealth::isCrashing().

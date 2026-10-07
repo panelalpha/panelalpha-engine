@@ -7,13 +7,13 @@ description: >-
 
   ONE OFFICIAL IMAGE, ONE PORT. Upstream publishes ncarlier/readflow on Docker
   Hub; this recipe pins the current release (1.2.0) and pulls it from Docker
-  Hub, which is fetched normally and sidesteps engine#229 (the GHCR/quay
-  docker-save seeding stub). The image is a single distroless binary that both
+  Hub, which is fetched normally and sidesteps the GHCR/quay
+  docker-save seeding stub. The image is a single distroless binary that both
   serves the built React UI (baked at /var/local/html) and exposes the
   GraphQL/REST API on one port (8080), so unlike a split front+API app it needs
   no nginx to fold two origins together: readflow is already one origin. Only
   this service publishes a host port, so the engine's port scan takes 8080 as
-  the primary app (engine#231); the image's baked EXPOSE 9090 (Prometheus,
+  the primary app; the image's baked EXPOSE 9090 (Prometheus,
   disabled by default) never reaches the compose file, so ComposePortScan does
   not see it.
 

@@ -20,8 +20,11 @@ final class ListeningSockets
     /** `sl local_address rem_address st …` — state 0A is LISTEN. */
     private const LISTEN_LINE = '/^\s*\d+:\s+([0-9A-Fa-f]+):([0-9A-Fa-f]{4})\s+\S+\s+0A\s/';
 
-    /** IPv4 127.0.0.1 is little-endian in /proc; IPv6 ::1 is the v6 form. */
-    private const LOOPBACK = ['0100007F', '00000000000000000000000001000000'];
+    /** IPv6 ::1 as /proc prints it. */
+    private const LOOPBACK_V6 = '00000000000000000000000001000000';
+
+    /** ::ffff:0:0/96 as /proc prints it; the last eight digits are the IPv4 address. */
+    private const V4_MAPPED_PREFIX = '0000000000000000FFFF0000';
 
     /**
      * Ports a recipe would plausibly serve on, best first. Used only to break
@@ -62,7 +65,21 @@ final class ListeningSockets
      */
     public static function isLoopback(string $hexAddr): bool
     {
-        return in_array(strtoupper($hexAddr), self::LOOPBACK, true);
+        $hex = strtoupper($hexAddr);
+        if (strlen($hex) === 32) {
+            if ($hex === self::LOOPBACK_V6) {
+                return true;
+            }
+            // A JVM binds 127.0.0.1 as ::ffff:127.0.0.1 in tcp6.
+            if (!str_starts_with($hex, self::V4_MAPPED_PREFIX)) {
+                return false;
+            }
+            $hex = substr($hex, 24);
+        }
+
+        // All of 127.0.0.0/8, not just .1: Docker's embedded DNS listens on
+        // 127.0.0.11. IPv4 is little-endian in /proc, so the first octet is last.
+        return strlen($hex) === 8 && str_ends_with($hex, '7F');
     }
 
     /**
@@ -71,13 +88,32 @@ final class ListeningSockets
      * bound: a recipe's guess, or an app that ignores $PORT (PocketBase),
      * would otherwise be a green deploy behind a 502.
      *
+     * A port the image itself declares ($declared, its Dockerfile's EXPOSE)
+     * outranks the generic preference: rapidbay listens on 80 (a stock nginx
+     * page) and on its declared 5000.
+     *
      * @param list<array{addr: string, port: int}> $sockets
+     * @param list<int> $declared
      */
-    public static function chooseAppPort(array $sockets, int $expected): ?int
+    public static function chooseAppPort(array $sockets, int $expected, array $declared = []): ?int
+    {
+        return self::rankedAppPorts($sockets, $expected, $declared)[0] ?? null;
+    }
+
+    /**
+     * Every port {@see chooseAppPort()} could answer, best first, so a caller
+     * that finds the first one does not speak HTTP can try the next: php-fpm
+     * on 9000 ranks above a real server on 8081.
+     *
+     * @param list<array{addr: string, port: int}> $sockets
+     * @param list<int> $declared
+     * @return list<int>
+     */
+    public static function rankedAppPorts(array $sockets, int $expected, array $declared = []): array
     {
         $reachable = self::reachablePorts($sockets);
         if ($reachable === [] || in_array($expected, $reachable, true)) {
-            return null;
+            return [];
         }
 
         // A port that cannot serve HTTP is not an answer to "where is the
@@ -85,17 +121,19 @@ final class ListeningSockets
         // read 3000 while traffic went to sshd. Empty means "not yet".
         $reachable = array_values(array_filter($reachable, InternalPorts::isWebCandidate(...)));
         if ($reachable === []) {
-            return null;
+            return [];
         }
 
-        foreach (self::WEB_PORT_PREFERENCE as $preferred) {
-            if (in_array($preferred, $reachable, true)) {
-                return $preferred;
+        $ranked = [];
+        foreach ([...$declared, ...self::WEB_PORT_PREFERENCE] as $preferred) {
+            if (in_array($preferred, $reachable, true) && !in_array($preferred, $ranked, true)) {
+                $ranked[] = $preferred;
             }
         }
-        sort($reachable);
+        $rest = array_values(array_diff($reachable, $ranked));
+        sort($rest);
 
-        return $reachable[0];
+        return [...$ranked, ...$rest];
     }
 
     /**

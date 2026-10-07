@@ -28,6 +28,15 @@ use OpenApi\Attributes as OA;
             ],
             type: 'object',
         ),
+        new OA\Property(
+            property: 'unreadable_secrets',
+            type: 'array',
+            items: new OA\Items(type: 'string'),
+            description: 'Stored secrets that cannot be decoded, e.g. `git_token`, `env_vars`, '
+                . '`site_git.public_html.token`. They read as empty and the next save stores them empty. Empty when every secret reads.',
+            example: []
+        ),
+        new OA\Property(property: 'warning', type: 'string', nullable: true, description: 'Names the secrets that cannot be decoded and what to do; null when there are none.'),
         new OA\Property(property: 'created_at', type: 'string', format: 'date-time'),
         new OA\Property(property: 'updated_at', type: 'string', format: 'date-time'),
     ],

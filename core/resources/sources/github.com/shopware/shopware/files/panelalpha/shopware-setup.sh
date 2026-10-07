@@ -22,7 +22,7 @@ DB_PORT="${DB_PORT:-3306}"
 # ---------------------------------------------------------------------------
 # 1. vendor/autoload_runtime.php, which Composer was not allowed to write.
 #
-# Engine defect #168. The php manifest installs with `--no-plugins` -- a
+# An engine defect. The php manifest installs with `--no-plugins` -- a
 # plugin is arbitrary PHP out of a customer repository and the install runs on
 # the host daemon -- and PhpHostBuild::mayRunPlugins() lifts that only for a
 # project whose composer.lock pins nothing but installer plugins.
@@ -34,7 +34,7 @@ DB_PORT="${DB_PORT:-3306}"
 # symfony/runtime writes vendor/autoload_runtime.php on POST_AUTOLOAD_DUMP,
 # and that file is line 11 of public/index.php and line 18 of bin/console.
 # Without it every request and every console command is a fatal "Failed to
-# open stream: No such file or directory". Verified on this engine: a plain
+# open stream: No such file or directory". A plain
 # `composer install --no-dev --no-scripts --no-plugins --optimize-autoloader`
 # of this repository leaves no vendor/autoload_runtime.php.
 #
@@ -48,7 +48,7 @@ DB_PORT="${DB_PORT:-3306}"
 # backward-compatibility checker. None of it is needed to serve a shop and it
 # is another few hundred megabytes of the account's quota.
 if [ ! -f vendor/autoload_runtime.php ]; then
-    echo "[shopware] writing vendor/autoload_runtime.php (engine defect #168)"
+    echo "[shopware] writing vendor/autoload_runtime.php"
     composer dump-autoload --no-dev --optimize --no-interaction --no-scripts
 fi
 
@@ -243,8 +243,8 @@ chmod 600 .env .env.local 2>/dev/null || true
 # 6. Say plainly whether the administration is there.
 #
 # panelalpha/build-assets.sh skips the Administration's Vite build on an
-# account smaller than ~2.7GB, because it cannot be made to fit; see the
-# measurements in that file. The storefront does not depend on it, so the shop
+# account smaller than ~2.7GB, because it cannot be made to fit; see that
+# file. The storefront does not depend on it, so the shop
 # works either way, but /admin is a blank page without it and an operator
 # should not have to find that out by clicking.
 if [ ! -d src/Administration/Resources/public/administration ]; then

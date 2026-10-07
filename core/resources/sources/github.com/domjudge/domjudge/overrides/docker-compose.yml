@@ -1,0 +1,64 @@
+# Compose-replace: the repository's compose is DOMjudge's contributor stack,
+# which builds DOMjudge from the mounted checkout and says not to use it in
+# production. This runs upstream's published domserver image of the current
+# release with MariaDB, as its Docker Hub page documents. No judgehost: it needs
+# privileged cgroup access.
+services:
+  domserver:
+    image: domjudge/domserver:9.0.0@sha256:cdcfe4866e62474b781e57f6b28834e10bd84bf2e76c2d400426d76e1aaf4982
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    env_file:
+      # MYSQL_PASSWORD / MYSQL_ROOT_PASSWORD, generated once by hooks/prepare.sh.
+      - ../.panelalpha/domjudge/db.env
+    environment:
+      MYSQL_HOST: mariadb
+      MYSQL_DATABASE: domjudge
+      MYSQL_USER: domjudge
+      CONTAINER_TIMEZONE: UTC
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    healthcheck:
+      # The image's own check: nginx and php-fpm running, /api answering.
+      test: ["CMD", "/scripts/bin/healthcheck"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    mem_limit: 1g
+
+  mariadb:
+    image: mariadb:11.4@sha256:1292844148b311e4ed4300022a996d39083f415a963e970cf47cad1b3b18e3a6
+    restart: unless-stopped
+    # Upstream's documented settings.
+    command: ["--max-connections=1000", "--max-allowed-packet=512M"]
+    env_file:
+      - ../.panelalpha/domjudge/db.env
+    environment:
+      MYSQL_DATABASE: domjudge
+      MYSQL_USER: domjudge
+      MARIADB_AUTO_UPGRADE: "1"
+    volumes:
+      - db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 30s
+    mem_limit: 512m
+
+  # No-op gate: `up -d` returns once the domserver has installed its schema and answers.
+  ready:
+    image: mariadb:11.4@sha256:1292844148b311e4ed4300022a996d39083f415a963e970cf47cad1b3b18e3a6
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      domserver:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db: {}

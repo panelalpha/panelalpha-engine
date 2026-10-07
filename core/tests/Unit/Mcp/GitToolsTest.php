@@ -32,10 +32,10 @@ class GitToolsTest extends TestCase
     ];
 
     /** Tokens every Git description must contain (path default). */
-    private const PATH_LOCK = ['path', 'public_html'];
+    private const PATH_LOCK = ['path', 'document root of the main domain'];
 
     /**
-     * Extra lock tokens per tool. `public_html` / `reset --hard` / `Pull first`
+     * Extra lock tokens per tool. `reset --hard` / `Pull first`
      * are matched case-sensitively; everything else case-insensitively.
      *
      * @var array<string, list<string>>
@@ -128,7 +128,7 @@ class GitToolsTest extends TestCase
 
     public function test_git_tool_descriptions_contain_the_lock_tokens(): void
     {
-        $caseSensitive = ['public_html', 'reset --hard', 'Pull first'];
+        $caseSensitive = ['reset --hard', 'Pull first'];
 
         foreach (self::LOCKS as $name => $extra) {
             $class = self::GIT_TOOLS[$name];

@@ -8,4 +8,4 @@
 - Edit the monitored hosts under `/opt/nagios/etc/objects/` inside the
   container; they persist on the volume.
 - Known gap: `check_ping` as user `nagios` fails (`ping_group_range` is
-  `65534 65534` in tenant containers, engine#442); HTTP/TCP checks work.
+  `65534 65534` in tenant containers); HTTP/TCP checks work.

@@ -15,10 +15,10 @@ description: >-
   official image with a compose-replace, pinned to the current stable release
   v1.5.4 (Hub `latest` at time of writing). Building from source would compile
   a Go binary on a small host for no gain, and seeding a Docker Hub image also
-  sidesteps engine#229 (image-seed NotFound is the GHCR/from-registry case, not
+  sidesteps the image-seed NotFound (the GHCR/from-registry case, not
   Hub). The image is FROM alpine (it has a shell), so readiness could be an
   internal probe, but to match the proven pattern a curl sidecar polls the
-  public landing page and a `ready` gate waits on it (engine#204).
+  public landing page and a `ready` gate waits on it.
 
   WHY COMPOSE-REPLACE. PicoShare ships no compose file of its own -- only a
   Dockerfile -- so there is nothing for bare detection to run. The upstream
@@ -27,7 +27,7 @@ description: >-
   the admin passphrase generated once (never a hardcoded dummy) and fed from a
   redeploy-surviving store, the SQLite DB + uploads on a named volume so they
   outlive a rebuild, and the port published so the engine's scan takes it as the
-  primary (engine#234).
+  primary.
 
   ADMIN GATE, NO OPEN DEFAULT. main.go log.Fatal's if neither PS_SHARED_SECRET
   nor PS_SHARED_SECRET_FILE is set, so the passphrase is mandatory -- there is
@@ -49,7 +49,7 @@ description: >-
   volume needs no chown.
 
   PORT. The app listens on 4001 (PORT, default 4001); only the app publishes a
-  port (4001:4001) so the port scan takes it as the primary (engine#234). The
+  port (4001:4001) so the port scan takes it as the primary. The
   curl and ready helpers publish nothing.
 credentials:
   login_path: /login

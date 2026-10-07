@@ -8,15 +8,14 @@
 # An override rather than a replacement compose file, and here that matters
 # twice over: an `overrides/docker-compose.yml` is written into the checkout
 # *before* detection runs, so a compose file in the project root is exactly
-# the thing hooks/prepare.sh had to move out of the way (engine defect #166,
+# the thing hooks/prepare.sh had to move out of the way (an engine defect,
 # and the reason this repository was detected as `compose` to begin with).
 #
 # There is no database service here on purpose. `database: mysql` in
 # panelalpha.yaml gets one on the account's own MySQL server: visible in the
 # panel, openable in phpMyAdmin, inside the account's backup, and costing the
-# host neither a container nor a volume. Measured MariaDB 12.2.2 on this
-# engine, against Shopware's floor of 10.11
-# (DatabaseConnectionFactory::checkVersion()).
+# host neither a container nor a volume. The account's MariaDB is above
+# Shopware's floor of 10.11 (DatabaseConnectionFactory::checkVersion()).
 services:
   app:
     environment:
@@ -46,7 +45,7 @@ services:
     # hardener never sees it -- which is the point.
     mem_limit: 1g
 
-    # Engine defect #90. The install stage does all of Shopware's setup before
+    # `up -d` does not wait for the app. The install stage does all of Shopware's setup before
     # Apache binds: the autoloader dump, the schema and its migrations, the
     # administrator, the sales channel and a theme compile. The engine runs
     # `docker compose up -d` without --wait and probes as soon as it returns,

@@ -53,21 +53,14 @@ Before this, a redeploy lost `env.php`: the upgrade stage found none and exited
 table. `generated/`, `var/` and `pub/static` are not kept — `setup:upgrade`,
 `setup:di:compile` and on-demand static content rebuild them.
 
-Verified 2026-09-29 on mariusz.panelalpha.tools (engine 705f250a, 4096 MB):
-fresh deploy 165s, a product and a media file created, `POST
-/projects/<name>/rebuild` (122s, re-clones into an emptied `~/project`). After
-it the crypt key and install date were unchanged, the product page answered 200,
-the media file 200, `setup:db:status` said "All modules are up to date." and the
-stored admin credentials reached the dashboard.
-
 ## The install itself
 
 `files/panelalpha/install.sh`, run from the `install` and `upgrade` stages.
 
 - **Every `bin/magento` call goes through `php -d memory_limit=-1`.** Magento's
   own `pub/.user.ini` raises the limit to 756M for *web* requests, which is why
-  a storefront works; `bin/magento` is CLI and gets PHP's 128M default. The
-  first install attempt died at module 245 of 904 with `Allowed memory size of
+  a storefront works; `bin/magento` is CLI and gets PHP's 128M default, on
+  which `setup:install` dies partway through with `Allowed memory size of
   134217728 bytes exhausted`.
 - **`setup:di:compile` runs after `setup:install`.** Without it every request is
   `ReflectionException: Class "Magento\Framework\App\Http\Interceptor" does not

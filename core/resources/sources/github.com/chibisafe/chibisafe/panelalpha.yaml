@@ -17,12 +17,3 @@ description: >-
   rewrites to chibisafe_server:8000; upstream's own settings text says to set
   "Serve Uploads From" to the site's domain when running on Docker, which the
   admin does in the dashboard.
-
-  == Verified on 10.10.10.25 (engine 705f250a), memory_limit 2000 ==
-
-  Create: deployment_status success in 79s, health :80 ok. / is 292 KB with
-  its _next chunks 200 (title is the default service name "change-me");
-  /api/version {"version":"6.5.5"}; login with the default admin and an
-  upload both worked, and Caddy served the uploaded file. Rebuild: success,
-  the file still served and listed (volumes kept). /.env and /.git/config
-  404. Idle memory: server 122 MiB, frontend 46 MiB, caddy 11 MiB.

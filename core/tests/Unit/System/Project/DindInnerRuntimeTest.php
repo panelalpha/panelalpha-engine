@@ -16,6 +16,7 @@ use App\System\Project\Dind\ProjectFiles;
 use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Symfony\Component\Yaml\Yaml;
 
 class DindInnerRuntimeTest extends TestCase
 {
@@ -63,6 +64,61 @@ class DindInnerRuntimeTest extends TestCase
         $this->assertFileExists($composeFile);
         $this->assertStringContainsString('nginx:alpine', file_get_contents($composeFile));
         $this->assertSame('nginx:alpine', $model->getDetails()['deploy_image'] ?? null);
+    }
+
+    public function test_compose_writer_mounts_the_projects_persist_paths(): void
+    {
+        $model = $this->dindModel(['deploy_strategy' => 'express', 'persist_paths' => ['/app/uploads']]);
+        $project = $this->dind($model);
+        $yaml = "services:\n  app:\n    image: node:22\n    volumes:\n      - './:/app'\n";
+
+        $project->composeWriter()->writeGeneratedCompose($project->userAppDirPath(), $yaml, null);
+
+        $compose = \Symfony\Component\Yaml\Yaml::parseFile($this->homeRoot . '/alice/project/' . EngineArtifacts::RUN_COMPOSE);
+        $this->assertSame(['./:/app', 'data-app-uploads:/app/uploads'], $compose['services']['app']['volumes']);
+        $this->assertArrayHasKey('data-app-uploads', $compose['volumes']);
+    }
+
+    /** The app container read the host's MemTotal: every service gets the account's lxcfs files. */
+    public function test_a_generated_run_file_binds_the_lxcfs_files_the_account_has(): void
+    {
+        $model = $this->dindModel(['deploy_strategy' => 'static']);
+        $system = $this->system();
+        $system->lxcfs = "meminfo\nloadavg\n";
+        $project = (new ProjectAggregate($system, $model))->runtime();
+
+        $project->composeWriter()->writeGeneratedCompose($project->userAppDirPath(), "services:\n  app:\n    image: nginx:alpine\n", null);
+
+        $compose = Yaml::parseFile($project->userAppComposeFilePath());
+        $this->assertSame(['/proc/meminfo', '/proc/loadavg'], array_column($compose['services']['app']['volumes'], 'target'));
+        $this->assertSame('nginx:alpine', $compose['services']['app']['image']);
+    }
+
+    /**
+     * Persist paths, Procfile processes and lxcfs files together: the worker
+     * the Procfile adds shares the app's persisted volume and, like every
+     * service, gets the account's lxcfs files.
+     */
+    public function test_procfile_processes_get_persist_paths_and_lxcfs_files_too(): void
+    {
+        $model = $this->dindModel(['deploy_strategy' => 'express', 'persist_paths' => ['/app/uploads']]);
+        $system = $this->system();
+        $system->lxcfs = "meminfo\n";
+        $project = (new ProjectAggregate($system, $model))->runtime();
+        file_put_contents($this->homeRoot . '/alice/project/Procfile', "web: node server.js\nworker: node worker.js\n");
+
+        $project->composeWriter()->writeGeneratedCompose(
+            $project->userAppDirPath(),
+            "services:\n  app:\n    image: node:22\n    volumes:\n      - './:/app'\n",
+            null
+        );
+
+        $compose = Yaml::parseFile($project->userAppComposeFilePath());
+        foreach (['app', 'worker'] as $service) {
+            $volumes = $compose['services'][$service]['volumes'];
+            $this->assertContains('data-app-uploads:/app/uploads', $volumes, $service);
+            $this->assertContains('/proc/meminfo', array_column(array_filter($volumes, 'is_array'), 'target'), $service);
+        }
     }
 
     public function test_networking_public_app_url_uses_main_domain_ssl_flag(): void
@@ -120,6 +176,8 @@ class DindInnerRuntimeTest extends TestCase
         $homeRoot = $this->homeRoot;
 
         return new class ($tmpRoot, $homeRoot) extends System {
+            public string $lxcfs = '';
+
             public function __construct(
                 private string $engineRoot,
                 private string $homeRoot,
@@ -160,6 +218,10 @@ class DindInnerRuntimeTest extends TestCase
                 $argv = $this->withoutSudo($cmd);
                 if (in_array($argv[0] ?? null, ['mkdir', 'cp', 'chmod'], true)) {
                     return (new Process($argv))->mustRun()->getOutput();
+                }
+                // The account's answer to which lxcfs files it has.
+                if (($argv[0] ?? null) === 'docker' && str_contains((string) end($argv), '/var/lib/lxcfs/proc')) {
+                    return $this->lxcfs;
                 }
 
                 return '';

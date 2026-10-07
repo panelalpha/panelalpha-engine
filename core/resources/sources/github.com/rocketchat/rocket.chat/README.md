@@ -242,7 +242,7 @@ The application healthcheck is the repository's own, from
 `docker-compose-ci.yml`: `wget --spider http://127.0.0.1:3000/livez`. The image
 is `node:24-alpine`, so busybox `wget` is present and `curl` is not. Meteor
 does not validate the `Host` header, so the loopback probe on `127.0.0.1:3000`
-is answered normally (engine#165 does not apply).
+is answered normally.
 
 ## Observed
 

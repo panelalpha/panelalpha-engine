@@ -42,6 +42,59 @@ class Filesystem
         }
     }
 
+    /**
+     * Write $contents at $path without ever opening whatever is already
+     * there: a temp file next to $path, then `mv -T` it into place.
+     *
+     * `cp`/`copyFile()` write through a symlink at $path to wherever it
+     * points -- fine when $path is ours alone, not when a directory holding
+     * it is (or used to be) writable from inside a tenant's account.
+     * `mv` replaces the directory entry for $path directly, so
+     * a symlink there is swapped out, never followed; `-T` keeps that true
+     * even if $path currently is a directory or a symlink to one.
+     */
+    public function writeFileReplacingPath(string $path, string $contents, ?string $chown = null, ?string $chmod = null): void
+    {
+        $dir = dirname($path);
+        $this->makeDirWithParents($dir, $chown);
+        $tmp = $path . '.tmp-' . bin2hex(random_bytes(8));
+        $local = tempnam(sys_get_temp_dir(), 'tmp_');
+        file_put_contents($local, $contents);
+        $this->system->exec(['sudo', 'cp', $local, $tmp]);
+        @unlink($local);
+        if ($chown) {
+            $this->system->exec(['sudo', 'chown', $chown, $tmp]);
+        }
+        if ($chmod) {
+            $this->system->exec(['sudo', 'chmod', $chmod, $tmp]);
+        }
+        $this->system->exec(['sudo', 'mv', '-T', $tmp, $path]);
+    }
+
+    /**
+     * Overwrite $path's content in place -- same inode -- refusing when
+     * $path is a symlink. For the one caller that cannot use {@see
+     * writeFileReplacingPath()}: a file a running container bind-mounts
+     * pins that inode, so a rename would not be visible until the container
+     * is recreated, and only an in-place write keeps it live. That is also
+     * why this one checks first instead of just renaming: it is the single
+     * remaining write that would follow a symlink if it is wrong.
+     *
+     * @return bool whether it wrote
+     */
+    public function overwriteFileUnlessSymlink(string $path, string $contents): bool
+    {
+        if ($this->system->runProcess(['sudo', 'test', '-L', $path])->getExitCode() === 0) {
+            return false;
+        }
+        $local = tempnam(sys_get_temp_dir(), 'tmp_');
+        file_put_contents($local, $contents);
+        $this->system->exec(['sudo', 'cp', $local, $path]);
+        @unlink($local);
+
+        return true;
+    }
+
     public function isDir(string $target): bool
     {
         $process = $this->system->runProcess(["sudo", "test", "-d", $target]);
@@ -194,6 +247,21 @@ class Filesystem
             $path,
         ]);
         return is_numeric($process->getOutput()) ? (int)$process->getOutput() : null;
+    }
+
+    /** Permission bits of $path, or null when there is no such file. */
+    public function mode(string $path): ?int
+    {
+        $process = $this->system->runProcess([
+            'sudo',
+            'stat',
+            '-c',
+            '%a',
+            $path,
+        ]);
+        $mode = trim($process->getOutput());
+
+        return $process->getExitCode() === 0 && preg_match('/\A[0-7]{3,4}\z/', $mode) === 1 ? (int) octdec($mode) : null;
     }
 
     public function cat(string $path): ?string

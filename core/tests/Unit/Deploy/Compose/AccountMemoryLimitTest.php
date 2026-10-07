@@ -43,9 +43,9 @@ class AccountMemoryLimitTest extends TestCase
      * page cache for all of them live inside it — so an application handed
      * 100% is one that can starve the daemon supervising it.
      *
-     * Measured on Wekan at 2048 MB before this: the app never touched its own
-     * ceiling (`memory.events: max 0`) while the account cgroup sat at
-     * exactly 2147491840 bytes with 2500 reclaim events.
+     * With Wekan at 2048 MB before this, the app never touched its own ceiling
+     * (`memory.events: max 0`) while the account cgroup sat at exactly
+     * 2147491840 bytes with 2500 reclaim events.
      */
     public function test_a_service_never_gets_the_whole_account_budget(): void
     {

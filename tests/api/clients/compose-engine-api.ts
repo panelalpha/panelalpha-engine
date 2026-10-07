@@ -3,10 +3,10 @@ import { AcmeApi } from './resources/acme.api';
 import { AppUsersApi } from './resources/app-users.api';
 import { ContainersApi } from './resources/containers.api';
 import { CronApi } from './resources/cron.api';
-import { CsfApi } from './resources/csf.api';
 import { DomainsApi } from './resources/domains.api';
 import { EximApi } from './resources/exim.api';
 import { FilesApi } from './resources/files.api';
+import { FirewallApi } from './resources/firewall.api';
 import { FtpApi } from './resources/ftp.api';
 import { IpApi } from './resources/ip.api';
 import { LighthouseApi } from './resources/lighthouse.api';
@@ -40,7 +40,7 @@ export const ENGINE_API_CLIENTS = [
   SftpApi,
   CronApi,
   WpCliApi,
-  CsfApi,
+  FirewallApi,
   ModSecurityApi,
   SystemApi,
   FilesApi,

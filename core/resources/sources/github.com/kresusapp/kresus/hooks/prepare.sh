@@ -1,7 +1,7 @@
 #!/bin/bash
 # Generate Kresus's secrets once and materialise ~/project/.env for compose.
 #
-# ~/project is re-cloned and wiped on every redeploy (engine#173), so the
+# ~/project is re-cloned and wiped on every redeploy, so the
 # postgres password and the export salt live in the account's persistent
 # ~/.panelalpha/kresus (the only writable, rebuild-surviving dir). They are
 # generated once and reused on every later deploy, so the encrypted data keeps
@@ -40,7 +40,7 @@ chmod 600 "${AUTH_ENV}"
 
 # Compose reads ~/project/.env for ${...} interpolation. The engine merges its
 # own keys onto this file without dropping ours (EnvFile::merge); writing it
-# also pre-empts any repo .env being copied over it (engine#218).
+# also pre-empts any repo .env being copied over it.
 cd "${HOME}/project"
 cp "${STORE}" .env
 chmod 600 .env

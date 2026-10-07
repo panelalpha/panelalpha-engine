@@ -17,9 +17,3 @@ description: >-
   Photofield has no upload and no user accounts, as upstream ships it: photos
   are placed in the `photos` volume, and collections are configured in
   /app/data/configuration.yaml.
-
-  Measured on mariusz2.panelalpha.tools (2026-09-29, engine 705f250a): deploy
-  43s, rebuild 25s, app 99 MiB. / serves the UI (<title>Photos</title>); a
-  photo placed in photos/pa-test/ shows up as collection `pa-test` after a
-  rebuild, indexes through POST /api/tasks (INDEX_FILES), serves its original,
-  and the index (indexed_count 1) survives a further rebuild.

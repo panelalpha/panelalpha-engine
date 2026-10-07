@@ -162,6 +162,19 @@ class ProjectOuterLifecycleTest extends TestCase
         $this->assertNotInstanceOf(\App\System\Project\Dind::class, $project);
     }
 
+    public function test_recreate_outer_compose_rewrites_a_missing_compose_file(): void
+    {
+        $system = $this->recordingSystem(template: 'dind');
+        $project = $system->project($this->dindModel('alice', $system));
+        $this->assertFileDoesNotExist($project->composeFilePath());
+
+        $this->assertFalse($project->isRunning());
+        $project->recreateOuterCompose();
+
+        $this->assertFileExists($project->composeFilePath());
+        $this->assertContains('compose-up', $system->journal);
+    }
+
     private function dindModel(string $username, System $system): ModelsUser
     {
         $model = new class ($system) extends ModelsUser {
@@ -312,6 +325,11 @@ class ProjectOuterLifecycleTest extends TestCase
                     $this->journal[] = 'compose-up';
                 }
                 if (str_contains($line, 'ps --services')) {
+                    // As Compose does when the file it is pointed at is gone.
+                    if (preg_match('/-f (\S+)/', $line, $m) === 1 && !is_file($m[1])) {
+                        throw new \Exception("compose file \"{$m[1]}\" is invalid: open {$m[1]}: no such file or directory");
+                    }
+
                     return '';
                 }
                 if (str_contains($line, 'mkdir')) {
@@ -352,9 +370,11 @@ class ProjectOuterLifecycleTest extends TestCase
                 if (str_contains($line, 'rm -rf')) {
                     $this->simulateRmRf($line);
                 }
+                // The account's own container is on the host, under its Compose label.
+                $output = str_starts_with($line, 'sudo docker ps -a --filter name=^/alice$') ? "alice\n" : '';
 
-                return new class extends Process {
-                    public function __construct()
+                return new class ($output) extends Process {
+                    public function __construct(private string $output)
                     {
                         parent::__construct(['true']);
                     }
@@ -376,7 +396,7 @@ class ProjectOuterLifecycleTest extends TestCase
 
                     public function getOutput(): string
                     {
-                        return '';
+                        return $this->output;
                     }
                 };
             }

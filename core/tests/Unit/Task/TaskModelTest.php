@@ -76,6 +76,32 @@ class TaskModelTest extends SqliteTaskTestCase
         $this->assertNull($task->started_at);
     }
 
+    /** A worker and a delete each read the row as queued; the first write wins. */
+    public function test_a_worker_never_runs_a_task_cancelled_after_it_read_the_row(): void
+    {
+        $task = Task::start(jobType: 'App\\Jobs\\RebuildJob', queue: 'default');
+        $workerCopy = Task::findOrFail($task->id);
+
+        $this->assertTrue($task->cancelIfQueued());
+        $this->assertFalse($workerCopy->markRunning('horizon-uuid-1'));
+
+        $this->assertSame(Task::STATUS_CANCELLED, $workerCopy->status);
+        $this->assertNull($workerCopy->started_at);
+        $this->assertNull($workerCopy->job_id);
+    }
+
+    public function test_cancel_if_queued_loses_to_a_worker_that_took_the_task_first(): void
+    {
+        $task = Task::start(jobType: 'App\\Jobs\\RebuildJob', queue: 'default');
+        $deleteCopy = Task::findOrFail($task->id);
+
+        $this->assertTrue($task->markRunning('horizon-uuid-1'));
+        $this->assertFalse($deleteCopy->cancelIfQueued());
+
+        $this->assertSame(Task::STATUS_RUNNING, $deleteCopy->status);
+        $this->assertNull($deleteCopy->cancelled_at);
+    }
+
     public function test_queued_can_complete_without_running(): void
     {
         $task = Task::start(jobType: 'App\\Jobs\\RebuildJob', queue: 'default');

@@ -20,6 +20,14 @@ class FileStreamWrapper
     private static ?string $root = null;
 
     /**
+     * What the helper runs under. confineTo() sets the account's setpriv
+     * prefix, so a read sees only what the account itself can.
+     *
+     * @var list<string>
+     */
+    private static array $runAs = ['sudo'];
+
+    /**
      * @var resource|false|null $proc
      */
     private $proc = null;
@@ -38,22 +46,25 @@ class FileStreamWrapper
 
     /**
      * Refuse any path that does not resolve to a file under $root. The check
-     * runs in the privileged helper, on the real path, so a symlink planted
-     * inside an account that points at /etc/shadow or another account's home
-     * is turned away where it would otherwise be read as root.
+     * runs in the helper, on the real path, so a symlink planted inside an
+     * account that points at /etc/shadow or another account's home is turned
+     * away. $runAs is the command prefix the helper runs under: the account's,
+     * or a file under the home that only root can read, such as ~/docker,
+     * would be read as root.
+     *
+     * @param list<string> $runAs
      */
-    public static function confineTo(?string $root): void
+    public static function confineTo(?string $root, array $runAs = ['sudo']): void
     {
         self::$root = $root === null ? null : rtrim($root, '/');
+        self::$runAs = $runAs;
     }
 
     public function stream_open(string $path, string $mode, int $options, ?string &$opened_path): bool
     {
         $realPath = preg_replace('#^sudophp://#', '', $path);
         $cmd = [
-            "sudo",
-            "php",
-            __DIR__ . '/file_stream.php',
+            ...$this->helperCommand(),
             $mode,
             $realPath,
         ];
@@ -162,13 +173,19 @@ class FileStreamWrapper
         $this->cleanup();
     }
 
+    /**
+     * Asked of the helper, as the account and confined like the read itself:
+     * this user cannot see into a directory only the account can enter.
+     */
     public function url_stat(string $path, int $flags): array|bool
     {
-        $realPath = preg_replace('#^sudophp://#', '', $path);
-        if (self::$root !== null && !self::isUnder(self::$root, $realPath)) {
+        $probe = new static();
+        $opened = null;
+        if (!@$probe->stream_open($path, 'r', 0, $opened)) {
             return false;
         }
-        $stat = @stat($realPath);
+        $stat = $probe->stream_stat();
+        $probe->stream_close();
         if ($stat === false) {
             return false;
         }
@@ -199,19 +216,9 @@ class FileStreamWrapper
         return false;
     }
 
-    /**
-     * Whether $path, with every symlink followed, lies inside $root. This is
-     * the unprivileged view; the helper repeats it as root, since a
-     * root-only directory in the chain is unreadable from here.
-     */
-    public static function isUnder(string $root, string $path): bool
+    /** @return list<string> */
+    protected function helperCommand(): array
     {
-        $realRoot = realpath($root);
-        $real = realpath($path);
-        if ($realRoot === false || $real === false) {
-            return false;
-        }
-
-        return str_starts_with($real, rtrim($realRoot, '/') . '/');
+        return [...self::$runAs, 'php', __DIR__ . '/file_stream.php'];
     }
 }

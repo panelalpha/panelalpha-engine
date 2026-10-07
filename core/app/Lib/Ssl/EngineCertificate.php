@@ -13,7 +13,7 @@ use App\System;
  * was written as string equality against the `vhost-default-ip-domain`
  * setting.
  *
- * A wildcard changes that completely. `*.178-104-84-45.panelalpha.direct`
+ * A wildcard changes that completely. `*.203-0-113-45.panelalpha.direct`
  * covers every project on the host, and an engine that kept generating
  * self-signed certificates next to it would be ignoring the answer it already
  * had. The same is true of a wildcard an operator bought and installed by
@@ -46,6 +46,22 @@ final class EngineCertificate
         return $this->system->engineDirPath() . '/crt/server.key';
     }
 
+    /** The certificate `:2011` presents, read the way covering() reads it; null when there is none. */
+    public function served(): ?string
+    {
+        $fs = $this->system->filesystem();
+        $path = $this->certificatePath();
+        if (!$fs->fileExists($path)) {
+            return null;
+        }
+
+        try {
+            return $fs->fileGetContents($path);
+        } catch (\Exception) {
+            return null;
+        }
+    }
+
     /**
      * The engine's certificate and key when they cover the domain and are in
      * date, else null.
@@ -76,8 +92,8 @@ final class EngineCertificate
 
         // A certificate nobody holds the key to covers nothing. Both files can
         // be readable, valid and even in date while belonging to different
-        // pairs -- the state a rotation left crt/server.cert in on 2.29.1.58,
-        // where nginx started without a word and then refused every handshake
+        // pairs -- the state a rotation can leave crt/server.cert in, where
+        // nginx starts without a word and then refuses every handshake
         // with `SSL alert number 40`. Serving that to a project would hand it
         // a certificate no client can complete a connection with, so the
         // project is better off signing its own.

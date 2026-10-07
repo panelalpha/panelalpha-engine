@@ -3,7 +3,7 @@ set -e
 cd ~/project
 
 # Secrets are generated ONCE and reused on every redeploy. ~/project is wiped and
-# re-cloned each deploy (engine#173), so they live in ~/.panelalpha/ziit/ -- the
+# re-cloned each deploy, so they live in ~/.panelalpha/ziit/ -- the
 # only writable, rebuild-surviving directory. Rotating NUXT_PASETO_KEY logs every
 # user out; rotating the DB password locks the app out of the existing pgdata
 # volume. Write only when missing.

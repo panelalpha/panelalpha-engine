@@ -83,7 +83,7 @@ class RubyStrategy
                 'runtime' => PlatformManifest::RUNTIME_NODE,
                 'env' => array_merge(
                     $this->environment($app, $projectDir, $chown),
-                    ComposeHarden::urlEnvironment($this->dind->publicAppUrl()),
+                    ComposeHarden::urlEnvironment($this->dind->publicAppUrl(), $strategy->projectEnvFiles($projectDir)),
                     $strategy->entrypoint()->deployPhaseEnvironment()
                 ),
             ],
@@ -92,7 +92,7 @@ class RubyStrategy
         $this->dind->composeWriter()->writeGeneratedCompose(
             $projectDir,
             DeployCompose::framework(
-                $strategy->composeDecision($decision),
+                $strategy->composeDecision($strategy->withPathPrefixKeys($decision, $projectDir)),
                 $port,
                 $this->dind->publicAppUrl()
             ),

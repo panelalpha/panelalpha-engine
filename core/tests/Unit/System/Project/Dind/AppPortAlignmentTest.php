@@ -59,12 +59,13 @@ class AppPortAlignmentTest extends TestCase
 
     /**
      * @param array<string, string> $files
+     * @param string|array<string, string> $httpStatus one answer, or one per probed port
      */
-    private function stubbedSystem(array $files, string $procNetTcp): System
+    private function stubbedSystem(array $files, string $procNetTcp, string|array $httpStatus = ''): System
     {
         $copiedTo = &$this->copiedTo;
 
-        return new class ($files, $copiedTo, $procNetTcp) extends System {
+        return new class ($files, $copiedTo, $procNetTcp, $httpStatus) extends System {
             /**
              * @param array<string, string> $files
              * @param array<string, string> $copiedTo
@@ -73,6 +74,7 @@ class AppPortAlignmentTest extends TestCase
                 private array $files,
                 private array &$copiedTo,
                 private string $procNetTcp,
+                private string|array $httpStatus,
             ) {
             }
 
@@ -107,6 +109,15 @@ class AppPortAlignmentTest extends TestCase
                 // directly rather than needing a real docker daemon.
                 if (str_contains($line, 'net/tcp')) {
                     return $this->procNetTcp;
+                }
+                if (str_contains($line, 'curl')) {
+                    if (is_array($this->httpStatus)) {
+                        preg_match('/ip:(\d+)\//', $line, $m);
+
+                        return $this->httpStatus[$m[1] ?? ''] ?? '000';
+                    }
+
+                    return $this->httpStatus;
                 }
                 if (preg_match('/^sudo cp (\S+) (\S+)$/', $line, $m) === 1 && is_file($m[1])) {
                     $this->copiedTo[$m[2]] = (string) file_get_contents($m[1]);
@@ -180,12 +191,13 @@ class AppPortAlignmentTest extends TestCase
     }
 
     /**
-     * Engine #88: sockets over time, one list per poll; the last repeats.
+     * Sockets over time, one list per poll; the last repeats.
      *
      * @param list<list<int>> $timeline
+     * @param list<int> $declared
      * @return array{0: ?int, 1: int, 2: list<int>} port, polls, sleeps
      */
-    private function awaitOver(int $expected, array $timeline): array
+    private function awaitOver(int $expected, array $timeline, array $declared = []): array
     {
         $polls = 0;
         $sleeps = [];
@@ -198,7 +210,8 @@ class AppPortAlignmentTest extends TestCase
             },
             function (int $seconds) use (&$sleeps): void {
                 $sleeps[] = $seconds;
-            }
+            },
+            $declared
         );
 
         return [$port, $polls, $sleeps];
@@ -246,11 +259,113 @@ class AppPortAlignmentTest extends TestCase
         $this->assertSame(3000, $port);
     }
 
-    /** epmd and unprivileged SSH are never front doors (#259). */
+    /**
+     * SignServer CE: the only other socket in the window does not speak
+     * HTTP (epmd, php-fpm, a loopback-only observer). Forwarding there leaves
+     * the site dead for good, so the published port stays.
+     */
+    public function test_a_candidate_that_does_not_answer_http_is_not_forwarded_to(): void
+    {
+        $files = [self::RUN_PATH => "services:\n  app:\n    ports:\n      - \"8081:8081\"\n"];
+        $system = $this->stubbedSystem($files, $this->procNetListening(8090), '000');
+        $dind = $this->stubbedDind($system, self::RUN_PATH, self::RUN_PATH);
+
+        // Reaching the rewrite would call Telemetry, which errors without Laravel.
+        (new AppPortAlignment($dind, static function (int $seconds): void {
+        }))->alignIfNeeded();
+
+        $this->assertSame([], $this->copiedTo, 'a port that does not answer HTTP must not become the published one');
+    }
+
+    public function test_a_probe_answer_reads_as_http_or_not(): void
+    {
+        $this->assertTrue(AppPortAlignment::answersHttp("404\n"));
+        $this->assertTrue(AppPortAlignment::answersHttp('200'));
+        $this->assertFalse(AppPortAlignment::answersHttp("000\n"));
+        $this->assertNull(AppPortAlignment::answersHttp(''), 'could not ask: no verdict, align as before');
+        $this->assertNull(AppPortAlignment::answersHttp('curl: not found'));
+    }
+
+    /** epmd and unprivileged SSH are never front doors. */
     public function test_non_web_ports_are_never_chosen(): void
     {
         [$port] = $this->awaitOver(4000, [[4369, 2222]]);
 
         $this->assertNull($port);
+    }
+
+    /** rapidbay never binds 6881 over TCP; 80 is a stock nginx page, 5000 the declared UI. */
+    public function test_a_port_the_dockerfile_declares_wins_over_the_generic_preference(): void
+    {
+        [$port] = $this->awaitOver(6881, [[80, 5000]], [6881, 5000]);
+
+        $this->assertSame(5000, $port);
+    }
+
+    /** php-fpm on 9000 outranks the real server on 8081, and is never HTTP. */
+    public function test_the_next_candidate_is_tried_when_the_first_does_not_answer_http(): void
+    {
+        $probed = [];
+        $port = AppPortAlignment::firstAnsweringHttp([9000, 8081], function (int $port) use (&$probed): ?bool {
+            $probed[] = $port;
+
+            return $port === 8081;
+        });
+
+        $this->assertSame(8081, $port);
+        $this->assertSame([9000, 8081], $probed);
+    }
+
+    public function test_no_candidate_is_chosen_when_none_answers_http(): void
+    {
+        $this->assertNull(AppPortAlignment::firstAnsweringHttp([9000, 4000], fn (): bool => false));
+        // A probe that could not run is no verdict: align as before.
+        $this->assertSame(9000, AppPortAlignment::firstAnsweringHttp([9000, 8081], fn (): ?bool => null));
+    }
+
+    public function test_only_the_first_few_candidates_are_probed(): void
+    {
+        $probed = [];
+        AppPortAlignment::firstAnsweringHttp([9000, 4000, 5555, 6666, 7777], function (int $port) use (&$probed): bool {
+            $probed[] = $port;
+
+            return false;
+        });
+
+        $this->assertSame([9000, 4000, 5555], $probed);
+    }
+
+    public function test_the_window_ends_with_no_candidate_once_the_container_stopped(): void
+    {
+        $polls = 0;
+        $candidates = AppPortAlignment::awaitCandidates(
+            8080,
+            function () use (&$polls): array {
+                $polls++;
+
+                return [['addr' => '00000000', 'port' => 9000]];
+            },
+            static function (int $seconds): void {
+            },
+            [],
+            function () use (&$polls): bool {
+                return $polls >= 2;
+            }
+        );
+
+        $this->assertSame([], $candidates);
+        $this->assertSame(2, $polls);
+    }
+
+    public function test_the_window_hands_back_every_candidate_best_first(): void
+    {
+        $candidates = AppPortAlignment::awaitCandidates(
+            8080,
+            fn (): array => [['addr' => '00000000', 'port' => 9000], ['addr' => '00000000', 'port' => 8081]],
+            static function (int $seconds): void {
+            }
+        );
+
+        $this->assertSame([9000, 8081], $candidates);
     }
 }

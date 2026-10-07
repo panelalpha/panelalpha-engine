@@ -15,7 +15,7 @@ use Symfony\Component\Process\Process;
 
 /**
  * After a Rust host compile, the binary is checked in the image it will run
- * in (#92). Only a gap costs the build-image copy and the second check; a
+ * in. Only a gap costs the build-image copy and the second check; a
  * binary slim can run gets one container and nothing else.
  */
 class HostCompileRustLibrariesTest extends TestCase
@@ -44,7 +44,9 @@ class HostCompileRustLibrariesTest extends TestCase
                     return $this->exit($found ? 0 : 1);
                 }
                 $sh = array_search('sh', $cmd, true);
-                $this->containers[] = ['image' => (string) $cmd[$sh - 1], 'script' => (string) end($cmd)];
+                // Without the OOM report every host build script starts with.
+                $script = (string) preg_replace("/^trap '[^']*' EXIT; /", '', (string) end($cmd));
+                $this->containers[] = ['image' => (string) $cmd[$sh - 1], 'script' => $script];
 
                 return $this->exit(array_shift($this->exitCodes) ?? 0);
             }

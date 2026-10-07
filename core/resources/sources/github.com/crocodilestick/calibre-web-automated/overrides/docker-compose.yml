@@ -1,7 +1,7 @@
 # Compose-replace: the repo's docker-compose.yml is a template with
 # /path/to/... bind mounts and a placeholder HARDCOVER_TOKEN. This runs the
 # official release image with named volumes, closes the default admin login
-# before the port is published, and fronts it with a small nginx (engine#323).
+# before the port is published, and fronts it with a small nginx.
 services:
   # One-shot, before the app exists: creates app.db and replaces
   # admin/admin123 with the engine's password (Calibre-Web's `cps.py -s`).
@@ -46,8 +46,8 @@ services:
     mem_limit: 2g
 
   # The only published port. The engine's vhost sends `Connection: upgrade` on
-  # every request and gevent then never finishes reading a POST body
-  # (engine#323); files/panelalpha/front.conf sends it only for real upgrades.
+  # every request and gevent then never finishes reading a POST body;
+  # files/panelalpha/front.conf sends it only for real upgrades.
   web:
     image: nginx:1-alpine
     restart: unless-stopped
@@ -65,7 +65,7 @@ services:
       retries: 12
     mem_limit: 64m
 
-  # No-op gate: `up` returns only once the site answers (engine#204).
+  # No-op gate: `up` returns only once the site answers.
   ready:
     image: nginx:1-alpine
     restart: "no"

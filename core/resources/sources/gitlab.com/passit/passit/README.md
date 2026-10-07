@@ -8,19 +8,18 @@ It is one product, delivered by upstream as one image.
 
 ## One source, no grafting
 
-The tracker Repository URL is the GitLab **group** `gitlab.com/passit`, which
-is three repos: `passit-backend` (Django), `passit-frontend` (Angular), and
+Upstream is the GitLab **group** `gitlab.com/passit`, which is three repos: `passit-backend` (Django), `passit-frontend` (Angular), and
 `passit` (the deployment meta-repo). A recipe may deploy only one source and
 may pull official prebuilt images, but may not clone a second source repo and
 stitch it in.
 
 Passit does not need grafting: upstream publishes **`passit/passit`**, a single
 self-contained image that bundles the backend and the *already-built* frontend.
-Verified inside the image:
+The image holds:
 
 ```
 /code/dist/index.html          # Angular build output
-/code/static/main.8b0a469c….js # collected + hashed, whitenoise-served
+/code/static/main.<hash>.js    # collected + hashed, whitenoise-served
 /code/manage.py  /code/bin/start.sh (granian ASGI on :8080)
 ```
 
@@ -34,8 +33,7 @@ official image. `git ls-remote` on it needs no credentials.
 Docker Hub `passit/passit:latest` was pushed **2019-01-11** (Python 3.6,
 uWSGI). `stable` was pushed **2026-04-10** (Python 3.14, granian) and is what
 the backend's current master builds. `latest` predates the current settings
-entirely — it has no Valkey cache/task backend and, measured on the control
-deploy below, dies on boot with `ImproperlyConfigured: Set the SECRET_KEY
+entirely — it has no Valkey cache/task backend and dies on boot with `ImproperlyConfigured: Set the SECRET_KEY
 environment variable` and never loads the app. The recipe pins `stable`;
 `PASSIT_IMAGE` in the account env overrides the tag.
 
@@ -44,12 +42,10 @@ environment variable` and never loads the app. The recipe pins `stable`;
 The meta-repo has only a `Dockerfile` (`FROM passit/passit:latest`) and a
 DigitalOcean app spec — no runnable compose. So detection reads it as
 `dockerfile` and builds one container with **no database, no cache, no
-SECRET_KEY and no migrations**. Measured control (recipe hidden, same repo):
-
-- Deploy reported **`success` in 36 s**, then the public domain answered
-  **000** (nothing served). The inner container ran uWSGI in "no app loaded /
-  full dynamic mode" after `ImproperlyConfigured: Set the SECRET_KEY
-  environment variable`, crash-looping. A green deploy in front of a dead site.
+SECRET_KEY and no migrations**. The deploy reports **`success`** and the public
+domain then serves nothing: the container runs uWSGI in "no app loaded / full
+dynamic mode" after `ImproperlyConfigured: Set the SECRET_KEY environment
+variable`, crash-looping. A green deploy in front of a dead site.
 
 The recipe replaces that with the real stack:
 
@@ -92,7 +88,7 @@ registers in the SPA, which does the crypto correctly.
 Django's `/admin/` is a second, session-only login surface that lists every
 registered email, is not the vault, and whose login POST is rejected by CSRF
 over the proxy anyway. The recipe turns it off (`ENABLE_DJANGO_ADMIN=False`,
-overridable) — measured: `/admin/` → 404.
+overridable), so `/admin/` is a 404.
 
 ## SMTP limitation, stated plainly
 
@@ -106,33 +102,6 @@ vars and documented in `~/.panelalpha/passit/credentials.txt` — not a recipe
 repair and not grafting. Everything except the email delivery works without it.
 (Passit only *sends* mail; it receives none, so the "mail-receiving apps"
 policy does not apply.)
-
-## Verified on mariusz.panelalpha.tools, over the public HTTPS domain
-
-- **Deploy 48 s** (image warm), `deploy_strategy: compose`. `/` → 200 with
-  `<title>Passit</title>` (SPA), `/api/ping/` → `{"ping":"pong"}`, `/_health/`
-  → 200. Chain came up `db→cache→init(exit 0)→app(healthy)→ready(exit 0)`.
-  Control (same repo, no recipe): `success` in 36 s, then **000**, app
-  crash-looping on the missing SECRET_KEY.
-- **Product exercised end to end, with the real E2E crypto** (via
-  `passit_sdk`, over the public domain): registered a user, confirmed the email
-  with the code read from the DB (the console-backend path), logged in for a
-  knox token, **created a secret and read it back decrypted** to its original
-  plaintext. The server-stored blob is ciphertext only — the plaintext never
-  appears in it.
-- **Anonymous refused:** `/api/secrets/` → 403; a non-existent secret → 403,
-  no traceback (DEBUG off).
-- **Exposure by body:** `/.env`, `/.env.default`, `/.git/config`,
-  `/docker-compose.yml`, `/Dockerfile`, `/passit/settings.py`, `/manage.py`,
-  `/pa/init.sh`, `/pa/entrypoint.sh`, `/admin/`, `/media/` all 404 with no
-  `SECRET_KEY` / password / private key in any body. `/api/conf/` (an
-  intentional `AllowAny` endpoint the SPA reads) returns non-secret config only.
-- **Redeploy survival (rebuild, 200 / `success`):** the three files in
-  `~/.panelalpha/passit/` were **byte-identical** (same sha256) — `prepare.sh`
-  reused them — the user and the secret persisted in the `pgdata` volume, and
-  the pre-existing account still logged in and **its secret still decrypted**.
-- **Memory at idle:** app 110 MiB / 768, db 24 MiB / 384, cache 6 MiB / 128;
-  ~140 MiB across the app services, 236 MiB for the whole account container.
 
 ## Where things live
 

@@ -9,7 +9,7 @@ cd ~/project
 say() { echo "[foodsoft] $*" >&2; }
 
 # ~/.panelalpha/foodsoft/ survives the deploy; ~/project is emptied on every
-# deploy (engine#173), so a secret written there would be regenerated on every
+# deploy, so a secret written there would be regenerated on every
 # rebuild -- a new SECRET_KEY_BASE logs everyone out and voids every signed
 # cookie, and a new DB password locks the app out of the mariadb volume that
 # still holds the old one. db.env holds only what the mariadb container needs;

@@ -92,7 +92,7 @@ class NextWorkspaceProbeTest extends ProbeTestCase
 
     public function test_the_app_with_its_own_next_config_beats_a_server_that_imports_next(): void
     {
-        // engine#160, Teable: nestjs-backend depends on next to serve the app
+        // Teable: nestjs-backend depends on next to serve the app
         // and sorts first; nextjs-app is the app.
         $this->writeJson('package.json', ['name' => '@teable/teable']);
         $this->write('pnpm-workspace.yaml', "packages:\n  - apps/*\n");

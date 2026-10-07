@@ -45,7 +45,7 @@ services:
       start_period: 10s
     mem_limit: 768m
 
-  # `up -d` runs without --wait (engine#204); this blocks it until Sharry answers.
+  # `up -d` runs without --wait; this blocks it until Sharry answers.
   ready:
     image: postgres:18-alpine
     restart: "no"

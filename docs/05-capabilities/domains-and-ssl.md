@@ -32,6 +32,16 @@ If you create a project without naming a domain, the engine picks the best publi
 
 A `panelalpha.online` name is yours for as long as the project exists, and is released again when you remove it.
 
+## Extra names for an app that needs them
+
+Some applications answer on a few fixed names next to their main one, for example an API on its own hostname. On a `panelalpha.online` name, a project can add a few sibling names beside its own, such as `api-shop.panelalpha.online` next to `shop.panelalpha.online`. Each one has a trusted certificate, reaches the same site, and arrives with the name the visitor typed, so the application can tell them apart:
+
+```text
+Add api-shop.panelalpha.online as an extra name for shop.panelalpha.online.
+```
+
+This works for applications that let you choose those names (an `API_DOMAIN` setting or similar). An application that insists on a name *under* its own, such as `api.shop.panelalpha.online`, cannot get one on `panelalpha.online`. Give it a domain of your own, point its DNS at this server, and add the extra names (`api.shop.example.com`, ...) to the project as well, as addon domains, each with its own certificate.
+
 ## Reach a site through Cloudflare
 
 Instead of pointing a DNS record at this VPS, you can have visitors reach a repository-deployed site through Cloudflare, with Cloudflare providing HTTPS. You save a Cloudflare API token on the project, then ask the assistant to attach the hostname:
@@ -72,7 +82,21 @@ The engine already sends HTTP and HTTPS for your project hostnames to the right 
 List the proxy rules on this engine.
 ```
 
-Do not add a rule that opens a public port for an application that already has a hostname. Traffic is supposed to arrive at the engine's webserver, which routes it into the right project: [Security](security.md#the-firewall-csf).
+Do not add a rule that opens a public port for an application that already has a hostname. Traffic is supposed to arrive at the engine's webserver, which routes it into the right project: [Security](security.md#the-firewall).
+
+A rule that belongs to a project can only send traffic to that project's own app, named by the project's name. The engine refuses any other destination: another project, an address, the engine's own services (its database server, its API, its image registries) or the server itself. Its hostname, if it has one, must be one of the project's own domains or aliases: a project cannot answer for another project's site, on any port. A rule that belongs to the engine (a system rule) is yours as the server's administrator and may point anywhere the server reaches, the engine's own services included. Its port is opened in the firewall like any other, so a system rule to the database server puts that database on the internet.
+
+## Mail from a domain
+
+Mail a site sends ends up in spam when its domain does not vouch for the server that sent it. The engine lists the SPF, DKIM, DMARC and MX records a domain needs for mail sent through this host, and checks which of them are published:
+
+```text
+Check the mail DNS records for shop.example.com.
+```
+
+Each record comes back as ok, missing, wrong or unknown, with the value to publish where the engine knows it. If the mail relay rewrites senders to its own sender domain, the records belong to that domain, and the answer says so.
+
+The engine does not sign mail itself. A DKIM signature comes from a relay (SendGrid, Amazon SES, MailChannels or your own SMTP server) that signs for the domain. Give the assistant the relay's DKIM selector to check that record too.
 
 ## Troubleshooting
 

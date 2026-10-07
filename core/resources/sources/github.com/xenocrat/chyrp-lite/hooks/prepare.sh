@@ -40,8 +40,7 @@ chmod 700 "${DATA_HOME}"
 # written overrides/docker-compose.override.yml into the project root under
 # exactly that name -- the order is clone, copy files/ and overrides/, run this
 # hook, then detect -- so a glob moves this recipe's own override aside and the
-# deploy quietly loses its healthcheck while still reporting success
-# (engine#166).
+# deploy quietly loses its healthcheck while still reporting success.
 mkdir -p .panelalpha
 for f in docker-compose.yaml Dockerfile entrypoint.sh .dockerignore; do
     [ -e "$f" ] || continue
@@ -53,8 +52,8 @@ done
 # 2. uploads/, which is where the blog's images go.
 #
 # Chyrp's uploads_path is MAIN_DIR . "/uploads/" and MAIN_DIR is dirname of
-# index.php -- inside the checkout, which a redeploy clears and re-clones
-# (engine#173). A symlink out of the document root is not an option here:
+# index.php -- inside the checkout, which a redeploy clears and re-clones.
+# A symlink out of the document root is not an option here:
 # uploads are served by Apache as static files, and the generated vhost's
 # `<Directory /> Require all denied` matches the *resolved* path, so anything
 # pointing outside the document root answers 403.

@@ -20,10 +20,10 @@ final class RollBackProject implements FailureDisposition
         $this->destroy($user);
     }
 
-    /** The template path never kept the log tail of a cancelled deploy. */
+    /** The rollback deletes the deploy log, so a cancel needs the tail kept as much as a failure. */
     public function hookRunsOnCancel(): bool
     {
-        return false;
+        return true;
     }
 
     public function hookName(): string
@@ -34,8 +34,9 @@ final class RollBackProject implements FailureDisposition
     private function destroy(ModelsUser $user): void
     {
         // Re-read: the pipeline may have saved details since, and destroy()
-        // works off the row rather than the in-memory model.
-        $fresh = ModelsUser::findByUsername($user->username);
+        // works off the row rather than the in-memory model. By id: a newer
+        // project may have taken the name of one deleted under this deploy.
+        $fresh = $user->getKey() === null ? null : ModelsUser::query()->whereKey($user->getKey())->first();
         $fresh?->project()->destroy();
     }
 }

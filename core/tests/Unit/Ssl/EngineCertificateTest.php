@@ -59,4 +59,46 @@ class EngineCertificateTest extends TestCase
             $system->probed
         );
     }
+
+    /** /system/info read it with is_readable() as the engine's PHP user; covering() reads it as root. */
+    public function test_the_served_certificate_is_read_the_way_covering_reads_it(): void
+    {
+        $system = new class extends System {
+            /** @var array<string, string> */
+            public array $files = [];
+
+            public function engineDirPath(): string
+            {
+                return '/opt/panelalpha/shared-hosting';
+            }
+
+            public function filesystem(): Filesystem
+            {
+                $engine = $this;
+
+                return new class ($engine) extends Filesystem {
+                    public function __construct(private System $engine)
+                    {
+                        parent::__construct($engine);
+                    }
+
+                    public function fileExists(string $path): bool
+                    {
+                        return isset($this->engine->files[$path]);
+                    }
+
+                    public function fileGetContents(string $path): string
+                    {
+                        return $this->engine->files[$path];
+                    }
+                };
+            }
+        };
+        $certificate = new EngineCertificate($system);
+
+        $this->assertNull($certificate->served());
+
+        $system->files['/opt/panelalpha/shared-hosting/crt/server.cert'] = "-----BEGIN CERTIFICATE-----\n";
+        $this->assertSame("-----BEGIN CERTIFICATE-----\n", $certificate->served());
+    }
 }

@@ -48,6 +48,20 @@ class RegistryImageConfigTest extends TestCase
         $this->assertSame(self::CACHE . '/v2/postgres/manifests/16', $asked[0], 'the cache registry is asked first');
     }
 
+    public function test_an_images_own_environment_is_read_from_its_config(): void
+    {
+        $env = $this->config([
+            self::PROXY . '/v2/sharelatex/sharelatex/manifests/6.3.0' => json_encode(['config' => ['digest' => 'sha256:c']]),
+            self::PROXY . '/v2/sharelatex/sharelatex/blobs/sha256:c' => json_encode(['config' => ['Env' => [
+                'PATH=/usr/bin',
+                'NODE_OPTIONS=--require /overleaf/.pnp.cjs --import /overleaf/.pnp.register.mjs',
+            ]]]),
+        ])->environment('sharelatex/sharelatex:6.3.0');
+
+        $this->assertSame(['PATH=/usr/bin', 'NODE_OPTIONS=--require /overleaf/.pnp.cjs --import /overleaf/.pnp.register.mjs'], $env);
+        $this->assertSame([], $this->config([])->environment('sharelatex/sharelatex:6.3.0'));
+    }
+
     public function test_the_cache_registry_answers_under_the_pushed_name(): void
     {
         $ports = $this->config([
@@ -78,6 +92,31 @@ class RegistryImageConfigTest extends TestCase
         $digest = 'sha256:' . str_repeat('a', 64);
 
         $this->assertSame([self::PROXY, 'library/redis', $digest], RegistryImageConfig::sources("redis@{$digest}")[1]);
+    }
+
+    public function test_a_tag_beside_a_digest_stays_out_of_the_path(): void
+    {
+        $digest = 'sha256:' . str_repeat('a', 64);
+
+        $this->assertSame([
+            [self::CACHE, 'sharelatex/sharelatex', $digest],
+            [self::PROXY, 'sharelatex/sharelatex', $digest],
+        ], RegistryImageConfig::sources("sharelatex/sharelatex:6.3.0@{$digest}"));
+        $this->assertSame(
+            [self::CACHE, 'registry.internal:5000/ns/pg', $digest],
+            RegistryImageConfig::sources("registry.internal:5000/ns/pg:16@{$digest}")[0]
+        );
+    }
+
+    public function test_a_pinned_image_declares_its_ports(): void
+    {
+        $digest = 'sha256:' . str_repeat('a', 64);
+        $ports = $this->config([
+            self::PROXY . "/v2/traefik/whoami/manifests/{$digest}" => json_encode(['config' => ['digest' => 'sha256:c']]),
+            self::PROXY . '/v2/traefik/whoami/blobs/sha256:c' => json_encode(['config' => ['ExposedPorts' => ['80/tcp' => []]]]),
+        ])->exposedPorts("traefik/whoami:v1.10.3@{$digest}");
+
+        $this->assertSame([80], $ports);
     }
 
     public function test_a_private_registry_host_with_a_port_is_not_hub(): void

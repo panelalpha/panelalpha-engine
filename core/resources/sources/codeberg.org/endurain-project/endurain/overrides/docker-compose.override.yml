@@ -28,8 +28,8 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - ${LOCAL_PATH:-/var/opt/endurain}/backend/data:/app/backend/data
-      - ${LOCAL_PATH:-/var/opt/endurain}/backend/logs:/app/backend/logs
+      - ${LOCAL_PATH:-../.panelalpha/endurain}/backend/data:/app/backend/data
+      - ${LOCAL_PATH:-../.panelalpha/endurain}/backend/logs:/app/backend/logs
 
   postgres:
     image: postgres:18

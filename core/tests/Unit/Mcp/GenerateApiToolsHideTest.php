@@ -3,6 +3,7 @@
 namespace Tests\Unit\Mcp;
 
 use App\Http\Controllers\TaskController;
+use App\Http\Controllers\User\AppUserController;
 use App\Http\Controllers\User\MysqlController;
 use Illuminate\Support\Facades\File;
 use OpenApi\Attributes as OA;
@@ -83,6 +84,18 @@ class GenerateApiToolsHideTest extends TestCase
     {
         $attribute = (new ReflectionMethod(MysqlController::class, 'usePhpmyadminSsoToken'))
             ->getAttributes(OA\Put::class)[0]->newInstance();
+
+        $this->assertSame(['mcp-hide' => true], $attribute->x);
+    }
+
+    /**
+     * The app SSO redeem is a browser's: as a tool it burned the single-use
+     * token the link needs and put the session cookie in a tool result.
+     */
+    public function test_the_app_sso_token_redeem_is_hidden_from_mcp(): void
+    {
+        $attribute = (new ReflectionMethod(AppUserController::class, 'useAppSsoToken'))
+            ->getAttributes(OA\Get::class)[0]->newInstance();
 
         $this->assertSame(['mcp-hide' => true], $attribute->x);
     }

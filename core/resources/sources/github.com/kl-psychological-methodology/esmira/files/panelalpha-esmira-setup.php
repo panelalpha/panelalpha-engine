@@ -65,8 +65,8 @@ use backend\Paths;
 // /data is a bind mount of ~/.panelalpha/esmira/data, declared by the compose
 // override. Two things follow from it and both matter:
 //
-//   1. it survives a redeploy. The engine empties ~/project before every clone
-//      (engine #173), and ESMira's own default data location is DIR_BASE --
+//   1. it survives a redeploy. The engine empties ~/project before every clone,
+//      and ESMira's own default data location is DIR_BASE --
 //      i.e. inside the document root, inside the checkout -- so on the default
 //      the account would lose every study and every collected response on each
 //      redeploy.
@@ -134,7 +134,7 @@ if ($store->isInit()) {
 //
 // The engine's login (`credentials:` in panelalpha.yaml), written to
 // ~/.panelalpha/app-credentials.env and delivered by env_file:, so it is
-// outside ~/project (engine #173) and outside .env, which
+// outside ~/project and outside .env, which
 // ProjectEnvironment::apply() copies to .env.default at mode 644.
 $account = getenv('ESMIRA_ADMIN_USER') ?: '';
 $password = getenv('ESMIRA_ADMIN_PASS') ?: '';

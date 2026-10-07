@@ -60,7 +60,7 @@ class GitRepoInputTest extends TestCase
             'bare self-hosted host' => ['https://git.internal/', 'git_repo_incomplete'],
             'a forge account is not a repository' => ['https://github.com/vvolv', 'git_repo_incomplete'],
             'embedded credentials' => ['https://user:pw@github.com/o/r.git', 'git_repo_embedded_credentials'],
-            // #83: this used to become https://vvolv/market-radar, "Could not reach vvolv".
+            // This used to become https://vvolv/market-radar, "Could not reach vvolv".
             'owner/repo shorthand' => ['vvolv/market-radar', 'git_repo_shorthand'],
         ];
     }
@@ -99,6 +99,42 @@ class GitRepoInputTest extends TestCase
                 'https://github.com/vvolv/market-radar',
             ],
         ];
+    }
+
+    /**
+     * Only a forge serves an SSH remote's path over HTTPS on the default
+     * port; anywhere else the HTTPS address is not guessed.
+     */
+    #[DataProvider('unguessableProvider')]
+    public function test_suggests_no_https_url_it_would_have_to_guess(string $input): void
+    {
+        $problem = GitRepoInput::problem('git_repo', $input);
+
+        $this->assertNotNull($problem);
+        $this->assertSame('git_repo_ssh_unsupported', $problem['code']);
+        $this->assertArrayNotHasKey('suggestion', $problem);
+        $this->assertStringNotContainsString('https://', $problem['message']);
+    }
+
+    public static function unguessableProvider(): array
+    {
+        return [
+            'self-hosted scp-style' => ['git@git.example.com:acme/app.git'],
+            'self-hosted on another port' => ['ssh://git@git.example.com:2222/acme/app.git'],
+            'a forge on another port' => ['ssh://git@gitlab.com:2222/acme/app.git'],
+            'GitHub over port 443' => ['ssh://git@ssh.github.com:443/acme/app.git'],
+        ];
+    }
+
+    /** The refusal names the way an SSH remote does work: a deploy key on an existing project. */
+    public function test_an_ssh_remote_is_pointed_at_the_deploy_key(): void
+    {
+        $message = GitRepoInput::problem('git_repo', 'git@github.com:acme/app.git')['message'];
+
+        $this->assertStringContainsString('Create the project without a repository', $message);
+        $this->assertStringContainsString('POST /projects/{name}/git/deploy-key', $message);
+        $this->assertStringContainsString('POST /projects/{name}/git/connect', $message);
+        $this->assertStringNotContainsString('holds no SSH keys', $message);
     }
 
     /** A token needs HTTPS; plain HTTP is fine without one. */

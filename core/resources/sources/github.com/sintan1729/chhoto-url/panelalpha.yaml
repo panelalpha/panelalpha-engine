@@ -10,7 +10,7 @@ description: >-
   WHY COMPOSE-REPLACE ON THE OFFICIAL DOCKER HUB IMAGE. Upstream ships clean
   multi-arch images on Docker Hub (sintan1729/chhoto-url:7.8.1 and :7.8.1-alpine,
   the latest release), which the engine seeds fine (Docker Hub, not the GHCR
-  case of engine#229). The `dockerfile` strategy is not usable: a hosted deploy
+  case of the image-seed NotFound). The `dockerfile` strategy is not usable: a hosted deploy
   needs a persistent SQLite path, the admin password and the public site URL
   wired in, which are compose concerns, not source changes. The repo's own
   deploy/compose.yaml is the `image + one volume` example; this override is that
@@ -44,8 +44,7 @@ description: >-
 
   PORT. The app listens on 4567 (CHHOTO_LISTEN_PORT default; a separate health
   server binds 127.0.0.1:1729 for /healthz, used only by the container's own
-  healthcheck). Published as 4567:4567 -- the only service that publishes a port
-  (engine#234).
+  healthcheck). Published as 4567:4567 -- the only service that publishes a port.
 credentials:
   adopt_from: .panelalpha/chhoto-url/app.env
   fields:

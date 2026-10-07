@@ -10,9 +10,7 @@ description: >-
   image contains cookbook/static/vue3/manifest.json and an image built from a
   bare checkout contains no vue3 directory at all. django-vite then logs
   W001 "Cannot read Vite manifest file" on every boot and the application has
-  no frontend. Measured on this host: the published image has
-  /opt/recipes/cookbook/static/vue3/{manifest.json,assets/,service-worker.js},
-  the image the engine built has no /opt/recipes/cookbook/static/vue3 at all.
+  no frontend.
 
   The second failure is the one a visitor sees. recipes/settings.py:125 reads
   ALLOWED_HOSTS from the environment with an empty default and DEBUG is 0, so
@@ -33,8 +31,7 @@ description: >-
   ships psycopg2-binary and nothing else) and settings.py:511 raises
   "Unsupported database schema" for any DATABASE_URL that is not postgres or
   sqlite, so `database: mysql` cannot work whatever is configured. SQLite does
-  work -- measured, all 245 cookbook migrations apply cleanly in the published
-  image -- but it turns off Tandoor's full-text and trigram search
+  work, but it turns off Tandoor's full-text and trigram search
   (cookbook/helper/recipe_search.py:199 falls back to icontains) and the app
   puts a "not recommended" banner in its own system page
   (cookbook/views/views.py:193). postgres:16-alpine, the version upstream's own
@@ -42,7 +39,7 @@ description: >-
   resident, which is cheaper than the feature loss.
 
   Two of the three services exist only to make `docker compose up -d` mean
-  what it says. The engine runs it without --wait (engine#204), so a deploy is
+  what it says. The engine runs it without --wait, so a deploy is
   "finished" when containers have been started. `init` runs the migrations and
   creates the administrator before the web container is allowed to start, which
   is what closes /setup/ -- `app` waits on it with

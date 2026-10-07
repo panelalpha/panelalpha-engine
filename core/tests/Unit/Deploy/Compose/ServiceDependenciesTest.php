@@ -154,4 +154,39 @@ class ServiceDependenciesTest extends TestCase
         $this->assertSame(['db'], $service['depends_on']);
         $this->assertArrayNotHasKey('links', $service);
     }
+
+    /** RoboSats runs every service on `network_mode: service:tor`, and `tor` is built here. */
+    public function test_a_dropped_network_or_volume_source_is_let_go(): void
+    {
+        $service = ServiceDependencies::withoutDropped(
+            [
+                'image' => 'redis:6.2.6',
+                'network_mode' => 'service:tor',
+                'volumes_from' => ['tor:ro', 'cache', 'container:tor'],
+            ],
+            ['tor' => true]
+        );
+
+        $this->assertArrayNotHasKey('network_mode', $service);
+        $this->assertSame(['cache', 'container:tor'], $service['volumes_from']);
+
+        $kept = ServiceDependencies::withoutDropped(
+            ['network_mode' => 'service:vpn', 'volumes_from' => ['tor']],
+            ['tor' => true]
+        );
+        $this->assertSame('service:vpn', $kept['network_mode']);
+        $this->assertArrayNotHasKey('volumes_from', $kept);
+    }
+
+    public function test_a_rename_follows_network_mode_and_volumes_from(): void
+    {
+        $service = ServiceDependencies::renamed(
+            ['network_mode' => 'service:app', 'volumes_from' => ['app:ro', 'container:app']],
+            'app',
+            'app-sidecar'
+        );
+
+        $this->assertSame('service:app-sidecar', $service['network_mode']);
+        $this->assertSame(['app-sidecar:ro', 'container:app'], $service['volumes_from']);
+    }
 }

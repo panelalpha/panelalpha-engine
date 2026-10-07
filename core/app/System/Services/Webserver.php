@@ -340,8 +340,8 @@ class Webserver implements WebserverInterface
      *
      * A restart is the one path here with no fallback: handed an unusable
      * config the container exits on the `[emerg]` and loops under
-     * `restart: always`, taking every site on the host down with it (issue
-     * #63). So the config is tested first, and the restart is refused while
+     * `restart: always`, taking every site on the host down with it.
+     * So the config is tested first, and the restart is refused while
      * the test fails. Only nginx's own verdict refuses -- a container that is
      * down is exactly what a restart is for.
      */
@@ -517,6 +517,11 @@ class Webserver implements WebserverInterface
 
         $pipeline = 'echo ' . escapeshellarg($inner) . ' | at now';
         $hostCmd = 'bash -lc ' . escapeshellarg($pipeline);
-        $this->system->runProcessOnHost($hostCmd);
+        $process = $this->system->runProcessOnHost($hostCmd);
+        // Nothing else would say so: a host without `at` never runs the job.
+        if (!$process->isSuccessful()) {
+            Log::warning('Could not queue the webserver reload on the host: '
+                . Str::limit(trim($process->getErrorOutput() . ' ' . $process->getOutput()), 200));
+        }
     }
 }

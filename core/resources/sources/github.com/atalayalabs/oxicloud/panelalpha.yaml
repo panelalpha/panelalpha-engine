@@ -17,6 +17,6 @@ description: >-
 
   OXICLOUD_TRUST_PROXY_CIDR is left unset, as upstream ships it: OxiCloud takes
   the leftmost X-Forwarded-For entry, which the account vhost lets a visitor
-  set (engine#319), so its login/registration rate limits count every visitor
+  set, so its login/registration rate limits count every visitor
   as the proxy's address. The first account registered becomes the admin, as
   upstream ships it.

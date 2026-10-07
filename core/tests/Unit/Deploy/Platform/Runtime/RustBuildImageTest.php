@@ -12,7 +12,7 @@ use PHPUnit\Framework\TestCase;
  * A Rust host compile does not run in the image the app runs in.
  *
  * `rust:1-slim-bookworm` ships the toolchain and nothing a build script can
- * link against. Measured on this host:
+ * link against:
  *
  *     rust:1-bookworm       g++ present   pkg-config present
  *                           /usr/include/openssl/ssl.h present   libssl.so present
@@ -132,7 +132,7 @@ class RustBuildImageTest extends TestCase
     /**
      * The host compile is where the build image has to arrive. It resolved
      * `buildImageTag()` nowhere, so cargo ran in slim and died on the first
-     * crate wanting g++ (#104), make (#138) or pkg-config and OpenSSL (#92).
+     * crate wanting g++, make, or pkg-config and OpenSSL.
      */
     public function test_the_host_compile_runs_cargo_in_the_build_image(): void
     {

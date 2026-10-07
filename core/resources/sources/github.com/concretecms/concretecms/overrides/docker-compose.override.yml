@@ -15,11 +15,11 @@
 services:
   app:
     # The second env_file is the whole reason this file has one at all. The
-    # administrator password is generated once per account by hooks/prepare.sh
-    # and must be the same on every deploy, so it cannot live in ~/project --
+    # account's settings are written once by hooks/prepare.sh and must be the
+    # same on every deploy, so they cannot live in ~/project --
     # which is re-cloned each time -- and it must not live in .env, which
-    # ProjectEnvironment::apply() copies to a world-readable .env.default
-    # (engine#173). It is read from ~/.panelalpha/concrete/concrete.env at 0600
+    # ProjectEnvironment::apply() copies to a world-readable .env.default.
+    # It is read from ~/.panelalpha/concrete/concrete.env at 0600
     # instead.
     #
     # `.env` is restated rather than left to be inherited: Compose merges some
@@ -29,11 +29,13 @@ services:
     env_file:
       - .env
       - ../.panelalpha/concrete/concrete.env
+      # The administrator's login, which the engine generates (`credentials:`).
+      - ../.panelalpha/app-credentials.env
 
     # Everything Concrete writes that is data rather than code. All three are
     # inside the checkout by default, and
     # GitRepository::cloneConfiguredRepository() empties ~/project before every
-    # deploy (engine#173) -- so without these a redeploy is a factory reset
+    # deploy -- so without these a redeploy is a factory reset
     # that leaves the database behind: the site would come back pointing at its
     # own data with no credentials to reach it and no files to serve.
     #
@@ -70,7 +72,7 @@ services:
     # connection file, the schema, the starting point, the administrator. The
     # engine runs `docker compose up -d` without --wait and probes as soon as
     # it returns, which is while that is still going: nothing is listening and
-    # the probe reads `Failed to connect to 127.0.0.1 port 8000` (engine#90).
+    # the probe reads `Failed to connect to 127.0.0.1 port 8000`.
     #
     #   1. GET /       the home page of the starting point, rendered through
     #                  the theme. A 200 means the schema exists, Concrete

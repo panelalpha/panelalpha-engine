@@ -8,7 +8,7 @@ use App\System\Project\Dind\TenantEgressGuard;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#217: from inside an account, customer code reached core (:2011,
+ * From inside an account, customer code reached core (:2011,
  * :80), SFTP, FTP, phpMyAdmin and other accounts on pash-default-network, the
  * host on every port, and 169.254.169.254. The guard is run for real here,
  * with iptables and getent replaced by shims that record what it does.
@@ -40,21 +40,21 @@ esac
 [ "$1" = "-C" ] && exit 1
 exit 0
 SH);
-        file_put_contents($this->dir . '/bin/getent', <<<'SH'
+        file_put_contents($this->dir . '/bin/getent', str_replace('__DB_NAMES__', implode('|', TenantEgressGuard::DATABASE_NAMES), <<<'SH'
 #!/bin/sh
 [ -f "$SHIM_DIR/nodns" ] && exit 2
 case "$2" in
-  database-users.shared-hosting.palocal|shared-hosting-sites-db-1) echo "172.25.0.3      STREAM $2" ;;
+  __DB_NAMES__) echo "172.25.0.3      STREAM $2" ;;
   panelalpha-cache-registry) echo "172.25.0.9      STREAM $2" ;;
   panelalpha-registry-proxy) echo "172.25.0.2      STREAM $2" ;;
   host.docker.internal) echo "172.20.0.1      STREAM $2" ;;
   *) exit 2 ;;
 esac
-SH);
+SH));
         chmod($this->dir . '/bin/iptables', 0755);
         chmod($this->dir . '/bin/getent', 0755);
         file_put_contents($this->dir . '/chains', "OUTPUT\nFORWARD\n");
-        file_put_contents($this->dir . '/guard.sh', TenantEgressGuard::script(['178.104.84.45', '172.25.0.1', 'not-an-ip']));
+        file_put_contents($this->dir . '/guard.sh', TenantEgressGuard::script(['203.0.113.45', '172.25.0.1', 'not-an-ip']));
     }
 
     protected function tearDown(): void
@@ -102,10 +102,10 @@ SH);
             '-A PA-TENANT-EGRESS -d 172.25.0.1 -p tcp --dport 80 -j RETURN',
             '-A PA-TENANT-EGRESS -d 172.25.0.1 -p tcp --dport 443 -j RETURN',
             '-A PA-TENANT-EGRESS -d 172.25.0.1 -j DROP',
-            '-A PA-TENANT-EGRESS -d 178.104.84.45 -p tcp --dport 25 -j RETURN',
-            '-A PA-TENANT-EGRESS -d 178.104.84.45 -p tcp --dport 80 -j RETURN',
-            '-A PA-TENANT-EGRESS -d 178.104.84.45 -p tcp --dport 443 -j RETURN',
-            '-A PA-TENANT-EGRESS -d 178.104.84.45 -j DROP',
+            '-A PA-TENANT-EGRESS -d 203.0.113.45 -p tcp --dport 25 -j RETURN',
+            '-A PA-TENANT-EGRESS -d 203.0.113.45 -p tcp --dport 80 -j RETURN',
+            '-A PA-TENANT-EGRESS -d 203.0.113.45 -p tcp --dport 443 -j RETURN',
+            '-A PA-TENANT-EGRESS -d 203.0.113.45 -j DROP',
             // core, SFTP, FTP, phpMyAdmin and every other account
             '-A PA-TENANT-EGRESS -d 172.25.0.0/255.255.255.0 -j DROP',
             '-A PA-TENANT-EGRESS -d 169.254.0.0/16 -p udp --dport 53 -j RETURN',
@@ -134,7 +134,7 @@ SH);
         $this->guardRun();
         file_put_contents($this->dir . '/nodns', '');
         // Something else changed, so the chain is rebuilt -- with MySQL still in it.
-        file_put_contents($this->dir . '/guard.sh', TenantEgressGuard::script(['178.104.84.46']));
+        file_put_contents($this->dir . '/guard.sh', TenantEgressGuard::script(['203.0.113.46']));
 
         $rules = $this->rules($this->guardRun());
         $this->assertContains('-A PA-TENANT-EGRESS -d 172.25.0.3 -p tcp --dport 3306 -j RETURN', $rules);

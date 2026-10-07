@@ -4,9 +4,8 @@ namespace App\Http\Controllers\User;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\SshCommandRunRequest;
-use App\Models\User;
+use App\Lib\Project\ProjectShell;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 
 /**
@@ -46,30 +45,14 @@ class SshController extends Controller
     )]
     public function run(string $username, SshCommandRunRequest $request): JsonResponse
     {
-        $user = $this->projectOrNotFound($username);
-
-        if ($user->getTemplate() !== 'dind') {
-            throw ValidationException::withMessages([
-                'command' => 'Shell commands are only supported for dind projects.',
-            ]);
-        }
-
+        $user = $this->projectOr404($username);
         $params = $request->validated();
-        $cwd = $params['cwd'] ?? null;
 
-        $runtime = $user->project()->runtime();
-        if (!$runtime instanceof \App\System\Project\Dind) {
-            throw ValidationException::withMessages([
-                'command' => 'Shell commands are only supported for dind projects.',
-            ]);
-        }
-
-        $result = $runtime->runSshCommand(
+        return new JsonResponse(ProjectShell::run(
+            $user,
             $params['command'],
-            is_string($cwd) && $cwd !== '' ? $cwd : null,
+            $params['cwd'] ?? null,
             (int)($params['timeout'] ?? SshCommandRunRequest::DEFAULT_TIMEOUT)
-        );
-
-        return new JsonResponse($result);
+        ));
     }
 }

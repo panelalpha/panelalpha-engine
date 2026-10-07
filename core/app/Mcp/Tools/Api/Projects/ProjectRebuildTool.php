@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Redeploy a project
 
-    Detects, builds and starts the app again from ~/project, importing `zip_path` first when given (refused on a git project). Answers when the deploy ends; if the call times out the deploy carries on, so follow deploy_log_get instead of calling again.
+    Detects, builds and starts the app again from ~/project, importing `zip_path` first when given (refused on a git project). Answers at once with a task `id`: follow it with task_get until completed, failed or cancelled; a failure is in details.error and details.problems. A 409 means a deploy is already running: follow the task_id it names with task_get (task_cancel if it is stuck), or deploy_log_get when task_id is null, instead of calling again.
     MARKDOWN)]
 #[IsDestructive]
 class ProjectRebuildTool extends ApiTool
@@ -71,7 +71,7 @@ class ProjectRebuildTool extends ApiTool
     {
         return [
             'name' => $schema->string()->required(),
-            'env_vars' => $schema->object()->description('KEY=value changes merged onto the project\'s; an empty value removes a key, null clears them all.'),
+            'env_vars' => $schema->object()->description('KEY=value changes merged onto the project\'s; an empty value removes a key, null clears them all.')->nullable(),
             'zip_path' => $schema->string()->description('Optional archive under the project home to import into ~/project before detect/apply'),
             'recipe' => $schema->string()->description('Recipe id to use instead of the detected one, from source_inspect\'s application.candidates. This deploy only. Example: php.'),
             'stages' => $schema->object()->description('Replace a stage\'s commands for this deploy only: {stage: [{id, run, ...}]} for precheck, prepare, build, install, upgrade, start; [] skips a stage.'),

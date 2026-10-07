@@ -14,7 +14,7 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 
 /**
- * Apache Guacamole's shape (engine#162): its own Dockerfile runs `COPY .`
+ * Apache Guacamole's shape: its own Dockerfile runs `COPY .`
  * and then the RAT license check over everything it copied. The engine's run
  * file and an empty `.env` it created were in that context and failed it.
  */

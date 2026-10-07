@@ -8,18 +8,18 @@
 # The whole point of the recipe is persistence. Kirby's database is three
 # directories inside the checkout -- content/ (pages + files), site/accounts/
 # (Panel password hashes) and site/config/ (config + the content.salt). A
-# rebuild empties ~/project (engine#173, ProjectTree::clearContents), so those
+# rebuild empties ~/project (ProjectTree::clearContents), so those
 # three are moved to ~/.panelalpha/kirby -- the only writable, rebuild-surviving
 # place (the home is root-owned, Project.php:813) -- and symlinked back in
 # hooks/prepare.sh. The start command creates the first Panel admin from a
 # persisted password before Apache binds, so /panel/installation is closed
-# before the port ever opens (engine#200).
+# before the port ever opens.
 description: 'Kirby Starterkit, the runnable flat-file CMS. Extends php. Kirby stores its content, Panel accounts and config as files inside the checkout, which a rebuild wipes; the recipe persists them in ~/.panelalpha/kirby and symlinks them back, and creates the first Panel admin before the port opens.'
 extends: php
 
 # The starterkit serves from its own root (root index.php + .htaccess); there is
 # no public/. PhpDocroot folds '' and '.' to the same result here because the
-# root has an index.php (engine#172), but declare it so PA_DOCROOT is /app by
+# root has an index.php, but declare it so PA_DOCROOT is /app by
 # intent rather than by detection.
 docroot: .
 
@@ -44,10 +44,10 @@ commands:
 
   # Runs in the app container (php + kirby are present) at every boot, before
   # the serve command execs Apache -- so on the first boot the admin exists
-  # before the port opens (engine#200, first-visitor-wins). Idempotent: it
+  # before the port opens (first-visitor-wins). Idempotent: it
   # does nothing once a Panel user exists, so a redeploy keeps the persisted
   # account and its password untouched. Single-line description on purpose
-  # (a multi-line one crash-loops the container, engine#198).
+  # (a multi-line one crash-loops the container).
   - id: kirby-init-admin
     stage: start
     description: 'Create the first Panel admin from the persisted password before Apache binds, closing /panel/installation before the port opens.'

@@ -3,7 +3,7 @@ description: >-
   Drop, a self-hosted game distribution platform (Nuxt server behind an
   in-container nginx on :3000, PostgreSQL). The repository has no compose
   file and its Dockerfile fails in `nuxt prepare` because the build context
-  has no .git (engine#413); it would also start without a database. This
+  has no .git; it would also start without a database. This
   recipe runs upstream's published release image
   (ghcr.io/drop-oss/drop:0.4.0-rc-5, the tag the upstream quickstart pins)
   with PostgreSQL 17, EXTERNAL_URL set to the site address, and the game

@@ -3,12 +3,11 @@
  *
  * Not webpack/prod.mjs, and not because prod.mjs is wrong -- it is what
  * upstream's release pipeline runs, on a CI runner. Run in the engine's host
- * build container it is killed: measured on a 15.6 GB host, when the build
- * container got MemTotal/3 = 5202 MB (before engine#295), the webpack process reached 5.0 GB anon-rss and the cgroup OOM
- * killer took it ("Memory cgroup out of memory: Killed process (webpack)
- * total-vm:35615720kB, anon-rss:5130116kB"), after 2m38s, with nothing but
- * `Killed` in the log. Raising the limit is not available to a recipe: it is
- * derived from the host's RAM, and this host is shared.
+ * build container it can be killed: the webpack process grows past 5 GB
+ * anon-rss, and on a build container smaller than that the cgroup OOM killer
+ * takes it ("Memory cgroup out of memory: Killed process (webpack)"), with
+ * nothing but `Killed` in the log. Raising the limit is not available to a
+ * recipe: it is derived from the host's RAM, and the host is shared.
  *
  * So this config is prod.mjs minus the three things a hosting deployment pays
  * for and never uses. Everything else -- the entry points, the loaders, the
@@ -38,9 +37,9 @@
  *       is enabled in the base image and compresses on the fly instead.
  *
  * terser still runs -- the bundles are minified exactly as upstream's are --
- * but with `parallel: 2` rather than one worker per core: this host has 8, and
- * eight terser workers each with their own heap inside one cgroup is the other
- * half of the memory story.
+ * but with `parallel: 2` rather than one worker per core: one terser worker per
+ * core, each with its own heap inside one cgroup, is the other half of the
+ * memory story.
  *
  * `extractComments: 'all'` is kept from prod.mjs, so the dependency licence
  * headers are written out beside the bundles instead of being dropped.

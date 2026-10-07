@@ -2,10 +2,13 @@
 
 namespace App\Console;
 
+use App\Exceptions\Handler;
+use App\Support\RootConsoleOwnership;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
 use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Config;
+use Throwable;
 
 class Kernel extends ConsoleKernel
 {
@@ -20,6 +23,22 @@ class Kernel extends ConsoleKernel
         if (App::runningInConsole() && function_exists('posix_geteuid') && posix_geteuid() === 0) {
             $compiledPath = (string)Config::get('view.compiled');
             Config::set('view.compiled', $compiledPath . '/console');
+        }
+
+        if (RootConsoleOwnership::applies(App::runningInConsole(), function_exists('posix_geteuid') ? posix_geteuid() : -1, App::runningUnitTests())) {
+            RootConsoleOwnership::register();
+        }
+    }
+
+    /**
+     * Collision (a dev dependency, installed on hosts) replaces the exception
+     * handler's console rendering with a stack dump; a failure the user can
+     * act on stays one plain line either way.
+     */
+    protected function renderException($output, Throwable $e)
+    {
+        if (!Handler::renderPlainForConsole($output, $e)) {
+            parent::renderException($output, $e);
         }
     }
 
@@ -49,6 +68,10 @@ class Kernel extends ConsoleKernel
         // answer rather than waiting out its own timeout; the two-minute grace
         // period keeps it from racing a deploy that has just started.
         $schedule->command('task:reconcile --older-than=120')->everyMinute()->withoutOverlapping();
+        // A redeploy killed halfway can leave traffic on its second app
+        // generation and the old checkout moved aside. Only touches an
+        // account whose deploy lock is free.
+        $schedule->command('deploy:generations:sweep')->everyMinute()->withoutOverlapping();
         $schedule->command('acme:challenge:prune')->hourly();
         // Expired vault entries hold ciphertext nobody can use anymore, but
         // a secret that stopped working should not outlive its usefulness on
@@ -79,8 +102,13 @@ class Kernel extends ConsoleKernel
         $schedule->command('deploy:cache:prune')->dailyAt('04:15')->withoutOverlapping();
         // Host base images outside the prewarm catalogue, and host build
         // cache, were otherwise only reclaimed by the weekly prewarm, images
-        // only under pressure. It defers itself while any deploy is in flight.
-        $schedule->command('system:image:prune')->dailyAt('04:45')->withoutOverlapping();
+        // only under pressure. The image half defers while any deploy is in
+        // flight, so it runs hourly and does real work once per 20h window:
+        // on a busy host a single daily slot almost always found a deploy.
+        $schedule->command('system:image:prune --due-after=20h')->hourly()->withoutOverlapping();
+        // Caps host build cache and frees disk once free space runs low,
+        // instead of waiting for the next prune or refusing a deploy.
+        $schedule->command('system:disk:guard')->everyFiveMinutes()->withoutOverlapping();
         // Deploy telemetry is written to a spool during a deploy and sent from
         // here: QUEUE_CONNECTION is `sync`, so a dispatched job would put a
         // network round trip inside the customer's deploy request.

@@ -17,7 +17,7 @@ set -eo pipefail
 # Compose runs this as root; the image's entrypoint is what drops to the
 # manticore user, and it has not run yet. The bootstrap must be that user
 # already: it writes auth.json, and a root-owned 0600 auth.json is one the
-# daemon cannot read back. Measured on 29.9.0 -- the bootstrap reports
+# daemon cannot read back. The bootstrap reports
 # "authentication settings successfully created and reloaded" only when the
 # reload can re-read the file, and otherwise leaves the daemon refusing the
 # credential it just wrote until the container is restarted.

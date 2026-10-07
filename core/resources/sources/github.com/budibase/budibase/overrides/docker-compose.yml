@@ -113,6 +113,13 @@ services:
   app-service:
     image: ${BB_APPS_IMAGE:-budibase/apps:stable}
     restart: unless-stopped
+    # BB_ADMIN_USER_EMAIL / BB_ADMIN_USER_PASSWORD: the login the engine generates
+    # (`credentials:` in panelalpha.yaml). server/src/startup/index.ts creates
+    # this admin once, if no global user exists yet. Without it
+    # /api/global/users/init stays open to whoever reaches the account's public
+    # name first.
+    env_file:
+      - ../.panelalpha/app-credentials.env
     environment:
       SELF_HOSTED: 1
       BUDIBASE_ENVIRONMENT: PRODUCTION
@@ -143,11 +150,6 @@ services:
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
       API_ENCRYPTION_KEY: ${API_ENCRYPTION_KEY}
       JWT_SECRET: ${JWT_SECRET}
-      # server/src/startup/index.ts creates this admin once, if no global user
-      # exists yet. Without it /api/global/users/init stays open to whoever
-      # reaches the account's public name first. See hooks/prepare.sh.
-      BB_ADMIN_USER_EMAIL: ${BB_ADMIN_USER_EMAIL}
-      BB_ADMIN_USER_PASSWORD: ${BB_ADMIN_USER_PASSWORD}
       # Two reasons this is written out rather than left to the hardener.
       # --no-node-snapshot is baked into the image as ENV NODE_OPTIONS and is
       # required for isolated-vm on Node 20+ (it is what runs every JS binding

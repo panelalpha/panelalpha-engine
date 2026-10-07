@@ -1,16 +1,14 @@
 #!/bin/bash
 # Account shell, after the clone and before the build.
 #
-# Five things that have to be true before anything is built or served, and that
+# Four things that have to be true before anything is built or served, and that
 # nothing later in the deploy can do:
 #   1. the web installer has to be shut, and it is open in a fresh clone;
 #   2. the admin password has to outlive the checkout;
-#   3. ffmpeg, ffprobe and mediainfo have to exist somewhere, because the
-#      shared PHP base image has none of them and ClipBucket is a transcoder
-#      with a website attached;
-#   4. the uploaded media has to live outside ~/project, which every deploy
-#      re-clones (engine#173);
-#   5. the directories .gitignore keeps out of the repository have to exist.
+#   3. the uploaded media has to live outside ~/project, which every deploy
+#      re-clones;
+#   4. the directories .gitignore keeps out of the repository have to exist.
+# ffmpeg, ffprobe and mediainfo come from `system_packages` in panelalpha.yaml.
 set -e
 cd ~/project
 
@@ -18,12 +16,12 @@ log() { echo "[clipbucket] $*"; }
 
 # Everything this account accumulates that must outlive a redeploy. ~ itself is
 # root-owned 0755 and nothing can be created directly in it; ~/.panelalpha is
-# created with the account and belongs to it. engine#173 also writes
+# created with the account and belongs to it. The engine also writes
 # .env.default and the generated docker-compose.yml into the checkout 0644 and
 # readable by every other tenant, which is the other reason nothing secret
 # belongs in ~/project.
 DATA_HOME="${HOME}/.panelalpha/clipbucket"
-mkdir -p "${DATA_HOME}/bin" "${DATA_HOME}/files"
+mkdir -p "${DATA_HOME}/files"
 chmod 700 "${HOME}/.panelalpha" "${DATA_HOME}"
 
 # ------------------------------------------------- 1. shut the installer --
@@ -75,82 +73,7 @@ log "removed upload/files/temp/install.me (shipped unlocked by upstream)"
 # compose override. Nothing here ever uses ClipBucket's default `admin`
 # password (cb_install/modes/adminsettings.php:31).
 
-# ----------------------------------------------------------- 3. the tools --
-#
-# The shared PHP base image has no ffmpeg, no ffprobe and no mediainfo:
-#
-#   docker run --rm panelalpha/php:8.3-apache-bookworm-pa20260910 \
-#       sh -c 'command -v ffmpeg ffprobe mediainfo'   ->  nothing
-#
-# and there is no way for a recipe to add an apt package to it. The manifest's
-# `requires` names toolchains the engine knows; PhpBaseImage's `extras` are
-# php extensions passed to install-php-extensions
-# (core/app/Lib/Deploy/CacheManager/PhpBaseImage.php:254-270), not packages;
-# and resources/deploy/templates/dockerfile/php-base.stub installs a fixed
-# `git unzip` and nothing a manifest can reach.
-#
-# ClipBucket is not "nicer with ffmpeg". cb_install/functions_install.php:95-104
-# lists FFmpeg, FFprobe and MediaInfo as required software and
-# functions_install.php:127-132 makes only MySQL Client and Git skippable, so
-# upstream's own installer will not let you past the precheck without them --
-# and at runtime FFMpeg::ClipBucket() is the whole of what an upload becomes.
-#
-# So the binaries are fetched once per account, as static builds, into
-# ~/.panelalpha/clipbucket/bin, which the compose override mounts at /data/bin.
-# Once, not per deploy: the directory survives the re-clone that ~/project does
-# not. Fatal if it fails, because a video site that cannot accept a video should
-# not be reported as a successful deploy.
-BIN="${DATA_HOME}/bin"
-
-if [ ! -x "${BIN}/ffmpeg" ] || [ ! -x "${BIN}/ffprobe" ]; then
-    log "fetching static ffmpeg/ffprobe (once per account)"
-    tmp=$(mktemp -d)
-    trap 'rm -rf "${tmp}"' EXIT
-    # johnvansickle's builds are the ones ffmpeg.org links to for static Linux
-    # x86_64. They are GPLv3 (the tarball carries GPLv3.txt) and are downloaded
-    # by the account at deploy time rather than redistributed by PanelAlpha.
-    if ! curl -fsSL --retry 3 --max-time 300 \
-        -o "${tmp}/ffmpeg.tar.xz" \
-        https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
-    then
-        log "could not download ffmpeg. ClipBucket cannot convert a video without" >&2
-        log "it and its own installer refuses to run without it, so the deploy stops here." >&2
-        exit 1
-    fi
-    tar -xJf "${tmp}/ffmpeg.tar.xz" -C "${tmp}"
-    src=$(find "${tmp}" -maxdepth 1 -type d -name 'ffmpeg-*-amd64-static' | head -1)
-    install -m 0755 "${src}/ffmpeg"  "${BIN}/ffmpeg"
-    install -m 0755 "${src}/ffprobe" "${BIN}/ffprobe"
-    rm -rf "${tmp}"
-    trap - EXIT
-fi
-
-if [ ! -x "${BIN}/mediainfo" ]; then
-    log "fetching static mediainfo (once per account)"
-    tmp=$(mktemp -d)
-    trap 'rm -rf "${tmp}"' EXIT
-    # MediaArea's Lambda build is the only self-contained MediaInfo CLI they
-    # publish: one binary with no libmediainfo/libzen to unpack beside it.
-    # Verified to run in the bookworm base image.
-    if curl -fsSL --retry 3 --max-time 300 -o "${tmp}/mi.zip" \
-        https://mediaarea.net/download/binary/mediainfo/26.05/MediaInfo_CLI_26.05_Lambda_x86_64.zip
-    then
-        unzip -qo "${tmp}/mi.zip" -d "${tmp}/mi"
-        install -m 0755 "${tmp}/mi/bin/mediainfo" "${BIN}/mediainfo"
-    else
-        # Not fatal, unlike ffmpeg. MediaInfo is a hard requirement of
-        # upstream's *precheck* and only a fallback at runtime: FFMpeg::
-        # getFileInfo() calls it for the duration when ffprobe could not give
-        # one and for the "Original width/height" of anamorphic material
-        # (includes/classes/ffmpeg.class.php:126,134). Everything else comes
-        # from ffprobe.
-        log "could not download mediainfo; continuing without it (see README)" >&2
-    fi
-    rm -rf "${tmp}"
-    trap - EXIT
-fi
-
-# ---------------------------------------------------- 4. the media, moved --
+# ---------------------------------------------------- 3. the media, moved --
 #
 # Every byte a user uploads goes under upload/files: DirPath::get()
 # (includes/constants.php:33-47) puts videos, original files, thumbs, photos,
@@ -198,11 +121,8 @@ mkdir -p "${DATA_HOME}/files/conversion_queue" "${DATA_HOME}/files/temp" \
 chmod -R u+rwX,go+rX "${DATA_HOME}/files"
 
 # The per-video conversion logs are on the mount, inside the document root, and
-# upstream protects only files/temp/. Measured before this file existed:
-#
-#   GET /files/logs/2026/09/20/<file_name>.log   200, 5,991 bytes
-#
-# and <file_name> is in the page HTML of every video, so the logs are
+# upstream protects only files/temp/: /files/logs/<date>/<file_name>.log is
+# served, and <file_name> is in the page HTML of every video, so the logs are
 # enumerable rather than merely reachable. They carry absolute container paths,
 # the ffmpeg command line, every source and output stream's codec and bitrate,
 # and whatever ffmpeg had to say about a file the account uploaded privately.
@@ -246,7 +166,7 @@ fi
 
 # ------------------------------------------------- 5. display_errors, off --
 #
-# engine#185 leaves the platform with display_errors=1 and no php.ini. The ini
+# The shared PHP base image leaves the platform with display_errors=1 and no php.ini. The ini
 # in files/panelalpha/php turns it off for both SAPIs, but that file is only
 # read because the compose override sets PHP_INI_SCAN_DIR; this is here to say
 # the .htaccess route was considered and is not used -- upload/.htaccess is

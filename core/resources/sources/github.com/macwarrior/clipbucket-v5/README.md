@@ -5,11 +5,7 @@ photos, an admin area and an ffmpeg transcoding pipeline — in flat PHP with
 MySQL underneath and no Composer at the repository root.
 
 Upstream: <https://github.com/MacWarrior/clipbucket-v5> (5.5.3, revision 188,
-`86d81659`). Tracker:
-[supported-apps#1137](https://git.modulesgarden.tech/panelalpha/playground/supported-apps/-/work_items/1137).
-
-The batch verdict was `serving-missing_entry`: a deploy that finished and a
-site where every request answered 403.
+`86d81659`).
 
 ## What the engine could not infer
 
@@ -22,13 +18,12 @@ repository root holds `README.md`, `LICENSE`, `dockerfile`, `package.json`,
 `docker/` and `utils/` and no index file — so `detect()` falls through
 everything and returns `''`, no `PA_DOCROOT` is emitted, and
 `panelalpha-serve.sh` falls back to `/app` because there is no `/app/public`.
-Apache answers 403 on a directory with no index, and the report says the entry
-point is missing.
+Apache answers 403 on a directory with no index.
 
-`docroot: upload` is the whole fix for the verdict, and it is enough on its own:
+`docroot: upload` is the whole fix, and it is enough on its own:
 `upload` is a plain relative path, so unlike `.` it survives
 `PlatformManifest::readDocroot()` (`PlatformManifest.php:297-318`), which folds
-both `''` and `'.'` to "undeclared". **#172 does not bite here.** This is
+both `''` and `'.'` to "undeclared". **That fold does not bite here.** This is
 exactly the case the manifest key exists for — `_schema.json` names `upload` in
 its own example, for OpenCart. Adding `upload` to the probe list would be the
 wrong fix: `upload/` is a directory name a great many applications use for
@@ -38,8 +33,7 @@ wrong fix: `upload/` is a directory name a great many applications use for
 The repository root is the *parent* of the document root, so `.git/`,
 `.env.default`, the generated `docker-compose.yml`, `docker-compose.override.yml`
 and the `panelalpha-*` scripts are unreachable by construction rather than by
-an `.htaccess` rule. **#181 does not apply.** Verified: all of them answer with
-the 404 body, or with the vhost's own 403 for the names it denies by pattern.
+an `.htaccess` rule.
 
 **The database.** MySQL or nothing — `cb_install/sql/structure.sql` is MySQL
 DDL, every data file beside it is a MySQL dump, and `Clipbucket_db` speaks
@@ -52,21 +46,7 @@ rest of this recipe and have sections of their own below.
 
 ## The ffmpeg answer
 
-**The shared PHP base image has no ffmpeg, no ffprobe and no mediainfo, and no
-recipe can add one.** Measured:
-
-```
-$ docker run --rm panelalpha/php:8.3-apache-bookworm-pa20260910 \
-      sh -c 'command -v ffmpeg ffprobe mediainfo'
-(nothing)
-```
-
-`requires:` in a manifest names toolchains the engine knows about;
-`PhpBaseImage`'s `extras` are php extension names handed to
-`install-php-extensions` (`core/app/Lib/Deploy/CacheManager/PhpBaseImage.php:254-270`);
-and `core/resources/deploy/templates/dockerfile/php-base.stub` installs a fixed
-`git unzip` and nothing a manifest can reach. There is no per-project
-Dockerfile any more — the stub says so itself.
+**The shared PHP base image has no ffmpeg, no ffprobe and no mediainfo.**
 
 **For ClipBucket that is not a degraded feature, it is the product.** Two
 separate facts:
@@ -84,35 +64,22 @@ separate facts:
   nobody can play** — not an error, not a rejection, just a video that never
   appears. That is the worst of the three possible answers.
 
-So `hooks/prepare.sh` fetches static builds once per account into
-`~/.panelalpha/clipbucket/bin`, which the compose override mounts at
-`/data/bin`:
+So `panelalpha.yaml` asks for them with `system_packages: [ffmpeg, mediainfo]`:
+the engine builds a variant of the shared PHP base image with Debian's
+packages, once per host, and only accounts deploying an app that asks for the
+set load it. The first deploy of a new set waits for that build and fails
+rather than deploying without the packages. The install then writes
+`/usr/bin/ffmpeg`, `/usr/bin/ffprobe` and `/usr/bin/mediainfo` into the
+`ffmpegpath`, `ffprobe_path` and `media_info` config rows, which
+`System::get_binaries()` reads *before* it ever falls back to `which`
+(`includes/classes/system.class.php:547-620`), and the setup stage refuses to
+continue if any of the three is missing.
 
-| Tool | Source | Size |
-| --- | --- | --- |
-| ffmpeg, ffprobe 7.0.2 | `johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz` | 42 MB down, 160 MB on disk |
-| mediainfo 26.05 | MediaArea's `MediaInfo_CLI_26.05_Lambda_x86_64.zip` | 6.6 MB down, 17 MB on disk |
-
-Both verified to run inside the bookworm base image before being wired in.
-MediaArea's Lambda build is the only self-contained MediaInfo CLI they publish
-— their Debian packages need `libmediainfo0v5` and `libzen0v5` unpacked beside
-them. The install then writes those paths into the `ffmpegpath`,
-`ffprobe_path` and `media_info` config rows, which `System::get_binaries()`
-reads *before* it ever falls back to `which`
-(`includes/classes/system.class.php:547-620`).
-
-Once per account, not once per deploy: `~/.panelalpha` outlives the re-clone
-(#173). A failed **ffmpeg** download fails the deploy — a video site that
-cannot accept a video should not be reported as a success. A failed
-**mediainfo** download does not: it is a hard requirement of upstream's
-precheck but only a fallback at runtime, used for the duration when ffprobe
-could not give one and for the "Original width/height" of anamorphic material
-(`ffmpeg.class.php:126,134`), and ffprobe covers everything else.
-
-**This is a workaround and the right fix is in the base image.** Every
-video-, audio- or image-processing application on this platform will want
-ffmpeg, and the alternative to putting it there is every recipe downloading
-160 MB per account from a third party. See "Engine findings" below.
+Earlier versions of this recipe downloaded static builds (johnvansickle's
+ffmpeg, MediaArea's MediaInfo CLI, ~180 MB on disk) into
+`~/.panelalpha/clipbucket/bin` on every account. The config rows are written on
+every deploy, so an account installed that way is re-pointed at `/usr/bin` by
+its next redeploy; the old `bin/` directory is left alone and can be deleted.
 
 ### Nothing needs a cron, and that is not obvious
 
@@ -127,7 +94,7 @@ They do not. `automate_launch_mode` defaults to `user_activity`
 **every non-CLI request**: if the `automate` tool has not started in the last
 minute it backgrounds it with `AdminTool::launchCli()`, and that tool launches
 every tool that is due, including the conversion one. ClipBucket drives its own
-queue off its own traffic. Measured end to end below.
+queue off its own traffic.
 
 Two consequences worth knowing. A site with no visitors converts nothing — but
 this deployment's own compose healthcheck polls `/` every five seconds, so in
@@ -203,25 +170,22 @@ finished.
 
 ### What is reachable in the document root without a session
 
-**Read this section's results carefully, because status codes lie here.**
-Upstream's `upload/.htaccess` sets `ErrorDocument 404 /404` and
-`ErrorDocument 403 /403`, which render ClipBucket's own pages, and
-302-*redirects* several families of path to `/403` rather than denying them. A
-status-code-only probe therefore reports a mixture of 200, 302, 403 and 404
-that means very little. Every result below is a body compared against two
-baselines: the 404 page (`md5 a0f277d6…`, 27,199 bytes) and the 403 page
-(`md5 95e8706b…`, 27,085 bytes).
+**Status codes lie here.** Upstream's `upload/.htaccess` sets
+`ErrorDocument 404 /404` and `ErrorDocument 403 /403`, which render
+ClipBucket's own pages, and 302-*redirects* several families of path to `/403`
+rather than denying them. A status code alone says very little; compare the
+body against ClipBucket's 404 and 403 pages.
 
-Reachable on a first deploy, and closed by this recipe:
+Reachable without this recipe, and closed by it:
 
-| Path | What it was |
+| Path | What it is |
 | --- | --- |
 | `/cb_install/*` | the installer, above |
-| `/vendor/composer/installed.json` | 200, 35,941 bytes — the exact installed version of every dependency, which is a CVE shopping list |
-| `/vendor/**/*.php` | `vendor/filp/whoops/src/Whoops/Run.php` answered **500 with an empty body**, which is Apache *executing* a library file out of context |
-| `/vendor/smarty/smarty/composer.json` etc. | 200, package metadata throughout the tree |
-| `/files/logs/<date>/<file_name>.log` | 200, 5,991 bytes — the per-video conversion log: absolute container paths, every source and output stream's codec and bitrate. `file_name` is in the page HTML of every video, so these are *enumerable*, not merely reachable |
-| `/composer.json`, `/package.json` | 200 — the dependency set and the exact version |
+| `/vendor/composer/installed.json` | the exact installed version of every dependency, which is a CVE shopping list |
+| `/vendor/**/*.php` | library files Apache would *execute* out of context (`vendor/filp/whoops/src/Whoops/Run.php`) |
+| `/vendor/smarty/smarty/composer.json` etc. | package metadata throughout the tree |
+| `/files/logs/<date>/<file_name>.log` | the per-video conversion log: absolute container paths, every source and output stream's codec and bitrate. `file_name` is in the page HTML of every video, so these are *enumerable*, not merely reachable |
+| `/composer.json`, `/package.json` | the dependency set and the exact version |
 
 `vendor/` cannot simply be denied: ClipBucket installs three frontend libraries
 with Composer and links them straight out of it on every page and in the admin
@@ -231,11 +195,6 @@ under `vendor/` is served only if it ends in an asset extension, and everything
 else is 403. A deny-list would have to guess at every extension a Composer
 package might ship and would be wrong on the next dependency.
 
-After the change, re-measured on the live deploy: `installed.json`,
-`Whoops/Run.php`, `/composer.json`, `/package.json`, the conversion log and
-`/cb_install/` are all 403, and jQuery (87,533 bytes), select2, font-awesome
-and its `.woff2` still serve 200.
-
 What upstream already gets right, and it is a decent amount:
 
 - `includes/`, `changelog/` and `files/temp/` are 302'd to `/403` — so
@@ -243,14 +202,13 @@ What upstream already gets right, and it is a decent amount:
   reachable even though it is inside the document root.
 - `admin_area/` and every page under it redirect to the login for an
   anonymous request.
-- **A `.php` file under `files/` is bounced before Apache can run it.**
-  Measured: a `pa-probe.php` written into `files/avatars/` answered 302 to
-  `/403`; the same file named `.php.jpg` was served as plain text and not
+- **A `.php` file under `files/` is bounced before Apache can run it**: it is
+  redirected to `/403`, and a `.php.jpg` is served as plain text, not
   executed. `files/.htaccess`'s `AddHandler cgi-script` + `Options -ExecCGI` is
   the belt, the parent's `RewriteRule ^(.*/)?files/.*\.php` is the braces.
 - Directory listings are off everywhere (`Options -Indexes` in the vhost).
 
-### `register_argc_argv`, checked and found inert — here
+### `register_argc_argv`, inert here
 
 ClipBucket ships CLI-only entry points *inside the document root* with no
 `php_sapi_name()` guard: `actions/video_convert.php` and
@@ -261,12 +219,10 @@ into argv. `GET /actions/video_convert.php?x+<file_name>` looks like an
 unauthenticated way into the conversion driver with a `file_name` that is
 public in every video's page.
 
-Measured on the live deploy: `GET /pa-probe.php?x+hello` gives
+Under the Apache module, `GET /…?x+hello` gives
 `$_SERVER['argv'] == ['x','hello']` but leaves the **global `$argv` NULL**,
-because the Apache module populates only the superglobal. `$argv[1]` is null,
-the scripts `die()` on their own first line, and nothing happens — confirmed by
-calling the real URL against the real video and finding its status, its queue
-row and its log unchanged.
+because the module populates only the superglobal. `$argv[1]` is null, the
+scripts `die()` on their own first line, and nothing happens.
 
 Under the CGI and FPM SAPIs the global *is* populated. So
 `zz-clipbucket.ini` sets `register_argc_argv = Off`, which is what
@@ -298,7 +254,7 @@ CLI SAPI builds argv regardless of the setting.
 
 ## The php.ini, and a claim that is easy to get wrong
 
-The base image loads no php.ini at all (#185) — `php --ini` answers
+The base image loads no php.ini at all — `php --ini` answers
 "Loaded Configuration File: (none)" — so what is in force is PHP's compiled-in
 defaults. The compose override sets `PHP_INI_SCAN_DIR` to the image's own
 `conf.d` **plus** a directory in the checkout, and
@@ -322,16 +278,15 @@ What the defaults actually break:
 - `System::check_global_configs()` rejects a `max_execution_time` between 1 and
   7199 (`system.class.php:661-664`) and an admin `max_upload_size` larger than
   those limits (`:667-679`), and `includes/admin_config.php:45-51` then puts a
-  "your server is misconfigured" banner across **every admin page**. Measured
-  at `max_execution_time = 600`: the banner is there. At 7200: it is gone.
+  "your server is misconfigured" banner across **every admin page**.
 
 So the ini sets `upload_max_filesize` and `post_max_size` to 2048M,
 `max_execution_time` to 7200 (upstream's own number, and what their nginx
 example uses for `fastcgi_read_timeout`), `max_input_time` to 3600,
 `memory_limit` to 512M, a UTC timezone, and `display_errors = Off` with
 `expose_php = Off`. The last is the only place `expose_php` can be reached —
-it is `PHP_INI_SYSTEM`, so no `.htaccess` can touch it — and it works:
-verified, no `X-Powered-By` on any response.
+it is `PHP_INI_SYSTEM`, so no `.htaccess` can touch it — and with it no
+response carries `X-Powered-By`.
 
 The cost of `max_execution_time = 7200` is that a wedged request can hold an
 Apache worker for two hours. The container is one account's own, so that is
@@ -348,7 +303,7 @@ account's backup.
 puts videos, original uploads, thumbnails, posters, photos, avatars,
 backgrounds, logos, subtitles, the conversion queue, the mass-upload staging
 area and the per-video conversion logs under `upload/files/<name>/` — inside
-the checkout that every deploy re-clones (#173) — while the `cb_video` rows
+the checkout that every deploy re-clones — while the `cb_video` rows
 naming them survive. A redeploy would leave a catalogue of videos that are no
 longer there.
 
@@ -366,11 +321,6 @@ container starts, so Docker never creates it as root, the repository's own
 `no_video.mp4`, `example.mp4`, `processing.jpg`, `no-photo_*.png` and
 `files/.htaccess` are on it, and a version bump that adds a new default file
 still gets it.
-
-**Verified with a real redeploy**, not reasoned about: a video uploaded and
-transcoded, then `POST /projects/<u>/rebuild`, then the same video's watch page,
-its 360p rendition (135,895 bytes) and its thumbnails all still served over the
-public HTTPS domain, and the generated admin password still logging in.
 
 `upload/cache/` (Smarty's compiled templates and the view cache) is
 deliberately *not* on the mount: it is derived data, it is rebuilt on demand,
@@ -395,105 +345,33 @@ served: the previous container keeps running and the account's data is
 untouched. This is where ZenTao's recipe had to give up, and ClipBucket is
 better arranged for it.
 
-**Exercised only as a no-op.** The redeploy above re-ran the upgrade stage and
-logged `schema 5.5.3.188 matches the checkout`; an actual version bump was not
-tested, because `master` is the only branch that carries 5.5.3 and there is
-nothing newer to move to.
-
-## What was verified
-
-On `mariusz.panelalpha.tools`, 2026-09-20, ClipBucket 5.5.3 rev 188
-(`86d81659`), PHP 8.3, `--memory-limit=2000`, **host load average 6.7–8.1
-throughout** (a long batch job was running, so these numbers are slow):
-
-- `deploy-ok`, `serving: ok`, HTTP 200 on the public domain, every baseline
-  and `php` health check passing, **75 s** for a first deploy from nothing,
-  **21 s** for a rebuild.
-- **Logged in over the public HTTPS domain with the generated credential** and
-  rendered authenticated pages: `/my_account` → `My Account - ClipBucket`,
-  `/admin_area/` → `ClipBucket - Administration Panel` with its dashboard.
-  Anonymous `/my_account` is a 302.
-- **The admin's own System Info page finds every tool**: FFmpeg 7.0.2,
-  FFprobe 7.0.2, MediaInfo 26.05, Git 2.39.5, MySQL 12.2.2,
-  `post_max_size`/`upload_max_filesize` 2048M, `exec()` and `shell_exec()`
-  enabled.
-- **A real video upload, end to end.** A 6-second 640×360 H.264/AAC MP4 posted
-  to `actions/file_uploader.php`; `{"success":"yes","videoid":1}`; the queue row
-  picked up by the `user_activity` automation 50 seconds later; ffmpeg produced
-  240p and 360p renditions and 25 WebP thumbnails in **4.8 seconds**; the video
-  went to status `Successful` with `convert_percent` 100 and its duration read
-  back as 6. The watch page renders it, the anonymous `/videos` listing shows
-  it, and `/files/videos/2026/09/20/<name>-360.mp4` serves 135,895 bytes of
-  `video/mp4` over the public domain.
-- **The redeploy**, and the video surviving it (above).
-- The exposure table above, before and after the hardening, with bodies
-  compared rather than status codes.
-- The `register_argc_argv` question, answered by probe rather than by reading.
-- **The finished recipe re-run from nothing on a second account**, after the
-  hardening and the ini were added: `deploy-ok`, `serving: ok`, 75.2 s, no
-  failing health check, the admin panel rendering with **no misconfiguration
-  banner**, `/cb_install/`, `/vendor/composer/installed.json` and
-  `/composer.json` all 403 while jQuery still serves, `install.me` absent from
-  both the checkout and the mount, and a second video uploaded, transcoded to
-  240p/360p and served over the public domain.
-
-### The multipart-POST stall is real (#170)
-
-The upload had to be retried against the account's own address.
-`POST /actions/file_uploader.php` with a 97 KB `multipart/form-data` body
-through `https://<account>.panelalpha.online` **hung for exactly 60 seconds and
-came back as a 302 to an openresty error page**. The identical request to the
-account container's own `:8000` with a `Host:` header returned in 39
-milliseconds. Nothing about ClipBucket is involved; do not read it as an
-application fault.
-
-### Not verified
-
-- An actual ClipBucket version upgrade (nothing newer than 5.5.3 exists to
-  upgrade to).
-- Photo upload, collections, playlists, comments and the mail paths.
-- HLS conversion (`conversion_type` is `mp4` by default; the HLS branch of
-  `video_convert.php` was read but not run).
-- Behaviour when the ffmpeg download fails — the failure path is written and
-  reviewed but was not forced.
-
 ## Files
 
 | Path | Why |
 | --- | --- |
-| `panelalpha.yaml` | `docroot: upload`, `database: mysql`, the setup command |
-| `hooks/prepare.sh` | deletes the shipped `install.me`; fetches ffmpeg/ffprobe/mediainfo; seeds and protects the media mount; denies developer files |
+| `panelalpha.yaml` | `docroot: upload`, `database: mysql`, `system_packages` (ffmpeg, mediainfo), the setup command |
+| `hooks/prepare.sh` | deletes the shipped `install.me`; seeds and protects the media mount; denies developer files |
 | `files/panelalpha-setup.sh` | install/upgrade stage driver (repository root, outside the docroot) |
 | `files/panelalpha-install.php` | CLI install through upstream's own SQL, `pass_code()` and `Migration::updateConfig()` |
 | `files/panelalpha-migrate.php` | runs ClipBucket's own migration tool on the upgrade stage |
-| `files/panelalpha/php/zz-clipbucket.ini` | upload limits, `max_execution_time`, `display_errors`, `expose_php`, `register_argc_argv` (#185) |
+| `files/panelalpha/php/zz-clipbucket.ini` | upload limits, `max_execution_time`, `display_errors`, `expose_php`, `register_argc_argv` |
 | `files/upload/cb_install/.htaccess` | the installer, denied |
 | `files/upload/vendor/.htaccess` | asset allow-list over the Composer tree |
-| `overrides/docker-compose.override.yml` | the two mounts, `PHP_INI_SCAN_DIR`, `mem_limit`, healthcheck + `ready` service (#90) |
+| `overrides/docker-compose.override.yml` | the two mounts, `PHP_INI_SCAN_DIR`, `mem_limit`, healthcheck + `ready` service |
 
-## Engine findings
+## Known engine defects, and how this recipe meets them
 
-Nothing new filed. Two things worth someone's attention:
-
-**ffmpeg belongs in the shared PHP base image.** This recipe downloads 160 MB
-of static binaries per account from a third party because there is no other
-lever — `extras` are php extensions, `php-base.stub`'s apt line is fixed, and
-there is no per-project Dockerfile. Every video, audio or image application
-this platform meets will want the same thing, and `castopod`'s recipe already
-records losing its video-clip feature to the same gap. An `extras`-shaped key
-for apt packages, or simply `ffmpeg` in the stub, would remove the workaround
-from this recipe and the next five.
-
-**Known defects met, and how.** #172 does not bite (`upload` is a real relative
-path). #181 does not apply (the docroot is a child of the repository root).
-#166 is avoided by declaring `database: mysql`, which stops sidecar mining —
-and nothing here moves compose files aside, so the "globbed away your own
-override" trap cannot be sprung. #168 is not reached: there is no
-`composer.json` at the repository root and `vendor/` is committed. #171 is
-respected — the setup command is on `install`/`upgrade`, never `build`. #169 is
-avoided by `extends:` with no `id:`. #173 is the whole reason for the media
-mount and `~/.panelalpha`. #185 is the whole reason for the ini. #190 does not
-bite: ClipBucket builds absolute URLs from the `base_url` config row rather
+The `readDocroot()` fold of `''` and `'.'` does not bite (`upload` is a real
+relative path). Serving the repository root does not apply (the docroot is a
+child of the repository root). Sidecar mining is avoided by declaring
+`database: mysql` — and nothing here moves compose files aside, so the
+"globbed away your own override" trap cannot be sprung. The host Composer
+build's disabled plugins are not reached: there is no `composer.json` at the
+repository root and `vendor/` is committed. Build-stage commands being dropped
+is respected — the setup command is on `install`/`upgrade`, never `build`.
+Declaring `extends:` with no `id:` avoids another defect. The wiped
+`~/project` is the whole reason for the media mount and `~/.panelalpha`. The
+missing `php.ini` is the whole reason for the ini. The probe's `Host` header
+does not bite: ClipBucket builds absolute URLs from the `base_url` config row rather
 than from the `Host` header (`Network::get_server_url()`,
 `network.class.php:303`), so the healthcheck's `Host: 127.0.0.1` is harmless.
-#170 was hit squarely and is written up above.

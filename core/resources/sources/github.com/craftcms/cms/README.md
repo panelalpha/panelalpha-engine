@@ -15,10 +15,9 @@ bootstrap/ src/ lib/ packages/ tests/ composer.json package.json webpack.config.
 ```
 
 No `web/`, no `index.php`, no `craft` console script, no `.env` worth the name.
-Detection read that correctly — composer.json and no artisan, so the `php`
-strategy, PHP 8.2 against `"php": "^8.2"` — and then reported
-`serving-missing_entry`, which was the truth about the tree: there is no entry
-point in it.
+Detection reads that correctly — composer.json and no artisan, so the `php`
+strategy, PHP 8.2 against `"php": "^8.2"` — and without the recipe there is
+nothing to serve: there is no entry point in the tree.
 
 The deployable Craft is **craftcms/craft**, the starter project
 `composer create-project craftcms/craft` makes a site from. Opened up, it is
@@ -34,8 +33,8 @@ running the vendor's published image, because that checkout is a *different
 program* (the desktop sync client) and contributes nothing.
 
 Here the checkout is Craft. All of it: `src/` is the whole application, and
-`src/web/assets/*/dist` is 28 MB of **committed, already-built** control panel
-in git. What is missing is the seven files that wrap it, and those are public,
+`src/web/assets/*/dist` is the **committed, already-built** control panel in
+git. What is missing is the seven files that wrap it, and those are public,
 0BSD-licensed and tiny. So the recipe writes them (`files/`) and lets the clone
 be the Craft they load, rather than deleting the clone and pulling craftcms/cms
 back from Packagist. The code that runs is the code that was cloned, which is
@@ -77,7 +76,7 @@ across 66 control-panel asset bundles, behind a `prebuild` that runs
 `prettier --write .` over the whole repository.
 
 And it produces files that are already in git. `src/web/assets/cp/dist/cp.js`,
-the fonts, the CSS, all 28 MB of it, is committed — it is what a published
+the fonts, the CSS, all of it, is committed — it is what a published
 craftcms/cms tarball serves, and the webpack config is how Pixel & Tonic
 regenerate it, not something a site runs. `hooks/prepare.sh` renames
 `package.json` and `package-lock.json` to `*.upstream-dev`.
@@ -86,7 +85,7 @@ regenerate it, not something a site runs. `hooks/prepare.sh` renames
 
 `craft\db\Connection` supports `mysql` and `pgsql`; there is no SQLite driver,
 so `database: mysql` in the manifest is not a preference — without it Craft
-cannot install at all. (This is also why engine#167, `database_path()` doubling,
+cannot install at all. (This is also why the `database_path()` doubling trap
 cannot bite here.)
 
 The engine then hands the container `DB_HOST`, `DB_PORT`, `DB_DATABASE`,
@@ -110,7 +109,7 @@ the remember-me cookie, verification and password-reset codes, and anything a
 field or plugin stores encrypted. Three engine facts collide over it:
 
 - `GitRepository::cloneConfiguredRepository()` empties `~/project` before every
-  deploy (engine#173), and the account's MySQL database survives that. A key
+  deploy, and the account's MySQL database survives that. A key
   stored beside the code is a new key on every deploy, against data the old one
   wrote.
 - `setup/security-key` — which `install` runs through `setup/keys` — writes the
@@ -155,8 +154,7 @@ return defined('CRAFT_LICENSE_KEY_PATH') ? CRAFT_LICENSE_KEY_PATH
 Setting only the environment variable moves the probe and leaves the real key in
 the checkout. So `files/web/index.php` and `files/craft` promote the variable to
 the constant before the bootstrap runs; `App::env()` falls back to constants, so
-the probe still agrees. Verified on the deployed account:
-`Craft::$app->getPath()->getLicenseKeyPath()` returns `/pa/license.key`.
+the probe still agrees.
 
 All of this rests on one engine fact: the account's home is bind-mounted into
 its own DinD container at the same path (`/home/<user> -> /home/<user>`), which
@@ -167,7 +165,7 @@ sources resolve on both sides.
 
 `craftcms/cms`'s lock pins two Composer plugins. Neither is on
 `PhpHostBuild::INSTALLER_PLUGINS`, so `--no-plugins` stays and neither runs
-(engine#168, in its lock-pins-the-wrong-plugins form):
+(the lock pins plugins outside the allowlist):
 
 - `yiisoft/yii2-composer` registers `yii2-extension` packages — five of Craft's
   dependencies, including `yiisoft/yii2-queue` — in
@@ -183,17 +181,15 @@ The "craftcms/plugin-installer" plugin was not loaded as plugins are disabled.
 The "yiisoft/yii2-composer" plugin was not loaded as plugins are disabled.
 ```
 
-**This recipe deliberately does not try to paper over it, and an earlier draft
-that did was wrong.** `composer dump-autoload` looks like the fix — it is what
+**This recipe deliberately does not try to paper over it.** `composer dump-autoload` looks like the fix — it is what
 the bolt/core recipe next door uses, for `symfony/runtime` — and it is not the
 fix for either of these. Both write their file from Composer's **Installer**
 interface, during the `install`/`update`/`uninstall` of a package of the
-matching type; neither subscribes to `POST_AUTOLOAD_DUMP`. Measured on a fully
-installed tree: a `dump-autoload` with plugins enabled produced
-`vendor/yiisoft/extensions.php` containing `return [];`, and no `plugins.php` at
-all. The only thing that would register those five extensions is a `composer
-install` with plugins enabled, which is exactly what `--no-plugins` exists to
-prevent. So the step was removed rather than kept as a placebo.
+matching type; neither subscribes to `POST_AUTOLOAD_DUMP`. A `dump-autoload`
+with plugins enabled writes `vendor/yiisoft/extensions.php` containing
+`return [];`, and no `plugins.php` at all. The only thing that would register
+those five extensions is a `composer install` with plugins enabled, which is
+exactly what `--no-plugins` exists to prevent. So there is no such step.
 
 (The empty `extensions.php` shows up on a deployed account anyway, and that is
 not this recipe: the php manifest's optional `composer run-script
@@ -204,9 +200,7 @@ the command.)
 It does not matter here. Craft configures every one of those packages
 explicitly in `src/config/app.php` by FQCN, so PSR-4 autoloading is enough;
 `Application::bootstrap()` guards the extensions file with `is_file()` and
-`Plugins::_loadPluginInfo()` guards plugins.php with `file_exists()`. A full
-install, migration, control-panel session, schema change and content write were
-verified against a tree with an empty `extensions.php` and no `plugins.php`.
+`Plugins::_loadPluginInfo()` guards plugins.php with `file_exists()`.
 
 What it does mean: **a Craft plugin has to be installed from the control
 panel**, not by committing it to `composer.json`. Craft's own
@@ -231,7 +225,7 @@ runs it instead, before anything is listening:
   `craft install --interactive=0`, and `install/check` makes the whole step a
   no-op on every deploy after the first.
 
-Measured on the deployed account: `/index.php?p=admin/install` answers 302 to
+`/index.php?p=admin/install` answers 302 to
 the login form, `/admin` 302 to `/admin/login`, and `.env`, `.env.default`,
 `.git/config`, `docker-compose.yml`, `.panelalpha-admin-password` and
 `cpresources/` are 403 while `config/db.php`, `config/general.php`,
@@ -243,7 +237,7 @@ means none of them is under the document root at all.
 ## Readiness
 
 `AppLauncher` runs `docker compose up -d` without `--wait`, so the deploy is
-finished when the containers have been *started* (engine#90). `ready` — alpine,
+finished when the containers have been *started*. `ready` — alpine,
 `exit 0`, `restart: "no"` — waits on the app's healthcheck, which makes `up -d`
 return only once Craft answers. A clean exit 0 is explicitly not a crash loop to
 `AppHealth::isCrashing()`.
@@ -267,7 +261,7 @@ circumventing the licensing features.
 
 A fresh install is **Solo**, and Solo is free:
 `src/migrations/Install.php` writes `'edition' => CmsEdition::Solo->handle()`,
-and the system report on the deployed account reads `Craft Solo 5.11.3`.
+so the system report reads `Craft Solo`.
 
 What Solo actually is, from the source rather than the marketing page:
 
@@ -291,73 +285,6 @@ survives a redeploy.
 Practically: a host can offer Craft, and every account gets a working free Solo
 site. A multi-editor Craft is a paid upgrade the customer buys themselves.
 
-## What was actually verified
-
-On `mariusz.panelalpha.tools`, `--memory-limit=2000`, three fresh accounts and
-three redeploys. The last fresh account and the last redeploy were on exactly
-the configuration in this directory.
-
-- **Deploy.** `deploy-ok`, `serving: ok`, HTTP 200 on the account's own domain,
-  all twelve health checks pass, three runs out of three. 136–166 s end to end
-  on a shared host, most of which is account provisioning under load: the
-  application's own share is about 7 s clone, 1 s prepare, 11 s `composer
-  install` from the committed lock, and 16 s for `docker compose up -d`
-  *including* the whole install stage behind the readiness gate. The first
-  deploy on a host with no PHP 8.2 image costs about 4½ minutes more to build
-  it. A redeploy is 28–48 s.
-- **Logged in.** `POST users/login` over the public HTTPS domain with the
-  generated password from `~/project/.panelalpha-admin-password` → `admin:
-  true`. A wrong password on the same endpoint is a 400.
-- **Authenticated pages render.** `/admin/dashboard`, `/admin/settings`,
-  `/admin/utilities/system-report` and `/admin/settings/sections/new` all 200
-  with their own titles. The system report reads `Craft Solo 5.11.3`, PHP
-  8.2.33, MariaDB 12.2.2, Imagick 3.8.1.
-- **The CMS works, not just the login.** Created an entry type, a `Blog`
-  section and a published entry through the control panel; the section and
-  entry type appear as YAML under `config/project/`, so project-config writes
-  land on disk. Saving *Settings → General* rewrote `timeZone` in
-  `project.yaml`.
-- **Redeploy keeps the account.** After a rebuild: a session cookie issued
-  *before* it still authenticated — which is the direct test that
-  `CRAFT_SECURITY_KEY` survived, since Craft validates the identity cookie with
-  it — the stored password still logged in, and `config/project/`, wiped with
-  the rest of the checkout, was regenerated from the database with the
-  `timeZone` change intact (`ProjectConfig::areChangesPending()` regenerates
-  external config when it finds none). The upgrade stage skipped the install and
-  ran `craft up`: *"No new migrations found."*
-- **In-container state.** `Craft::$app->getPath()->getLicenseKeyPath()` →
-  `/pa/license.key`, `getStoragePath()` → `/app/storage` (both bind mounts),
-  edition `Solo`, security key set, app id from the environment, and the primary
-  site's stored base URL is the literal `$APP_URL`, resolving to the live
-  domain.
-- **Exposure.** `.env`, `.env.default`, `.git/config`, `.git/HEAD`,
-  `docker-compose.yml`, `.panelalpha-admin-password`, `cpresources/` and
-  `uploads/` answer 403; `config/db.php`, `config/general.php`,
-  `config/project/project.yaml`, `composer.json`, `composer.lock`,
-  `src/Craft.php`, `src/config/app.php`, `vendor/autoload.php`,
-  `bootstrap/bootstrap.php`, `templates/index.twig`, `storage/`,
-  `package.json.upstream-dev`, `craft` and `CHANGELOG.md` answer 404. On disk,
-  `~/.panelalpha/craft.env` is 0600 and `~/project/.env.default` is 644 and
-  contains no secret — which is the point of the split.
-- **The installer is shut.** Anonymously, `/index.php?p=admin/install` follows
-  through to `/admin/login`; the word "install" does not appear in the response.
-- **Footprint.** ~100 MB resident against a 768 m ceiling, 181 MB in
-  `~/project` (83 MB checkout + 66 MB vendor).
-
-Not verified, and worth knowing:
-
-- The licence key. `/pa/license.key` holds the four bytes
-  `bootstrap/bootstrap.php` writes as its writability probe; `api.craftcms.com`
-  had not issued a real key by the time the accounts were torn down. The *path*
-  is verified, the key is not.
-- An asset volume end to end. `/app/web/uploads` is mounted and writable by the
-  container's uid, but no filesystem was created in the CP and no file uploaded
-  through it.
-- Mail, the Plugin Store, and updating Craft from the control panel. See
-  *Not configured*.
-- PostgreSQL. `files/config/db.php` has a `pgsql` branch because Craft supports
-  one; the engine only ever provisions MySQL, so it has never run.
-
 ## Not configured
 
 - **Mail.** Craft sends verification and password-reset messages through the
@@ -375,12 +302,12 @@ Not verified, and worth knowing:
 - **Updating Craft from the control panel — don't.** Craft's updater
   (`craft\services\Composer`) updates Craft by requiring `craftcms/cms` in the
   project's `composer.json`. Here that file *is* `craftcms/cms`'s own, so it
-  would be asking the root package to require itself. Not tested; the safe and
-  correct route is to change the branch or tag the project is deployed from and
+  would be asking the root package to require itself. The safe and correct
+  route is to change the branch or tag the project is deployed from and
   redeploy, after which `craft up` in the upgrade stage runs whatever migrations
   the new code brought — which is how this recipe expects Craft to move.
 - **Plugins** must come from the Plugin Store, not from `composer.json`. See
-  *Composer's plugins never run*. Untested either way.
+  *Composer's plugins never run*.
 - **No `overrides/app.sh`.** Craft has `users/create`, `users/set-password` and
   a full element API, so user management and SSO are both reachable; nothing
   here advertises them yet. On Solo there is only ever one user to manage.

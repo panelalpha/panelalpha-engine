@@ -29,7 +29,9 @@ class Git extends WorkTree
             if ($runtime instanceof Dind) {
                 $this->absolutePath = $runtime->userAppDirPath();
             } else {
-                $this->absolutePath = $home . '/public_html';
+                // What the site serves, the same rule WP-CLI uses.
+                $main = $project->model()->getMainDomain();
+                $this->absolutePath = $home . ($main?->getDocumentRoot() ?? '/public_html');
             }
         } else {
             $this->absolutePath = $project->resolvePath($trimmed);

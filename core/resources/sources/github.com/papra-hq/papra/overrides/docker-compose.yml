@@ -52,7 +52,7 @@ services:
     mem_limit: 768m
 
   # Exits 0 once app is healthy, so `compose up -d` returns only when Papra
-  # answers (engine#204).
+  # answers.
   ready:
     image: docker.io/library/alpine:3
     entrypoint: ["/bin/sh", "-c", "exit 0"]

@@ -28,7 +28,7 @@ description: >-
   relative links and works on any host.
 
   Persistence. -c points tube at /data for the library, uploads and the tube.db
-  index, and ~/project is wiped every redeploy (engine#173), so /data is
+  index, and ~/project is wiped every redeploy, so /data is
   bind-mounted to the account's persistent ~/.panelalpha/tube (the only writable,
   rebuild-surviving dir). Uploaded videos are LARGE and are all the state; a
   named-style persistent bind keeps them across rebuilds — verified: an uploaded,

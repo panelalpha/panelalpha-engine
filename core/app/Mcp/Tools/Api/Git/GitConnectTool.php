@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Connect a directory to a git remote
 
-    Connect a directory to a git remote. Optional `path` defaults to `project` on DinD and `public_html` on FPM/LiteSpeed. Body `repo_url` and `branch` are required. Optional `token` is a PAT (never logged). Set `repair` to re-adopt a missing .git. On a `deploy` account without repair this only keeps origin in sync and persists metadata — it does not clone from scratch.
+    Connect a directory to a git remote. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. Body `repo_url` and `branch` are required. Optional `token` is a PAT (never logged). Set `repair` to re-adopt a missing .git. On a `deploy` account without repair this only keeps origin in sync and persists metadata — it does not clone from scratch. An SSH `repo_url` (`git@host:owner/repo.git`) needs the project's deploy key (POST /projects/{username}/git/deploy-key) added to the repository first.
     MARKDOWN)]
 #[IsDestructive]
 class GitConnectTool extends ApiTool
@@ -73,8 +73,8 @@ class GitConnectTool extends ApiTool
     {
         return [
             'name' => $schema->string()->required(),
-            'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).'),
-            'repo_url' => $schema->string()->required(),
+            'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).'),
+            'repo_url' => $schema->string()->description('HTTPS URL, or an SSH remote when the project has a deploy key.')->required(),
             'branch' => $schema->string()->required(),
             'token' => $schema->string(),
             'auth_type' => $schema->string()->description('One of: pat.'),

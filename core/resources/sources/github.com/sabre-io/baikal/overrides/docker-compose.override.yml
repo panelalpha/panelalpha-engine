@@ -29,8 +29,8 @@ services:
       # Flake\Framework::bootstrap() reads exactly these two variables and only
       # falls back to config/ and Specific/ inside the repository when they are
       # unset (Core/Frameworks/Flake/Framework.php:180-195). The fallback is
-      # fatal here: the engine empties ~/project before every clone (engine
-      # #173), so the in-repository default would take config/baikal.yaml and
+      # fatal here: the engine empties ~/project before every clone,
+      # so the in-repository default would take config/baikal.yaml and
       # Specific/db/db.sqlite -- the account's users, calendars and contacts --
       # with it on every redeploy.
       #
@@ -45,7 +45,7 @@ services:
       # The one way to give this container a php.ini. The base image loads none
       # at all -- `php --ini` says "Loaded Configuration File: (none)",
       # measured -- and scans /usr/local/etc/php/conf.d, a directory inside the
-      # image that the account uid cannot write to (engine #185). PHP reads
+      # image that the account uid cannot write to. PHP reads
       # PHP_INI_SCAN_DIR from its own environment at startup whatever the SAPI,
       # so naming a second directory here reaches the Apache module and the CLI
       # both, and both need it: the CLI runs the install stage, the Apache
@@ -62,7 +62,7 @@ services:
     # env_file rather
     # than `environment:` because nothing else sets this key, so nothing
     # outranks the file -- and because .env would put a login credential into
-    # .env.default at mode 644 (engine #173).
+    # .env.default at mode 644.
     env_file:
       - ../.panelalpha/app-credentials.env
 
@@ -105,7 +105,7 @@ services:
     #      a 404 would mean PATH_INFO is not reaching it. curl -f is not used
     #      for this one, because 401 is the pass.
     #
-    # No `ready` service gating on this. The engine #90 workaround is for a
+    # No `ready` service gating on this. The readiness-gate workaround is for a
     # deploy whose install stage is still loading a schema into a starting
     # datastore when the probe fires; here the install stage is 20 CREATE
     # TABLE and CREATE INDEX statements into a local file, measured at well

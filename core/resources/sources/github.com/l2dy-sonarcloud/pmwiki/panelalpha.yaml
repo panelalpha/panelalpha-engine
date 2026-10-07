@@ -5,8 +5,7 @@ description: >-
   canonical source is SVN-only (svn://pmwiki.org/pmwiki) with no official git
   remote, so a project cannot be cloned from it. This recipe is keyed to
   github.com/l2dy-sonarcloud/pmwiki, a git mirror of the 2.3.x tree (HEAD =
-  pmwiki-2.3.27, scripts/version.php). supported-apps#1294 (canonical,
-  uncloneable) is Rejected and points here; the mirror row is the Supported one.
+  pmwiki-2.3.27, scripts/version.php).
 
   The tree lints clean on PHP 8.3 (the version the `php` runtime hands a repo
   with no composer.json) and calls no function removed in PHP 8 -- the two
@@ -30,14 +29,14 @@ description: >-
   3. **World-editable by default, and its data lives in the checkout.** A stock
      PmWiki lets any visitor edit every page, and stores pages in wiki.d/ and
      attachments in uploads/ inside the tree -- both wiped by the redeploy that
-     empties ~/project (engine#173). pmwiki-setup.sh moves wiki.d/ and uploads/
+     empties ~/project. pmwiki-setup.sh moves wiki.d/ and uploads/
      onto ~/.panelalpha (symlinked back in each boot) and writes the bcrypt
      hash of the admin password the engine generates (`credentials:` below,
      returned by GET /projects/{name}/app-credentials, MCP app_credentials_get)
      into ~/.panelalpha/pmwiki (0600).
      config.php reads that hash into $DefaultPasswords['admin'] and sets
      ['edit'] to the same, so reading stays public but editing and uploading
-     require the admin login. Redeploy survival is the acceptance test.
+     require the admin login.
 
   No database: PmWiki needs none, so no `database:` key and no sidecar -- it fits
   the smallest host. The setup tooling (local/, panelalpha/, wiki.d/, .git) is
@@ -45,7 +44,7 @@ description: >-
 extends: php-plain
 docroot: "."
 env:
-  # The shared PHP base image loads no php.ini (engine#185); this scan dir adds
+  # The shared PHP base image loads no php.ini; this scan dir adds
   # ours. Leading colon keeps PHP's compiled-in conf.d so nothing is dropped.
   PHP_INI_SCAN_DIR: ":/app/.pa-php"
 commands:

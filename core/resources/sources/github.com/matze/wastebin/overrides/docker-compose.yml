@@ -6,7 +6,7 @@
 # long-lived signing key + password salt fed in from a redeploy-surviving store,
 # the public origin filled in at deploy time, and a bounded body size + short
 # default expiry. Pulling a Docker Hub image (not building) keeps detection on
-# `compose` and sidesteps engine#229 (image-seed NotFound is the GHCR case).
+# `compose` and sidesteps the image-seed NotFound that GHCR images hit.
 #
 # SECURITY POSTURE: wastebin is public-by-design. Reading a paste by its link is
 # public and creating a paste is open -- upstream offers no instance auth / basic
@@ -65,7 +65,7 @@ services:
       # uid 10001 by data-init above so the non-root app can create state.db.
       - wastebin_data:/data
     # The app (UI + create + retrieve) listens on 8088; publish it so the
-    # engine's port scan takes it as the primary (engine#234).
+    # engine's port scan takes it as the primary.
     ports:
       - "8088:8088"
     mem_limit: 256m
@@ -92,7 +92,7 @@ services:
 
   # Starts nothing, exits 0, waits on the health probe. `docker compose up -d`
   # blocks on a depends_on completion condition, so the engine reports the deploy
-  # finished only after wastebin actually answers (engine#204).
+  # finished only after wastebin actually answers.
   ready:
     image: alpine:3
     entrypoint: ["/bin/sh", "-c", "exit 0"]

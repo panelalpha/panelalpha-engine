@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Project;
 
+use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\DetectProjectStrategy;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
 use App\Lib\Deploy\Platform\Strategies;
@@ -52,9 +53,11 @@ class DindDeployStrategyTest extends TestCase
         $project = $this->dind($this->dindModel());
         $project->strategy()->apply($decision, null, $projectDir, null, 'fixture');
 
-        $this->assertFileExists($projectDir . '/docker-compose.yml');
+        // The engine's compose file has its own name, so a repository's docker-compose.yml is never overwritten.
+        $this->assertFileExists($projectDir . '/' . EngineArtifacts::RUN_COMPOSE);
+        $this->assertFileDoesNotExist($projectDir . '/docker-compose.yml');
         $this->assertFileExists($projectDir . '/' . NginxConfig::FILENAME);
-        $compose = file_get_contents($projectDir . '/docker-compose.yml');
+        $compose = file_get_contents($projectDir . '/' . EngineArtifacts::RUN_COMPOSE);
         $this->assertIsString($compose);
         $this->assertStringContainsString('nginx', strtolower($compose));
     }

@@ -41,9 +41,9 @@ class PrepareStage
      *
      * @param array<string, mixed> $decision
      */
-    public function manifestFor(array $decision): ?PlatformManifest
+    public function manifestFor(array $decision, ?AppConfig $appConfig = null): ?PlatformManifest
     {
-        return PlatformRegistry::forDecision($decision);
+        return PlatformRegistry::forDecisionOrAppConfig($decision, $appConfig);
     }
 
     /**
@@ -90,7 +90,7 @@ class PrepareStage
             . " && timeout --foreground --kill-after=30 {$innerTimeout} bash "
             . escapeshellarg($setupScriptPath);
         $shell = $this->dind->shell();
-        $shell->execAsUser(['bash', '-c', $script], [], $timeout);
+        $shell->execAsUserWithProjectEnv(['bash', '-c', $script], $timeout);
         $shell->exec(['rm', '-f', $setupScriptPath]);
     }
 }

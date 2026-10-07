@@ -9,7 +9,7 @@ use App\Lib\Deploy\Platform\SourceRecipes;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#182, the Apaxy follow-up: `check_skip` lets a manifest say a shipped
+ * The Apaxy follow-up: `check_skip` lets a manifest say a shipped
  * check does not apply, with a reason. Everything a skip could get wrong is
  * refused where it is written, never discovered as a silent health report.
  */

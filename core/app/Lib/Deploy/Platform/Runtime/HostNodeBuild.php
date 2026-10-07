@@ -188,6 +188,28 @@ class HostNodeBuild
         return [implode(' && ', $prepare), $rest === '' ? '' : $env . $rest];
     }
 
+    /** Where provisioning() puts corepack's shims and a missing corepack. */
+    public const PROVISIONED_PATH = '/tmp/corepack-bin:/tmp/corepack-npm/bin';
+
+    /**
+     * An install command's provisioning part (corepack, a pinned pnpm),
+     * rewritten to run as the account: it cannot write npm's global prefix or
+     * /usr/local/bin, so both go under /tmp, on PROVISIONED_PATH.
+     */
+    public static function provisioning(string $install): string
+    {
+        [$prepare] = self::splitToolingPrefix($install);
+
+        return str_replace(
+            ['npm install -g corepack', 'corepack enable'],
+            [
+                'npm install -g --prefix /tmp/corepack-npm corepack',
+                'mkdir -p /tmp/corepack-bin && corepack enable --install-directory /tmp/corepack-bin',
+            ],
+            $prepare
+        );
+    }
+
     /**
      * The script for a non-JavaScript host compile: the recipe's own install
      * and build, nothing else. innerScript()'s corepack, git-hook and lockfile
@@ -211,18 +233,9 @@ class HostNodeBuild
         }
         $parts = [];
         $build = trim($build);
-        [$prepare, $install] = self::splitToolingPrefix($install);
-        $prepare = str_replace(
-            ['npm install -g corepack', 'corepack enable'],
-            [
-                // The build runs as the account, which cannot write npm's
-                // global prefix; the missing corepack goes under /tmp instead.
-                'npm install -g --prefix /tmp/corepack-npm corepack',
-                'mkdir -p /tmp/corepack-bin && corepack enable --install-directory /tmp/corepack-bin',
-            ],
-            $prepare
-        );
-        $parts[] = 'export PATH=/tmp/corepack-bin:/tmp/corepack-npm/bin:$PATH';
+        $prepare = self::provisioning($install);
+        [, $install] = self::splitToolingPrefix($install);
+        $parts[] = 'export PATH=' . self::PROVISIONED_PATH . ':$PATH';
         if ($prepare !== '') {
             $parts[] = $prepare;
         }

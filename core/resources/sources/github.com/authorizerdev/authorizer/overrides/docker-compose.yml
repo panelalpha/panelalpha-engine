@@ -9,8 +9,10 @@ services:
     user: "0:0"
     env_file:
       - ../.panelalpha/authorizer/secrets.env
-      # The project's env vars (AUTHORIZER_ADMIN_SECRET).
+      # The project's env vars.
       - .env
+      # AUTHORIZER_ADMIN_SECRET, the dashboard password the engine generates.
+      - ../.panelalpha/app-credentials.env
     environment:
       AUTHORIZER_URL: ${PA_PUBLIC_URL}
     entrypoint:
@@ -35,9 +37,6 @@ services:
       - data:/authorizer/data
     ports:
       - "8080:8080"
-    depends_on:
-      env-check:
-        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:8080/healthz"]
       interval: 5s
@@ -45,17 +44,6 @@ services:
       retries: 30
       start_period: 5s
     mem_limit: 512m
-
-  # Fails `compose up` (and so the deploy) while the admin secret is unset.
-  env-check:
-    image: quay.io/authorizer/authorizer:2.4.1
-    restart: "no"
-    env_file:
-      - .env
-    entrypoint: ["/bin/sh", "/authorizer-env-check.sh"]
-    volumes:
-      - ./authorizer-env-check.sh:/authorizer-env-check.sh:ro
-    mem_limit: 32m
 
   # No-op: `compose up -d` returns once Authorizer answers /healthz.
   ready:

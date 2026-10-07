@@ -6,7 +6,7 @@ description: >-
   The repository is the Gradle source tree with no Dockerfile or compose
   file; a plain deploy picks the generic java-gradle build, which stops at
   "Gradle 9.7.0 is required (hint: use the gradlew script): this gradle is
-  Gradle 8.14.5" (engine#99). This recipe runs the official Docker image of
+  Gradle 8.14.5". This recipe runs the official Docker image of
   the current release, solr:10.0.0, the way upstream's Docker documentation
   does: the image's default `solr-foreground` (SolrCloud mode with embedded
   ZooKeeper, the 10.x default) with the image's default 512 MB heap, and

@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Overleaf Community Edition, the collaborative LaTeX editor (sharelatex image
+  on :80, MongoDB, Redis). The repository's compose pins mongo:8.0, and every
+  published MongoDB 8.0 (up to 8.0.32) and 8.3 (up to 8.3.11) image refuses to
+  start on Linux 6.19 and newer ("MongoDB cannot start: Linux kernel versions
+  6.19 and newer has a known incompatibility", SERVER-121912), so the plain
+  deploy fails on its database. Overleaf 6.x refuses MongoDB below 8.0, so
+  the mongo:7.0 swap other recipes use does not apply. This recipe runs
+  upstream's compose with sharelatex/sharelatex:6.3.0 and mongo:8.2.12, which
+  starts on these kernels, keeps upstream's single-node replica set and its
+  init script, and puts the data, MongoDB and Redis on named volumes. The
+  invite token secret the image requires and the session secret are generated
+  once into ~/.panelalpha/overleaf, so sessions survive a rebuild. The first
+  admin is created at /launchpad.

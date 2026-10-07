@@ -5,13 +5,15 @@ namespace App\System\Project\PhpHosting;
 use App\Models\User as ModelsUser;
 use App\System\ProcessRunner;
 use App\System\Project\PhpHosting;
+use App\System\Project\PhpHosting\Services\Service;
+use App\System\Project\PhpHosting\Services\ServiceManager;
 
 final class FpmStack implements PhpStack
 {
     use FpmPoolSettings;
 
-    /** restartFpmScript() exit status: the runner has no script for this version. */
-    public const EXIT_NOT_MANAGED = 3;
+    /** restartScript() exit status: the account has no service for this version. */
+    public const EXIT_NOT_MANAGED = ServiceManager::EXIT_NOT_MANAGED;
 
     public function __construct(
         private ProcessRunner $system,
@@ -40,9 +42,9 @@ final class FpmStack implements PhpStack
         return [];
     }
 
-    public function entrypointBackgroundScripts(PhpHosting $project): array
+    public function services(PhpHosting $project): array
     {
-        return $this->getEntrypointPhpScripts();
+        return $this->phpServices();
     }
 
     public function waitForAllRunning(PhpHosting $project, int $tries = 12, int $intervalSeconds = 5): void
@@ -62,63 +64,62 @@ final class FpmStack implements PhpStack
             'php',
             'bash',
             '-c',
-            self::restartFpmScript($phpVersion),
+            self::restartScript($project->services(), $phpVersion),
         ]);
         if ($process->getExitCode() === self::EXIT_NOT_MANAGED) {
-            throw new PhpHandlerNotRunning("php-fpm{$phpVersion} is not run by the entrypoint runner of {$project->username()}");
+            throw new PhpHandlerNotRunning("php-fpm{$phpVersion} is not a service of {$project->username()}");
         }
         if (!$process->isSuccessful()) {
             $message = trim($process->getErrorOutput() ?: $process->getOutput());
             throw new \RuntimeException("Could not restart php-fpm{$phpVersion}: {$message}");
         }
+        // A restart prints only the stray master it had to stop.
         $output = $process->isStarted() ? trim($process->getOutput()) : '';
-        if (str_contains($output, 'the runner did not start')) {
+        if ($output !== '') {
             \Illuminate\Support\Facades\Log::warning("{$project->username()}: {$output}");
         }
     }
 
-    /**
-     * The runner only kills the PID it wrote itself. `service phpX-fpm restart`
-     * left a daemonised master it never saw holding the socket, so the fresh
-     * `-F` instance died on "Another FPM instance seems to already listen" and
-     * the old master kept the old php.ini. Nothing starts one that way any more;
-     * a master still running after the runner's stop is that leftover, so it is
-     * stopped by process title (these images write no FPM pid file) and named on
-     * stdout, which the caller logs.
-     */
-    public static function restartFpmScript(string $phpVersion): string
+    /** Inside the account: restart php-fpm$phpVersion through $services, then wait for its master. */
+    public static function restartScript(ServiceManager $services, string $phpVersion): string
+    {
+        $name = 'php-fpm' . self::version($phpVersion);
+
+        return $services->restartScript($name, self::masterPattern($phpVersion)) . "\n" . self::waitForMaster($phpVersion);
+    }
+
+    private static function version(string $phpVersion): string
     {
         if (preg_match('/^\d+\.\d+$/', $phpVersion) !== 1) {
             throw new \InvalidArgumentException("Invalid PHP version: {$phpVersion}");
         }
-        $name = "php-fpm{$phpVersion}";
-        $notManaged = self::EXIT_NOT_MANAGED;
-        // Anchored, so it never matches this script's own `bash -c` command line.
-        $master = '^php-fpm: master process \\(/etc/php/' . str_replace('.', '\\.', $phpVersion) . '/fpm/';
+
+        return $phpVersion;
+    }
+
+    /** Anchored, so it never matches the command line of the script that runs it. */
+    private static function masterPattern(string $phpVersion): string
+    {
+        return '^php-fpm: master process \\(/etc/php/' . str_replace('.', '\\.', $phpVersion) . '/fpm/';
+    }
+
+    private static function waitForMaster(string $phpVersion): string
+    {
+        $master = self::masterPattern($phpVersion);
 
         return <<<BASH
-            [ -f /entrypoint.d/{$name}.sh ] || exit {$notManaged}
-            bash /entrypoint-runner.sh stop {$name} >/dev/null
-            stray=\$(pgrep -d ' ' -f '{$master}')
-            if [ -n "\$stray" ]; then
-                echo "stopped a {$name} master the runner did not start: \$stray"
-                pkill -QUIT -f '{$master}'
-                for _ in \$(seq 20); do pgrep -f '{$master}' >/dev/null || break; sleep 0.5; done
-                pkill -KILL -f '{$master}'
-            fi
-            bash /entrypoint-runner.sh start {$name} >/dev/null
             for _ in \$(seq 20); do pgrep -f '{$master}' >/dev/null && exit 0; sleep 0.5; done
-            echo '{$name} did not start' >&2
+            echo 'php-fpm{$phpVersion} did not start' >&2
             exit 1
             BASH;
     }
 
     /**
-     * @return array<string, string>
+     * @return list<Service>
      */
-    private function getEntrypointPhpScripts(): array
+    private function phpServices(): array
     {
-        $scriptFiles = [];
+        $services = [];
         $usedPhpVersions = [];
         foreach ($this->model->getDomains() as $domain) {
             $ver = $domain->getPhpVersion();
@@ -130,9 +131,9 @@ final class FpmStack implements PhpStack
             }
         }
         foreach ($usedPhpVersions as $phpVersion) {
-            $scriptFiles["php-fpm{$phpVersion}.sh"] = "exec php-fpm{$phpVersion} -F";
+            $services[] = new Service("php-fpm{$phpVersion}", "exec php-fpm{$phpVersion} -F");
         }
 
-        return $scriptFiles;
+        return $services;
     }
 }

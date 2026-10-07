@@ -23,7 +23,7 @@ services:
       timeout: 5s
       retries: 60
       start_period: 30s
-    # Upstream asks for 4 GB of RAM; stay under the account limit (engine#428).
+    # Upstream asks for 4 GB of RAM; stay under the account limit.
     mem_limit: 3g
 
   # No-op gate: `compose up -d` returns only once the Document Server answers.

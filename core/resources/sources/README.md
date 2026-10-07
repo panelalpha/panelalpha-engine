@@ -23,7 +23,7 @@ github.com/wordpress/wordpress/
 | `panelalpha.yaml` | — | **Required.** A platform manifest with extra keys — the same vocabulary as `core/resources/apps/<id>/panelalpha.yaml`: a `description`, `extends:` (the shipped recipe this repository is an instance of) and any manifest key overriding it, `env:`, `requires:`, staged `commands:` |
 | `hooks/precheck.sh` | Before `git clone` | Validate prerequisites (e.g. disk space) |
 | `hooks/prepare.sh` | After clone, before `docker compose up` | Generate config, set credentials, prepare a database. Responsible for creating a compose file if neither the repo nor `overrides/` ships one |
-| `overrides/docker-compose.yml` | After clone | Replaces the repo's own compose file, stashing anything that would shadow it. Written before the prepare hook, so the hook can rely on it |
+| `overrides/docker-compose.yml` | After clone | Replaces the repo's own compose file, stashing anything that would shadow it. The repo's committed `docker-compose.override.yml` is not layered over it; one the prepare hook or `files/` writes is. Written before the prepare hook, so the hook can rely on it |
 | `overrides/docker-compose.override.yml` | After clone | Layers over the repo's own compose file. Prefer this — the upstream file is never modified |
 | `overrides/entrypoint.sh` | Container boot | Replaces the generated entrypoint outright: no `install`, no `upgrade`, no `start`, no serve command |
 | `overrides/app.sh` | On demand | Called by the engine for app management (`info` / `install` / `users:list` / `users:add` / `users:delete` / `users:reset-password` / `users:sso`). Should print `MISSING_SNIPPET` to stderr and exit 1 if a required file is missing so the engine can reinstall it and retry |
@@ -32,6 +32,13 @@ github.com/wordpress/wordpress/
 A repository that ships its own `.panelalpha/` directory wins over anything
 here — an upstream that describes its own hosting knows more than a page
 written about it from outside.
+
+The account's `~/.panelalpha` (where hooks keep what must survive a redeploy)
+is 0700 and also holds the engine's own files (`app-credentials.env`, tunnel
+tokens). Bind only the subdirectory or file a service needs
+(`../.panelalpha/<app>:/pa-data/<app>`), never the whole directory, and create
+that subdirectory in `hooks/prepare.sh` so it is the account's: a bind source
+that does not exist yet is created by Docker as root.
 
 ---
 
@@ -153,6 +160,12 @@ Under the framework strategies (`laravel`, `php`, the Node/Python/Ruby recipes, 
 
 ---
 
+### The routed port of a compose recipe (`port`)
+
+The compose strategy routes the site to the port it reads from the compose file, and that scan never picks a datastore's: a service whose image is `qdrant/qdrant`, `minio/minio` or `couchdb`, or a port like 6333, is a sidecar there. When the application *is* that product, say so with `extends: compose` and `port:` in the recipe's `panelalpha.yaml`. The stated port is routed instead of the scanned one, and the recipe's own `overrides/docker-compose.yml` is used even when every service in it is a datastore image. Publish the port in that compose file.
+
+---
+
 ### The PHP frontend build (`frontend_build`)
 
 A PHP application gets a host Node pass after Composer: the engine installs `package.json`'s dependencies (lockfile, cache, a git-capable image when a dependency is a repository) and runs its `build` script. With no `build` script there is no pass. `frontend_build` changes that, `runtime: php` only:
@@ -194,6 +207,31 @@ Seed only when the application has no user yet, so a password changed in the app
 
 ---
 
+### The clone's depth (`git`)
+
+A deploy clones the repository at depth 1: one branch, no history, no tags. A build that stamps its version from tags (`git describe --tags`, goreleaser, setuptools-scm, a Makefile's `$(shell git describe)`) then fails with `fatal: No names found, cannot describe anything`. For such a repository:
+
+```yaml
+git:
+  history: full     # default: shallow
+```
+
+After the clone the engine fetches the whole history of the branch and every tag (`git fetch --unshallow --tags`), on every deploy. It works from the engine's per-repository directory and from a repository's own `.panelalpha/`. Leave it out for every other repository: the full history of a large project is tens of megabytes and many seconds.
+
+---
+
+### An HTTPS-only application port (`port_scheme`)
+
+The account's web server reaches the application over plain HTTP. An application that serves only TLS on its port (UniFi Network Application on 8443, with a self-signed certificate) declares it next to `port:`:
+
+```yaml
+port_scheme: https
+```
+
+The project's generated :80 and :443 proxy rules then use an `https` upstream, without verifying the application's certificate, and no re-encrypting nginx sidecar is needed. `http` (or no key) is the default. It works for a compose recipe too, next to its `port:` (see above), without making the recipe a manifest. The value is stored on the project at every deploy, so a redeploy, a domain rename or a later rule sync keeps it.
+
+---
+
 ### Secrets derived from the install path
 
 Every account's checkout is mounted at `/app`, so any value an application
@@ -215,7 +253,7 @@ service: 64 hex characters, per account, stable across deploys and wipe
 rebuilds. A repository's own compose services and Railpack builds do not get
 it; there, generate a value per account (`openssl rand -hex 32`) and keep it in
 `~/.panelalpha/`, not in `~/project`: a wipe rebuild clears `~/project`, and a
-secret regenerated against surviving data is lost for good (engine#173).
+secret regenerated against surviving data is lost for good.
 
 ---
 

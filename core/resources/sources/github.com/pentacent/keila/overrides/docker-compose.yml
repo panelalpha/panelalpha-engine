@@ -23,7 +23,7 @@ services:
 
   # One-shot: Keila exits at boot without an SMTP mailer for system emails, so
   # the deploy fails here naming each missing variable. Values come from .env
-  # (the project's env vars), not interpolation (engine#336). Also hands the
+  # (the project's env vars), not interpolation. Also hands the
   # uploads volume, created root-owned, to the image's user (uid 1001).
   init:
     image: pentacent/keila:0.30.3
@@ -80,7 +80,7 @@ services:
       start_period: 10s
     mem_limit: 768m
 
-  # `up -d` runs without --wait (engine#204); this blocks it until Keila answers.
+  # `up -d` runs without --wait; this blocks it until Keila answers.
   ready:
     image: postgres:18-alpine
     restart: "no"

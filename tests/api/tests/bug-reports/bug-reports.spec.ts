@@ -24,9 +24,14 @@ test.describe('bug reports', () => {
     api,
     setupUser,
   }) => {
+    // A queued report is shipped to production monitoring like a customer's.
+    test.skip(
+      process.env.ALLOW_BUG_REPORT_SHIP !== '1',
+      'Set ALLOW_BUG_REPORT_SHIP=1 to file a real bug report. A queued report reaches production monitoring.'
+    );
     const response = await api.createBugReportRaw({
       project: setupUser.username,
-      title: 'The site answers 502 after a green deploy',
+      title: '[api-test] The site answers 502 after a green deploy',
       description: 'It finishes green and then 502s until I restart the container.',
       attach_health: false,
       attach_log: false,

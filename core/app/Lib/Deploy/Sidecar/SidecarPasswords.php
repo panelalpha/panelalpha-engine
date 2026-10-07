@@ -3,7 +3,7 @@
 namespace App\Lib\Deploy\Sidecar;
 
 /**
- * The password a database sidecar gets when nobody chose one (engine#189).
+ * The password a database sidecar gets when nobody chose one.
  *
  * It used to be the literal `app`, for the user and root alike. Now it is
  * derived per account and per variable, so MYSQL_PASSWORD and

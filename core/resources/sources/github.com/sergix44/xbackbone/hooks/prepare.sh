@@ -39,7 +39,7 @@ cd ~/project
 # Everything generated per account -- the application key, the administrator
 # password, the database and the uploads -- lives in ~/.panelalpha/xbackbone,
 # which the compose override bind-mounts at /data. A redeploy re-clones
-# ~/project and would otherwise take all four with it (engine#173).
+# ~/project and would otherwise take all four with it.
 
 DATA_HOME="${HOME}/.panelalpha/xbackbone"
 
@@ -116,8 +116,7 @@ mkdir -p storage/framework/cache/data storage/framework/sessions storage/framewo
 # cookies and encrypted columns forgeable by anyone who read the file. It is
 # never copied: the .env below is written from scratch, and the key is put into
 # it by panelalpha/xbb-install.php on the install stage rather than here,
-# because the engine copies this hook's .env into a world-readable .env.default
-# (engine#173).
+# because the engine copies this hook's .env into a world-readable .env.default.
 if [ ! -f "${DATA_HOME}/app.key" ]; then
     (umask 077; printf 'base64:%s\n' "$(openssl rand -base64 32)" > "${DATA_HOME}/app.key")
 fi

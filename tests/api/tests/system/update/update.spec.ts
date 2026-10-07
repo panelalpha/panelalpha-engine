@@ -1,6 +1,10 @@
 import { expect, test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
-import { waitForCondition } from '@/helpers/retry';
+import { isEngineUnreachable, waitForCondition } from '@/helpers/retry';
+import { describeFinishedChange, hasExitCode } from '@/helpers/system-change';
+import { waitForSystemInfo } from '@/helpers/webserver-helpers';
+import type { EngineApi } from '@/clients/engine-api';
+import type { SystemChangeStatus } from '@/types';
 
 /**
  * Updating the engine replaces the software the rest of the suite is testing, so
@@ -14,6 +18,21 @@ const UPDATE_POLL_INTERVAL_MS = 5_000;
 
 function licenseKey(): string | undefined {
   return process.env.SYSTEM_UPDATE_LICENSE_KEY ?? process.env.LICENSE_KEY;
+}
+
+/**
+ * The update restarts core and sites-http, so a poll can land on a closed
+ * socket. `undefined` means "not reachable right now", not "no update".
+ */
+async function readLatestUpdate(api: EngineApi): Promise<SystemChangeStatus | null | undefined> {
+  try {
+    return (await api.getSystemInfo()).data.latest_update ?? null;
+  } catch (error) {
+    if (isEngineUnreachable(error)) {
+      return undefined;
+    }
+    throw error;
+  }
 }
 
 test.describe('engine update', () => {
@@ -40,7 +59,8 @@ test.describe('engine update', () => {
 
   /**
    * An update that never records `finished_at` leaves the engine stuck showing
-   * "Building" forever, which is what this watches for.
+   * "Building" forever, which is what this watches for. A finished update has to
+   * have exited 0 as well: one that failed can leave the webserver down.
    */
   test('an update reaches a terminal status', async ({ api }) => {
     const before = (await api.getSystemInfo()).data.latest_update ?? null;
@@ -49,22 +69,28 @@ test.describe('engine update', () => {
     const triggered = await api.updateSystemRaw(key ? { license_key: key } : {});
     test.skip(triggered.status === 404, 'This engine has no system update route.');
 
+    let lastSeen = 'nothing read yet';
     await waitForCondition(
       async () => {
-        const latest = (await api.getSystemInfo()).data.latest_update ?? null;
+        const latest = await readLatestUpdate(api);
+        if (latest === undefined) {
+          lastSeen = 'engine unreachable (restarting)';
+          return false;
+        }
+        lastSeen = JSON.stringify(latest);
         const isNewRun =
           latest?.started_at && before?.started_at ? latest.started_at > before.started_at : true;
-        return Boolean(isNewRun && latest?.finished_at);
+        return Boolean(isNewRun && hasExitCode(latest));
       },
       {
         timeout: UPDATE_POLL_TIMEOUT_MS,
         interval: UPDATE_POLL_INTERVAL_MS,
-        message: 'the engine update never recorded a finish time',
-        describeLast: async () =>
-          JSON.stringify((await api.getSystemInfo()).data.latest_update ?? null),
+        message: 'the engine update never recorded its exit code',
+        describeLast: () => lastSeen,
       }
     );
 
-    expect((await api.getSystemInfo()).data.latest_update?.finished_at).toBeTruthy();
+    const finished = (await waitForSystemInfo(api)).data.latest_update;
+    expect(finished?.exit_code, describeFinishedChange('The engine update', finished)).toBe(0);
   });
 });

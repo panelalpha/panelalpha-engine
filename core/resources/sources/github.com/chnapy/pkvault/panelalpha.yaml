@@ -17,12 +17,3 @@ description: >-
   BACKUP_FILE_COUNT_LIMIT) reach the container. The clone still pulls the
   repository's PokeAPI submodules, so the first deploy spends most of its
   time cloning.
-
-  == Verified on 10.10.10.25 (engine 705f250a), memory_limit 2000 ==
-
-  Fresh create: success, 693 s, of which cloning (the submodules) was 642 s
-  and start_to_answer 14 s. / 200 <title>PKVault; /api/settings 200 reports
-  version 2.3.4 with canUploadSaves (uploads land in /pkvault). /.env and
-  /.git/config return the SPA shell. Settings changed with POST
-  /api/settings (language fr, a /data/saves/*.sav glob) were still in effect
-  after POST /rebuild (641 s, again mostly cloning).

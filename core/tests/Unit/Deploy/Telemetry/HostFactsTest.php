@@ -87,14 +87,14 @@ class HostFactsTest extends TestCase
         // IP or an account name here would make every batch attributable.
         $envelope = HostFacts::envelope($this->system([
             'ID' => 'AAAA:BBBB:CCCC',
-            'Name' => 'mariusz-pa',
+            'Name' => 'engine-host',
             'OperatingSystem' => 'Ubuntu 24.04 LTS',
         ]));
 
         foreach (['hostname', 'machine_id', 'docker_id', 'public_ip', 'cpu_model', 'username'] as $key) {
             $this->assertArrayNotHasKey($key, $envelope, $key);
         }
-        $this->assertStringNotContainsString('mariusz-pa', (string) json_encode($envelope));
+        $this->assertStringNotContainsString('engine-host', (string) json_encode($envelope));
     }
 
     public function test_whether_sysbox_is_registered_is_reported(): void
@@ -117,11 +117,11 @@ class HostFactsTest extends TestCase
         // Never transmitted; hashed into the install id.
         $material = HostFacts::forFingerprint($this->system([
             'ID' => 'AAAA:BBBB:CCCC',
-            'Name' => 'mariusz-pa',
+            'Name' => 'engine-host',
         ]));
 
         $this->assertSame('AAAA:BBBB:CCCC', $material['docker_id']);
-        $this->assertSame('mariusz-pa', $material['hostname']);
+        $this->assertSame('engine-host', $material['hostname']);
         $this->assertArrayHasKey('machine_id', $material);
         $this->assertArrayHasKey('mem_total_kb', $material);
     }

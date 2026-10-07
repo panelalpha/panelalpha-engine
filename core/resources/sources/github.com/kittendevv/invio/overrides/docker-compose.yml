@@ -33,7 +33,7 @@ services:
       start_period: 5s
     mem_limit: 1g
 
-  # `up -d` runs without --wait (engine#204); this blocks it until Invio answers.
+  # `up -d` runs without --wait; this blocks it until Invio answers.
   ready:
     image: ghcr.io/kittendevv/invio:v2.2.0
     restart: "no"

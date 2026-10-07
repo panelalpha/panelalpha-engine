@@ -4,9 +4,10 @@
 #
 # Three things a file snippet cannot do: make the root composer.json say what
 # wikimedia/composer-merge-plugin would have made it say (the whole reason
-# this repository deploys to a fatal error), keep the account's generated
-# secrets and its site data somewhere a redeploy does not delete, and tell a
-# human what the administrator password is.
+# this repository deploys to a fatal error), and keep the account's settings
+# and its site data somewhere a redeploy does not delete. The administrator's
+# login is the engine's (`credentials:` in panelalpha.yaml), in
+# ~/.panelalpha/app-credentials.env.
 set -e
 cd ~/project
 
@@ -49,7 +50,7 @@ fi
 #     nothing to an autoload map, and PhpRuntime::requirementFor() reads
 #     composer.json's constraints when the lock's platform is contradicted --
 #     so copying `"php": "^7.3||^8.0"` into the root could move the whole
-#     project onto an older minor than the control deploy resolved. The lock
+#     project onto an older minor than a deploy without it resolves. The lock
 #     already carries every one of them under `platform`.
 #
 #   * `provide`, `bin`, `config` and the rest are not copied. The install
@@ -124,7 +125,7 @@ PYMERGE
 # 2. The things that must outlive the checkout.
 #
 # GitRepository::cloneConfiguredRepository() empties ~/project before every
-# deploy (engine#173) and the account's MySQL database survives it. Everything
+# deploy and the account's MySQL database survives it. Everything
 # Concrete writes that is *data* -- the connection it was installed against,
 # every setting changed from the dashboard, every uploaded file, every
 # marketplace add-on -- is written inside ~/project, so all of it goes here
@@ -159,13 +160,10 @@ if [ ! -f "$STORE" ]; then
 # container as a second env_file (see overrides/docker-compose.override.yml).
 # Kept out of ~/project, which every deploy re-clones from scratch, and out of
 # .env, which ProjectEnvironment::apply() copies to a world-readable
-# .env.default (engine#173).
+# .env.default.
 #
-# The first administrator, created non-interactively from the install stage so
-# that /install is never left open for whoever arrives first to claim. The
-# username is not configurable: Concrete's installer always names it "admin".
-PA_CONCRETE_ADMIN_EMAIL=admin@example.com
-PA_CONCRETE_ADMIN_PASSWORD=$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-20)
+# The first administrator's login is not here: the engine generates it
+# (`credentials:` in panelalpha.yaml) into ~/.panelalpha/app-credentials.env.
 PA_CONCRETE_SITE_NAME=Concrete CMS
 # Which starting point c5:install imports. atomik_blank is upstream's own
 # non-interactive default and gives a themed, empty site. atomik_full adds
@@ -175,24 +173,7 @@ PA_CONCRETE_STARTING_POINT=atomik_blank
 EOF
     )
     chmod 600 "$STORE"
-    say "generated the account's administrator password in ~/.panelalpha/concrete/concrete.env"
+    say "wrote the account's settings to ~/.panelalpha/concrete/concrete.env"
 fi
-
-# Where a human is pointed. ~/project is re-cloned every deploy, so this is a
-# copy of the stored value rather than the value itself -- the same password on
-# every redeploy, and the one the database actually holds. The leading dot and
-# the `panelalpha` in the name are both already denied by the generated vhost,
-# and files/.htaccess denies the name a third time.
-(
-    umask 077
-    {
-        echo "# Written by PanelAlpha. Concrete's installer creates the first"
-        echo "# administrator and there is no sign-up page; this is that account."
-        echo "USERNAME=admin"
-        grep -E '^PA_CONCRETE_ADMIN_(EMAIL|PASSWORD)=' "$STORE" | sed 's/^PA_CONCRETE_ADMIN_//'
-        echo "# Sign in at <your domain>/login , dashboard at <your domain>/dashboard"
-    } > .panelalpha-admin-password
-)
-chmod 600 .panelalpha-admin-password
 
 say "prepared; site data lives in ~/.panelalpha/concrete and survives a redeploy"

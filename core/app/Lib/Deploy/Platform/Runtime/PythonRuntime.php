@@ -7,10 +7,9 @@ use App\Lib\Deploy\Detect\PlaceholderPage;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * Python, versioned by `requires-python` in pyproject.toml.
- *
- * Nothing else states a version the engine can trust: requirements.txt pins
- * packages, not the interpreter.
+ * Python, versioned by `.python-version` when it pins one, else by
+ * `requires-python` in pyproject.toml. requirements.txt pins packages, not
+ * the interpreter.
  */
 final class PythonRuntime implements Runtime
 {
@@ -103,6 +102,13 @@ final class PythonRuntime implements Runtime
             return null;
         }
 
+        // An exact pin wins over a range: uv and pyenv run what .python-version
+        // names, and a venv built on another minor is not the one the image runs.
+        $pinned = self::pinnedMinor($context->contents('.python-version'));
+        if ($pinned !== null) {
+            return new Requirement('python', '3.' . $pinned, '', '.python-version');
+        }
+
         $toml = $context->contents('pyproject.toml');
         if ($toml === null
             || preg_match('/requires-python\s*=\s*[\'"]([^\'"]+)[\'"]/', $toml, $matches) !== 1
@@ -129,6 +135,24 @@ final class PythonRuntime implements Runtime
     public function image(Requirement $requirement): string
     {
         return self::imageTag($requirement->version);
+    }
+
+    /**
+     * The 3.x minor on the first version line of a .python-version
+     * (`3.11.13`, `3.11`, `cpython@3.11`, `cpython-3.11.13-linux-x86_64-gnu`).
+     */
+    private static function pinnedMinor(?string $file): ?int
+    {
+        foreach (preg_split('/\R/', (string) $file) ?: [] as $line) {
+            $line = trim($line);
+            if ($line === '' || str_starts_with($line, '#')) {
+                continue;
+            }
+
+            return preg_match('/(?:^|[^0-9.])3\.(\d+)(?:\.\d+)?(?:[^0-9.]|$)/', $line, $m) === 1 ? (int) $m[1] : null;
+        }
+
+        return null;
     }
 
     /** Lowest 3.x minor a `>=3.11`-shaped constraint allows. */
@@ -211,9 +235,14 @@ final class PythonRuntime implements Runtime
         // A project with a `[build-system]` is a package and is installed too,
         // as its own `uv sync` would: Codex's `bin/manage.py` imports `codex`,
         // and Quasarr's `quasarr` script exists only once the project is.
+        //
+        // UV_PYTHON keeps the venv on the image's interpreter. Left to
+        // .python-version, uv downloads its own CPython outside /app and links
+        // .venv to it, which the run container does not have.
         if (isset($files['uv.lock'])) {
             return $venv . $pip . 'uv'
-                . ' && VIRTUAL_ENV="$PWD/' . self::VENV . '" ' . self::VENV
+                . ' && UV_PYTHON_DOWNLOADS=never UV_PYTHON="$(command -v python)"'
+                . ' VIRTUAL_ENV="$PWD/' . self::VENV . '" ' . self::VENV
                 . '/bin/uv sync --frozen' . (self::isUvPackage($pyproject) ? '' : ' --no-install-project');
         }
 
@@ -410,8 +439,8 @@ final class PythonRuntime implements Runtime
             return self::python() . ' ' . $file;
         }
 
-        // 3. A Django project laid out in a subdirectory -- NetBox, issue
-        //    #414 -- and a declared server to run it. Only reached when the
+        // 3. A Django project laid out in a subdirectory -- NetBox --
+        //    and a declared server to run it. Only reached when the
         //    root offered nothing.
         if ($server !== null) {
             $nested = self::nestedServableModule($projectDir);
@@ -626,7 +655,7 @@ final class PythonRuntime implements Runtime
      * anchored the same way: the package directory holding `wsgi.py` sits
      * beside the `manage.py` that runs the project. At the root that is
      * `manage.py` beside `NAME/wsgi.py` (module `NAME.wsgi`); run inside a
-     * subdirectory — NetBox, issue #414 — it is `netbox/manage.py` beside
+     * subdirectory — NetBox — it is `netbox/manage.py` beside
      * `netbox/netbox/wsgi.py` (module `netbox.wsgi`, needing `netbox/` on the
      * import path).
      *

@@ -23,7 +23,7 @@ description: >-
   already publishes. overrides/docker-compose.yml runs the published image
   instead; the checkout contributes nothing to the running container. A Docker
   Hub image `docker save`s as a real multi-arch manifest and the engine's DinD
-  image-seeding delivers it intact (this is not Flink/engine#229, which bit
+  image-seeding delivers it intact (unlike the Flink case, which bit
   containerd-store images whose `docker save` yields a manifest-only stub).
   v4.0.0 is pinned rather than `latest` so a redeploy is reproducible.
 
@@ -48,7 +48,7 @@ description: >-
   portkey writes nothing at runtime — no DB, favicon cache disabled, metrics
   off — so the container is entirely read-only and the app is stateless in the
   usual sense. The only mutable "state" is the operator's link list, and that
-  lives in the one config file. It must not live in ~/project, which engine#173
+  lives in the one config file. It must not live in ~/project, which the engine
   wipes and re-clones every redeploy, so hooks/prepare.sh seeds
   ~/.panelalpha/portkey/config.yml once (only if absent, so a customer's edits
   are never clobbered) and the compose mounts ~/.panelalpha/portkey read-only

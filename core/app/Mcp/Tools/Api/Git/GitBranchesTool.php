@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     List git branches
 
-    List git branches. Optional `path` defaults to `project` on DinD and `public_html` on FPM/LiteSpeed.
+    List git branches. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -70,7 +70,7 @@ class GitBranchesTool extends ApiTool
     {
         return [
             'name' => $schema->string()->required(),
-            'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).'),
+            'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).'),
         ];
     }
 }

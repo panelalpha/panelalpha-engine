@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Dind\Strategy;
 
+use App\Lib\Deploy\Compose\AppRoot;
 use App\System\Project\Dind as DindProject;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
@@ -98,14 +99,16 @@ class FrameworkStrategy
         // runtime keeps the image its own recipe resolved -- python:3.12-slim,
         // golang, the JDK -- which is also what the host compile used.
         if ($isNginx || HostRunProject::isNode($decision['strategy'] ?? null)) {
-            $files = ProjectContext::listRootFiles($projectDir);
-            $package = ProjectContext::readPackageJson($projectDir) ?? [];
+            // Read where the host compile read: a host-run project's app_root.
+            $appDir = DeployCompose::isHostRunProject($decision) ? AppRoot::path($projectDir, $decision) : $projectDir;
+            $files = ProjectContext::listRootFiles($appDir);
+            $package = ProjectContext::readPackageJson($appDir) ?? [];
             // Run under the interpreter the lockfile named, the same one the
             // host compile used. A tree installed by one and imported by
             // another fails on packages only the first can resolve.
             $decision['image'] = HostNodeBuild::runtimeImage(
                 JsPackageManager::detectPackageManager($files, $package),
-                Images::nodeImage($projectDir, $package)
+                Images::nodeImage($appDir, $package)
             );
         } else {
             // A command runtime keeps the version its recipe resolved, but a
@@ -197,7 +200,7 @@ class FrameworkStrategy
         $this->dind->composeWriter()->writeGeneratedCompose(
             $projectDir,
             DeployCompose::framework(
-                $strategy->composeDecision($decision),
+                $strategy->composeDecision($strategy->withPathPrefixKeys($decision, $projectDir)),
                 $port,
                 $this->dind->publicAppUrl()
             ),

@@ -1,8 +1,8 @@
 #!/bin/bash
 # Prepare a persistent, secured data dir for yarnd before first boot.
 #
-# yarnd keeps ALL state under -d /data and ~/project is wiped every redeploy
-# (engine#173), so the data lives in the account's persistent ~/.panelalpha/yarn
+# yarnd keeps ALL state under -d /data and ~/project is wiped every redeploy,
+# so the data lives in the account's persistent ~/.panelalpha/yarn
 # (bind-mounted to /data by the override). This hook:
 #   - creates that dir,
 #   - generates the three production pod secrets ONCE (reused forever) so
@@ -38,7 +38,7 @@ fi
 
 # The dockerfile strategy declares env_file: .env and the override interpolates
 # PUID/PGID from it. Writing .env here also stops the engine copying a repo
-# .env.example over it (engine#218). Only the account uid/gid go here — never
+# .env.example over it. Only the account uid/gid go here — never
 # the secrets.
 cd "${HOME}/project"
 {

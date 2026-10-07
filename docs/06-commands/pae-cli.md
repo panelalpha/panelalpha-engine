@@ -18,14 +18,14 @@ Throughout this page, `{project}` means the project's name - the value shown as 
 
 | Command | What it does |
 |---|---|
-| `pae configure` | Opens the menu: address and certificate, assistant tokens, API tokens, the queue, the Docker Hub login, the site database caches, the firewall UI, telemetry. Pick one, do it, come back for the next. |
+| `pae configure` | Opens the menu: address and certificate, assistant tokens, API tokens, the queue, the Docker Hub login, prewarmed images, the site database caches, telemetry. Pick one, do it, come back for the next. |
 | `pae configure address` | The address clients connect to, and the certificate on that name. |
 | `pae configure mcp-tokens` | Connect an assistant, or change what assistants may use. |
 | `pae configure api-tokens` | Mint a token for your own software, and limit it to part of the API. |
 | `pae configure queue` | How many deploys, backups, or staging jobs run at once. A number from 1 to 32. Left unset, it is 1 on a server with less than 4 GB of RAM and 2 otherwise. |
 | `pae configure docker-hub` | The Docker Hub account image downloads go out under. |
+| `pae configure prewarm` | Which base images are kept ready before a deploy asks, and the disk budget and reserve for them. None by default. |
 | `pae configure sites-db` | How much memory the database for hosted PHP sites keeps for its caches. Defaults are 32M, 8M and 8M. Changing one restarts that database for a few seconds. |
-| `pae configure csf-ui` | Turns the firewall's web interface on port 2012 on or off. It is off by default. |
 | `pae configure telemetry` | Whether reports are sent, and how much they carry. |
 | `pae configure --dry-run` | Any of the above. Shows what it would write, and writes nothing. |
 
@@ -35,7 +35,7 @@ Choosing assistant tokens, then **Global scope**, opens:
 
 ```text
  Groups      37 of 37 groups on
- Commands    196 of 196 commands on
+ Commands    204 of 204 commands on
  Ceiling     full — they may do anything, including delete
  Review and save
  Back
@@ -74,8 +74,9 @@ The settings themselves are ordinary lines in `.env-core` and you can still edit
 | `pae project:push {project} {target}` | Pushes state between a staging pair. |
 | `pae project:limit:get --project={project}` | Shows disk, memory and CPU limits. |
 | `pae project:limit:set --project={project} --memory-limit=512` | Changes a limit. Memory is in megabytes and may not exceed what projects may have on this server. Every project has a memory limit, so it can be changed but not removed. |
+| `pae project:network:move --all` | Moves running projects created before this version onto the isolated network. The project container stays up. An application using the server's MySQL may restart, and its site is unavailable until it answers again. A stopped project is left alone; start it and run the command again. `--project={project}` moves one. |
 | `pae project:ssh {project} '{command}'` | Runs one command inside the project. |
-| `pae project:delete {project}` | Deletes the project and everything in it. Asks you to confirm. |
+| `pae project:delete {project}` | Deletes the project and everything in it. Asks you to confirm. Work still queued for the project is cancelled first. While a deploy or rebuild, staging copy, push, backup or restore is running on it, the delete is refused and changes nothing; cancel that task or wait for it, then delete again. |
 
 Create a project from a public repository and wait until it is up:
 
@@ -114,6 +115,8 @@ These are the values your application reads when it starts. Change one, then reb
 | `pae project:settings:get {name} --project={project}` | Prints one setting. |
 | `pae project:settings:set {name} {value} --project={project}` | Sets one setting. |
 | `pae project:settings:unset {name} --project={project}` | Removes one setting. |
+| `pae project:settings:set persist-paths /app/storage,/app/public/uploads --project={project}` | Keeps what the application writes under these container paths across redeploys and rebuilds, on volumes of the project's own. Takes effect from the next deploy. A project that brings its own `docker-compose.yml` declares its volumes there instead. |
+| `pae project:settings:set registry-auth "ghcr.io {user} {token}" --project={project}` | Logs the project in to private image registries, one `host username token` line per registry. The deploy uses it to pull images and build from them; the Docker login file is present in the project only while a deploy runs, and an image it covers never goes through the server's shared registries. |
 
 Context: [Environment variables](../05-capabilities/projects.md#environment-variables).
 
@@ -131,6 +134,7 @@ For projects deployed from git, these act on the checkout the engine owns. A pul
 | `pae git:revert {project}` | Returns the checkout to the last deployed commit, then rebuilds. |
 | `pae git:update-credentials {project}` | Replaces the stored git access token. |
 | `pae git:deploy-hook {project}` | Creates the push-to-deploy hook and prints its URL and secret; the secret is shown only this once. Run again, it prints the same URL without the secret. `--rotate` issues a new URL and secret, `--delete` removes the hook, `--path` picks another checkout, `--provider` narrows the TLS setup notes to one git host. |
+| `pae git:deploy-key {project}` | Creates the project's SSH deploy key and prints its public half to add to the repository. Run again, it prints the same key. `--host` also trusts a git server other than github.com, gitlab.com and bitbucket.org, `--delete` removes the key. |
 
 Context: [Connecting with Git](../05-capabilities/connecting-with-git.md), [Push to deploy](../05-capabilities/push-to-deploy.md).
 
@@ -221,7 +225,7 @@ Context: [A token shared by several projects](../05-capabilities/connecting-with
 | `pae project:bandwidth {project} --start= --end= --group-by=day` | Transfer series for the project, in bytes. |
 | `pae project:domain:bandwidth {project} {domain} --start= --end=` | Transfer series for one hostname. |
 | `pae project:domain:visitors {project} {domain} --start= --end=` | Visitor overview for one hostname (`domain_visitors`). Daily hits and visits clip to the range; unique visitors and session length are calendar months. |
-| `pae project:domain:visitors-breakdown {project} {domain} {dimension} --start= --end=` | Visitor breakdown (`domain_visitors_breakdown`): pages, countries, continents, regions, referrers, os, or browsers. Month grain. |
+| `pae project:domain:visitors-breakdown {project} {domain} {dimension} --start= --end=` | Visitor breakdown (`domain_visitors_breakdown`): pages, countries, continents, regions, referrers, os, or browsers, at month grain; or `status_codes`, requests and bytes per HTTP status for exactly the range. |
 | `pae geolocation:database update` | Downloads the local City MMDB used for country / continent / region. Not scheduled. Geo lists stay empty until this has run. `--accept-terms` for scripts; `--force` to replace this month's file. |
 
 Country charts still need a visible [DB-IP](https://db-ip.com) backlink: [Visitor statistics](../05-capabilities/visitor-statistics.md).
@@ -272,7 +276,7 @@ Create the token on Docker Hub under **Account settings → Personal access toke
 The engine ships more commands than belong on a daily list. Most are for support to point you at, or for server upkeep the engine normally handles on its own. Each one describes itself with `pae <command> --help`. The main groups:
 
 - **Server upkeep:** `system:version`, `system:database:test`, `system:ip:sync`, `system:domain:rebuild`, `system:modsec:rebuild`, `system:sftp:rebuild`, `system:exim:rebuild`, `system:webserver:update`.
-- **Scheduled cleanup:** `task:prune`, `metrics:prune`, `deploy:cache:prune` (runs once a day and deletes build caches unused for 24 hours; `--older-than=7d` changes the window, `--dry-run` only prints), `system:image:prune` (runs once a day, skipped while a deploy is running: removes deploy base images outside the prewarm catalogue that no deploy has pulled, built or named for 3 days, and host build cache unused for 24 hours; `--older-than`, `--build-cache-older-than` and `--dry-run` as above, defaults in `DEPLOY_HOST_IMAGE_RETENTION` and `DEPLOY_HOST_BUILD_CACHE_RETENTION`), `deploy:log:prune`, `acme:challenge:prune`, `vault:purge` (removes expired paste slots, never a filled engine-wide secret).
+- **Scheduled cleanup:** `task:prune`, `metrics:prune`, `deploy:cache:prune` (runs once a day and deletes build caches unused for 24 hours; `--older-than=7d` changes the window, `--dry-run` only prints), `system:image:prune` (runs once a day; while a deploy is running the image half waits and is retried the next hour: removes deploy base images not selected in `pae configure prewarm` that no deploy has pulled, built or named for 3 days, and host build cache unused for 24 hours; `--older-than`, `--build-cache-older-than` and `--dry-run` as above, `--due-after=20h` skips the image half when it last completed within that window, defaults in `DEPLOY_HOST_IMAGE_RETENTION` and `DEPLOY_HOST_BUILD_CACHE_RETENTION`), `system:disk:guard` (every five minutes: keeps host build cache under `DEPLOY_HOST_BUILD_CACHE_MAX`, 10G, and while free space on the Docker root or /home is below `DEPLOY_DISK_PRESSURE_FREE`, 15% by default, prunes the oldest build cache and then base images unused for 6 hours; `--dry-run` only prints), `deploy:log:prune`, `acme:challenge:prune`, `vault:purge` (removes expired paste slots, never a filled engine-wide secret).
 - **Per-project repair:** `project:permission:fix`, `project:quota:rebuild`, `project:domain:fix`, `project:domain:rebuild`, `project:domain:cleanup`.
 - **PHP Apache modules (inside a project, not on the VPS):** `apache:mod:enable`, `apache:mod:disable`.
 - **Engine settings:** `settings:get`, `settings:set`, `settings:exists`.
@@ -281,11 +285,7 @@ Only run one of these when you understand what it does, or when support hands yo
 
 ## Anything not on this page
 
-A few operations have no command of their own: databases, cron jobs, FTP accounts. **Ask your assistant to do those.** If you have no assistant, call the API as the engine:
-
-```bash
-pae api:call GET /projects
-```
+A few operations have no command of their own: databases, cron jobs, FTP accounts. **Ask your assistant to do those.**
 
 Installing, updating and removing the engine are scripts rather than `pae` commands: [Install](../02-getting-started/install.md), [Updating](../02-getting-started/updating.md), [Uninstall](../02-getting-started/uninstall.md).
 
@@ -299,7 +299,7 @@ bash /opt/panelalpha/shared-hosting/scripts/pae-command.sh register
 ```
 
 **A command needs a project name and I do not know it.**
-List them with `pae api:call GET /projects` - the value you want is `username`.
+List them with `pae project:deploy:list` - the value you want is `username`.
 
 **A destructive command is asking me to confirm and I am in a script.**
 Most take `--force` to skip the prompt. Be certain before you use it: `pae project:delete --all --force` deletes every project on your VPS with no further questions.

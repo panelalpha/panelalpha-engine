@@ -11,10 +11,10 @@ use PHPUnit\Framework\TestCase;
  *
  * It must be the lockfile's own. Compiling an npm project under bun means
  * rewriting its install and build lines into bun's dialect and installing a
- * tree a later Node process may not be able to import - and, as it turned
- * out on the test host, running the git-hook strip step under `bun -e`,
- * where it hangs and pins a core until somebody notices. Laravel is an npm
- * project, so this took out the whole PHP-with-assets family too.
+ * tree a later Node process may not be able to import - and running the
+ * git-hook strip step under `bun -e`, where it hangs and pins a core until
+ * somebody notices. Laravel is an npm project, so this took out the whole
+ * PHP-with-assets family too.
  */
 class HostNodeBuildImageTest extends TestCase
 {

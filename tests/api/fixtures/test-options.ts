@@ -121,8 +121,15 @@ export const test = base.extend<EngineFixtures>({
     if (keep.length > 0) {
       testInfo.annotations.push({ type: 'preserved-users', description: keep.join(', ') });
     }
+    // Every one is tried before a project left on the engine fails the test.
+    const left: string[] = [];
     for (const username of drop) {
-      await factory.deleteUser(username);
+      await factory.deleteUser(username).catch((error: unknown) => {
+        left.push(error instanceof Error ? error.message : String(error));
+      });
+    }
+    if (left.length > 0) {
+      throw new Error(left.join('\n'));
     }
   },
 

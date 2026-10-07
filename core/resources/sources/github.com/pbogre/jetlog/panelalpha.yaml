@@ -16,8 +16,8 @@ description: >-
   signing key SECRET_KEY is required at startup (server/environment.py exits(1)
   without it) and must stay stable across redeploys or every session token is
   invalidated; the prepare hook generates it once into ~/.panelalpha/jetlog and
-  never regenerates it, because ~/project is wiped on every redeploy
-  (engine#173). Second, admin:admin must never reach the public internet: the
+  never regenerates it, because ~/project is wiped on every redeploy.
+  Second, admin:admin must never reach the public internet: the
   hook pre-seeds ~/.panelalpha/jetlog/data/jetlog.db with a users table holding
   a single admin with the login the engine generates (`credentials:` below;
   argon2, using the image's own hasher), so the container finds the DB already
@@ -31,7 +31,7 @@ description: >-
   published there. A curl healthcheck on the public /config endpoint plus a
   no-op `ready` service gated on service_healthy make `compose up` block until
   jetlog actually answers, so the engine's "deploy finished" is honest
-  (engine#90: up -d returns before the app is up).
+  (up -d returns before the app is up).
 credentials:
   fields:
     JETLOG_ADMIN_USER: {kind: username, value: admin}

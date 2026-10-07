@@ -6,7 +6,7 @@ use App\Lib\Deploy\Sidecar\SidecarPasswords;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#189: a database sidecar nobody gave a password used to get `app`, for
+ * A database sidecar nobody gave a password used to get `app`, for
  * the user and root alike.
  */
 class SidecarPasswordsTest extends TestCase

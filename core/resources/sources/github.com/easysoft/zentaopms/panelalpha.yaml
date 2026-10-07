@@ -21,7 +21,7 @@ description: >-
   name for a whole *site* directory -- so this is exactly the case the manifest
   key exists for. `docroot: www` is a plain relative path, so unlike `.` it
   survives `PlatformManifest::readDocroot()` (PlatformManifest.php:297-318),
-  which folds both `''` and `'.'` to "undeclared". #172 does not bite here and
+  which folds both `''` and `'.'` to "undeclared". That fold does not bite here and
   no PA_DOCROOT override is needed.
 
   **Serving `www/` is also what makes this application safe to host.** Every
@@ -32,7 +32,7 @@ description: >-
   at the repository root are all unreachable over HTTP by construction rather
   than by an `.htaccess` rule. That is a better position than CouchCMS or
   OpenEMR, which serve from the repository root and need `files/.htaccess` to
-  claw it back (#181).
+  claw it back.
 
   **There is no web installer in a git checkout, and that is not luck.**
   `.gitignore` lists `www/install.php` and `www/upgrade.php`; the repository
@@ -88,14 +88,14 @@ description: >-
   redeploy untouched -- every product, project, story, task and bug is in
   there. Attachments are not: `fileModel::setSavePath()` (module/file/model.php:533)
   puts them in `www/data/upload/<companyID>/<YYYYMM>/`, which is inside the
-  checkout, and every clone wipes `~/project` (#173). So a redeploy destroys
+  checkout, and every clone wipes `~/project`. So a redeploy destroys
   every uploaded file while the `zt_file` rows that point at them survive, and
   the application then shows attachments it cannot serve. `www/data/` is also
   inside the document root; upstream protects it with nothing, and the recipe
   adds `files/www/data/.htaccess` to stop the directory being browsed and to
   deny PHP execution there, but it cannot make the files outlive a redeploy.
   This is the honest limitation of hosting ZenTao today and it is upstream's
-  layout, not the engine's fault -- though #173 is what turns it from "files in
+  layout, not the engine's fault -- though the engine wiping the checkout is what turns it from "files in
   the checkout" into "files that disappear".
 
   **Licensing: hosting for third parties is permitted, and this recipe's
@@ -125,7 +125,7 @@ description: >-
   the user model), and PHP's own `display_errors` is turned back on by
   upstream's `www/.htaccess` under `<IfModule php_module>` -- which the shared
   base image's mod_php matches. hooks/prepare.sh appends an override that turns
-  it off, because #185 leaves the platform with `display_errors=1` and no
+  it off, because the shared PHP base image leaves the platform with `display_errors=1` and no
   php.ini to fix it centrally.
 extends: php-plain
 # ZenTao serves from www/. See the note above: this key is the only thing that
@@ -136,7 +136,7 @@ docroot: www
 # list in config/config.php offers mysql, pgsql and dm, and there is no SQLite
 # path. The checkout ships no .env and no compose file to point itself at a
 # server, so without this the engine has nothing to hand it. Declaring it also
-# keeps PhpStrategy from mining the checkout for sidecars (#166).
+# keeps PhpStrategy from mining the checkout for sidecars.
 database: mysql
 commands:
   - id: zentao-setup

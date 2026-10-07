@@ -58,4 +58,16 @@ class ProblemException extends ValidationException
     {
         return self::of([['field' => $field, 'code' => $code, 'message' => $message] + $extra]);
     }
+
+    /**
+     * A failed deploy: the stage it died in, and where to start reading its
+     * log for the rest of the story.
+     */
+    public static function deploy(string $code, string $message, ?string $stage): self
+    {
+        return self::one('deploy', $code, $message, array_filter([
+            'stage' => $stage,
+            'deploy_log_offset' => 0,
+        ], static fn (mixed $v): bool => $v !== null));
+    }
 }

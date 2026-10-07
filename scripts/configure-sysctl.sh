@@ -24,13 +24,11 @@ sysctl_file="${PANELALPHA_SYSCTL_FILE:-/etc/sysctl.d/99-panelalpha.conf}"
 # reboots three seconds later, without unmounting anything or stopping any
 # service.
 #
-# Measured on 2.29.1.58: six reboots in 90 minutes (16:06, 16:12, 16:17,
-# 16:31, 16:37, 19:26) while app deploys ran, each killing every deploy in
-# flight. The kernel log ends mid-sentence with no shutdown sequence and with
-# no panic banner, which is what an unclean panic reboot leaves behind -- and
-# 15 `... oom-kill ... python` entries in the same window show the host was
-# reaching the limit, not surviving it. The app-support batch recorded 15 of
-# its 54 apps as `deploy-timeout` purely because their host disappeared.
+# Under deploy load that reboots the host again and again, each time killing
+# every deploy in flight. The kernel log ends mid-sentence with no shutdown
+# sequence and with no panic banner, which is what an unclean panic reboot
+# leaves behind -- and `... oom-kill ...` entries in the same window show the
+# host reaching the limit, not surviving it.
 #
 # On an appliance, 1 is a defensible choice: a wedged kernel is worse than a
 # reboot. This machine runs other tenants' work. One tenant's runaway build

@@ -61,7 +61,7 @@ services:
     mem_limit: 1400m
 
     # The engine runs `docker compose up -d` without `--wait` and probes as
-    # soon as it returns (engine#90), which for Contao is while Composer is
+    # soon as it returns, which for Contao is while Composer is
     # still downloading and the prod cache is still being compiled -- a state
     # in which every request is a 500.
     #

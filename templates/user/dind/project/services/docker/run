@@ -1,2 +1,6 @@
 #!/bin/sh
+# The largest process in the account, so the account's OOM killer picked it
+# and every container went down with it. containerd inherits this; containers
+# get their own score (0) from their spec.
+echo -500 > /proc/self/oom_score_adj 2>/dev/null || true
 exec dockerd

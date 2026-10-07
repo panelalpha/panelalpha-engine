@@ -10,12 +10,11 @@ use PHPUnit\Framework\TestCase;
 /**
  * Reading back the image the account will actually run.
  *
- * `SourcePreparation` freezes `deploy_image` from the detection decision,
- * which is right at the time and stale by the time anything reads it — a
- * strategy then swaps in the shared base, the lockfile's interpreter, or the
- * Bun image. Measured on 10.10.10.25: a Python account whose snapshot said
- * `python:3.12-slim` while its container ran
- * `panelalpha/python:3.12-slim-pa2a0d75ad`.
+ * `SourcePreparation` freezes `deploy_image` from the detection decision, which
+ * is right at the time and stale by the time anything reads it — a strategy
+ * then swaps in the shared base, the lockfile's interpreter, or the Bun image.
+ * For example a Python account whose snapshot said `python:3.12-slim` while its
+ * container ran `panelalpha/python:3.12-slim-pa2a0d75ad`.
  *
  * It is not only cosmetic. `AppLauncher` provisions `getDeployImage()` by
  * name, so a stale snapshot seeds an image nothing runs and leaves the real

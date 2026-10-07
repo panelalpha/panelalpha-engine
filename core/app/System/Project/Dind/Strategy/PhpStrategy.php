@@ -5,11 +5,13 @@ namespace App\System\Project\Dind\Strategy;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\AppDatabase;
 use App\Lib\Deploy\CacheManager\PhpBaseImage;
+use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\EnvFile;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\PlatformStage;
 use App\Lib\Deploy\Platform\ProjectContext;
+use App\Lib\Deploy\Platform\Runtime\Php\AccountUserFiles;
 use App\Lib\Deploy\Platform\Runtime\Php\ComposerManifest;
 use App\Lib\Deploy\Platform\Runtime\Php\MysqlSidecar;
 use App\Lib\Deploy\Platform\Runtime\Php\MysqlWait;
@@ -20,6 +22,7 @@ use App\Lib\Deploy\Platform\Runtime\Php\PhpExtensions;
 use App\Lib\Deploy\Platform\Runtime\Php\PhpHostBuild;
 use App\Lib\Deploy\Platform\Runtime\PhpRuntime;
 use App\Lib\Deploy\Sidecar\SidecarEngine;
+use Illuminate\Support\Facades\Cache;
 
 /**
  * Laravel and plain PHP applications.
@@ -76,7 +79,7 @@ class PhpStrategy
             : ($artisan ? EnvFile::databaseSettings($projectDir, $this->dind->projectTree()->read(...)) : []);
         if (!$accountDb && !$hasMysql && MysqlSidecar::isNeeded($db)) {
             // Before anything reads DB_PASSWORD, so the sidecar and the app
-            // get the same one (engine#189).
+            // get the same one.
             $db = MysqlSidecar::withPassword($db, $strategy->sidecars()->passwords());
         }
         $needsMysql = $hasMysql || MysqlSidecar::isNeeded($db);
@@ -127,13 +130,59 @@ class PhpStrategy
             $projectDir,
             $files,
             $build->appRoot,
-            $frontendBuild === false || is_string($frontendBuild) ? $frontendBuild : null
+            $frontendBuild === false || is_string($frontendBuild) ? $frontendBuild : null,
+            $this->runtimeImage($build)
         );
         // No Dockerfile. The shared base image is the runtime -- Apache, the
         // extension set, composer and the entrypoint shim are all baked into
         // it -- and what makes it this project is the bind mount the compose
         // file declares. {@see \App\Lib\Deploy\Compose\FrameworkService}.
-        $this->writeCompose($projectDir, $chown, $db, $hasMysql, $sidecars, $artisan, $accountDb, $build, $decision);
+        $this->writeCompose(
+            $projectDir,
+            $chown,
+            $db,
+            $hasMysql,
+            $sidecars,
+            $artisan,
+            $accountDb,
+            $build,
+            $decision,
+            $this->writeAccountUserFiles($projectDir, $chown, $build)
+        );
+    }
+
+    /**
+     * Whether passwd/group naming the account uid were written next to the run
+     * file. Only on our own base image: the files are read from it on the host.
+     */
+    private function writeAccountUserFiles(string $projectDir, ?string $chown, PhpBuild $build): bool
+    {
+        $user = $this->dind->userModel();
+        $uid = $user->getUid();
+        $gid = $user->getGid();
+        if ($build->baseImage === null || $build->baseImage === '' || $uid === null || $gid === null) {
+            return false;
+        }
+        $system = $this->dind->system();
+        $files = (new AccountUserFiles(
+            fn (array $argv): string => $system->exec($argv, [], 120),
+            Cache::store()
+        ))->for($build->baseImage, $uid, $gid);
+        if ($files === null) {
+            return false;
+        }
+
+        try {
+            $dir = rtrim($projectDir, '/') . '/';
+            $system->filesystem()->filePutContents($dir . EngineArtifacts::RUN_PASSWD, $files['passwd'], $chown, '644');
+            $system->filesystem()->filePutContents($dir . EngineArtifacts::RUN_GROUP, $files['group'], $chown, '644');
+        } catch (\Exception $e) {
+            $this->dind->shell()->logger()?->info('Could not write the account user files: ' . $e->getMessage());
+
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -238,7 +287,8 @@ class PhpStrategy
         return $this->dind->innerDocker()->ensurePhpBaseImage(
             PhpRuntime::imageFor($composerJson, $composerLock),
             PhpBaseImage::bakeableExtras(PhpBaseImage::missingExtensions($extensions)),
-            $systemPackages
+            $systemPackages,
+            PhpExtensions::requiredFor(new ComposerManifest($composerJson, $composerLock))
         );
     }
 
@@ -371,7 +421,8 @@ class PhpStrategy
         bool $artisan,
         bool $accountDb,
         PhpBuild $build,
-        array $manifestDecision
+        array $manifestDecision,
+        bool $accountUserFiles = false
     ): void {
         $strategy = $this->dind->strategy();
         $publicUrl = $this->dind->publicAppUrl();
@@ -392,11 +443,11 @@ class PhpStrategy
                 self::isSymfony($build, $this->installedPackages($projectDir, $build))
             ),
             $sidecars
-        );
+        ) + ($accountUserFiles ? ['account_user_files' => true] : []);
         $this->dind->composeWriter()->writeGeneratedCompose(
             $projectDir,
             DeployCompose::framework(
-                $strategy->composeDecision($decision),
+                $strategy->composeDecision($strategy->withPathPrefixKeys($decision, $projectDir)),
                 PhpBaseImage::PORT,
                 $publicUrl
             ),
@@ -438,16 +489,19 @@ class PhpStrategy
             // prepared, which drops the mount rather than handing the account
             // one it cannot write. {@see accountComposerCacheDir()}.
             'composer_cache_dir' => $this->accountComposerCacheDir(),
-            'env' => array_merge(
-                PhpEnvironment::for(
-                    $hasMysql ? array_merge($db, ['connection' => 'mysql']) : $db,
-                    $publicUrl,
-                    $artisan,
-                    $symfony,
-                    $databaseConfig
+            'env' => PhpEnvironment::withManifest(
+                array_merge(
+                    PhpEnvironment::for(
+                        $hasMysql ? array_merge($db, ['connection' => 'mysql']) : $db,
+                        $publicUrl,
+                        $artisan,
+                        $symfony,
+                        $databaseConfig
+                    ),
+                    $this->documentRoot($decision, $build),
+                    $this->dind->strategy()->entrypoint()->deployPhaseEnvironment()
                 ),
-                $this->documentRoot($decision, $build),
-                $this->dind->strategy()->entrypoint()->deployPhaseEnvironment()
+                $decision['env'] ?? null
             ),
         ];
         if ($accountDb) {
@@ -456,7 +510,7 @@ class PhpStrategy
             // nested Docker resolves none of the engine's names. Pin it — and
             // do not also start a sidecar, which would leave the app with two
             // databases and its data in whichever one it reached first.
-            $extraHosts = AppDatabase::extraHosts();
+            $extraHosts = AppDatabase::extraHosts($this->dind);
 
             return $extraHosts === [] ? $decision : $decision + ['extra_hosts' => $extraHosts];
         }

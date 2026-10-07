@@ -5,9 +5,8 @@ description: >-
   ghcr.io/cmintey/wishlist. The repository ships a docker-compose.yaml that is
   a real deployment rather than a workstation stack -- one service, no build,
   the published image, and the file the README tells every operator to write --
-  so detection read it, the compose strategy ran it, and the deploy finished
-  successfully in 60.2s. Nothing answered. The proxy returned 502 and the
-  verdict was serving-error_page.
+  so detection reads it, the compose strategy runs it, and the deploy finishes
+  successfully. Nothing answers: the proxy returns 502.
 
   The cause is one empty value. `.env.example` ships `ORIGIN=` with nothing
   after it, ProjectEnvironment::apply() copies .env.example to .env unchanged
@@ -36,11 +35,10 @@ description: >-
   the artifact this project ships, and building the checkout would compile
   sharp and better-sqlite3 from source per account to arrive at it. What
   changes is where the volumes point. Upstream bind-mounts ./data and ./uploads
-  inside the project directory; a redeploy clears and re-clones ~/project
-  (engine#173), so every list, item, claim and uploaded image would be
-  destroyed by the next deploy -- measured on the stock deploy, both
-  directories were created inside ~/project, root-owned, with prod.db in one of
-  them. They are ~/.panelalpha/wishlist/data and .../uploads instead.
+  inside the project directory; a redeploy clears and re-clones ~/project,
+  so every list, item, claim and uploaded image would be
+  destroyed by the next deploy. They are ~/.panelalpha/wishlist/data and
+  .../uploads instead.
 
   And the installation is given an owner. Wishlist has no installer and no CLI:
   routes/setup-wizard/+page.server.ts serves its wizard to anybody while the
@@ -59,7 +57,7 @@ description: >-
   A `ready` service gates the deploy. Caddy binds :3280 before the migrations
   run, so the port answers 502 for the whole of the first boot -- 45 Prisma
   migrations, the seed, three patches and the install step -- and `docker
-  compose up -d` without `--wait` returns into that window (engine#90). `ready`
+  compose up -d` without `--wait` returns into that window. `ready`
   is a no-op on alpine:3 that waits for the app's healthcheck, so `up -d`
   returns only once /login really serves.
 

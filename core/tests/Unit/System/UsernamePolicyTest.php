@@ -5,6 +5,7 @@ namespace Tests\Unit\System;
 use App\System\UsernamePolicy;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Yaml\Yaml;
 
 /**
  * A project gets an OS user and a home directory named after it, so the rule
@@ -84,6 +85,49 @@ class UsernamePolicyTest extends TestCase
         $this->assertSame($reserved, array_map('strtolower', $reserved));
         $this->assertContains('root', $reserved);
         $this->assertContains('www-data', $reserved);
+    }
+
+    /** The proxy's resolver may answer these already, so a project's rules would reach them. */
+    public function test_a_name_the_engines_networks_already_answer_is_refused(): void
+    {
+        foreach (['core', 'ftp', 'sftp', 'lighthouse', 'dind', 'php', 'localhost', 'localhost4', 'localhost6'] as $name) {
+            $this->assertFalse(UsernamePolicy::isAcceptable($name), $name);
+        }
+    }
+
+    /** A service added to the engine's or an account's compose file must be reserved too. */
+    public function test_every_compose_service_name_a_project_could_take_is_reserved(): void
+    {
+        $root = dirname(__DIR__, 4);
+        $names = [];
+        $files = glob($root . '/docker-compose.yml*') ?: [];
+        $this->assertNotEmpty($files);
+        foreach ($files as $file) {
+            foreach ((array) (Yaml::parseFile($file)['services'] ?? []) as $service => $definition) {
+                $names[] = (string) $service;
+                if (is_array($definition) && is_string($definition['container_name'] ?? null)) {
+                    $names[] = $definition['container_name'];
+                }
+            }
+        }
+        // The account templates are Blade, not YAML: their service is the first key under services.
+        $templates = [...(glob($root . '/templates/user/*/project/docker-compose.yml*.blade.php') ?: []),
+            ...(glob($root . '/templates/user-config/docker-compose.yml*.blade.php') ?: [])];
+        $this->assertNotEmpty($templates);
+        foreach ($templates as $file) {
+            $this->assertSame(1, preg_match('/^services:\n  ([a-z0-9_-]+):/m', (string) file_get_contents($file), $m), $file);
+            $names[] = $m[1];
+        }
+
+        $names = array_values(array_unique($names));
+        $this->assertContains('core', $names);
+        $this->assertContains('dind', $names);
+        foreach ($names as $name) {
+            // A project name has no hyphen.
+            if (!str_contains($name, '-')) {
+                $this->assertTrue(UsernamePolicy::isReserved($name), "'{$name}' must be reserved");
+            }
+        }
     }
 
     public function test_a_name_that_merely_contains_a_reserved_one_is_fine(): void

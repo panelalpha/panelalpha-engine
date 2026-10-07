@@ -8,12 +8,13 @@ services:
     # Without a server password Seanime answers only loopback/private hosts;
     # the public domain gets 403 on every API call.
     entrypoint: ["/bin/sh", "-c", "exec /app/seanime --password \"$$SEANIME_PASSWORD\""]
+    # SEANIME_PASSWORD, generated and kept by the engine (credentials:).
+    env_file:
+      - ../.panelalpha/app-credentials.env
     environment:
       # Binds 127.0.0.1 unless told otherwise.
       SEANIME_SERVER_HOST: 0.0.0.0
       SEANIME_SERVER_PORT: "43211"
-      # From the project's env vars (checked below).
-      SEANIME_PASSWORD: ${SEANIME_PASSWORD:-}
     volumes:
       # config.toml, seanime.db, logs, cache, extensions.
       - data:/root/.config/Seanime
@@ -22,9 +23,6 @@ services:
       - downloads:/downloads
     ports:
       - "43211:43211"
-    depends_on:
-      env-check:
-        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:43211/"]
       interval: 5s
@@ -32,15 +30,6 @@ services:
       retries: 60
       start_period: 10s
     mem_limit: 1g
-
-  # Fails `compose up` (and so the deploy) while SEANIME_PASSWORD is unset.
-  env-check:
-    image: umagistr/seanime:v3.10.3
-    restart: "no"
-    entrypoint: ["/bin/sh", "-c", "[ -n \"$$SEANIME_PASSWORD\" ] && echo 'seanime: server password set' || { echo 'seanime: missing project environment variable SEANIME_PASSWORD. Seanime refuses remote (non-local) access without a server password; set SEANIME_PASSWORD (writing any $$ as $$$$), then redeploy.' >&2; exit 1; }"]
-    environment:
-      SEANIME_PASSWORD: ${SEANIME_PASSWORD:-}
-    mem_limit: 32m
 
   # No-op gate: `compose up -d` returns only once Seanime answers.
   ready:

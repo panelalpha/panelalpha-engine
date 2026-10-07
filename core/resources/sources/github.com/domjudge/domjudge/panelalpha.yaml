@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  DOMjudge, the programming-contest jury system (domserver: jury, team and
+  scoreboard interfaces, on :80, with MariaDB). The repository's compose is
+  DOMjudge's contributor stack, which its first line says not to use in
+  production: its domjudge-contributor image builds DOMjudge from the mounted
+  checkout and fails ("autom4te: cannot create autom4te.cache ... Permission
+  denied"), and it asks for privileged cgroup access. This recipe runs
+  upstream's published domjudge/domserver image of the current release
+  (9.0.0) against MariaDB 11.4 on a named volume, as its Docker Hub page
+  documents. The database passwords are generated once into
+  ~/.panelalpha/domjudge. No judgehost is started (it needs privileged cgroup
+  access), so submissions stay queued until one is attached. The initial
+  admin password is printed in the domserver log on the first start.

@@ -17,7 +17,7 @@ cd ~/project
 #
 # A redeploy empties and re-clones ~/project before it does anything else
 # (System/Project/Dind/Source/GitRepository.php:89 calls
-# `tree()->clearContents($gitProjectDir)`, engine#173). ~ itself is root-owned
+# `tree()->clearContents($gitProjectDir)`). ~ itself is root-owned
 # 0755, so an account cannot create anything directly in its own home;
 # ~/.panelalpha is created with the account and belongs to it, which is why
 # the data directory is a child of that one. Created here, before the mount is
@@ -70,8 +70,8 @@ ln -sfn /data/images images
 # ---------------------------------------------------------------------------
 # 3. A php.ini, on a platform that loads none.
 #
-#    `php --ini` in the base image answers "Loaded Configuration File: (none)"
-#    (engine#185), so what is in force is PHP's compiled-in defaults. Two of
+#    `php --ini` in the base image answers "Loaded Configuration File: (none)",
+#    so what is in force is PHP's compiled-in defaults. Two of
 #    them matter to a wiki: upload_max_filesize = 2M, and memory_limit = 128M,
 #    which `maintenance/run.php update` and the localisation cache do not fit
 #    in. The file's own comments say the rest.

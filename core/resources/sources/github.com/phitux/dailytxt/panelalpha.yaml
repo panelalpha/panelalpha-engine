@@ -35,20 +35,7 @@ description: >-
      and does nothing, so a password changed in the UI is kept.
   3. PUBLIC_DEMO_MODE=false: upstream's entrypoint substitutes it into
      index.html as a JS literal. `ready` waits on the app's /api/version
-     healthcheck so `up -d` returns only once the app answers (engine#204).
-
-  == Verified on 10.10.10.25 (engine 705f250a), memory_limit 2000 ==
-
-  Deploy 59s. `/` title "DailyTxT" (SPA shell 1907 B), /api/version
-  current_version 2.6.3. isRegistrationAllowed false; anonymous register 403
-  "Registration is not allowed"; anonymous getLog 401. admin login 200,
-  entry saved via POST /api/logs/saveLog and read back via getLog; no
-  plaintext of it anywhere under /data. Admin panel accepts the generated
-  ADMIN_PASSWORD only. Rebuild 45s: seed "users.json already has a user;
-  nothing to do", users.json and the month file byte-identical, a cookie
-  issued before the rebuild still valid and the entry still decrypts.
-  /.env, /.git/config, /users.json, /data/users.json serve only the SPA
-  shell. App ~139 MiB after logins (Argon2id, 64 MiB per hash).
+     healthcheck so `up -d` returns only once the app answers.
 
   Note: upstream prints SECRET_TOKEN in the container log at start.
 

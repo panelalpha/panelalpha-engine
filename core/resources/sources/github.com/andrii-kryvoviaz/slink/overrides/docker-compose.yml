@@ -5,7 +5,7 @@
 # image, with the public SvelteKit server on :3000 fronting everything. This
 # runs that official image directly (pulled, not built), pinned to the current
 # stable release v1.13.1 (Hub `latest` at time of writing). Seeding a Docker Hub
-# image also sidesteps engine#229 (image-seed NotFound is the GHCR/registry-save
+# image also sidesteps the image-seed NotFound (that is the GHCR/registry-save
 # case, not Hub).
 #
 # WHY COMPOSE-REPLACE. Nothing to add as a sidecar -- SQLite is embedded and
@@ -77,7 +77,7 @@ services:
       # MUST survive a redeploy; separate volume from the DB.
       - slink-images:/app/slink/images
     # The SvelteKit server listens on 3000; publish it so the engine's port scan
-    # takes it as the primary (engine#234). No other service publishes a port.
+    # takes it as the primary. No other service publishes a port.
     ports:
       - "3000:3000"
     mem_limit: 1536m
@@ -106,7 +106,7 @@ services:
   # Starts nothing, exits 0, waits on the health probe. `docker compose up -d`
   # blocks on a depends_on completion condition, so `up` returns -- and the
   # engine reports the deploy finished -- only after Slink actually answers
-  # (engine#204: up -d returns before the app is up).
+  # (up -d returns before the app is up).
   ready:
     image: alpine:3
     entrypoint: ["/bin/sh", "-c", "exit 0"]

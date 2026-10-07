@@ -257,6 +257,31 @@ class EngineServerTest extends TestCase
         $this->assertSame('project_create', $found[0]);
     }
 
+    public function test_browsing_the_catalogue_pages_through_every_tool(): void
+    {
+        config(['mcp-tools.tool_search' => true]);
+
+        $first = $this->callCatalogue('search_tools', ['query' => '', 'limit' => 50]);
+        $this->assertTrue($first['hasMore']);
+
+        $seen = [];
+        $offset = 0;
+        for ($page = 0; $page < 100; $page++) {
+            $out = $this->callCatalogue('search_tools', ['query' => '', 'limit' => 50, 'offset' => $offset]);
+            $this->assertNotSame([], $out['tools']);
+            array_push($seen, ...array_column($out['tools'], 'name'));
+            if (!$out['hasMore']) {
+                $this->assertArrayNotHasKey('nextOffset', $out);
+                break;
+            }
+            $offset = $out['nextOffset'];
+        }
+
+        $this->assertSame($seen, array_values(array_unique($seen)), 'no tool is returned twice');
+        $this->assertContains('mysql_database_list', $seen);
+        $this->assertGreaterThan(100, count($seen), 'the whole catalogue, not the first page');
+    }
+
     public function test_search_results_carry_the_annotations_tools_list_would(): void
     {
         config(['mcp-tools.tool_search' => true]);
@@ -306,5 +331,52 @@ class EngineServerTest extends TestCase
 
         $this->assertNotContains('search_tools', $names);
         $this->assertContains('mysql_database_list', $names);
+    }
+
+    /** @return string the instructions an initialize answers with */
+    private function instructions(): string
+    {
+        $reply = $this->dispatch([
+            'jsonrpc' => '2.0',
+            'id' => 1,
+            'method' => 'initialize',
+            'params' => ['protocolVersion' => '2025-06-18', 'capabilities' => [], 'clientInfo' => ['name' => 'test', 'version' => '1']],
+        ]);
+
+        return (string)$reply['result']['instructions'];
+    }
+
+    /** The areas an agent can search, named where it reads them first, from the catalogue itself. */
+    public function test_the_instructions_and_search_tools_name_every_catalogue_area(): void
+    {
+        config(['mcp-tools.tool_search' => true]);
+
+        $this->assertMatchesRegularExpression('/^Tool names in the catalogue begin with: (.+)\.$/m', $this->instructions());
+        preg_match('/^Tool names in the catalogue begin with: (.+)\.$/m', $this->instructions(), $m);
+        $areas = explode(', ', $m[1]);
+        foreach (['app', 'vault', 'ssl', 'git', 'tunnel', 'metrics', 'mysql', 'wp'] as $area) {
+            $this->assertContains($area, $areas);
+        }
+
+        $reply = $this->dispatch(['jsonrpc' => '2.0', 'id' => 5, 'method' => 'tools/list', 'params' => []]);
+        $search = collect($reply['result']['tools'])->firstWhere('name', 'search_tools');
+        $this->assertStringContainsString('Tool names in the catalogue begin with: ' . $m[1] . '.', $search['description']);
+    }
+
+    public function test_an_area_the_token_cannot_reach_is_not_named(): void
+    {
+        config(['mcp-tools.tool_search' => true, 'mcp-tools.permission_mode' => ToolPolicy::MODE_READONLY]);
+
+        preg_match('/^Tool names in the catalogue begin with: (.+)\.$/m', $this->instructions(), $m);
+        // ssh_run is the only ssh tool, and it writes.
+        $this->assertNotContains('ssh', explode(', ', $m[1]));
+        $this->assertContains('mysql', explode(', ', $m[1]));
+    }
+
+    public function test_without_a_catalogue_the_instructions_name_no_areas(): void
+    {
+        config(['mcp-tools.tool_search' => false]);
+
+        $this->assertStringNotContainsString('Tool names in the catalogue begin with', $this->instructions());
     }
 }

@@ -5,8 +5,8 @@
 #
 # Four things, all of which have to be settled before Apache binds:
 #
-#   1. inc/config.php, which does not exist in a clone and whose absence is the
-#      entire `serving-php_error` verdict.
+#   1. inc/config.php, which does not exist in a clone and without which every
+#      request is a PHP error page.
 #   2. The admin password, which has to outlive the checkout.
 #   3. installation.php, an unauthenticated schema installer upstream tells you
 #      to delete by hand.
@@ -30,7 +30,7 @@ chmod 700 "${DATA_HOME}"
 # ----------------------------------------------------------- the admin password
 #
 # Generated once and never regenerated. Every deploy re-clones over ~/project
-# (engine#173) while the account's MySQL database -- and the bcrypt hash in it
+# while the account's MySQL database -- and the bcrypt hash in it
 # -- stays exactly where it was, so a password generated beside the code would
 # be a new password on every redeploy, matching nothing.
 #
@@ -62,7 +62,7 @@ chmod 600 .panelalpha-admin-password
 #       directory in /app/inc/bdd.php on line 2
 #     Fatal error: Uncaught Error: Failed opening required 'config.php'
 #
-# under HTTP 200, because display_errors is on (engine#185) and printing the
+# under HTTP 200, because display_errors is on and printing the
 # warning sends the headers before the fatal is reached.
 #
 # Written on every deploy rather than only when missing: ~/project is re-cloned
@@ -73,7 +73,7 @@ cat > inc/config.php <<'PHPEOF'
 <?php
 /**
  * Written by PanelAlpha. Rewritten on every deploy -- ~/project is cleared and
- * re-cloned each time (engine#173), so edits here do not survive one. The
+ * re-cloned each time, so edits here do not survive one. The
  * settings under "Yours to change" are the ones worth changing; see
  * ~/.panelalpha/simple-url-shortener/README.panelalpha.md.
  *
@@ -188,8 +188,7 @@ rm -f installation.php
 #    comment or URL outside the Basic Multilingual Plane is invalid in the
 #    connection's own charset before the column is reached -- SQLSTATE[22007],
 #    thrown out of shorten.php:46 as an uncaught PDOException, i.e. a 500 with an
-#    empty body. Measured: ASCII and Latin-2 accented comments store fine, one
-#    emoji is a 500.
+#    empty body.
 
 # ------------------------------------------------------------------- operator
 if [ ! -f "${DATA_HOME}/README.panelalpha.md" ]; then

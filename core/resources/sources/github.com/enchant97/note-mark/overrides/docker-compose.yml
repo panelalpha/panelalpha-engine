@@ -64,7 +64,7 @@ services:
         exit 1
     mem_limit: 64m
 
-  # `up -d` runs without --wait (engine#204); this makes it block until the
+  # `up -d` runs without --wait; this makes it block until the
   # health gate has passed.
   ready:
     image: docker.io/library/alpine:3

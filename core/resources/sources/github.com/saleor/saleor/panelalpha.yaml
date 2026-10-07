@@ -23,13 +23,11 @@ description: >-
 
   1. settings.py:516 reads ALLOWED_HOSTS with the default "localhost,127.0.0.1",
   so Django answers 400 DisallowedHost on the account's own domain, on every
-  path. Measured on the control deploy: 400 on /, /graphql/,
-  /.well-known/jwks.json, /static/ and /media/ alike.
+  path.
 
   2. settings.py:86 defaults DEBUG to True. That is the unusual part and it is
-  worse than the 400: the 400 page is Django's debug page, 182 KB of it,
-  publishing all 406 settings rows, the installed-app list, the Django version
-  and a traceback with local variables to anyone who asks. Passwords are
+  worse than the 400: the 400 page is Django's debug page, publishing all
+  settings rows, the installed-app list, the Django version and a traceback with local variables to anyone who asks. Passwords are
   scrubbed by Django's own filter; nothing else is.
 
   3. settings.py:258 reads SECRET_KEY from the environment with no default. With
@@ -60,8 +58,8 @@ description: >-
 
   PostgreSQL is not a choice: settings.py builds DATABASES through
   dj_database_url and the image carries psycopg only, so `database: mysql`
-  could not be used even if it were not inert outside runtime: php
-  (engine#210). postgres:15-alpine and valkey:8.1-alpine are the versions
+  could not be used even if it were not inert outside runtime: php.
+  postgres:15-alpine and valkey:8.1-alpine are the versions
   upstream's own .devcontainer/docker-compose.yml runs.
 
   Redis is a choice, and it is the expensive one. settings.py:643 sets
@@ -77,7 +75,7 @@ description: >-
 
   Secrets live in ~/.panelalpha/saleor/, 0600 in a 0700 directory: every deploy
   re-clones and ProjectTree::clearContents (GitRepository.php:89) empties
-  ~/project first (engine#173), so SECRET_KEY or the RSA key written there
+  ~/project first, so SECRET_KEY or the RSA key written there
   would be regenerated on every rebuild and invalidate every token in
   circulation. The superuser `init` creates has the login the engine generates
   (`credentials:` below; returned by GET /projects/{name}/app-credentials, MCP

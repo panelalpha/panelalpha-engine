@@ -1,5 +1,5 @@
 # Upstream's compose runs cap_drop: ALL + cap_add; the engine keeps only the
-# drop (engine#349), so the entrypoint cannot chown and crash-loops. This runs
+# drop, so the entrypoint cannot chown and crash-loops. This runs
 # the release image with default caps, no USB passthrough (monitor a remote
 # NUT server instead), state on named volumes and only the web port.
 services:

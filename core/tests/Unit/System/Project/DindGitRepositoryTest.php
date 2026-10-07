@@ -152,6 +152,64 @@ class DindGitRepositoryTest extends TestCase
         $this->assertTrue($branches[0]['current']);
     }
 
+    public function test_clone_retries_over_http_1_1_when_the_host_stops_after_the_ref_listing(): void
+    {
+        $calls = [];
+        $git = new TestableGitRepository($this->dindProject(), function (array $cmd) use (&$calls): string {
+            $calls[] = $cmd;
+            if (count($calls) === 1) {
+                throw new GitException("fatal: could not read Username for 'https://github.com'\nfatal: expected flush after ref listing", 400);
+            }
+
+            return '';
+        });
+
+        $git->clone('https://github.com/org/repo', 'main', null);
+
+        $this->assertCount(2, $calls);
+        $this->assertNotContains('http.version=HTTP/1.1', $calls[0]);
+        $this->assertSame(['git', '-c', 'http.version=HTTP/1.1'], array_slice($calls[1], 0, 3));
+        $this->assertSame(array_slice($calls[0], 1), array_slice($calls[1], 3));
+    }
+
+    public function test_clone_takes_its_timeout_from_deploy_clone_timeout(): void
+    {
+        $timeouts = [];
+        $runner = function (array $cmd, ?string $token, int $timeout) use (&$timeouts): string {
+            $timeouts[] = $timeout;
+
+            return '';
+        };
+
+        (new TestableGitRepository($this->dindProject(), $runner))->clone('https://github.com/org/repo', 'main', null);
+
+        $container = new \Illuminate\Container\Container;
+        $container->instance('config', new \Illuminate\Config\Repository(['deploy' => ['clone_timeout' => 1800]]));
+        \Illuminate\Container\Container::setInstance($container);
+        try {
+            (new TestableGitRepository($this->dindProject(), $runner))->clone('https://github.com/org/repo', 'main', null);
+        } finally {
+            \Illuminate\Container\Container::setInstance(null);
+        }
+
+        $this->assertSame([600, 1800], $timeouts);
+    }
+
+    public function test_clone_does_not_retry_other_failures(): void
+    {
+        $runner = new FakeGitRunner;
+        $runner->failIfContains = ['clone'];
+        $git = new TestableGitRepository($this->dindProject(), $runner);
+
+        try {
+            $git->clone('https://github.com/org/repo', 'main', null);
+            $this->fail('The clone failure must surface.');
+        } catch (GitException) {
+        }
+
+        $this->assertCount(1, $runner->commands);
+    }
+
     public function test_connect_on_empty_dir_persists_site_git(): void
     {
         $model = $this->dindModel();

@@ -37,6 +37,6 @@ description: >-
 
   WEBSOCKETS: the engine vhost passes Upgrade and a direct connection upgrades
   to websocket (101). On the *.panelalpha.online test edge the upgrade is
-  stripped and idle requests are cut at ~10s (engine#170), so socket.io falls
+  stripped and idle requests are cut at ~10s, so socket.io falls
   back to polling and reconnects often there; drawings still persist. A real
   domain on the engine host does not have this problem.

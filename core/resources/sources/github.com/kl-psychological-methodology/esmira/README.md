@@ -16,29 +16,11 @@ empties `~/project` before every clone.
 
 ---
 
-## What the control deploy does
+## Why the generic platform fails
 
-Measured on `mariusz2.panelalpha.tools` (2 cores, 3.7 GB), with this directory
-removed:
-
-```
-Detected project type: PHP (no Composer)
-Using strategy: php
-Deploy finished successfully  — 45.1 s
-verdict: serving-missing_entry   http=403
-```
-
-Inside the container:
-
-```
-$ tr '\0' '\n' < /proc/1/environ | grep DOCROOT
-PA_DOCROOT=/app
-$ ls /app
-CITATION.cff  ESMira-apps  ESMira-web  LICENSE  README.md  about  tutorial …
-```
-
-Apache's `Options -Indexes` on a directory with no `index.php` answers 403 to
-every request. The full chain:
+Without this directory the deploy succeeds (`php-plain`, PHP with no Composer)
+and every request answers 403: Apache's `Options -Indexes` on a directory with
+no `index.php`. The full chain:
 
 1. **The repository is a meta repository.** The root holds four files, an
    `about/` directory of screenshots and a `.gitmodules`. The server is the
@@ -56,34 +38,11 @@ every request. The full chain:
    `/app`.
 5. `apache-vhost.stub:19` — `Options -Indexes`, no DirectoryIndex match, 403.
 
-Pointing the document root at `ESMira-web/src` would not have helped either:
+Pointing the document root at `ESMira-web/src` does not help either:
 that is the *unbuilt* source. The deployable tree only exists after a webpack
 build.
 
 ## What the recipe changes
-
-Same host, same day, recipe in place:
-
-```
-   0s  Deploy started (source: git, repo: …/ESMira)
-   8s  Stage 'preparing' finished
-  11s  Repository cloned
-  14s  Submodules fetched
-  17s  Running setup commands (panelalpha-after-clone.sh)
-  18s  Recipe named by github.com/kl-psychological-methodology/esmira
-  18s  Detected project type: PHP (no Composer)
-  19s  Preparing shared PHP base image panelalpha/php:8.3-apache-bookworm-pa20260910
-  36s  Compiling frontend assets on host
-  98s  Frontend assets compiled on host
- 102s  Starting application (docker compose up -d)
-       Deploy finished successfully — 106 s engine, 120.5 s including the probe
-
-verdict: deploy-ok   healthy: true   serving: ok   http=200   title: ESMira
-```
-
-All twelve of the engine's baseline health checks pass, including
-`php-executes`, `entry-served`, `no-diagnostics-in-output` and
-`not-a-stock-default-page`.
 
 Four things, in the order the deploy hits them.
 
@@ -96,14 +55,13 @@ Four things, in the order the deploy hits them.
 turns any failure into a `warn` line. That is the right call for a repository
 whose submodules are optional and the wrong one here, where an empty
 `ESMira-web/` means there is no application at all — the deploy would go on to
-build nothing and serve a 403 that looks exactly like the control.
+build nothing and serve a 403 that looks exactly like the failure above.
 
 `hooks/prepare.sh` checks for `ESMira-web/src/index.php` and exits 1 with a
 message that says what happened.
 
-Measured today: both submodules resolve to their default-branch tips, so the
-shallow fetch finds them — 3.9 s, 11.8 MB. A pin that moves off the tip is
-exactly the case where `--depth=1` stops working.
+A submodule pin that moves off its default-branch tip is exactly the case where
+`--depth=1` stops working.
 
 ### 2. The application has to be compiled
 
@@ -127,7 +85,7 @@ package.json is one level down, and its production script is called `prod`.
 "build": "cd ESMira-web && npm install --no-audit --no-fund --loglevel=error && npm run prod"
 ```
 
-`npm install`, not `npm ci`, and that is measured rather than stylistic: at the
+`npm install`, not `npm ci`, and that is not stylistic: at the
 pinned submodule commit `package-lock.json` is out of sync with `package.json`
 (`npm error Missing: @types/semver@7.8.0 from lock file`), so `npm ci` fails
 outright. The engine would have chosen `ci` itself — `JsPackageManager::installCommand()`
@@ -135,12 +93,8 @@ picks it whenever a lockfile is present — which is another reason the build
 goes through a script the recipe writes rather than through the engine's
 default command.
 
-Cost, measured on the 2-core host, from the engine's own deploy timeline:
-"Compiling frontend assets on host" took **62 s** on the account's first deploy
-(node image pull, `npm install` of 394 packages, webpack) and **~35 s** on a
-redeploy, where `npm install` reported "added 394 packages in 4s" out of the
-shared host cache. `node_modules` itself (224 MB) is inside `~/project` and is
-therefore rebuilt every time; the cache is what makes that cheap.
+`node_modules` is inside `~/project` and is therefore rebuilt on every deploy;
+the shared host npm cache is what makes that cheap.
 
 ### 3. The first-run setup is first-visitor-wins
 
@@ -201,8 +155,7 @@ protected by one `.htaccess` holding `Deny from all` that
 and one Apache-2.4 `mod_access_compat` away from being a no-op, on research
 data about people.
 
-It also would not survive: `~/project` is emptied before every clone (engine
-#173).
+It also would not survive: `~/project` is emptied before every clone.
 
 `dataFolder_path` is a **config** value (`backend/fileSystem/PathsFS.php:21`),
 not a constant, so the recipe points it at `/data` — a bind mount of
@@ -218,44 +171,22 @@ credential.
 
 ---
 
-## Verified, over the account's public HTTPS domain
-
-Not a 200 on `/`. The whole researcher-and-participant round trip:
-
-| Step | Request | Result |
-|---|---|---|
-| front page is set up | `GET /` | `ESMira.init('home','',11,…)` — not `'initESMira'` |
-| wizard is closed | `POST /api/admin.php?type=InitESMira` | `{"success":false,…,"error":"Disabled"}` |
-| researcher logs in | `POST …?type=login` | `{"isAdmin":true,"accountName":"admin",…}` |
-| creates a study | `POST …?type=CreateStudy&study_id=1001&lastChanged=0` | study 1001, one questionnaire, `version:1` |
-| publishes it | (same call, `"published":true`, `accessKeys:["sleepmood"]`) | indexed |
-| participant finds it | `GET /api/studies.php?access_key=sleepmood` | the study JSON |
-| pretty URLs work | `GET /sleepmood`, `GET /survey-4242` | `ESMira.init('studyOverview',…)`, `ESMira.init('attend,qId:4242',…)` — upstream's own `.htaccess` rewrites, so `AllowOverride All` is live |
-| participant answers | `POST /api/datasets.php` (joined + questionnaire) | `{"states":[{"dataSetId":2,"success":true},{"dataSetId":1,"success":true}]}` |
-| researcher reads it back | `GET …?type=GetData&study_id=1001&q_id=4242` | CSV: `"1000002";"participant001";…;"Morning check-in";"questionnaire";…;"4";"7.5"` |
-| two-way messaging | `…?type=SendMessage` / `POST /api/save_message.php` / `…?type=ListMessages` | researcher message pending, participant reply unread |
-
 ## Exposure
 
-Every path below was fetched over the public HTTPS domain and the **body**
-compared, not the status code — ESMira has a front controller and its
+Compare bodies, not status codes: ESMira has a front controller and its
 `.htaccess` rewrites `^([a-zA-Z][a-zA-Z0-9]+)$` to `index.php?key=$1`, so
 `/VERSION` and `/STRUCTURE` answer 200 with the application's front page rather
 than with the file.
 
 | Path | Result |
 |---|---|
-| `/esmira_data/…`, `/data/esmira_data/…`, `/studies/1001/responses/4242.csv` | 404 — not under the document root at all |
-| `/backend/`, `/backend/config/configs.php`, `/backend/Configs.php` | 403, Apache's own 340-byte page (`Deny from all`, `access_compat_module` is enabled) |
-| `…/../backend/config/configs.php` from four different prefixes | 403 |
+| `/esmira_data/…`, `/data/esmira_data/…`, `/studies/<id>/responses/…` | 404 — not under the document root at all |
+| `/backend/`, `/backend/config/configs.php`, `/backend/Configs.php` | 403 (`Deny from all`, `access_compat_module` is enabled) |
 | `/.logins`, `/.permissions`, `/.htaccess`, `/.env` | 403 (`<FilesMatch "^\.(?!well-known)">` in the vhost) |
 | `/docker-compose.yml`, `/panelalpha-esmira-setup.php` | 403 (`<FilesMatch "^(?:docker-compose\.ya?ml\|panelalpha[-.])">`) |
 | `/VERSION`, `/STRUCTURE`, `/LICENSE` | 200 — the front page, by rewrite; not the file |
 | `/README.md`, `/CHANGELOG.md` | 200 — upstream's own public documentation |
 | `/src/frontend/ts/*.d.ts` | 200 — TypeScript declarations ts-loader emits into `dist/`; the public frontend API, no secrets |
-
-Every response body was also grepped for the account's bcrypt hash, the
-administrator password, the participant id and `dataFolder_path`. No hit.
 
 One thing is public by upstream's design and is worth knowing about:
 `/api/server_statistics.php` answers unauthenticated with aggregate counts —
@@ -265,7 +196,7 @@ no participant id, no response.
 
 ## Redeploy
 
-`POST /projects/<user>/rebuild`, 76 s. `~/project` is wiped and re-cloned,
+On a redeploy `~/project` is wiped and re-cloned,
 `ESMira-web/node_modules` is rebuilt from the host npm cache, `dist/` is
 recompiled — and `~/.panelalpha/esmira/` is untouched, so `PA_DEPLOY_PHASE`
 becomes `upgrade` and the setup script logs
@@ -277,13 +208,6 @@ becomes `upgrade` and the setup script logs
 
 `MigrationManager::autoRun()` is the same call upstream's
 `docker-entrypoint.sh` makes on every boot.
-
-Measured: every one of the 23 files under `~/.panelalpha/esmira/` was
-byte-identical afterwards (`md5sum` of the whole tree, before and after), the
-credentials file unchanged, and over HTTPS the same administrator password
-logged in, the study was still published and discoverable by its access key,
-the participant's response still downloaded with `mood=4, sleepHours=7.5`, and
-the message thread was still there.
 
 The one thing a redeploy can break is a stored login that has drifted from the
 account: if the data folder survives while the engine's stored login does not
@@ -307,18 +231,10 @@ and says so in the deploy log.
   redeploy silently undoes it, because the document root is a git checkout the
   engine re-clones. Redeploy the project instead; the version moves with the
   submodule and `MigrationManager` runs on the upgrade stage.
-- `ESMira-apps` (6.1 MB of Kotlin Multiplatform) is cloned and never used. It is
+- `ESMira-apps` (the Kotlin Multiplatform phone client) is cloned and never used. It is
   left in place so `git status` stays clean; it is outside the document root
   and has no URL.
-- Disk: 270 MB of `~/project`, of which 224 MB is `ESMira-web/node_modules` and
-  22 MB is `dist/`. The account's own data was 180 KB with one study and one
-  participant.
-- Memory: 71 MiB resident for the app container just after boot, 90 MiB with a
-  study and data loaded, and still 90 MiB under 30 concurrent requests to `/` —
-  inside the 512 MB the override gives it. The account's outer container sits
-  at 127-184 MiB.
-- Two full deploys were measured on the 2-core host and agreed: 120.5 s and
-  120.4 s wall, 106 s by the engine's own timeline. A redeploy is 76-80 s.
+- The compose override gives the app container 512 MB.
 
 ## Licence
 

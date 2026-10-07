@@ -16,7 +16,11 @@ use App\System\Project\Dind\Strategy\RailpackStrategy;
 use App\System\Project\Dind\Strategy\RubyStrategy;
 use App\System\Project\Dind\Strategy\UserComposeStrategy;
 use App\Lib\Deploy\Compose\ComposeEnvironment;
+use App\Lib\Deploy\Compose\ComposeOverride;
+use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Compose\DeployCompose;
+use App\Lib\Deploy\Compose\FrameworkService;
+use App\Lib\Deploy\Compose\PublicUrlEnvironment;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\Strategies;
 
@@ -129,6 +133,34 @@ class DeployStrategy
         return ComposeEnvironment::withPublicAddress($decision, $this->dind->publicAppUrl());
     }
 
+    /**
+     * The project's own `.env` and `.env.example`, null when absent: what
+     * {@see PublicUrlEnvironment::pathPrefixKeysIn()} reads.
+     *
+     * @return list<?string>
+     */
+    public function projectEnvFiles(string $projectDir): array
+    {
+        return [
+            $this->dind->projectTree()->readIn($projectDir, '.env'),
+            $this->dind->projectTree()->readIn($projectDir, '.env.example'),
+        ];
+    }
+
+    /**
+     * The decision for a service the engine generates, told which URL keys
+     * the project uses as a sub-path ({@see FrameworkService}).
+     *
+     * @param array<string, mixed> $decision
+     * @return array<string, mixed>
+     */
+    public function withPathPrefixKeys(array $decision, string $projectDir): array
+    {
+        $keys = PublicUrlEnvironment::pathPrefixKeysIn($this->projectEnvFiles($projectDir));
+
+        return $keys === [] ? $decision : ['path_prefix_keys' => $keys] + $decision;
+    }
+
     // -------------------------------------------------------------------------
     // The writers
     // -------------------------------------------------------------------------
@@ -145,14 +177,17 @@ class DeployStrategy
 
     /**
      * Once `.env` is final: keep the engine's files out of a repository
-     * Dockerfile's build context (engine#162).
+     * Dockerfile's build context.
      *
      * @param array<string, mixed> $decision
      */
     public function keepEngineFilesOutOfBuildContext(array $decision, string $projectDir, ?string $chown): void
     {
-        if (($decision['strategy'] ?? null) === Strategies::DOCKERFILE) {
+        $strategy = $decision['strategy'] ?? null;
+        if ($strategy === Strategies::DOCKERFILE) {
             $this->dockerfile()->keepEngineFilesOutOfContext($decision, $projectDir, $chown);
+        } elseif ($strategy === Strategies::COMPOSE || $strategy === Strategies::PAEMD) {
+            $this->userCompose()->keepEngineFilesOutOfContext($projectDir, $chown);
         }
     }
 
@@ -191,6 +226,7 @@ class DeployStrategy
      */
     public function bootstrap(?AppConfig $appConfig, string $projectDir, ?string $chown): void
     {
+        $this->userCompose()->noteRepositoryOverride($projectDir);
         $this->appConfigBootstrap()->run($appConfig, $projectDir, $chown);
     }
 
@@ -226,7 +262,7 @@ class DeployStrategy
         // Every other strategy generates its own build definition below, so
         // the platform's prepare runs first — it may write the very files the
         // generator is about to read.
-        $this->prepare()->run($projectDir, $this->prepare()->manifestFor($decision), $appConfig);
+        $this->prepare()->run($projectDir, $this->prepare()->manifestFor($decision, $appConfig), $appConfig);
 
         if ($strategy === Strategies::DOCKERFILE) {
             $this->dockerfile()->apply($decision, $projectDir, $chown);
@@ -280,6 +316,39 @@ class DeployStrategy
         }
 
         $this->railpack()->applyFallback($projectDir, $chown, $sourceLabel);
+    }
+
+    /**
+     * An app config's override may name a service the run file no longer has,
+     * with nothing to build it from; compose would refuse the whole project.
+     */
+    public function dropUndefinedOverrideServices(?string $chown): void
+    {
+        $override = $this->dind->userAppComposeOverridePath();
+        $fs = $this->dind->system()->filesystem();
+        if (!$fs->fileExists($override)) {
+            return;
+        }
+        $defined = [];
+        foreach ($this->dind->userAppComposeFiles() as $file) {
+            if ($file === $override || !$fs->fileExists($file)) {
+                continue;
+            }
+            $services = ComposeYaml::parse($fs->fileGetContents($file))['services'] ?? null;
+            foreach (is_array($services) ? array_keys($services) : [] as $name) {
+                $defined[] = (string) $name;
+            }
+        }
+        $trimmed = ComposeOverride::withoutUndefinedServices($fs->fileGetContents($override), $defined);
+        if ($trimmed['dropped'] === [] || $trimmed['yaml'] === null) {
+            return;
+        }
+        foreach ($trimmed['dropped'] as $name) {
+            $this->dind->shell()->logger()?->warn(
+                "Not layering service {$name} from the app config's compose override: the application has no such service, and the override gives it no image or build"
+            );
+        }
+        $fs->filePutContents($override, $trimmed['yaml'], $chown, '644');
     }
 
     /**

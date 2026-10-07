@@ -242,7 +242,7 @@ class DeployReport
         // The failing region, as the customer's message is built from it
         // ({@see FailureOutput}). The head of the raw output is progress on
         // any compose deploy: rero-ils reported 600 bytes of layer downloads
-        // and cut off before the line that said why (#112).
+        // and cut off before the line that said why.
         $region = FailureOutput::select($error);
         $focus = $region !== '' ? $region : $error;
         $match = DeployFailureExplainer::match($focus) ?? DeployFailureExplainer::match($error);

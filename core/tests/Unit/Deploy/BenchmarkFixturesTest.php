@@ -7,7 +7,7 @@ use App\Lib\Deploy\Platform\Strategies;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The fixture table in `scripts/benchmark-deploys.sh`.
+ * The fixture table in `scripts/tools/benchmark-deploys.sh`.
  *
  * Its expectations are strategy names, and a typo in one is a benchmark that
  * fails against a live host after twenty minutes of deploying. Checking them
@@ -26,7 +26,7 @@ class BenchmarkFixturesTest extends TestCase
      */
     private function fixtures(): array
     {
-        $script = dirname(__DIR__, 3) . '/../scripts/benchmark-deploys.sh';
+        $script = dirname(__DIR__, 3) . '/../scripts/tools/benchmark-deploys.sh';
         $this->assertFileExists($script, 'the benchmark script moved');
 
         $contents = (string) file_get_contents($script);
@@ -90,9 +90,11 @@ class BenchmarkFixturesTest extends TestCase
 
         // Each of these takes a different path through the build and the
         // caches: no build at all, the repo's own definition, a generated
-        // Dockerfile, and the fallback builder.
+        // Dockerfile. Railpack is not among them: every runtime it recognises
+        // has a platform now, and a recipe pinned to it holds for one deploy,
+        // so a warm rebuild would detect again and measure another strategy.
         foreach ([Strategies::STATIC, Strategies::COMPOSE, Strategies::DOCKERFILE,
-                  Strategies::PHP, Strategies::LARAVEL, Strategies::RAILPACK] as $strategy) {
+                  Strategies::PHP, Strategies::LARAVEL, Strategies::NODE] as $strategy) {
             $this->assertContains($strategy, $covered, "no fixture exercises '{$strategy}'");
         }
     }

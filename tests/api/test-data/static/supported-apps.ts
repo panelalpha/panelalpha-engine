@@ -1,6 +1,6 @@
 /**
- * A slice of the Supported column on the supported-apps board
- * (https://git.modulesgarden.tech/panelalpha/playground/supported-apps/-/boards).
+ * A slice of the applications the tracker marks Supported.
+ * Set SUPPORTED_APPS_TRACKER_URL to link entries to the tracker.
  *
  * Not the whole board — about forty applications, a few from each stack the
  * engine actually deploys. `slug` is the title reduced to letters and digits,
@@ -25,13 +25,15 @@ export function supportedAppSlug(title: string): string {
   return slug.length > 0 ? slug : 'app';
 }
 
+const TRACKER_URL = process.env.SUPPORTED_APPS_TRACKER_URL ?? 'https://tracker.example.com/supported-apps';
+
 function app(iid: number, title: string, repo: string, stack: SupportedAppStack): SupportedApp {
   return {
     iid,
     title,
     repo,
     stack,
-    issueUrl: `https://git.modulesgarden.tech/panelalpha/playground/supported-apps/-/work_items/${iid}`,
+    issueUrl: `${TRACKER_URL}/-/work_items/${iid}`,
     slug: supportedAppSlug(title),
   };
 }
@@ -41,7 +43,6 @@ export const SUPPORTED_APPS: readonly SupportedApp[] = [
   app(42, 'FreshRSS', 'https://github.com/FreshRSS/FreshRSS', 'php'),
   app(61, 'Roundcube', 'https://github.com/roundcube/roundcubemail', 'php'),
   app(312, 'osTicket', 'https://github.com/osTicket/osTicket', 'php'),
-  app(332, 'Easy!Appointments', 'https://github.com/alextselegidis/easyappointments', 'php'),
   app(335, 'OpenCart', 'https://github.com/opencart/opencart', 'php'),
   app(309, 'SuiteCRM', 'https://github.com/SuiteCRM/SuiteCRM', 'php'),
   app(334, 'PrestaShop', 'https://github.com/PrestaShop/PrestaShop', 'php'),
@@ -62,7 +63,6 @@ export const SUPPORTED_APPS: readonly SupportedApp[] = [
   // Python
   app(191, 'MeTube', 'https://github.com/alexta69/metube', 'python'),
   app(177, 'Ownfoil', 'https://github.com/a1ex4/ownfoil', 'python'),
-  app(1201, 'juntagrico', 'https://github.com/juntagrico/juntagrico', 'python'),
   app(
     1523,
     'Roundup Issue Tracker (GitHub mirror)',

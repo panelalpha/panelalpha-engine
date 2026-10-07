@@ -36,7 +36,7 @@ class PrivilegesController extends Controller
      */
     public function show($username, $dbuser, $dbname)
     {
-        $user = $this->projectOrNotFound($username);
+        $user = $this->projectOr404($username);
 
         /** @var ?MysqlUser */
         $dbuser = $user->mysqlUsers()->getQuery()->where('user', $user->qualifyMysqlUser($dbuser))->first();
@@ -85,7 +85,7 @@ class PrivilegesController extends Controller
      */
     public function update($username, $dbuser, $dbname, MysqlPrivilegesUpdateRequest $request)
     {
-        $user = $this->projectOrNotFound($username);
+        $user = $this->projectOr404($username);
 
         /** @var ?MysqlUser */
         $dbuser = $user->mysqlUsers()->getQuery()->where('user', $user->qualifyMysqlUser($dbuser))->first();
@@ -136,7 +136,7 @@ class PrivilegesController extends Controller
      */
     public function destroy($username, $dbuser, $dbname)
     {
-        $user = $this->projectOrNotFound($username);
+        $user = $this->projectOr404($username);
 
         /** @var ?MysqlUser */
         $dbuser = $user->mysqlUsers()->getQuery()->where('user', $user->qualifyMysqlUser($dbuser))->first();

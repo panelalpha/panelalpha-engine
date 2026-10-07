@@ -3,6 +3,7 @@
 namespace App\Lib\Deploy\DeployLog;
 
 use App\Exceptions\BuildStalledException;
+use App\Exceptions\DiskLimitException;
 use Symfony\Component\Process\Process;
 
 /**
@@ -10,12 +11,18 @@ use Symfony\Component\Process\Process;
  * worker, so a hung step would otherwise block every account until its
  * overall timeout. Any output resets the clock, and so does a step that is
  * silent but still using CPU: rustc on a workspace's last crate prints nothing
- * for longer than the limit (#153).
+ * for longer than the limit.
  */
 class StepWatchdog
 {
     /** The `build-stalled` explainer rule matches on this prefix. */
     public const MARKER = 'PANELALPHA: build step stalled';
+
+    /** The `disk-limit-reached` explainer rule matches on this prefix. */
+    public const DISK_MARKER = 'PANELALPHA: disk limit reached';
+
+    /** `du` over a large Docker store takes seconds, so not every poll. */
+    private const DISK_CHECK_SECONDS = 15;
 
     private const POLL_MICROSECONDS = 100_000;
 
@@ -35,16 +42,22 @@ class StepWatchdog
 
     private string $partial = '';
 
+    private float $lastDiskCheckAt;
+
     /**
      * @param ?\Closure(): bool $busy asked once the limit is reached; true means
      *        the step is working, not hung, and gets another window
+     * @param ?\Closure(): ?string $diskFull asked every DISK_CHECK_SECONDS; a
+     *        reason stops the step, so a pull cannot fill the host
      */
     public function __construct(
         private readonly int $idleSeconds,
         private readonly string $label,
-        private readonly ?\Closure $busy = null
+        private readonly ?\Closure $busy = null,
+        private readonly ?\Closure $diskFull = null,
+        private readonly int $diskCheckSeconds = self::DISK_CHECK_SECONDS
     ) {
-        $this->lastOutputAt = $this->lastPrintedAt = microtime(true);
+        $this->lastOutputAt = $this->lastPrintedAt = $this->lastDiskCheckAt = microtime(true);
     }
 
     /**
@@ -69,13 +82,15 @@ class StepWatchdog
      * still applies; silence past the limit kills the tree and throws.
      *
      * @throws BuildStalledException
+     * @throws DiskLimitException
      */
     public function wait(Process $process): int
     {
         while ($process->isRunning()) {
             $process->checkTimeout();
+            $this->stopIfDiskFull($process);
             $silent = microtime(true) - $this->lastOutputAt;
-            if ($silent >= $this->idleSeconds) {
+            if ($this->idleSeconds > 0 && $silent >= $this->idleSeconds) {
                 if ($this->isBusy()) {
                     $this->lastOutputAt = microtime(true);
                     continue;
@@ -90,6 +105,27 @@ class StepWatchdog
         }
 
         return $process->wait();
+    }
+
+    /** @throws DiskLimitException */
+    private function stopIfDiskFull(Process $process): void
+    {
+        if ($this->diskFull === null || microtime(true) - $this->lastDiskCheckAt < $this->diskCheckSeconds) {
+            return;
+        }
+        $this->lastDiskCheckAt = microtime(true);
+        try {
+            $why = ($this->diskFull)();
+        } catch (\Throwable) {
+            // A reading that cannot be taken is not a reason to stop a step.
+            return;
+        }
+        if (!is_string($why) || $why === '') {
+            return;
+        }
+
+        self::killTree($process);
+        throw new DiskLimitException(self::DISK_MARKER . " ({$why})");
     }
 
     /** A probe that cannot answer says "not busy": the limit then holds as before. */

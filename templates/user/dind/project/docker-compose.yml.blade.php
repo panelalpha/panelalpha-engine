@@ -27,9 +27,19 @@ services:
       - /run/service:mode=755,size=4m,exec
     volumes:
       - /home/{{ $user }}/:/home/{{ $user }}/
-      - ./entrypoint.sh:/entrypoint.sh
-      - ./entrypoint.d/:/entrypoint.d/
+      - ./entrypoint.sh:/entrypoint.sh:ro
+      - ./entrypoint.d/:/entrypoint.d/:ro
+      - ./daemon.json:/etc/docker/daemon.json:ro
       - ./services/:/etc/s6/account/:ro
+      # lxcfs: the account's own memory, CPUs and load in /proc. Long syntax,
+      # so compose never creates a missing source as a directory.
+@foreach ($proc_mounts ?? [] as $procFile)
+      - {type: bind, source: /var/lib/lxcfs/proc/{{ $procFile }}, target: /proc/{{ $procFile }}, read_only: true}
+@endforeach
+@if (!empty($proc_mounts))
+      # The same files for the containers the account's own dockerd starts.
+      - {type: bind, source: /var/lib/lxcfs/proc, target: /var/lib/lxcfs/proc, read_only: true}
+@endif
     tty: true
     {{ !empty($cpu_limit) ? ("cpus: " . $cpu_limit) : "" }}
     {{ !empty($memory_limit) ? ("mem_limit: " . $memory_limit . "M") : "" }}
@@ -47,7 +57,9 @@ services:
           rate: '{{ $device_write_bps }}'
 @endif
 @endif
+# Accounts only, never core: no traffic between members, and the host holds
+# them to sites-db and the registries (tenant-network-firewall.sh).
 networks:
   default:
-    name: pash-default-network
+    name: pash-tenants
     external: true

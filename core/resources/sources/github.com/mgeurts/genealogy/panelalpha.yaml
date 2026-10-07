@@ -6,7 +6,7 @@ description: >-
   role. The shipped `laravel` recipe already gets docroot (public), the account
   MySQL, the host-side composer + Vite build, key:generate, migrate,
   storage:link and optimize right; this recipe adds only what the app itself
-  needs on top and what the engine's redeploy model (~/project wiped, engine#173)
+  needs on top and what the engine's redeploy model (~/project wiped)
   would otherwise lose.
 
   Three things it adds:

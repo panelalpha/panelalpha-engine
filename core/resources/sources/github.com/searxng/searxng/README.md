@@ -33,17 +33,7 @@ every request with `Accept-Encoding: identity`; SearXNG's limiter rejects a
 (`searx/botdetection/http_accept_encoding.py`). The same edge also puts its own
 address last in `X-Forwarded-For`, so every visitor would share one rate-limit
 bucket. On the account's own domain (direct to the engine host) both are
-correct. Verify with `--resolve <name>:443:<engine ip>`.
+correct.
 
 The engine's health probe reports `HTTP 429` for `/`: the limiter rejects its
 non-browser User-Agent, which is the protection working.
-
-## Verification (mariusz.panelalpha.tools, engine 705f250a)
-
-Browser-like flow over `--resolve` to the engine host: `GET /` → load the
-`client<token>.css` link token → `GET /search?q=linux+kernel&format=html` →
-200, 42 results from brave, google cse and duckduckgo. The `ip` query shows the
-visitor's real address. `format=json` → 403; `curl` User-Agent → 429; a session
-without the link token → 200, 200, 429, then 302 to `/`. After
-`POST /projects/searxng/rebuild` the secret file and the effective
-`secret_key` are unchanged and Valkey data survives.

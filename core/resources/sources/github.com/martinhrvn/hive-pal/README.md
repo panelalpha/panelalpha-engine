@@ -16,7 +16,7 @@ second repo — a single origin, so no fronting nginx is needed.
 
 `hooks/prepare.sh` generates the DB password and the Better Auth session secret
 **once** into `~/.panelalpha/hive-pal/secrets.env` (0600) and reuses them on
-every redeploy — `~/project` is wiped each deploy (engine#173), so regenerating
+every redeploy — `~/project` is wiped each deploy, so regenerating
 them would log everyone out or lock the app out of its pgdata volume. The admin
 login is the engine's (`credentials:` in `panelalpha.yaml`), returned by
 `GET /projects/{name}/app-credentials` (MCP `app_credentials_get`); an account
@@ -75,4 +75,4 @@ scope here and left unconfigured — email+password sign-in does not need it.
 ## Health
 
 `app` has a healthcheck on `GET /api/health`; `postgres` on `pg_isready`, and the
-app gates on `postgres: condition: service_healthy` (engine#204).
+app gates on `postgres: condition: service_healthy`.

@@ -102,6 +102,20 @@ class PublicUrlEnvironmentTest extends TestCase
         $this->assertArrayNotHasKey('VIRTUAL_HOST', PublicUrlEnvironment::for('https://example.test'));
     }
 
+    public function testABlankBaseUrlIsNotOneToFill(): void
+    {
+        $this->assertNotContains('BASE_URL', PublicUrlEnvironment::blankFillKeys());
+        $this->assertContains('ORIGIN', PublicUrlEnvironment::blankFillKeys());
+    }
+
+    public function testBaseUrlSetBlankOrToAPathIsAPathPrefix(): void
+    {
+        $this->assertSame(['BASE_URL'], PublicUrlEnvironment::pathPrefixKeysIn(["BASE_URL=\n"]));
+        $this->assertSame(['BASE_URL'], PublicUrlEnvironment::pathPrefixKeysIn([null, "BASE_URL=\"/app\"\n"]));
+        $this->assertSame([], PublicUrlEnvironment::pathPrefixKeysIn(["BASE_URL=http://localhost:3000\n"]));
+        $this->assertSame([], PublicUrlEnvironment::pathPrefixKeysIn(["APP_URL=\n# BASE_URL=\n", null]));
+    }
+
     public function testNothingIsSetWithoutAUrl(): void
     {
         $this->assertSame([], PublicUrlEnvironment::for(null));

@@ -27,7 +27,7 @@ services:
     mem_limit: 512m
 
   # One-shot: fails the deploy naming each missing forge setting. Reads .env
-  # rather than interpolating, so *_SECRET values are never replaced (engine#336).
+  # rather than interpolating, so *_SECRET values are never replaced.
   forge-check:
     image: woodpeckerci/woodpecker-server:v3.18.1-alpine
     restart: "no"

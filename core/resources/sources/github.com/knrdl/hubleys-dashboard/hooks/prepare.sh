@@ -9,8 +9,8 @@
 #   1. It authenticates nobody. src/hooks.server.ts takes the user identity
 #      from Remote-User / Remote-Groups / Remote-Name / Remote-Email and
 #      trusts them, and `error(500, 'forward auth not configured')` on line 56
-#      is what a request with no Remote-User gets. That 500 is the whole
-#      stock-deploy verdict; sending the header is the whole bypass.
+#      is what a request with no Remote-User gets. That 500 is what a stock
+#      deploy serves; sending the header is the whole bypass.
 #   2. Everything it keeps -- config.yml, per-user settings, uploaded
 #      wallpapers -- lives under /data, which upstream's Dockerfile declares
 #      as a VOLUME. The engine honours that with a named volume, which
@@ -46,7 +46,7 @@ chmod 700 "${DATA_HOME}" "${AUTH_DIR}"
 # ---------------------------------------------------------------------------
 # The password
 # ---------------------------------------------------------------------------
-# Generated once and kept. A redeploy clears ~/project (engine#173) and leaves
+# Generated once and kept. A redeploy clears ~/project and leaves
 # ~/.panelalpha alone, so regenerating here would hand the customer a new
 # password every deploy while the one they wrote down stopped working.
 #
@@ -209,7 +209,7 @@ ln -sfn "${CONFIG}" config.yml
 # So a redeploy does not redo `npm install && npm run build` for nothing.
 #
 # `COPY . /app/` is the first line of the build stage, so anything in the
-# checkout that differs between two deploys throws away the 42s `npm install &&
+# checkout that differs between two deploys throws away the `npm install &&
 # check && lint && build` layer under it. Two things do:
 #
 #   * .git. Two clones of the same commit are identical except for it -- the
@@ -218,8 +218,8 @@ ln -sfn "${CONFIG}" config.yml
 #   * The files the platform and this recipe put in ~/project beside the
 #     application. The engine's generated docker-compose.yml carries
 #     `PA_DEPLOY_PHASE: install` on the first deploy and `upgrade` on every one
-#     after it -- measured: that one word was enough to make the second deploy
-#     rebuild everything (cache_hit_ratio 0.313, 48.5s of build). None of these
+#     after it -- and that one word is enough to make the second deploy
+#     rebuild everything. None of these
 #     files belong in the image either.
 #
 # Appended once, as a block, and guarded by its own marker so a redeploy does
@@ -245,8 +245,7 @@ fi
 # because one value in it cannot be known until the account exists: the uid.
 #
 # The app image runs as uid 1000 (`USER 1000` in the Dockerfile) and the
-# account is not uid 1000 -- it was 1002 on the host this was written on. A
-# bind mount is owned by the account, so the stock image cannot write to it.
+# account is not uid 1000. A bind mount is owned by the account, so the stock image cannot write to it.
 # Run without this line, against the same bind mount, the image says exactly
 # that and exits:
 #
@@ -285,7 +284,7 @@ services:
     # Replaces the engine's named volume for the same target. /data is where
     # config.yml, users/config/*.json and uploaded backgrounds live; a named
     # volume survives a redeploy but the customer cannot reach into it, and
-    # anything inside ~/project is deleted by the next clone (engine#173).
+    # anything inside ~/project is deleted by the next clone.
     # Relative paths resolve against --project-directory, which is ~/project.
     volumes:
       - ../.panelalpha/hubleys/data:/data
@@ -300,12 +299,10 @@ services:
       ADMINS: "group:admins"
 
       # Where adapter-node gets the origin it checks form POSTs against.
-      # Honest note: this fixes nothing that was observed. The handler falls
-      # back to `... || 'https'` (handler.js:1438) and to the Host header, and
-      # the engine's proxy chain preserves both, so the Settings POST answered
-      # 200 with these unset as well -- measured, twice. They are set because
-      # the fallback is a guess that happens to be right on this platform and
-      # these are the answer: a domain served over plain http, or any proxy
+      # The handler falls back to `... || 'https'` (handler.js:1438) and to the
+      # Host header, and the engine's proxy chain preserves both, so the
+      # fallback happens to be right on this platform. These are set because
+      # the fallback is a guess and these are the answer: a domain served over plain http, or any proxy
       # that rewrites Host, breaks the guess and every Save becomes a 403.
       # Reading the headers also keeps it right when the customer adds a
       # domain, which pinning ORIGIN would not.
@@ -314,9 +311,9 @@ services:
 
       # adapter-node caps a request body at 512 kB, which is 20x smaller than
       # the background image upload the app advertises
-      # (BACKGROUND_IMG_MAX_UPLOAD_MB=10). Measured on this deploy: a 1.47 MB
-      # PNG answered `{"type":"error","error":{"message":"Payload Too
-      # Large"}}` at handler.js:1405 with this unset, and 200 with it set.
+      # (BACKGROUND_IMG_MAX_UPLOAD_MB=10). Without this a larger upload answers
+      # `{"type":"error","error":{"message":"Payload Too Large"}}` at
+      # handler.js:1405.
       BODY_SIZE_LIMIT: "12M"
 
       # Neutralised on purpose. onServerStartup() copies FAVICON_FILE over
@@ -335,7 +332,7 @@ services:
     # The unprivileged build, run as the account itself. That is what lets the
     # password file stay 0600 in a 0700 directory the customer owns: stock
     # nginx drops its workers to uid 101 and would answer 500 on every
-    # authenticated request because it cannot read the file (measured). Group 0
+    # authenticated request because it cannot read the file. Group 0
     # because this image makes /etc/nginx and /var/cache/nginx group-writable
     # for gid 0 precisely so it can run as an arbitrary uid.
     image: nginxinc/nginx-unprivileged:1.29-alpine

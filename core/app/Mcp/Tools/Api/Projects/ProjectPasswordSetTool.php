@@ -70,7 +70,7 @@ class ProjectPasswordSetTool extends ApiTool
     {
         return [
             'name' => $schema->string()->required(),
-            'password' => $schema->string()->min(1)->description('Site password.')->required(),
+            'password' => $schema->string()->min(1)->description('Site password. Example: s3cret.')->required(),
         ];
     }
 }

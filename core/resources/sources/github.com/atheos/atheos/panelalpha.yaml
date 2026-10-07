@@ -10,7 +10,7 @@ description: >-
   it, so PhpDocroot's probe falls through to the root, which is where index.php
   is. Nothing in this recipe names a docroot, and naming '.' would not have
   helped anyway -- PlatformManifest::readDocroot() folds '.' to '' and the
-  probe runs regardless (engine#171's neighbour, engine#172).
+  probe runs regardless.
 
   The verdict was serving-php_error, and the page really was HTTP 200 with PHP
   in it -- but it is a fatal, not noise, and the application is completely
@@ -41,12 +41,12 @@ description: >-
   .htaccess, written by the after-clone hook, carries `php_flag display_errors
   off` inside an <IfModule mod_php.c>. The hook is not a stage command, so that
   second copy is the one that holds on a deploy where the install stage did not
-  run -- which is what engine#169 does to this recipe on the queue path, every
+  run -- which is what a worker's stale recipe list does to this recipe on the queue path, every
   time.
 
   What the engine cannot infer is where an IDE keeps things. WORKSPACE and DATA
   both default to BASE_PATH . "/..." -- inside the checkout -- and a redeploy
-  re-clones ~/project after clearing it (engine#173). For a CMS that loses a
+  re-clones ~/project after clearing it. For a CMS that loses a
   cache. Here it deletes the customer's source code and the account's own
   login. overrides/docker-compose.override.yml bind-mounts ~/.panelalpha/atheos
   at /data and the generated config.php points both constants into it.
@@ -93,9 +93,9 @@ description: >-
   composer-install command carries no `when` guard, so extending it fails every
   deploy on "Composer could not find a composer.json file in /app" before the
   image is built. php-plain is the same strategy, image and document root with
-  no dependency pass, so engine#168 never comes up either. There is nothing to wait for either: the
+  no dependency pass. There is nothing to wait for either: the
   install stage is a single PHP process over a handful of small JSON files and
-  Apache binds a second later, so no readiness gate is added (engine#90).
+  Apache binds a second later, so no readiness gate is added.
 
   One feature is given up on purpose. FileTree::loadURL() builds a preview URL
   of the form <host>/workspace/<path>, which only works while the workspace is
@@ -123,14 +123,14 @@ commands:
       - upgrade
     description: >-
       Writes config.php -- which a redeploy deletes with the rest of the
-      checkout (engine#173) -- and, on the first deploy only, runs Atheos's own
+      checkout -- and, on the first deploy only, runs Atheos's own
       components/install/process.php with the login the engine generated.
       Without it the account serves an unauthenticated installer to whoever
       reaches it first, and that visitor gets "configure" rights on a web IDE:
       shell commands through the Macro component and write access to the
       document root. A no-op once DATA/users.json.php exists, so the upgrade
       stage rewrites config.php and nothing else. On the build stage it would
-      not run at all (engine#171).
+      not run at all.
     run: 'php /app/panelalpha/atheos-install.php'
     timeout: 120
 credentials:

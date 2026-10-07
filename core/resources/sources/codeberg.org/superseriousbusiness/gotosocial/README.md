@@ -1,23 +1,14 @@
 # GoToSocial (codeberg.org/superseriousbusiness/gotosocial)
 
-Tracker: panelalpha/playground/supported-apps#1367. **Verdict: Supported.**
-
 GoToSocial is a single-binary ActivityPub (fediverse) server implementing the
 Mastodon client API: SQLite (or Postgres), a local media store, and an instance
 keypair that is the server's federation identity. AGPL-3.0. A personal server, in
 scope; not a relay, not a mail-receiving app.
 
-## Cloneability + scope
-
-`https://codeberg.org/superseriousbusiness/gotosocial` is a real cloneable git
-remote (Forgejo). `git ls-remote` and a full clone succeed. Not a SquirrelMail
-#1372 rejection.
-
 ## Image, not source build
 
-Runs the image upstream publishes: `docker.io/superseriousbusiness/gotosocial`
-(0.22.1, ~2 layers, ~15s pull on this host). The checkout contributes only its
-git ref (to pick a tag); it is not used as a runtime. Two reasons a bare checkout
+Runs the image upstream publishes: `docker.io/superseriousbusiness/gotosocial`.
+The checkout contributes only its git ref (to pick a tag); it is not used as a runtime. Two reasons a bare checkout
 does not build a runnable server:
 
 1. The repo's **root Dockerfile is a packaging Dockerfile**, not a build: its
@@ -38,18 +29,11 @@ detection, and `ComposeUsableProbe` (priority 980) then wins over the root
 Dockerfile (970) -- the probe explicitly accepts a repo that also has a root
 Dockerfile.
 
-## The federation ceiling (honest)
+## Federation
 
-**Verified** on a `*.panelalpha.online` test domain: local admin created before
-the public port opens, login (browser OAuth), the Mastodon client API, posting a
-status and reading it back over the API and the public web view, `/nodeinfo/2.0`
-and `/api/v1/instance` answering unauthenticated, and authenticated-only
-endpoints refusing anonymous requests (401). **Not proven, out of scope for a
-throwaway domain:** real two-way federation with production instances. GoToSocial
-bakes the host into every URI and the instance key-id and other servers verify
-HTTP signatures against it; the well-known/actor endpoints are reachable and
-serve a trusted cert, but a genuine federation handshake is not something a
-disposable test domain demonstrates. Not claimed.
+GoToSocial bakes the host into every URI and the instance key-id, and other
+servers verify HTTP signatures against it, so federation depends on the final,
+stable public domain.
 
 ## What the recipe supplies
 
@@ -73,7 +57,7 @@ disposable test domain demonstrates. Not claimed.
 - **Data survives redeploy.** SQLite DB, media store and the instance keypair
   (a row in the DB) all live in `~/.panelalpha/gotosocial/storage`, bind-mounted
   over the image's `VOLUME /gotosocial/storage` -- the only directory that
-  survives a redeploy (`~/project` is re-cloned, engine#173) and is account-owned
+  survives a redeploy (`~/project` is re-cloned) and is account-owned
   (`~` is chowned root each rebuild). Both services run as the account uid/gid
   (written into `docker-compose.override.yml` by `prepare.sh`). The wazero cache
   is redirected under the same dir so nothing lands on an anonymous volume.
@@ -85,35 +69,7 @@ server start` behind `entrypoint.sh`, binds 0.0.0.0:8080, `GTS_LETSENCRYPT_ENABL
 false`, `GTS_PROTOCOL https` (engine terminates TLS), healthcheck on the
 unauthenticated `/readyz` via the alpine image's busybox `wget`. `ready`: alpine
 no-op gated on `app: service_healthy`, because `docker compose up -d` runs without
-`--wait` (engine#204).
-
-## Measured (2026-09-21, gotosocial 0.22.1, image `:latest`, 2 GB account)
-
-- **Recipe:** deploy-ok in **59s**, strategy `compose`, app `healthy`, `init`
-  exited 0, `ready` exited 0. Public HTTPS `GET /` -> 200 (9057 B).
-  `app/health`: healthy, serving ok, port 8080 HTTP 200.
-- **Control (recipe parked, same repo):** see below.
-- **Past the probe, over the public https domain, in a browser:** signed in as
-  the generated `admin` (OAuth authorize consent, "Hi admin!"), role `admin` on
-  `verify_credentials`; posted a public status via `POST /api/v1/statuses`, read
-  it back via the API and rendered it in the browser at `/@admin/statuses/<id>`;
-  `/nodeinfo/2.0` shows `openRegistrations:false`, 1 user; `/api/v1/instance` URI
-  = the public domain. Anonymous `verify_credentials` and `/timelines/home` ->
-  401.
-- **Exposure (bodies, not codes):** `storage/sqlite.db`, `sqlite.db`,
-  `.git/config`, `.git/HEAD`,
-  `docker-compose.yml[.override]`, `.env`, `config.yaml`, and a `fileserver/..`
-  traversal all return GoToSocial's 21-byte JSON 404 -- no SQLite header, no PEM,
-  no file bytes (the app serves every route; there is no document root). On disk
-  the login is the engine's `~/.panelalpha/app-credentials.env` (0600); the instance
-  private key lives only in the DB, never web-served, and the ActivityPub actor
-  exposes only the public key.
-- **Redeploy** via `POST /projects/gts1367/rebuild`: success, strategy compose.
-  Instance keypair md5 **unchanged** (`389ef6166e5ef8073dbe8148d2692056`), admin
-  keypair md5 unchanged (`1ce69bd83453183ad8c6039d83568a7b`), admin password
-  unchanged, the status still present, admin still admin+confirmed; site and post
-  still serve, registrations still closed. Federation identity survived.
-- **Memory:** app container **171 MiB / 1 GiB** cap; account DinD ~130 MiB.
+`--wait`.
 
 ## Notes
 
@@ -124,5 +80,9 @@ no-op gated on `app: service_healthy`, because `docker compose up -d` runs witho
   in `ps` inside the one-shot init container only.
 - GoToSocial's CLI logs to **stdout**, so the admin-existence check runs with
   `GTS_LOG_LEVEL=error` to keep `admin account list` machine-readable.
+- The app serves every route itself; there is no document root, so no file
+  in the checkout or the storage directory is web-reachable. The instance
+  private key lives only in the database; the ActivityPub actor exposes only the
+  public key.
 - No password grant: GoToSocial allows only `authorization_code` and
   `client_credentials`. A user API token needs the browser OAuth flow.

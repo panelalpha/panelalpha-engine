@@ -39,7 +39,7 @@ chmod 700 /data/files /data/tmp
 
 # 1. www/config.php -- the database the engine provisioned and the paths the
 #    mount provides. Written every time rather than only when missing: every
-#    deploy re-clones over ~/project (#173), so there is never a file here to
+#    deploy re-clones over ~/project, so there is never a file here to
 #    preserve, and the values the container was handed are by definition the
 #    ones that work. It holds getenv() calls rather than values, so it is not a
 #    secret.

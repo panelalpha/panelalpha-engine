@@ -7,16 +7,17 @@ description: >-
 
   The repository's compose file builds the source and hands configuration over
   as env vars, but Authorizer v2 reads CLI flags only (.env.sample: "v2 does
-  NOT read from .env"), so the built container printed its usage and
-  restart-looped. This recipe runs the official image of the current release,
+  NOT read from .env"), so the built container prints its usage and
+  restart-loops. This recipe runs the official image of the current release,
   quay.io/authorizer/authorizer:2.4.1, and builds the flags from env: --url is
   the site's own address, SQLite lives on the named volume `data`.
 
-  == What the customer must set ==
+  == The admin secret ==
 
   AUTHORIZER_ADMIN_SECRET, the admin dashboard password: v2 refuses to start
-  without one ("FATAL: --admin-secret is required"). A one-shot check fails the
-  deploy naming it until it is set.
+  without one ("FATAL: --admin-secret is required"). The engine generates it
+  (`credentials:`, returned by `GET /projects/{name}/app-credentials`); a
+  project env var with that name set before the first deploy is kept instead.
 
   == What the recipe generates ==
 
@@ -25,13 +26,7 @@ description: >-
   a redeploy keeps issued tokens and enrolled TOTP seeds valid. Private
   networks are passed as --trusted-proxies so rate limits and the admin-secret
   lockout use the visitor's address, not the shared proxy's.
-
-  == Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 2500 ==
-
-  Create without the variable: failed with "authorizer: missing project
-  environment variable AUTHORIZER_ADMIN_SECRET". Rebuild with it set: success
-  in 25s; / redirects to /dashboard/ (<title>Authorizer | Dashboard</title>,
-  JS and CSS 200), /app/ is <title>Authorizer</title>, OIDC discovery names the
-  site's own https address. _admin_login accepts the set secret and rejects a
-  wrong one; a signed-up user survives a rebuild and the admin session issued
-  before it stays valid. /.env and /.git/config return 404.
+credentials:
+  login_path: /dashboard/
+  fields:
+    AUTHORIZER_ADMIN_SECRET: {kind: password}

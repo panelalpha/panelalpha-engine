@@ -9,7 +9,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * The probe reports the path that answered, and follows a path-relative
- * Location to get there (#200). Runs the generated script against a real
+ * Location to get there. Runs the generated script against a real
  * server, as HealthProbeRedirectTest does.
  */
 class HealthProbeLandingTest extends TestCase
@@ -63,10 +63,10 @@ class HealthProbeLandingTest extends TestCase
     }
 
     /** @return array<string, mixed> the parsed result for that port */
-    private function probe(int $port): array
+    private function probe(int $port, ?string $domain = null): array
     {
         $script = tempnam(sys_get_temp_dir(), 'pa-landing') . '.sh';
-        file_put_contents($script, AppHealth::probeScript([$port], 5, 1, 0));
+        file_put_contents($script, AppHealth::probeScript([$port], 5, 1, 0, $domain));
         exec('bash ' . escapeshellarg($script) . ' 2>/dev/null', $lines);
         unlink($script);
 
@@ -133,6 +133,30 @@ class HealthProbeLandingTest extends TestCase
         $result = $this->probe($port);
         $this->assertSame(302, $result['http_code']);
         $this->assertSame('/', $result['path']);
+    }
+
+    /**
+     * OpenClaw behind a trusted proxy: a request with no forwarded client is
+     * refused with 403 "Proxy client attribution is required", while the vhost's
+     * request (X-Forwarded-For + X-Real-IP, X-Forwarded-Proto) gets the page.
+     */
+    public function test_the_probe_sends_the_client_address_the_vhost_would(): void
+    {
+        $port = $this->serve(<<<'PHP'
+            <?php
+            if (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') !== 'https') { http_response_code(500); exit; }
+            if (($_SERVER['HTTP_X_FORWARDED_FOR'] ?? '') === '' || ($_SERVER['HTTP_X_REAL_IP'] ?? '') === '') {
+                http_response_code(403); echo 'proxy_attribution_required'; exit;
+            }
+            echo $_SERVER['HTTP_X_FORWARDED_FOR'];
+            PHP);
+
+        $result = $this->probe($port, 'openclaw.example.com');
+
+        $this->assertSame(200, $result['http_code']);
+        // An outside visitor, never loopback: apps treat a local client as trusted.
+        $this->assertNotFalse(filter_var($result['body'], FILTER_VALIDATE_IP));
+        $this->assertStringStartsNotWith('127.', $result['body']);
     }
 
     /** A probe line from before the path field still parses, as the root. */

@@ -35,6 +35,69 @@ class ComposeHardenTest extends TestCase
         $this->assertArrayNotHasKey('LEFTHOOK', $result['services']['app']['environment']);
     }
 
+    /**
+     * Every source the hardener drops is reported, so the deploy log can name
+     * it: Snagtime lost all 20 secrets with no line, then failed on
+     * "undefined secret app_database_url".
+     */
+    public function test_apply_reporting_names_every_source_it_removes(): void
+    {
+        $compose = [
+            'services' => [
+                'app' => [
+                    'image' => 'acme/app',
+                    'secrets' => ['app_database_url', 'ok'],
+                    'volumes' => ['/etc:/host-etc:ro', './data:/data', '/var/run/docker.sock:/var/run/docker.sock'],
+                ],
+                'db' => [
+                    'image' => 'postgres:16',
+                    'volumes' => [['type' => 'bind', 'source' => '/root', 'target' => '/r'], 'pgdata:/var/lib/postgresql/data'],
+                ],
+            ],
+            'secrets' => [
+                'app_database_url' => ['file' => '/etc/shadow'],
+                'ok' => ['file' => './secrets/ok'],
+            ],
+            'configs' => ['cfg' => ['file' => '/etc/app.conf']],
+            'volumes' => [
+                'pgdata' => ['driver_opts' => ['type' => 'none', 'o' => 'bind', 'device' => '/srv']],
+            ],
+        ];
+
+        $result = ComposeHarden::applyReporting($compose);
+
+        $this->assertSame([
+            'secret app_database_url: file /etc/shadow',
+            'config cfg: file /etc/app.conf',
+            'app: volume /etc:/host-etc:ro',
+            'app: volume /var/run/docker.sock:/var/run/docker.sock',
+            'db: volume {"type":"bind","source":"/root","target":"/r"}',
+            'volume pgdata: driver_opts',
+        ], $result['removed']);
+        $this->assertSame(['./data:/data'], $result['compose']['services']['app']['volumes']);
+        $this->assertSame(['ok'], array_keys($result['compose']['secrets']));
+        $this->assertSame($result['compose'], ComposeHarden::apply($compose));
+    }
+
+    public function test_apply_reporting_reports_nothing_for_a_clean_file(): void
+    {
+        $result = ComposeHarden::applyReporting(['services' => ['app' => ['image' => 'acme/app', 'volumes' => ['./data:/data']]]]);
+
+        $this->assertSame([], $result['removed']);
+    }
+
+    /** The issue's compose: the service names `sock`, the volume binds the account's /var/run. */
+    public function test_a_named_volume_that_binds_a_path_becomes_a_plain_volume(): void
+    {
+        $hardened = ComposeHarden::apply([
+            'services' => ['app' => ['image' => 'alpine', 'command' => 'sleep infinity', 'volumes' => ['sock:/host-run']]],
+            'volumes' => ['sock' => ['driver' => 'local', 'driver_opts' => ['type' => 'none', 'o' => 'bind', 'device' => '/var/run']]],
+        ]);
+
+        $this->assertSame(['driver' => 'local'], $hardened['volumes']['sock']);
+        $this->assertSame(['sock:/host-run'], $hardened['services']['app']['volumes']);
+    }
+
     public function test_appends_to_list_style_environment(): void
     {
         $compose = [
@@ -53,7 +116,7 @@ class ComposeHardenTest extends TestCase
 
         $this->assertContains('NODE_ENV=development', $env);
         $this->assertContains('NODE_OPTIONS=--max-old-space-size=268', $env);
-        $this->assertSame('unless-stopped', $result['services']['web']['restart']);
+        $this->assertArrayNotHasKey('restart', $result['services']['web']);
     }
 
     public function test_preserves_framework_commands_and_entrypoints(): void
@@ -168,17 +231,54 @@ class ComposeHardenTest extends TestCase
 
     /**
      * A repository's own image reads its own variables: MeTube took `HTTPS=on`
-     * as "serve TLS" and crash-looped without a certificate (engine#289).
+     * as "serve TLS" and crash-looped without a certificate.
      */
     public function test_url_environment_for_an_image_names_the_https_url_but_sets_no_tls_flags(): void
     {
         $env = ComposeHarden::urlEnvironment('https://metube.example.com');
 
         $this->assertSame('https://metube.example.com', $env['BASE_URL']);
-        $this->assertSame('metube.example.com', $env['SERVER_NAME']);
         foreach (['HTTPS', 'SSL', 'FORCE_SSL'] as $key) {
             $this->assertArrayNotHasKey($key, $env, $key);
         }
+    }
+
+    /**
+     * phpLDAPadmin's FrankenPHP image sets `ENV SERVER_NAME=:8080`; the host
+     * name in its place made Caddy redirect every request to https on itself.
+     * The Apache spelling stays: `ServerName ${SERVERNAME}` needs it.
+     */
+    public function test_url_environment_for_an_image_leaves_its_caddy_site_address_alone(): void
+    {
+        $env = ComposeHarden::urlEnvironment('https://plab.example.com');
+
+        $this->assertArrayNotHasKey('SERVER_NAME', $env);
+        $this->assertSame('plab.example.com', $env['SERVERNAME']);
+        $this->assertSame('https://plab.example.com', $env['PUBLIC_URL']);
+    }
+
+    /**
+     * DVinyl's `.env.example` ships `BASE_URL=` ("sub-path, leave empty for
+     * root") and mounts every route under it; the full URL crash-looped it.
+     */
+    public function test_url_environment_leaves_out_a_base_url_the_project_uses_as_a_path(): void
+    {
+        $dvinyl = "# Base URL for serving on a sub-path, leave empty to serve from root (default)\nBASE_URL=\nPORT=3000\n";
+
+        $env = ComposeHarden::urlEnvironment('https://dvinyl.example.com', [null, $dvinyl]);
+        $this->assertArrayNotHasKey('BASE_URL', $env);
+        $this->assertSame('https://dvinyl.example.com', $env['APP_URL']);
+
+        $this->assertArrayNotHasKey('BASE_URL', ComposeHarden::urlEnvironment('https://a.example.com', ["BASE_URL=/tools\n"]));
+    }
+
+    public function test_url_environment_keeps_a_base_url_the_project_uses_as_a_whole_url(): void
+    {
+        $url = 'https://yarn.example.com';
+
+        $this->assertSame($url, ComposeHarden::urlEnvironment($url, ["BASE_URL=http://localhost:8000\n", null])['BASE_URL']);
+        // No env file at all (tube, yarnd): the full URL, as before.
+        $this->assertSame($url, ComposeHarden::urlEnvironment($url, [null, null])['BASE_URL']);
     }
 
     public function test_extract_runtime_sidecars_keeps_datastores_drops_dev_app(): void
@@ -368,11 +468,13 @@ YAML
         $service = ComposeHarden::apply($compose)['services']['app'];
 
         foreach (
-            ['cap_add', 'security_opt', 'userns_mode', 'cgroup_parent', 'group_add', 'sysctls', 'device_cgroup_rules']
+            ['cap_add', 'security_opt', 'userns_mode', 'cgroup_parent', 'group_add', 'device_cgroup_rules']
             as $key
         ) {
             $this->assertArrayNotHasKey($key, $service, "{$key} survived hardening");
         }
+        // Only the engine's own network-namespaced default is left.
+        $this->assertSame(['net.ipv4.ping_group_range' => '0 65535'], $service['sysctls']);
     }
 
     public function test_removes_docker_socket_mounted_through_its_parent_directory(): void
@@ -441,30 +543,45 @@ YAML
             'volumes' => [
                 ['type' => 'bind', 'source' => '/var/run', 'target' => '/x'],
                 ['type' => 'bind', 'source' => '/run/', 'target' => '/y'],
-                ['type' => 'bind', 'source' => '/var/running', 'target' => '/app/running'],
+                ['type' => 'bind', 'source' => './runner', 'target' => '/app/running'],
             ],
         ]]];
 
         $service = ComposeHarden::apply($compose)['services']['app'];
 
         $this->assertSame(
-            [['type' => 'bind', 'source' => '/var/running', 'target' => '/app/running']],
+            [['type' => 'bind', 'source' => './runner', 'target' => '/app/running']],
             $service['volumes']
         );
     }
 
+    /** vd489: `/tmp:/vd/tmp` passed, as did any path nobody had listed. */
+    public function test_a_bind_outside_the_checkout_and_panelalpha_is_removed_and_reported(): void
+    {
+        $compose = ['services' => ['web' => [
+            'image' => 'example/app',
+            'volumes' => ['/tmp:/vd/tmp', '/srv/data:/vd/srv', '/home/acct/project/data:/data', './conf:/conf'],
+        ]]];
+
+        $result = ComposeHarden::applyReporting($compose, null, null, [], 'acct', '/nonexistent-core-view/acct/project');
+
+        $this->assertSame(['/home/acct/project/data:/data', './conf:/conf'], $result['compose']['services']['web']['volumes']);
+        $this->assertSame(['web: volume /tmp:/vd/tmp', 'web: volume /srv/data:/vd/srv'], $result['removed']);
+    }
+
     public function test_a_path_that_only_starts_like_run_is_kept(): void
     {
-        // `/var/running` is not `/var/run`, and the socket pattern must not
-        // widen into a prefix match.
+        // `/runner` is not `/run`: the socket pattern must not widen into a
+        // prefix match. An absolute `/runner` source is refused anyway, as
+        // outside the checkout.
         $compose = ['services' => ['app' => [
             'image' => 'example/app',
-            'volumes' => ['/var/running:/app/running', './run:/app/run'],
+            'volumes' => ['./data:/runner', './run:/app/run', '/runner:/app/running'],
         ]]];
 
         $service = ComposeHarden::apply($compose)['services']['app'];
 
-        $this->assertSame(['/var/running:/app/running', './run:/app/run'], $service['volumes']);
+        $this->assertSame(['./data:/runner', './run:/app/run'], $service['volumes']);
     }
 
     public function test_a_build_base_service_is_not_restarted(): void
@@ -483,7 +600,9 @@ YAML
         $this->assertSame(['base'], ComposeHarden::oneShotServices($compose));
         $this->assertSame('no', $services['base']['restart']);
         $this->assertSame('unless-stopped', $services['rails']['restart']);
-        $this->assertSame('unless-stopped', $services['sidekiq']['restart']);
+        // No port, no policy and nothing depends on it: left to compose's default.
+        $this->assertArrayNotHasKey('restart', $services['sidekiq']);
+        // rails depends on it.
         $this->assertSame('unless-stopped', $services['postgres']['restart']);
         // Quoted, or YAML 1.1 readers take it for a boolean.
         $this->assertStringContainsString("restart: 'no'", \Symfony\Component\Yaml\Yaml::dump($services['base']));
@@ -519,7 +638,9 @@ YAML
         $this->assertSame(['base'], ComposeHarden::oneShotServices($compose));
         $this->assertSame('no', $services['base']['restart']);
         $this->assertSame('unless-stopped', $services['rails']['restart']);
-        $this->assertSame('unless-stopped', $services['sidekiq']['restart']);
+        $this->assertArrayNotHasKey('restart', $services['sidekiq']);
+        $this->assertSame('unless-stopped', $services['postgres']['restart']);
+        $this->assertSame('unless-stopped', $services['redis']['restart']);
         $this->assertStringContainsString("restart: 'no'", \Symfony\Component\Yaml\Yaml::dump($services['base']));
     }
 
@@ -540,12 +661,82 @@ YAML
         $this->assertSame('unless-stopped', $services['app']['restart']);
     }
 
+    /** Baserow's permissions fixer chowns a volume and exits 0; restarted, it looked like a crash loop. */
+    public function test_a_file_setup_command_nobody_waits_on_is_one_shot(): void
+    {
+        $compose = ['services' => [
+            'volume-permissions-fixer' => ['image' => 'bash:4.4', 'command' => 'chown 9999:9999 -R /baserow/media'],
+            'perms' => ['image' => 'alpine', 'command' => ['sh', '-c', 'mkdir -p /data/a && chown -R 1000 /data; chmod 755 /data']],
+            'watcher' => ['image' => 'alpine', 'command' => 'sh -c "chown -R 1000 /data && sleep infinity"'],
+            'tailer' => ['image' => 'alpine', 'command' => 'echo start | nc -lk 9000'],
+            'checked' => ['image' => 'bash:4.4', 'command' => 'chown 1 /x', 'healthcheck' => ['test' => ['CMD', 'true']]],
+            'backend' => ['image' => 'baserow/backend:1.30', 'ports' => ['8000:8000']],
+        ]];
+
+        $this->assertSame(['volume-permissions-fixer', 'perms'], ComposeHarden::oneShotServices($compose));
+        $services = ComposeHarden::apply($compose)['services'];
+        $this->assertSame('no', $services['volume-permissions-fixer']['restart']);
+        $this->assertArrayNotHasKey('restart', $services['watcher']);
+        $this->assertSame('unless-stopped', $services['backend']['restart']);
+    }
+
     public function test_a_single_web_service_keeps_its_restart_policy(): void
     {
-        $compose = ['services' => ['web' => ['build' => '.', 'image' => 'acme/web']]];
+        $compose = ['services' => ['web' => ['build' => '.', 'image' => 'acme/web', 'ports' => ['3000:3000']]]];
 
         $this->assertSame([], ComposeHarden::oneShotServices($compose));
         $this->assertSame('unless-stopped', ComposeHarden::apply($compose)['services']['web']['restart']);
+    }
+
+    /** kassambara/wordpress-docker-compose: only the services that publish a port are restarted by default. */
+    public function test_only_publishing_services_get_the_default_policy(): void
+    {
+        $compose = ['services' => [
+            'wordpress' => ['image' => 'wordpress:latest', 'restart' => 'always', 'ports' => ['80:80']],
+            'mysql' => ['image' => 'mariadb:latest', 'restart' => 'always'],
+            'phpmyadmin' => ['image' => 'phpmyadmin/phpmyadmin:latest', 'ports' => ['8081:80']],
+            'wpcli' => ['build' => './wpcli/', 'image' => 'wpcli', 'working_dir' => '/var/www/html'],
+            'healthcheck' => ['build' => './wpcli/', 'image' => 'wpcli', 'command' => 'sh -c "/wait"'],
+        ]];
+
+        $services = ComposeHarden::apply($compose)['services'];
+
+        $this->assertSame('always', $services['wordpress']['restart']);
+        $this->assertSame('always', $services['mysql']['restart']);
+        $this->assertSame('unless-stopped', $services['phpmyadmin']['restart']);
+        $this->assertArrayNotHasKey('restart', $services['wpcli']);
+        $this->assertArrayNotHasKey('restart', $services['healthcheck']);
+    }
+
+    /** taskingai: only the frontend proxy publishes; the backends and datastores behind it must come back too. */
+    public function test_a_service_another_one_depends_on_or_names_gets_the_default_policy(): void
+    {
+        $compose = ['services' => [
+            'frontend' => ['image' => 'nginx', 'ports' => ['8080:80'], 'depends_on' => ['backend-web']],
+            'backend-web' => ['image' => 'acme/web', 'depends_on' => ['db' => ['condition' => 'service_healthy']]],
+            'backend-api' => ['image' => 'acme/api', 'command' => 'serve', 'environment' => ['REDIS_URL=redis://cache:6379/0', 'POSTGRES_URL=postgres://u:p@db/x']],
+            'db' => ['image' => 'pgvector/pgvector:pg16'],
+            'cache' => ['image' => 'redis:7', 'restart' => ''],
+            'search' => ['image' => 'searxng/searxng', 'container_name' => 'searxng'],
+            'sandbox' => ['image' => 'acme/sandbox', 'networks' => ['default' => ['aliases' => ['terrarium']]]],
+            'khoj' => ['image' => 'acme/khoj', 'restart' => 'always', 'environment' => ['KHOJ_SEARXNG_URL=http://searxng:8080', 'KHOJ_TERRARIUM_URL=http://terrarium:8080']],
+            'wpcli' => ['image' => 'wordpress:cli', 'environment' => ['WORDPRESS_DB_HOST=db']],
+            'migrate' => ['image' => 'acme/api', 'command' => 'migrate'],
+            'worker' => ['image' => 'acme/api', 'restart' => 'on-failure', 'depends_on' => ['migrate' => ['condition' => 'service_completed_successfully']]],
+        ]];
+
+        $services = ComposeHarden::apply($compose)['services'];
+
+        foreach (['frontend', 'backend-web', 'db', 'cache', 'search', 'sandbox'] as $name) {
+            $this->assertSame('unless-stopped', $services[$name]['restart'], $name);
+        }
+        // Nobody needs these; backend-api is named by nothing either.
+        $this->assertArrayNotHasKey('restart', $services['wpcli']);
+        $this->assertArrayNotHasKey('restart', $services['backend-api']);
+        // Waited on to finish: still a one-shot, and the author's policies win.
+        $this->assertSame('no', $services['migrate']['restart']);
+        $this->assertSame('on-failure', $services['worker']['restart']);
+        $this->assertSame('always', $services['khoj']['restart']);
     }
 
     public function test_an_authors_restart_policy_is_kept_even_on_a_one_shot(): void
@@ -628,7 +819,7 @@ YAML
 
     /**
      * An expose-only app service gets its detected primary port published, so
-     * the account container binds the port the DinD proxy targets (engine#234).
+     * the account container binds the port the DinD proxy targets.
      */
     public function test_publishes_the_detected_primary_port_for_an_expose_only_service(): void
     {
@@ -677,5 +868,90 @@ YAML
 
         $this->assertSame(5000, $result['published']);
         $this->assertContains('5000:5000', $result['compose']['services']['app']['ports']);
+    }
+
+    public function test_interpolated_mount_sources_are_checked_against_the_projects_env(): void
+    {
+        $compose = ComposeHarden::apply([
+            'services' => ['app' => [
+                'image' => 'acme/app',
+                'volumes' => ['${X}:/y', '${DATA_DIR:-./data}:/data'],
+                'configs' => ['c'],
+            ]],
+            'configs' => ['c' => ['file' => '${C:-/etc/shadow}'], 'ok' => ['file' => './app.conf']],
+        ], null, null, ['X' => ['/var/lib/docker']]);
+
+        $this->assertSame(['${DATA_DIR:-./data}:/data'], $compose['services']['app']['volumes']);
+        $this->assertSame(['ok'], array_keys($compose['configs']));
+    }
+
+    /**
+     * The lxcfs files and the image's own NODE_OPTIONS together, passed the
+     * way UserComposeStrategy passes them (positionally, procFiles before
+     * imageEnvironment).
+     */
+    public function test_lxcfs_files_and_the_images_node_options_apply_together(): void
+    {
+        $pnp = '--require /overleaf/.pnp.cjs --import /overleaf/.pnp.register.mjs';
+        $result = ComposeHarden::applyReporting(
+            ['services' => ['sharelatex' => ['image' => 'sharelatex/sharelatex:6.3.0', 'mem_limit' => '2g']]],
+            null,
+            null,
+            [],
+            null,
+            null,
+            ['meminfo'],
+            static fn (string $image): array => ["NODE_OPTIONS={$pnp}"]
+        )['compose']['services']['sharelatex'];
+
+        $this->assertSame($pnp . ' --max-old-space-size=1433', $result['environment']['NODE_OPTIONS']);
+        $this->assertContains('/proc/meminfo', array_column($result['volumes'], 'target'));
+    }
+
+    /** An app container read the host's MemTotal and load: lxcfs's files go into every service. */
+    public function test_lxcfs_proc_files_are_bound_into_every_service_after_hardening(): void
+    {
+        $result = ComposeHarden::applyReporting(
+            ['services' => [
+                'app' => ['image' => 'acme/app', 'volumes' => ['./data:/data']],
+                'db' => ['image' => 'mariadb:11'],
+            ]],
+            procFiles: ['meminfo', 'loadavg']
+        )['compose'];
+
+        foreach (['app', 'db'] as $service) {
+            $this->assertContains(
+                ['type' => 'bind', 'source' => '/var/lib/lxcfs/proc/meminfo', 'target' => '/proc/meminfo', 'read_only' => true],
+                $result['services'][$service]['volumes']
+            );
+            $this->assertContains(
+                ['type' => 'bind', 'source' => '/var/lib/lxcfs/proc/loadavg', 'target' => '/proc/loadavg', 'read_only' => true],
+                $result['services'][$service]['volumes']
+            );
+        }
+        $this->assertContains('./data:/data', $result['services']['app']['volumes']);
+    }
+
+    public function test_a_service_that_mounts_a_proc_file_itself_keeps_its_own(): void
+    {
+        $result = ComposeHarden::withProcMounts(['services' => [
+            'short' => ['image' => 'a', 'volumes' => ['/somewhere/meminfo:/proc/meminfo:ro']],
+            'long' => ['image' => 'b', 'volumes' => [['type' => 'bind', 'source' => '/x', 'target' => '/proc/meminfo']]],
+        ]], ['meminfo', 'loadavg']);
+
+        $this->assertSame(
+            ['/somewhere/meminfo:/proc/meminfo:ro', ['type' => 'bind', 'source' => '/var/lib/lxcfs/proc/loadavg', 'target' => '/proc/loadavg', 'read_only' => true]],
+            $result['services']['short']['volumes']
+        );
+        $this->assertCount(2, $result['services']['long']['volumes']);
+        $this->assertSame('/x', $result['services']['long']['volumes'][0]['source']);
+    }
+
+    public function test_without_lxcfs_nothing_is_bound(): void
+    {
+        $compose = ['services' => ['app' => ['image' => 'acme/app']]];
+
+        $this->assertSame($compose, ComposeHarden::withProcMounts($compose, []));
+        $this->assertArrayNotHasKey('volumes', ComposeHarden::applyReporting($compose)['compose']['services']['app']);
     }
 }

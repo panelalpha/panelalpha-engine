@@ -60,7 +60,7 @@ class CommandScriptTest extends TestCase
         // A YAML folded `>-` description with a blank line folds to real "\n".
         // Commenting only the first line drops the rest into the entrypoint as
         // bare shell: a syntax error that crash-loops the container while the
-        // deploy reports success (engine#198).
+        // deploy reports success.
         $lines = $this->lines([
             'id' => 'migrate',
             'run' => 'php artisan migrate --force',

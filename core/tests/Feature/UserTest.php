@@ -64,7 +64,9 @@ class UserTest extends TestCase
         $username = $this->getCacheAsString('user.username');
         $this->authenticate();
         $response = $this->postJson("/api/users/{$username}/rebuild");
-        $response->assertStatus(200);
+        $response->assertStatus(202);
+        // The suite's queue is sync, so the job has run by the time the 202 is back.
+        $this->assertSame('completed', $this->getJson('/api/tasks/' . $response->json('data.id'))->json('data.status'));
     }
 
     public function test_show_user(): void

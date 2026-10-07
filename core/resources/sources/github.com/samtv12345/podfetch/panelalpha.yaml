@@ -28,21 +28,10 @@ description: >-
      /api/v1/sys/config reports https://<domain>/.
   3. The image has no shell, so it cannot healthcheck itself: `wait` (alpine)
      polls /ui/ and `ready` waits on it completing, so `up -d` returns only
-     once PodFetch answers (engine#204).
+     once PodFetch answers.
 
-  == Verified on 10.10.10.25 (engine 705f250a), memory_limit 2000 ==
-
-  Deploy 54s. /ui/ title "Podfetch" (1036 B SPA shell, 392 KB JS bundle).
-  Anonymous /api/v1/podcasts, /api/v1/users, /api/v1/sys/info, /rss 403;
-  login with a wrong password 403, generated one 200; /users/me admin/admin.
-  POST /api/v1/podcasts/feed with the NPR Planet Money RSS feed added the
-  podcast; listed and its 75 episodes returned. Rebuild 32s: login
-  unchanged, same admin id, podcast and episodes still there. /.env,
-  /.git/config, /db/podcast.db and /podcasts/../db/podcast.db 404. App
-  ~12-22 MiB.
-
-  Notes: auto-download is on by default (5 newest episodes per podcast, 154 MB
-  for one feed), so disk use grows with subscriptions - tune it in Settings.
+  Notes: auto-download is on by default (5 newest episodes per podcast), so
+  disk use grows with subscriptions - tune it in Settings.
   Downloaded episode files under /podcasts/<podcast>/<episode>/ are served
   without auth by upstream design (external players, Chromecast); they are
   copies of public feeds, and there is no directory listing.

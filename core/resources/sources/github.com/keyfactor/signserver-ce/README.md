@@ -26,4 +26,4 @@ Keyfactor's PKI signing server (code, documents, timestamps) on WildFly.
   OAuth/OIDC login via the image's environment variables, or manage workers with
   the CLI: `docker compose -p project exec app /opt/keyfactor/signserver/bin/signserver getstatus brief all`.
 - Do not set `ADMINWEB_ACCESS=false` expecting it to protect anything: it is an
-  IP allow-list and the proxy listener trusts `X-Forwarded-For` (engine#319).
+  IP allow-list and the proxy listener trusts `X-Forwarded-For`.

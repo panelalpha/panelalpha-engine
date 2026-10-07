@@ -18,7 +18,7 @@ final class GitRepoInput
 {
     public const MAX_LENGTH = 2048;
 
-    /** SSH is absent: the engine holds no keys. {@see sshProblem()}. */
+    /** SSH only with a project's deploy key. {@see sshProblem()}. */
     private const SCHEMES = ['http', 'https'];
 
     private const SCP_STYLE = '#^[^@\s/]+@[^:\s/]+:[^\s]+$#';
@@ -32,6 +32,9 @@ final class GitRepoInput
     private const FORGE_HOSTS = [
         'github.com', 'gitlab.com', 'bitbucket.org', 'codeberg.org', 'gitea.com', 'sr.ht',
     ];
+
+    /** Forges where `git@host:owner/repo.git` is `https://host/owner/repo.git`. */
+    private const HTTPS_FORGES = ['github.com', 'gitlab.com', 'bitbucket.org', 'codeberg.org', 'gitea.com'];
 
     /**
      * The forge a bare `owner/repo` means when nothing says otherwise. The
@@ -87,7 +90,7 @@ final class GitRepoInput
     /**
      * Supply the scheme a caller left off `github.com/owner/repo`. A bare
      * `owner/repo` is left alone: `https://owner/repo` would send the probe
-     * to a host called `owner` (#83), and problem() suggests the URL instead.
+     * to a host called `owner`, and problem() suggests the URL instead.
      */
     public static function normalise(string $raw): string
     {
@@ -107,9 +110,67 @@ final class GitRepoInput
         return stripos($raw, 'ssh://') === 0 || preg_match(self::SCP_STYLE, $raw) === 1;
     }
 
-    /** The HTTPS spelling of an SSH remote, or null if it names no repository. */
+    /**
+     * The host of an SSH remote as known_hosts names it -- `[host]:port` off
+     * port 22 -- or null when the URL is not an SSH remote with a host.
+     */
+    public static function sshHost(string $raw): ?string
+    {
+        $raw = trim($raw);
+        if (!self::isSsh($raw)) {
+            return null;
+        }
+        if (stripos($raw, 'ssh://') === 0) {
+            $host = strtolower((string) parse_url($raw, PHP_URL_HOST));
+            $port = (int) (parse_url($raw, PHP_URL_PORT) ?: 22);
+        } else {
+            $host = strtolower(explode(':', substr($raw, strpos($raw, '@') + 1), 2)[0]);
+            $port = 22;
+        }
+        if ($host === '') {
+            return null;
+        }
+
+        return $port === 22 ? $host : "[{$host}]:{$port}";
+    }
+
+    /**
+     * An SSH remote for a project that holds a deploy key: refused only when
+     * its host key is not pinned, since the clone would then fail on it.
+     *
+     * @param callable(string): bool $pinned
+     * @return ?array<string, mixed>
+     */
+    public static function sshProblemWithKey(string $field, string $raw, callable $pinned): ?array
+    {
+        $host = self::sshHost($raw);
+        if ($host === null) {
+            return self::problemOf($field, 'malformed', "'{$raw}' names no host.");
+        }
+        if ($pinned($host)) {
+            return null;
+        }
+
+        return [
+            'field' => $field,
+            'code' => $field . '_ssh_host_not_pinned',
+            'message' => "The host key of {$host} is not pinned, so the clone could not verify the server. "
+                . 'Pin it with POST /projects/{name}/git/deploy-key and `host`.',
+            'expected' => 'an SSH remote on github.com, gitlab.com, bitbucket.org or a host pinned on the deploy key',
+            'examples' => ['git@github.com:owner/repo.git', 'ssh://git@git.example.com:2222/owner/repo.git'],
+        ];
+    }
+
+    /**
+     * The HTTPS spelling of an SSH remote on a forge that serves the same path
+     * over HTTPS, or null. Any other host -- or a forge on another SSH port --
+     * is not guessed: its HTTPS address and port are its own.
+     */
     public static function httpsEquivalent(string $raw): ?string
     {
+        if (!in_array(self::sshHost($raw), self::HTTPS_FORGES, true)) {
+            return null;
+        }
         $parsed = RepoUrl::parse(trim($raw));
 
         return $parsed === null
@@ -191,22 +252,23 @@ final class GitRepoInput
     }
 
     /**
-     * Refused rather than attempted: the clone authenticates only through a
-     * GIT_ASKPASS token, so SSH would reach git and die on the host key two
-     * minutes into a deploy job.
+     * Refused rather than attempted: an SSH remote clones only with a
+     * project's deploy key, and there is no project yet to hold one.
      *
      * @return array<string, mixed>
      */
-    private static function sshProblem(string $field, string $value): array
+    public static function sshProblem(string $field, string $value): array
     {
-        $message = 'SSH remotes are not supported: the engine clones anonymously or with an '
-            . 'HTTPS token (`git_token`), and holds no SSH keys.';
+        $message = 'An SSH remote clones only with a project\'s deploy key, and a project has none until it '
+            . 'exists. Create the project without a repository, create its key with POST '
+            . '/projects/{name}/git/deploy-key, add the returned public key to the repository as a deploy key, '
+            . 'then connect the SSH remote with POST /projects/{name}/git/connect.';
         $https = self::httpsEquivalent($value);
 
         return self::problemOf(
             $field,
             'ssh_unsupported',
-            $https === null ? $message : $message . ' Use ' . $https . ' instead.',
+            $https === null ? $message : $message . ' Or use ' . $https . ', with a token if it is private.',
             $https
         );
     }

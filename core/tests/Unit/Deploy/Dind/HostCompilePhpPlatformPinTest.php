@@ -227,7 +227,7 @@ class HostCompilePhpPlatformPinTest extends TestCase
     {
         $script = $this->script($this->build([
             'phpBB/composer.json' => (string) json_encode([
-                'require' => ['php' => '^8.2'],
+                'require' => ['php' => '~8.2.0'],
                 'config' => ['platform' => ['php' => '7.4']],
             ]),
         ], $this->phpDecision(), 'phpBB'));
@@ -238,7 +238,7 @@ class HostCompilePhpPlatformPinTest extends TestCase
 
     /**
      * The classmap directories come from the app root's composer.json, the
-     * same file the install reads (#119, ILIAS).
+     * same file the install reads (ILIAS).
      */
     public function test_missing_classmap_directories_are_read_from_the_app_root(): void
     {
@@ -478,6 +478,44 @@ class HostCompilePhpPlatformPinTest extends TestCase
     }
 
     /**
+     * Volmarg/personal-management-system: `platform.php` is the root constraint
+     * `^8.3.0`, not a minor, and the lock still holds paragonie/random_compat
+     * v9.99.99 requiring `^7`. The install died on that one package's platform
+     * check (`requires php ^7 -> your php version (8.3.35)`).
+     */
+    public function test_a_constraint_platform_lock_with_a_stale_package_relaxes_php_only(): void
+    {
+        $script = $this->script($this->build([
+            'composer.json' => (string) json_encode(['require' => ['php' => '^8.3.0']]),
+            'composer.lock' => (string) json_encode([
+                'platform' => ['php' => '^8.3.0', 'ext-gd' => '*'],
+                'packages' => [
+                    ['name' => 'symfony/console', 'version' => 'v5.4.0', 'require' => ['php' => '>=7.2.5']],
+                    ['name' => 'paragonie/random_compat', 'version' => 'v9.99.99', 'require' => ['php' => '^7']],
+                ],
+            ]),
+        ], $this->phpDecision()));
+
+        $this->assertStringContainsString('platform.php 8.3.99', $script);
+        $this->assertStringContainsString('--ignore-platform-req=php', $script);
+        $this->assertStringNotContainsString('--ignore-platform-reqs', $script);
+    }
+
+    /** The same lock without the stale package is installed strictly. */
+    public function test_a_constraint_platform_lock_whose_packages_agree_is_not_relaxed(): void
+    {
+        $script = $this->script($this->build([
+            'composer.json' => (string) json_encode(['require' => ['php' => '^8.3.0']]),
+            'composer.lock' => (string) json_encode([
+                'platform' => ['php' => '^8.3.0'],
+                'packages' => [['name' => 'symfony/console', 'version' => 'v5.4.0', 'require' => ['php' => '>=7.2.5']]],
+            ]),
+        ], $this->phpDecision()));
+
+        $this->assertStringNotContainsString('--ignore-platform-req=php', $script);
+    }
+
+    /**
      * A locked platform the engine publishes no image for is not a minor to
      * pin -- but the install still applies it, so it is the contradiction to
      * relax.
@@ -508,7 +546,7 @@ class HostCompilePhpPlatformPinTest extends TestCase
     }
 
     /**
-     * Engine #168. bolt/project, pimcore/skeleton and thelia/thelia commit no
+     * bolt/project, pimcore/skeleton and thelia/thelia commit no
      * composer.lock, so the lock-keyed gate always built them --no-plugins
      * and symfony/runtime never wrote vendor/autoload_runtime.php. Now the
      * install runs with plugins, under the runtime manifest's allow-plugins,

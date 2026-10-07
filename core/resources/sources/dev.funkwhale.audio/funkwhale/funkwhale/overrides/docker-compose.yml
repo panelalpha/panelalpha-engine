@@ -13,7 +13,7 @@
 # nobody asked for. Override FUNKWHALE_VERSION in the account env_vars to move it.
 #
 # Every value is literal or uses compose's ${VAR:-default} form; a bare ${VAR}
-# interpolates to an empty string (engine#212), which for a password means a
+# interpolates to an empty string, which for a password means a
 # database that trusts everyone.
 
 x-fw-env: &fw-env
@@ -105,7 +105,7 @@ services:
   # One-shot: migrate, publish the collected static, create this account's
   # superuser, then exit 0. `api` waits on it (service_completed_successfully),
   # so a failed migration or a missing owner stops the stack instead of
-  # publishing an unowned pod. `up -d` runs without --wait (engine#204), so a
+  # publishing an unowned pod. `up -d` runs without --wait, so a
   # one-shot that failed would otherwise leave the deploy green.
   init:
     image: docker.io/funkwhale/api:${FUNKWHALE_VERSION:-2.0.11}
@@ -231,7 +231,7 @@ services:
     mem_limit: 96m
 
   # Does nothing and exits 0, but only once the front's healthcheck passes.
-  # `up -d` runs without --wait (engine#204); compose does block on a
+  # `up -d` runs without --wait; compose does block on a
   # depends_on health condition, so this is what makes the deploy finish only
   # after the API truly answers. A clean exit 0 is not a crash loop to AppHealth.
   ready:

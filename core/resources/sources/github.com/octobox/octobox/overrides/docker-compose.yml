@@ -20,7 +20,7 @@ x-octobox: &octobox
 
 services:
   # One-shot: Octobox only signs in with GitHub OAuth, so the deploy fails here
-  # naming each missing variable. Read from .env at runtime (engine#336).
+  # naming each missing variable. Read from .env at runtime.
   check:
     image: octoboxio/octobox:september-2026
     restart: "no"

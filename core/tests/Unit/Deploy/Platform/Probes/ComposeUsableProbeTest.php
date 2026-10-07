@@ -43,6 +43,72 @@ class ComposeUsableProbeTest extends ProbeTestCase
         );
     }
 
+    /**
+     * Stretto's recipe: one service builds a deps image and binds the
+     * checkout, which reads as a workstation file in a repository but is what
+     * the recipe author wrote for the engine.
+     */
+    public function test_an_app_config_compose_is_not_second_guessed_as_a_workstation_file(): void
+    {
+        $recipe = <<<'YAML'
+        services:
+          app:
+            build: { context: ., dockerfile: Dockerfile.local }
+            working_dir: /app/src
+            volumes:
+              - .:/app/src
+        YAML;
+        $this->write(EngineArtifacts::APP_CONFIG_COMPOSE, $recipe);
+        $this->write('Dockerfile.local', "FROM node:20\n");
+
+        $this->assertSame(
+            ['compose_path' => $this->dir . '/' . EngineArtifacts::APP_CONFIG_COMPOSE],
+            $this->probe()->evaluate($this->context())
+        );
+
+        // The same file shipped by the repository is still a workstation file.
+        $this->write('docker-compose.yml', $recipe);
+        unlink($this->dir . '/' . EngineArtifacts::APP_CONFIG_COMPOSE);
+        $this->assertFalse($this->probe()->evaluate($this->context()));
+    }
+
+    /** NextChat gates both its services behind profiles: `compose up` reports "no service selected". */
+    public function test_a_file_whose_every_service_is_profiled_starts_nothing(): void
+    {
+        $profiled = <<<'YAML'
+        services:
+          chatgpt-next-web:
+            profiles: [ "no-proxy" ]
+            image: yidadaa/chatgpt-next-web
+            ports: ["3000:3000"]
+          chatgpt-next-web-proxy:
+            profiles: [ "proxy" ]
+            image: yidadaa/chatgpt-next-web
+            ports: ["3000:3000"]
+        YAML;
+        $this->write('docker-compose.yml', $profiled);
+        $this->assertFalse($this->probe()->evaluate($this->context()));
+
+        // The repository's own .env activating one makes it a stack again.
+        $this->write('.env', "COMPOSE_PROFILES=proxy\n");
+        $this->assertSame(
+            ['compose_path' => $this->dir . '/docker-compose.yml'],
+            $this->probe()->evaluate($this->context())
+        );
+    }
+
+    /** poke's only service has its `image:` commented out and no `build:`. */
+    public function test_a_service_with_neither_image_nor_build_starts_nothing(): void
+    {
+        $this->write('docker-compose.yml', "services:\n  poke:\n    restart: unless-stopped\n    ports:\n      - \"6003:6003\"\n");
+        $this->write('Dockerfile', "FROM node:20\n");
+        $this->assertFalse($this->probe()->evaluate($this->context()));
+
+        // A service that inherits its image through `extends` is fine.
+        $this->write('docker-compose.yml', "services:\n  base:\n    image: node:20\n  web:\n    extends: base\n    ports: [\"3000:3000\"]\n");
+        $this->assertIsArray($this->probe()->evaluate($this->context()));
+    }
+
     public function test_the_modern_filename_is_preferred(): void
     {
         // Repos mid-rename carry both. compose.yaml is the current spelling
@@ -263,7 +329,7 @@ class ComposeUsableProbeTest extends ProbeTestCase
     }
 
     /**
-     * rapidbay (#122) ships a Compose v1 file: the service at the top level,
+     * rapidbay ships a Compose v1 file: the service at the top level,
      * no `services:`. Compose v2 refuses it (`additional properties
      * 'rapidbay' not allowed`), so claiming it only guaranteed a failed
      * deploy while the root Dockerfile next to it builds.

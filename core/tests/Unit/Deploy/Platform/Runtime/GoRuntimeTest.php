@@ -83,6 +83,40 @@ class GoRuntimeTest extends TestCase
         $this->assertSame('./cmd/server', GoRuntime::mainPackage($this->dir));
     }
 
+    /** Stash: the root's only Go file is the tools.go idiom, the program is cmd/stash. */
+    public function test_a_tools_tagged_root_file_does_not_count_as_the_program(): void
+    {
+        $this->write('go.mod', "module github.com/stashapp/stash\n\ngo 1.24\n");
+        $this->write('tools.go', "//go:build tools\n// +build tools\n\npackage main\n\nimport _ \"github.com/99designs/gqlgen\"\n");
+        $this->write('cmd/stash/main.go');
+        $this->write('internal/api/server.go', "package api\n");
+
+        $this->assertSame('./cmd/stash', GoRuntime::mainPackage($this->dir));
+        $this->assertStringContainsString('go build -o app ./cmd/stash &&', GoRuntime::buildCommand($this->dir));
+    }
+
+    public function test_build_constraints_are_evaluated_for_a_linux_build_without_cgo(): void
+    {
+        $holds = static fn (string $header): bool => GoRuntime::constraintsHold($header . "\n\npackage main\n");
+
+        $this->assertTrue($holds(''));
+        $this->assertTrue($holds('//go:build linux'));
+        $this->assertTrue($holds('//go:build !windows && (linux || darwin)'));
+        $this->assertTrue($holds('//go:build !cgo'));
+        $this->assertTrue($holds('//go:build go1.21'));
+        $this->assertTrue($holds("// +build linux,!cgo darwin"));
+        $this->assertFalse($holds('//go:build tools'));
+        $this->assertFalse($holds('//go:build ignore'));
+        $this->assertFalse($holds('//go:build cgo'));
+        $this->assertFalse($holds('//go:build windows'));
+        $this->assertFalse($holds('//go:build linux && integration'));
+        $this->assertFalse($holds('// +build tools'));
+        // Unparseable: counted, as every file was before.
+        $this->assertTrue($holds('//go:build linux &&'));
+        // A constraint after the package clause is not one.
+        $this->assertTrue(GoRuntime::constraintsHold("package main\n\n//go:build tools\n"));
+    }
+
     public function test_a_single_cmd_entrypoint_is_built(): void
     {
         $this->write('go.mod', "module example.com/bar\n\ngo 1.22\n");
@@ -118,7 +152,7 @@ class GoRuntimeTest extends TestCase
     }
 
     /**
-     * Dropserver (#94): `ds-dev` is a development helper beside the server
+     * Dropserver: `ds-dev` is a development helper beside the server
      * `ds-host`, and won only by being the shorter name.
      */
     public function test_a_development_helper_is_not_picked_over_the_server(): void

@@ -201,7 +201,7 @@ class BuiltImageTest extends TestCase
             $sizes,
             9_500_000_000,
             10_000_000_000,
-            HostPrewarmPlan::catalog()
+            HostPrewarmPlan::available()
         );
 
         $this->assertSame([$variant], $drop, 'the catalogued base is worth more than an on-demand variant');
@@ -220,7 +220,7 @@ class BuiltImageTest extends TestCase
             $sizes,
             10_000_000_000 - 300 * 1048576,
             10_000_000_000,
-            HostPrewarmPlan::catalog()
+            HostPrewarmPlan::available()
         );
 
         $this->assertCount(1, $drop);
@@ -237,7 +237,7 @@ class BuiltImageTest extends TestCase
 
         $this->assertSame(
             [],
-            HostPrewarmPlan::reclaimableBuiltImages($sizes, 0, 10_000_000_000, HostPrewarmPlan::catalog())
+            HostPrewarmPlan::reclaimableBuiltImages($sizes, 0, 10_000_000_000, HostPrewarmPlan::available())
         );
     }
 }

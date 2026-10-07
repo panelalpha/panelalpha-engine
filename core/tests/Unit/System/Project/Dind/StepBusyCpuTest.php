@@ -24,4 +24,24 @@ class StepBusyCpuTest extends TestCase
         $this->assertSame(0.0, ShellOperations::cpuPercent("--\n"));
         $this->assertSame(0.0, ShellOperations::cpuPercent("no such service: dind\n"));
     }
+
+    /**
+     * Two `<uptime> <usage_usec>` samples of the account's cgroup, as read with
+     * a BuildKit RUN step spinning while `docker stats` said 0.97%, then idle.
+     */
+    public function test_cgroup_samples_give_the_cpu_of_nested_builds(): void
+    {
+        $this->assertEqualsWithDelta(201.7, ShellOperations::cgroupCpuPercent("231.41 353554173\n233.41 357587418\n"), 0.1);
+        $this->assertEqualsWithDelta(0.5, ShellOperations::cgroupCpuPercent("289.19 395156634\n291.20 395166770\n"), 0.01);
+    }
+
+    /** Anything unreadable is null, and the probe falls back to `docker stats`. */
+    public function test_unreadable_cgroup_samples_are_null(): void
+    {
+        $this->assertNull(ShellOperations::cgroupCpuPercent(''));
+        $this->assertNull(ShellOperations::cgroupCpuPercent(" 222677606\n 226703398\n"));
+        $this->assertNull(ShellOperations::cgroupCpuPercent("231.41 353554173\n"));
+        $this->assertNull(ShellOperations::cgroupCpuPercent("231.41 353554173\n231.41 357587418\n"));
+        $this->assertNull(ShellOperations::cgroupCpuPercent("cut: /proc/uptime: No such file or directory\n"));
+    }
 }

@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Task;
 
+use App\Http\Controllers\TaskController;
 use App\Http\Middleware\Authenticate;
 use App\Models\Task;
 use App\Models\TaskLog;
@@ -176,5 +177,33 @@ class TaskApiKernelTest extends SqliteTaskTestCase
         $this->assertSame('two', $frames[1]['log']);
         $this->assertSame('finish', $frames[2]['type']);
         $this->assertSame('completed', $frames[2]['status']);
+    }
+
+    public function test_get_logs_stream_sends_heartbeats_while_the_task_is_quiet(): void
+    {
+        $task = Task::start(jobType: 'App\\Jobs\\RebuildJob', queue: 'default');
+        $started = microtime(true);
+        // The task logs one line and finishes once the stream has been quiet past the heartbeat.
+        Task::retrieved(static function (Task $seen) use ($started): void {
+            if (microtime(true) - $started > TaskController::STREAM_HEARTBEAT_SECONDS + 0.5
+                && TaskLog::query()->where('task_id', $seen->id)->doesntExist()) {
+                TaskLog::create([
+                    'task_id' => $seen->id,
+                    'log' => json_encode(['ts' => 1, 'stage' => null, 'level' => 'info', 'msg' => 'late']),
+                ]);
+                Task::query()->whereKey($seen->id)->update(['status' => Task::STATUS_COMPLETED]);
+            }
+        });
+
+        $body = $this->get('/api/tasks/' . $task->id . '/logs/stream')->streamedContent();
+
+        $frames = array_map(
+            static fn (string $line) => json_decode($line, true),
+            explode("\n", trim($body)),
+        );
+        $this->assertSame(['type' => 'heartbeat'], $frames[0]);
+        $this->assertSame('late', $frames[1]['log']);
+        $this->assertSame(['type' => 'finish', 'status' => 'completed'], $frames[2]);
+        $this->assertCount(3, $frames);
     }
 }

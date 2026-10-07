@@ -68,6 +68,7 @@ class DeployLoggerTest extends TestCase
 
     public function test_a_known_problem_is_written_to_the_log_line_by_line(): void
     {
+        config(['system.version' => '2.0.2']);
         $logger = DeployLogger::start($this->username());
         $write = new \ReflectionMethod(DeployLogger::class, 'writeProblem');
         $write->invoke($logger, [
@@ -92,6 +93,32 @@ class DeployLoggerTest extends TestCase
         $logger->finish(DeployLogger::STATUS_SUCCESS);
     }
 
+    /**
+     * OSPOS on an engine that already had the composer-in-npm-scripts fix:
+     * "Fixed in engine 2.1.1" was printed for a failure 2.1.1 did not prevent.
+     */
+    public function test_a_fix_this_engine_already_has_is_not_claimed(): void
+    {
+        config(['system.version' => '2.1.1']);
+        $logger = DeployLogger::start($this->username());
+        $write = new \ReflectionMethod(DeployLogger::class, 'writeProblem');
+        $write->invoke($logger, [
+            'title' => 'PHP frontend build calls Composer from a Node-only build container',
+            'body_why' => 'An npm script runs composer, which the Node image does not have.',
+            'body_fix' => 'Fixed in engine 2.1.1: a frontend build whose npm scripts call composer or php runs in the PHP image.',
+            'fixed_in_version' => '2.1.1',
+        ], null);
+
+        $this->assertSame([
+            'Known problem: PHP frontend build calls Composer from a Node-only build container',
+            'Why:',
+            'An npm script runs composer, which the Node image does not have.',
+            'This engine already includes the fix released in 2.1.1; this failure is a case it does not cover',
+        ], array_column($logger->read()['lines'], 'msg'));
+
+        $logger->finish(DeployLogger::STATUS_SUCCESS);
+    }
+
     public function test_a_finished_deploy_without_a_known_problem_says_so(): void
     {
         $logger = DeployLogger::start($this->username());
@@ -101,6 +128,26 @@ class DeployLoggerTest extends TestCase
         $this->assertSame(DeployLogger::STATUS_FAILED, $latest['status']);
         $this->assertArrayHasKey('problem', $latest);
         $this->assertNull($latest['problem']);
+    }
+
+    /**
+     * A failed rebuild was finished by the workflow and again by the catch
+     * around it: two `Deploy failed` lines, two telemetry reports, and the
+     * second one's status replacing the first's.
+     */
+    public function test_a_second_finish_of_the_same_deploy_changes_nothing(): void
+    {
+        $logger = DeployLogger::start($this->username());
+        $logger->finish(DeployLogger::STATUS_FAILED, 'Failed to start app: the base image is missing');
+        $first = $logger->readLatest();
+
+        $logger->recordFailureOutput('Failed to start app: the base image is missing');
+        $logger->finish(DeployLogger::STATUS_FAILED, 'something else');
+
+        $messages = array_column($logger->read()['lines'], 'msg');
+        $finished = array_filter($messages, static fn (string $m): bool => str_starts_with($m, 'Deploy failed'));
+        $this->assertCount(1, $finished);
+        $this->assertSame($first, $logger->readLatest());
     }
 
     public function test_log_level_wrappers_write_the_expected_level(): void

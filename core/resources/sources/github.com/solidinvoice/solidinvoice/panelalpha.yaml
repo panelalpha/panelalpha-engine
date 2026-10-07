@@ -6,21 +6,18 @@ description: >-
   repository's docker-compose.yml is upstream's own: solidinvoice/solidinvoice
   on 8765:8765 beside mysql:8.0.
 
-  Detection was already right. The tracker run read that compose file, chose
-  the compose strategy and found port 8765; what it got was
-  `serving-unknown`, nothing listening on 8765 and the health report's
-  app-restart-looping check naming `app (Restarting (137))`. 137 is the
-  kernel, and the reason is the first thing the binary does: initializeApp()
-  untars its embedded copy of the application into $HOME/.SolidInvoice before
-  any subcommand runs. Measured on this host, that untar wants more than 1280
-  MB of cgroup -- the dirty pages are charged to it -- while ServiceLimits
-  hands an unlisted `app` service a share of the account. So the container was
-  killed mid-untar, and then the second failure landed on top of the first:
-  extractEmbeddedApp() decides it has already unpacked by os.Stat() on the
-  directory alone, so a half-unpacked tree is never completed. Every later
-  boot found a directory with no bin/console and no Caddyfile, Caddy refused
-  to load a config that was not there, and the container sat "Up" answering
-  nothing. This recipe unpacks once, in a one-shot container sized for it, into
+  Detection is right: that compose file, the compose strategy, port 8765. But
+  the app container restart-loops with exit code 137, which is the kernel, and
+  the reason is the first thing the binary does: initializeApp() untars its
+  embedded copy of the application into $HOME/.SolidInvoice before any
+  subcommand runs. That untar wants more than 1280 MB of cgroup -- the dirty
+  pages are charged to it -- while ServiceLimits hands an unlisted `app`
+  service a share of the account. So the container is killed mid-untar, and
+  then the second failure lands on top of the first: extractEmbeddedApp()
+  decides it has already unpacked by os.Stat() on the directory alone, so a
+  half-unpacked tree is never completed. Every later boot finds a directory
+  with no bin/console and no Caddyfile, Caddy refuses to load a config that is
+  not there, and the container sits "Up" answering nothing. This recipe unpacks once, in a one-shot container sized for it, into
   a volume the app service shares, and removes a half-unpacked tree before
   trying again.
 
@@ -80,7 +77,7 @@ description: >-
   header needs no special handling here, unusually: the image sets
   SOLIDINVOICE_DOCKER=true, which makes the Caddy site address `http://:8765`
   -- a port with no hostname, matching any Host -- so the engine's probe on
-  127.0.0.1:8765 is answered rather than 400ed (engine#165).
+  127.0.0.1:8765 is answered rather than 400ed.
 
   Not configured: mail (SOLIDINVOICE_MAILER_DSN stays null://null, so password
   resets and invoice e-mails are accepted and discarded), Meilisearch, Sentry,

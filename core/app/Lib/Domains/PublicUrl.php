@@ -73,7 +73,7 @@ final class PublicUrl
     }
 
     /**
-     * Said in the deploy log without marking the deploy partial (#79).
+     * Said in the deploy log without marking the deploy partial.
      *
      * A fallback that still resolves publicly, such as `panelalpha_direct`
      * after PanelAlpha Online refused a label, works, so it is not a warning.

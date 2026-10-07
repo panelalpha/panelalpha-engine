@@ -9,13 +9,13 @@ description: >-
   connects to on a laptop. ComposeFileInspector classifies it correctly
   (isSidecarsOnlyComposeYaml: every service a known datastore, none with a
   build) and will not run it as the project, so detection fell through to the
-  root Dockerfile, built it in 145 seconds and started the image on its own
-  with an empty .env. Outline exits immediately without a database, a redis
+  root Dockerfile, built it and started the image on its own with an empty
+  .env. Outline exits immediately without a database, a redis
   and a SECRET_KEY, so the container restart-looped and nothing ever listened
-  on 3000 — the serving-unknown verdict this recipe turns into a served page.
+  on 3000.
 
-  Building that Dockerfile was also the wrong thing to spend the 145 seconds
-  on. It is a repackaging step, not a build: its first stage is `FROM
+  Building that Dockerfile was also the wrong thing to spend time on. It is a
+  repackaging step, not a build: its first stage is `FROM
   outlinewiki/outline-base` at the floating `latest` tag, and every COPY in
   the runner stage lifts build/, server/, public/ and node_modules/ out of
   that image, so the checkout contributes no compiled bytes and the resulting
@@ -24,8 +24,8 @@ description: >-
   and it needs `--max-old-space-size=24000` for the vite pass, which is a
   24 GB heap inside a 2500 MB account. So overrides/docker-compose.yml runs
   the project's published image, and hooks/prepare.sh takes the tag from the
-  checkout's own package.json version (the MAJOR.MINOR line, verified against
-  Docker Hub) so a clone still decides which Outline runs.
+  checkout's own package.json version (the MAJOR.MINOR line) so a clone still
+  decides which Outline runs.
 
   Both datastores are required; there is no single-file mode. The prepare hook
   generates SECRET_KEY, UTILS_SECRET and the Postgres password into .env, once
@@ -64,8 +64,7 @@ description: >-
   handshake against the engine proxy answers 101. The same handshake against a
   *.panelalpha.online test domain answers 200, because those resolve to a
   front proxy (eu1.withoutdns.com) that drops the Upgrade header before the
-  engine ever sees it. Measured with a packet capture of the request arriving
-  at the account. It is not the recipe and not the engine, but it does mean
+  engine ever sees it. It is not the recipe and not the engine, but it does mean
   the editor will look broken on a test domain while the API is fine.
 
   FORCE_HTTPS is deliberately off: TLS is the engine proxy's and the container

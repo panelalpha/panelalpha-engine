@@ -10,7 +10,7 @@ set -e
 cd ~/project
 
 # The account's own state, and the only writable directory that survives a
-# rebuild (panelalpha/engine#173). ~/project does not: a git-project rebuild
+# rebuild. ~/project does not: a git-project rebuild
 # clears it and re-clones (DindDeployMechanics::ingestForWipeRebuild ->
 # ProjectTree::clearContents), so a `[ ! -f ... ]` guard inside the checkout
 # guards nothing -- it would mint a new database password on every redeploy
@@ -57,9 +57,9 @@ ADMIN_HASH="$(cat "${STATE}/admin-hash")"
 umask 077
 mkdir -p panelalpha
 # 0755 and not 0700: the engine scans ~/project after this hook and cannot
-# open a directory it may not read -- measured, "scandir
+# open a directory it may not read -- "scandir
 # (/home/<user>/project/panelalpha): Failed to open directory: Permission
-# denied", which failed the deploy outright. The files below are 0644 for the
+# denied" fails the deploy outright. The files below are 0644 for the
 # same reason; they are copied into an image layer in the same account either
 # way, and ~/project/.env beside them holds the same database password.
 chmod 755 panelalpha

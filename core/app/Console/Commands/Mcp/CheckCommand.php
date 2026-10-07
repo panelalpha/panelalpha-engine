@@ -16,7 +16,7 @@ use Illuminate\Support\Facades\Http;
 class CheckCommand extends Command
 {
     // The token as an argument still works, but it shows in `ps` and in shell
-    // history (engine#48 item 23): prompt for it, or read it from stdin.
+    // history: prompt for it, or read it from stdin.
     protected $signature = 'mcp:check
         {token? : Deprecated - visible in ps and shell history. Omit it to be prompted}
         {--stdin : Read the token from standard input}';

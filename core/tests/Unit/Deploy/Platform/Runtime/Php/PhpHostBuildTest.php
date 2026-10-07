@@ -449,6 +449,18 @@ class PhpHostBuildTest extends TestCase
     }
 
     /**
+     * Composer 2.9+ drops every version with a security advisory, so a lockless
+     * project whose runtime dependency has one on every allowed version
+     * (providence, Islandora) could not be resolved. Every host composer run
+     * gets this environment: the install, the lockless update and the build step.
+     */
+    public function test_security_advisories_do_not_block_the_resolve(): void
+    {
+        $this->assertSame('1', PhpHostBuild::environment()['COMPOSER_NO_BLOCKING']);
+        $this->assertSame('1', PhpHostBuild::environment(false)['COMPOSER_NO_BLOCKING']);
+    }
+
+    /**
      * The application's compose file is run by the account's nested daemon,
      * which resolves bind-mount sources inside the account container. Nothing
      * mounts /var/cache/panelalpha in there, so the running container's cache

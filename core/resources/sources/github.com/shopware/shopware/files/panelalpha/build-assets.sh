@@ -4,8 +4,8 @@
 # HostCompile::runForPhp(). The checkout is bind-mounted at /app and the
 # account's uid owns it, but the cgroup is the *engine's* build budget and not
 # the account's limit: DindEngine::buildMemory() takes DEPLOY_BUILD_MEMORY when
-# an operator set one, and otherwise 8192MB, never more than half the host's RAM
-# (engine#295). NODE_OPTIONS already carries --max-old-space-size=70% of that.
+# an operator set one, and otherwise 8192MB, never more than half the host's RAM.
+# NODE_OPTIONS already carries --max-old-space-size=70% of that.
 #
 # Shopware's monorepo ships no compiled frontend. src/Storefront/Resources/
 # .gitignore excludes `app/storefront/dist/*` (all but the static `assets`
@@ -23,8 +23,7 @@ export CI=true
 # The cgroup the engine put this container in. Read rather than assumed: the
 # two builds have very different appetites, the administration one cannot be
 # made to fit under about 2.8 GB, and the budget is a property of the engine
-# host -- 5202 MB on the 15 GB host this was measured on, but the 2048 MB
-# floor on anything under ~6 GB. So this is the number that decides whether to
+# host -- the 2048 MB floor on anything under ~6 GB. So this is the number that decides whether to
 # attempt it.
 limit_mb() {
     local v
@@ -60,8 +59,7 @@ echo "[shopware] host asset build, memory limit ${MEM}MB"
 #      storefront bundle fails the theme assignment outright rather than
 #      degrading it.
 #
-# Measured on this engine: npm ci 37s / 845MB of node_modules, the production
-# build ~6s. Comfortable inside a 2GB account.
+# Comfortable inside a 2GB account.
 # ---------------------------------------------------------------------------
 # 0. var/plugins.json, which the storefront's webpack config refuses to start
 #    without and which only PHP can normally write.
@@ -103,23 +101,17 @@ cd "$ROOT"
 #
 # `npm run build` here is `VITE_MODE=production ts-node -T build.ts`, a Rollup
 # pass over the whole administration plus a second one for the Storefront's
-# admin modules. Measured on this engine, three runs of the same commit:
-#
-#   2000MB cgroup / 1400MB heap -> FATAL ERROR: Ineffective mark-compacts near
-#                                  heap limit
-#   2400MB cgroup / 1800MB heap -> exit 137, cgroup OOM kill
-#   2800MB cgroup / 2200MB heap -> success in 52s, RSS peaked ~2.5GB
-#
-# (The heap in each row is what ServiceLimits::nodeHeapMbFor() derives from
-# that cgroup, so those are the pairs a real deploy would see.)
+# admin modules. It needs a cgroup of about 2.8GB (with the heap
+# ServiceLimits::nodeHeapMbFor() derives from it); below that it dies with
+# "FATAL ERROR: Ineffective mark-compacts near heap limit" or a cgroup OOM
+# kill (exit 137).
 #
 # There is no flag that makes it smaller: the peak is Rollup's module graph,
 # not minification. An engine host with less than ~5.3GB of RAM gives the build
 # container less than that, so on a small engine this build cannot run at all,
 # whatever the account is sized at.
 #
-# Attempting it anyway spends 51s and 1.2GB of node_modules to arrive at a
-# kill, and a failure here fails the whole deploy (runContainer() throws),
+# Attempting it anyway spends a full npm install to arrive at a kill, and a failure here fails the whole deploy (runContainer() throws),
 # taking a storefront that does work down with it. So it is skipped, loudly,
 # rather than attempted and swallowed: the shop is still a working shop --
 # storefront, customer account area and checkout are server-rendered Twig --

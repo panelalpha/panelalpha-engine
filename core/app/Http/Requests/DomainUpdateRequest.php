@@ -29,7 +29,7 @@ class DomainUpdateRequest extends FormRequest
             // outside the account altogether. The vhost templates write it
             // unquoted (Blade escapes HTML only), so whitespace, `;`, `{`, `"`,
             // `$` and newlines would end the directive: only plain path
-            // characters are taken (engine#7).
+            // characters are taken.
             'document_root' => [
                 'sometimes',
                 'string',

@@ -31,15 +31,8 @@ description: >-
   persist. The official image has no zip extension, so zip/unzip actions are
   unavailable; tar works. A `ready` service gates on the login page.
 
-  Measured on mariusz2.panelalpha.tools (2026-09-28, engine 705f250a,
-  memory_limit 1200): deploy 47s, rebuild 27s, app 17 MiB. admin/admin@123,
-  user/12345 and a wrong password: "Login failed"; the generated admin logs
-  in. Uploaded a .txt and a .php, listed and downloaded both byte-for-byte;
-  GET /pa-shell.php, /data/..., /srv/files/... 404, /config.php and
-  /.htaccess 403, /.env, /.git/config, /tinyfilemanager.php 404. After
-  rebuild the same password logged in and the files were intact. Uploads
-  must be tested against the engine host: the *.panelalpha.online test edge
-  stalls multipart POSTs (panelalpha/engine#170).
+  Uploads must be tested against the engine host: the *.panelalpha.online
+  test edge stalls multipart POSTs.
 credentials:
   adopt_from: .panelalpha/tinyfm/admin.env
   fields:

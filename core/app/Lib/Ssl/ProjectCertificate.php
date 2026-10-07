@@ -4,6 +4,7 @@ namespace App\Lib\Ssl;
 
 use App\System\Project\Dind;
 use App\Models\Domain;
+use App\Models\User;
 use RuntimeException;
 
 /**
@@ -48,12 +49,21 @@ final class ProjectCertificate
         // reads, and it would otherwise describe the certificate this just
         // replaced until the next deploy.
         $connection->rebuild();
-        $project = $domain->user?->project();
-        if ($project instanceof Dind) {
-            $project->appCertificate()->remember();
-        }
+        self::remember($domain->user);
 
         return CertificateStatus::of($connection->getSslCertificateInfo(), $name);
+    }
+
+    /**
+     * Refresh a DinD project's `details.ssl` after its certificate changed.
+     * User::project() is the System\Project wrapper; the DinD driver is its runtime().
+     */
+    public static function remember(?User $user): void
+    {
+        $runtime = $user?->project()->runtime();
+        if ($runtime instanceof Dind) {
+            $runtime->appCertificate()->remember();
+        }
     }
 
     /**
@@ -77,9 +87,10 @@ final class ProjectCertificate
 
     /**
      * Staging keeps its own accounting and its own trust, so it is the way to
-     * rehearse a request without spending anything that counts.
+     * rehearse a request without spending anything that counts. Renewal asks
+     * here too, so it follows the same shared-zone rule as the first request.
      */
-    private static function issuer(bool $staging): AcmeIssuer
+    public static function issuer(bool $staging): AcmeIssuer
     {
         // The shared-zone decision comes from the setting here too. Building
         // an AcmeIssuer directly is how this path skipped it once already:

@@ -13,7 +13,7 @@ class AppLauncherTest extends TestCase
     {
         $source = file_get_contents(dirname(__DIR__, 5) . '/app/System/Project/Dind/AppLauncher.php');
 
-        $start = $this->methodBody($source, 'start');
+        $start = $this->methodBody($source, 'startWithLogins');
         $success = strpos($start, 'getExitCode() === 0');
         $this->assertNotFalse($success, 'start() no longer branches on a successful up.');
 
@@ -24,6 +24,17 @@ class AppLauncherTest extends TestCase
             strpos($afterUp, 'appCertificate()->remember()'),
             strpos($afterUp, 'appHealth()->report()'),
             'The health report is written before the certificate snapshot.'
+        );
+    }
+
+    public function test_compose_up_reads_the_deploys_registry_logins_when_there_are_any(): void
+    {
+        $command = ['env', 'PWD=/home/a/project', 'docker', 'compose', 'up', '-d'];
+
+        $this->assertSame($command, \App\System\Project\Dind\AppLauncher::withDockerConfig($command, null));
+        $this->assertSame(
+            ['env', 'DOCKER_CONFIG=/home/a/.panelalpha-registry-x', 'PWD=/home/a/project', 'docker', 'compose', 'up', '-d'],
+            \App\System\Project\Dind\AppLauncher::withDockerConfig($command, '/home/a/.panelalpha-registry-x')
         );
     }
 

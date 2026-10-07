@@ -99,7 +99,7 @@ class HostNodeBuildTest extends TestCase
                 'build' => 'astro check && astro build',
             ])
         );
-        // engine#151: every command after the stripped prefix needs the
+        // Every command after the stripped prefix needs the
         // project's binaries, not only the first (reveal.js).
         $this->assertSame(
             'export PATH=/app/node_modules/.bin:$PATH && vite build && vite build -c vite.config.styles.ts',
@@ -176,7 +176,7 @@ class HostNodeBuildTest extends TestCase
         $this->assertSame('', HostNodeBuild::bunBuildCommand(''));
     }
 
-    /** engine#159/#160: a pnpm build printed `cp: cannot stat '/app/package-lock.json'`. */
+    /** A pnpm build printed `cp: cannot stat '/app/package-lock.json'`. */
     public function test_only_an_existing_lockfile_is_stamped_into_node_modules(): void
     {
         $script = HostNodeBuild::innerScript('pnpm install --frozen-lockfile', 'pnpm run build');
@@ -249,7 +249,7 @@ class HostNodeBuildTest extends TestCase
     }
 
     /**
-     * engine#157: Node 25+ images ship no corepack. The guard installs it,
+     * Node 25+ images ship no corepack. The guard installs it,
      * and on the host it is found without writing npm's global prefix.
      */
     public function test_a_missing_corepack_is_installed_before_it_is_used(): void

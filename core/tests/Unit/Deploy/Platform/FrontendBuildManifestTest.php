@@ -13,7 +13,7 @@ use PHPUnit\Framework\TestCase;
 /**
  * `frontend_build:` lets a PHP recipe turn the host frontend pass off (Crater
  * commits public/build) or name the command it runs (grocy's `yarn install`),
- * instead of editing package.json from a prepare hook (engine#433).
+ * instead of editing package.json from a prepare hook.
  */
 class FrontendBuildManifestTest extends TestCase
 {

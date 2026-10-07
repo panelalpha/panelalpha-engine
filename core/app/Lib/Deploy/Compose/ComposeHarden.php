@@ -4,6 +4,7 @@ namespace App\Lib\Deploy\Compose;
 
 use App\Lib\Deploy\Sidecar\SidecarEngine;
 use App\Lib\Deploy\Sidecar\SidecarPasswords;
+use App\System\Project\Dind\LxcfsProc;
 
 /**
  * Turning a compose file somebody wrote for their laptop into one an account
@@ -17,27 +18,56 @@ use App\Lib\Deploy\Sidecar\SidecarPasswords;
  */
 class ComposeHarden
 {
+    /** Why {@see applyReporting()} removes a source, for the deploy log. */
+    public const REMOVED_SOURCE = 'Removed from the run file (a host path, outside the project, or a directory the engine cannot check)';
+
     /**
      * For the Dockerfile and Ruby strategies, which run an image the repository
-     * wrote: the URL aliases, without the generic HTTPS/SSL flags.
+     * wrote: the URL aliases, without the generic HTTPS/SSL flags, without
+     * SERVER_NAME, which is a Caddy/FrankenPHP site address: a hostname there
+     * turns on automatic HTTPS and every proxied request 308s to itself, and
+     * without a path-prefix key the project's own env file sets blank or to a path.
      *
+     * @param list<?string> $envFiles the project's `.env` / `.env.example`
      * @return array<string, string>
      */
-    public static function urlEnvironment(?string $publicUrl): array
+    public static function urlEnvironment(?string $publicUrl, array $envFiles = []): array
     {
-        return PublicUrlEnvironment::for($publicUrl, false);
+        return array_diff_key(
+            PublicUrlEnvironment::for($publicUrl, false),
+            ['SERVER_NAME' => true],
+            array_flip(PublicUrlEnvironment::pathPrefixKeysIn($envFiles))
+        );
     }
 
     /**
      * @param array<string, mixed> $compose
      * @param array<array-key, mixed>|null $asWritten the repository's own services, when
      *        `$compose` carries a prepared copy of them, for the one-shot decision only
+     * @param array<string, list<?string>|string> $env what compose may interpolate the file with
      * @return array<string, mixed>
      */
-    public static function apply(array $compose, ?int $accountMemoryMb = null, ?array $asWritten = null): array
+    public static function apply(array $compose, ?int $accountMemoryMb = null, ?array $asWritten = null, array $env = [], ?string $accountUser = null, ?string $projectDir = null): array
     {
+        return self::applyReporting($compose, $accountMemoryMb, $asWritten, $env, $accountUser, $projectDir)['compose'];
+    }
+
+    /**
+     * As {@see apply()}, with one line per mount source, secret, config or
+     * volume option it removed, so a deploy log can say what went missing.
+     *
+     * @param array<string, mixed> $compose
+     * @param array<array-key, mixed>|null $asWritten
+     * @param array<string, list<?string>|string> $env
+     * @param list<string> $procFiles lxcfs files the account serves ({@see withProcMounts()})
+     * @param (callable(string): list<string>)|null $imageEnvironment an image's `Config.Env`
+     * @return array{compose: array<string, mixed>, removed: list<string>}
+     */
+    public static function applyReporting(array $compose, ?int $accountMemoryMb = null, ?array $asWritten = null, array $env = [], ?string $accountUser = null, ?string $projectDir = null, array $procFiles = [], ?callable $imageEnvironment = null): array
+    {
+        [$compose, $removed] = ServiceHardener::withoutUnsafeFileSources($compose, $env, $accountUser, $projectDir);
         if (!is_array($compose['services'] ?? null)) {
-            return $compose;
+            return ['compose' => $compose, 'removed' => $removed];
         }
 
         // Classified against the file the repository wrote, not against what is
@@ -51,16 +81,75 @@ class ComposeHarden
         $oneShot = self::oneShotServices(
             is_array($asWritten) ? ['services' => $asWritten] + $compose : $compose
         );
+        $publishers = array_keys(array_filter(
+            $compose['services'],
+            static fn ($service): bool => is_array($service) && ServiceHardener::publishesWebPort($service)
+        ));
+        $needed = ServiceReferences::needed($compose['services']);
         foreach ($compose['services'] as $name => $service) {
             if (is_array($service)) {
                 if (in_array((string) $name, $oneShot, true)) {
                     $service['restart'] = 'no';
+                } elseif (in_array((string) $name, $needed, true) && in_array($service['restart'] ?? null, [null, '', false], true)) {
+                    // A database another service depends on or reaches by name
+                    // publishes no port, and must still come back after a reboot.
+                    $service['restart'] = 'unless-stopped';
                 }
-                $compose['services'][$name] = ServiceHardener::harden((string) $name, $service, $accountMemoryMb);
+                // A loopback binding stays loopback when another service is the front door.
+                $keepLoopback = array_diff($publishers, [$name]) !== [];
+                foreach (ServiceHardener::forbiddenMounts($service, $env, $accountUser, $projectDir) as $mount) {
+                    $removed[] = "{$name}: volume {$mount}";
+                }
+                $compose['services'][$name] = ServiceHardener::harden((string) $name, $service, $accountMemoryMb, $keepLoopback, $env, $accountUser, $projectDir, $imageEnvironment);
             }
+        }
+        [$compose, $entries] = ServiceHardener::withoutHostPathEntries($compose);
+
+        return ['compose' => self::withProcMounts($compose, $procFiles), 'removed' => [...$removed, ...$entries]];
+    }
+
+    /**
+     * lxcfs's /proc files bound read-only into every service, so an app reads
+     * its own memory and load instead of the host's. Added after hardening,
+     * which removes host paths; a service that mounts the target keeps its own.
+     *
+     * @param array<string, mixed> $compose
+     * @param list<string> $procFiles names under {@see LxcfsProc::PROC_DIR} the account has
+     * @return array<string, mixed>
+     */
+    public static function withProcMounts(array $compose, array $procFiles): array
+    {
+        if ($procFiles === [] || !is_array($compose['services'] ?? null)) {
+            return $compose;
+        }
+        foreach ($compose['services'] as $name => $service) {
+            if (!is_array($service)) {
+                continue;
+            }
+            $volumes = is_array($service['volumes'] ?? null) ? $service['volumes'] : [];
+            $taken = array_map(self::mountTarget(...), $volumes);
+            foreach ($procFiles as $file) {
+                if (!in_array("/proc/{$file}", $taken, true)) {
+                    $volumes[] = ['type' => 'bind', 'source' => LxcfsProc::PROC_DIR . "/{$file}", 'target' => "/proc/{$file}", 'read_only' => true];
+                }
+            }
+            $compose['services'][$name]['volumes'] = array_values($volumes);
         }
 
         return $compose;
+    }
+
+    private static function mountTarget(mixed $volume): ?string
+    {
+        if (is_array($volume)) {
+            return is_string($volume['target'] ?? null) ? rtrim($volume['target'], '/') : null;
+        }
+        if (!is_string($volume)) {
+            return null;
+        }
+        $parts = explode(':', $volume);
+
+        return rtrim($parts[count($parts) > 1 ? 1 : 0], '/');
     }
 
     /**
@@ -110,6 +199,7 @@ class ComposeHarden
      * @param callable(string): list<int>|null $imagePorts resolves an image to
      *        the ports it declares; null when nobody can ask the daemon
      * @param ?string $projectIdentity owner/repo being deployed
+     * @param array<string, list<?string>|string> $env what compose may interpolate the file with
      * @return array{services: array<string, array<string, mixed>>, volumes: array<string, mixed>, env: array<string, string>, app_env: array<string, string>}
      */
     public static function extractRuntimeSidecars(
@@ -119,7 +209,10 @@ class ComposeHarden
         ?string $projectIdentity = null,
         ?int $accountMemoryMb = null,
         ?string $placeholderSeed = null,
-        ?SidecarPasswords $passwords = null
+        ?SidecarPasswords $passwords = null,
+        array $env = [],
+        ?string $accountUser = null,
+        ?string $projectDir = null
     ): array {
         return RuntimeSidecars::fromFile(
             $composePath,
@@ -128,7 +221,10 @@ class ComposeHarden
             $projectIdentity,
             $accountMemoryMb,
             $placeholderSeed,
-            $passwords
+            $passwords,
+            $env,
+            $accountUser,
+            $projectDir
         );
     }
 
@@ -136,6 +232,8 @@ class ComposeHarden
      * As {@see extractRuntimeSidecars()}, from already-read YAML.
      *
      * @param callable(string): list<int>|null $imagePorts
+     * @param array<string, list<?string>|string> $env what compose may interpolate the file with
+     * @param list<string> $rootBuildNames names the repository's own compose files give its root build
      * @return array{services: array<string, array<string, mixed>>, volumes: array<string, mixed>, env: array<string, string>, app_env: array<string, string>}
      */
     public static function extractRuntimeSidecarsFromYaml(
@@ -145,7 +243,11 @@ class ComposeHarden
         ?string $projectIdentity = null,
         ?int $accountMemoryMb = null,
         ?string $placeholderSeed = null,
-        ?SidecarPasswords $passwords = null
+        ?SidecarPasswords $passwords = null,
+        array $env = [],
+        ?string $accountUser = null,
+        ?string $projectDir = null,
+        array $rootBuildNames = []
     ): array {
         return RuntimeSidecars::fromYaml(
             $raw,
@@ -154,7 +256,11 @@ class ComposeHarden
             $projectIdentity,
             $accountMemoryMb,
             $placeholderSeed,
-            $passwords
+            $passwords,
+            $env,
+            $accountUser,
+            $projectDir,
+            $rootBuildNames
         );
     }
 

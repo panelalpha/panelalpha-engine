@@ -18,6 +18,12 @@ final class JavaNodeTooling
     private const GRADLE_NODE = '/(["\'])(?:npm|npx|pnpm|yarn|node)(?:\.cmd)?(?:\1|\s)'
         . '|\bcom\.github\.node-gradle\.node\b|\bcom\.moowork\.node\b/';
 
+    /**
+     * The node-gradle plugin declared in a version catalog, which a script then
+     * applies as `alias(libs.plugins.node)` without naming it (halo).
+     */
+    private const CATALOG_NODE = '/\bcom\.github\.node-gradle\.node\b|\bcom\.moowork\.node\b/';
+
     /** exec-maven-plugin running a JS tool. */
     private const MAVEN_NODE = '/<executable>\s*(?:npm|npx|pnpm|yarn|node)(?:\.cmd)?\s*<\/executable>/i';
 
@@ -52,7 +58,7 @@ final class JavaNodeTooling
 
     /**
      * Gradle scripts at the root, in gradle/ and buildSrc/, and in modules
-     * two levels down; poms at the same depths.
+     * two levels down; version catalogs in gradle/; poms at the same depths.
      *
      * @return array<string, string> path => pattern to match it with
      */
@@ -66,6 +72,9 @@ final class JavaNodeTooling
                     $scripts[$path] = self::GRADLE_NODE;
                 }
             }
+        }
+        foreach (glob($root . '/gradle/*.versions.toml') ?: [] as $path) {
+            $scripts[$path] = self::CATALOG_NODE;
         }
         foreach (['/', '/*/', '/*/*/'] as $dir) {
             foreach (glob($root . $dir . 'pom.xml') ?: [] as $path) {

@@ -5,16 +5,11 @@ namespace App\Http\Controllers\User;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Git\DeployHookCreateRequest;
 use App\Http\Requests\Git\GitPathRequest;
-use App\Lib\Deploy\Source\GitUrl;
-use App\Lib\DeployHook\DeployHooks;
-use App\Lib\DeployHook\EngineTlsAdvisory;
-use App\Models\DeployHook;
+use App\Lib\DeployHook\DeployHookActions;
+use App\Lib\DeployHook\DeployHookNotFound;
 use App\Models\HookDelivery;
-use App\Models\User;
-use App\System\Project\Git as ProjectGit;
 use App\System\Project\Git\Exception as GitException;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 
 /**
@@ -38,8 +33,8 @@ class DeployHookController extends Controller
     #[OA\Post(
         path: '/projects/{username}/git/deploy-hook',
         description: 'Create the Deploy Hook for a git-connected checkout, so a push to its tracked branch '
-            . 'redeploys the project. Optional `path` defaults to `project` on DinD and `public_html` on '
-            . 'FPM/LiteSpeed (`project` is the Deploy-managed checkout). Returns the `url` to register in the git host and the `secret` to sign with. '
+            . 'redeploys the project. Optional `path` defaults to `project` on DinD and the document root of the '
+            . 'main domain on FPM/LiteSpeed (`project` is the Deploy-managed checkout). Returns the `url` to register in the git host and the `secret` to sign with. '
             . 'The secret is shown ONCE, in this response, and can never be read again: store it now, or '
             . 'rotate later. Asking again returns the same hook (200) without the secret and never rotates it. '
             . 'On the Deploy-managed checkout every push to the tracked branch force-updates it to match the '
@@ -59,7 +54,7 @@ class DeployHookController extends Controller
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
             properties: [
-                new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).', type: 'string'),
+                new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).', type: 'string'),
                 new OA\Property(property: 'provider', description: 'Optional. Narrows `tls.instructions` to this git host: github, gitlab, bitbucket-cloud, bitbucket-data-center.', type: 'string'),
             ],
         )),
@@ -85,25 +80,18 @@ class DeployHookController extends Controller
             new OA\Response(response: 200, description: 'The hook already existed; no `secret`', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
-            new OA\Response(response: 404, description: 'User not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 422, description: 'The checkout is not connected to git', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function create(string $username, DeployHookCreateRequest $request, DeployHooks $hooks): JsonResponse
+    public function create(string $username, DeployHookCreateRequest $request, DeployHookActions $hooks): JsonResponse
     {
-        return $this->withCheckout($username, $request, function (User $user, ProjectGit $git) use ($hooks, $request): JsonResponse {
-            $creation = $hooks->create($user, $git);
+        $user = $this->projectOr404($username);
 
-            $data = $this->describe($creation->hook, $hooks->warningFor($git)) + [
-                'created' => $creation->created,
-                'tls' => EngineTlsAdvisory::forProvider($request->validated()['provider'] ?? null),
-            ];
-            if ($creation->secret !== null) {
-                // The only time the plaintext leaves the engine.
-                $data['secret'] = $creation->secret;
-            }
+        return $this->respond(function () use ($hooks, $user, $request): JsonResponse {
+            $data = $hooks->create($user, $request->validated());
 
-            return new JsonResponse(['data' => $data], $creation->created ? 201 : 200);
+            return new JsonResponse(['data' => $data], $data['created'] ? 201 : 200);
         });
     }
 
@@ -125,14 +113,14 @@ class DeployHookController extends Controller
             . 'null while still queued or for a delivery that queued nothing. `detail` carries the reason for a '
             . 'refused pull or a failure; `deploy_id` points at the full build log '
             . '(`php artisan project:deploy:log <project> --id=<deploy_id>`) for a delivery that started one. '
-            . 'Optional `path` defaults to `project` on DinD and `public_html` on FPM/LiteSpeed. '
+            . 'Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. '
             . '404 when the checkout has no hook.',
         summary: 'Show a push-to-deploy hook',
         security: [['bearerAuth' => []]],
         tags: ['Git'],
         parameters: [
             new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
-            new OA\Parameter(name: 'path', description: 'Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'path', description: 'Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
         ],
         responses: [
             new OA\Response(response: 200, description: 'The hook (no secret)', content: new OA\JsonContent(
@@ -163,27 +151,15 @@ class DeployHookController extends Controller
                     ])),
                 ])],
             )),
-            new OA\Response(response: 404, description: 'User or hook not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 404, description: 'Project or hook not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function show(string $username, GitPathRequest $request, DeployHooks $hooks): JsonResponse
+    public function show(string $username, GitPathRequest $request, DeployHookActions $hooks): JsonResponse
     {
-        return $this->withCheckout($username, $request, function (User $user, ProjectGit $git) use ($hooks): JsonResponse {
-            $hook = $hooks->show($user, $git);
-            if ($hook === null) {
-                return $this->noHook();
-            }
+        $user = $this->projectOr404($username);
 
-            $data = $this->describe($hook, $hooks->warningFor($git)) + [
-                'registered_url' => $hook->registered_url,
-                'url_changed_since_registration' => $hook->addressChanged(),
-                'tls' => EngineTlsAdvisory::forProvider(),
-                'deliveries' => $this->deliveries($hook),
-            ];
-
-            return new JsonResponse(['data' => $data]);
-        });
+        return $this->respond(fn () => new JsonResponse(['data' => $hooks->show($user, $request->validated())]));
     }
 
     #[OA\Post(
@@ -191,7 +167,7 @@ class DeployHookController extends Controller
         description: 'Replace the Deploy Hook\'s URL and secret with new ones, for when either leaked. '
             . 'The old URL answers 404 from this moment, so the new `url` and `secret` must be registered '
             . 'in the git host again. The secret is shown ONCE, in this response, and can never be read again. '
-            . 'Optional `path` defaults to `project` on DinD and `public_html` on FPM/LiteSpeed. '
+            . 'Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. '
             . '404 when the checkout has no hook; rotating '
             . 'never creates one. On the Deploy-managed checkout every push to the tracked branch force-updates '
             . 'it to match the repository (local changes to tracked files and untracked files that are not '
@@ -199,7 +175,7 @@ class DeployHookController extends Controller
         summary: 'Rotate a push-to-deploy hook',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
-            properties: [new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).', type: 'string')],
+            properties: [new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).', type: 'string')],
         )),
         tags: ['Git'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -215,128 +191,55 @@ class DeployHookController extends Controller
                     new OA\Property(property: 'warning', type: 'string'),
                 ])],
             )),
-            new OA\Response(response: 404, description: 'User or hook not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 404, description: 'Project or hook not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function rotate(string $username, GitPathRequest $request, DeployHooks $hooks): JsonResponse
+    public function rotate(string $username, GitPathRequest $request, DeployHookActions $hooks): JsonResponse
     {
-        return $this->withCheckout($username, $request, function (User $user, ProjectGit $git) use ($hooks): JsonResponse {
-            $rotation = $hooks->rotate($user, $git);
-            if ($rotation === null) {
-                return $this->noHook();
-            }
+        $user = $this->projectOr404($username);
 
-            // As on create, the only time this secret leaves the engine.
-            $data = $this->describe($rotation->hook, $hooks->warningFor($git)) + ['rotated' => true, 'secret' => $rotation->secret];
-
-            return new JsonResponse(['data' => $data]);
-        });
+        return $this->respond(fn () => new JsonResponse(['data' => $hooks->rotate($user, $request->validated())]));
     }
 
     #[OA\Delete(
         path: '/projects/{username}/git/deploy-hook',
         description: 'Delete the Deploy Hook of a checkout and its delivery history. Its URL answers 404 '
             . 'from then on; remove the webhook in the git host too. Optional `path` defaults to `project` '
-            . 'on DinD and `public_html` on FPM/LiteSpeed. 404 when the checkout has no hook.',
+            . 'on DinD and the document root of the main domain on FPM/LiteSpeed. 404 when the checkout has no hook.',
         summary: 'Delete a push-to-deploy hook',
         security: [['bearerAuth' => []]],
         tags: ['Git'],
         parameters: [
             new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
-            new OA\Parameter(name: 'path', description: 'Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'path', description: 'Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
         ],
         responses: [
             new OA\Response(response: 204, description: 'Deleted'),
-            new OA\Response(response: 404, description: 'User or hook not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 404, description: 'Project or hook not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function destroy(string $username, GitPathRequest $request, DeployHooks $hooks): JsonResponse
-    {
-        return $this->withCheckout($username, $request, function (User $user, ProjectGit $git) use ($hooks): JsonResponse {
-            return $hooks->delete($user, $git)
-                ? new JsonResponse(null, 204)
-                : $this->noHook();
-        });
-    }
-
-    /**
-     * What every response says about a hook: where it is, never its secret,
-     * and the warning about what a push does to the checkout when there is one.
-     *
-     * @return array<string, mixed>
-     */
-    private function describe(DeployHook $hook, ?string $warning): array
-    {
-        $data = [
-            'url' => $hook->url(),
-            'path' => $hook->path_key,
-            'created_at' => $hook->created_at?->toIso8601String(),
-            'updated_at' => $hook->updated_at?->toIso8601String(),
-        ];
-        if ($warning !== null) {
-            $data['warning'] = $warning;
-        }
-
-        return $data;
-    }
-
-    /**
-     * The hook's retained deliveries (HookDelivery::pruneOldest()'s two windows), newest
-     * first, each with the outcome the request was answered with and the
-     * result the queued work reached (or hasn't yet, or never will -- an
-     * ignored or rejected delivery queued nothing).
-     *
-     * @return list<array<string, mixed>>
-     */
-    private function deliveries(DeployHook $hook): array
-    {
-        return $hook->deliveries()
-            ->orderByDesc('id')
-            ->limit(HookDelivery::KEEP_HISTORY + HookDelivery::KEEP_REJECTED)
-            ->get()
-            ->map(static fn (HookDelivery $delivery): array => [
-                'provider' => $delivery->provider,
-                'event' => $delivery->event,
-                'branch' => $delivery->branch,
-                'commit' => $delivery->commit,
-                'outcome' => $delivery->outcome,
-                'reason' => $delivery->reason,
-                'result' => $delivery->result,
-                'detail' => $delivery->detail,
-                'deploy_id' => $delivery->deploy_id,
-                'created_at' => $delivery->created_at?->toIso8601String(),
-            ])
-            ->all();
-    }
-
-    private function noHook(): JsonResponse
-    {
-        return new JsonResponse(['message' => 'This checkout has no deploy hook.'], 404);
-    }
-
-    /**
-     * Resolve the project and the checkout the request names, and run `$work`
-     * with them, turning the git layer's refusals into the API's usual
-     * answers.
-     *
-     * @param callable(User, ProjectGit): JsonResponse $work
-     */
-    private function withCheckout(string $username, GitPathRequest $request, callable $work): JsonResponse
+    public function destroy(string $username, GitPathRequest $request, DeployHookActions $hooks): JsonResponse
     {
         $user = $this->projectOr404($username);
 
+        return $this->respond(function () use ($hooks, $user, $request): JsonResponse {
+            $hooks->delete($user, $request->validated());
+
+            return new JsonResponse(null, 204);
+        });
+    }
+
+    /** @param callable(): JsonResponse $respond */
+    private function respond(callable $respond): JsonResponse
+    {
         try {
-            $git = $user->project()->git($request->validated()['path'] ?? null);
-
-            return $work($user, $git);
+            return $respond();
+        } catch (DeployHookNotFound $e) {
+            return new JsonResponse(['message' => $e->getMessage()], 404);
         } catch (GitException $e) {
-            if ($e->httpStatus === 422) {
-                throw ValidationException::withMessages(['git' => $e->getMessage()]);
-            }
-
-            return new JsonResponse(['message' => GitUrl::sanitize($e->getMessage())], $e->httpStatus);
+            return new JsonResponse(['message' => $e->getMessage()], $e->httpStatus);
         }
     }
 }

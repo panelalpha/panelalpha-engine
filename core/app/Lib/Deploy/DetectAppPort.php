@@ -41,10 +41,21 @@ class DetectAppPort
      * already being served.
      *
      * @param list<array{addr: string, port: int}> $sockets
+     * @param list<int> $declared ports the image declares, preferred
      */
-    public static function chooseAppPort(array $sockets, int $expected): ?int
+    public static function chooseAppPort(array $sockets, int $expected, array $declared = []): ?int
     {
-        return ListeningSockets::chooseAppPort($sockets, $expected);
+        return ListeningSockets::chooseAppPort($sockets, $expected, $declared);
+    }
+
+    /**
+     * @param list<array{addr: string, port: int}> $sockets
+     * @param list<int> $declared
+     * @return list<int>
+     */
+    public static function rankedAppPorts(array $sockets, int $expected, array $declared = []): array
+    {
+        return ListeningSockets::rankedAppPorts($sockets, $expected, $declared);
     }
 
     /**
@@ -59,11 +70,12 @@ class DetectAppPort
      * Public ports, best first, plus the bindings detection refused and why
      * ({@see ComposePortScan}).
      *
+     * @param array<string, string> $env the project's `.env`, for host ports taken from it
      * @return array{all: list<int>, primary?: int, refused: list<array{port: int, reason: string, service: string}>}
      */
-    public static function detectAllPorts(string $composePath): array
+    public static function detectAllPorts(string $composePath, array $env = []): array
     {
-        return ComposePortScan::of($composePath);
+        return ComposePortScan::of($composePath, $env);
     }
 
     public static function detectPrimaryPort(string $composePath): int

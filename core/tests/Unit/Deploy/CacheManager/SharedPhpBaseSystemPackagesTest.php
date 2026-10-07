@@ -16,7 +16,7 @@ use PHPUnit\Framework\TestCase;
 /**
  * A PHP base variant carrying `system_packages:` must be waited for, never
  * swapped for the plain base: the plain base has no ffmpeg, and ClipBucket on
- * it accepts every upload and converts none (engine#193).
+ * it accepts every upload and converts none.
  */
 class SharedPhpBaseSystemPackagesTest extends TestCase
 {
@@ -99,6 +99,50 @@ class SharedPhpBaseSystemPackagesTest extends TestCase
 
         $this->assertSame(['tag' => $plain, 'baked' => []], $result);
         $this->assertSame(['build ' . PhpBaseImage::tag(self::PHP, ['grpc'])], $this->background);
+    }
+
+    /**
+     * Wallabag requires ext-tidy: on the plain base the host composer install
+     * aborts, so the first deploy after a base bump failed until the
+     * background build finished minutes later.
+     */
+    public function test_a_variant_carrying_a_required_extension_is_built_now(): void
+    {
+        $tag = (string) PhpBaseImage::tag(self::PHP, ['tidy']);
+        $this->onHost = [(string) PhpBaseImage::tag(self::PHP)];
+
+        $result = $this->bases()->ensurePhp(self::PHP, ['tidy'], [], ['iconv', 'tidy']);
+
+        $this->assertSame(['tag' => $tag, 'baked' => ['tidy']], $result);
+        $this->assertSame(['build ' . $tag, 'load ' . $tag], $this->foreground);
+        $this->assertSame([], $this->background);
+    }
+
+    /**
+     * When the plain base cannot be provided, the deploy falls back to the
+     * stock php image and dies in the host build on `composer: not found`. The
+     * base is the runtime, so that is a failure here.
+     */
+    public function test_a_plain_base_that_cannot_be_provided_fails_with_the_cause(): void
+    {
+        $this->buildFails = true;
+
+        try {
+            $this->bases()->ensurePhp(self::PHP);
+            $this->fail('the stock image has no composer, apache config or entrypoint');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString((string) PhpBaseImage::tag(self::PHP), $e->getMessage());
+            $this->assertStringContainsString('stock ' . self::PHP, $e->getMessage());
+        }
+    }
+
+    /** A variant that fails still drops to a plain base that works. */
+    public function test_a_deferred_variant_still_falls_back_to_the_plain_base(): void
+    {
+        $plain = (string) PhpBaseImage::tag(self::PHP);
+        $this->inAccount = [$plain];
+
+        $this->assertSame(['tag' => $plain, 'baked' => []], $this->bases()->ensurePhp(self::PHP, ['grpc']));
     }
 
     private function bases(): SharedBaseImages

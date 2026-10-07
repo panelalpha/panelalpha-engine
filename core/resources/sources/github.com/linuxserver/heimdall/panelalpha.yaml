@@ -7,8 +7,8 @@ description: >-
   Detection reads it correctly as `laravel`, and everything the strategy does
   is right: PHP 8.4 against `"php": "^8.4"`, `public/` as the document root,
   Composer on the host dropping 33 dev packages from the committed tree, the
-  account's public https URL in APP_URL. The container still restart-looped on
-  exit 1, which is the `serving-unknown` verdict this recipe exists to fix.
+  account's public https URL in APP_URL. The container still restart-loops on
+  exit 1, which is what this recipe exists to fix.
 
   One value was wrong, and the engine is what got it wrong.
   `PhpEnvironment::sqlitePath()` exists to notice exactly this application --
@@ -54,8 +54,7 @@ description: >-
   `password = null`, and App\Http\Middleware\CheckAllowed reads that literally
   -- `if (empty($current_user->password)) { return $next($request); }` -- so a
   freshly seeded Heimdall serves /settings, /users and /items/create to anyone
-  who has the address. Measured on a deploy of this repository: HTTP 200, no
-  credentials, full administration. That is the right default for the LAN
+  who has the address. That is the right default for the LAN
   dashboard Heimdall was written to be and the wrong one for an account that
   has just been given a public HTTPS name, so
   files/panelalpha/set-admin-password.php sets the one the engine generates

@@ -14,8 +14,8 @@
 # (The repository already ships docker/docker-compose.yml, which is upstream's
 # own development stack for nginx + php-fpm + MariaDB. It is in a subdirectory,
 # so detection does not see it, and RuntimeSidecars is not asked to mine it
-# because the manifest declares `database: mysql` -- engine#166. Nothing here
-# moves compose files aside, so the trap in that issue, of globbing away the
+# because the manifest declares `database: mysql`. Nothing here
+# moves compose files aside, so the trap of globbing away the
 # engine's own docker-compose.override.yml and silently losing this
 # healthcheck, is not one this recipe can spring.)
 services:
@@ -27,16 +27,10 @@ services:
       - ../.panelalpha/app-credentials.env
     volumes:
       # ~/.panelalpha/clipbucket. Everything this account accumulates lives
-      # here, because a redeploy clears and re-clones ~/project (engine#173):
-      #
-      #   /data/bin/              static ffmpeg, ffprobe and mediainfo. The
-      #                           shared PHP base image has none of them and no
-      #                           manifest key can add an apt package to it, so
-      #                           hooks/prepare.sh fetches them once per account
-      #                           and the install writes their paths into
-      #                           ClipBucket's own config rows.
-      #   /data/files/            mounted again below, over the application's
-      #                           own upload/files.
+      # here, because a redeploy clears and re-clones ~/project:
+      # /data/files is mounted again below, over the application's own
+      # upload/files. (A bin/ left there by an older version of this recipe is
+      # unused: the tools come from `system_packages`.)
       - ../.panelalpha/clipbucket:/data
 
       # Every byte a user uploads. DirPath::get() (includes/constants.php:33-47)
@@ -60,7 +54,7 @@ services:
     environment:
       # The one way to give this container a php.ini. The base image loads none
       # at all and scans /usr/local/etc/php/conf.d, a directory inside the image
-      # that the account uid cannot write to (engine#185). PHP reads
+      # that the account uid cannot write to. PHP reads
       # PHP_INI_SCAN_DIR from its own environment at startup whatever the SAPI,
       # so naming a second directory here reaches the Apache module and the CLI
       # both -- and both need it: the Apache module takes the upload, the CLI
@@ -104,7 +98,7 @@ services:
     #                its own proves less here than usual.
     #
     # Host is 127.0.0.1:8000, as it is for AppHealth's own probe, and that is
-    # safe here where engine#190 would otherwise bite: ClipBucket builds every
+    # safe here where it would otherwise bite: ClipBucket builds every
     # absolute URL from the base_url config row rather than from the Host
     # header (Network::get_server_url(), network.class.php:303).
     healthcheck:
@@ -124,8 +118,8 @@ services:
   # Does nothing and exits 0. Compose does not wait for a healthcheck on its
   # own, but it does block on a `depends_on` health condition -- so a service
   # that waits for the app is what makes `up -d` return only once ClipBucket has
-  # built its schema and answered, and what the health probe then meets
-  # (engine#90). alpine:3 and not a datastore image: this pulls in a few
+  # built its schema and answered, and what the health probe then meets.
+  # alpine:3 and not a datastore image: this pulls in a few
   # megabytes and exits, and anything the sidecar miner recognises as a backing
   # service here would produce a dependency cycle. A clean exit 0 is not a crash
   # loop as far as AppHealth is concerned.

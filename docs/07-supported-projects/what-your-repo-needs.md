@@ -40,7 +40,7 @@ PHP and Laravel run Apache **inside the project's container**. The VPS still ser
 
 ## Docker Compose projects: editing the compose file
 
-The engine never runs your `docker-compose.yml` as it is. It runs a copy made fit for hosting, with resource limits and a restart policy, and your own file stays unchanged. If you edit your compose file on the account, over SSH or with the file tools, start the project again with the `up` or `pull` action. The engine rebuilds that copy from your edited file before it starts the containers. It does not clone the repository again. The same applies to an account with no repository where you created a `docker-compose.yml` yourself.
+The engine never runs your `docker-compose.yml` as it is. It runs a copy made fit for hosting, with resource limits and a restart policy on every service that publishes a port or that another service needs, and your own file stays unchanged. A service counts as needed when another one names it in `depends_on`, `links`, `volumes_from` or `network_mode: service:…`, or reaches it by name in its environment (`DB_HOST=db`, `REDIS_URL=redis://cache:6379`). Any other service that sets no `restart:` of its own is not restarted when it exits, so a one-off helper runs once, and a background worker nothing depends on needs `restart: unless-stopped` if it must come back after a crash or a server restart. If you edit your compose file on the account, over SSH or with the file tools, start the project again with the `up` or `pull` action. The engine rebuilds that copy from your edited file before it starts the containers. It does not clone the repository again. The same applies to an account with no repository where you created a `docker-compose.yml` yourself.
 
 ## Dockerfile projects: what goes into the build
 
@@ -51,6 +51,18 @@ The engine also leaves out `.env.panelalpha`, which holds the project's environm
 The engine keeps `.git` in the build when your build reads git history: the Dockerfile copies `.git` or runs a command such as `git describe`, or the project takes its version from git (for example `setuptools-scm`). Each redeploy then rebuilds from the first `COPY . .`.
 
 To decide this yourself, put `!.git` in your `.dockerignore` to keep `.git`. You can also commit your own `Dockerfile.dockerignore`. The engine then uses your file as it is.
+
+## Workers and release commands: a Procfile
+
+A `Procfile` at the top level can name more processes than the web server. Each line other than `web:` runs beside your application, from the same image, with the same environment and files, and without a public port:
+
+```text
+web: bundle exec puma -C config/puma.rb
+worker: bundle exec sidekiq
+release: bundle exec rails db:migrate
+```
+
+`release:` is different: it runs once on every deploy, before your application starts. If it fails, the deploy fails and the application is not started. Every other line, such as `worker:` or `clock:`, keeps running and is restarted if it stops. This applies to every kind of project above except Docker Compose, where your compose file lists the services, and sites served by nginx.
 
 ## Node projects: the lockfile decides the tool
 
@@ -86,3 +98,6 @@ Ask your assistant to inspect the repository and explain what it found. Most cas
 
 **Inspect says this cannot be deployed.**
 The engine found no way to start a website from these files. Often it is a library, or the start file is missing. Fix the repository before you deploy.
+
+**The build fails with "Cannot change ownership to uid …".**
+Every file in a build or image must be owned by a user and group id between 0 and 65535; an account cannot hold anything owned above that. This happens when a build extracts an archive made on another system, for example `tar` in a Flutter web build. Extract it with `tar --no-same-owner` (or set `TAR_OPTIONS=--no-same-owner` in that `RUN` step), or deploy the project's published image instead.

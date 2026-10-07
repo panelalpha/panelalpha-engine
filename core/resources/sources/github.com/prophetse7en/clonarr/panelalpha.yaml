@@ -21,15 +21,8 @@ description: >-
   Login attempts are rate limited per visitor: TRUSTED_PROXIES covers the
   account's Docker bridges, so Clonarr keys on the last X-Forwarded-For hop,
   the one the engine's vhost adds. Behind a further proxy (a CDN, or the
-  *.panelalpha.online edge on the test host) that hop is the proxy and all
-  visitors share one bucket of 5 attempts a minute.
-
-  Measured on mariusz.panelalpha.tools (2026-09-29, engine 705f250a): deploy
-  35s, rebuild 25s, app 15 MiB. Anonymous / and /.env -> 302 /login,
-  /api/config and /api/instances -> 401 (also with X-Forwarded-For
-  127.0.0.1), POST /setup -> 409 "Setup already completed". The generated
-  admin logs in (<title>Clonarr</title>, 826 kB), a Radarr instance created
-  through POST /api/instances reads back, and both survive a rebuild.
+  *.panelalpha.online test edge) that hop is the proxy and all visitors share
+  one bucket of 5 attempts a minute.
 credentials:
   login_path: /login
   adopt_from: .panelalpha/clonarr/admin.env

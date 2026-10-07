@@ -187,7 +187,7 @@ Installing into a container (CI, dev):
                            --no-sysbox --no-hardening --dind-runtime privileged
                            --mtu 1400. Individual flags still win.
       --no-sysbox          do not install the Sysbox runtime
-      --no-hardening       skip sysctl, monit and CSF
+      --no-hardening       skip sysctl, monit and the firewall (ufw, fail2ban)
       --no-upgrade         skip 'apt-get upgrade' and 'apt-get autoremove'
       --no-quota           leave filesystem quota off; project disk and inode
                            limits are then recorded but not enforced
@@ -773,6 +773,10 @@ before_install() {
     fi
     apt-get -o DPkg::Lock::Timeout=300 update --fix-missing -y
     ensure_packages jq unzip lsb-release apt-transport-https ca-certificates curl ipcalc quota at
+    # nft binds each port of the accounts' network to its container.
+    # The package's own nftables.service ships disabled and must stay so: its
+    # default config flushes every rule on the host, Docker's and ufw's too.
+    ensure_packages nftables
 
     detect_distro
 
@@ -865,7 +869,8 @@ download_engine_from_repository() {
     command -v git >/dev/null 2>&1 || apt-get -o DPkg::Lock::Timeout=300 install git -y
 
     export GIT_TERMINAL_PROMPT=0
-    if ! git clone --depth 1 --branch "$PANELALPHA_ENGINE_VERSION" \
+    # The whole history, without old file contents: list_dropped_engine_files reads it.
+    if ! git clone --filter=blob:none --single-branch --branch "$PANELALPHA_ENGINE_VERSION" \
         "$ENGINE_REPO" "$INSTALL_DIR/src" >/dev/null 2>&1; then
         echo_error "Could not clone ${safe} (ref ${PANELALPHA_ENGINE_VERSION})"
     fi
@@ -873,6 +878,7 @@ download_engine_from_repository() {
     # file; git installs must recreate it before .git is removed).
     local tip_sha
     tip_sha=$(git -C "$INSTALL_DIR/src" rev-parse HEAD 2>/dev/null | tr -d '\r\n' || true)
+    list_dropped_engine_files "$INSTALL_DIR/src" "$INSTALL_DIR/dropped-files"
     rm -rf "$INSTALL_DIR/src/.git"
     if [ -n "$tip_sha" ]; then
         printf '%s\n' "$tip_sha" >"$INSTALL_DIR/src/version"
@@ -894,12 +900,148 @@ download_panelalpha_engine() {
     download_engine_from_repository
 }
 
+# Host state: never deleted by an update, whatever an older release shipped at
+# that path. The same paths deploy-from-source.sh keeps out of its upload.
+ENGINE_HOST_STATE=(
+    .git .idea .aider-desk .aider.input.history .github .claude
+    .env .env-core version crt
+    core/.env core/.env.backup core/.env.pae-backup
+    users logs webserver-logs webserver-config
+    nginx-proxy-conf.d nginx-proxy-logs
+    pureftpd data awstats-config awstats-data litespeed-config build
+    scripts/monit.conf scripts/monit-script.sh
+    docker-compose.yml-webserver docker-compose.override.yml
+    config/logrotate config/exim config/modsecurity config/sftp config/pure-ftpd
+    core/config/logrotate core/config/exim core/config/modsecurity
+    core/config/sftp core/config/pure-ftpd
+    core/vendor core/storage core/bootstrap/cache
+    tests/api/node_modules tests/api/.playwright tests/api/test-results tests/api/playwright-report
+    tests/api/env/.env 'tests/api/env/.env.*'
+    scripts/tools/dind-test/vendor
+)
+
+engine_host_state() { # <path relative to the engine dir>
+    local s
+    for s in "${ENGINE_HOST_STATE[@]}"; do
+        # shellcheck disable=SC2053 # a pattern, as rsync reads it
+        [[ $1 == $s || $1 == $s/* ]] && return 0
+    done
+    return 1
+}
+
+# Every path this release's history tracked that the release itself does not,
+# with each version of it the history holds ("<mode> <blob id> <path>", NUL
+# ended): what an earlier release can have left on the host, and what its copy
+# looks like. Needs the clone's .git, but only commits and trees, no contents.
+list_dropped_engine_files() { # <clone> <list to write>
+    local meta path side
+    local -a f
+    local -A current=() seen=()
+    rm -f "$2"
+    # -m: a merge can drop a file only its second parent had.
+    if [ "$(git -C "$1" rev-parse --is-shallow-repository 2>/dev/null)" != false ] ||
+        ! git -C "$1" ls-tree -r -z --name-only HEAD >"$2.current" 2>/dev/null ||
+        ! git -C "$1" rev-list HEAD >"$2.revs" 2>/dev/null ||
+        ! git -C "$1" diff-tree --stdin -r -m --root -z --raw --no-abbrev --no-commit-id \
+            <"$2.revs" >"$2.raw" 2>/dev/null; then
+        rm -f "$2.current" "$2.revs" "$2.raw"
+        echo_warning "Could not read the engine's history; files earlier releases shipped and this one does not stay in place"
+        return 0
+    fi
+    while IFS= read -r -d '' path; do current[$path]=1; done <"$2.current"
+    # Each change is ":<old mode> <new mode> <old id> <new id> <status>", then the path.
+    while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
+        [ -n "$path" ] && [ -z "${current[$path]+x}" ] || continue
+        f=(${meta#:})
+        for side in "${f[0]} ${f[2]}" "${f[1]} ${f[3]}"; do
+            case "$side" in 000000* | 160000* | *" 0000000000000000000000000000000000000000") continue ;; esac
+            [ -z "${seen[$side $path]+x}" ] || continue
+            seen[$side $path]=1
+            printf '%s\0' "$side $path"
+        done
+    done <"$2.raw" >"$2"
+    rm -f "$2.current" "$2.revs" "$2.raw"
+}
+
+# Copying a release over the old tree keeps every file the release dropped, and
+# dropped code keeps running (api:call did). Removes those files, and folders
+# they leave empty, but only a file that is still a copy some release shipped:
+# one an operator wrote or changed at that path stays, and so does host state
+# and anything whose folder is reached through a link.
+remove_dropped_engine_files() { # <list> <engine dir>
+    local root rec mode oid path dir real have removed=0 kept=0
+    local -a order=()
+    local -A shipped=()
+    [ -s "$1" ] && [ -d "$2" ] || return 0
+    root=$(cd "$2" && pwd -P)
+    while IFS= read -r -d '' rec; do
+        mode=${rec%% *} rec=${rec#* }
+        oid=${rec%% *} path=${rec#* }
+        [ -n "${shipped[$path]+x}" ] || order+=("$path")
+        shipped[$path]+=" $mode:$oid"
+    done <"$1"
+    for path in "${order[@]}"; do
+        case "/$path/" in */../* | */./* | *//*) continue ;; esac
+        engine_host_state "$path" && continue
+        [ -f "$root/$path" ] || [ -L "$root/$path" ] || continue
+        # ${path%/*}, not $(dirname): a command substitution drops a name's last newline.
+        dir=.
+        [ "${path#*/}" = "$path" ] || dir=${path%/*}
+        real=$(cd "$root/$dir" 2>/dev/null && pwd -P && echo x) || continue
+        real=${real%$'\n'x}
+        [ "$dir" = . ] && have=$root || have=$root/$dir
+        if [ "$real" != "$have" ]; then
+            echo "Kept $path: its folder is reached through a link"
+            kept=$((kept + 1))
+            continue
+        fi
+        # GIT_DIR: never the repository of the directory the installer runs from;
+        # a broken worktree or a sha256 one there would fail or miss every hash.
+        if [ -L "$root/$path" ]; then
+            have=$(printf '%s' "$(readlink "$root/$path")" | GIT_DIR=/nonexistent git hash-object --stdin 2>/dev/null) &&
+                have="120000:$have" || have=''
+        else
+            have=$(GIT_DIR=/nonexistent git hash-object --no-filters "$root/$path" 2>/dev/null) || have=''
+            case "${shipped[$path]} " in *" 100755:$have "*) have="100755:$have" ;; *) have="100644:$have" ;; esac
+            [ "$have" != 100644: ] || have=''
+        fi
+        if [ -z "$have" ]; then
+            echo "Kept $path: could not hash it"
+            kept=$((kept + 1))
+            continue
+        fi
+        case "${shipped[$path]} " in
+        *" $have "*) ;;
+        *)
+            echo "Kept $path: not a copy any release shipped"
+            kept=$((kept + 1))
+            continue
+            ;;
+        esac
+        rm -f -- "$root/$path" || continue
+        echo "Removed $path"
+        removed=$((removed + 1))
+        while [ "$dir" != . ] && rmdir -- "$root/$dir" 2>/dev/null; do
+            [ "${dir#*/}" = "$dir" ] && dir=. || dir=${dir%/*}
+        done
+    done
+    [ "$removed" = 0 ] || echo_info "Removed ${removed} file(s) that earlier releases shipped and this one does not"
+    [ "$kept" = 0 ] || echo_info "Kept ${kept} file(s) at paths earlier releases used, for the reasons above"
+}
+
 unzip_panelalpha_engine() {
-    # --preserve=mode also repairs files an earlier run left with the wrong mode;
-    # a plain cp keeps the existing file's mode.
     if [ ! -d "$INSTALL_DIR/src" ]; then
         echo_error "Engine tree missing under ${INSTALL_DIR}/src (expected a git clone)"
     fi
+    # Before the copy: a file that became a folder, or the other way round,
+    # would stop cp.
+    remove_dropped_engine_files "$INSTALL_DIR/dropped-files" "$PANELALPHA_DIR/shared-hosting"
+    # The repository's agent setup is for people working on the engine, not for
+    # a host, and a .claude/skills folder an older release left cannot take the
+    # link this one has. The host's own .claude is host state and stays.
+    rm -rf "$INSTALL_DIR/src/.claude"
+    # --preserve=mode also repairs files an earlier run left with the wrong mode;
+    # a plain cp keeps the existing file's mode.
     cp -Rf --preserve=mode "$INSTALL_DIR/src/." "$PANELALPHA_DIR/shared-hosting/"
 }
 
@@ -977,9 +1119,16 @@ prepare_config_files() {
     mkdir -p /opt/panelalpha/shared-hosting/webserver-logs/nginx
     mkdir -p /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy
     cp -n /opt/panelalpha/shared-hosting/docker-compose.yml-nginx-proxy /opt/panelalpha/shared-hosting/docker-compose.yml-webserver
+    bash /opt/panelalpha/shared-hosting/scripts/refresh-webserver-image.sh /opt/panelalpha/shared-hosting ||
+        echo_warning "Could not bring the webserver image tag up to date"
     mkdir -p /opt/panelalpha/shared-hosting/config/pure-ftpd
     cp -Rn /opt/panelalpha/shared-hosting/templates/config/pure-ftpd/. /opt/panelalpha/shared-hosting/config/pure-ftpd/.
     chmod +x /opt/panelalpha/shared-hosting/config/pure-ftpd/entrypoint.sh
+    # Until the first FTP account there is no password database, and pure-ftpd
+    # answers every login 421 without logging it, so fail2ban's ftp jail sees
+    # nothing. The container's entrypoint builds the database from this file.
+    mkdir -p /opt/panelalpha/shared-hosting/pureftpd
+    touch /opt/panelalpha/shared-hosting/pureftpd/pureftpd.passwd
     mkdir -p /opt/panelalpha/shared-hosting/config/sftp
     cp -Rn /opt/panelalpha/shared-hosting/templates/config/sftp/. /opt/panelalpha/shared-hosting/config/sftp/.
     # Scripts are engine code, not host state: -n would keep the installed copy.
@@ -992,6 +1141,8 @@ prepare_config_files() {
     fi
     mkdir -p /opt/panelalpha/shared-hosting/config/logrotate
     cp -Rn /opt/panelalpha/shared-hosting/templates/config/logrotate/. /opt/panelalpha/shared-hosting/config/logrotate/.
+    # Their postrotate reopens the webserver's logs: engine code, not host state.
+    cp /opt/panelalpha/shared-hosting/templates/config/logrotate/{apache,nginx,nginx-proxy}.conf /opt/panelalpha/shared-hosting/config/logrotate/
     mkdir -p /opt/panelalpha/shared-hosting/config/exim
     mkdir -p /opt/panelalpha/shared-hosting/logs/exim
     cp -Rn /opt/panelalpha/shared-hosting/templates/config/exim/. /opt/panelalpha/shared-hosting/config/exim/.
@@ -1019,32 +1170,36 @@ EOF
     fi
 }
 
-# Host hardening, and the reason it runs before the stack does: csf.sh rebuilds
-# the whole iptables ruleset, which drops the chains the Docker daemon installs
-# at start, so the daemon has to be restarted afterwards. Doing that with the
-# stack up takes every container down with it — which is how the install used to
-# fail, on the first artisan call after the restart. It needs .env, the compose
+# Host hardening, and the reason it runs before the stack does: on a host
+# still running CSF, firewall.sh moves its rules to ufw and uninstalls it, and
+# CSF's uninstaller flushes the whole iptables ruleset, Docker's chains with it,
+# so the daemon has to be restarted afterwards. Doing that with the stack up
+# takes every container down with it — which is how the install used to fail,
+# on the first artisan call after the restart. It needs .env, the compose
 # bridge and docker0 in place, so the earliest safe point is right before 'up'.
 harden_host() {
     if [ "$HARDEN" != 1 ]; then
-        echo_warning "Skipping sysctl, monit and CSF (--no-hardening)"
+        echo_warning "Skipping sysctl, monit and the firewall (--no-hardening)"
         return
     fi
 
     bash /opt/panelalpha/shared-hosting/scripts/configure-sysctl.sh
     bash /opt/panelalpha/shared-hosting/scripts/configure-monit.sh
-    bash /opt/panelalpha/shared-hosting/scripts/csf.sh --install
+    bash /opt/panelalpha/shared-hosting/scripts/firewall.sh --install ||
+        echo_warning "Could not set up the firewall; the firewall: lines above say what protects this host now"
     # This is the fourth Docker restart in a minute or so (install, sysbox,
-    # daemon DNS, CSF); docker.service allows three, and on a fast host the
+    # daemon DNS, firewall); docker.service allows three, and on a fast host the
     # fourth fails with start-limit-hit although the daemon stopped cleanly.
     systemctl reset-failed docker.service 2>/dev/null || true
     service docker restart
-    # engine#246: host builds run on panelalpha-build. Made here, while
-    # Docker's chains are fresh: after a CSF flush the engine cannot create it.
+    # Host builds run on panelalpha-build. Made here, while
+    # Docker's chains are fresh: after a firewall flush the engine cannot create it.
     bash /opt/panelalpha/shared-hosting/scripts/build-network-firewall.sh --create panelalpha-build || true
+    # The accounts' network, likewise; the stack names it.
+    bash /opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh --create --restart-docker || true
 }
 
-# Without it every setquota the engine runs is a no-op (#244). Never fatal: a
+# Without it every setquota the engine runs is a no-op. Never fatal: a
 # host that cannot have quota still gets an engine, and is told why.
 configure_quota() {
     if [ "$QUOTA" != 1 ]; then
@@ -1053,6 +1208,21 @@ configure_quota() {
     fi
     bash /opt/panelalpha/shared-hosting/scripts/configure-quota.sh ||
         echo_warning "Could not turn on filesystem quota; project disk limits will not be enforced"
+}
+
+# lxcfs gives each account its own /proc/meminfo, loadavg and CPUs. Never
+# fatal: without it accounts start as before and see the host's.
+configure_lxcfs() {
+    bash /opt/panelalpha/shared-hosting/scripts/configure-lxcfs.sh ||
+        echo_warning "lxcfs is not running; accounts will see the host's memory, CPUs and load in /proc"
+}
+
+# Host AppArmor profiles that attach by path also confine tenant binaries at
+# that path. Run on every install and update, so profiles a new
+# release ships are caught. Never fatal.
+configure_apparmor() {
+    bash /opt/panelalpha/shared-hosting/scripts/configure-apparmor.sh ||
+        echo_warning "Could not disable the host's path-attached AppArmor profiles; tenant binaries at those paths stay confined"
 }
 
 remove_renamed_containers() {
@@ -1066,6 +1236,48 @@ remove_renamed_containers() {
             docker rm -f $ids >/dev/null 2>&1 || true
         fi
     done
+}
+
+# A container whose start failed on its network (a host port held elsewhere)
+# stays Created, and Docker later "starts" it with no network at all: compose
+# says Started and exits 0. Remove those so `up` creates them afresh.
+remove_unstarted_containers() {
+    local id
+    for id in $(docker ps -aq --filter "label=com.docker.compose.project=shared-hosting" 2>/dev/null || true); do
+        if docker inspect -f '{{.State.Status}} {{len .NetworkSettings.Networks}}' "$id" 2>/dev/null |
+            grep -qE '^created |^running 0$'; then
+            echo_info "Removing $(docker inspect -f '{{.Name}}' "$id" 2>/dev/null): its last start failed, so it would run without a network"
+            docker rm -f "$id" >/dev/null 2>&1 || true
+        fi
+    done
+}
+
+# Every enabled service must run attached to a network; `up -d` exiting 0 does
+# not say so (see above). Waits a minute for a restarting one.
+check_engine_stack() {
+    local compose=/opt/panelalpha/shared-hosting/docker-compose.yml
+    local waited=0 services svc id state down
+    services=$(docker compose -f "$compose" config --services)
+    while :; do
+        down=''
+        for svc in $services; do
+            id=$(docker ps -aq --filter "label=com.docker.compose.project=shared-hosting" \
+                --filter "label=com.docker.compose.service=${svc}" \
+                --filter "label=com.docker.compose.oneoff=False" 2>/dev/null | head -n1)
+            state=$(docker inspect -f '{{.State.Status}} {{len .NetworkSettings.Networks}}' "$id" 2>/dev/null || true)
+            case "$state" in
+            '') down="${down} ${svc}(missing)" ;;
+            'running 0') down="${down} ${svc}(no network)" ;;
+            running\ *) ;;
+            *) down="${down} ${svc}(${state% *})" ;;
+            esac
+        done
+        [ -z "$down" ] && return 0
+        [ "$waited" -ge 60 ] && break
+        sleep 5
+        waited=$((waited + 5))
+    done
+    echo_error "These engine services are not running:${down}"
 }
 
 install_panelalpha_engine() {
@@ -1183,6 +1395,11 @@ EOF
 
     # create docker network if not exists
     bash /opt/panelalpha/shared-hosting/scripts/ensure-docker-network.sh "${DOCKER_NETWORK_MTU}"
+    # The accounts' network; sites-db and the registries join it.
+    DOCKER_NETWORK_MTU="${DOCKER_NETWORK_MTU}" bash /opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh --create --restart-docker || true
+    # Closed from boot until core binds it, not only from when core starts.
+    bash /opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh --install-units ||
+        echo_warning "Could not install the tenant network's boot units; after a reboot accounts run unfiltered until core starts"
 
     # make sure systemd-resolved is disabled / no conflicts with sites-dns
     disable_systemd_resolved || true
@@ -1200,12 +1417,29 @@ EOF
     remove_renamed_containers
     bash /opt/panelalpha/shared-hosting/scripts/retire-dockerhub-mirror.sh /opt/panelalpha/shared-hosting/.env
 
-    # run docker stack
-    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml up -d
+    # sites-db and the registries join pash-tenants: without it the
+    # stack cannot start, so stop here and say why rather than at compose.
+    docker network inspect pash-tenants >/dev/null 2>&1 ||
+        echo_error "The accounts' network pash-tenants could not be created; the tenant-network-firewall messages above say why"
+
+    # run docker stack. --remove-orphans drops containers of services this
+    # compose file does not define, which may hold a port one of its services
+    # needs: going to a release without cache-registry-writer, that container
+    # still holds 127.0.0.1:5000 against cache-registry.
+    remove_unstarted_containers
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml up -d --remove-orphans
+    check_engine_stack
 
     # run database migrations
     wait_for_database
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan migrate --force
+    # Accounts from before it leave core's network for pash-tenants,
+    # live. Already-moved and stopped ones are left alone, and one that cannot
+    # move keeps working where it is, so it never fails the update.
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan project:network:move --all || true
+    # Exim listens on docker0's gateway, which differs per host (bip, or a
+    # 172.17 clash), and relays for pash-tenants; both are read from Docker.
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan system:exim:rebuild --networks || true
     if [ "$ENABLE_NAT" = 1 ]; then
         docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan system:nat:build --replace-default-ipv4 || true
     fi
@@ -1340,6 +1574,8 @@ post_install_config() {
     # Hardening ran before the stack came up, in harden_host.
     set_default_ip
     configure_quota
+    configure_lxcfs
+    configure_apparmor
     # Before request_certificates: an ACME HTTP-01 challenge is answered through
     # this webserver, so take its restart before any challenge is in flight.
     render_webserver_config
@@ -1553,22 +1789,28 @@ json_field() { # json_field <name> <json>
     printf '%s' "$2" | sed -n "s/.*\"$1\":\"\\([^\"]*\\)\".*/\\1/p" | head -n1
 }
 
-# Prefer a concrete failure line from project:create output (HTTP 4xx/5xx or
-# "Deploy failed: …"); otherwise the last non-empty line.
+# The reason project:create gave: its first unindented line (the deploy log it
+# streams is indented, and the reason follows it on stderr), else the log's
+# "Deploy failed: …", else the last non-empty line. Never the "Deploy log:"
+# hint, nor the "In <file> line <n>:" header artisan puts above an exception.
 deploy_error_reason() {
-    local out="$1" line reason=""
+    local out="$1" line reason="" failed=""
     while IFS= read -r line; do
         case "$line" in
-        *'HTTP 4'* | *'HTTP 5'*)
-            reason=$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+        '' | [[:space:]]* | 'Deploy log:'* | 'In '*' line '*':') ;;
+        *)
+            [ -n "$reason" ] || reason=$(printf '%s' "$line" | sed -E 's/[[:space:]]+$//')
             ;;
+        esac
+        case "$line" in
         *'Deploy failed:'*)
-            reason=$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//; s/.*Deploy failed:[[:space:]]*//; s/[[:space:]]+$//')
+            failed=$(printf '%s' "$line" | sed -E 's/.*Deploy failed:[[:space:]]*//; s/[[:space:]]+$//')
             ;;
         esac
     done <<EOF
 $out
 EOF
+    [ -n "$reason" ] || reason="$failed"
     if [ -z "$reason" ]; then
         reason=$(printf '%s\n' "$out" | sed '/^[[:space:]]*$/d' | tail -n1 | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
     fi
@@ -1593,15 +1835,20 @@ deploy_repository() {
         args+=("--email=${INSTALL_EMAIL}")
     fi
 
-    # --json: JSON on stdout, live deploy log on stderr. Stream stderr to the
-    # caller's stdout (TUI tails it) via fd 3 so it is not swallowed by >$out_file.
+    # --json: JSON on stdout; the live deploy log, then any failure reason, on
+    # stderr. stderr is streamed to the caller's stdout (TUI tails it) via fd 3.
+    # A pipeline rather than >(tee …): bash waits for tee, so the reason -- the
+    # last line written -- is in $err_file before it is read.
     local out_file err_file result ec=0
     out_file=$(mktemp)
     err_file=$(mktemp)
 
     exec 3>&1
-    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core \
-        php artisan "${args[@]}" >"$out_file" 2> >(tee "$err_file" >&3) || ec=$?
+    {
+        docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core \
+            php artisan "${args[@]}" 2>&1 >"$out_file" | tee "$err_file" >&3
+        ec=${PIPESTATUS[0]}
+    } || true
     exec 3>&-
 
     result=$(
@@ -2138,6 +2385,10 @@ if [ -n "$DEPLOY_REPO" ]; then
     echo_info "Deploying ${DEPLOY_REPO_LABEL}"
     deploy_repository
 fi
+
+# Later steps restart services (sites-http, the certificate's `up -d`); report
+# success only for a stack that is still up.
+check_engine_stack
 
 update_progress 100 "Finishing installation"
 finish_installation

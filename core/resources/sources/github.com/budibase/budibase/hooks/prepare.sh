@@ -5,8 +5,9 @@ cd ~/project
 # Guarded as a whole: couchdb_data and minio_data outlive the checkout, so a
 # regenerated COUCH_DB_PASSWORD would lock Budibase out of its own database, a
 # regenerated API_ENCRYPTION_KEY would make every stored datasource credential
-# undecryptable, a regenerated JWT_SECRET would log everyone out, and a
-# regenerated admin password would be one nobody was ever told.
+# undecryptable, and a regenerated JWT_SECRET would log everyone out. The admin
+# login is the engine's (`credentials:` in panelalpha.yaml), read by app-service
+# from ~/.panelalpha/app-credentials.env.
 if [ -f .env ]; then
     exit 0
 fi
@@ -54,20 +55,6 @@ if [ -n "${COUCHDB_VERSION}" ] \
     BB_COUCHDB_TAG="${COUCHDB_VERSION}"
 fi
 
-# server/src/startup/index.ts creates an admin from these on first boot, when
-# SELF_HOSTED is set and MULTI_TENANCY is not. Without them there is no admin,
-# and POST /api/global/users/init stays unauthenticated until one exists
-# (worker/src/api/controllers/global/users.ts throws 403 "You cannot initialise
-# once an global user has been created." only *after* that) -- on a public
-# HTTPS name that means the first stranger to open the site owns the instance.
-#
-# Alphanumeric and 20 characters: the value is interpolated by compose, passed
-# through the container environment and typed by a human. Budibase's own floor
-# is PASSWORD_MIN_LENGTH=12, and createAdminUser is called with
-# skipPasswordValidation anyway.
-BB_ADMIN_USER_EMAIL=admin@example.com
-BB_ADMIN_USER_PASSWORD=$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | cut -c1-20)
-
 # COUCH_DB_USER/PASSWORD are embedded in COUCH_DB_URL as userinfo, so hex
 # rather than base64: no @, / or : to re-parse the URL around.
 cat > .env <<EOF
@@ -87,18 +74,5 @@ INTERNAL_API_KEY=$(openssl rand -hex 32)
 API_ENCRYPTION_KEY=$(openssl rand -hex 32)
 # Signs every session cookie and API token.
 JWT_SECRET=$(openssl rand -hex 32)
-BB_ADMIN_USER_EMAIL=${BB_ADMIN_USER_EMAIL}
-BB_ADMIN_USER_PASSWORD=${BB_ADMIN_USER_PASSWORD}
 EOF
 chmod 600 .env
-
-# Where the engine and the customer look for a generated credential. .env is the
-# file compose interpolates; this is the one a human is pointed at.
-cat > .panelalpha-admin-password <<EOF
-# Written by PanelAlpha on the first deploy. Budibase has no installer: until a
-# first user exists, /api/global/users/init will make an admin out of whoever
-# calls it, so PanelAlpha creates that admin instead of leaving the window open.
-BUDIBASE_ADMIN_EMAIL=${BB_ADMIN_USER_EMAIL}
-BUDIBASE_ADMIN_PASSWORD=${BB_ADMIN_USER_PASSWORD}
-EOF
-chmod 600 .panelalpha-admin-password

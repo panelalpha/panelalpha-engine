@@ -20,4 +20,4 @@ login providers are configured with project environment variables
 - `hooks/prepare.sh` generates the database password once into
   `~/.panelalpha/drop/`.
 - The repository's Dockerfile is not used: `nuxt prepare` runs
-  `git rev-parse` and the build context has no `.git` (engine#413).
+  `git rev-parse` and the build context has no `.git`.

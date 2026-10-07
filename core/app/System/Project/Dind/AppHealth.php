@@ -3,12 +3,16 @@
 namespace App\System\Project\Dind;
 
 use App\System\Project\Dind;
+use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DetectAppPort;
+use App\Lib\Deploy\Health\CheckRegistry;
 use App\Lib\Deploy\Health\CheckResult;
 use App\Lib\Deploy\Health\CheckRunner;
 use App\Lib\Deploy\Health\HealthCheck;
 use App\Lib\Deploy\Health\ProbedResponse;
+use App\Lib\Deploy\Platform\PlatformManifest;
+use App\Lib\Deploy\Port\PortMapping;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -57,6 +61,19 @@ class AppHealth
     /** The check {@see restartLoopCheck()} adds when it finds one. */
     public const CHECK_RESTART_LOOPING = 'app-restart-looping';
 
+    /** The check {@see restartLoopCheck()} adds for a container that is stopped, not crashing. */
+    public const CHECK_APP_STOPPED = 'app-stopped';
+
+    /** What `docker stop` leaves: SIGKILL or SIGTERM, which is not a crash by itself. */
+    private const STOP_EXIT_CODES = [137, 143];
+
+    /** The check {@see withBlankPageCheck()} adds, and the serving word it sets. */
+    public const CHECK_BLANK_PAGE = 'app-blank-page';
+    public const SERVING_BLANK_PAGE = 'blank_page';
+
+    /** The check {@see unreadableSecretsCheck()} adds. */
+    public const CHECK_SECRETS_READABLE = 'secrets-readable';
+
     /** Short: the deploy is already over and one `compose ps` is all this is. */
     private const RESTART_PROBE_TIMEOUT_SECONDS = 20;
 
@@ -99,9 +116,44 @@ class AppHealth
      */
     public function ports(): array
     {
-        $ports = DetectAppPort::detectAllPorts($this->dind->userAppComposeFileToRun())['all'];
+        $ports = DetectAppPort::detectAllPorts($this->dind->userAppComposeFileToRun(), $this->dind->environment()->forPortDetection())['all'];
 
-        return array_values(array_map('intval', $ports));
+        return self::withRoutedPortFirst(
+            self::withRecipePort(
+                array_values(array_map('intval', $ports)),
+                Networking::recipeComposePort($this->dind->userModel())
+            ),
+            $this->dind->userModel()->getAppPort()
+        );
+    }
+
+    /**
+     * The port the site is routed to leads, so the checks read what visitors
+     * get: a site moved off the lowest port ({@see AppLauncher}) was still
+     * judged by that port's 501.
+     *
+     * @param list<int> $ports
+     * @return list<int>
+     */
+    public static function withRoutedPortFirst(array $ports, ?int $routed): array
+    {
+        return $routed === null || !in_array($routed, $ports, true)
+            ? $ports
+            : [$routed, ...array_values(array_diff($ports, [$routed]))];
+    }
+
+    /**
+     * The port a compose recipe states is the one the site is routed to, so
+     * it is probed too, even when the scan refused it as a datastore's.
+     *
+     * @param list<int> $ports
+     * @return list<int>
+     */
+    public static function withRecipePort(array $ports, ?int $recipePort): array
+    {
+        return $recipePort === null || in_array($recipePort, $ports, true)
+            ? $ports
+            : [$recipePort, ...$ports];
     }
 
     /**
@@ -115,7 +167,7 @@ class AppHealth
      *
      * @return array{healthy: bool|null, ports: list<array{port: int, scheme: ?string, status: string, http_code: ?int, time: ?float, detail: string}>, error?: string}
      */
-    public function check(int $timeout = 5, int $attempts = 3, int $delay = 2): array
+    public function check(int $timeout = 5, int $attempts = 3, int $delay = 2, bool $waitOnServerError = false): array
     {
         try {
             $ports = $this->ports();
@@ -137,7 +189,7 @@ class AppHealth
 
         try {
             $raw = $this->dind->shell()->execQuiet(
-                ['bash', '-c', self::probeScript($ports, $timeout, $attempts, $delay, $this->mainDomain())],
+                ['bash', '-c', self::probeScript($ports, $timeout, $attempts, $delay, $this->mainDomain(), $waitOnServerError, $this->httpsPorts())],
                 [],
                 self::timeBudget($ports, $timeout, $attempts, $delay)
             );
@@ -160,6 +212,9 @@ class AppHealth
         $looping = $this->restartLoopCheck($results);
         if ($looping !== null) {
             $checks[] = $looping;
+            if ($looping['id'] === self::CHECK_APP_STOPPED) {
+                $verdict['serving'] = CheckRunner::SERVING_STOPPED;
+            }
         } elseif (($silent = (new SilentPortCheck($this->dind))->check($results)) !== null) {
             // Up, not restarting, and still silent: say what it listens on.
             $checks[] = $silent;
@@ -174,6 +229,19 @@ class AppHealth
             'domain' => $this->reachability($results, $timeout),
             'checks' => $checks,
         ];
+    }
+
+    /**
+     * The app port when the recipe declared it HTTPS-only (`port_scheme: https`).
+     *
+     * @return list<int>
+     */
+    private function httpsPorts(): array
+    {
+        $user = $this->dind->userModel();
+        $port = $user->getAppPort();
+
+        return $user->getAppPortScheme() === 'https' && $port !== null ? [$port] : [];
     }
 
     /** The name visitors use, or null before the project has one. */
@@ -201,13 +269,11 @@ class AppHealth
      * The deploy even says so out loud: "a worker or queue-only app can
      * ignore this".
      *
-     * Two applications in the supported-apps series were not workers.
-     * PocketBase's entrypoint runs the binary with no subcommand, so it
-     * printed its help and exited 0 seven times in ninety seconds; Miniflux
-     * exited on `dial tcp [::1]:5432: connect: connection refused` because
-     * nothing had provisioned the PostgreSQL it requires. Both were reported
-     * with an empty check list and a message inviting the reader to dismiss
-     * it.
+     * Not every such account is a worker. PocketBase's entrypoint runs the
+     * binary with no subcommand, so it prints its help and exits 0 in a loop;
+     * Miniflux exits on `dial tcp [::1]:5432: connect: connection refused` because
+     * nothing provisioned the PostgreSQL it requires. Both were reported with
+     * an empty check list and a message inviting the reader to dismiss it.
      *
      * Docker knows the difference and was never asked. A worker sits in
      * `running`; these sit in `restarting`.
@@ -246,7 +312,133 @@ class AppHealth
             return null;
         }
 
-        return self::restartLoopFrom($raw);
+        $restarts = $this->restartCountsIfSignalled($raw);
+
+        return self::restartLoopCounting($raw, $restarts)
+            ?? (self::nothingAt($results) ? self::stoppedFrom($raw, $this->oneShotServices(), $restarts) : null);
+    }
+
+    /**
+     * Restart counts by container name, read only when a container exited on
+     * a stop signal: that alone does not say whether `docker stop` or a crash
+     * loop's kill put it there.
+     *
+     * @return array<string, int>
+     */
+    private function restartCountsIfSignalled(string $composePsJson): array
+    {
+        $signalled = false;
+        foreach (preg_split('/\R/', trim($composePsJson)) ?: [] as $line) {
+            $row = json_decode(trim($line), true);
+            $signalled = $signalled || (is_array($row) && ($row['State'] ?? null) === self::STATE_EXITED
+                && in_array((int) ($row['ExitCode'] ?? 0), self::STOP_EXIT_CODES, true));
+        }
+        $snapshot = $signalled ? $this->containerSnapshot() : null;
+        if ($snapshot === null) {
+            return [];
+        }
+
+        $counts = [];
+        foreach (self::inspectRows($snapshot) as $row) {
+            $counts[$row['name']] = $row['restarts'];
+        }
+
+        return $counts;
+    }
+
+    /** No port gave any HTTP answer: a stopped container cannot have. @param list<array<string, mixed>> $results */
+    private static function nothingAt(array $results): bool
+    {
+        foreach ($results as $result) {
+            if (is_int($result['http_code'] ?? null)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /** @return list<string> services that are meant to run once and exit */
+    private function oneShotServices(): array
+    {
+        try {
+            $compose = ComposeYaml::parse((string) $this->dind->system()->filesystem()->fileGetContents(
+                $this->dind->userAppComposeFileToRun()
+            ));
+        } catch (\Throwable) {
+            return [];
+        }
+
+        return is_array($compose) ? AppLauncher::oneShotServices($compose) : [];
+    }
+
+    /**
+     * Services that are stopped rather than crashing: `exited` with 0 or a
+     * stop signal and no restart in progress, `created` or `paused`. A
+     * one-shot that finished is allowed to have finished.
+     *
+     * @param list<string> $oneShots
+     * @param array<string, int> $restarts by container name, see {@see isCrashing()}
+     * @return array<string, mixed>|null
+     */
+    public static function stoppedFrom(string $composePsJson, array $oneShots = [], array $restarts = []): ?array
+    {
+        $stopped = [];
+        foreach (preg_split('/\R/', trim($composePsJson)) ?: [] as $line) {
+            $row = json_decode(trim($line), true);
+            if (!is_array($row) || self::isCrashing($row, $restarts)) {
+                continue;
+            }
+            $service = self::stringOrNull($row['Service'] ?? null);
+            if (!in_array(strtolower((string) ($row['State'] ?? '')), [self::STATE_EXITED, 'created', 'paused'], true)
+                || ($service !== null && in_array($service, $oneShots, true))
+            ) {
+                continue;
+            }
+            $status = self::stringOrNull($row['Status'] ?? null);
+            $stopped[] = trim(($service ?? self::stringOrNull($row['Name'] ?? null) ?? 'a service') . ($status === null ? '' : " ({$status})"));
+        }
+
+        if ($stopped === []) {
+            return null;
+        }
+
+        return [
+            'id' => self::CHECK_APP_STOPPED,
+            'group' => 'runtime',
+            'status' => CheckResult::STATUS_FAIL,
+            'severity' => HealthCheck::SEVERITY_ERROR,
+            'title' => 'The application container is stopped.',
+            'detail' => 'Docker reports ' . implode(', ', $stopped) . '. Nothing answered because it is not running.',
+            'fix' => 'Start it with container_project_action up, or redeploy.',
+            'evidence' => ['stopped' => $stopped],
+        ];
+    }
+
+    /**
+     * Stored secrets that cannot be decoded. The app may be serving fine;
+     * the next save stores them empty. Only the health endpoint asks, so it
+     * never makes a deploy partial.
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function unreadableSecretsCheck(\App\Models\User $user): ?array
+    {
+        $names = $user->unreadableSecrets();
+        if ($names === []) {
+            return null;
+        }
+
+        return [
+            'id' => self::CHECK_SECRETS_READABLE,
+            'group' => '_baseline',
+            'status' => CheckResult::STATUS_FAIL,
+            'severity' => HealthCheck::SEVERITY_WARNING,
+            'title' => 'Stored secrets cannot be decoded.',
+            'detail' => (string) $user->unreadableSecretsWarning(),
+            'fix' => \App\Models\User::UNREADABLE_SECRETS_REMEDY,
+            'evidence' => ['secrets' => $names],
+        ];
     }
 
     /**
@@ -262,10 +454,22 @@ class AppHealth
      */
     public static function restartLoopFrom(string $composePsJson): ?array
     {
+        return self::restartLoopCounting($composePsJson, []);
+    }
+
+    /**
+     * The same, with restart counts by container name to tell `docker stop`
+     * from a crash ({@see isCrashing()}).
+     *
+     * @param array<string, int> $restarts
+     * @return array<string, mixed>|null
+     */
+    public static function restartLoopCounting(string $composePsJson, array $restarts): ?array
+    {
         $restarting = [];
         foreach (preg_split('/\R/', trim($composePsJson)) ?: [] as $line) {
             $row = json_decode(trim($line), true);
-            if (!is_array($row) || !self::isCrashing($row)) {
+            if (!is_array($row) || !self::isCrashing($row, $restarts)) {
                 continue;
             }
             $name = self::stringOrNull($row['Service'] ?? null) ?? self::stringOrNull($row['Name'] ?? null);
@@ -304,16 +508,26 @@ class AppHealth
      * A clean `exited` with status 0 is not this: a one-shot job that
      * finished is allowed to have finished. A non-zero exit is a crash.
      *
+     * A stop signal's exit (137, 143) is `docker stop` when Docker has never
+     * restarted that container; with no count to go on it stays a crash.
+     *
      * @param array<string, mixed> $row one `docker compose ps --format json` row
+     * @param array<string, int> $restarts restart counts by container name
      */
-    private static function isCrashing(array $row): bool
+    private static function isCrashing(array $row, array $restarts = []): bool
     {
         $state = $row['State'] ?? null;
         if ($state === self::STATE_RESTARTING) {
             return true;
         }
 
-        return $state === self::STATE_EXITED && (int) ($row['ExitCode'] ?? 0) !== 0;
+        $code = (int) ($row['ExitCode'] ?? 0);
+        $name = ltrim((string) ($row['Name'] ?? ''), '/');
+        if (in_array($code, self::STOP_EXIT_CODES, true) && ($restarts[$name] ?? null) === 0) {
+            return false;
+        }
+
+        return $state === self::STATE_EXITED && $code !== 0;
     }
 
     /**
@@ -329,12 +543,17 @@ class AppHealth
     private function runChecks(array $results, int $timeout = 5): array
     {
         try {
-            $runner = self::checkRunnerFor($this->dind->userModel()->getDetails());
+            $details = $this->dind->userModel()->getDetails();
+            $runner = self::checkRunnerFor($details);
             $first = self::firstResponse($results);
 
-            return $runner->runByPath(
-                [HealthCheck::DEFAULT_PATH => $first] + $this->fetchPaths($runner->paths(), $results, $timeout),
-                $this->dind->userAppDirPath()
+            return self::withBlankPageCheck(
+                $runner->runByPath(
+                    [HealthCheck::DEFAULT_PATH => $first] + $this->fetchPaths($runner->paths(), $results, $timeout),
+                    $this->dind->userAppDirPath()
+                ),
+                self::stringOrNull($details[self::DETAIL_RUNTIME] ?? null),
+                $first
             );
         } catch (\Throwable $e) {
             Log::debug('Health checks could not run: ' . self::trimReason($e->getMessage()));
@@ -344,10 +563,67 @@ class AppHealth
     }
 
     /**
+     * A 2xx with nothing in it: what a visitor sees as a blank page. 204 and
+     * 205 mean "no content" on purpose; any body at all, an API's `{}` or `[]`
+     * included, is content.
+     */
+    public static function isBlankPage(int $status, string $body): bool
+    {
+        // A full sample can be the start of a longer page; only a shorter one is the whole body.
+        return $status >= 200 && $status < 300 && !in_array($status, [204, 205], true)
+            && strlen($body) < ProbedResponse::SAMPLE_BYTES && trim($body) === '';
+    }
+
+    /**
+     * A front page that answers 2xx with nothing in it is not serving, in any
+     * runtime: no check can match text that is not there, and every visitor
+     * gets a blank page. In PHP it is usually a fatal the application
+     * suppresses itself (PHP Server Monitor masks E_ERROR before config.php
+     * exists).
+     *
+     * @param array{serving: string, checks: list<array<string, mixed>>} $verdict
+     * @return array{serving: string, checks: list<array<string, mixed>>}
+     */
+    public static function withBlankPageCheck(array $verdict, ?string $runtime, ProbedResponse $front): array
+    {
+        if (!self::isBlankPage($front->status, $front->body)) {
+            return $verdict;
+        }
+        $php = $runtime === PlatformManifest::RUNTIME_PHP;
+
+        $outranked = false;
+        foreach ($verdict['checks'] as $check) {
+            $outranked = $outranked || (($check['status'] ?? null) === CheckResult::STATUS_FAIL
+                && ($check['severity'] ?? null) === HealthCheck::SEVERITY_ERROR);
+        }
+
+        $verdict['checks'][] = [
+            'id' => self::CHECK_BLANK_PAGE,
+            'group' => $php ? PlatformManifest::RUNTIME_PHP : CheckRegistry::BASELINE,
+            'status' => CheckResult::STATUS_FAIL,
+            'severity' => HealthCheck::SEVERITY_ERROR,
+            'title' => "The front page answered {$front->status} with an empty page.",
+            'detail' => "{$front->url} returned no content.",
+            'fix' => $php
+                ? 'Usually a PHP fatal error the application suppresses. Read the container output, '
+                    . 'or turn on the application\'s debug mode, to see it.'
+                : 'Read the container output with container_service_logs to see why it sends nothing. '
+                    . 'A route meant to send nothing answers 204.',
+            'evidence' => ['url' => $front->url, 'http_code' => $front->status],
+        ];
+        // Errors outrank warnings, as in CheckRunner; an error already found says more than "empty".
+        if (!$outranked) {
+            $verdict['serving'] = self::SERVING_BLANK_PAGE;
+        }
+
+        return $verdict;
+    }
+
+    /**
      * The checks for this account: its runtime's group, what the platform's
      * manifest added, and the checks its source recipe ships in `checks/`
-     * (frozen onto the account as `deploy_checks_dir`). engine#182: the
-     * recipe's list and directory were both unreachable from here.
+     * (frozen onto the account as `deploy_checks_dir`). The recipe's list
+     * and directory used to be unreachable from here.
      *
      * @param array<string, mixed> $details
      */
@@ -413,7 +689,7 @@ class AppHealth
     ): string {
         $timeout = max(1, $timeout);
         $domain = $domain !== null && trim($domain) !== '' ? strtolower(trim($domain)) : null;
-        $hostHeader = $domain !== null ? '-H ' . escapeshellarg("Host: {$domain}") . ' ' : '';
+        $hostHeader = self::visitorHeaders($domain);
         $sample = ProbedResponse::SAMPLE_BYTES;
         $base = escapeshellarg(($scheme === 'https' ? 'https' : 'http') . '://127.0.0.1:' . $port);
         $list = implode(' ', array_map('escapeshellarg', $paths));
@@ -486,7 +762,25 @@ SH;
         }
 
         // find(), not all(): a source recipe's id resolves only there.
-        return \App\Lib\Deploy\Platform\PlatformRegistry::find($platform);
+        $manifest = \App\Lib\Deploy\Platform\PlatformRegistry::find($platform);
+        $home = self::stringOrNull($details['home_dir'] ?? null);
+        if ($manifest !== null || $home === null) {
+            return $manifest;
+        }
+
+        // A repository's own manifest with an id of its own is registered nowhere.
+        try {
+            $appConfig = \App\Lib\Deploy\Platform\AppConfig\AppConfig::load(
+                new \App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource(),
+                rtrim($home, '/') . '/project'
+            );
+
+            return \App\Lib\Deploy\Platform\PlatformRegistry::forDecisionOrAppConfig(['platform' => $platform], $appConfig);
+        } catch (\Throwable $e) {
+            Log::debug('Project manifest unreadable for health checks: ' . self::trimReason($e->getMessage()));
+
+            return null;
+        }
     }
 
     /**
@@ -580,9 +874,9 @@ SH;
         return AppReachability::compareFingerprints($domain, $edge, $app);
     }
 
-    public static function edgeProbeScript(string $domain, string $ip, int $timeout = 5): string
+    public static function edgeProbeScript(string $domain, string $ip, int $timeout = 5, bool $https = false): string
     {
-        return AppReachability::edgeProbeScript($domain, $ip, $timeout);
+        return AppReachability::edgeProbeScript($domain, $ip, $timeout, $https);
     }
 
     public static function appProbeScript(string $scheme, int $port, int $timeout = 5, ?string $domain = null): string
@@ -590,7 +884,7 @@ SH;
         return AppReachability::appProbeScript($scheme, $port, $timeout, $domain);
     }
 
-    /** @return array{code: int, hash: string, default404: bool, hash2: string} */
+    /** @return array{code: int, hash: string, default404: bool, hash2: string, location: string, scheme: string} */
     public static function parseFingerprint(string $raw): array
     {
         return AppReachability::parseFingerprint($raw);
@@ -613,6 +907,12 @@ SH;
 
     /** The reachability verdict, one of the REACH_* constants. */
     public const DETAIL_REACHABLE = 'health_reachable';
+
+    /** What the webserver answered for the domain, beside that verdict. */
+    public const DETAIL_REACHABLE_CODE = 'health_reachable_code';
+
+    /** An edge that answers a gateway error while the app answers: a site visitors cannot use. */
+    private const EDGE_GATEWAY_ERRORS = [502, 503, 504];
 
     /** What the application is serving, one of {@see CheckRunner}'s words. */
     public const DETAIL_SERVING = 'health_serving';
@@ -667,6 +967,16 @@ SH;
     private const DEPLOY_DELAY = 4;
 
     /**
+     * Past that budget, a container that is up and bound to nothing yet is
+     * still given this long: Magento runs setup:install at start, and the
+     * verdict landed mid-compile. A manifest's `health: {start_period}`
+     * replaces it, frozen onto the account as {@see DETAIL_START_PERIOD}.
+     */
+    private const START_GRACE_SECONDS = 300;
+    private const START_POLL_SECONDS = 15;
+    public const DETAIL_START_PERIOD = 'deploy_start_period';
+
+    /**
      * Run the check, write one line per port into the running deploy log, and
      * remember the verdict on the account.
      *
@@ -674,31 +984,38 @@ SH;
      * gating: what reads the verdict afterwards decides what it is worth, and
      * an app that answers nothing on HTTP is a legitimate deploy for a queue
      * consumer.
+     *
+     * @return array<string, mixed>|null the report, when there was one with ports to read
      */
-    public function report(): void
+    public function report(): ?array
     {
         $logger = $this->dind->shell()->logger();
         if ($logger === null) {
-            return;
+            return null;
         }
 
         // Before the probe, so a restart while it waits still counts.
         $before = $this->containerSnapshot();
-        $report = $this->observe(self::DEPLOY_TIMEOUT, self::DEPLOY_ATTEMPTS, self::DEPLOY_DELAY);
+        // Right after `compose up` a 500 may be a frontend whose backend is
+        // still booting (Pingvin Share X), so keep asking until the budget runs out.
+        $report = $this->observe(self::DEPLOY_TIMEOUT, self::DEPLOY_ATTEMPTS, self::DEPLOY_DELAY, true);
         if ($report === null) {
-            return;
+            return null;
         }
 
         if (isset($report['error'])) {
             $logger->warn('Health check: ' . $report['error']);
-            return;
+            return null;
         }
 
         if ($report['healthy'] === null) {
             $logger->dim('Health check: the application publishes no port to probe');
-            return;
+            // No port is fine for a worker; a service restarting forever is not.
+            $this->reportChecks($this->withLateRestartLoop($report, $before), $logger);
+            return null;
         }
 
+        $report = $this->awaitSlowStart($report, $before, $logger);
         $report = $this->withLateRestartLoop($report, $before);
 
         foreach ($report['ports'] as $result) {
@@ -711,6 +1028,8 @@ SH;
 
         $this->reportReachability($report, $logger);
         $this->reportChecks($report, $logger);
+
+        return $report;
     }
 
     /**
@@ -728,15 +1047,21 @@ SH;
             }
         }
 
+        // Nothing to probe means nothing was waited for either: give a
+        // crashing service the same few seconds to show it.
+        $wait = ($report['healthy'] ?? null) === null;
         foreach ((array) ($report['ports'] ?? []) as $port) {
             if (is_array($port) && ($port['status'] ?? null) === self::STATUS_OK) {
-                sleep(self::SETTLE_SECONDS);
+                $wait = true;
                 break;
             }
         }
+        if ($wait) {
+            $this->settle();
+        }
 
         $after = $this->containerSnapshot();
-        $looping = $after === null ? null : self::restartLoopBetween($before, $after);
+        $looping = $after === null ? null : self::restartLoopBetween($before, $after, $this->appServices());
         if ($looping === null) {
             return $report;
         }
@@ -747,8 +1072,131 @@ SH;
         return $report;
     }
 
+    protected function settle(): void
+    {
+        sleep(self::SETTLE_SECONDS);
+    }
+
+    /**
+     * The probe ended with a container that is running and listens on
+     * nothing yet: keep reading its sockets until one appears, it exits or
+     * restarts, or the start budget is spent, then probe once more.
+     *
+     * @param array<string, mixed> $report
+     * @return array<string, mixed>
+     */
+    protected function awaitSlowStart(array $report, ?string $before, DeployLogger $logger): array
+    {
+        $starting = [];
+        foreach ((array) ($report['checks'] ?? []) as $check) {
+            $starting = [...$starting, ...SilentPortCheck::starting(is_array($check) ? $check : null)];
+        }
+        $budget = $this->startPeriod();
+        if ($starting === [] || $budget <= 0) {
+            return $report;
+        }
+
+        $logger->info(sprintf(
+            'Still starting: %s listens on nothing yet; waiting up to %s more',
+            implode(', ', array_unique($starting)),
+            self::duration($budget)
+        ));
+        $deadline = $this->clock() + $budget;
+        $bound = false;
+        while ($this->clock() < $deadline) {
+            $logger->throwIfCancelled();
+            $this->pause(min(self::START_POLL_SECONDS, max(1, $deadline - $this->clock())));
+            $after = $this->containerSnapshot();
+            if ($after !== null && self::restartLoopBetween($before, $after) !== null) {
+                break;
+            }
+            // Null: no longer running (or not readable), so nothing to wait for.
+            $silent = $this->silentCheck((array) $report['ports']);
+            if ($silent === null) {
+                break;
+            }
+            if (SilentPortCheck::starting($silent) === []) {
+                $bound = true;
+                break;
+            }
+        }
+
+        // Something bound: give it the deploy's full probe. Otherwise one look for the verdict.
+        $again = $this->observe(self::DEPLOY_TIMEOUT, $bound ? self::DEPLOY_ATTEMPTS : 1, self::DEPLOY_DELAY, true);
+
+        return $again === null || isset($again['error']) ? $report : $again;
+    }
+
+    /** Seconds this account's app may take to bind its port, past the probe's own budget. */
+    private function startPeriod(): int
+    {
+        try {
+            $declared = $this->dind->userModel()->getDetails()[self::DETAIL_START_PERIOD] ?? null;
+        } catch (\Throwable) {
+            $declared = null;
+        }
+
+        return is_int($declared) ? max(0, $declared) : self::START_GRACE_SECONDS;
+    }
+
+    private static function duration(int $seconds): string
+    {
+        if ($seconds % 60 !== 0) {
+            return "{$seconds} s";
+        }
+        $minutes = intdiv($seconds, 60);
+
+        return $minutes === 1 ? '1 minute' : "{$minutes} minutes";
+    }
+
+    /**
+     * @param list<array<string, mixed>> $ports
+     * @return array<string, mixed>|null
+     */
+    protected function silentCheck(array $ports): ?array
+    {
+        return (new SilentPortCheck($this->dind))->check($ports);
+    }
+
+    protected function clock(): int
+    {
+        return time();
+    }
+
+    protected function pause(int $seconds): void
+    {
+        sleep($seconds);
+    }
+
+    /**
+     * The run file's services that publish the port the site is routed to,
+     * null when none can be told: then every looping service is the application.
+     *
+     * @return list<string>|null
+     */
+    private function appServices(): ?array
+    {
+        $port = $this->dind->userModel()->getAppPort();
+        try {
+            $compose = $port === null ? null : ComposeYaml::parseFile($this->dind->userAppComposeFileToRun());
+        } catch (\Throwable) {
+            return null;
+        }
+        $names = [];
+        foreach (is_array($compose['services'] ?? null) ? $compose['services'] : [] as $name => $service) {
+            foreach (is_array($service) && is_array($service['ports'] ?? null) ? $service['ports'] : [] as $entry) {
+                if (PortMapping::parse($entry)?->hostPort === $port) {
+                    $names[] = (string) $name;
+                    break;
+                }
+            }
+        }
+
+        return $names === [] ? null : $names;
+    }
+
     /** `docker inspect` of the stack in {@see INSPECT_FORMAT}; null when it could not be asked. */
-    private function containerSnapshot(): ?string
+    protected function containerSnapshot(): ?string
     {
         $ps = implode(' ', array_map(
             'escapeshellarg',
@@ -775,9 +1223,13 @@ SH;
      * snapshots (exit 0 included). No earlier snapshot, no count comparison:
      * a sidecar kept from an older deploy may carry old restarts.
      *
+     * When $appServices are known and none of them is looping, the verdict
+     * names the backing service instead of calling the application down.
+     *
+     * @param list<string>|null $appServices
      * @return array<string, mixed>|null
      */
-    public static function restartLoopBetween(?string $before, string $after): ?array
+    public static function restartLoopBetween(?string $before, string $after, ?array $appServices = null): ?array
     {
         $earlier = null;
         if ($before !== null) {
@@ -788,16 +1240,23 @@ SH;
         }
 
         $looping = [];
+        $services = [];
+        $appLoops = $appServices === null;
         foreach (self::inspectRows($after) as $row) {
             $grew = $earlier !== null && $row['restarts'] > ($earlier[$row['name']] ?? 0);
             if ($row['state'] !== self::STATE_RESTARTING && !$grew) {
                 continue;
             }
+            $services[] = $row['service'] ?? $row['name'];
+            $appLoops = $appLoops || in_array($row['service'], $appServices ?? [], true);
+            // Docker resets ExitCode to 0 when it starts the container again,
+            // so the code is only the crash's while it is down.
+            $down = in_array($row['state'], [self::STATE_RESTARTING, self::STATE_EXITED], true);
             $looping[] = sprintf(
-                '%s (%s, last exit %d, restarted %d time%s)',
+                '%s (%s, last exit %s, restarted %d time%s)',
                 $row['service'] ?? $row['name'],
                 $row['state'],
-                $row['exit'],
+                $down ? (string) $row['exit'] : 'unknown',
                 $row['restarts'],
                 $row['restarts'] === 1 ? '' : 's'
             );
@@ -805,6 +1264,23 @@ SH;
 
         if ($looping === []) {
             return null;
+        }
+
+        // Koillection's postgres looping beside an app that was fine read
+        // "The application is restarting", which sent the reader to the wrong container.
+        if (!$appLoops) {
+            return [
+                'id' => self::CHECK_RESTART_LOOPING,
+                'group' => 'runtime',
+                'status' => CheckResult::STATUS_FAIL,
+                'severity' => HealthCheck::SEVERITY_ERROR,
+                'title' => 'A backing service is restarting: ' . implode(', ', $looping) . '.',
+                'detail' => 'The application itself is not restarting, but what it needs from '
+                    . implode(', ', $services) . ' may not be there.',
+                'fix' => 'Read the output of ' . implode(', ', $services) . ' with container_service_logs'
+                    . ' (service: ' . $services[0] . '); the reason it exits is there.',
+                'evidence' => ['restarting' => $looping],
+            ];
         }
 
         return [
@@ -919,10 +1395,10 @@ SH;
      *
      * @return array<string, mixed>|null
      */
-    public function observe(int $timeout = 5, int $attempts = 3, int $delay = 2): ?array
+    public function observe(int $timeout = 5, int $attempts = 3, int $delay = 2, bool $waitOnServerError = false): ?array
     {
         try {
-            $report = $this->check($timeout, $attempts, $delay);
+            $report = $this->check($timeout, $attempts, $delay, $waitOnServerError);
         } catch (\Throwable $e) {
             Log::warning('App health check failed to run: ' . $e->getMessage());
 
@@ -965,6 +1441,23 @@ SH;
     }
 
     /**
+     * Whether a port answered the last observation with a 5xx: the app is up
+     * and failing, and why is in what its container printed.
+     *
+     * @param array<string, mixed> $details the account's details
+     */
+    public static function sawServerError(array $details): bool
+    {
+        foreach ((array) ($details[self::DETAIL_PORTS] ?? []) as $port) {
+            if (is_array($port) && is_int($port['http_code'] ?? null) && $port['http_code'] >= self::SERVER_ERROR_FROM) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Write the verdict onto the account, ports and status codes only.
      *
      * `checked` is what tells "nothing to probe" apart from "nothing
@@ -982,6 +1475,7 @@ SH;
                 self::DETAIL_CHECKED => $report['healthy'] !== null,
                 self::DETAIL_HEALTHY => $report['healthy'],
                 self::DETAIL_REACHABLE => is_array($reach) ? $reach['verdict'] : null,
+                self::DETAIL_REACHABLE_CODE => is_array($reach) && is_int($reach['http_code'] ?? null) ? $reach['http_code'] : null,
                 self::DETAIL_SERVING => $report['serving'] ?? null,
                 self::DETAIL_CHECKS => self::failuresOf($report),
                 self::DETAIL_PORTS => array_map(
@@ -1064,7 +1558,7 @@ SH;
      * The one place the question is answered, because three callers ask it
      * and each of them writes down a different consequence: the create path
      * finishes its deploy log with these, `User::rebuild()` finishes its own
-     * with them, and `recordRebuildSucceeded()` puts them on the account
+     * with them, and `ProjectRebuild::recordSucceeded()` puts them on the account
      * record. They diverged twice already -- rebuild reported a degraded
      * application as a clean success for as long as it finished its log
      * itself, and this line, the one case where nothing answers at all, was
@@ -1080,17 +1574,53 @@ SH;
     public static function servingWarnings(array $details): array
     {
         $warnings = self::nothingAnswered($details) ? [self::NOT_ANSWERING] : [];
+        $edge = self::edgeFailure($details);
+        if ($edge !== null) {
+            $warnings[] = $edge;
+        }
 
         return array_merge($warnings, self::errorCheckMessages($details));
     }
 
     /**
-     * Did every port that was probed fail?
+     * The app answers inside the account, and the site does not: the domain
+     * answered a gateway error, or the webserver refused the connection.
+     * Any other difference stays a log line ({@see reportReachability()}):
+     * an app that varies by Host is not broken.
+     *
+     * @param array<string, mixed> $details
+     */
+    public static function edgeFailure(array $details): ?string
+    {
+        $verdict = $details[self::DETAIL_REACHABLE] ?? null;
+        $code = $details[self::DETAIL_REACHABLE_CODE] ?? null;
+        $gateway = $verdict === self::REACH_DIFFERS && in_array($code, self::EDGE_GATEWAY_ERRORS, true);
+        if (!$gateway && $verdict !== self::REACH_UNREACHABLE) {
+            return null;
+        }
+
+        $appAnswered = false;
+        foreach ((array) ($details[self::DETAIL_PORTS] ?? []) as $port) {
+            $answer = is_array($port) ? ($port['http_code'] ?? null) : null;
+            $appAnswered = $appAnswered || (is_int($answer) && $answer > 0 && $answer < self::SERVER_ERROR_FROM);
+        }
+        if (!$appAnswered) {
+            return null;
+        }
+
+        return $gateway
+            ? "The application answers inside the account, but the site answers {$code} through the webserver."
+            : 'The application answers inside the account, but the webserver did not accept a connection for the site.';
+    }
+
+    /**
+     * Did every port that was probed give no HTTP answer at all?
      *
      * The strict reading on purpose. One failing port out of three is a
      * partially wrong recipe worth a log line; *nothing* answering is an
      * application that is not serving, and that is the only case confident
-     * enough to change what a deploy reports.
+     * enough to change what a deploy reports. A 5xx is an answer: the
+     * `no-server-error` check reports it, and this line would point at ports.
      *
      * @param array<string, mixed> $details
      */
@@ -1109,7 +1639,7 @@ SH;
         }
 
         foreach ($ports as $port) {
-            if (is_array($port) && ($port['status'] ?? null) === self::STATUS_OK) {
+            if (is_array($port) && (($port['status'] ?? null) === self::STATUS_OK || is_int($port['http_code'] ?? null))) {
                 return false;
             }
         }
@@ -1151,15 +1681,23 @@ SH;
      * TLS itself is not reported down. `-k` throughout — a self-signed
      * certificate on 127.0.0.1 is not what this check is about.
      *
+     * $httpsPorts are asked over https first: a recipe declared them
+     * HTTPS-only, and nginx answers plain http there with a 400 that would
+     * pass for the app.
+     *
      * @param list<int> $ports
+     * @param list<int> $httpsPorts
      */
     public static function probeScript(
         array $ports,
         int $timeout = 5,
         int $attempts = 3,
         int $delay = 2,
-        ?string $domain = null
+        ?string $domain = null,
+        bool $waitOnServerError = false,
+        array $httpsPorts = []
     ): string {
+        $secureList = implode(' ', array_map('intval', $httpsPorts));
         $timeout = max(1, $timeout);
         $attempts = max(1, $attempts);
         $delay = max(0, $delay);
@@ -1167,10 +1705,11 @@ SH;
         $list = implode(' ', array_map('intval', $ports));
         // Ask as a visitor does: an app that validates Host (Django's
         // ALLOWED_HOSTS, Laravel TrustHosts, Phorge's site URIs) refuses
-        // `Host: 127.0.0.1` while serving its domain fine (#165, #190).
+        // `Host: 127.0.0.1` while serving its domain fine.
         $domain = $domain !== null && trim($domain) !== '' ? strtolower(trim($domain)) : null;
-        $hostHeader = $domain !== null ? '-H ' . escapeshellarg("Host: {$domain}") . ' ' : '';
+        $hostHeader = self::visitorHeaders($domain);
         $ownName = $domain !== null ? ' || [ "$host" = ' . escapeshellarg($domain) . ' ]' : '';
+        $waitCodes = $waitOnServerError ? '000|500|502|503|504' : '000|502|503|504';
 
         return <<<SH
 set -u
@@ -1276,18 +1815,23 @@ for port in {$list}; do
     attempt=1
     while :; do
         scheme=http
-        result=\$(probe http "\$port")
+        other=https
+        case " {$secureList} " in
+            *" \$port "*) scheme=https; other=http ;;
+        esac
+        result=\$(probe "\$scheme" "\$port")
         if [ "\${result%% *}" = "000" ]; then
-            secure=\$(probe https "\$port")
-            if [ "\${secure%% *}" != "000" ]; then
-                scheme=https
-                result=\$secure
+            second=\$(probe "\$other" "\$port")
+            if [ "\${second%% *}" != "000" ]; then
+                scheme=\$other
+                result=\$second
             fi
         fi
         # A proxy bundled in the image (Caddy, nginx) binds the port at once
         # and answers 502-504 until its backend is up: keep waiting on those.
+        # A deploy waits on 500 too: the app may still be warming up.
         case "\${result%% *}" in
-            000|502|503|504) ;;
+            {$waitCodes}) ;;
             *) break ;;
         esac
         [ "\$attempt" -ge {$attempts} ] && break
@@ -1299,6 +1843,33 @@ done
 exit 0
 SH;
     }
+
+    /**
+     * curl flags for the headers the account vhost adds for a visitor on
+     * https. An app that insists on a secure request (ASP.NET antiforgery in
+     * Squidex) answers 500 to plain http without them, and one that trusts its
+     * proxy requires the client address (OpenClaw answers 403 without it).
+     */
+    public static function visitorHeaders(?string $domain): string
+    {
+        if ($domain === null) {
+            return '';
+        }
+
+        return implode(' ', array_map(
+            static fn (string $header): string => '-H ' . escapeshellarg($header),
+            [
+                "Host: {$domain}", 'X-Forwarded-Proto: https', "X-Forwarded-Host: {$domain}", 'X-Forwarded-Port: 443',
+                'X-Forwarded-For: ' . self::PROBE_CLIENT, 'X-Real-IP: ' . self::PROBE_CLIENT,
+            ]
+        )) . ' ';
+    }
+
+    /**
+     * The client address the probe claims: a documentation address (RFC 5737),
+     * so the app answers an outside visitor, never a loopback "local" client.
+     */
+    private const PROBE_CLIENT = '192.0.2.1';
 
     /**
      * Ceiling for the whole probe: every port may burn both schemes on every

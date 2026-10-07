@@ -223,6 +223,55 @@ class PanelAlphaConnect
     }
 
     /**
+     * Addresses the *.panelalpha.online front connects from (config
+     * connect.front_addresses). Anything that is not an IP or CIDR is dropped,
+     * since each one is written into nginx as set_real_ip_from.
+     *
+     * @return list<string>
+     */
+    public static function frontAddresses(): array
+    {
+        $raw = preg_split('/[\s,]+/', (string) config('connect.front_addresses', ''), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $valid = [];
+        foreach ($raw as $entry) {
+            [$ip, $prefix] = array_pad(explode('/', $entry, 2), 2, null);
+            if (filter_var($ip, FILTER_VALIDATE_IP) === false) {
+                continue;
+            }
+            $max = str_contains($ip, ':') ? 128 : 32;
+            if ($prefix !== null && (!ctype_digit($prefix) || (int) $prefix > $max)) {
+                continue;
+            }
+            $valid[] = $entry;
+        }
+
+        return array_values(array_unique($valid));
+    }
+
+    /**
+     * The front's addresses when the front serves this domain (a
+     * *.panelalpha.online name, or one of its tunnels points here), else none.
+     *
+     * @return list<string>
+     */
+    public static function trustedFrontsFor(Domain $domain): array
+    {
+        $suffix = '.' . self::PARENT_DOMAIN;
+        $behindFront = false;
+        foreach ([$domain->domain, ...$domain->getAliases()] as $name) {
+            if (Str::endsWith(strtolower(rtrim(trim((string) $name), '.')), $suffix)) {
+                $behindFront = true;
+                break;
+            }
+        }
+        if (!$behindFront && $domain->exists) {
+            $behindFront = $domain->tunnels()->where('provider', Tunnel::PROVIDER_PANELALPHA)->exists();
+        }
+
+        return $behindFront ? self::frontAddresses() : [];
+    }
+
+    /**
      * Register *.panelalpha.online via Connect's WithoutDNS proxy (no DinD / CF token).
      * Caller must have already run {@see TunnelManager::assertCreatable}.
      */
@@ -237,7 +286,10 @@ class PanelAlphaConnect
             );
         }
 
-        $created = (new self())->createSite($domain->domain, $targetIp, $path);
+        // Forwarded with its own name as Host: on the domain of the same name
+        // that is the domain, and a sibling (`api-<name>`) reaches the app as
+        // the name its visitor typed.
+        $created = (new self())->createSite(self::pathFqdnFromHostname($hostname), $targetIp, $path);
 
         return self::recordPanelAlphaTunnel($user, $domain, $created + ['target_ip' => $targetIp]);
     }

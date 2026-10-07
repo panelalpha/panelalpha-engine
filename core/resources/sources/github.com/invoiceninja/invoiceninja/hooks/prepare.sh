@@ -19,5 +19,5 @@ fi
 chmod 600 "${STORE}/secrets.env"
 
 # The image does not read the repo's .env; this keeps .env.example (whose
-# COMPOSER_AUTH compose cannot parse once re-quoted, engine#326) out of it.
+# COMPOSER_AUTH compose cannot parse once re-quoted) out of it.
 printf '# Invoice Ninja runs from the official image; settings are in docker-compose.yml.\n' > ~/project/.env

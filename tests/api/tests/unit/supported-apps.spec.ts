@@ -49,6 +49,13 @@ test.describe('supported-app catalogue', () => {
       expect(entry.issueUrl.endsWith(`/${entry.iid}`)).toBe(true);
     }
   });
+
+  // Easy!Appointments' HEAD fails its own gulp build; juntagrico is a library.
+  test('lists no app that fails for upstream reasons', () => {
+    const repos = SUPPORTED_APPS.map((entry) => entry.repo);
+    expect(repos).not.toContain('https://github.com/alextselegidis/easyappointments');
+    expect(repos).not.toContain('https://github.com/juntagrico/juntagrico');
+  });
 });
 
 test.describe('inspect ports contract', () => {

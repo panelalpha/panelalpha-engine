@@ -1,5 +1,5 @@
-# The repository root has no main package (the binary is cmd/stash, engine
-# #328) and the UI is a separate pnpm build, so this runs upstream's published
+# The repository root has no main package (the binary is
+# cmd/stash) and the UI is a separate pnpm build, so this runs upstream's published
 # v0.31.1 release image laid out like docker/production/docker-compose.yml.
 #
 # Behind the engine every visitor arrives with a public X-Forwarded-For, and

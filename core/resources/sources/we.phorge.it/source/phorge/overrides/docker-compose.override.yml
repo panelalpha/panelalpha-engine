@@ -38,7 +38,7 @@ services:
     volumes:
       - ./arcanist:/arcanist:ro
       # The account's secrets, which live outside ~/project because ~/project
-      # is wiped and re-cloned on every deploy (engine defect #173) while the
+      # is wiped and re-cloned on every deploy while the
       # database volume is not. Read-only, and 0700/0600 on the host side.
       - ../.panelalpha/phorge:/panelalpha:ro
 
@@ -74,7 +74,7 @@ services:
       db:
         condition: service_healthy
 
-    # Engine defect #90. The install stage does all of Phorge's setup before
+    # The install stage does all of Phorge's setup before
     # Apache serves anything useful: 54 databases, ~900 storage patches, the
     # first administrator and the password auth provider. The engine runs
     # `docker compose up -d` without --wait and probes as soon as it returns,
@@ -149,18 +149,14 @@ services:
   # include. That is a real loss and it is written down in the README. It is
   # also the only shape in which this application runs.
   #
-  # Its credentials are NOT set here, and not for want of trying. The engine
-  # harvests this file for backing services and replaces the `environment` of
-  # anything it recognises as a datastore with values of its own -- for a
-  # non-Laravel app those are all the literal string `app`, root password
-  # included (MysqlSidecar::FALLBACK_PASSWORD). `environment:` outranks
-  # `env_file:`, and the only other channel is `.env`, which the engine copies
-  # to a 644 `.env.default`. So the engine wins here and
-  # panelalpha/phorge-db-secure.php replaces the credentials from inside the
-  # app container, once the database is up, on every deploy.
+  # Its root password comes from ~/.panelalpha/phorge/db-root.env, which
+  # hooks/prepare.sh writes from the per-account PHORGE_DB_PASSWORD. The engine
+  # adds no credentials to a recipe's own override, and MySQL will not
+  # initialise without one.
   db:
     image: mysql:8.0
     restart: unless-stopped
+    env_file: ../.panelalpha/phorge/db-root.env
     volumes:
       - phorge_db:/var/lib/mysql
     command:
@@ -188,13 +184,9 @@ services:
       # three-letter terms matching.
       - --innodb-ft-min-token-size=3
 
-    # Credential-free on purpose, and it replaces the one the engine generates.
-    #
-    # The generated healthcheck is
-    # `mariadb-admin ping -uroot -p"$$MYSQL_ROOT_PASSWORD"`, and
-    # panelalpha/phorge-db-secure.php changes root's password on the first
-    # deploy -- after which the engine's own check authenticates with a password
-    # the server no longer has and the container goes unhealthy forever.
+    # Credential-free on purpose: phorge-db-secure.php may change root's
+    # password on a database an older engine initialised, and a check that
+    # authenticates would then go unhealthy forever.
     #
     # `mysqladmin ping` answers "Access denied" rather than a connection error
     # for a live server with bad credentials, so the grep is what makes "the
@@ -220,7 +212,7 @@ services:
   # and what the health probe then meets. A clean exit 0 is not a crash loop as
   # far as AppHealth is concerned.
   #
-  # alpine:3, never a datastore image (engine defect #90).
+  # alpine:3, never a datastore image.
   ready:
     image: alpine:3
     entrypoint: ["/bin/sh", "-c", "exit 0"]

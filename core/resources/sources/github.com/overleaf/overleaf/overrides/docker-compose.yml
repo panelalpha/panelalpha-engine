@@ -1,0 +1,89 @@
+# Compose-replace: upstream's compose pins mongo:8.0, which refuses to start on
+# Linux 6.19+ below 8.0.35 (SERVER-121912), and Overleaf 6.x needs
+# MongoDB 8.0 or newer. 8.2.12 starts on these kernels. The rest is upstream's
+# compose without the Server Pro settings, on named volumes.
+services:
+  sharelatex:
+    image: sharelatex/sharelatex:6.3.0@sha256:d2c20ae595d64f61dca224864b90a5594fb71df0c20c014c2dcaae595f2de7d8
+    restart: unless-stopped
+    stop_grace_period: 60s
+    ports:
+      - "80:80"
+    env_file:
+      # OVERLEAF_INVITE_TOKEN_SECRET (the image refuses to start without it)
+      # and OVERLEAF_SESSION_SECRET (else sessions end on every rebuild),
+      # generated once by hooks/prepare.sh.
+      - ../.panelalpha/overleaf/app.env
+    environment:
+      OVERLEAF_APP_NAME: Overleaf Community Edition
+      OVERLEAF_SITE_URL: ${PA_PUBLIC_URL}
+      OVERLEAF_MONGO_URL: mongodb://mongo/sharelatex
+      OVERLEAF_REDIS_HOST: redis
+      REDIS_HOST: redis
+      ENABLED_LINKED_FILE_TYPES: "project_file,project_output_file"
+      ENABLE_CONVERSIONS: "true"
+      EMAIL_CONFIRMATION_DISABLED: "true"
+      # The image's own value: its Node services load through Yarn PnP. Left
+      # unset, the engine's heap cap would replace it and every service would
+      # fail on `Cannot find package 'mongodb-legacy'`.
+      NODE_OPTIONS: --require /overleaf/.pnp.cjs --import /overleaf/.pnp.register.mjs
+    volumes:
+      - data:/var/lib/overleaf
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+    mem_limit: 2g
+
+  mongo:
+    # Not 8.0 or 8.3: their published images refuse this kernel until 8.0.35 /
+    # 8.3.14. Data written by 8.2 upgrades forward to 8.3.
+    image: mongo:8.2.12@sha256:e0ce8c35124d4a9f9785532d1f268f39e9728ffa1cb38f46fa482436424c4bd3
+    restart: unless-stopped
+    # Overleaf needs transactions, so upstream runs a single-node replica set.
+    command: ["--replSet", "overleaf", "--wiredTigerCacheSizeGB", "0.25"]
+    environment:
+      MONGO_INITDB_DATABASE: sharelatex
+    volumes:
+      - mongo:/data/db
+      # Upstream's own init script, from the checkout: rs.initiate on mongo:27017.
+      - ./bin/shared/mongodb-init-replica-set.js:/docker-entrypoint-initdb.d/mongodb-init-replica-set.js:ro
+    extra_hosts:
+      # The init script runs before the network name answers (as upstream).
+      - mongo:127.0.0.1
+    healthcheck:
+      test: echo 'db.stats().ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+    mem_limit: 768m
+
+  redis:
+    image: redis:6.2@sha256:e7b96daa9a182b0a2639253fdab98244190ec2dca8a41da3fb31a147ef71a870
+    restart: unless-stopped
+    volumes:
+      - redis:/data
+    mem_limit: 256m
+
+  # No-op gate: `up -d` returns once Overleaf has migrated and answers.
+  ready:
+    image: redis:6.2@sha256:e7b96daa9a182b0a2639253fdab98244190ec2dca8a41da3fb31a147ef71a870
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      sharelatex:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}
+  mongo: {}
+  redis: {}

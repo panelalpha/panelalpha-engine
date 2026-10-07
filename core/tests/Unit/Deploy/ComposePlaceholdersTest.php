@@ -136,7 +136,7 @@ YAML);
         $this->assertSame('http://localhost:8079', $env['UPSTASH_REDIS_REST_URL']);
     }
 
-    /** engine#236: a localhost placeholder is rewritten on any port, not just an allowlist. */
+    /** A localhost placeholder is rewritten on any port, not just an allowlist. */
     public function test_it_rewrites_a_localhost_url_on_a_non_allowlisted_port(): void
     {
         $compose = ['services' => ['fittrackee' => ['environment' => [
@@ -331,7 +331,7 @@ YAML);
     }
 
     /**
-     * Compose's fail-closed form. RSS Monster (#147) and Etherpad (#116) both
+     * Compose's fail-closed form. RSS Monster and Etherpad both
      * died before a container existed, because nothing supplies a value and
      * `docker compose up` refuses to interpolate.
      */
@@ -348,6 +348,88 @@ YAML);
         $this->assertMatchesRegularExpression('/^[0-9a-f]{48}$/', $env['JWT_SECRET']);
         $this->assertMatchesRegularExpression('/^[0-9a-f]{48}$/', $env['FEVER_CREDENTIAL_SECRET']);
         $this->assertNotSame($env['JWT_SECRET'], $env['FEVER_CREDENTIAL_SECRET']);
+    }
+
+    /**
+     * Rustrak's session key refuses 48 characters ("at least 64 are required");
+     * its message says how long a key it wants, and every reference agrees.
+     */
+    public function test_a_required_secret_is_as_long_as_its_message_asks(): void
+    {
+        $compose = ['services' => [
+            'server' => ['environment' => [
+                'SESSION_SECRET_KEY=${SESSION_SECRET_KEY:?generate one with openssl rand -hex 32}',
+                'OTHER_KEY=${SESSION_SECRET_KEY:?set it}',
+                'JWT_SECRET=${JWT_SECRET:?must be 32 characters}',
+            ]],
+        ]];
+
+        $env = ComposePlaceholders::fill($compose, 'seed')['compose']['services']['server']['environment'];
+        $key = substr($env[0], strlen('SESSION_SECRET_KEY='));
+
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{64}$/', $key);
+        $this->assertSame('OTHER_KEY=' . $key, $env[1]);
+        // Shorter hints never shorten the value an existing deploy already uses.
+        $this->assertSame('JWT_SECRET=' . ComposePlaceholders::generatedSecret('JWT_SECRET', 'seed'), $env[2]);
+        $this->assertSame(
+            $key,
+            ComposePlaceholders::requiredSecret('SESSION_SECRET_KEY', '${SESSION_SECRET_KEY:?openssl rand -hex 32}', 'seed')
+        );
+    }
+
+    /** EcomGen decodes its key as base64 and refuses anything but 32 bytes. */
+    public function test_a_required_secret_asked_for_as_base64_bytes_decodes_to_that_many(): void
+    {
+        $expr = '${ECOMGEN_MASTER_KEY:?Set a base64-encoded 32-byte key in .env}';
+        $compose = ['services' => [
+            'api' => ['environment' => ['ECOMGEN_MASTER_KEY' => $expr]],
+            'worker' => ['environment' => ['ECOMGEN_MASTER_KEY' => $expr]],
+        ]];
+
+        $filled = ComposePlaceholders::fill($compose, 'seed')['compose']['services'];
+        $key = $filled['api']['environment']['ECOMGEN_MASTER_KEY'];
+
+        $this->assertSame(32, strlen((string) base64_decode($key, true)));
+        $this->assertSame($key, $filled['worker']['environment']['ECOMGEN_MASTER_KEY']);
+        $this->assertSame($key, ComposePlaceholders::requiredSecret('ECOMGEN_MASTER_KEY', $expr, 'seed'));
+        $this->assertNotSame($key, ComposePlaceholders::fill($compose, 'other-seed')['compose']['services']['api']['environment']['ECOMGEN_MASTER_KEY']);
+    }
+
+    public function test_base64_hints(): void
+    {
+        $this->assertSame(32, ComposePlaceholders::hintedBase64Bytes('Set a base64-encoded 32-byte key'));
+        $this->assertSame(64, ComposePlaceholders::hintedBase64Bytes('generate with openssl rand -base64 64'));
+        $this->assertSame(16, ComposePlaceholders::hintedBase64Bytes('16 bytes, base64'));
+        $this->assertSame(32, ComposePlaceholders::hintedBase64Bytes('must be base64'));
+        $this->assertSame(0, ComposePlaceholders::hintedBase64Bytes('generate one with openssl rand -hex 32'));
+        $this->assertSame(0, ComposePlaceholders::hintedBase64Bytes('a 32-byte key'));
+    }
+
+    /** egma requires its own address and stops interpolation without it. */
+    public function test_a_required_own_url_gets_the_public_url(): void
+    {
+        $compose = ['services' => ['api' => ['environment' => [
+            'EGMA_BASE_URL' => '${EGMA_BASE_URL:?no default — the whole address a browser reaches egma at}',
+            'DATABASE_URL' => '${DATABASE_URL:?set it}',
+            'CALLBACK' => '${EGMA_BASE_URL:?x}/auth/callback',
+        ]]]];
+
+        $result = ComposePlaceholders::fill($compose, 'seed', 'https://egma.example.test/');
+        $env = $result['compose']['services']['api']['environment'];
+
+        $this->assertSame('https://egma.example.test', $env['EGMA_BASE_URL']);
+        $this->assertSame('https://egma.example.test/auth/callback', $env['CALLBACK']);
+        $this->assertSame('${DATABASE_URL:?set it}', $env['DATABASE_URL']);
+        $this->assertContains('EGMA_BASE_URL', $result['urls']);
+        $this->assertNotContains('EGMA_BASE_URL', $result['secrets']);
+
+        // The account's own value wins; without a public URL nothing is invented.
+        $own = ComposePlaceholders::fill($compose, 'seed', 'https://egma.example.test', ['EGMA_BASE_URL' => 'https://mine.test']);
+        $this->assertSame('https://mine.test', $own['compose']['services']['api']['environment']['EGMA_BASE_URL']);
+        $this->assertSame(
+            $compose['services']['api']['environment']['EGMA_BASE_URL'],
+            ComposePlaceholders::fill($compose, 'seed')['compose']['services']['api']['environment']['EGMA_BASE_URL']
+        );
     }
 
     /**
@@ -421,7 +503,7 @@ YAML);
     }
 
     /**
-     * Pad (#2156): the password is required as the database's whole value and
+     * Pad: the password is required as the database's whole value and
      * again inside the app's DSN. Filling only the first left Compose to abort
      * on the second, behind a log saying it had been generated.
      */
@@ -490,7 +572,7 @@ YAML);
     }
 
     /**
-     * oc8 (#2197) keeps its required secrets in an `x-` fragment merged into
+     * oc8 keeps its required secrets in an `x-` fragment merged into
      * each service. Compose interpolates the fragment too, so filling only the
      * merged copies still aborted on the original.
      */
@@ -528,7 +610,7 @@ YAML);
     }
 
     /**
-     * EcomGen (#2220): the account set ECOMGEN_MASTER_KEY and the generated
+     * EcomGen: the account set ECOMGEN_MASTER_KEY and the generated
      * value was baked over it. The account's own value is used everywhere
      * the variable appears, written so Compose does not interpolate its `$`.
      */
@@ -550,7 +632,7 @@ YAML);
     }
 
     /**
-     * Scrob (#2009) ships `changeme` as the database password and again in
+     * Scrob ships `changeme` as the database password and again in
      * the app's DATABASE_URL. Too common a word to search for, but the
      * password slot of a URL is exact, so both sides get the same value.
      */

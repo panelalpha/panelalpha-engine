@@ -6,6 +6,7 @@ use App\Models\Domain;
 use App\Models\ProxyRule;
 use App\Models\User;
 use App\System;
+use App\System\Services\Webserver\ProxyRulePorts;
 use App\System\Services\Webserver\RoutingCompiler;
 use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
@@ -241,6 +242,67 @@ class RoutingCompilerTest extends TestCase
         $this->rule(['transport' => 'udp', 'listen_port' => 53]);
 
         $this->assertSame('udp', $this->compile()['stream'][0]['transport']);
+    }
+
+    // --- what a project's rule may reach ---
+
+    /**
+     * A project's rule stored before upstreams were checked, pointing at
+     * another project or sites-db, is not served and gets no firewall port.
+     */
+    public function test_a_project_rule_to_anything_but_its_own_app_is_not_compiled(): void
+    {
+        $domain = $this->domainFor('alice', 'alice.test');
+        $this->makeUser('bob');
+        $this->rule(['owner_scope' => 'user', 'username' => 'alice', 'transport' => 'tcp', 'listen_port' => 17002, 'upstream_host' => 'bob']);
+        $this->rule(['owner_scope' => 'user', 'username' => 'alice', 'transport' => 'tcp', 'listen_port' => 17003, 'upstream_host' => '172.25.0.2']);
+        $this->rule(['owner_scope' => 'user', 'username' => 'alice', 'listen_port' => 80, 'server_name' => null, 'upstream_host' => 'core']);
+        $own = $this->rule(['owner_scope' => 'user', 'username' => 'alice', 'transport' => 'tcp', 'listen_port' => 17004, 'upstream_host' => 'alice']);
+
+        $compiled = $this->compile([$domain]);
+
+        $this->assertSame([$own->id], array_column($compiled['stream'], 'id'));
+        $this->assertSame([80, 443], array_column($this->generated($compiled['http']), 'listen_port'), 'the refused :80 rule claims nothing');
+        $this->assertNotContains(false, array_column($compiled['http'], 'is_generated'));
+        $this->assertSame(['17004'], array_values(array_map(
+            static fn ($allow): string => (string) $allow->port,
+            ProxyRulePorts::allows([...$compiled['http'], ...$compiled['stream']])
+        )));
+    }
+
+    /**
+     * A project's rule stored before server names were checked, named after
+     * another project's domain, is not served and gets no firewall port.
+     */
+    public function test_a_project_rule_named_after_another_projects_domain_is_not_compiled(): void
+    {
+        $alice = $this->domainFor('alice', 'alice.test');
+        $alice->setDetails(['aliases' => ['www.alice.test']]);
+        $alice->save();
+        $bob = $this->domainFor('bob', 'bob.test');
+        $this->rule(['owner_scope' => 'user', 'username' => 'bob', 'listen_port' => 8089, 'server_name' => 'alice.test', 'upstream_host' => 'bob']);
+        $this->rule(['owner_scope' => 'user', 'username' => 'bob', 'listen_port' => 8090, 'server_name' => 'www.alice.test', 'upstream_host' => 'bob']);
+        $this->rule(['owner_scope' => 'user', 'username' => 'bob', 'listen_ip' => '10.1.2.3', 'listen_port' => 80, 'server_name' => 'alice.test', 'upstream_host' => 'bob']);
+        $own = $this->rule(['owner_scope' => 'user', 'username' => 'bob', 'listen_port' => 8091, 'server_name' => 'BOB.test', 'upstream_host' => 'bob']);
+        $alias = $this->rule(['owner_scope' => 'user', 'username' => 'alice', 'listen_port' => 8092, 'server_name' => 'www.alice.test', 'upstream_host' => 'alice']);
+        $system = $this->rule(['listen_port' => 8093, 'server_name' => 'alice.test']);
+
+        $http = $this->compile([$alice, $bob])['http'];
+
+        $ids = array_values(array_filter(array_column($http, 'id')));
+        sort($ids);
+        $this->assertSame([$own->id, $alias->id, $system->id], $ids);
+        $ports = array_values(array_map(static fn ($allow): string => (string) $allow->port, ProxyRulePorts::allows($http)));
+        sort($ports);
+        $this->assertSame(['8091', '8092', '8093'], $ports);
+    }
+
+    /** The operator's own rules are not limited. */
+    public function test_a_system_rule_to_any_upstream_is_compiled(): void
+    {
+        $this->rule(['transport' => 'tcp', 'listen_port' => 17003, 'upstream_host' => '172.25.0.2']);
+
+        $this->assertSame('172.25.0.2', $this->compile()['stream'][0]['upstream_host']);
     }
 
     /**

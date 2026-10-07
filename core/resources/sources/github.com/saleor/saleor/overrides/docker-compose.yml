@@ -11,7 +11,7 @@
 # or a pinned commit gets its own code, which no image tag could give it.
 #
 # Every value here is literal or uses compose's ${VAR:-default} form. A bare
-# ${VAR} would interpolate to an empty string (engine#212), which for
+# ${VAR} would interpolate to an empty string, which for
 # POSTGRES_PASSWORD means a database that trusts everyone.
 services:
   db:
@@ -23,7 +23,7 @@ services:
     restart: unless-stopped
     # POSTGRES_PASSWORD only -- written once into ~/.panelalpha/saleor/ by
     # hooks/prepare.sh, because ~/project is emptied before every clone
-    # (engine#173) and a regenerated password would lock Saleor out of this
+    # and a regenerated password would lock Saleor out of this
     # volume for good.
     env_file:
       - ../.panelalpha/saleor/saleor.env
@@ -77,7 +77,7 @@ services:
   # One-shot. Migrates, publishes the static files the image built, and creates
   # this account's superuser, then exits 0. `api` will not start until it has.
   #
-  # `docker compose up -d` runs without --wait (engine#204), so a deploy is
+  # `docker compose up -d` runs without --wait, so a deploy is
   # "finished" once containers have been *started*; a one-shot that exited 1
   # would leave the deploy green. A depends_on condition is the one thing
   # compose does block on, which is why both gates in this file are conditions
@@ -105,7 +105,7 @@ services:
       - ../.panelalpha/app-credentials.env
     environment: &saleor_env
       # settings.py:86 defaults this to True, which on a public domain means
-      # Django's debug page -- 406 settings rows and a traceback with local
+      # Django's debug page -- every settings row and a traceback with local
       # variables -- is the error page. Off is the whole reason the three
       # values under it have to be supplied.
       DEBUG: "False"
@@ -212,8 +212,8 @@ services:
       start_period: 60s
     mem_limit: 64m
 
-  # Does nothing and exits 0. `docker compose up -d` runs without --wait
-  # (engine#204), so without this the deploy is finished while Saleor is still
+  # Does nothing and exits 0. `docker compose up -d` runs without --wait,
+  # so without this the deploy is finished while Saleor is still
   # booting. Compose does block on a depends_on health condition, so a service
   # that waits on web's healthcheck makes `up -d` return only once the API
   # answers. alpine, not the Saleor image: nothing extra is pulled and nothing

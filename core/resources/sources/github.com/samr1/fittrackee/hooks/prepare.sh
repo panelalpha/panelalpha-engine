@@ -9,8 +9,8 @@ cd ~/project
 
 say() { echo "[fittrackee] $*" >&2; }
 
-# ~/.panelalpha/fittrackee survives a redeploy; ~/project is emptied every deploy
-# (engine#173). A secret written under ~/project would be regenerated on every
+# ~/.panelalpha/fittrackee survives a redeploy; ~/project is emptied every deploy.
+# A secret written under ~/project would be regenerated on every
 # rebuild -- a new APP_SECRET_KEY logs everyone out, and a new DB password would
 # lock the app out of the existing Postgres volume.
 STORE_DIR="${HOME}/.panelalpha/fittrackee"

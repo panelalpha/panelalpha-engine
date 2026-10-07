@@ -9,7 +9,7 @@
 #
 # Persistence lives on /pa-data, which the recipe's docker-compose.override.yml
 # bind-mounts from ~/.panelalpha (the account home survives a redeploy; ~/project
-# does not -- engine#173). HOME is not set in the app container, so absolute
+# does not). HOME is not set in the app container, so absolute
 # paths only.
 set -eu
 

@@ -7,7 +7,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#148: the vite recipe served `dist` whatever the config said.
+ * The vite recipe served `dist` whatever the config said.
  */
 class ViteOutputDirTest extends TestCase
 {

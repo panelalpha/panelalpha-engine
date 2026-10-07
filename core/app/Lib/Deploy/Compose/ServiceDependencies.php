@@ -5,7 +5,8 @@ namespace App\Lib\Deploy\Compose;
 /**
  * References to services that have been dropped: Compose refuses to start a
  * stack naming a service the file does not define. `depends_on` is the obvious
- * key, `links` the older spelling Compose enforces just as strictly.
+ * key, `links` the older spelling Compose enforces just as strictly, and
+ * `network_mode: service:x` and `volumes_from` name a service too.
  */
 final class ServiceDependencies
 {
@@ -30,8 +31,58 @@ final class ServiceDependencies
         foreach (self::REFERENCE_KEYS as $key) {
             $service = self::withoutDroppedIn($service, $key, $dropped);
         }
+        // Without the service whose network it shared, it joins the stack's own.
+        $network = self::networkServiceOf($service);
+        if ($network !== null && isset($dropped[strtolower($network)])) {
+            unset($service['network_mode']);
+        }
+        if (is_array($service['volumes_from'] ?? null)) {
+            $service['volumes_from'] = array_values(array_filter(
+                $service['volumes_from'],
+                static fn ($ref): bool => !is_string($ref)
+                    || str_starts_with($ref, 'container:')
+                    || !isset($dropped[strtolower(self::serviceIn($ref))])
+            ));
+            if ($service['volumes_from'] === []) {
+                unset($service['volumes_from']);
+            }
+        }
 
         return $service;
+    }
+
+    /**
+     * The services $service names through `depends_on`, `links`,
+     * `network_mode: service:x` or `volumes_from`.
+     *
+     * @param array<string, mixed> $service
+     * @return list<string>
+     */
+    public static function namesIn(array $service): array
+    {
+        $names = [];
+        foreach (self::REFERENCE_KEYS as $key) {
+            $refs = $service[$key] ?? null;
+            if (!is_array($refs)) {
+                continue;
+            }
+            foreach (self::isStringList($refs) ? $refs : array_keys($refs) as $ref) {
+                if (is_string($ref) && $ref !== '') {
+                    $names[] = self::serviceIn($ref);
+                }
+            }
+        }
+        $network = self::networkServiceOf($service);
+        if ($network !== null) {
+            $names[] = $network;
+        }
+        foreach (is_array($service['volumes_from'] ?? null) ? $service['volumes_from'] : [] as $ref) {
+            if (is_string($ref) && !str_starts_with($ref, 'container:')) {
+                $names[] = self::serviceIn($ref);
+            }
+        }
+
+        return array_values(array_unique($names));
     }
 
     /**
@@ -61,8 +112,33 @@ final class ServiceDependencies
             }
             $service[$key] = $renamed;
         }
+        $network = self::networkServiceOf($service);
+        if ($network !== null && strcasecmp($network, $from) === 0) {
+            $service['network_mode'] = 'service:' . $to;
+        }
+        if (is_array($service['volumes_from'] ?? null)) {
+            $service['volumes_from'] = array_map(
+                static fn ($ref) => is_string($ref) && !str_starts_with($ref, 'container:') && $matches($ref)
+                    ? $to . substr($ref, strlen(self::serviceIn($ref)))
+                    : $ref,
+                $service['volumes_from']
+            );
+        }
 
         return $service;
+    }
+
+    /**
+     * @param array<string, mixed> $service
+     */
+    private static function networkServiceOf(array $service): ?string
+    {
+        $mode = $service['network_mode'] ?? null;
+        if (!is_string($mode) || !str_starts_with(trim($mode), 'service:')) {
+            return null;
+        }
+
+        return trim(substr(trim($mode), strlen('service:')));
     }
 
     /**

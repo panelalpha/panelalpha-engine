@@ -102,16 +102,17 @@ class HealthReportCommand extends Command
                 continue;
             }
 
-            $failures = AppHealth::failedChecks($user->fresh()?->getDetails() ?? $user->getDetails());
-            if ($failures === []) {
+            $details = $user->fresh()?->getDetails() ?? $user->getDetails();
+            if (!self::notServing($details)) {
                 continue;
             }
+            $failures = AppHealth::failedChecks($details);
 
             $degraded++;
             $rows[] = [
                 'project' => $user->username,
                 'serving' => (string) ($report['serving'] ?? CheckRunner::SERVING_UNKNOWN),
-                'checks' => implode(', ', array_map(
+                'checks' => $failures === [] ? 'nothing answered' : implode(', ', array_map(
                     static fn (array $f): string => $f['id'] . ' (' . $f['severity'] . ')',
                     $failures
                 )),
@@ -126,6 +127,17 @@ class HealthReportCommand extends Command
         $this->present($rows, $swept, $degraded, $reported, $local);
 
         return self::SUCCESS;
+    }
+
+    /**
+     * A failed check, or ports that gave no answer at all: silence nothing
+     * could explain is not "fine" either.
+     *
+     * @param array<string, mixed> $details
+     */
+    public static function notServing(array $details): bool
+    {
+        return AppHealth::failedChecks($details) !== [] || AppHealth::nothingAnswered($details);
     }
 
     /**
@@ -176,20 +188,22 @@ class HealthReportCommand extends Command
      *
      * A suspended account is skipped on purpose: its application is stopped
      * because somebody stopped it, and reporting a stopped site as a fault
-     * would fill the sweep with the one failure that is not one.
+     * would fill the sweep with the one failure that is not one. The same for
+     * an app stopped through the API's stop/down action.
      */
     private function projectFor(User $user): ?Dind
     {
-        if ($user->getTemplate() !== 'dind' || $user->status === 'suspended') {
+        if ($user->getTemplate() !== 'dind' || $user->status === 'suspended' || $user->isAppStoppedByRequest()) {
             return null;
         }
 
         try {
-            $project = $user->project();
+            $runtime = $user->project()->runtime();
         } catch (\Throwable $e) {
             return null;
         }
 
-        return $project instanceof Dind ? $project : null;
+        // project() is the System\Project wrapper; the DinD runtime sits behind it.
+        return $runtime instanceof Dind ? $runtime : null;
     }
 }

@@ -17,5 +17,5 @@ description: >-
   added at /app/useradministration. The database is a named volume; the
   pidfile goes to /dev/null so a restarted container is not blocked by a
   stale RUNNING_PID. The UI syncs over a websocket, which the
-  *.panelalpha.online test edge strips (engine#170); on a real domain it
+  *.panelalpha.online test edge strips; on a real domain it
   passes.

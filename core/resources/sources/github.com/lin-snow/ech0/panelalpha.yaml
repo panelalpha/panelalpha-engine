@@ -16,7 +16,7 @@ description: >-
   a bind mount. This recipe runs the official Docker Hub image directly via a
   compose-replace, pinned to the current stable release v5.7.0 (Hub `latest` at
   time of writing, published 2026-08-28). Seeding a Hub image also sidesteps
-  engine#229 (image-seed NotFound on a from-registry seed).
+  the image-seed NotFound on a from-registry seed.
 
   WHY COMPOSE-REPLACE. There is no datastore sidecar to add -- SQLite is
   embedded -- but the app needs three things bare detection cannot give it: a
@@ -32,7 +32,7 @@ description: >-
   invalidate every session on each restart/redeploy. hooks/prepare.sh generates
   a real 64-hex JWT_SECRET once into ~/.panelalpha/ech0/ech0.env (0600 in 0700)
   -- the only writable, rebuild-surviving place, since ~/project is wiped on
-  every deploy (engine#173) -- and never regenerates it.
+  every deploy -- and never regenerates it.
 
   OWNER SEED (the security-critical step). Ech0's first-run Owner is created by
   the PUBLIC, single-shot endpoint POST /api/init/owner (internal/router/init.go
@@ -65,11 +65,11 @@ description: >-
   _URL, localhost value).
 
   PORT + READY GATE. Only the app publishes a port, 6277, so the port scan takes
-  it as the primary (engine#231/#234). A busybox-wget healthcheck on the public
+  it as the primary. A busybox-wget healthcheck on the public
   /api/init/status endpoint gates init-owner (depends_on service_healthy), and a
   no-op `ready` service gates on init-owner completing successfully, so
   `docker compose up -d` blocks until Ech0 answers and the Owner is seeded and
-  the engine's "deploy finished" is honest (engine#204: up -d returns before the
+  the engine's "deploy finished" is honest (up -d returns before the
   app is up).
 credentials:
   adopt_from: .panelalpha/ech0/ech0.env

@@ -11,15 +11,15 @@ description: >-
   the official image of the current release, ghcr.io/tinyauthapp/tinyauth:v5.2.0,
   with /data on a named volume and a `ready` gate on `tinyauth healthcheck`.
 
-  == What the customer must set ==
+  == The login ==
 
   Tinyauth refuses to start without a login provider ("no authentication
-  providers configured", internal/bootstrap/app_bootstrap.go). The compose file
-  therefore requires the project env var TINYAUTH_AUTH_USERS
-  (user:bcrypt-hash, comma-separated) and the deploy fails, naming it, until it
-  is set. Every $ in the hash must be written $$: the engine hands env vars to
-  compose unquoted, and compose would otherwise swallow the hash
-  (panelalpha/engine#326). Other settings (OIDC clients, OAuth, LDAP) are
+  providers configured", internal/bootstrap/app_bootstrap.go). The engine
+  generates an admin login (`credentials:`, returned by
+  `GET /projects/{name}/app-credentials`); the app service hashes it with
+  `tinyauth user create` at start and adds it to TINYAUTH_AUTH_USERS, so users
+  the project sets there (user:bcrypt-hash, every $ written $$)
+  keep working beside it. Other settings (OIDC clients, OAuth, LDAP) are
   project env vars too; hooks/prepare.sh only creates an empty .env so the
   engine does not seed it from .env.example (whose relative database path
   would put the sessions outside the volume).
@@ -31,16 +31,11 @@ description: >-
   domain is not a public suffix, so Tinyauth's default parent-domain cookie
   would reach other accounts' sites. Set it to true on a domain of your own.
 
-  == Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 2500 ==
-
-  Create without the variable: failed with "required variable
-  TINYAUTH_AUTH_USERS is missing a value: Set the project env var ...". Rebuild
-  with it set: success in 22s; / is <title>Tinyauth</title> (1287 B); the
-  configured user logs in (200), /api/auth/traefik answers 200 with the session
-  and 401 without. Rebuild: the session issued before it is still valid.
-  /.env and /.git/config return the SPA shell only.
-
   Behind the hosting proxy, X-Forwarded-Host is Tinyauth's own host, so
   forward auth gives a correct 200/401 but per-app ACLs cannot match, and the
   nginx auth_request and Envoy ext_authz modes answer 400; the OIDC provider
   is unaffected.
+credentials:
+  fields:
+    TINYAUTH_ADMIN_USER: {kind: username}
+    TINYAUTH_ADMIN_PASSWORD: {kind: password}

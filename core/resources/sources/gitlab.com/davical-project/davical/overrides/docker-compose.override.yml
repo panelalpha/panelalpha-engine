@@ -41,7 +41,7 @@ services:
 
       # The one way to give this container a php.ini. The base image loads none
       # at all and scans /usr/local/etc/php/conf.d, a directory inside the image
-      # that the account uid cannot write to (engine #185). PHP reads
+      # that the account uid cannot write to. PHP reads
       # PHP_INI_SCAN_DIR from its own environment at startup whatever the SAPI,
       # so naming a second directory here reaches the Apache module and the CLI
       # both -- and both need it: the CLI runs the schema load, the Apache
@@ -60,7 +60,7 @@ services:
       # connection settings under every spelling it knows
       # (SidecarCredentials::envForSidecar), and the password it uses is the
       # literal `app` that resolvedComposeValue() substitutes for a value it
-      # cannot resolve (engine #189). Left alone the container advertises a DSN
+      # cannot resolve. Left alone the container advertises a DSN
       # that does not work. Restated here from the same variable the database is
       # started with, so anything an operator reads out of the environment is
       # true.
@@ -71,7 +71,7 @@ services:
       DATABASE_URL: postgres://davical:${PA_DAVICAL_DB_PASSWORD}@davical-db:5432/davical
 
     # The two secrets, by a path that climbs out of the document root.
-    # ~/.panelalpha survives the clone; ~/project does not (engine #173), and
+    # ~/.panelalpha survives the clone; ~/project does not, and
     # hooks/prepare.sh rewrites this file's contents on every deploy before
     # compose runs.
     #
@@ -100,7 +100,7 @@ services:
     mem_limit: 768m
 
     # The engine runs `docker compose up -d` without `--wait` and probes as soon
-    # as it returns (engine #90), which here is while the install stage is still
+    # as it returns, which here is while the install stage is still
     # loading 90 KB of schema and stored procedures into an empty database.
     # Without this the probe reads `Failed to connect to 127.0.0.1 port 8000`.
     #
@@ -153,7 +153,7 @@ services:
     # applied. That fills in every one of the engine's init_vars (POSTGRES_DB,
     # POSTGRES_USER, POSTGRES_PASSWORD) from whatever `environment:` says, and
     # resolvedComposeValue() turns an absent or unresolvable value into the
-    # literal string `app` (engine #189). So the generated file would declare
+    # literal string `app`. So the generated file would declare
     # `POSTGRES_PASSWORD: app` as `environment:`, compose gives `environment:`
     # precedence over `env_file:`, and the database would initialise with a
     # password the application was never told.
@@ -207,7 +207,7 @@ services:
   # gated on the app is what makes `up -d` return only once DAViCal has loaded
   # its schema, rotated the admin password and answered a CalDAV OPTIONS. A
   # clean exit 0 is not a crash loop as far as AppHealth is concerned. This is
-  # the engine #90 workaround.
+  # the readiness-gate workaround.
   #
   # alpine:3, and the image is load-bearing rather than a size preference.
   # Reusing postgres:17-alpine here would make ServiceRole::isKnownDatastore()

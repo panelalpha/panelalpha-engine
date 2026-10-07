@@ -13,12 +13,12 @@
 # there: the page is identical whether MariaDB is answering or gone, because
 # the shell is compiled and the data arrives over `/api/...` afterwards. So the
 # port probe passes, the reachability comparison passes, and every `_baseline`
-# check passes on a site where nothing works — which is exactly the deploy this
-# check was written after.
+# check passes on a site where nothing works — which is exactly the failure this
+# check exists for.
 #
 # `/api/health` is the application's own answer, and the backend's `db.raw
-# ('SELECT 1')` behind it means a 200 there is a *measured* database round
-# trip rather than a configured one. It answers
+# ('SELECT 1')` behind it means a 200 there is a *real* database round trip
+# rather than a configured one. It answers
 # `{"status":"ok","database":"connected"}` when the query succeeds and
 # `{"status":"error","database":"unreachable"}` with a 500 when it does not.
 #

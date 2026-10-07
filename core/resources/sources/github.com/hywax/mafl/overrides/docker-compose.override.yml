@@ -6,7 +6,7 @@
 # Mafl's nitro storage `data` is the fs driver at ./data (nuxt.config.ts) and
 # WORKDIR is /app, so the config it refuses to start without is
 # /app/data/config.yml. Upstream mounts ./config.yml there from inside the
-# checkout; a redeploy clears and re-clones ~/project (engine#173), which would
+# checkout; a redeploy clears and re-clones ~/project, which would
 # take the customer's whole homepage with it. Relative mount paths resolve
 # against --project-directory, which is ~/project, so `..` is the account's
 # home. hooks/prepare.sh creates the directory and seeds the file before this
@@ -19,9 +19,8 @@
 # Read-only on purpose. Mafl has no route that writes its config -- no admin
 # UI, no write API, and websocket.ts answers nothing but `ping` -- so nothing
 # in this container has any reason to write here, and :ro means a compromised
-# one cannot rewrite the homepage or plant files in ~/.panelalpha. Verified on
-# the published image: the page serves and the watcher attaches with the mount
-# read-only.
+# one cannot rewrite the homepage or plant files in ~/.panelalpha. The page
+# serves and the watcher attaches with the mount read-only.
 services:
   app:
     volumes:

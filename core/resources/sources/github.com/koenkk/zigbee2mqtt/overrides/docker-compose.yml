@@ -21,7 +21,7 @@ services:
 
   # Internal broker, no published port, anonymous clients on 1883. The config
   # sits in /etc/mosquitto: a host AppArmor profile for /usr/sbin/mosquitto
-  # denies reading /mosquitto/config (engine#366).
+  # denies reading /mosquitto/config.
   mqtt:
     image: eclipse-mosquitto:2.1.2-alpine
     restart: unless-stopped

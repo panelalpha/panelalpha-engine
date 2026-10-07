@@ -46,7 +46,7 @@ services:
       start_period: 30s
     mem_limit: 1g
 
-  # No-op gate: `up` returns only once the site answers (engine#204).
+  # No-op gate: `up` returns only once the site answers.
   ready:
     image: ghcr.io/blackcandy-org/blackcandy:3.2.1
     restart: "no"

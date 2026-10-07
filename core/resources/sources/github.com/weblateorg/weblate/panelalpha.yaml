@@ -15,7 +15,7 @@ description: >-
   2026.9.1.2. Building from the clone would compile the Django app plus its
   large native/VCS toolchain, which is slow and fragile; the published image
   already contains everything, so nothing is built from the clone. Seeding a Hub
-  image also sidesteps engine#229 (image-seed NotFound).
+  image also sidesteps the image-seed NotFound.
 
   WHY COMPOSE-REPLACE. Weblate needs PostgreSQL and Redis, which the schema's
   MySQL-only `database:` cannot provide. This override runs the all-in-one app

@@ -9,7 +9,7 @@
 // `finish` the proxy redirects every path to /init
 // (apps/nextjs/src/proxy.ts:45-51). So on a stock deploy the first stranger to
 // load the domain becomes the administrator of the account owner's dashboard.
-// That is engine#200, in its strongest form.
+// That is the first-visitor problem, in its strongest form.
 //
 // This runs in the one-shot `init` service, which `app` depends on with
 // `service_completed_successfully`, so by the time anything can reach port

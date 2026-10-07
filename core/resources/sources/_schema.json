@@ -124,11 +124,26 @@
       ]
     },
     "port": {
+      "description": "The port the application listens on. Under the compose strategy it is the port the site is routed to, ahead of the port the engine reads from the compose file: that scan never routes an image-named datastore, so a recipe whose application is one (Qdrant, MinIO, CouchDB, Meilisearch) states its port here. The compose file must publish it.",
       "anyOf": [
         {
           "type": "integer",
           "minimum": 1,
           "maximum": 65535
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "port_scheme": {
+      "description": "What the application's published port speaks. `https` for an app that serves only TLS on its port (UniFi's 8443, self-signed): the account's generated :80 and :443 proxy rules then reach it over https, without verifying its certificate. Omit it (or `http`) for everything else. Applies to the port the engine routes the domain to, whatever the strategy; kept on the project, so a rename or a later rule sync keeps it, and re-read on every deploy.",
+      "anyOf": [
+        {
+          "enum": [
+            "http",
+            "https"
+          ]
         },
         {
           "type": "null"
@@ -532,6 +547,51 @@
               "additionalProperties": false
             }
           ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "git": {
+      "description": "How the deploy clones the repository. The default is a depth-1 clone of one branch, with no history and no tags. `history: full` fetches the whole history and every tag after the clone, for a build that derives its version from them (`git describe --tags`, goreleaser, setuptools-scm); it costs the size of the history on every deploy, so set it only for a repository that needs it.",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "history": {
+              "enum": [
+                "full",
+                "shallow"
+              ]
+            }
+          },
+          "required": [
+            "history"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "health": {
+      "description": "How the deploy waits for the application. `start_period` is how many seconds an application whose container is running but listens on no port yet may take to bind it, after the deploy's own probe (about 105 s) gave up. The default is 300; set it for an application that installs itself on first start (Magento's setup:install and di:compile). 0 turns the wait off.",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "start_period": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1800
+            }
+          },
+          "required": [
+            "start_period"
+          ],
+          "additionalProperties": false
         },
         {
           "type": "null"

@@ -43,6 +43,15 @@ http {
 
     client_max_body_size 0;
 
+    # Header room as in nginx-proxy, for proxied and FastCGI answers alike: the
+    # page-size default answers 502 to an app whose response headers are larger.
+    proxy_buffer_size 128k;
+    proxy_buffers 8 32k;
+    proxy_busy_buffers_size 128k;
+    fastcgi_buffer_size 128k;
+    fastcgi_buffers 8 32k;
+    fastcgi_busy_buffers_size 128k;
+
     include /opt/panelalpha/shared-hosting/webserver-config/nginx/cloudflare-realip[.]conf;
     include /etc/nginx/conf.d/*.conf;
 

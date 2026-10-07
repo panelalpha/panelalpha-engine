@@ -14,7 +14,7 @@ description: >-
   the current stable release v1.9.6. Building from source would compile a Python
   venv, download the Argos model index and install language models into the image
   for no gain -- the official image already does exactly that at boot. A Docker
-  Hub seed also sidesteps engine#229 (the image-seed NotFound is the GHCR/
+  Hub seed also sidesteps the image-seed NotFound (the GHCR/
   registry-save case, not Hub).
 
   WHY COMPOSE-REPLACE. The repo's own docker-compose.yml is an 8-line example with
@@ -50,11 +50,11 @@ description: >-
   private data behind it.
 
   ONE PUBLISHED PORT. Only the libretranslate service publishes a port (:5000,
-  Flask/gunicorn), so the engine's port scan takes it as primary (engine#231/#234);
+  Flask/gunicorn), so the engine's port scan takes it as primary;
   Redis and the key-init one-shot publish nothing. The app needs no knowledge of
   its own public URL (relative UI, path-based API), so there is no *_URL to rewrite.
   A curl health sidecar plus a `ready` gate make `docker compose up` block until
-  LibreTranslate actually answers after the model download (engine#204), with a long
+  LibreTranslate actually answers after the model download, with a long
   window because that first boot is slow.
 credentials:
   adopt_from: .panelalpha/libretranslate/api-key.env

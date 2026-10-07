@@ -4,8 +4,8 @@ namespace App\Http\Requests\Concerns;
 
 use App\Exceptions\ProblemException;
 use App\Rules\ProblemRule;
+use App\Rules\RuleExpectation;
 use Illuminate\Contracts\Validation\Validator;
-use Illuminate\Support\Str;
 
 /**
  * Report a FormRequest's failures as {@see ProblemException}, so a rule
@@ -39,18 +39,22 @@ trait ReportsProblems
 
     protected function failedValidation(Validator $validator): void
     {
+        $generic = RuleExpectation::problems(
+            $validator,
+            fn (string $field): ?array => $this->expectations()[$field] ?? null,
+            fn (string $field): string => $this->reportedField($field),
+        );
         $problems = [];
+        $i = 0;
 
         foreach ($validator->errors()->messages() as $field => $messages) {
             $rich = ($this->problemRules[$field] ?? null)?->problem();
-            $failed = array_keys($validator->failed()[$field] ?? []);
 
             // One per message, not per field: ProblemException rebuilds
             // `errors` from what it is given.
-            foreach (array_values($messages) as $i => $message) {
-                $problems[] = ($rich['message'] ?? null) === $message
-                    ? $rich
-                    : $this->problem($field, $failed[$i] ?? 'invalid', $message);
+            foreach ($messages as $message) {
+                $problems[] = ($rich['message'] ?? null) === $message ? $rich : $generic[$i];
+                $i++;
             }
         }
 
@@ -59,7 +63,7 @@ trait ReportsProblems
 
     /**
      * What a field holds, said in the problem so a caller can fix the value
-     * without reading the docs (#83): `expected`, and `examples` where useful.
+     * without reading the docs: `expected`, and `examples` where useful.
      *
      * @return array<string, array{expected: string, examples?: list<string>}>
      */
@@ -72,19 +76,5 @@ trait ReportsProblems
     protected function reportedField(string $field): string
     {
         return $field;
-    }
-
-    /** @return array<string, mixed> */
-    private function problem(string $field, string $rule, string $message): array
-    {
-        $reported = $this->reportedField($field);
-        // A closure or rule object fails under its class name, which is no code.
-        $rule = str_contains($rule, '\\') ? 'invalid' : $rule;
-
-        return [
-            'field' => $reported,
-            'code' => Str::snake($reported) . '_' . Str::snake($rule),
-            'message' => $message,
-        ] + ($this->expectations()[$field] ?? []);
     }
 }

@@ -22,7 +22,7 @@ description: >-
   `ghcr.io/arran4/gobookmarks` (Debian, ENTRYPOINT `gobookmarks`, CMD `serve`,
   EXPOSE 8080), so `files/Dockerfile` is a one-line `FROM` of that published
   image — no build from source, and a public pullable base keeps it clear of
-  the image-seeding NotFound path (engine#229). `extra.dockerfile` /
+  the image-seeding NotFound path. `extra.dockerfile` /
   `port_hint` state what the dockerfile probe would have found, because a
   source recipe is applied before the probes run
   (`PlatformSelector::fromSource()` describes with no probe data), and the
@@ -32,8 +32,8 @@ description: >-
   bookmarks + history), the auto-generated `session.key` cookie secret and the
   local-git store — lives under `/var/lib/gobookmarks`, which
   `overrides/docker-compose.override.yml` binds to the account's
-  `~/.panelalpha/gobookmarks`. `~/project` is wiped on every redeploy
-  (engine#173); `~/.panelalpha` is the one writable directory that survives a
+  `~/.panelalpha/gobookmarks`. `~/project` is wiped on every redeploy;
+  `~/.panelalpha` is the one writable directory that survives a
   redeploy and a failed-deploy rollback, so a login and a saved bookmark
   persist across `project_rebuild`. `hooks/prepare.sh` creates that directory
   0700 before the stack starts; `session.key` is written there 0600 by the app

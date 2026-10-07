@@ -39,7 +39,7 @@ class PhpDocrootTest extends TestCase
     }
 
     /**
-     * engine#172: `.` is a statement, not an omission. It must reach the
+     * `.` is a statement, not an omission. It must reach the
      * decision as the root so the probe cannot move it to a public/ the
      * application does not serve from.
      */

@@ -144,7 +144,30 @@ final class NodeRuntime implements Runtime
         'kerberos',
         'node-rdkafka',
         'duckdb',
+        // 1.x ships no linux-x64 prebuild, so its install always runs node-gyp.
+        'node-pty',
     ];
+
+    /**
+     * Build toolchains that bundle webpack 4 below the given major. Webpack 4
+     * hashes with MD4, which OpenSSL 3 (Node 17+) refuses.
+     *
+     * @var array<string, int>
+     */
+    private const WEBPACK4_TOOLCHAINS = [
+        'webpack' => 5,
+        'react-scripts' => 5,
+        '@vue/cli-service' => 5,
+        'laravel-mix' => 6,
+        'nuxt' => 3,
+    ];
+
+    /**
+     * Shell that adds `--openssl-legacy-provider` to NODE_OPTIONS when the
+     * running Node is 17 or newer; older Node rejects the flag.
+     */
+    public const LEGACY_OPENSSL_ENV = '{ case "$(node -v 2>/dev/null)" in v1[7-9].*|v[2-9][0-9].*) '
+        . 'export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--openssl-legacy-provider";; esac; }';
 
     /**
      * Lockfiles whose text is worth scanning, in the order they are read.
@@ -477,10 +500,66 @@ final class NodeRuntime implements Runtime
         if (self::declaresNativeDependency($dependencies)) {
             return true;
         }
+        // pnpm records no install scripts in its lock; its build allowlist does.
+        if (self::pnpmAllowsNativeBuild($context, $dependencies)) {
+            return true;
+        }
 
         $lock = self::lockfileText($context);
 
         return $lock !== '' && self::lockMarksNative($lock);
+    }
+
+    /**
+     * Does this project build with webpack 4?
+     *
+     * A declared toolchain decides; without one, a lockfile that resolves
+     * webpack 4 and no webpack 5 does.
+     *
+     * @param array<string, mixed> $package
+     */
+    public static function needsLegacyOpenssl(ProjectContext $context, array $package = []): bool
+    {
+        $package = $package === [] ? ($context->package() ?? []) : $package;
+        foreach (['dependencies', 'devDependencies'] as $section) {
+            $declared = is_array($package[$section] ?? null) ? $package[$section] : [];
+            foreach (self::WEBPACK4_TOOLCHAINS as $name => $fixedIn) {
+                $constraint = $declared[$name] ?? null;
+                if (!is_string($constraint) || preg_match('/^[\s^~=v<>]*\d/', $constraint) !== 1) {
+                    continue;
+                }
+                $major = self::parseMajor($constraint);
+                if ($major !== null) {
+                    return $major < $fixedIn;
+                }
+            }
+        }
+
+        $lock = self::lockfileText($context);
+        if ($lock === '') {
+            return false;
+        }
+        $resolves = static fn (string $major): bool => preg_match(
+            '~(?:"node_modules/webpack"|"webpack"):\s*\{\s*"version":\s*"' . $major . '\.'
+                . '|^"?webpack@[^\n]*:\n\s+version:?\s+"?' . $major . '\.'
+                . '|^\s+/?webpack@' . $major . '\.~m',
+            $lock
+        ) === 1;
+
+        return $resolves('4') && !$resolves('5');
+    }
+
+    /**
+     * $build, run with OpenSSL's legacy provider when the project in
+     * $projectDir builds with webpack 4.
+     */
+    public static function withLegacyOpenssl(string $build, string $projectDir): string
+    {
+        if (trim($build) === '' || $projectDir === '' || !self::needsLegacyOpenssl(ProjectContext::at($projectDir))) {
+            return $build;
+        }
+
+        return self::LEGACY_OPENSSL_ENV . ' && ' . $build;
     }
 
     /**
@@ -514,6 +593,45 @@ final class NodeRuntime implements Runtime
                 continue;
             }
             foreach (array_keys($declared) as $name) {
+                if (is_string($name) && self::isNativeName(strtolower($name))) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Does the project's pnpm build allowlist (`onlyBuiltDependencies`, or
+     * `allowBuilds: {name: true}`) name one of {@see NATIVE_DEPENDENCIES}?
+     *
+     * Read from package.json `pnpm` and from pnpm-workspace.yaml.
+     *
+     * @param array<string, mixed> $package
+     */
+    private static function pnpmAllowsNativeBuild(ProjectContext $context, array $package): bool
+    {
+        $sources = [is_array($package['pnpm'] ?? null) ? $package['pnpm'] : []];
+        if ($context->hasFile('pnpm-workspace.yaml')) {
+            try {
+                $workspace = \Symfony\Component\Yaml\Yaml::parse((string) $context->contents('pnpm-workspace.yaml'));
+                if (is_array($workspace)) {
+                    $sources[] = $workspace;
+                }
+            } catch (\Throwable) {
+                // An unreadable workspace file is no evidence either way.
+            }
+        }
+
+        foreach ($sources as $policy) {
+            $names = is_array($policy['onlyBuiltDependencies'] ?? null) ? $policy['onlyBuiltDependencies'] : [];
+            foreach ((is_array($policy['allowBuilds'] ?? null) ? $policy['allowBuilds'] : []) as $name => $allowed) {
+                if ($allowed === true) {
+                    $names[] = $name;
+                }
+            }
+            foreach ($names as $name) {
                 if (is_string($name) && self::isNativeName(strtolower($name))) {
                     return true;
                 }
@@ -1071,9 +1189,11 @@ final class NodeRuntime implements Runtime
     ): array {
         $runtime = $partial['runtime'];
         $build = '';
-        if ($runtime === 'nginx') {
+        if ($runtime === 'nginx' && trim((string) ($partial['workspace_relative'] ?? ''), '/') === '') {
             $build = self::nginxAssetBuildCommand($pm, $scripts, $partial);
         } else {
+            // A workspace app (a Next export under apps/) builds through its own
+            // `build:<slug>` or a filtered turbo, not every package in the repo.
             $build = JsPackageManager::resolveLifecycleCommand($pm, $scripts, 'build', $partial);
         }
 

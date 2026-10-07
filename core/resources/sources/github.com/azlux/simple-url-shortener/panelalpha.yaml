@@ -5,9 +5,9 @@ description: >-
   and a list. No framework, no Composer manifest, no build, no vendor
   directory. Detection read it correctly -- `php-plain` on the `php` strategy,
   and the document root is the repository root, which PhpDocroot reaches on its
-  own from index.php (PhpDocroot.php:80). The control deploy finished in 45.3s
-  and every request answered HTTP 200 with a stack trace in the body, which is
-  the `serving-php_error` verdict this recipe is opened for.
+  own from index.php (PhpDocroot.php:80). Without this recipe every request
+  answers HTTP 200 with a stack trace in the body, which is the
+  `serving-php_error` verdict this recipe is opened for.
 
   **The PHP error is one missing file.** `inc/bdd.php` line 2 is
   `require 'config.php'`; `.gitignore` line 2 is `config.php`; upstream's
@@ -19,13 +19,12 @@ description: >-
       Fatal error: Uncaught Error: Failed opening required 'config.php'
         (include_path='.:/usr/local/lib/php') in /app/inc/bdd.php:2
 
-  It answers **200** rather than 500 for the reason engine#185 describes: the
-  shared PHP base image loads no php.ini at all (`php -i` on the deployed
-  container says `Loaded Configuration File => (none)`), so display_errors is
-  on, the warning is written into the body, and writing a body sends the
-  headers with the 200 that was already on them. Measured on the control
-  deploy, with `php_flag display_errors off` added to a .htaccess and nothing
-  else changed, the same checkout answers an empty 500 of zero bytes -- so here
+  It answers **200** rather than 500 because the
+  shared PHP base image loads no php.ini at all (`php -i` says
+  `Loaded Configuration File => (none)`), so display_errors is on, the warning
+  is written into the body, and writing a body sends the headers with the 200
+  that was already on them. With `php_flag display_errors off` in a .htaccess
+  and nothing else changed, the same checkout answers an empty 500 -- so here
   the warning is publishing a failure rather than being one. Both halves are
   fixed: hooks/prepare.sh writes the config file, and files/.htaccess turns
   display_errors off so a deploy in which that somehow did not happen fails
@@ -69,8 +68,7 @@ description: >-
   correct for the `<a href>` list.php renders and wrong for the `Location:`
   header index.php:23 sends, where the target receives a parameter named
   `amp;b`. hooks/prepare.sh decodes at the point of use, which leaves the HTML
-  path escaped as upstream intended. Verified end to end over the public name:
-  the 302 now carries the ampersand the operator typed.
+  path escaped as upstream intended.
 
   **The data is in the account's own MySQL database, not in the checkout.**
   `database: mysql` rather than the SQLite the application also supports, and
@@ -79,13 +77,12 @@ description: >-
   nginx snippet denies `\.(sqlite3|ht)$` while its Apache snippet does not, so
   the Apache installation it documents publishes every short link, every target
   URL and every bcrypt hash as a downloadable file. It is also inside
-  ~/project, which a redeploy clears and re-clones (engine#173), so every short
+  ~/project, which a redeploy clears and re-clones, so every short
   link an account had handed out would stop working on the next deploy while
   the people holding those links still held them. MySQL costs nothing here --
   it is the account's own server, already running, the one in the panel and in
-  phpMyAdmin -- and it survives a redeploy untouched, which was verified by
-  reproducing one by hand. files/.htaccess denies `*.sqlite3` anyway, for the
-  operator who switches.
+  phpMyAdmin -- and it survives a redeploy untouched. files/.htaccess denies
+  `*.sqlite3` anyway, for the operator who switches.
 
   The schema is installation.php's with three corrections, because DDL is not
   code and a better version of it is not a patch anyone maintains. `short` is
@@ -101,20 +98,17 @@ description: >-
   **An emoji in a comment was a blank 500.** inc/bdd.php:7 pins the MySQL
   connection to `charset=utf8` -- utf8mb3 -- so anything outside the Basic
   Multilingual Plane is invalid in the connection's own charset before the
-  column is reached, and shorten.php:46 throws an uncaught
-  `SQLSTATE[22007] Incorrect string value` that display_errors-off renders as an
-  empty 500. Verified on the deployed account: ASCII and Latin-2 accented
-  comments store, one emoji does not. hooks/prepare.sh makes it `utf8mb4`; no
-  column charset can fix it, because the connection is where the bytes are
-  rejected.
+  column is reached, and shorten.php:46 throws an uncaught `SQLSTATE[22007]
+  Incorrect string value` that display_errors-off renders as an empty 500.
+  hooks/prepare.sh makes it `utf8mb4`; no column charset can fix it, because the
+  connection is where the bytes are rejected.
 
   **login.php's Change Password never checks the old password.** login.php:54
-  requires `old_password` to be non-empty and then never verifies it -- measured,
-  not read: a POST with `old_password=totally-wrong` changed the password and
-  the new one worked. There is no CSRF token on that form, or on any other, so
-  cross-site that would be a one-request account takeover. files/.htaccess sets
+  requires `old_password` to be non-empty and then never verifies it. There is
+  no CSRF token on that form, or on any other, so cross-site that would be a
+  one-request account takeover. files/.htaccess sets
   `session.cookie_samesite=Lax`, which is what stops it; PHP's session cookie
-  has no SameSite attribute without a php.ini and there is none (engine#185), so
+  has no SameSite attribute without a php.ini and there is none, so
   this is a line the recipe has to carry.
 
   Three upstream defects this recipe reports and does not touch, because the
@@ -137,13 +131,12 @@ extends: php-plain
 database: mysql
 # `docroot` is deliberately absent rather than `docroot: .`: the manifest reader
 # folds '.' to '' (PlatformManifest.php:305), which means "undeclared", so it
-# cannot say "the repository root" at all -- engine#172. It does not need to:
+# cannot say "the repository root" at all. It does not need to:
 # index.php is at the root, so PhpDocroot::detect() returns the root candidate
-# and the deploy sets PA_DOCROOT=/app, which was confirmed on the deployed
-# container.
+# and the deploy sets PA_DOCROOT=/app.
 commands:
   - id: shortener-setup
-    # Not `build`: engine#171, a `stage: build` command is inert. install runs
+    # Not `build`: a `stage: build` command is inert. install runs
     # on a first deploy and upgrade on every one after it, and this is
     # idempotent by construction -- CREATE TABLE IF NOT EXISTS, and the admin
     # account is only created when the users table is empty.

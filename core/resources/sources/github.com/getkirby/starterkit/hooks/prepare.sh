@@ -1,9 +1,9 @@
 #!/bin/bash
 # Kirby is flat-file: its database is directories inside the checkout. ~/project
-# is emptied and re-cloned on every deploy (engine#173, ProjectTree::clearContents),
+# is emptied and re-cloned on every deploy (ProjectTree::clearContents),
 # so content/, site/accounts/ and site/config/ cannot live there or a redeploy
 # destroys every page, every Panel account and the content salt -- which is why
-# #844 was rejected. They live in ~/.panelalpha/kirby (owner-owned, survives a
+# an earlier attempt was rejected. They live in ~/.panelalpha/kirby (owner-owned, survives a
 # rebuild, the only writable place outside ~/project since the home is root:root)
 # and are symlinked back into the fresh checkout here. Runs after the clone,
 # before the container, as the account user (execAsUser).
@@ -67,7 +67,7 @@ printf '[panelalpha] kirby Panel password: %s\n' "$(cat "$STATE/admin.pw")" >&2
 
 # --- the in-container init script. Lives in the persisted store (mounted at
 # /data), outside the document root. Creates the first Panel user so
-# /panel/installation is closed before Apache binds (engine#200). Idempotent.
+# /panel/installation is closed before Apache binds. Idempotent.
 cat > "$STATE/pa-kirby-init.php" <<'PHP'
 <?php
 // Runs in the app container at the start stage, before the serve command execs

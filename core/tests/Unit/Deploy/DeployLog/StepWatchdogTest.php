@@ -3,6 +3,7 @@
 namespace Tests\Unit\Deploy\DeployLog;
 
 use App\Exceptions\BuildStalledException;
+use App\Exceptions\DiskLimitException;
 use App\System;
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\DeployLog\StepWatchdog;
@@ -87,7 +88,7 @@ class StepWatchdogTest extends TestCase
     }
 
     /**
-     * Warpgate (#153): its last crate compiled silently past the limit and the
+     * Warpgate: its last crate compiled silently past the limit and the
      * build was killed a step from the end. Silent but busy is not stalled.
      */
     public function test_a_silent_step_that_is_still_busy_is_not_killed(): void
@@ -112,6 +113,61 @@ class StepWatchdogTest extends TestCase
         $this->assertSame(0, $process->getExitCode());
         $this->assertStringContainsString('Finished', $output);
         $this->assertGreaterThanOrEqual(1, $asked);
+    }
+
+    /** One pull took a host from 34 GB free to 0 inside a single step. */
+    public function test_a_step_is_stopped_when_the_disk_runs_out_while_it_runs(): void
+    {
+        $readings = [null, 'the engine host has 2.9G free on /home, under DEPLOY_HOST_MIN_FREE (3G)'];
+        $started = microtime(true);
+        try {
+            (new System())->runProcessWithCallbacks(
+                ['sh', '-c', 'while true; do echo pulling; sleep 0.2; done'],
+                [],
+                60,
+                null,
+                null,
+                new StepWatchdog(0, 'docker compose up', null, function () use (&$readings): ?string {
+                    return array_shift($readings);
+                }, 1)
+            );
+            $this->fail('A step that filled the disk was not stopped');
+        } catch (DiskLimitException $e) {
+            $this->assertSame(
+                StepWatchdog::DISK_MARKER . ' (the engine host has 2.9G free on /home, under DEPLOY_HOST_MIN_FREE (3G))',
+                $e->getMessage()
+            );
+            $match = DeployFailureExplainer::match("Deploy failed\n" . $e->getMessage());
+            $this->assertSame('disk-limit-reached', $match['rule'] ?? null);
+            $this->assertStringContainsString('because the engine host has 2.9G free on /home, under DEPLOY_HOST_MIN_FREE (3G),', $match['message']);
+            $this->assertStringContainsString('Free disk on the host', $match['message']);
+        }
+        $this->assertSame([], $readings, 'asked once per interval');
+        $this->assertLessThan(8, microtime(true) - $started);
+    }
+
+    public function test_a_disk_reading_that_fails_does_not_stop_the_step(): void
+    {
+        $process = (new System())->runProcessWithCallbacks(
+            ['sh', '-c', 'for i in 1 2 3 4 5 6 7 8; do echo tick; sleep 0.3; done'],
+            [],
+            60,
+            null,
+            null,
+            new StepWatchdog(0, 'build', null, static function (): ?string {
+                throw new \RuntimeException('du: cannot read');
+            }, 1)
+        );
+
+        $this->assertSame(0, $process->getExitCode());
+    }
+
+    public function test_the_project_limit_is_explained_as_the_projects(): void
+    {
+        $match = DeployFailureExplainer::match(StepWatchdog::DISK_MARKER . ' (the project uses 2.1G, over its 2G disk limit)');
+
+        $this->assertSame('disk-limit-reached', $match['rule'] ?? null);
+        $this->assertStringContainsString("Raise the project's disk limit", $match['message']);
     }
 
     public function test_a_step_that_stops_working_is_killed_and_the_whole_silence_reported(): void
@@ -156,7 +212,8 @@ class StepWatchdogTest extends TestCase
 
     /**
      * killTree() polls the process, which delivers what it printed while dying.
-     * Measured on a live DinD exec: "printed nothing for 0s" after 21s of silence.
+     * Otherwise a stalled exec is reported as "printed nothing for 0s" after
+     * 21s of silence.
      */
     public function test_what_the_step_prints_while_being_killed_does_not_reset_the_report(): void
     {

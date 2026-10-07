@@ -13,16 +13,15 @@ use PHPUnit\Framework\TestCase;
  * one-shot service produces. A service that runs, refuses, and exits 1
  * therefore left `up -d` exiting 0 and the deploy reported successful.
  *
- * Measured on Manticore (supported-apps#297) by deliberately switching off
- * the authentication its gate exists to require: `ready` printed its refusal
- * and exited 1, `up -d` exited 0, the rebuild endpoint returned success, and
- * the account was published with an unauthenticated, writable search engine
- * on it. The failure is silent in the worst direction — the thing the gate
- * exists to prevent is exactly what ships.
+ * Manticore with the authentication its gate exists to require switched off:
+ * `ready` prints its refusal and exits 1, `up -d` exits 0, the rebuild endpoint
+ * returns success, and the account is published with an unauthenticated,
+ * writable search engine on it. The failure is silent in the worst direction —
+ * the thing the gate exists to prevent is exactly what ships.
  *
  * A gate is the only mechanism a recipe has to assert a post-condition
- * before the account goes live, and several rely on one: Manticore (#297),
- * Baikal (#274), Mattermost (#47), Dolibarr (#307).
+ * before the account goes live, and several rely on one: Manticore,
+ * Baikal, Mattermost, Dolibarr.
  *
  * This is the narrower of the two fixes the issue offers. `--wait` also
  * waits on health checks, so it would start delaying or failing deploys that
@@ -85,7 +84,7 @@ class GateServiceFailsTheDeployTest extends TestCase
 
     /**
      * The services worth waiting for: `restart: "no"` in the hardened run
-     * file and nothing published. Everything else got a restart policy.
+     * file and nothing published.
      */
     public function test_one_shots_are_the_unpublished_no_restart_services(): void
     {
@@ -98,6 +97,24 @@ class GateServiceFailsTheDeployTest extends TestCase
         ]];
 
         $this->assertSame(['ready', 'init'], AppLauncher::oneShotServices($compose));
+    }
+
+    /**
+     * kassambara/wordpress-docker-compose's `wpcli` publishes no port and names
+     * no policy, so the run file gives it none: its exit is not a gate's.
+     */
+    public function test_services_with_no_restart_policy_are_not_gates(): void
+    {
+        $compose = ['services' => [
+            'wordpress' => ['image' => 'wordpress', 'restart' => 'always', 'ports' => ['80:80']],
+            'wpcli' => ['image' => 'wpcli'],
+            'healthcheck' => ['image' => 'wpcli', 'restart' => ''],
+            'ready' => ['image' => 'alpine:3', 'restart' => 'no'],
+            'init' => ['image' => 'x', 'restart' => false],
+        ]];
+
+        $this->assertSame(['wpcli', 'healthcheck'], AppLauncher::withoutRestartPolicy($compose));
+        $this->assertSame([], AppLauncher::withoutRestartPolicy([]));
     }
 
     /**

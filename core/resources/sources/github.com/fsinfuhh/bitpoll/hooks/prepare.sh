@@ -9,7 +9,7 @@ cd ~/project
 say() { echo "[bitpoll] $*" >&2; }
 
 # ~/.panelalpha/bitpoll/ survives the clone; ~/project is emptied on every
-# deploy (engine#173), so a secret written there would be regenerated on every
+# deploy, so a secret written there would be regenerated on every
 # rebuild -- a new SECRET_KEY logs everyone out, a new FIELD_ENCRYPTION_KEY
 # strands every encrypted field, and a new DB password locks the app out of the
 # pgdata volume that still holds the old one. db.env holds only what the

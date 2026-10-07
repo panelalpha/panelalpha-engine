@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Exceptions\NotFoundException;
 use App\System;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -73,11 +74,8 @@ class Domain extends Model
 
     public static function findByNameOrFail(string $name): self
     {
-        $domain = self::findByName($name);
-        if (!$domain) {
-            abort(404, "Not Found");
-        }
-        return $domain;
+        return self::findByName($name)
+            ?? throw new NotFoundException("Domain '{$name}' not found.");
     }
 
     public static function findByNameOrAlias(string $domainName): ?self
@@ -288,11 +286,33 @@ class Domain extends Model
      */
     public function getVhostAltNames(): array
     {
-        $names = $this->getAliases();
+        $names = [...$this->getAliases(), ...$this->siblingTunnelHostnames()];
         if ($this->domain == Setting::get('vhost-default-ip-domain')) {
             $names[] = (string)Setting::get('default_ipv4');
         }
         return $names;
+    }
+
+    /**
+     * panelalpha.online names a project added beside this domain, such as
+     * `api-<name>`: the front forwards each with its own Host, so the site
+     * has to answer to them.
+     *
+     * @return list<string>
+     */
+    public function siblingTunnelHostnames(): array
+    {
+        if (!$this->exists) {
+            return [];
+        }
+
+        /** @var list<string> */
+        return $this->tunnels()->getQuery()
+            ->where('provider', Tunnel::PROVIDER_PANELALPHA)
+            ->where('hostname', '!=', strtolower((string) $this->domain))
+            ->orderBy('hostname')
+            ->pluck('hostname')
+            ->all();
     }
 
     /**

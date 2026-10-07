@@ -1,5 +1,5 @@
 # Compose-replace: upstream's filesystem deployment (docs/docs/deployment/filesystem.md)
-# on the release image; drops the Garage S3 node and pins MongoDB 7.0 (engine#146).
+# on the release image; drops the Garage S3 node and pins MongoDB 7.0.
 services:
   paaster:
     image: wardpearce/paaster:3.6.1
@@ -15,7 +15,7 @@ services:
       MONGO_URL: mongodb://paaster_mongodb:27017
       MONGO_DB: paasterv3
       # Client address for the per-IP rate limits: the hop the engine's proxy
-      # appended, not the socket (the proxy) or the visitor-supplied first entry (engine#319).
+      # appended, not the socket (the proxy) or the visitor-supplied first entry.
       ADDRESS_HEADER: X-Forwarded-For
       XFF_DEPTH: "1"
     ports:
