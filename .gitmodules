@@ -1,0 +1,3 @@
+[submodule ".claude/agent-skills"]
+	path = .claude/agent-skills
+	url = https://github.com/panelalpha/agent-skills.git
