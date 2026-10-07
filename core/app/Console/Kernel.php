@@ -21,6 +21,8 @@ class Kernel extends ConsoleKernel
 
     private const MUTEX_FIVE_MINUTES = 5;
 
+    private const MUTEX_FIFTEEN_MINUTES = 15;
+
     private const MUTEX_HOURLY = 50;
 
     private const MUTEX_SIX_HOURS = 300;
@@ -162,13 +164,15 @@ class Kernel extends ConsoleKernel
 
     /**
      * Ship spooled telemetry (QUEUE_CONNECTION is `sync`, so a queued job would
-     * sit inside the deploy request), repair accounts sysbox unmapped, sweep
-     * application health, and update the AWStats databases.
+     * sit inside the deploy request), repair accounts sysbox unmapped, measure
+     * project disk use (`du` walks every file, so a quarter-hour; the API reads
+     * the stored figure), sweep application health, and update the AWStats databases.
      */
     private function scheduleMonitoring(Schedule $schedule): void
     {
         $schedule->command('telemetry:ship')->everyFiveMinutes()->withoutOverlapping(self::MUTEX_FIVE_MINUTES);
         $schedule->command('project:mapping:check')->everyFiveMinutes()->withoutOverlapping(self::MUTEX_FIVE_MINUTES);
+        $schedule->command('metrics:projects:disk')->everyFifteenMinutes()->withoutOverlapping(self::MUTEX_FIFTEEN_MINUTES);
         $schedule->command('project:health:report')->everySixHours()->withoutOverlapping(self::MUTEX_SIX_HOURS);
         $schedule->command('stats:update')->daily()->withoutOverlapping(self::MUTEX_DAILY);
     }

@@ -231,7 +231,7 @@ Context: [A token shared by several projects](../05-capabilities/connecting-with
 | `pae project:file:fetch {project} --url= --path=` | Downloads an `http` or `https` address into a directory that already exists. `--filename=` sets the name when the address has none. This does not deploy the file. |
 | `pae project:file:chmod {project} --path= --mode=755` | Sets the mode of one file or directory. Three or four octal digits. It does not walk into folders inside it. |
 | `pae project:file:move-contents {project} --source= --dest=` | Moves the immediate children of a directory into a destination that already exists. A name that is already there is replaced. `--override=0` leaves the existing file. |
-| `pae project:usage {project}` | Resource usage, including this month's transfer against the bandwidth limit. |
+| `pae project:usage {project}` | Resource usage, including this month's transfer against the bandwidth limit, and the disk its own Docker takes (images, build cache, volumes) apart from its files. Disk figures are measured every 15 minutes. |
 | `pae project:bandwidth {project} --start= --end= --group-by=day` | Transfer series for the project, in bytes. |
 | `pae project:domain:bandwidth {project} {domain} --start= --end=` | Transfer series for one hostname. |
 | `pae project:domain:visitors {project} {domain} --start= --end=` | Visitor overview for one hostname (`domain_visitors`). Daily hits and visits clip to the range; unique visitors and session length are calendar months. |

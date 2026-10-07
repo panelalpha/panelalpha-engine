@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Lib\Deploy\Credentials\AppCredentials;
+use App\Lib\Host\ProjectDisk;
 use App\Models\User;
 use App\System\Project\Dind\AppDatabase;
 use App\System\Project\Dind\Networking;
@@ -39,6 +40,7 @@ class UserResource extends JsonResource
                 : null,
             'details' => $this->publicDetails($user),
             'app_credentials' => $this->appCredentials($user),
+            'disk' => $this->disk($user),
             // Secrets stored for this project that cannot be decoded; [] when all decode.
             'unreadable_secrets' => $user->unreadableSecrets(),
             'warning' => $user->unreadableSecretsWarning(),
@@ -53,6 +55,29 @@ class UserResource extends JsonResource
         }
 
         return $resource;
+    }
+
+    /**
+     * The stored measurement; a request never runs `du`.
+     *
+     * @return ?array<string, mixed>
+     */
+    private function disk(User $user): ?array
+    {
+        $disk = ProjectDisk::latest((string) $user->username);
+        if ($disk === null) {
+            return null;
+        }
+        // -1 is stored for unlimited.
+        $limitMb = $user->getDiskSpaceLimit();
+
+        return [
+            'files_bytes' => $disk['files_bytes'],
+            'docker_bytes' => $disk['docker_bytes'],
+            'total_bytes' => $disk['total_bytes'],
+            'limit_bytes' => $limitMb === null || $limitMb < 0 ? null : $limitMb * 1024 * 1024,
+            'measured_at' => $disk['measured_at'],
+        ];
     }
 
     /**

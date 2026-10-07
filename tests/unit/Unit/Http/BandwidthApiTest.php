@@ -78,6 +78,8 @@ class BandwidthApiTest extends TestCase
             $table->timestamps();
         });
 
+        (require database_path('migrations/2026_10_07_000000_create_project_disk_usage_table.php'))->up();
+
         $this->statistics = new FakeStatistics();
         $this->statistics->domainSeries = [
             'example.com' => [
@@ -233,6 +235,24 @@ class BandwidthApiTest extends TestCase
         $usage = $this->getJson("/api/projects/{$user->username}/usage");
         $usage->assertOk();
         $usage->assertJsonPath('bandwidth.usage', 0);
+    }
+
+    public function test_usage_reads_the_stored_disk_measurement_and_runs_no_du(): void
+    {
+        $user = $this->makeProject();
+        DB::table('project_disk_usage')->insert([
+            'timestamp' => '2026-10-07 09:15:00', 'username' => $user->username,
+            'files_bytes' => 5 * 1048576 + 1, 'docker_bytes' => 1848709120,
+        ]);
+        $this->system->ran = [];
+
+        $response = $this->getJson("/api/projects/{$user->username}/usage");
+
+        $response->assertOk();
+        $response->assertJsonPath('storage.usage', 6);
+        $response->assertJsonPath('docker.usage', 1848709120);
+        $response->assertJsonPath('docker.maximum', null);
+        $this->assertSame([], array_filter($this->system->ran, static fn (array $cmd): bool => in_array('du', $cmd, true)));
     }
 
     /**

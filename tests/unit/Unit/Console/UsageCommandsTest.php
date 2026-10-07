@@ -67,6 +67,8 @@ class UsageCommandsTest extends TestCase
             });
         }
 
+        (require database_path('migrations/2026_10_07_000000_create_project_disk_usage_table.php'))->up();
+
         $this->statistics = new FakeStatistics();
         $this->statistics->domainSeries = [
             'example.com' => ['2026-09-01' => 1000, '2026-09-02' => 2500],
@@ -109,7 +111,7 @@ class UsageCommandsTest extends TestCase
 
     public function test_project_usage(): void
     {
-        $this->assertCommand(0, '{"storage":{"usage":42,"maximum":null},"logs":{"usage":0,"maximum":null},"bandwidth":{"usage":4000,"maximum":10485760},'
+        $this->assertCommand(0, '{"storage":{"usage":42,"maximum":null},"logs":{"usage":0,"maximum":null},"docker":{"usage":null,"maximum":null},"bandwidth":{"usage":4000,"maximum":10485760},'
             . '"addon_domains":{"usage":1,"maximum":null},"subdomains":{"usage":0,"maximum":null},'
             . '"ftp_accounts":{"usage":0,"maximum":null},"sftp_accounts":{"usage":0,"maximum":null},'
             . '"mysql_databases":{"usage":1,"maximum":null}}', 'project:usage', ['project' => 'alice']);

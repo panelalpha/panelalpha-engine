@@ -37,6 +37,22 @@ use OpenApi\Attributes as OA;
             type: 'object',
         ),
         new OA\Property(
+            property: 'disk',
+            description: 'Disk the project uses, measured every 15 minutes in the background; null before the first '
+                . 'measurement. files_bytes is its home without ~/docker; docker_bytes is its own Docker\'s images, '
+                . 'build cache, containers and volumes (null when it has none). limit_bytes is the project '
+                . 'disk_space_limit, null when unlimited.',
+            properties: [
+                new OA\Property(property: 'files_bytes', type: 'integer', nullable: true, example: 23363584),
+                new OA\Property(property: 'docker_bytes', type: 'integer', nullable: true, example: 1848709120),
+                new OA\Property(property: 'total_bytes', type: 'integer', nullable: true, example: 1872072704),
+                new OA\Property(property: 'limit_bytes', type: 'integer', nullable: true, example: 10737418240),
+                new OA\Property(property: 'measured_at', type: 'string', example: '2026-10-07T09:15:02Z'),
+            ],
+            type: 'object',
+            nullable: true,
+        ),
+        new OA\Property(
             property: 'unreadable_secrets',
             type: 'array',
             items: new OA\Items(type: 'string'),
