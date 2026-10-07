@@ -1182,7 +1182,7 @@ harden_host() {
     bash /opt/panelalpha/shared-hosting/scripts/configure-sysctl.sh
     bash /opt/panelalpha/shared-hosting/scripts/configure-monit.sh
     bash /opt/panelalpha/shared-hosting/scripts/firewall.sh --install ||
-        echo_warning "Could not set up the firewall; this host has none until the next update"
+        echo_warning "Could not set up the firewall; the firewall: lines above say what protects this host now"
     # This is the fourth Docker restart in a minute or so (install, sysbox,
     # daemon DNS, firewall); docker.service allows three, and on a fast host the
     # fourth fails with start-limit-hit although the daemon stopped cleanly.

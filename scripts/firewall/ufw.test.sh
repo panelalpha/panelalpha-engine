@@ -14,8 +14,8 @@ for cmd in systemctl ss fail2ban-client; do
     printf '#!/bin/bash\necho "%s $*" >>"%s/calls"\n' "$cmd" "$W" >"$W/bin/$cmd"
 done
 # The ufw lock (ufw.sh's default under PA_ENGINE_DIR). ufw called without it goes
-# to $W/unlocked; fail2ban-client or systemctl called with it held, to $W/locked:
-# fail2ban's ban action waits for that lock.
+# to $W/unlocked; fail2ban-client, or systemctl on fail2ban, called with it held,
+# to $W/locked: fail2ban's ban action waits for that lock.
 LOCK="$W/engine/data/ufw.lock"
 # BusyBox's flock (core's test container) has no -w; poll -n in its place.
 if ! flock -w 1 /dev/null true 2>/dev/null; then
@@ -36,7 +36,7 @@ FAKE
 cat >"$W/bin/systemctl" <<FAKE
 #!/bin/bash
 echo "systemctl \$*" >>"$W/calls"
-flock -n "$LOCK" true 2>/dev/null || echo "systemctl \$*" >>"$W/locked"
+case "\$*" in *fail2ban*) flock -n "$LOCK" true 2>/dev/null || echo "systemctl \$*" >>"$W/locked" ;; esac
 case "\$*" in
 "is-active --quiet csf" | "is-active --quiet lfd") [ -f "$W/running-\$3" ] ;;
 "show -p LoadState --value csf" | "show -p LoadState --value lfd") [ -f "$W/loaded-\$5" ] && echo loaded || echo not-found ;;
@@ -114,7 +114,8 @@ csf() { # a CSF install with the given csf.allow / csf.deny / csf.ignore bodies
     printf '%b' "$1" >"$W/etc/csf/csf.allow"
     printf '%b' "$2" >"$W/etc/csf/csf.deny"
     printf '%b' "${3:-}" >"$W/etc/csf/csf.ignore"
-    printf '#!/bin/sh\necho "csf-uninstall" >>"%s/calls"\n' "$W" >"$W/etc/csf/uninstall.sh"
+    printf '#!/bin/sh\necho "csf-uninstall" >>"%s/calls"\nflock -n "%s" true 2>/dev/null && echo csf-uninstall >>"%s/unlocked"\n' \
+        "$W" "$LOCK" "$W" >"$W/etc/csf/uninstall.sh"
 }
 env_run() {
     PATH="$W/bin:$PATH" PA_ENGINE_DIR="$W/engine" PA_UFW_DIR="$W/etc/ufw" \
@@ -259,7 +260,8 @@ expect "CSF UI settings leave .env" "0" "$(grep -c CSF_UI "$W/engine/.env")"
 expect "trusted addresses are never banned" "203.0.113.5 1.2.3.4" "$(sort -r "$W/etc/fail2ban/panelalpha-ignoreip" | tr '\n' ' ' | sed 's/ $//')"
 expect "rules move before CSF goes" "1" "$([ "$(line_of 'ufw prepend')" -lt "$(line_of csf-uninstall)" ] && echo 1)"
 expect "ufw is enabled after CSF is gone" "1" "$([ "$(line_of 'ufw --force enable')" -gt "$(line_of csf-uninstall)" ] && echo 1)"
-expect "every ufw write holds the ufw lock" "" "$(cat "$W/unlocked" 2>/dev/null)"
+expect "ufw is configured before CSF goes" "1" "$([ "$(line_of 'ufw default deny incoming')" -lt "$(line_of csf-uninstall)" ] && echo 1)"
+expect "every ufw write, and CSF's uninstaller, holds the ufw lock" "" "$(cat "$W/unlocked" 2>/dev/null)"
 expect "and fail2ban is never driven while it is held" "" "$(cat "$W/locked" 2>/dev/null)"
 
 # The engine's ports and ufw's defaults.
@@ -392,6 +394,39 @@ touch "$W/f2b-down"
 rm -f "$W/calls"
 run fail2ban >/dev/null
 expect "a stopped fail2ban is started instead" "1|0" "$(calls 'systemctl restart fail2ban')|$(calls 'fail2ban-client reload')"
+
+# CSF stays until ufw can take over: a failure before that leaves it running.
+csf_kept() { echo "$(calls csf-uninstall)|$([ -f "$W/etc/csf/csf.conf" ] && echo kept || echo gone)"; }
+reset
+csf '1.2.3.4\n' '5.6.7.8\n'
+rm -f "$W/held"
+flock "$LOCK" -c "touch '$W/held'; sleep 3" &
+holder=$!
+until [ -f "$W/held" ]; do sleep 0.1; done
+expect "a held lock while CSF's rules move: install fails" "1" "$(PA_UFW_LOCK_WAIT=1 run install)"
+expect "CSF is not uninstalled" "0|kept" "$(csf_kept)"
+expect "ufw is not enabled" "0" "$(calls 'ufw --force enable')"
+expect "and it says CSF is left in place" "1" "$(grep -c "CSF is left in place" "$W/out")"
+wait "$holder"
+expect "the next install moves it" "0|1|gone" "$(run install)|$(csf_kept)"
+
+reset
+csf '1.2.3.4\n' ''
+echo 'default deny incoming' >"$W/ufw-refuses"
+expect "ufw's defaults refused: install fails" "1" "$(run install)"
+expect "with CSF in place" "0|kept" "$(csf_kept)"
+expect "and ufw off" "0|1" "$(calls 'ufw --force enable')|$(grep -c "CSF is left in place" "$W/out")"
+
+reset
+csf '1.2.3.4\n' ''
+echo 'force enable' >"$W/ufw-refuses"
+expect "ufw does not start after CSF is gone: install fails" "1" "$(run install)"
+expect "and says the host has no firewall" "1" "$(grep -c "this host has NO firewall" "$W/out")"
+expect "and where CSF's configuration is" "1" "$(grep -c "CSF's configuration is in $W/backups/panelalpha-csf-[0-9]*\.tgz\$" "$W/out")"
+
+reset
+echo 'force enable' >"$W/ufw-refuses"
+expect "without CSF, a ufw that does not start fails install too" "1|1" "$(run install)|$(grep -c "ufw did not start" "$W/out")"
 
 # CSF turned off by the operator: ufw stays off.
 reset

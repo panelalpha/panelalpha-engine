@@ -459,23 +459,33 @@ csf_present() {
 # saved, and it is uninstalled. Its uninstaller flushes the whole ruleset,
 # Docker's chains included; the installers restart Docker right after this.
 # A host where CSF had been turned off (csf.disable) keeps ufw off as well.
-migrate_from_csf() {
+#
+# The move is in two halves. This one runs while CSF still protects the host,
+# and fails if any rule file could not be read over: CSF is then left as it is.
+import_from_csf() {
     clear_csf_leftover
     [ -f "$CSF_DIR/csf.conf" ] || return 0
-    local backup
     say "replacing CSF with ufw"
-    mkdir -p "$BACKUP_DIR"
-    backup="$BACKUP_DIR/panelalpha-csf-$(date +%Y%m%d%H%M%S).tgz"
-    if tar -czf "$backup" -C "$(dirname "$CSF_DIR")" "$(basename "$CSF_DIR")" 2>/dev/null; then
-        say "CSF's configuration is saved in $backup"
-    fi
-
-    with_ufw_lock import_csf_file deny "$CSF_DIR/csf.deny"
-    with_ufw_lock import_csf_file allow "$CSF_DIR/csf.allow"
+    with_ufw_lock import_csf_file deny "$CSF_DIR/csf.deny" &&
+        with_ufw_lock import_csf_file allow "$CSF_DIR/csf.allow" || return 1
     mkdir -p "$F2B_DIR"
     import_csf_ignores
     [ -f "$CSF_DIR/csf.disable" ] && touch "$UFW_DIR/.panelalpha-keep-disabled"
+    return 0
+}
 
+# The second half, once ufw is ready to take over; install() runs it under the
+# same hold of the ufw lock as `ufw enable`, so nothing can come between them.
+# The backup is made here: clear_csf_leftover reads it as "the move finished".
+remove_csf() {
+    [ -f "$CSF_DIR/csf.conf" ] || return 0
+    mkdir -p "$BACKUP_DIR"
+    CSF_BACKUP="$BACKUP_DIR/panelalpha-csf-$(date +%Y%m%d%H%M%S).tgz"
+    if tar -czf "$CSF_BACKUP" -C "$(dirname "$CSF_DIR")" "$(basename "$CSF_DIR")" 2>/dev/null; then
+        say "CSF's configuration is saved in $CSF_BACKUP"
+    else
+        CSF_BACKUP=
+    fi
     if [ -f "$CSF_DIR/uninstall.sh" ]; then
         sh "$CSF_DIR/uninstall.sh" >/dev/null 2>&1 || true
     elif [ -f "$CSF_SRC/uninstall.sh" ]; then
@@ -504,9 +514,13 @@ configure_ufw() {
     if [ -f "$UFW_DEFAULTS" ]; then
         sed -i 's/^IPV6=.*/IPV6=yes/; s/^MANAGE_BUILTINS=.*/MANAGE_BUILTINS=no/' "$UFW_DEFAULTS"
     fi
-    ufw default deny incoming >/dev/null
-    ufw default allow outgoing >/dev/null
-    ufw default deny routed >/dev/null
+    # Enabled without them, ufw would let everything in.
+    ufw default deny incoming >/dev/null &&
+        ufw default allow outgoing >/dev/null &&
+        ufw default deny routed >/dev/null || {
+        warn "could not set ufw's default policies"
+        return 1
+    }
     # The firewall API reads what was blocked from ufw's log; an operator's
     # own level (medium, high) is kept.
     if grep -q '^LOGLEVEL=off' "$UFW_DIR/ufw.conf" 2>/dev/null; then
@@ -883,22 +897,61 @@ published_off() {
     return 0
 }
 
+# CSF goes and ufw comes on, under one hold of the ufw lock. After CSF's
+# uninstaller only `ufw enable` is left to fail, and then the host has no
+# firewall at all: that is said in so many words.
+switch_on() {
+    local had_csf=
+    [ -f "$CSF_DIR/csf.conf" ] && had_csf=1
+    CSF_BACKUP=
+    remove_csf
+    # Enabling an active ufw reloads it, which applies the hooks above.
+    ufw --force enable >/dev/null && return 0
+    if [ -n "$had_csf" ]; then
+        local saved=""
+        [ -z "$CSF_BACKUP" ] || saved="; CSF's configuration is in $CSF_BACKUP"
+        warn "CSF is uninstalled but ufw did not start: this host has NO firewall. Run 'ufw enable'$saved"
+    else
+        warn "ufw did not start; run 'ufw enable'"
+    fi
+    return 1
+}
+
+not_set_up() {
+    if [ -f "$CSF_DIR/csf.conf" ]; then
+        warn "ufw could not be set up; CSF is left in place"
+    else
+        warn "ufw could not be set up"
+    fi
+}
+
+# Nothing of CSF is touched until ufw is configured and holds its rules; any
+# failure before that leaves CSF running as it was.
 install() {
     install_packages || {
         warn "could not install ufw and fail2ban"
         return 1
     }
-    migrate_from_csf
-    with_ufw_lock configure_ufw || return 1
+    import_from_csf || {
+        warn "CSF's rules could not be moved to ufw; CSF is left in place"
+        return 1
+    }
+    with_ufw_lock configure_ufw || {
+        not_set_up
+        return 1
+    }
     configure_fail2ban
-    with_ufw_lock mirror_bans || return 1
+    with_ufw_lock mirror_bans || {
+        not_set_up
+        return 1
+    }
     if [ -f "$UFW_DIR/.panelalpha-keep-disabled" ]; then
+        with_ufw_lock remove_csf || return 1
         say "CSF was disabled on this host, so ufw is left off: run 'ufw enable' to turn it on"
         rm -f "$UFW_DIR/.panelalpha-keep-disabled"
         return 0
     fi
-    # Enabling an active ufw reloads it, which applies the hooks above.
-    with_ufw_lock ufw --force enable >/dev/null
+    with_ufw_lock switch_on || return 1
     published_on
     say "ufw is on; open ports: $(managed_rules | awk '{ printf "%s%s/%s", sep, $1, $2; sep = " " }')"
 }
