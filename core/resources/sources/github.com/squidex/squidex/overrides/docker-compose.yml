@@ -1,5 +1,5 @@
 # Compose-replace: upstream's squidex-hosting compose on the release image
-# instead of the repo's multi-stage source build; MongoDB 7.0 (engine#146).
+# instead of the repo's multi-stage source build; MongoDB 7.0.
 services:
   squidex:
     image: squidex/squidex:7.24.0
@@ -42,7 +42,7 @@ services:
       retries: 30
     mem_limit: 512m
 
-  # Front proxy for engine#429 (files/panelalpha/front.conf); the only published port.
+  # Front proxy for the engine's health probe (files/panelalpha/front.conf); the only published port.
   web:
     image: nginx:1-alpine
     restart: unless-stopped

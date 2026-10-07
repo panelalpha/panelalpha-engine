@@ -9,7 +9,7 @@ is the old codebase; `master` is a rewrite onto **Laravel 13, Fortify,
 Livewire 4 and PHP 8.4**, with no tag yet. An account cloning this URL gets the
 rewrite, so that is what this recipe deploys.
 
-## Why detection was right and the deploy still failed
+## Why the repository does not deploy as it is
 
 The repository is a **monorepo of two halves**, and neither is deployable on
 its own:
@@ -23,9 +23,8 @@ core/   the Laravel package that holds the application — XBB\, the routes, the
         public/build bundle
 ```
 
-The repository root has **no index.php and no composer.json at all**. That is
-exactly the `serving-missing_entry` verdict, and detection read the tree
-correctly. `app/bootstrap/app.php` is what ties the halves together: it boots
+The repository root has **no index.php and no composer.json at all**, so a
+plain deploy has no entry point to serve. `app/bootstrap/app.php` is what ties the halves together: it boots
 `vendor/xbackbone/core/bootstrap/app.php` and then overrides only the public,
 environment, storage and bootstrap paths — so `base_path()` stays inside the
 package (that is where `config/`, `database/` and the published `public/build`
@@ -54,14 +53,14 @@ from `PrepareFromSource::prepare()` ahead of `DetectProjectStrategy::detect()`),
 so the patched manifest is what picks the image. That is the whole reason this
 can be done in a hook at all.
 
-Nothing else about the build needed saying. `composer install --no-scripts
---no-plugins` resolves 129 packages in ~15 s, and the php manifest's optional
+Nothing else about the build needs saying. `composer install --no-scripts
+--no-plugins` resolves the dependency tree, and the php manifest's optional
 `post-autoload-dump` step then runs the skeleton's own scripts — `xbb
 package:discover` and the two `vendor:publish` lines that copy the core's
 compiled `public/build` and its images into `public/`. There is **no Node
 build**: the monorepo commits the production bundle, and after the restructure
 there is no `package.json` at the project root for `HostCompile::runForPhp()`
-to find. **engine#168** does not bite either: the only Composer plugin in the
+to find. The engine's `--no-plugins` Composer install does not bite either: the only Composer plugin in the
 graph is `php-http/discovery`, which nothing needs at runtime.
 
 ## Where the data lives — the thing the engine cannot infer
@@ -75,7 +74,7 @@ are inside the checkout:
   the skeleton to override;
 - the SQLite database defaults to `APP_ROOT/xbb.db`.
 
-A redeploy re-clones `~/project` after clearing it (**engine#173**), so an
+A redeploy re-clones `~/project` after clearing it, so an
 account would lose every uploaded file *and* its entire database on the next
 deploy. So:
 
@@ -94,7 +93,7 @@ is a child of that one — and the prepare hook creates it before the mount is
 made, so Docker never gets to create it as root.
 
 `DB_DATABASE` is used verbatim by `config/database.php`; there is no
-`database_path()` wrapper, so **engine#167** does not apply.
+`database_path()` wrapper, so the engine issue with that wrapper does not apply.
 
 ## The .env is written, not derived
 
@@ -129,7 +128,7 @@ to `/login`, enforced by the marker the action writes
 middleware, so a snapshot captured from `/install` before setup finished cannot
 be replayed against the shared Livewire endpoint afterwards.
 
-`stage: build` would not run at all (**engine#171**), so the command is on
+`stage: build` would not run at all, so the command is on
 `install` and `upgrade`. It is idempotent: it returns early once the
 application reports itself installed, and `FinalizeInstallation` reuses an
 existing administrator with the same address rather than creating a second one.
@@ -156,20 +155,19 @@ columns with a key printed in a public repository. The hook writes a fresh
 
 The key is put into `.env` by the **install script**, not by the hook, because
 the engine copies whatever `.env` the hook leaves into a world-readable
-`.env.default` (**engine#173**) and an application key has no business in that
-file. Measured on the deployed account: `.env` is 0600 and carries the key,
-`.env.default` is 0644 and carries none.
+`.env.default` and an application key has no business in that
+file.
 
 ### Self-registration
 
 **Off by default, and nothing here had to close it.** `XBB\Features\SignUp`
 resolves to `false` and `XBB\Actions\Fortify\CreateNewUser` aborts 404 unless
-it is active. Measured on the deployed account, `/register` is **404**. An
-administrator can open it under Settings.
+it is active, so `/register` is **404**. An administrator can open it under
+Settings.
 
 ### What is not reachable
 
-Measured against the deployed account over its public HTTPS domain:
+What the public domain answers:
 
 ```
 302  /                      -> /dashboard -> /login
@@ -205,47 +203,15 @@ PDFs and SVGs do, through gd and imagick — both are in the image, along with
 `zip`, `exif` and `pdo_sqlite`, which is the whole extension set
 `core/composer.json` asks for.
 
+Uploads through a `*.panelalpha.online` test name stall and come back as a
+`302` from openresty (an engine defect, not XBackBone); a real domain is not
+affected.
+
 ## No readiness gate
 
-`AppLauncher` runs `docker compose up -d` without `--wait` (**engine#90**), and
-the usual fix is a healthcheck plus a no-op `ready` service. Measured here, the
-entire install stage — `migrate` over a fresh SQLite file, the administrator,
-and `optimize` — takes **0.91 s**, and Apache binds **1.7 s** after the
-container starts:
-
-```
-12:31:57.686  container started
-12:31:58.360  [panelalpha] install: xbackbone-install
-12:31:59.266  [panelalpha] XBackBone installed; administrator admin@…
-12:31:59.398  Apache … resuming normal operations
-```
-
-There is nothing real to wait for, and a `ready` container on a 3 GB host is a
-cost with nothing to buy. The health probe answered on the first attempt on
-both deploys.
-
-## What was verified
-
-On `mariusz2`, `--memory-limit=1200`, commit `524b9bc`:
-
-- deploy **60.2 s** (45 s of it the `running` stage, ~15 s Composer), verdict
-  **`deploy-ok`**, `healthy: true`, `serving: ok`, all twelve baseline and
-  `php/*` health checks pass, `https://<domain>/` → **200** after the redirect
-  chain.
-- **Login over the public HTTPS domain** with the generated credential:
-  `POST /login` → 302 to `/dashboard`, which renders (`Gallery | XBackBone`,
-  95 KB).
-- **Upload round trip.** An API token taken from `/integrations/sharex` over
-  the authenticated HTTPS session; `POST /api/v1/upload` → **201**, and the
-  file came back over the public HTTPS domain at `/raw/<code>.txt` and
-  `/download/<code>.txt` byte-for-byte, with the preview page rendering. A PNG
-  went the same way and `/thumbnail/<code>` answered `image/png`. Both landed
-  in `~/.panelalpha/xbackbone/uploads/` under their sha1.
-- **Install idempotency.** With `storage/installed` removed, the config cache
-  dropped and `APP_INSTALLED=false` — the state a redeploy leaves — the install
-  command ran again: still one user, still two resources, the same password
-  still logs in, the uploaded files still fetchable.
-
-The multipart upload had to be sent to the account's own address: through the
-`*.panelalpha.online` test edge it stalled for 60 s and returned a `302` from
-openresty, which is **engine#170** and not XBackBone.
+`AppLauncher` runs `docker compose up -d` without `--wait`, and
+the usual fix is a healthcheck plus a no-op `ready` service. Here the entire
+install stage — `migrate` over a fresh SQLite file, the administrator, and
+`optimize` — takes about a second, and Apache binds right after it. There is
+nothing real to wait for, and a `ready` container is a cost with nothing to
+buy.

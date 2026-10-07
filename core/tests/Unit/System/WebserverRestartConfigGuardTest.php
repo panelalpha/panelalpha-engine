@@ -13,14 +13,13 @@ use Tests\TestCase;
 /**
  * A restart is the one webserver path with no fallback.
  *
- * Issue #63: sites-http crash-looped for a whole audit window, and every
- * operation that reaches into it answered 422 `container is restarting`. A
- * reload is not the cause -- a master handed an unusable config keeps serving
- * the one it booted with. A *restart* is: the container exits on the `[emerg]`
- * and loops under `restart: always`. Measured on the app-nginx image, a vhost
- * naming a certificate that went with a deleted account takes it down with
- * `cannot load certificate`, which is the breakage `pruneDomainConfigs()`
- * exists to remove.
+ * sites-http crash-looped, and every operation that reaches into it
+ * answered 422 `container is restarting`. A reload is not the cause -- a master
+ * handed an unusable config keeps serving the one it booted with. A *restart*
+ * is: the container exits on the `[emerg]` and loops under `restart: always`.
+ * On the app-nginx image, a vhost naming a certificate that went with a deleted
+ * account takes it down with `cannot load certificate`, which is the breakage
+ * `pruneDomainConfigs()` exists to remove.
  *
  * So every path that restarts the container tests the config first -- the
  * queued one included, where the test has to run next to the restart. The

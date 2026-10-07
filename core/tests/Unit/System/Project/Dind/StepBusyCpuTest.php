@@ -26,9 +26,8 @@ class StepBusyCpuTest extends TestCase
     }
 
     /**
-     * Two `<uptime> <usage_usec>` samples of the account's cgroup, as read on
-     * a dev host with a BuildKit RUN step spinning while `docker stats` said
-     * 0.97%, then idle.
+     * Two `<uptime> <usage_usec>` samples of the account's cgroup, as read with
+     * a BuildKit RUN step spinning while `docker stats` said 0.97%, then idle.
      */
     public function test_cgroup_samples_give_the_cpu_of_nested_builds(): void
     {

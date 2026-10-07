@@ -5,8 +5,8 @@ description: >-
   plus busybox crond under supervisord, jobs in an NeDB file.
 
   The repository's docker-compose.yml builds the clone and starts with no
-  authentication, which is what an earlier automated test left public: an
-  anonymous visitor could run any shell command as root in the container.
+  authentication: an anonymous visitor could run any shell command as root in
+  the container.
   overrides/docker-compose.yml runs the published alseambusher/crontab-ui
   image of the current release (0.4.2) with /crontab-ui/crontabs (crontab.db,
   env.db, backups, job logs) on a named volume and ENABLE_AUTOSAVE, so the
@@ -16,8 +16,8 @@ description: >-
   ~/.panelalpha/crontabui/auth.env (user `admin`) and feeds it to the app's
   own Basic auth (BASIC_AUTH_USER/BASIC_AUTH_PWD, which covers every route and
   static file). The app's rate limiter runs before that auth and keys on the
-  client IP, which behind the engine's proxy is one shared address, so ~300
-  anonymous requests locked the owner out with 429 for 15 minutes. So the app
+  client IP, which behind the engine's proxy is one shared address, so
+  anonymous requests could lock the owner out with 429 for 15 minutes. So the app
   publishes no port: `proxy` (nginx) is the only thing on the account's port,
   checks the same credentials from an htpasswd rewritten every deploy, and
   anonymous requests never reach the app. To change the password edit
@@ -27,12 +27,3 @@ description: >-
   account's own Docker, not on the server. No Docker socket, the account's
   Docker API is closed, outbound internet is open, and the named volume is
   writable. Anything the owner schedules runs with that reach.
-
-  Measured on mariusz.panelalpha.tools (2026-09-28, engine 705f250a): deploy
-  39s, rebuild 28s. Anonymous GET/POST on all 17 routes (/save, /runjob,
-  /import, /export, /logger, /stdout, /crontab, /backup, /restore, ...),
-  static files and path variants -> 401, both at the public domain and
-  directly at the app container; a wrong password -> 401; 350 anonymous
-  requests leave the owner at 200. A job created through POST /save, run
-  through POST /runjob, reads back through /stdout, cron fires it every
-  minute, and it keeps firing after a rebuild with the password unchanged.

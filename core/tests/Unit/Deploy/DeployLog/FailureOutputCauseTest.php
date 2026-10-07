@@ -14,7 +14,7 @@ use PHPUnit\Framework\TestCase;
 class FailureOutputCauseTest extends TestCase
 {
     /**
-     * minthcm (engine#111), the step output as logged: the account daemon's
+     * minthcm, the step output as logged: the account daemon's
      * libnetwork socket was missing, so runc could not start the RUN step.
      */
     public function test_a_runc_run_failure_leads_over_the_steps_error_line(): void
@@ -46,7 +46,7 @@ OUT;
     }
 
     /**
-     * hitobito (engine#116), the failed step and compose's stderr from a deploy log:
+     * hitobito, the failed step and compose's stderr from a deploy log:
      * `rails locales:patch_de` loads a rake task requiring annotate_rb, a gem
      * in the `metrics` group the Dockerfile's BUNDLE_WITHOUT leaves out. The
      * explainer is given what AppLauncher hands it: the step's own tail, then stderr.

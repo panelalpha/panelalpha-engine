@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * engine#33: the second generation of a redeploy is the routed service once
+ * The second generation of a redeploy is the routed service once
  * more, beside the running one, sharing its sidecars, networks and volumes.
  */
 class NextGenerationTest extends TestCase

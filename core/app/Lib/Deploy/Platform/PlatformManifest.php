@@ -431,7 +431,7 @@ final class PlatformManifest
      *
      * An absent key is '' and the runtime probes for the root. `.` (or `/`) is a stated
      * answer, PhpDocroot::ROOT, so the probe cannot move it to a `public/` the
-     * application does not serve from (engine#172, OpenEMR).
+     * application does not serve from (OpenEMR).
      *
      * @throws ManifestException
      */

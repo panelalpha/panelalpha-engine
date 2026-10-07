@@ -12,7 +12,7 @@ use App\System\Project\PhpHosting;
 use App\System\Project\PhpHosting\TenantNetworkMove as PhpHostingTenantNetworkMove;
 
 /**
- * Accounts created before engine#519 (DinD) or engine#217 (PHP hosting) sit
+ * Accounts (DinD or PHP hosting) created before pash-tenants existed sit
  * on pash-default-network with core; new ones start on pash-tenants. This moves the old ones, live. Safe to run
  * again: an account already moved is left as it is.
  */

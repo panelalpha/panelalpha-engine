@@ -28,14 +28,6 @@ description: >-
   /-/ping. `npm login --registry https://<domain>/` works as admin: npm's web
   login gets a 404, it falls back to the classic flow and retries the 409
   with the credentials, which returns a token.
-
-  Measured on mariusz.panelalpha.tools (2026-09-28, engine 705f250a): deploy
-  42s, rebuild 25-27s, app 66 MiB. Anonymous: adduser 409, publish 401,
-  package, tarball and readme 401, search empty. As admin: npm login (driven by
-  expect), token via PUT /-/user, npm whoami admin, npm publish @pa/hello, npm view and npm install
-  of it plus lodash through the uplink, web UI login; after rebuild 1.0.0
-  was still there, 1.0.1 published, and a token minted before the rebuild
-  still authenticated.
 credentials:
   adopt_from: .panelalpha/verdaccio/admin.env
   fields:

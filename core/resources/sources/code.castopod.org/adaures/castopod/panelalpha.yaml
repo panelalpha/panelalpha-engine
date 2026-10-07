@@ -36,7 +36,7 @@ description: >-
   -- `Content-Length: 0` and an Apache access log with no error beside it. The
   error is only readable with CI_ENVIRONMENT=development, because
   app/Config/Boot/production.php sets `display_errors = 0` itself; this is the
-  one application where engine#185's platform-wide `display_errors = 1` is not
+  one application where the platform-wide `display_errors = 1` is not
   what shows, and `X-Powered-By: PHP/8.5.10` on the 500 is the rest of that
   defect still visible.
 
@@ -69,7 +69,7 @@ description: >-
   account's own container on the install stage and, when the dataset download
   fails, writes a stub of the same class rather than the empty file a failed
   redirect would leave: analytics that identify nothing beat a site that does
-  not answer. (engine#168 is not what bites here: adaures/castopod does commit
+  not answer. (This is not the missing-lock case: adaures/castopod does commit
   a composer.lock, and its only allowed plugin is a dev-time phpstan installer.
   This is `--no-scripts`, which no lock lifts.)
 
@@ -118,7 +118,7 @@ description: >-
   serves nothing is better than one that serves the install wizard.
 
   **And an episode is an audio file.** The shared PHP image loads no php.ini at
-  all (engine#185), so what is in force is PHP's compiled-in
+  all, so what is in force is PHP's compiled-in
   `upload_max_filesize = 2M` and `post_max_size = 8M` -- and a POST over
   post_max_size is discarded before PHP is entered, so $_POST and $_FILES both
   arrive empty and Castopod's episode form reports "the audio file is required"
@@ -133,7 +133,7 @@ description: >-
   podcast host it is the whole question. Modules\Media\Config\Media hard-codes
   `$storage = ROOTPATH . 'public'` and `$root = 'media'`, so every episode's
   audio, every cover and every avatar is written inside the checkout -- which a
-  redeploy clears and re-clones (engine#173), while the database rows that point
+  redeploy clears and re-clones, while the database rows that point
   at those files survive, so the feed would go on advertising audio that is no
   longer there. hooks/prepare.sh replaces public/media with a symlink to /data,
   which the compose override bind-mounts from ~/.panelalpha/castopod; a symlink
@@ -141,7 +141,7 @@ description: >-
   keep resolving under the document root, and public/.htaccess already sets
   `Options +FollowSymlinks`. The analytics salt lives beside it, for the same
   reason and because .env.default is a
-  world-readable copy of whatever the clone ends with (engine#173) -- which is
+  world-readable copy of whatever the clone ends with -- which is
   why the real .env is written by the install stage, inside the container, after
   that copy has been taken.
 
@@ -187,7 +187,7 @@ commands:
       cannot. Idempotent: on an account that already has an owner it re-points
       .env at the current credentials, brings the schema up to date and leaves
       the user alone, which is what the upgrade stage replays on every redeploy.
-      On the build stage it would not run at all (engine#171).
+      On the build stage it would not run at all.
     run: 'sh panelalpha/castopod-setup.sh'
 credentials:
   login_path: /cp-auth/login

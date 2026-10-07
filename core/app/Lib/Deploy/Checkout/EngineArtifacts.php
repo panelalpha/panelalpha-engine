@@ -25,7 +25,7 @@ final class EngineArtifacts
 
     /**
      * The run file inlines env_vars, database passwords and PA_INSTANCE_SECRET,
-     * and ~/project is traversable by every uid on the host (engine#173).
+     * and ~/project is traversable by every uid on the host.
      */
     public const RUN_COMPOSE_MODE = '600';
 
@@ -34,7 +34,7 @@ final class EngineArtifacts
 
     /**
      * The repository's own `docker-compose.override.yml` with its escapes
-     * removed, layered in its place (engine#48, item 9).
+     * removed, layered in its place.
      */
     public const RUN_CLIENT_OVERRIDE = 'docker-compose.panelalpha.client-override.yml';
 

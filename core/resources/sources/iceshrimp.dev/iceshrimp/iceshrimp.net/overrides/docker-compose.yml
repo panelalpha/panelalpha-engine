@@ -98,7 +98,7 @@ services:
     restart: unless-stopped
     # PA_PUBLIC_URL ships as http://localhost and is rewritten to the account's
     # https URL by ComposePlaceholders before the stack starts (a *_URL key with
-    # a localhost value — the engine#221 path, no platform block required). The
+    # a localhost value — no platform block required). The
     # entrypoint turns it into the bare host Iceshrimp wants for WebDomain /
     # AccountDomain, which is what its federation actor URIs and web UI are built
     # against. These two must never change after first boot, and they will not:
@@ -154,7 +154,7 @@ services:
 
   # Does nothing and exits 0. `docker compose up -d` returns — and the engine
   # calls the deploy finished — as soon as containers are started, not when the
-  # app answers (engine#90). Gating a service on iceshrimp's healthcheck makes
+  # app answers. Gating a service on iceshrimp's healthcheck makes
   # `up -d` block until the site is genuinely serving. Reuses the Postgres image
   # so nothing extra is pulled.
   ready:

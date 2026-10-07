@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Log;
 /**
  * Nothing answered, and nothing is restarting either: the containers are up
  * and silent. Says, per container that publishes a probed port, what it is
- * listening on instead (engine#90). {@see SilentPort}.
+ * listening on instead. {@see SilentPort}.
  */
 final class SilentPortCheck
 {

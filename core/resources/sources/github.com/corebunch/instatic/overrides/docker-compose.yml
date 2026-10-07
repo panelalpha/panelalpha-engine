@@ -29,7 +29,7 @@ services:
       retries: 30
     mem_limit: 1024m
 
-  # No-op gate: `compose up -d` returns only once the app answers (engine#204).
+  # No-op gate: `compose up -d` returns only once the app answers.
   ready:
     image: ghcr.io/corebunch/instatic:0.0.20
     restart: "no"

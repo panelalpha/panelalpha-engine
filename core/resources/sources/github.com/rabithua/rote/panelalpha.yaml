@@ -19,7 +19,7 @@ description: >-
   The Postgres password is generated once into ~/.panelalpha/rote (0600 in
   0700) and handed to both Postgres and the backend through an env_file, so
   it is never interpolated (upstream's ${POSTGRES_PASSWORD:?} otherwise gets
-  an engine-generated value that does not survive, engine#336). Notes live in
+  an engine-generated value that does not survive). Notes live in
   Postgres on a named volume; attachments go to the S3/R2 storage configured
   in the app's admin settings. First run is as upstream ships it: the first
   account registered becomes the site owner.

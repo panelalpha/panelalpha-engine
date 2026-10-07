@@ -9,9 +9,8 @@ Detection: `php-plain` on the `php` strategy — no `composer.json` anywhere, so
 `PhpSourcesProbe` answers and `php.yaml` does not. Document root `src/`, which
 `PhpDocroot::detect()` reaches on its own: the repository root has no index, so
 every ordinary candidate misses and `src` is picked up from `LATE_CANDIDATES`
-(`PhpDocroot.php:45`). Both were already right. The deploy succeeded on the
-first attempt in 45s and every request answered HTTP 200 with a PHP stack trace
-in it — the `serving-php_error` verdict this recipe fixes.
+(`PhpDocroot.php:45`). Both are right. Without this recipe every request
+answers HTTP 200 with a PHP stack trace in it.
 
 ## The error
 
@@ -26,13 +25,12 @@ reads it with no guard: `file_get_contents()` returns `false`,
 `json_decode(false, true)` returns `null`, `array_merge($defaults, null)` is
 fatal on PHP 8.
 
-It answers **200** rather than 500 because of engine#185. The base image loads
+It answers **200** rather than 500 because of the base image, which loads
 no `php.ini` at all (`php -i` → `Loaded Configuration File => (none)`), so
 `display_errors` is on and `error_reporting` is `E_ALL`; the warning is written
 into the response body, and writing a body sends the headers, with the 200 that
-was already on them. Measured on the control deploy: with
-`php_flag display_errors off` added and nothing else changed, the same checkout
-answers a clean, empty 500.
+was already on them. With `php_flag display_errors off` added and nothing else
+changed, the same checkout answers a clean, empty 500.
 
 That is the same mechanism as Atheos, one step less severe — there the notice
 broke `session_start()` and took the whole application with it; here it only
@@ -42,10 +40,10 @@ publishes the stack trace of a failure that was going to happen anyway.
 
 `panelalpha.yaml` is four lines of manifest: `extends: php-plain` and
 `docroot: src`. No `id:` and no stage commands at all — everything is host-side
-work on the checkout, which is what the after-clone hook is for, so engine#169
-has nothing to drop. (`docroot: .` would not have worked even if the docroot
+work on the checkout, which is what the after-clone hook is for, so there is
+nothing for the engine to drop. (`docroot: .` would not have worked even if the docroot
 were the repository root: `PlatformManifest::readDocroot()` folds `.` to `""`,
-which means "undeclared" — engine#172. A real relative path like `src` is
+which means "undeclared". A real relative path like `src` is
 honoured.)
 
 `hooks/prepare.sh`:
@@ -77,7 +75,7 @@ project, losing the php strategy, the bind mount and `PA_DOCROOT` with it.
 
 Both mutable things are inside the checkout and both are gitignored —
 `src/config.json` and `src/hp_assets/img/*` — and a redeploy clears and
-re-clones `~/project` (engine#173). Without the mounts, the account's entire
+re-clones `~/project`. Without the mounts, the account's entire
 configuration is deleted by the next deploy: there is nothing in a database,
 because there is no database.
 
@@ -88,12 +86,6 @@ read from the host, which is why `~/.panelalpha/homepage/README.panelalpha.md`
 tells the operator to edit the file there. `config.json` is 0600 in a 0700
 directory: `protected.unsplash_client_id` and `protected.custom_url_headers`
 are credentials.
-
-Verified by reproducing a redeploy by hand (`rm -rf ~/project`, re-clone,
-re-apply the recipe, `up -d --force-recreate` — the engine has no redeploy
-endpoint, #2344): a hand-edited title, a hand-added link, a changed hover
-colour and a PNG dropped into `img/` all came back unchanged, and the symlink
-and the `.htaccess` block were re-created.
 
 ## Authentication: there is none
 
@@ -111,9 +103,8 @@ background source configured, answers 200 with an empty body. When an operator
 sets `protected.custom_url` it becomes a server-side fetch of a URL only that
 operator can choose.
 
-Exposure sweep on the deployed account, bodies compared against a reference 404
-and a reference 403 rather than status codes alone (there is no front
-controller and no rewrite here, so a 404 really is "not there"):
+What the public domain answers (there is no front controller and no rewrite
+here, so a 404 really is "not there"):
 
 | path | result |
 | --- | --- |
@@ -126,30 +117,21 @@ controller and no rewrite here, so a 404 really is "not there"):
 | `/hp_assets/`, `/hp_assets/img/`, `/hp_assets/lib/` | 403, `Options -Indexes` |
 | `/hp_assets/lib/ajax_get_image.php` | 200, empty |
 
-`config.json` was also probed as `hp_assets/img/../../config.json`,
-`./config.json`, `%2econfig.json` and `config.json/` — all 403 — and as
-`CONFIG.JSON` and `config.json.`, which are 404 because the filesystem is
-case-sensitive and neither file exists.
-
-**engine#181 does not apply to this application.** It is the one where
+**The web-readable override file does not apply to this application.** That is the defect where
 `docker-compose.override.yml` is web-readable because the vhost's rule reads
 `^(?:docker-compose\.ya?ml|panelalpha[-.])` and does not match
 `docker-compose.override.yml`. Here the document root is `src/` and the
 engine's files are at the repository root, one level above it, so that request
-is a plain 404 — verified, not assumed. A `files/.htaccess` of the kind CouchCMS
+is a plain 404. A `files/.htaccess` of the kind CouchCMS
 needs would be dead weight.
 
-## Measurements
+## No readiness gate
 
-- Deploy: **45.2s** wall, 38s engine-side (preparing 9s, cloning 3s, running
-  26s). Identical to the control deploy's 45.3s — the recipe costs nothing.
-- Runtime footprint: **17 MiB** RSS for the whole container.
-- engine#90 (`up -d` does not wait): measured over three down/up cycles on
-  mariusz2, `docker compose up -d` returned in 0.89-0.99s and Apache answered
-  HTTP 200 **68-84ms** later, once with no failed poll at all. **No readiness
-  gate is added** — there is no database, no migration and no build at boot.
-- engine#166 (sidecar mining): not applicable. The repository ships no compose
-  file of any kind, so nothing is moved and nothing is globbed.
+`up -d` not waiting needs no workaround here: Apache answers
+moments after `docker compose up -d` returns, and there is no database, no
+migration and no build at boot. Sidecar mining does not apply
+either: the repository ships no compose file of any kind, so nothing is moved
+and nothing is globbed.
 
 ## `{{cur}}` and the scheme
 
@@ -160,7 +142,7 @@ TLS-terminating proxy, so on the face of it neither is true — and yet the link
 come out `https://` with no recipe at all.
 
 The reason is worth writing down, because it is not a reason to rely on. With
-no `php.ini` loaded (engine#185), `variables_order` keeps its compiled default
+no `php.ini` loaded, `variables_order` keeps its compiled default
 of `EGPCS`, which merges the process environment into `$_SERVER` — and the
 generated compose file sets `HTTPS: 'on'`. The correct scheme on every hosted
 Homepage is currently a side effect of a missing configuration file.
@@ -170,11 +152,8 @@ appears on this image, every `{{cur}}` link everywhere silently becomes
 
 So the hook adds `SetEnvIf X-Forwarded-Proto "^https$" HTTPS=on`, which takes
 the scheme from the header the proxy actually sends
-(`templates/dind/virtualHost-nginx-proxy.blade.php:39`). Verified with a probe
-script under the document root: `SET=on` through the proxy, `UNSET` on a direct
-request to `:8000` with no header, `SET=on` on a direct request carrying it.
-Requests that arrive without the header — the health probe, which sends
-`Host: 127.0.0.1` (engine#190) — fall back to the environment variable, which
+(`templates/dind/virtualHost-nginx-proxy.blade.php:39`). Requests that arrive without the header — the health probe, which sends
+`Host: 127.0.0.1` — fall back to the environment variable, which
 is what happens today.
 
 ## What is not done

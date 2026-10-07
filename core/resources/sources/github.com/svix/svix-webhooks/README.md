@@ -1,22 +1,18 @@
 # Svix — svix/svix-webhooks
 
-Issue [#693](https://git.modulesgarden.tech/panelalpha/playground/supported-apps/-/work_items/693).
-
 Svix is a webhook-sending service. An application registers endpoints, sends a
 message, and Svix fans it out, signs each request, retries on a schedule and
 records every delivery attempt. It is an HTTP API over Postgres and Redis. There
 is no web interface, no users, no sign-up and no installer.
 
-Verdict: **deploy-ok, `serving: ok`**, 166.1s on a 2000 MB account.
+## Why the repository root does not deploy
 
-## Why the batch said `serving-missing_entry`
-
-Not the application's fault, and not the engine's either — both were reading the
-repository root, and the root of `svix/svix-webhooks` is the client SDKs.
+Not the application's fault, and not the engine's either — the root of
+`svix/svix-webhooks` is the client SDKs.
 `csharp/`, `go/`, `java/`, `javascript/`, `kotlin/`, `php/`, `python/`, `ruby/`,
 `rust/`, plus `codegen/` and `svix-cli/`, with a `composer.json` that says
-`"type": "library"`, `"description": "Svix PHP Library"`. Detection found PHP,
-chose the php strategy, looked for an `index.php` and found none.
+`"type": "library"`, `"description": "Svix PHP Library"`. Detection finds PHP,
+chooses the php strategy, looks for an `index.php` and finds none.
 
 The server is `server/`: a Rust workspace with its own `Cargo.toml`,
 `Dockerfile`, `docker-compose.yml` and `openapi.json`, MIT-licensed.
@@ -25,13 +21,12 @@ One directory down puts it out of reach of every compose lookup the engine has.
 `ComposeFileInspector::COMPOSE_FILE_CANDIDATES` is four basenames joined to the
 project root with a single `/`, and the only glob is `RuntimeSidecars`'
 `$projectDir . '/docker-compose.*.yml'` and three siblings — no `**`. So
-`server/docker-compose.yml` is neither auto-loaded nor mined. **engine#166 does
+`server/docker-compose.yml` is neither auto-loaded nor mined. **Sidecar mining does
 not arise here**: there is nothing at the root to be greedy about.
 
 ## Can a headless API satisfy the serving criterion?
 
-Yes, and without a fake index page. Two things make it work, and both were
-checked in the engine source before the recipe was written.
+Yes, and without a fake index page. Two things make it work.
 
 **Svix redirects `/` to its own documentation.** `GET /` answers `307` with
 `Location: /docs`, and `AppHealth::probeScript()` follows *relative* redirects
@@ -46,24 +41,15 @@ applications legitimately 404 on `/`, and an API that answers 401 to an
 unauthenticated probe is working."* With `runtime: compose` the baseline group is
 the whole of what runs — there is no `checks/compose/` and no `entry-served`
 outside the `php` and `nginx` groups — so nothing asks a compose deploy for an
-entry document. The `missing_entry` verdict was `checks/php/entry-served.yaml`,
-reached only because detection had chosen php.
-
-Measured on the deployed account:
-
-```
-health: healthy=true  serving=ok
-ports:  8071 http 200 (0.004s)
-domain: ok, http_code 307
-external probe: https://<domain>/ -> 200, title 'Svix API - ReDoc'
-```
+entry document. Without this recipe the `missing_entry` failure comes from
+`checks/php/entry-served.yaml`, reached only because detection chooses php.
 
 **This recipe declares no `check:` block, deliberately.** It would not run.
 `AppHealth::declaredChecks()` resolves the account's stored platform id against
 `PlatformRegistry::all()` (`AppHealth.php:346`), which reads
 `resources/platforms/` and `resources/apps/` only (`PlatformRegistry.php:38-45`)
 — never `resources/sources/`. A source recipe's `check:` list and its `checks/`
-directory are both inert at health time. See "Engine findings" below.
+directory are both inert at health time.
 
 ## The stack
 
@@ -73,8 +59,7 @@ Upstream's own `server/docker-compose.yml`, minus pgbouncer.
 multi-stage on `rust:1.96-slim-trixie` that runs `cargo chef cook --release` and
 then `cargo build --release` across a two-crate workspace with `hyper` patched
 from a git fork. That is a rustc and a linker sized like the whole account, for a
-binary upstream publishes as `svix/svix-server` — 264 tags, `v1.101.0` and
-`latest` pushed 2026-08-26. `hooks/prepare.sh` reads the version from
+binary upstream publishes as `svix/svix-server`. `hooks/prepare.sh` reads the version from
 `server/Cargo.toml`'s `[workspace.package]`, confirms `v<version>` is published
 on Docker Hub before using it, and falls back to `:latest` for a clone of `main`
 between releases.
@@ -88,8 +73,7 @@ upstream puts a pooler in between. `SVIX_DB_POOL_MAX_SIZE: "10"` is the
 configured minimum and far more than one account uses.
 
 **Postgres 16, not the 13.4 upstream pins**, which reached end-of-life in
-November 2025. The migration set runs clean on 16 and `/api/v1/health` reports
-`"database":{"status":"ok"}`. The tag floats within the major on purpose — a
+November 2025. The migration set runs clean on 16. The tag floats within the major on purpose — a
 major change would leave the volume unreadable.
 
 **Redis with `noeviction`.** This Redis is the queue, not a cache. An eviction
@@ -98,24 +82,13 @@ refusing the write makes the failure visible. The cache is not in Redis at all �
 `SVIX_CACHE_TYPE: memory` is safe with a single API process, which is what an
 account runs, and it saves a second connection pool and the memory behind it.
 
-**`ready` is the readiness gate (engine#90).** `ready` waits for `token`, which
+**`ready` is the readiness gate.** `ready` waits for `token`, which
 waits for the backend's healthcheck, which is upstream's own
 `svix-server healthcheck` — a HEAD of `/api/v1/health`, which answers only once
 the database, the queue and the cache have each been reached, and therefore only
 after the migration set has run against an empty database. The image is
 debian-trixie-slim with no curl and no wget, so the binary's own subcommand is
 also the only probe available inside it.
-
-Measured on the account, steady state:
-
-| container | memory | limit |
-|---|---|---|
-| backend | 21.8 MiB | 768m |
-| postgres | 61.5 MiB | 320m |
-| redis | 13.1 MiB | 128m |
-| account total | 140 MiB | 2000 MB |
-
-`token` and `ready` have exited 0 by then.
 
 ## Credentials
 
@@ -134,8 +107,8 @@ if !figment.contains("jwt_secret") {
 ```
 
 So an unauthenticated caller cannot obtain a credential, and a misconfigured
-instance does not start rather than starting open. Confirmed on the deployed
-account: `GET /api/v1/app` with no token and with a bogus token both answer
+instance does not start rather than starting open. `GET /api/v1/app` with no
+token or a bogus one answers
 `401 {"code":"authentication_failed","detail":"Invalid token"}`.
 
 `default_org_id()` is a hard-coded constant, `org_23rb8YdGqMT0qIzpgGwdXfHirMu`,
@@ -165,13 +138,11 @@ the mode.
 endpoint signing secrets at rest, and `ConfigurationInner::encryption` carries
 `#[serde(default)]` — which resolves to `Encryption::default()`, which is
 `new_noop()`, whose `encrypt()` is `Ok(data.to_vec())`. Left unset, every
-`whsec_…` key is stored in Postgres in the clear. Set, the column is ciphertext;
-verified on the account, where the endpoint whose API secret reads
-`whsec_s1k7Aaqv…` stores 65 bytes beginning `81d25efe752bcacd…` — a 24-byte
-XChaCha20 nonce and a Poly1305-tagged body. Svix's own note is *"IMPORTANT: Once
+`whsec_…` key is stored in Postgres in the clear. Set, the column is ciphertext
+— a 24-byte XChaCha20 nonce and a Poly1305-tagged body. Svix's own note is *"IMPORTANT: Once
 set, it can't be changed."*
 
-Nothing here is derived from the account's filesystem path (**engine#175**). Svix
+Nothing here is derived from the account's filesystem path. Svix
 reads `config.toml` relative to its own working directory, which in the published
 image is `/`, not the `/app` every account is mounted at; this recipe does not
 bind-mount the checkout into the server container at all; and all three secrets
@@ -183,47 +154,16 @@ nothing but the public `default_org_id`.
 `SVIX_WHITELIST_SUBNETS` is deliberately left unset. With it unset Svix refuses
 to dispatch to an endpoint whose URL resolves into private address space. This is
 the only thing between a webhook URL a customer can type and a request into the
-network the account is hosted on. Verified on the account: an endpoint at
+network the account is hosted on. An endpoint at a private address such as
 `http://10.0.0.1:8080/hook` records every attempt as
 
 ```
 status=2 fail -> requests to this IP range are blocked (see the server configuration)
 ```
 
-while a public endpoint in the same fan-out delivered successfully. An operator
+while public endpoints in the same fan-out are delivered. An operator
 who needs it can set the variable in `~/.panelalpha/svix.env`; the file says so
 and says why.
-
-## The round trip that was actually exercised
-
-`deploy-ok` and `serving: ok` prove a process is listening. This is what proves
-the product works — every call over the account's public HTTPS name, with the
-generated token:
-
-```
-GET  /                                     307 -> /docs -> 200 'Svix API - ReDoc'
-GET  /api/v1/health                        200 {"database":{"status":"ok"},
-                                                "queue":{"status":"ok"},
-                                                "cache":{"status":"ok"}}
-GET  /api/v1/app            (no token)     401 authentication_failed
-GET  /api/v1/app            (bogus token)  401 authentication_failed
-POST /api/v1/app                           201 app_3JaoUPyRLWW3kHmcJIc9SvV1uKW
-POST /api/v1/app/pa-smoke/endpoint         201 ep_3JaoUR717VYsLQKUdC7Q3lr7YSm
-GET  .../endpoint/<ep>/secret              200 whsec_s1k7Aaqv5DiMYCD4lGwszNbgVMUpADee
-POST /api/v1/app/pa-smoke/msg              202 msg_3JaoUSIF8AGYKyOwxG3j3oW8aG9
-GET  .../attempt/msg/<msg>                 200 status=0 success, code=200, 235ms
-```
-
-The receiver echoed back the payload it was sent (`{"issue":693,"hello":
-"panelalpha"}`) along with the headers Svix signed it with —
-`svix-id: msg_3JaoUSIF8AGYKyOwxG3j3oW8aG9`,
-`svix-signature: v1,/OIobWb8cXSzK0jkcOEJAEQrNB0v6FjVxq0i2V324rU=`,
-`user-agent: Svix-Webhooks/1.101.0`.
-
-A redeploy — `~/project` emptied and re-cloned, `prepare.sh` re-run, `up -d`
-again — left `svix.env`, `svix-db.env` and `admin-token` byte-identical, brought
-the stack back healthy, and the application, the endpoint and the *decrypted*
-signing secret were all still there.
 
 ## What the engine could not infer
 
@@ -246,17 +186,9 @@ signing secret were all still there.
 ## Do not add `extends: compose` to `panelalpha.yaml`
 
 It looks like the obvious tidy-up, it makes the inspect endpoint's answer
-correct, and it fails the deploy outright. Measured, not reasoned:
-
-```
-with extends: compose     POST /source/inspect -> strategy=compose, platform=compose,
-                                                  deployable=false,
-                                                  issue="Compose strategy selected but
-                                                         compose file is missing."
-                          deploy               -> FAILED in 30.1s, same message
-without (as shipped)      POST /source/inspect -> strategy=php, deployable=true
-                          deploy               -> completed in 166.1s, serving: ok
-```
+correct, and it fails the deploy outright with *"Compose strategy selected but
+compose file is missing."* Without it (as shipped), inspect answers
+`strategy=php` and the deploy runs as compose.
 
 Both halves come from the same place. `PlatformSelector::forContext()` tries
 `fromSource()` before the file walk (`PlatformSelector.php:49`), and
@@ -280,8 +212,8 @@ then claims the repository, but the decision it builds carries no
 `PrepareFromSource.php:82`, *after* the compose file has already been written
 one line earlier. The recipe cannot name the strategy it actually uses.
 
-The cost of leaving it out is cosmetic: the batch's triage comment records
-`strategy: php` for an app that deploys as compose. Every other
+The cost of leaving it out is cosmetic: inspect reports `strategy: php` for an
+app that deploys as compose. Every other
 compose-override recipe in this catalogue (rocketchat, budibase, n8n, cal.diy,
 wordpress) has the same skew.
 

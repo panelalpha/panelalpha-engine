@@ -58,7 +58,7 @@ class NamedVolumesTest extends TestCase
     }
 
     /**
-     * godoxy (#142): split at the first `:` the reference itself became a
+     * godoxy: split at the first `:` the reference itself became a
      * volume called `${DOCKER_SOCKET`, and compose refused the whole file.
      */
     public function test_a_variable_bind_source_is_not_a_named_volume(): void

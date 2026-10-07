@@ -135,7 +135,7 @@ class DetectProjectStrategyTest extends TestCase
         DeployabilityCheck::assert($decision, $this->tmpDir);
     }
 
-    /** #183: a compose file that is there but was not accepted is not "missing". */
+    /** A compose file that is there but was not accepted is not "missing". */
     public function test_a_skipped_compose_file_is_named_rather_than_called_missing(): void
     {
         $this->writeFile('docker-compose.yml', "services:\n  db:\n    image: mariadb:11\n");

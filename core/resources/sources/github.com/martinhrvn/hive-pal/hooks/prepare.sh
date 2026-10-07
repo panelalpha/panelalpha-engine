@@ -3,7 +3,7 @@ set -e
 cd ~/project
 
 # Secrets are generated ONCE and reused on every redeploy. ~/project is wiped
-# and re-cloned each deploy (engine#173), so they live in ~/.panelalpha/hive-pal/
+# and re-cloned each deploy, so they live in ~/.panelalpha/hive-pal/
 # — the only writable, rebuild-surviving directory. Regenerating
 # BETTER_AUTH_SECRET would invalidate every session; regenerating the DB
 # password would lock the app out of the existing pgdata volume. Write only when

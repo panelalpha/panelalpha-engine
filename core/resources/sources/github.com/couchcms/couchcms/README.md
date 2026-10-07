@@ -1,13 +1,11 @@
 # CouchCMS
 
-Tracker: [supported-apps#1061](https://git.modulesgarden.tech/panelalpha/playground/supported-apps/-/work_items/1061)
-· Upstream: <https://github.com/CouchCMS/CouchCMS> (v2.4, `60484485`)
+Upstream: <https://github.com/CouchCMS/CouchCMS>
 
-An ordinary PHP + MySQL content management system, and the whole of what was
+An ordinary PHP + MySQL content management system, and the whole of what is
 wrong with it here is that the repository has no front page: `README.md`,
-`CHANGELOG.md`, `INSTALL.md`, `UPGRADE.md` and `couch/`. The batch verdict was
-`serving-missing_entry` — a successful deploy in which every request answered
-403.
+`CHANGELOG.md`, `INSTALL.md`, `UPGRADE.md` and `couch/`. Without the recipe the
+deploy succeeds and every request answers 403.
 
 ## What this recipe decides
 
@@ -44,9 +42,9 @@ Original Developer's attribution to be displayed whenever the software runs.
 Sections 99 and 100 of `config.example.php` are that mechanism —
 `K_PAID_LICENSE` and `K_REMOVE_FOOTER_LINK`, both `0` — and this recipe writes
 `config.php` from upstream's example with both untouched. Turning either on is
-what CouchCMS sells a commercial licence for. Verified on the deployed site:
-every front-end page carries the "Powered by CouchCMS" link, and the admin panel
-keeps its own logo, name and version.
+what CouchCMS sells a commercial licence for. Every front-end page carries the
+"Powered by CouchCMS" link, and the admin panel keeps its own logo, name and
+version.
 
 ## Files
 
@@ -65,24 +63,6 @@ project root, and the generated vhost denies exactly
 `^(?:docker-compose\.ya?ml|panelalpha[-.])` plus dotfiles. A `panelalpha/`
 directory, which recipes serving from `public/` can use, would be served here as
 plain text.
-
-## Verified
-
-Deployed on `mariusz.panelalpha.tools`, 2026-09-20: `deploy-ok`, `serving: ok`,
-every baseline and `php` health check passing, HTTP 200 on the public domain.
-
-- Logged in at `/couch/` over HTTPS with the generated password; the admin panel
-  renders (`<title>Admin Panel</title>`, CouchCMS Version 2.4).
-- Edited the heading and the rich-text region in the admin and saw both on the
-  public page — the whole round trip, including CouchCMS's CSRF nonce, which is
-  keyed on a secret stored in the account's own database.
-- `/couch/config.php`, `/couch/db.php` and `/couch/install.php` answer 200 with
-  an empty body (they `die()` without `K_COUCH_DIR`); `/.git/config`, `/.env`,
-  `/.panelalpha-admin-password`, `/docker-compose.yml`,
-  `/docker-compose.override.yml`, `/panelalpha-setup.sh` and
-  `/panelalpha-install.php` all answer 403.
-- A rebuild re-ran the upgrade stage in 32s and the edited content came back
-  unchanged.
 
 ## Known caveats
 

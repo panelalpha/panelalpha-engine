@@ -20,8 +20,8 @@
 services:
   app:
     volumes:
-      # ~/.panelalpha/chyrp-lite. A redeploy clears and re-clones ~/project
-      # (engine#173), so everything that has to outlive one is here:
+      # ~/.panelalpha/chyrp-lite. A redeploy clears and re-clones ~/project,
+      # so everything that has to outlive one is here:
       #
       #   /data/config.json.php     the site configuration, which holds the
       #                             database password and every setting, and
@@ -54,7 +54,7 @@ services:
       # Said out loud, because a manifest cannot say it: `docroot: .` is folded
       # to '' by PlatformManifest::readDocroot() (app/Lib/Deploy/Platform/
       # PlatformManifest.php:305), which means "undeclared" and sends the
-      # engine back to the probe (engine#172). The probe reaches /app anyway --
+      # engine back to the probe. The probe reaches /app anyway --
       # index.php is at the repository root and there is no public/ -- but the
       # document root decides which files are web-reachable, and that is not
       # something to leave to a probe order.

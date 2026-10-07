@@ -26,7 +26,7 @@ final class MysqlSidecar
 
     /**
      * The settings with a password filled in where the project left it blank,
-     * so the sidecar and the app's DB_PASSWORD agree on it (engine#189).
+     * so the sidecar and the app's DB_PASSWORD agree on it.
      *
      * A legacy account keeps the blank: its data directory was initialised
      * with `app` for a user, or an empty root password.
@@ -68,7 +68,7 @@ final class MysqlSidecar
     /**
      * A decision with the sidecar added and the app pointed at it. The
      * connection goes last in `env`, so it outranks the `.env.example` the
-     * decision was built from (engine#288).
+     * decision was built from.
      *
      * `$db` is expected to have been through {@see withPassword()} already.
      *

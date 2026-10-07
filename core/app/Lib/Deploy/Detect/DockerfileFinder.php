@@ -296,7 +296,7 @@ final class DockerfileFinder
 
         // From disk as well: a caller with no listing to hand passes [] --
         // PortsReport does -- and the loop below skips the plain name on the
-        // assumption that this line took it (engine#258).
+        // assumption that this line took it.
         if (isset($this->files[strtolower(self::ROOT_NAME)]) || isset($names[self::ROOT_NAME])) {
             $plain[] = self::ROOT_NAME;
         }

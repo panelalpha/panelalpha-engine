@@ -6,7 +6,7 @@ namespace App\Lib\Deploy\DeployLog;
  * When `docker compose up` gives up on a service the application depends on,
  * it says only that: `dependency failed to start: container
  * project-limbas_pgsql-1 is unhealthy`. The reason is in that container's own
- * output (engine#97: postgres 18 refusing its legacy data mount), which the
+ * output (for example postgres 18 refusing its legacy data mount), which the
  * engine collects into the deploy log but never reported as the failure.
  *
  * This names the containers compose gave up on, and picks the line of their

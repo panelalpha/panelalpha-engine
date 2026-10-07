@@ -32,22 +32,9 @@ description: >-
      refused and does nothing, so a password changed in the UI is kept.
   3. Persistence: /shiori on the named volume shiori-data. `ready` waits on
      the app's /system/liveness healthcheck so `up -d` returns only once the
-     app answers (engine#204).
+     app answers.
   4. Proxy-header SSO stays off (SHIORI_SSO_PROXY_AUTH_ENABLED defaults to
      false; its default trusted ranges include every private network).
-
-  == Verified on mariusz2 (engine 705f250a), memory_limit 1200 ==
-
-  Deploy success in 44s. `/` title "Shiori - Bookmarks Manager" (8084 B).
-  shiori/gopher login -> 400 "username or password do not match"; admin
-  login OK, accounts list is [admin (owner)] only. Bookmark added via
-  POST /api/bookmarks, archived via PUT /api/v1/bookmarks/cache, read back
-  with its tag; /bookmark/1/archive serves the archived page to the owner
-  and 302s anonymous visitors to login. Rebuild 28s: init "default
-  shiori/gopher login is refused; nothing to do", admin and the archived
-  bookmark intact; a token issued before an app restart still valid.
-  /.env, /.git/config, /shiori.db serve only the SPA shell. App ~3.4 MiB,
-  account ~105 MiB.
 
   The login is returned by GET /projects/{name}/app-credentials (MCP
   app_credentials_get). More users: web UI, Settings > Accounts.

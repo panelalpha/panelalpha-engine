@@ -95,7 +95,7 @@ class DindEntrypointInitScriptsTest extends TestCase
     }
 
     /**
-     * daemon.json moved to a host-rendered, bind-mounted file (engine#312):
+     * daemon.json moved to a host-rendered, bind-mounted file:
      * nothing inside the account writes it any more, so running anything in
      * the account to patch an old account's registry settings is no longer
      * needed in the first place.

@@ -11,14 +11,15 @@ description: >-
   /config (app.db, settings, users), /calibre-library and /cwa-book-ingest on
   named volumes, so settings, users and books survive a redeploy.
 
-  NGINX FRONT (engine#323). The engine's account vhost sends `Connection:
+  NGINX FRONT. The engine's account vhost sends `Connection:
   upgrade` on every request. Calibre-Web is served by gevent's pywsgi, which
   then treats the socket as upgraded and reads a POST body until EOF, so every
   form POST, the login included, hangs until the proxy gives up. A small
   nginx:1-alpine `web` service in front (files/panelalpha/front.conf) sends
   `upgrade` only when the client sent an Upgrade header and passes the
   X-Forwarded-* headers through unchanged. It is the only service that
-  publishes a port (8083). It can be dropped once engine#323 is fixed.
+  publishes a port (8083). It can be dropped once the engine's vhost stops sending
+  `Connection: upgrade` on every request.
 
   DEFAULT ADMIN CLOSED BEFORE THE PORT OPENS. Calibre-Web creates admin /
   admin123 with a new app.db. A one-shot `set-admin` service runs first, on the

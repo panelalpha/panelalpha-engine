@@ -13,7 +13,7 @@ description: >-
   v3.224.5. The repository builds a Gradle/JVM backend plus a Node SPA from
   source, which is slow and fragile; the published image already contains both,
   so nothing is built from the clone. Seeding a Hub image also sidesteps
-  engine#229 (image-seed NotFound).
+  the image-seed NotFound.
 
   WHY COMPOSE-REPLACE. Tolgee needs PostgreSQL, which the schema's MySQL-only
   `database:` cannot provide. The all-in-one image can autostart an EMBEDDED

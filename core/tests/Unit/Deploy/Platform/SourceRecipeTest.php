@@ -418,7 +418,7 @@ class SourceRecipeTest extends TestCase
     }
 
     /**
-     * Regression for #232: a recipe that ships its own check must resolve it at
+     * Regression: a recipe that ships its own check must resolve it at
      * selection time. `fromSource()` dropped the recipe's `checks/` directory,
      * so a `check:` naming a recipe-owned check was refused as unknown here even
      * though `SourceRecipes::at()` threads the same directory correctly.
@@ -450,7 +450,7 @@ class SourceRecipeTest extends TestCase
     }
 
     /**
-     * engine#221 / #183: `extends: compose` from a recipe directory. The file
+     * `extends: compose` from a recipe directory. The file
      * bootstrap wrote is there, and the decision has to say where.
      */
     public function test_a_recipe_extending_compose_carries_its_compose_path(): void

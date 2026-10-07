@@ -7,7 +7,7 @@ set -e
 cd ~/project
 
 # Everything this account accumulates that must outlive a redeploy lives here.
-# A redeploy clears and re-clones ~/project (engine#173), so uploaded audio
+# A redeploy clears and re-clones ~/project, so uploaded audio
 # under the checkout would be gone on the next deploy. ~ itself is root-owned
 # 0755 and nothing can be created in it; ~/.panelalpha is created with the
 # account and belongs to it.
@@ -76,7 +76,7 @@ fi
 # 4. A .env with nothing secret in it.
 #
 #    The engine copies whatever .env the clone ends with into .env.default at
-#    mode 644, which every other tenant on the host can read (engine#173) -- so
+#    mode 644, which every other tenant on the host can read -- so
 #    the real file, with the database password and the analytics salt in it, is
 #    written by panelalpha/castopod-setup.sh inside the container instead,
 #    after that copy has been taken, and chmod 600 there.

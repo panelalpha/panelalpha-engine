@@ -4,7 +4,7 @@ set -e
 # portkey is driven entirely by one config.yml, read once at startup. That file
 # is the operator's link list — the only mutable state the app has — so it must
 # live where a redeploy cannot wipe it. ~/project is deleted and re-cloned every
-# rebuild (engine#173); ~/.panelalpha is the one writable, rebuild-surviving
+# rebuild; ~/.panelalpha is the one writable, rebuild-surviving
 # directory the account owns.
 #
 # Seed it once from the config shipped with the recipe. If it already exists,

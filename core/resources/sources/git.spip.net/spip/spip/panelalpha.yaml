@@ -7,9 +7,8 @@ description: >-
   vendor/) is fetched by `composer install` from get.spip.net. spip.php boots
   SpipHttpKernel through vendor/autoload_runtime.php (symfony/runtime), and the
   back office + web installer live under ecrire/. composer.json requires
-  php ^8.4, so the engine resolves PHP 8.4 (in range 8.1-8.5); HEAD runs clean
-  there. Detection reads it as the plain `php` strategy (composer.json, no
-  artisan).
+  php ^8.4, so the engine resolves PHP 8.4 (in range 8.1-8.5). Detection reads
+  it as the plain `php` strategy (composer.json, no artisan).
 
   What the bare deploy gets wrong, none of it a code fix:
 
@@ -28,7 +27,7 @@ description: >-
      which --no-scripts does not disable.
 
   2. **URLs, config and media live in the checkout, wiped every redeploy.**
-     ~/project is emptied on every deploy (engine#173). SPIP keeps its DB
+     ~/project is emptied on every deploy. SPIP keeps its DB
      connection file and its crypto keys in config/ (config/connect.php +
      config/cles.php, both under _DIR_ETC) and uploaded media in IMG/. The
      recipe points _DIR_ETC at persistent storage with SPIP_ETC_DIR
@@ -57,18 +56,18 @@ description: >-
   blocked by the dotfile rule.
 
   SOURCE: keyed to the canonical git.spip.net/spip/spip, which clones
-  anonymously (verified). supported-apps#1267.
+  anonymously.
 extends: php
 docroot: "."
 database: mysql
 env:
   # Persist SPIP's config dir (connect.php + cles.php crypto keys +
   # mes_options.php) on the bind-mounted account home, so the DB connection and
-  # the auth secret survive the redeploy that empties ~/project (engine#173).
+  # the auth secret survive the redeploy that empties ~/project.
   SPIP_ETC_DIR: /pa-data/spip/config
   # Symfony runtime env; SPIP defaults to prod when unset, set it explicitly.
   APP_ENV: prod
-  # The base image loads no php.ini (engine#185); add ours. The LEADING COLON
+  # The base image loads no php.ini; add ours. The LEADING COLON
   # keeps PHP's compiled-in conf.d (which enables mysqli/pdo_mysql) and only
   # appends ours -- a bare path would drop every DB extension.
   PHP_INI_SCAN_DIR: ":/app/.pa-php"

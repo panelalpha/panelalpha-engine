@@ -18,7 +18,7 @@ variable`. The repository's `docker-compose.yml` is a development stack
   `DATABASE_URL` once to `~/.panelalpha/chiefonboarding/chief.env`.
 - Login lockout (django-axes) reads `X-Real-IP`, which the engine vhost sets
   to the peer it saw. Upstream reads the leftmost `X-Forwarded-For` entry,
-  which a visitor can set (engine#319). Behind the shared
+  which a visitor can set. Behind the shared
   `*.panelalpha.online` front that peer is the front itself; on a custom
   domain it is the visitor.
 - A no-op `ready` service waits for gunicorn, so the deploy ends after the

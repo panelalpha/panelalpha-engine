@@ -18,7 +18,7 @@ return [
     // registered with App\System\Firewall\FirewallFactory::register().
     // scripts/firewall.sh reads the same key from the engine's .env.
     'FIREWALL_PROVIDER' => env('FIREWALL_PROVIDER'),
-    // Filter what a DinD account's own code may reach (engine#217): on the
+    // Filter what a DinD account's own code may reach: on the
     // shared network only the users' MySQL and the image registries, on the
     // host only mail and the sites, never the metadata address. Applied inside
     // each account when it is created or recreated. See TenantEgressGuard.

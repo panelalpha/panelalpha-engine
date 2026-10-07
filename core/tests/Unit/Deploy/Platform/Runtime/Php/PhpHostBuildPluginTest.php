@@ -11,7 +11,7 @@ use PHPUnit\Framework\TestCase;
  * project says and whether or not it commits a lock.
  *
  * The rule used to be keyed on composer.lock and all-or-nothing, so a
- * lockless project was always installed `--no-plugins` (engine #168):
+ * lockless project was always installed `--no-plugins`:
  * composer/installers never placed anything, and symfony/runtime's
  * vendor/autoload_runtime.php appeared only if the later `run-script` step
  * happened to load it. Composer 2.2's `allow-plugins` is enforced per plugin,
@@ -45,7 +45,7 @@ class PhpHostBuildPluginTest extends TestCase
         $this->assertFalse($rules['*']);
     }
 
-    /** The lockless case #168 is about: bolt/project's allow-plugins, abridged. */
+    /** The lockless case: bolt/project's allow-plugins, abridged. */
     public function test_a_lockless_project_gets_the_engines_allow_plugins(): void
     {
         $composerJson = (string) json_encode([

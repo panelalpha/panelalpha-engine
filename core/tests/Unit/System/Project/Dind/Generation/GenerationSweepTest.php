@@ -21,7 +21,7 @@ use Illuminate\Support\Sleep;
 use Tests\TestCase;
 
 /**
- * engine#692: a redeploy whose process died. The sweep brings the previous
+ * A redeploy whose process died. The sweep brings the previous
  * version back while what it needs is kept, keeps the new one only when it
  * passed its health check and still answers or nothing of the previous one
  * is left, and the deploy's log says which version serves and why.
@@ -264,7 +264,7 @@ class GenerationSweepTest extends TestCase
     }
 
     /**
-     * engine#757, interrupted: the new version took the site through its copy, replaced the running one and
+     * Interrupted: the new version took the site through its copy, replaced the running one and
      * does not answer, and the previous one cannot be started. The copy keeps the site, not the silent app.
      */
     public function test_with_nothing_of_the_previous_version_left_a_silent_new_version_does_not_take_the_site_from_its_copy(): void

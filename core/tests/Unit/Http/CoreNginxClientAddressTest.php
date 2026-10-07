@@ -5,7 +5,7 @@ namespace Tests\Unit\Http;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#241: on a CSF host :2011 reached core through docker-proxy, from the
+ * On a CSF host :2011 reached core through docker-proxy, from the
  * bridge gateway, and that gateway sat inside the trusted 172.16.0.0/12 -- so
  * an internet client's X-Forwarded-For was believed. Only the two proxies that
  * really set the header may be trusted, and :2011 must start the chain itself.

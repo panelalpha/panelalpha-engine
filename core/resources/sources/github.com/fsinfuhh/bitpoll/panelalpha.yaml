@@ -14,8 +14,8 @@ description: >-
   --extra production, collectstatic and compilemessages at build time) that
   produces a uWSGI server on :3009 with a built-in static-map, so no nginx and
   no runtime collectstatic are needed. This recipe therefore builds that
-  Dockerfile locally in DinD, which also sidesteps engine#229 (image-seeding
-  NotFound): the app image carries `build:` plus a local tag, and imageRefs
+  Dockerfile locally in DinD, which also sidesteps the image-seeding
+  NotFound: the app image carries `build:` plus a local tag, and imageRefs
   recognises a same-file-built tag and never asks Hub for it
   (DeployCompose::imageRefs).
 
@@ -24,11 +24,10 @@ description: >-
   Bitpoll speaks PostgreSQL (psycopg2-binary is in the production extra; there
   is no MySQL driver). PostgreSQL therefore has to run beside the app, which is
   a compose concern. The repo's own compose.yaml only wires an nginx and leaves
-  the app on the default sqlite in a bind mount that a redeploy wipes
-  (engine#173), so it is not usable as-is. This override supplies the real
+  the app on the default sqlite in a bind mount that a redeploy wipes, so it is not usable as-is. This override supplies the real
   stack: postgres:16-alpine on a named volume, a one-shot `init` that migrates
   and seeds the admin before the app is allowed to answer, the app on
-  8080:3009, and a `ready` gate (engine#204) so the deploy turns green only once
+  8080:3009, and a `ready` gate so the deploy turns green only once
   the site actually answers.
 
   CONFIG INJECTION. The image symlinks bitpoll/settings_local.py to

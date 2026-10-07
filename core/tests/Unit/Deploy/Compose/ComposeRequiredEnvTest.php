@@ -10,7 +10,7 @@ class ComposeRequiredEnvTest extends TestCase
 {
     private const SEED = 'test-seed';
 
-    /** onetimesecret (#140): the root only includes, the file it includes requires two secrets. */
+    /** onetimesecret: the root only includes, the file it includes requires two secrets. */
     private const OTS_ROOT = <<<'YAML'
 include:
   - path: docker/compose/docker-compose.simple.yml
@@ -35,7 +35,7 @@ services:
       --requirepass ${VALKEY_PASSWORD:?VALKEY_PASSWORD must be set}
 YAML;
 
-    /** kaneo (#144): postgres takes its password from `.env` and nothing puts one there. */
+    /** kaneo: postgres takes its password from `.env` and nothing puts one there. */
     private const KANEO = <<<'YAML'
 services:
   postgres:

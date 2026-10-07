@@ -5,7 +5,7 @@ description: >-
   (Next.js, SQLite under DATA_DIR). The repository's docker-compose.yml runs
   the published decolua/9router image next to a headroom sidecar
   (context-compression proxy), and both publish a port. The engine routes the
-  domain to the lower one, headroom's 8787 (engine#425), so the site answers
+  domain to the lower one, headroom's 8787, so the site answers
   421 Misdirected Request and the dashboard on 20128 is never reached.
 
   This recipe runs the same two services at their current release images
@@ -16,14 +16,3 @@ description: >-
   Everything else comes from the project's .env, seeded from upstream's
   .env.example: the dashboard password is INITIAL_PASSWORD (set it as a project
   env var; the example's value is change-me).
-
-  == Verified on 10.10.10.25 (engine 705f250a), memory_limit 2000 ==
-
-  Fresh create: health :20128 200, app_port 20128, 68 s. / -> /login 200
-  <title>9Router - AI Infrastructure Management</title>, 10 KB; /api/health
-  {"ok":true}; /api/version 0.5.91. Logged in over https with the example's
-  INITIAL_PASSWORD, created an API key; /api/headroom/status reaches
-  http://headroom:8787. /.env and /.git/config are the app's 404 page.
-  Rebuild: success in 27 s, the key was still listed, the jwt-secret file was
-  unchanged and the session cookie from before the rebuild still opened
-  /dashboard.

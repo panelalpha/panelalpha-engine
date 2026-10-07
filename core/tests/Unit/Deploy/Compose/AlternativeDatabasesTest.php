@@ -7,13 +7,13 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * A compose file that offers the app a choice of SQL database keeps the one
- * the app's own environment names (engine#166).
+ * the app's own environment names.
  */
 class AlternativeDatabasesTest extends TestCase
 {
     /**
      * Koillection's docker-compose.dist.yml: its app talks to postgresql, and
-     * mysql is there for developers who prefer it (engine#166).
+     * mysql is there for developers who prefer it.
      */
     private const KOILLECTION = <<<'YAML'
     services:

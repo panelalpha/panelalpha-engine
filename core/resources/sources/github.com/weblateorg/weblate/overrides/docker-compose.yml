@@ -124,7 +124,7 @@ services:
 
   # Starts nothing, exits 0, waits on app's healthcheck so `docker compose up -d`
   # returns only once the site actually answers, not the moment supervisor
-  # launches (engine#204).
+  # launches.
   ready:
     image: docker.io/library/alpine:3
     entrypoint: ["/bin/sh", "-c", "exit 0"]

@@ -7,7 +7,7 @@ use App\System\Project\Dind\Generation\GenerationState;
 use Tests\TestCase;
 
 /**
- * engine#33: what a redeploy kept beside the running app is written down
+ * What a redeploy kept beside the running app is written down
  * next to its deploy lock, so a sweep can find it after the deploy died.
  */
 class GenerationStateTest extends TestCase

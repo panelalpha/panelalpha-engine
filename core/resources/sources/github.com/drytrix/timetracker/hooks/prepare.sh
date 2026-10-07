@@ -1,6 +1,6 @@
 #!/bin/bash
 # Generate the secrets once, where a redeploy will not wipe them (~/project is
-# emptied on every deploy, engine#173), and seed .env. The admin login is the
+# emptied on every deploy), and seed .env. The admin login is the
 # engine's (`credentials:` in panelalpha.yaml), in ~/.panelalpha/app-credentials.env.
 set -e
 cd ~/project

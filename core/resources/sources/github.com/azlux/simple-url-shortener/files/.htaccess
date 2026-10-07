@@ -34,12 +34,11 @@
 # Not cosmetic on this image. The shared PHP base image loads no php.ini at all
 # -- `php -i` reports `Loaded Configuration File => (none)` -- so display_errors
 # is on and error_reporting is E_ALL, and every diagnostic PHP raises is written
-# into the response body. That is engine#185, and it is the whole of the
-# `serving-php_error` verdict this recipe was opened for: a checkout with no
+# into the response body. So a checkout with no
 # inc/config.php answers HTTP 200 with `Warning: require(config.php)` and an
 # uncaught Error in the body, because printing the warning sends the headers
-# before the fatal is reached. Measured on the control deploy: with this block
-# and nothing else changed, the same checkout answers a clean, empty 500.
+# before the fatal is reached. With this block the same checkout answers a
+# clean, empty 500.
 #
 # It stays after the config file is in place because this application reads
 # unset array keys in three files ($_SESSION['admin'] in list.php:6 is reachable
@@ -62,7 +61,7 @@
 # docker-compose.yml, .panelalpha-admin-password and this recipe's own
 # panelalpha-* files. Two things it does not cover:
 #
-#   docker-compose.override.yml -- engine#181. Its rule is anchored on
+#   docker-compose.override.yml. Its rule is anchored on
 #   `docker-compose.ya?ml` and does not match the `.override.` spelling. This
 #   recipe ships no overrides/, so there is no such file here today; the block
 #   is two lines and means a later override cannot be published by accident.
@@ -85,7 +84,7 @@
 # The cookies this application sets are Secure and HttpOnly already
 # (index.php:30, shorten.php:4, login.php:4, list.php:2 all pass cookie_secure)
 # but PHP's session cookie carries no SameSite attribute without a php.ini, and
-# there is none (engine#185). SameSite=Lax is what stops a third-party page
+# there is none. SameSite=Lax is what stops a third-party page
 # from POSTing to shorten.php or login.php?signin with the visitor's session.
 <IfModule mod_php.c>
     php_value session.cookie_samesite "Lax"

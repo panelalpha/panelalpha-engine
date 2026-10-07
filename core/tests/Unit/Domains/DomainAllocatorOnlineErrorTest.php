@@ -9,7 +9,7 @@ use Tests\TestCase;
 
 /**
  * A used-up PanelAlpha Online quota is an engine-wide fact, reported once in
- * `GET /system/info` rather than found project by project (#79).
+ * `GET /system/info` rather than found project by project.
  */
 class DomainAllocatorOnlineErrorTest extends TestCase
 {

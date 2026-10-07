@@ -179,7 +179,7 @@ class ProjectEnvironmentSecretsTest extends TestCase
     }
 
     /**
-     * #178: this used to assert that every deploy got a different key. Every
+     * This used to assert that every deploy got a different key. Every
      * deploy re-clones and lands here again, so that rotated the key -- and
      * every session and encrypted column with it -- on each redeploy. The
      * same account now gets the same key; other accounts still do not.

@@ -23,7 +23,7 @@ fi
 # ---------------------------------------------------------------------------
 # 1. Secrets.
 #
-# engine#173: every deploy re-clones and ProjectTree::clearContents()
+# Every deploy re-clones and ProjectTree::clearContents()
 # (GitRepository.php:89) empties ~/project first, so a guard on a file in there
 # never fires. Each of these has a different consequence if it is regenerated:
 #
@@ -124,9 +124,8 @@ done
 # whole file. ComposeUsableProbe then skips the file, detection falls through to
 # the root Dockerfile, and the engine runs its own generated single-container
 # compose instead of this one -- silently: the log says "Detected project type:
-# Dockerfile" and never mentions the compose file it declined. Measured; it is
-# what the first deploy of this recipe did, with init, api and worker collapsed
-# into network aliases on one container.
+# Dockerfile" and never mentions the compose file it declined, with init, api
+# and worker collapsed into network aliases on one container.
 #
 # So the build services mount nothing. The scripts get in by being in the build
 # context (the Dockerfile's `COPY . /app`, and .dockerignore excludes `.*`,

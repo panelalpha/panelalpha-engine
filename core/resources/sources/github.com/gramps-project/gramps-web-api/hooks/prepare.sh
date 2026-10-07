@@ -6,7 +6,7 @@ cd ~/project
 
 say() { echo "[gramps] $*" >&2; }
 
-# engine#173: every deploy re-clones and ~/project is emptied first, so a secret
+# Every deploy re-clones and ~/project is emptied first, so a secret
 # kept in there would be regenerated every time. ~/.panelalpha/gramps/ survives
 # the wipe and is the only place in the account that does.
 #   GRAMPSWEB_SECRET_KEY   Flask signs its session/JWT tokens with it; a new one

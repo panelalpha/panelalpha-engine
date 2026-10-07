@@ -8,8 +8,8 @@ description: >-
   cannot grant ("error setting rlimit type 8: operation not permitted"), so
   the stack never starts. This recipe is that compose file with the images
   pinned to the current release (bbilly1/tubearchivist:v0.5.12,
-  bbilly1/tubearchivist-es:8.19.0), the memlock ulimit dropped
-  (panelalpha/engine#346), TA_HOST set to the site's address, and all data on
+  bbilly1/tubearchivist-es:8.19.0), the memlock ulimit dropped,
+  TA_HOST set to the site's address, and all data on
   named volumes.
 
   The image needs TA_USERNAME and TA_PASSWORD (the initial login); the engine

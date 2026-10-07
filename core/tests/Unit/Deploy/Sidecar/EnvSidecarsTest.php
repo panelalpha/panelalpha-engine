@@ -122,7 +122,7 @@ class EnvSidecarsTest extends TestCase
         }
     }
 
-    /** The reader the deploy passes is what is read, not the host path (engine#186). */
+    /** The reader the deploy passes is what is read, not the host path. */
     public function test_from_project_dir_reads_through_the_given_reader(): void
     {
         $files = [

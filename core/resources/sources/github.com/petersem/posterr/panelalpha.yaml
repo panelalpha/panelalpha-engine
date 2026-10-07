@@ -45,17 +45,6 @@ description: >-
   Posterr checks for updates at logz.nesretep.net on start (upstream, no
   switch to turn it off).
 
-  == Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 2500 ==
-
-  Deploy 47s, rebuild 38s. Anonymous `/` -> 200 <title>Posterr; /settings,
-  /SETTINGS, /settings/, //settings, /css/%2e%2e/settings, /logon, /debug,
-  POST /settings, POST /logon, POST /api/sleep, /.env, /.git/config,
-  /config/settings.json, /package.json -> 401; Basic admin:raidisnotabackup
-  -> 401. With Basic, the app's own logon refuses raidisnotabackup ("Invalid
-  password") and accepts the generated one. Settings saved (slide duration,
-  Plex IP/token, title colour) and read back, intact after rebuild; init then
-  logs "already non-default; nothing to do". App 35 MiB, proxy 9 MiB.
-
   The login (HTTP Basic user and password; the same password is the settings
   page's) is returned by GET /projects/{name}/app-credentials. Accounts
   deployed before this kept it in ~/.panelalpha/posterr/admin.env, which

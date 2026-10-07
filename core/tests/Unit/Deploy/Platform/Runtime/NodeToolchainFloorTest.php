@@ -9,7 +9,7 @@ use App\Lib\Deploy\Platform\Runtime\RuntimeRegistry;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#145, engine#134: the Node major is raised to what the project's own
+ * The Node major is raised to what the project's own
  * toolchain needs — a pinned pnpm 11, or a direct dependency's engines.node in
  * the lockfile — instead of the engine default it cannot run on.
  */

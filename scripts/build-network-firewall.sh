@@ -1,5 +1,5 @@
 #!/bin/sh
-# Egress rules for the network host build containers run on (engine#246).
+# Egress rules for the network host build containers run on.
 #
 # A host build runs the customer's install and build scripts (npm postinstall,
 # composer, cargo build.rs) in a container on the *host* daemon. On the default

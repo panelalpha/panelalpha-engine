@@ -21,9 +21,9 @@ description: >-
   self-contained stack of named volumes and the two official images. It carries
   no platform block, so detection is fromWalk over the replaced compose file.
 
-  What the bare repository does without this recipe (measured on a control
-  deploy of the clone): detection reads the root compose.yml and runs it. That
-  file's `api`/`worker` services `build`+bind-mount `../api` for live reload --
+  What the bare repository does without this recipe: detection reads the root
+  compose.yml and runs it. That file's `api`/`worker` services
+  `build`+bind-mount `../api` for live reload --
   the workstation shape ComposeFileInspector is meant to decline -- but they
   reach it through compose `extends:` into compose/app.django.yml, and the
   inspector does not resolve extends, so the top-level services look like bare
@@ -34,9 +34,9 @@ description: >-
   template, Traefik routing labels and typesense. FUNKWHALE_HOSTNAME comes out as
   project.funkwhale.test (the compose default for an unset ${FUNKWHALE_DOMAIN}),
   there is no migration or superuser gating, and the engine ends up proxying the
-  Vite dev port. Measured endpoint: 502 Bad Gateway on the account's domain (the
-  dev nginx never gets a served API behind it), against HTTPS 200 with this
-  recipe. The replacement is what turns the Git URL into a running Funkwhale.
+  Vite dev port: 502 Bad Gateway on the account's domain (the dev nginx never
+  gets a served API behind it). The replacement is what turns the Git URL into
+  a running Funkwhale.
 
   Four things the images cannot know, all supplied here:
 
@@ -68,7 +68,7 @@ description: >-
   owner is `administrator`.
 
   Persistence lives in named volumes only, never ~/project (emptied before every
-  clone, engine#173): pgdata for PostgreSQL, redisdata for the broker, media for
+  clone): pgdata for PostgreSQL, redisdata for the broker, media for
   uploaded and transcoded audio (MEDIA_ROOT=/data/media, shared read-write with
   the worker and read-only with the front), and static for the collected Django
   assets. The front image is upstream's own nginx: it serves the SPA, proxies
@@ -76,7 +76,7 @@ description: >-
   /_protected/media internal-redirect that Django uses to stream an authorised
   track (REVERSE_PROXY_TYPE=nginx, X-Accel-Redirect). A one-shot init migrates
   and collectstatic before anything listens, and a `ready` gate holds `up -d`
-  until the API answers through the front (engine#204).
+  until the API answers through the front.
 
   Registration is closed and email verification off by default (Funkwhale's own
   defaults: registration is a DB preference, ACCOUNT_EMAIL_VERIFICATION_ENFORCE

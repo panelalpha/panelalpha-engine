@@ -6,7 +6,7 @@ use App\Lib\Deploy\Dind\RegistryConfigSync;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#312: a registry-settings refresh no longer runs anything inside the
+ * A registry-settings refresh no longer runs anything inside the
  * account. These are the two facts it needs from the host's own view of the
  * account's container before it may rewrite the host file and signal it.
  */

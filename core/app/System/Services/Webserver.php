@@ -340,8 +340,8 @@ class Webserver implements WebserverInterface
      *
      * A restart is the one path here with no fallback: handed an unusable
      * config the container exits on the `[emerg]` and loops under
-     * `restart: always`, taking every site on the host down with it (issue
-     * #63). So the config is tested first, and the restart is refused while
+     * `restart: always`, taking every site on the host down with it.
+     * So the config is tested first, and the restart is refused while
      * the test fails. Only nginx's own verdict refuses -- a container that is
      * down is exactly what a restart is for.
      */

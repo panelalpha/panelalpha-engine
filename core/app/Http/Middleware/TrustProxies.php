@@ -12,7 +12,7 @@ class TrustProxies extends Middleware
      *
      * config/core/nginx.conf runs the realip module over both hops that exist
      * here -- the :2011 -> :80 loopback proxy and the host webserver arriving
-     * from the bridge gateway (engine#241) -- so REMOTE_ADDR reaching PHP is
+     * from the bridge gateway -- so REMOTE_ADDR reaching PHP is
      * the real client. Trusting anything wider
      * makes Laravel process X-Forwarded-For a second time, and whoever is
      * already inside RFC1918 (a tenant's build container, for one) can then

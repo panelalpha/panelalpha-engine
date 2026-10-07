@@ -32,18 +32,6 @@ description: >-
   settings edited in /super > Configuration do not survive a redeploy. Cameras
   are runtime configuration: add them as monitors in an Admin account. `ready`
   waits on the app's healthcheck so `up -d` returns only once Shinobi answers.
-
-  == Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 2500 ==
-
-  Deploy success in 263s (build 215.7s, start_to_answer 26.3s). `/` and
-  `/super` serve title "Shinobi" (10068 / 9855 B). Superuser login with
-  admin@shinobi.video / admin -> {"ok":false}; with the generated password ->
-  ok. Superuser registerAdmin created ops@example.com, which logged in on `/`
-  and added monitors through /configureMonitor, read back from /monitor.
-  majesticflame has a password; an empty-password login is denied. Rebuild
-  233s: default still refused, generated login, the Admin account and all four
-  monitors intact. /.env, /.git/config, /super.json, /conf.json, /sql/user.sql
-  -> 404. App ~286 MiB.
 credentials:
   login_path: /super
   # The old recipe's credentials.txt used these names (email=, password=).

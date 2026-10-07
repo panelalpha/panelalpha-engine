@@ -43,7 +43,7 @@ description: >-
   refused.
 
   Persistence. /var/lib/scm holds everything and ~/project is wiped every
-  redeploy (engine#173), so it is bind-mounted to ~/.panelalpha/scm-manager/data,
+  redeploy, so it is bind-mounted to ~/.panelalpha/scm-manager/data,
   which the wipe never touches, and the container runs as the account uid in
   group 0 (${CONTAINER_UID}:0) so both that mount and the image's group-writable
   work volume are writable. A

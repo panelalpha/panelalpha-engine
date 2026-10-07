@@ -164,7 +164,7 @@ class GitRemoteProbeTest extends TestCase
         $this->assertStringNotContainsString($token, json_encode($problem) ?: '');
     }
 
-    // ---- #83: a branch the remote does not have ----------------------------
+    // ---- A branch the remote does not have ---------------------------------
 
     /** Output of `git ls-remote --symref -- <url> HEAD refs/heads/* refs/tags/*`. */
     private const REFS = "ref: refs/heads/main\tHEAD\n"

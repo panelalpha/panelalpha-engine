@@ -4,7 +4,7 @@ description: >-
   8000). The repository's docker-compose.yaml leaves APP_KEY empty (the image
   refuses to start without it), adds the optional AI face-recognition service,
   and gives MariaDB `cap_drop: [ALL]` plus a `cap_add` list; the engine strips
-  the cap_add half (engine#349), so a plain deploy fails with MariaDB's
+  the cap_add half, so a plain deploy fails with MariaDB's
   "failed switching to 'mysql': operation not permitted".
 
   This recipe runs upstream's own shape on the current release

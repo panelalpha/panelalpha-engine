@@ -45,7 +45,7 @@ say "using svix/svix-server:${SVIX_TAG}"
 # ---------------------------------------------------------------------------
 # 2. The secrets, outside the checkout.
 #
-# engine#173: GitRepository::cloneConfiguredRepository() empties ~/project on
+# GitRepository::cloneConfiguredRepository() empties ~/project on
 # every deploy, so a guard on a file in there never fires and a regenerated
 # secret is a silent data loss. And ProjectEnvironment::apply() copies ~/project
 # /.env to .env.default at mode 644, so nothing secret may be written there
@@ -135,7 +135,7 @@ chmod 600 "${TOKEN_FILE}"
 cat > .env <<EOF
 # Written by PanelAlpha. Compose reads this for \${...} substitution in
 # docker-compose.yml. Nothing secret belongs here: the engine copies this file
-# to .env.default at mode 644 (engine#173). This account's Svix secrets are in
+# to .env.default at mode 644. This account's Svix secrets are in
 # ~/.panelalpha/svix.env and ~/.panelalpha/svix-db.env, both 0600.
 SVIX_IMAGE=svix/svix-server:${SVIX_TAG}
 POSTGRES_IMAGE=postgres:16-alpine

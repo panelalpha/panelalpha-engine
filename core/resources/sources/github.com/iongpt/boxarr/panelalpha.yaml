@@ -18,13 +18,3 @@ description: >-
   redeploy. The proxy waits for the app's healthcheck, so the deploy is not
   called finished before Boxarr answers. The Radarr connection is entered
   behind the gate in /setup.
-
-  Measured on mariusz.panelalpha.tools (2026-09-29, engine 705f250a): deploy
-  37s, rebuild 25s; app 58 MiB, proxy 11 MiB. Anonymous /, /setup,
-  /api/health, /api/config, /api/movies/ignore, /static/..., /.env,
-  //setup, /%73etup and POST /api/movies/ignore -> 401; a wrong password ->
-  401. With the generated credentials /setup (<title>Boxarr Setup</title>)
-  saved a Radarr connection through POST /api/config/save, / then redirects
-  to /overview (<title>Movie Overview - Boxarr</title>), an ignore-list
-  entry reads back, and all of it survives a rebuild with the password
-  unchanged.

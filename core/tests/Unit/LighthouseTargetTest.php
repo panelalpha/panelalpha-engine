@@ -16,7 +16,7 @@ use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
 /**
- * #48 item 14: the Lighthouse endpoint made headless Chrome, which sits on the
+ * The Lighthouse endpoint made headless Chrome, which sits on the
  * engine's network, fetch any URL a caller named.
  */
 class LighthouseTargetTest extends TestCase
@@ -134,7 +134,7 @@ class LighthouseTargetTest extends TestCase
     public function test_a_hop_chrome_refused_ends_on_chrome_error_and_is_reported(): void
     {
         // What a redirect to 169.254.169.254 looks like once the rules block it
-        // (measured with the engine's lighthouse image).
+        // (as the engine's lighthouse image reports it).
         $this->journal->report = [
             'mainDocumentUrl' => 'chrome-error://chromewebdata/',
             'finalDisplayedUrl' => 'chrome-error://chromewebdata/',

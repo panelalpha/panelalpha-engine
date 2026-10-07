@@ -1,15 +1,13 @@
 # Thelia — github.com/thelia/thelia
 
 Thelia 3.1 is an e-commerce platform: Symfony 7.4, Propel over MySQL, a Flexy
-front office and a back office at `/admin`. Tracker issue
-[#934](https://git.modulesgarden.tech/panelalpha/playground/supported-apps/-/work_items/934).
+front office and a back office at `/admin`.
 
 Detection reads the repository correctly on its own — composer.json and no
 artisan, so the `php` strategy, PHP 8.3, the shared Apache base image with
 `~/project` bind-mounted, `composer install` on the host, `public/` as the
-document root. The deploy finished successfully without this recipe and every
-request answered **HTTP 500**, which is the `serving-error_page` verdict it
-exists to fix.
+document root. Without this recipe the deploy finishes and every request
+answers **HTTP 500**.
 
 ## Log in
 
@@ -30,9 +28,9 @@ administrator changes in the back office.
 Almost all of it comes back to one fact: **thelia/thelia commits no
 composer.lock**, and `PhpHostBuild::mayRunPlugins()` can only lift
 `--no-plugins` for a project that has one. So none of the five plugins this
-project allows ran, and this repository needs three of them.
+project allows run, and this repository needs three of them.
 
-| What was wrong | Where it is fixed |
+| What goes wrong | Where it is fixed |
 |---|---|
 | `vendor/autoload_runtime.php` never written (symfony/runtime), so `public/index.php` dies on `LogicException: Symfony Runtime is missing` — the 500 | `thelia-setup.sh` runs `composer dump-autoload` |
 | …and that plugin-enabled dump writes a *wrong* map: composer/installers puts the templates under `templates/`, where nothing is yet, and drops them and everything under them (130 psr-4 prefixes instead of 157, no liip/imagine-bundle) | a second `dump-autoload --no-plugins` right after it |
@@ -40,14 +38,14 @@ project allows ran, and this repository needs three of them.
 | no database, and nothing in the checkout to infer one from | `database: mysql` |
 | the committed `.env`'s empty `DATABASE_*` shadow the `.env.local` bin/install writes, because `env_file:` makes them real environment variables | `prepare.sh` deletes that block; same hook sets `APP_ENV` and a generated `APP_SECRET` for the same reason |
 | `CheckPermission` refuses to install below `post_max_size` 20M; the base image has 8M and no writable conf.d | `PHP_INI_SCAN_DIR` in the compose override + `panelalpha/php/zz-thelia.ini` |
-| `APP_ENV=production` — Laravel's word — so the shop ran with Symfony's debug handler | `env: APP_ENV: prod` in `panelalpha.yaml` |
+| `APP_ENV=production` — Laravel's word — so the shop runs with Symfony's debug handler | `env: APP_ENV: prod` in `panelalpha.yaml` |
 | no first administrator, and no web installer to fall back on | `bin/install --with-admin` with a generated password |
 
 And a second cluster, which is the same `--no-plugins` from another side:
-**symfony/flex never ran, so no Flex recipe was ever applied** — and
+**symfony/flex never runs, so no Flex recipe is ever applied** — and
 thelia/thelia `.gitignore`s `/config/`, so what the repository holds under it
 is only the handful of files someone added with `git add -f`. Four pieces of
-generated configuration were missing, each of them fatal on its own:
+generated configuration are missing, each of them fatal on its own:
 
 | Missing | Symptom |
 |---|---|
@@ -60,8 +58,8 @@ plus three bundles missing from the committed `config/bundles.php`, which Flex
 also generates: without `TalesFromADevTwigExtraTailwindBundle` every
 front-office page is `Unknown "tailwind_merge" filter`, and without the two
 SymfonyCasts bundles `tailwind:build` and `sass:build` do not exist, so
-`bin/install` skipped them — silently, because it treats a command that is not
-registered as one the active theme does not need — and no stylesheet was ever
+`bin/install` skips them — silently, because it treats a command that is not
+registered as one the active theme does not need — and no stylesheet is ever
 compiled. `thelia-register-bundles.php` adds them, and only when the class is
 really installed and not already registered.
 
@@ -92,23 +90,6 @@ credentials the container was handed and clears the cache instead of
 installing. **The generated password file does not survive a redeploy** while
 the administrator it describes does; keep it somewhere before redeploying, or
 reset the password from the back office afterwards.
-
-## Verified on mariusz, 2026-09-20
-
-- Batch run from a clean account: `deploy-ok`, `serving: ok`, HTTP 200, 12 of
-  12 health checks pass, 286s.
-- Logged in over the public domain as `admin` with the generated password:
-  `POST /admin/checklogin` → 302 → `/admin`, `Dashboard - Thelia`.
-- The front office renders the Flexy theme at `/` (header, language selector,
-  cart, footer); `/admin/login` carries the password field the healthcheck
-  greps for.
-- `.env`, `.env.local` and `.panelalpha-admin-password` answer 403; everything
-  outside `public/` — `composer.json`, `panelalpha/`, `config/jwt/private.pem`
-  — answers 404, because the document root is `public/`.
-- Absolute URLs on the home page are `https://<domain>` with no `:8000`, so the
-  trusted-proxy configuration is doing its job.
-- The upgrade branch replayed in the deployed container: no reinstall, cache
-  cleared, site still 200.
 
 ## Not done
 

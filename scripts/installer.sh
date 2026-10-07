@@ -773,7 +773,7 @@ before_install() {
     fi
     apt-get -o DPkg::Lock::Timeout=300 update --fix-missing -y
     ensure_packages jq unzip lsb-release apt-transport-https ca-certificates curl ipcalc quota at
-    # nft binds each port of the accounts' network to its container (engine#529).
+    # nft binds each port of the accounts' network to its container.
     # The package's own nftables.service ships disabled and must stay so: its
     # default config flushes every rule on the host, Docker's and ufw's too.
     ensure_packages nftables
@@ -1188,14 +1188,14 @@ harden_host() {
     # fourth fails with start-limit-hit although the daemon stopped cleanly.
     systemctl reset-failed docker.service 2>/dev/null || true
     service docker restart
-    # engine#246: host builds run on panelalpha-build. Made here, while
+    # Host builds run on panelalpha-build. Made here, while
     # Docker's chains are fresh: after a firewall flush the engine cannot create it.
     bash /opt/panelalpha/shared-hosting/scripts/build-network-firewall.sh --create panelalpha-build || true
-    # engine#519: the accounts' network, likewise; the stack names it.
+    # The accounts' network, likewise; the stack names it.
     bash /opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh --create --restart-docker || true
 }
 
-# Without it every setquota the engine runs is a no-op (#244). Never fatal: a
+# Without it every setquota the engine runs is a no-op. Never fatal: a
 # host that cannot have quota still gets an engine, and is told why.
 configure_quota() {
     if [ "$QUOTA" != 1 ]; then
@@ -1214,7 +1214,7 @@ configure_lxcfs() {
 }
 
 # Host AppArmor profiles that attach by path also confine tenant binaries at
-# that path (engine#366). Run on every install and update, so profiles a new
+# that path. Run on every install and update, so profiles a new
 # release ships are caught. Never fatal.
 configure_apparmor() {
     bash /opt/panelalpha/shared-hosting/scripts/configure-apparmor.sh ||
@@ -1391,7 +1391,7 @@ EOF
 
     # create docker network if not exists
     bash /opt/panelalpha/shared-hosting/scripts/ensure-docker-network.sh "${DOCKER_NETWORK_MTU}"
-    # The accounts' network (engine#519); sites-db and the registries join it.
+    # The accounts' network; sites-db and the registries join it.
     DOCKER_NETWORK_MTU="${DOCKER_NETWORK_MTU}" bash /opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh --create --restart-docker || true
     # Closed from boot until core binds it, not only from when core starts.
     bash /opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh --install-units ||
@@ -1413,7 +1413,7 @@ EOF
     remove_renamed_containers
     bash /opt/panelalpha/shared-hosting/scripts/retire-dockerhub-mirror.sh /opt/panelalpha/shared-hosting/.env
 
-    # sites-db and the registries join pash-tenants (engine#519): without it the
+    # sites-db and the registries join pash-tenants: without it the
     # stack cannot start, so stop here and say why rather than at compose.
     docker network inspect pash-tenants >/dev/null 2>&1 ||
         echo_error "The accounts' network pash-tenants could not be created; the tenant-network-firewall messages above say why"
@@ -1429,7 +1429,7 @@ EOF
     # run database migrations
     wait_for_database
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan migrate --force
-    # engine#519: accounts from before it leave core's network for pash-tenants,
+    # Accounts from before it leave core's network for pash-tenants,
     # live. Already-moved and stopped ones are left alone, and one that cannot
     # move keeps working where it is, so it never fails the update.
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan project:network:move --all || true

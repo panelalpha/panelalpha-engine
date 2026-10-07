@@ -8,9 +8,9 @@ use PHPUnit\Framework\TestCase;
 /**
  * Where a deploy spent its time, and whether the cache did anything.
  *
- * The fixtures are real BuildKit output shapes from a Matomo deploy on
- * a dev host — the one that spent 123.7s compiling PHP extensions because the
- * shared base image was missing, and the same deploy once it was present.
+ * The fixtures are real BuildKit output shapes from a Matomo deploy — the one
+ * that spent 123.7s compiling PHP extensions because the shared base image was
+ * missing, and the same deploy once it was present.
  */
 class DeployTimingsTest extends TestCase
 {
@@ -120,7 +120,7 @@ class DeployTimingsTest extends TestCase
      */
     private function matomoLog(): array
     {
-        // Real milestones from a Matomo deploy on a dev host, 2026-08-28.
+        // Real milestones from a Matomo deploy.
         return [
             ['ts' => 1000, 'msg' => 'Deploy started (source: git, repo: https://github.com/matomo-org/matomo)'],
             ['ts' => 1000, 'msg' => 'Starting stage: preparing'],

@@ -16,7 +16,7 @@ description: >-
   one-shot runs upstream's `libretime-api migrate` before the services
   start. files/docker-compose.override.yml stands in for the repository's
   development override (source builds, bind mounts, dev ports), which the
-  engine would otherwise layer over the replacement (engine#416). Media, the database and the playout cache are on named volumes.
+  engine would otherwise layer over the replacement. Media, the database and the playout cache are on named volumes.
 
   Log in with upstream's default admin / admin and change it under
   Settings. Only the web UI is published: the Icecast stream (8000) and the

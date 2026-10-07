@@ -206,7 +206,7 @@ class DeployComposeTest extends TestCase
 
     /**
      * A sidecar with a healthcheck is waited on until it passes: Servas runs
-     * `artisan migrate` on boot and lost the race to its MariaDB (engine#187).
+     * `artisan migrate` on boot and lost the race to its MariaDB.
      */
     public function test_the_app_waits_for_a_sidecar_that_has_a_healthcheck(): void
     {

@@ -5,7 +5,7 @@ namespace Tests\Unit\Http;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#273: realip rewrites REMOTE_ADDR to the client before PHP runs, so
+ * Realip rewrites REMOTE_ADDR to the client before PHP runs, so
  * TrustProxies never sees the proxy and ignores X-Forwarded-Proto/Port. Core's
  * nginx has to hand PHP the scheme and port itself, or every redirect core
  * builds is http:// and the engine origin loses :2011.

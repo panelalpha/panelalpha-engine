@@ -8,9 +8,9 @@ use Tests\TestCase;
 
 /**
  * What a client is told about the certificate a git host will see. No engine
- * certificate exists on a test box (`System::engineDirPath()` is a fixed
- * `/opt/panelalpha/...`), so `state` is deterministically `self_signed` here
- * -- the same "nothing to point to" case a fresh install is in.
+ * certificate exists in a test run (`System::engineDirPath()` is a fixed
+ * `/opt/panelalpha/...`), so `state` is deterministically `self_signed` here --
+ * the same "nothing to point to" case a fresh install is in.
  */
 class EngineTlsAdvisoryTest extends TestCase
 {

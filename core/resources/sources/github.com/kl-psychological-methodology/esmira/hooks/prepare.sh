@@ -34,9 +34,8 @@ cd ~/project
 # right call for a repository whose submodules are optional, and fatal for this
 # one, where an empty ESMira-web/ means there is no application at all.
 #
-# Measured: both submodules resolve to their default-branch tips today, so the
-# shallow fetch finds them; a pin that moves off the tip is exactly the case
-# where `--depth=1` stops working and this message is what the log would say.
+# A submodule pin that moves off its default-branch tip is exactly the case
+# where `--depth=1` stops working, and this message is what the log would say.
 if [ ! -f ESMira-web/src/index.php ]; then
     echo "[esmira] ESMira-web/src/index.php is missing." >&2
     echo "[esmira] This repository is a meta repository: the server lives in the" >&2
@@ -44,8 +43,8 @@ if [ ! -f ESMira-web/src/index.php ]; then
     exit 1
 fi
 
-# ESMira-apps is the Android/iOS client: a Kotlin Multiplatform tree, 6.1 MB in the checkout,
-# nothing in it is served and nothing in it is built here. It is left in place
+# ESMira-apps is the Android/iOS client: a Kotlin Multiplatform tree. Nothing
+# in it is served and nothing in it is built here. It is left in place
 # rather than deleted -- it is part of the checkout the account cloned and
 # `git status` should stay clean -- but it is outside the document root
 # (ESMira-web/dist), so it has no URL.
@@ -54,7 +53,7 @@ STORE="${HOME}/.panelalpha"
 # Account homes are root-owned 755, so this has to be created rather than
 # written into $HOME directly. It is also the only place anything survives a
 # deploy: GitRepository::cloneConfiguredRepository empties ~/project before
-# every clone (engine #173).
+# every clone.
 mkdir -p "${STORE}"
 chmod 700 "${STORE}"
 
@@ -108,7 +107,7 @@ mkdir -p ESMira-web/dist/backend/config
 # ~/.panelalpha/app-credentials.env. esmira-app.env keeps the two install
 # settings. Both reach the container by `env_file:` at a path that climbs out
 # of the checkout, rather than through .env: ProjectEnvironment::apply() copies
-# .env to .env.default at mode 644 (engine #173). ComposeEnvFiles refuses a path
+# .env to .env.default at mode 644. ComposeEnvFiles refuses a path
 # with a `..` segment, so the engine does not create esmira-app.env on the
 # stack's behalf; this hook is what guarantees it exists before compose reads it.
 APP_ENV="${STORE}/esmira-app.env"

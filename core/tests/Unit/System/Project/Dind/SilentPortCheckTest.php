@@ -11,7 +11,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * The check the deploy-time probe adds when every port stayed silent and no
- * container is restarting (engine#90).
+ * container is restarting.
  */
 class SilentPortCheckTest extends TestCase
 {
@@ -53,7 +53,7 @@ class SilentPortCheckTest extends TestCase
         $this->assertStringContainsString('app listens on 4000 on 127.0.0.1 only', $check['detail']);
     }
 
-    /** engine#569: the deploy waits on these, and only these. */
+    /** The deploy waits on these, and only these. */
     public function test_a_container_bound_to_nothing_yet_is_named_as_starting(): void
     {
         $ps = '{"Name":"project-app-1","Service":"app","State":"running","Publishers":[{"TargetPort":8080,"PublishedPort":8080}]}';

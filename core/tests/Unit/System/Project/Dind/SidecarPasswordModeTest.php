@@ -12,7 +12,7 @@ use App\System\Project\Dind\Strategy\AccountSecrets;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#189: which password a sidecar nobody configured gets, decided once
+ * Which password a sidecar nobody configured gets, decided once
  * per account from whether its Docker already holds data.
  */
 class SidecarPasswordModeTest extends TestCase

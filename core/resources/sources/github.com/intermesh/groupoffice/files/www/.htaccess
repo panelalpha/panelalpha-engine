@@ -2,10 +2,9 @@
 #
 # The document root is this directory -- `app_root: www` makes ~/project/www
 # the container's /app and PhpDocroot then answers PA_DOCROOT=/app -- and
-# upstream's layout puts rather more than the front controller in it. Every
-# rule below was checked against a real deploy: each of these answered an
-# unauthenticated request, and none is reachable through index.php, so denying
-# them costs the application nothing.
+# upstream's layout puts rather more than the front controller in it. Without
+# this file each of these answers an unauthenticated request, and none is
+# reachable through index.php, so denying them costs the application nothing.
 #
 # The generated vhost already denies dotfiles and anything named `panelalpha-*`
 # or `docker-compose.ya?ml` (resources/deploy/templates/apache-vhost.stub), so
@@ -51,8 +50,8 @@ RedirectMatch 404 ^/install(/|$)
 # ---------------------------------------------------------------------------
 # vendor/ -- Composer's tree.
 #
-# Nothing in Group Office links to an asset under vendor/ (checked: no URL
-# built in views/ or go/core/webclient/ resolves there), and it is thirty-odd
+# Nothing in Group Office links to an asset under vendor/ (no URL built in
+# views/ or go/core/webclient/ resolves there), and it is thirty-odd
 # libraries' worth of examples, tests and tools -- including tcpdf's, whose own
 # tools/ directory ships an .htaccess saying exactly this.
 #
@@ -101,9 +100,9 @@ RedirectMatch 404 ^/vendor(/|$)
 # display_errors and friends.
 #
 # Belt and braces for files/www/.panelalpha/php/zz-groupoffice.ini: the base
-# image loads no php.ini at all (#185), so display_errors is on and a single
+# image loads no php.ini at all, so display_errors is on and a single
 # notice is rendered into the page for every visitor -- with absolute paths in
-# it, as measured on this application before the ini existed. PHP_INI_SCAN_DIR
+# it. PHP_INI_SCAN_DIR
 # is the real fix and reaches the CLI too; this covers the Apache side if that
 # environment variable is ever lost. `php_flag` is mod_php's, and mod_php is
 # what the base image runs (panelalpha-serve.sh execs apache2-foreground).
@@ -117,14 +116,13 @@ php_flag log_errors On
 #
 # The activesync module vendors Z-Push as a git submodule -- which the engine
 # fetches after the clone -- and Z-Push ships its administration and migration
-# scripts as ordinary .php files under src/ and tools/. Found by asking the
-# tree rather than by guessing: every .php under the document root whose first
-# line is a `#!` shebang is one of these, plus cli.php, cron.php and
-# groupofficecli.php, which are denied above.
+# scripts as ordinary .php files under src/ and tools/. Every .php under the
+# document root whose first line is a `#!` shebang is one of these, plus
+# cli.php, cron.php and groupofficecli.php, which are denied above.
 #
-# Measured on a real deploy: `GET /modules/z-push/z-push-admin.php` answered
-# 200 and wrote its shebang line into the response before failing on a constant
-# it only has under the CLI. Nothing here is reachable through the application
+# Without this, `GET /modules/z-push/z-push-admin.php` answers 200 and writes
+# its shebang line into the response before failing on a constant it only has
+# under the CLI. Nothing here is reachable through the application
 # and none of it has any business answering a request.
 #
 # Z-Push/src/index.php is NOT denied: that one is the ActiveSync endpoint a

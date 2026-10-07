@@ -17,7 +17,7 @@ use App\Lib\Deploy\Engine\ImageStore;
  * holds, pushed there first) or, for anything else, from the image's own
  * registry, Docker Hub going through panelalpha-registry-proxy. There is no
  * `docker save | docker load`: it copied incomplete containerd-store images
- * without complaint (#156, #229).
+ * without complaint.
  *
  * Reference validation and the seeding heuristics live in {@see ImageTransfer};
  * this class is only the Docker spelling of them. Builds commands only.

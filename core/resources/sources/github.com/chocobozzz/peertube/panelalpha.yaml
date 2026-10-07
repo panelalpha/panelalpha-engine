@@ -3,7 +3,7 @@ description: >-
   PeerTube, the ActivityPub-federated video platform (Node server that also
   serves its Angular client on :9000, PostgreSQL, Redis). The repository root
   is the pnpm source tree; the plain deploy compiles it as an Express app and
-  then restart-loops with `exec: pnpm: not found` (engine#414), and it would
+  then restart-loops with `exec: pnpm: not found`, and it would
   still have no database, Redis or config. This recipe runs the official
   chocobozzz/peertube image of the current release, v8.3.1, with PostgreSQL 17
   and Redis 8 as upstream's support/docker/production compose does, minus its

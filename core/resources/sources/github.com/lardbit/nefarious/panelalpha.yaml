@@ -15,8 +15,3 @@ description: >-
 
   First run is left as upstream ships it: the entrypoint creates the login
   admin/admin (NEFARIOUS_PASS defaults to admin); change it in the app.
-
-  Measured on mariusz2.panelalpha.tools (2026-09-29, engine 705f250a,
-  memory_limit 1200): deploy 75s, rebuild 51s, ~340 MB for the four
-  services. `/` -> /static/index.html (title "nefarious"); a settings PATCH
-  and a watch-list movie read back and survive a rebuild.

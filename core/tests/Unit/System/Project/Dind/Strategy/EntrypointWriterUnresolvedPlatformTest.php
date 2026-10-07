@@ -6,7 +6,7 @@ use App\Lib\Deploy\Platform\PlatformRegistry;
 use App\System\Project\Dind\Strategy\EntrypointWriter;
 use PHPUnit\Framework\TestCase;
 
-/** engine#169: a platform that detection named and the registry cannot find is said out loud. */
+/** A platform that detection named and the registry cannot find is said out loud. */
 class EntrypointWriterUnresolvedPlatformTest extends TestCase
 {
     public function test_a_named_platform_that_does_not_resolve_is_reported(): void

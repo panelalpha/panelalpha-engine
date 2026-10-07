@@ -14,6 +14,6 @@ Closed-source freeware, no licence key needed.
 - Data: `uisp-config` volume (`/config`). Survives redeploys, not account deletion.
 - Devices connect to `wss://<domain>:443` (the connection string in UISP settings).
 - Not published: NetFlow (UDP 2055), optional.
-- On `*.panelalpha.online` test domains the edge strips `Upgrade`
-  (panelalpha/engine#170), so the live UI and device websockets only work on a
+- On `*.panelalpha.online` test domains the edge strips `Upgrade`,
+  so the live UI and device websockets only work on a
   real domain or straight to the host; HTTP pages and the REST API are fine.

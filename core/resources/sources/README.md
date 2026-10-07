@@ -253,7 +253,7 @@ service: 64 hex characters, per account, stable across deploys and wipe
 rebuilds. A repository's own compose services and Railpack builds do not get
 it; there, generate a value per account (`openssl rand -hex 32`) and keep it in
 `~/.panelalpha/`, not in `~/project`: a wipe rebuild clears `~/project`, and a
-secret regenerated against surviving data is lost for good (engine#173).
+secret regenerated against surviving data is lost for good.
 
 ---
 

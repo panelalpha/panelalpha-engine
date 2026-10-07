@@ -24,7 +24,7 @@ services:
       #
       # A redeploy re-clones ~/project and clears it first, so an upload host
       # that kept its files under the document root would lose every one of
-      # them on the next `git pull` (engine#173). ~ itself is root-owned 0755
+      # them on the next `git pull`. ~ itself is root-owned 0755
       # and nothing can be created in it; ~/.panelalpha is created with the
       # account and belongs to it, which is why the data directory is a child
       # of that one. The prepare hook creates it before this mount is made, so

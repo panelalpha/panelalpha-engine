@@ -7,7 +7,7 @@ with the web UI embedded (:7777), PostgreSQL and Redis.
 
 The repository's `docker-compose.yml` builds Pad from source and requires
 `PAD_ENCRYPTION_KEY` to be 64 hex characters. The engine fills required
-secrets with 48 characters (engine#338), so the plain deploy crash-loops with
+secrets with 48 characters, so the plain deploy crash-loops with
 `encryption key must be a 64-character hex string ... len=48`.
 
 ## What the recipe does
@@ -24,4 +24,4 @@ secrets with 48 characters (engine#338), so the plain deploy crash-loops with
 
 First visit opens Pad's own first-admin setup, as upstream ships it.
 `PAD_TRUSTED_PROXIES` is deliberately not set: the account's proxy keeps a
-client-supplied `X-Forwarded-For` (engine#319).
+client-supplied `X-Forwarded-For`.

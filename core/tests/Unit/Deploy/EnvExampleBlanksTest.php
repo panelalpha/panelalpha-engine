@@ -16,10 +16,9 @@ use PHPUnit\Framework\TestCase;
  * the blanks win — the engine prefers a developer's fill-in-the-blanks file
  * to the image author's real answer.
  *
- * Homarr is the case (supported-apps#436). Its image ships
- * `ENV DB_URL=/appdata/db/db.sqlite`; its `.env.example` says
- * `DB_URL=FULL_PATH_TO_YOUR_SQLITE_DB_FILE`. The copy was byte-identical to
- * the template and the container ran with the blank:
+ * Homarr is the case. Its image ships `ENV DB_URL=/appdata/db/db.sqlite`; its
+ * `.env.example` says `DB_URL=FULL_PATH_TO_YOUR_SQLITE_DB_FILE`. The copy was
+ * byte-identical to the template and the container ran with the blank:
  *
  *   - `run.sh` migrated from /app and *succeeded* into a 364544-byte file
  *     literally named FULL_PATH_TO_YOUR_SQLITE_DB_FILE
@@ -126,7 +125,7 @@ class EnvExampleBlanksTest extends TestCase
     /**
      * Homarr checks the key is exactly 64 characters; a 48-character
      * replacement crash-looped it ("SECRET_ENCRYPTION_KEY has to be 64
-     * characters"), measured on a live account.
+     * characters").
      */
     public function test_a_fixed_length_placeholder_keeps_its_length(): void
     {
@@ -188,7 +187,7 @@ class EnvExampleBlanksTest extends TestCase
 
     /**
      * wishlist ships `ORIGIN=`; set-but-empty made adapter-node exit on
-     * "Invalid ORIGIN: ''" while unset would have been fine (engine#192).
+     * "Invalid ORIGIN: ''" while unset would have been fine.
      */
     public function test_a_blank_public_url_key_gets_the_accounts_address(): void
     {

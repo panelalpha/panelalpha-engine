@@ -9,9 +9,9 @@ description: >-
   `PhpDocroot::CANDIDATES` (app/Lib/Deploy/Platform/Runtime/Php/PhpDocroot.php:25)
   and `PhpStrategy::documentRoot()` runs *after* the host Composer build
   (PhpStrategy.php:113 then :118), so a `web/index.php` would have been found.
-  There was none: the host build resolved 69 packages into `vendor/` and
-  created no `web/` at all, because it ran with `--no-plugins`. Composer said
-  so, five times, in the deploy log of the control deploy:
+  There is none: the host build resolves the packages into `vendor/` and
+  creates no `web/` at all, because it runs with `--no-plugins`. Composer says
+  so, five times, in the deploy log:
 
       The "composer/installers" plugin was not loaded as plugins are disabled.
       The "drupal/core-composer-scaffold" plugin was not loaded as plugins are disabled.
@@ -27,10 +27,9 @@ description: >-
   package. With both disabled the tree has no document root, no front
   controller and no index file anywhere, `PhpDocroot::detect()` returns `''`,
   no `PA_DOCROOT` is emitted, `panelalpha-serve` serves `/app`, and Apache
-  answers 403 on a directory with no `DirectoryIndex` match. That is exactly
-  the `serving-missing_entry` the tracker recorded, and the control deploy
-  reproduced it (44 s, HTTP 403, `entry-served` failing with "There is no
-  index.php anywhere in ~/project").
+  answers 403 on a directory with no `DirectoryIndex` match: the
+  `serving-missing_entry` failure, with `entry-served` failing on "There is no
+  index.php anywhere in ~/project".
 
   The engine already knows this. `PhpHostBuild::INSTALLER_PLUGINS`
   (PhpHostBuild.php:63) lists precisely the five plugins this lock pins, and
@@ -45,11 +44,8 @@ description: >-
   (AppConfig.php:459-463, "`commands` and `env` this class applies itself"),
   and the app config's own commands are only ever consumed for the host stages
   and for the entrypoint -- nothing reads `$appConfig->commands('build')`. So a
-  source recipe's build-stage commands are inert (engine #171), `install_command`
-  stays php.yaml's, and `--no-plugins` cannot be removed from it. Confirmed on
-  this host: with the recipe's `commands:` declared for the build stage, the
-  resolved manifest still reported
-  `role='dependencies' run=composer install ... --no-plugins ...`.
+  source recipe's build-stage commands are inert, `install_command`
+  stays php.yaml's, and `--no-plugins` cannot be removed from it.
 
   So the second half of the build runs where a recipe *can* speak: the install
   and upgrade stages, in the application container, which has the same Composer
@@ -57,11 +53,11 @@ description: >-
   Composer's `LibraryInstaller::isInstalled()` tests the path the installer
   plugin computes, finds `web/core` missing, and reinstalls `drupal/core` into
   it, regenerating the autoloader against the new location
-  (`vendor/composer/installed.json` then reads `"install-path": "../../web/core"`).
-  Measured on this host: 8 s, and `COMPOSER_CACHE_DIR` is already baked into the
-  base image pointing at the account's own `~/.cache/composer`, so a redeploy
-  does not download again. What the host build left behind at
-  `vendor/drupal/core` is then 164 MB of nothing, and the stage removes it.
+  (`vendor/composer/installed.json` then reads `"install-path":
+  "../../web/core"`). `COMPOSER_CACHE_DIR` is already baked into the base image
+  pointing at the account's own `~/.cache/composer`, so a redeploy does not
+  download again. What the host build left behind at `vendor/drupal/core` is
+  then an unused copy of Drupal core, and the stage removes it.
 
   That is the cost of the defect, stated plainly: one wasted download of Drupal
   core per first deploy. Fix `HostCompile.php:407` and this recipe's first two
@@ -90,12 +86,12 @@ description: >-
   already installed" to everyone.
 
   **On Drupal 11 the `standard` profile is no longer a standard site.** This
-  cost a deploy and is the second failure this recipe fixes.
+  is the second failure this recipe fixes.
   `core/profiles/standard/standard.info.yml` at 11.4-dev installs a module list
   and `themes: [default_admin]`, and nothing more. Installed from it the site
-  bootstrapped, served `/user/login` correctly, and answered **403 Access
+  bootstraps, serves `/user/login` correctly, and answers **403 Access
   denied** to every anonymous visitor on `/` -- a Drupal-rendered 403, not
-  Apache's -- because nothing had granted the anonymous role `access content`.
+  Apache's -- because nothing grants the anonymous role `access content`.
   From the outside that is indistinguishable from the original bug.
 
   What used to be in the profile is now in `core/recipes/standard/recipe.yml`:
@@ -115,7 +111,7 @@ description: >-
   are what every Drupal before 11.2 shipped.
 
   **What survives a redeploy, and how.** `~/project` is emptied before every
-  clone (`ProjectTree::clearContents()`, engine #173), which takes
+  clone (`ProjectTree::clearContents()`), which takes
   `web/sites/default/settings.php` and `web/sites/default/files` with it.
   Three things therefore live in `~/.panelalpha/drupal/` instead:
   `app.env` (the hash salt, 0600 in a 0700 directory, delivered by a second
@@ -129,7 +125,7 @@ description: >-
   the database password does not, because `AppDatabase` already guarantees it
   is stable.
 
-  **No php.ini reaches this image** (engine #185): `php --ini` answers "Loaded
+  **No php.ini reaches this image**: `php --ini` answers "Loaded
   Configuration File: (none)", so `memory_limit` is 128M and `display_errors`
   is On. 128M is below what a standard-profile install needs, and
   `display_errors` on a CMS prints account paths into the page.
@@ -143,20 +139,20 @@ extends: php
 # `web/`, stated rather than detected. Detection would find it too -- the
 # document root is resolved after the host build -- but only once the build
 # has been fixed, and stating it means the answer no longer depends on which
-# Composer flags won. A plain relative path, so engine #172 (readDocroot()
-# folding '' and '.' together) does not apply.
+# Composer flags won. A plain relative path, so readDocroot()
+# folding '' and '.' together does not apply.
 docroot: web
 # The account's own MySQL, not a sidecar. See the note above.
 database: mysql
 commands:
   # No `id:` on any of these, deliberately: a stale detection cache drops every
   # stage command from a recipe that carries one while the log still reports
-  # "Recipe named by ..." (engine #169). Extending a shipped manifest and
+  # "Recipe named by ...". Extending a shipped manifest and
   # omitting the ids is the mitigation.
   #
   # Every one of them is on install+upgrade rather than build. Not a style
   # choice: a source recipe's build-stage commands never reach the pipeline
-  # (engine #171, see the note above), so `build` here would be four commands
+  # (see the note above), so `build` here would be four commands
   # that silently never run.
   - stage:
       - install
@@ -169,7 +165,7 @@ commands:
       Without it the project has a vendor/ and no document root at all, which
       is the 403 this recipe exists for. `--no-scripts` is kept: the repository
       defines no scripts block, and Composer 2 still runs plugin event
-      subscribers under it -- measured, the scaffold ran.
+      subscribers under it, so the scaffold runs.
     run: 'composer install --no-dev --no-interaction --no-scripts --optimize-autoloader'
     timeout: 900
   - stage:
@@ -186,7 +182,7 @@ commands:
       - install
       - upgrade
     description: >-
-      164 MB the host build downloaded into the wrong place. Composer moved
+      An unused copy of drupal/core the host build downloaded into the wrong place. Composer moved
       drupal/core to web/core and recorded "install-path": "../../web/core" in
       vendor/composer/installed.json, but it does not delete the directory its
       own previous, plugin-less run created. Guarded on web/core actually

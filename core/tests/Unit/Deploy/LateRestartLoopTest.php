@@ -8,12 +8,12 @@ use App\System\Project\Dind\AppHealth;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#90: a container that answers once and then keeps restarting.
+ * A container that answers once and then keeps restarting.
  *
  * MintHCM (CMD `start.sh; exec bash`, no TTY) answered 200, exited 0 a second
  * later and restarted 11 times in three minutes behind a 502, while the deploy
  * said "Deploy finished successfully". Rows are the engine's inspect format as
- * the test host printed them for that container.
+ * the engine prints them for that container.
  */
 class LateRestartLoopTest extends TestCase
 {
@@ -109,7 +109,7 @@ class LateRestartLoopTest extends TestCase
         $this->assertNull(AppHealth::restartLoopBetween('garbage', "not json\n{}"));
     }
 
-    /** engine#166: only the sidecar loops, so the verdict names it, not the application. */
+    /** Only the sidecar loops, so the verdict names it, not the application. */
     public function test_a_looping_sidecar_beside_a_steady_app_is_named_as_the_sidecar(): void
     {
         $before = self::JUST_STARTED . "\n" . '{"name":"/project-db-1","service":"db","state":"running","exit":0,"restarts":0}';

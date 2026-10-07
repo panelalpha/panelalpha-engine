@@ -11,13 +11,13 @@ use Symfony\Component\Process\Process;
 /**
  * `docker compose up --build` (v5.5.1, measured) writes BuildKit's progress to
  * stdout and only the `failed to solve` summary to stderr. The deploy explained
- * stderr, so a repo Dockerfile whose Rust did not compile (#123) or whose
- * go:embed file was missing (#117) was reported as "A build step failed (exit
+ * stderr, so a repo Dockerfile whose Rust did not compile or whose
+ * go:embed file was missing was reported as "A build step failed (exit
  * code N)" -- the rules for both exist and never saw the line they match.
  */
 class BuildStepOutputTest extends TestCase
 {
-    /** wastebin (#123), the failing step as compose printed it on stdout. */
+    /** wastebin, the failing step as compose printed it on stdout. */
     private const RUST_STDOUT = <<<'OUT'
     #12 [builder 7/9] RUN cargo fetch
     #12 DONE 31.2s
@@ -52,7 +52,7 @@ class BuildStepOutputTest extends TestCase
     failed to solve: process "/bin/sh -c cargo zigbuild --release --bin wastebin" did not complete successfully: exit code: 101
     OUT;
 
-    /** photofield (#117). */
+    /** photofield. */
     private const GO_STDOUT = <<<'OUT'
     #12 [builder 3/3] RUN set -eou pipefail && CGO_ENABLED=0 go build -tags embedui,embeddocs,embedgeo -o /build/photofield .
     #12 6.297 go: downloading github.com/segmentio/asm v1.1.3
@@ -121,7 +121,7 @@ class BuildStepOutputTest extends TestCase
         );
     }
 
-    /** #96: a packaging Containerfile that COPYs what CI built. Stderr alone names it. */
+    /** A packaging Containerfile that COPYs what CI built. Stderr alone names it. */
     public function test_a_copy_of_a_path_the_checkout_lacks_is_named(): void
     {
         $stderr = "Containerfile:27\n"
@@ -135,7 +135,7 @@ class BuildStepOutputTest extends TestCase
         $this->assertStringContainsString('`target`', $match['message'] ?? '');
     }
 
-    /** #118: a cgo-only dependency under a build with cgo off. */
+    /** A cgo-only dependency under a build with cgo off. */
     public function test_a_cgo_only_package_is_named(): void
     {
         $output = "package github.com/mynaparrot/plugnmeet-server\n"
@@ -149,7 +149,7 @@ class BuildStepOutputTest extends TestCase
         $this->assertStringContainsString('`github.com/livekit/media-sdk/opus`', $match['message'] ?? '');
     }
 
-    /** #328: the package asked for is excluded by its own tag; cgo is not the reason. */
+    /** The package asked for is excluded by its own tag; cgo is not the reason. */
     public function test_an_excluded_own_package_is_not_blamed_on_cgo(): void
     {
         $output = "ERROR: Unable to open log: Permission denied\n"

@@ -5,7 +5,7 @@
 #
 # Three jobs, all idempotent:
 #   1. Persist config/ and data/ onto /pa-data (~/.panelalpha), which survives the
-#      redeploy that empties ~/project (engine#173); ~/project does not.
+#      redeploy that empties ~/project; ~/project does not.
 #   2. Headless install BEFORE the site is publicly reachable: create the schema
 #      and a generated-password super-admin, so the first visitor never meets an
 #      open installer. Skipped once config.inc.php exists in persistent storage.

@@ -7,7 +7,7 @@ use App\Lib\Deploy\Platform\Runtime\NodeRuntime;
 use Tests\TestCase;
 
 /**
- * Tolgee's Gradle build looks npm up while it configures (#141). Only a build
+ * Tolgee's Gradle build looks npm up while it configures. Only a build
  * that names a JS tool gets Node; a plain Java build keeps its image.
  */
 class JavaNodeToolingTest extends TestCase

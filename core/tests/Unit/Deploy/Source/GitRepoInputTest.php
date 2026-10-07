@@ -60,7 +60,7 @@ class GitRepoInputTest extends TestCase
             'bare self-hosted host' => ['https://git.internal/', 'git_repo_incomplete'],
             'a forge account is not a repository' => ['https://github.com/vvolv', 'git_repo_incomplete'],
             'embedded credentials' => ['https://user:pw@github.com/o/r.git', 'git_repo_embedded_credentials'],
-            // #83: this used to become https://vvolv/market-radar, "Could not reach vvolv".
+            // This used to become https://vvolv/market-radar, "Could not reach vvolv".
             'owner/repo shorthand' => ['vvolv/market-radar', 'git_repo_shorthand'],
         ];
     }

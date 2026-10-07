@@ -7,7 +7,7 @@ description: >-
   The repository's docker-compose.yml runs dumbwareio/dumbpad:latest with a
   ./data bind mount and an empty PIN, which leaves every note readable and
   writable by anyone. Its .env.example is saved as UTF-16, which the engine
-  copies into a .env compose refuses (engine#315); hooks/prepare.sh writes its
+  copies into a .env compose refuses; hooks/prepare.sh writes its
   own .env so that file is never read. overrides/docker-compose.yml runs the
   current release, 1.0.5, with /app/data on a named volume that survives
   redeploys, BASE_URL and ALLOWED_ORIGINS set to the site's address.

@@ -6,7 +6,7 @@ use App\Lib\Deploy\Platform\SourceRecipes;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#169: a queue worker started before a recipe existed.
+ * A queue worker started before a recipe existed.
  *
  * `for()` read the new directory and detection named the recipe, while
  * `findById()` walked a list cached at worker start and returned null, so

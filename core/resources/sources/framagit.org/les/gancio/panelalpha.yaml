@@ -27,8 +27,8 @@ description: >-
   and the override's bind mount is unopposed. The image ships /app/data owned
   by root and runs as `node` (uid 1000), so it cannot write a directory this
   account owns; the prepare hook creates ~/.panelalpha/gancio/data (the only
-  writable, rebuild-surviving directory — ~/project is emptied every deploy,
-  engine#173) and records the account uid, and the override runs the container
+  writable, rebuild-surviving directory — ~/project is emptied every deploy)
+  and records the account uid, and the override runs the container
   as that uid so the bind mount it writes is owned by the user it runs as.
 
   Public URL and first admin. Gancio reads BASEURL and freezes it into
@@ -36,8 +36,8 @@ description: >-
   actor, feed and absolute link is wrong. The dockerfile strategy injects the
   public URL as PUBLIC_URL (among others), and the container command exports
   BASEURL from it before the first boot. Gancio's first registered user becomes
-  an active admin and open registration is on by default (first-visitor-wins,
-  engine#200), with no gated /setup wizard to stop it; the command runs
+  an active admin and open registration is on by default (first-visitor-wins),
+  with no gated /setup wizard to stop it; the command runs
   migrations, creates the admin (role admin, a password generated once and kept
   in the data volume) and sets allow_registration=false — all before `start`
   opens the port, so the window in which a stranger could register as admin

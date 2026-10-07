@@ -199,10 +199,10 @@ RUN chmod 755 /usr/share/centreon/container.d/*.sh
 
 # The account's own installer answer files, written by hooks/prepare.sh into
 # ~/project/panelalpha/ and read by step 14 above. Last, so every layer over
-# the 1.2 GB of packages stays cached when only these change; and copied rather
-# than bind-mounted, because a compose service that both builds and bind-mounts
-# a path under ./ is read as a workstation file and loses the strategy -- the
-# note on `volumes:` in overrides/docker-compose.yml has the measurement.
+# the packages stays cached when only these change; and copied rather than
+# bind-mounted, because a compose service that both builds and bind-mounts a
+# path under ./ is read as a workstation file and loses the strategy -- see the
+# note on `volumes:` in overrides/docker-compose.yml.
 #
 # These are secrets in an image layer. The image is built by the account's own
 # dockerd, never pushed, and holds the same three passwords that ~/project/.env

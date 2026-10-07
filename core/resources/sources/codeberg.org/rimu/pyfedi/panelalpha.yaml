@@ -4,7 +4,7 @@ description: >-
   alternative): gunicorn on :5000, PostgreSQL for data, Redis for cache and the
   Celery broker. This recipe is the compose-REPLACE pattern (calcom/n8n/cannery):
   no platform block is declared, so detection runs via fromWalk, the compose
-  strategy takes over, engine#221 does not bite, and ComposePlaceholders
+  strategy takes over, the fromSource platform-declaration trap does not bite, and ComposePlaceholders
   rewrites the one PA_PUBLIC_URL below from localhost to the account's public
   https address.
 
@@ -44,7 +44,7 @@ description: >-
   communities, posts, the alpha API) work. Outbound ActivityPub delivery runs in
   a Celery worker that this lean stack does not start, so cross-instance
   federation is not exercised. Image upload is multipart and stalls through the
-  shared panelalpha.online (WithoutDNS) tunnel (engine#170); it works against
+  shared panelalpha.online (WithoutDNS) tunnel; it works against
   the account's own address/container. Both are engine/tunnel limitations to
   report, not recipe or app failures.
 credentials:

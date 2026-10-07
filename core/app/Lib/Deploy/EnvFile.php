@@ -282,7 +282,7 @@ class EnvFile
      *
      * Pass `$read` to go through the account's own file layer: a 0600 `.env`
      * is unreadable to the engine's user and would silently lose to the
-     * example (engine#186).
+     * example.
      *
      * @param (callable(string): ?string)|null $read path => contents, null when absent
      * @return array{connection: string, host: string, port: string, database: string, username: string, password: string}

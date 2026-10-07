@@ -18,7 +18,7 @@ description: >-
   generates an admin login (`credentials:`, returned by
   `GET /projects/{name}/app-credentials`); the app service hashes it with
   `tinyauth user create` at start and adds it to TINYAUTH_AUTH_USERS, so users
-  the project sets there (user:bcrypt-hash, every $ written $$, engine#326)
+  the project sets there (user:bcrypt-hash, every $ written $$)
   keep working beside it. Other settings (OIDC clients, OAuth, LDAP) are
   project env vars too; hooks/prepare.sh only creates an empty .env so the
   engine does not seed it from .env.example (whose relative database path
@@ -30,17 +30,6 @@ description: >-
   address. TINYAUTH_AUTH_SUBDOMAINSENABLED defaults to false: the shared parent
   domain is not a public suffix, so Tinyauth's default parent-domain cookie
   would reach other accounts' sites. Set it to true on a domain of your own.
-
-  == Verified ==
-
-  On a dev host (engine 705f250a), memory_limit 2500, with a
-  TINYAUTH_AUTH_USERS project env var: / is <title>Tinyauth</title> (1287 B);
-  the configured user logs in (200), /api/auth/traefik answers 200 with the
-  session and 401 without; a rebuild keeps the session. /.env and
-  /.git/config return the SPA shell only. On a dev host (2026-10-02) with no
-  env var at all: the deploy succeeds, and the login from
-  `GET /projects/{name}/app-credentials` signs in (/api/user/login 200, a
-  wrong password 401).
 
   Behind the hosting proxy, X-Forwarded-Host is Tinyauth's own host, so
   forward auth gives a correct 200/401 but per-app ACLs cannot match, and the

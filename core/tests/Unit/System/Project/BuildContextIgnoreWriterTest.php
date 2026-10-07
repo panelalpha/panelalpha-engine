@@ -13,7 +13,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * The engine writes `<Dockerfile>.dockerignore` into the account's checkout,
- * never touching a file the project owns. #208 / #197.
+ * never touching a file the project owns.
  */
 class BuildContextIgnoreWriterTest extends TestCase
 {

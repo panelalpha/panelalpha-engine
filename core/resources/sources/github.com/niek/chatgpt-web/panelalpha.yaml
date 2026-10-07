@@ -14,11 +14,4 @@ description: >-
   Optional build-time settings are the project's VITE_* env vars (e.g.
   VITE_API_BASE for an OpenAI-compatible endpoint); a VITE_API_KEY set there
   is compiled into the public bundle, so leave it unset on a public site.
-
-  == Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 2500 ==
-
-  Create: success in 61s (vite build 17.3s). / is <title>ChatGPT-web</title>;
-  its JS (3.06 MB), CSS and logo answer 200, and a browser renders the
-  provider and API key form with no console errors. Rebuild: success, same
-  page. /.env and /.git/config answer 403.
 extends: vite

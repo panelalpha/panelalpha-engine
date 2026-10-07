@@ -4,22 +4,18 @@ description: >-
   records page views from a script tag or a tracking pixel, and PostgreSQL
   under both. The repository ships a root docker-compose.yml, so detection
   reads it as `compose` and deploys it verbatim. That is the whole of the
-  502 on this tracker row, and it is not a boot race.
+  502, and it is not a boot race.
 
   docker-compose.yml interpolates the database credentials out of a `.env`
   the repository does not contain -- POSTGRES_USER=${DB_USER},
   POSTGRES_PASSWORD=${DB_PASSWORD}, POSTGRES_DB=${DB_NAME} -- and TEMPLATE.env
   is the file the operator is told to copy and fill in. The engine creates
-  `.env` empty when a compose file names one in env_file (measured:
-  "Created empty .env (required by compose env_file)"), so all three resolve
-  to the empty string. postgres:latest then refuses to initialise -- "You
+  `.env` empty when a compose file names one in env_file, so all three
+  resolve to the empty string. postgres:latest then refuses to initialise -- "You
   must specify POSTGRES_PASSWORD to a non-empty value" -- and restarts
   forever; Shynet cannot reach a database that never came up and restarts
   forever too; the bundled nginx is the only container that stays up and
-  answers 502 to everything. Measured on this host: the control deploy
-  reported success in 78 s and served 502 continuously, with
-  shynet_database in `Restarting (1)` and shynet_main under a second old on
-  every look. ComposePlaceholders does not fill these in: it rewrites
+  answers 502 to everything. ComposePlaceholders does not fill these in: it rewrites
   `${VAR:?message}` (REQUIRED_VAR_PATTERN, ComposePlaceholders.php:87), not
   a bare `${VAR}`.
 
@@ -33,8 +29,7 @@ description: >-
   from master by .github/workflows/build-docker-edge.yml and its
   org.opencontainers.image.revision label is
   ca35caba3af2b888acc990b99152c500a1c44461, the exact commit a plain clone of
-  this repository lands on -- verified with docker image inspect. There is no
-  v0.14.0 tag on Docker Hub at all.
+  this repository lands on. There is no v0.14.0 tag on Docker Hub at all.
 
   Running the code the checkout actually contains means shynet/settings.py:43
   defaults ALLOWED_HOSTS to `localhost,127.0.0.1`, so every request arriving

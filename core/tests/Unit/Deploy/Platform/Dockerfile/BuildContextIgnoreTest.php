@@ -8,8 +8,8 @@ use App\Lib\Deploy\Platform\Dockerfile\DockerIgnore;
 use PHPUnit\Framework\TestCase;
 
 /**
- * #208 / #197: the engine's compose files and `.git` sat in the build context
- * and made `COPY . .` miss on every redeploy. #162: Apache Guacamole's RAT
+ * The engine's compose files and `.git` sat in the build context
+ * and made `COPY . .` miss on every redeploy. Apache Guacamole's RAT
  * license check failed on the engine's compose file and an empty `.env`.
  */
 class BuildContextIgnoreTest extends TestCase

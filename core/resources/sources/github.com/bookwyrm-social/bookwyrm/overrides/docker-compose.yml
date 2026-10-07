@@ -1,7 +1,7 @@
 # Upstream's production stack (docker-compose.yml) without certbot and the
 # backup job: nginx in upstream's reverse_proxy mode (the engine terminates
 # TLS) with Anubis, gunicorn, Celery, Postgres and two Redis. Secrets come from
-# ~/.panelalpha (hooks/prepare.sh); POSTGRES_* declared here trip engine#419.
+# ~/.panelalpha (hooks/prepare.sh); POSTGRES_* declared here trip a known engine defect.
 x-bookwyrm: &bookwyrm
   image: bookwyrm:local
   restart: unless-stopped

@@ -130,8 +130,8 @@ description: >-
   PNG upload produces fullsize, thumbnail and square_thumbnail JPEGs.
 
   **An item is a file somebody uploaded, and the platform loads no php.ini.**
-  `php --ini` in the base image answers "Loaded Configuration File: (none)"
-  (engine#185), so what is in force is the compiled-in `upload_max_filesize =
+  `php --ini` in the base image answers "Loaded Configuration File: (none)",
+  so what is in force is the compiled-in `upload_max_filesize =
   2M` and `post_max_size = 8M` -- and a POST over post_max_size is discarded
   before PHP is entered, so $_POST and $_FILES both arrive empty and the item
   form reports a request that carried a file as one that did not. The image's
@@ -147,7 +147,7 @@ description: >-
   bootstrap.php hard-codes both `FILES_DIR = BASE_DIR . '/files'` (where Omeka
   writes) and `WEB_FILES = WEB_ROOT . '/files'` (the URL a visitor fetches),
   so every original and every derivative is inside the directory a redeploy
-  deletes and re-clones (engine#173: GitRepository.php:90 calls
+  deletes and re-clones (GitRepository.php:90 calls
   `clearContents($gitProjectDir)` before `clone`) -- while the `omeka_files`
   rows pointing at them survive, so every item page would show a broken image.
   `storage.adapterOptions.localDir` would move the writes but not the URL.
@@ -201,7 +201,7 @@ commands:
       Omeka (first deploy) or runs its pending migrations (every one after), so
       that /install is never a live form on a public address. Idempotent: the
       upgrade stage replays it on every redeploy. On the build stage it would
-      not run at all (engine#171).
+      not run at all.
     run: 'sh panelalpha-setup.sh'
 credentials:
   login_path: /admin/users/login

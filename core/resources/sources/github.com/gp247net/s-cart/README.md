@@ -7,14 +7,13 @@ shop is three Composer packages that register everything themselves:
 `gp247/core` (admin shell, users, settings, extensions), `gp247/front` (the
 storefront template) and `gp247/shop` (catalogue, orders, payments).
 
-Detection: `laravel`, from `composer.json` and `artisan`, and right about
-everything that follows from it — PHP 8.3 against `"php": "^8.3"`, `public/` as
-the document root, Composer and the Vite build on the host, the account's public
-https URL in `APP_URL`. The deploy reported success, nothing answered on 8000
-and the domain gave 502. That is the `serving-unknown` verdict this recipe
-turns into a served shop.
+Detection picks `laravel`, from `composer.json` and `artisan`, and is right
+about everything that follows from it — PHP 8.3 against `"php": "^8.3"`,
+`public/` as the document root, Composer and the Vite build on the host, the
+account's public https URL in `APP_URL`. Without the recipe the deploy reports
+success, nothing answers on 8000 and the domain gives 502.
 
-## What was wrong
+## Why the generic platform fails
 
 ### 1. Half of the workstation compose file was adopted
 
@@ -27,19 +26,17 @@ profile-gated `mysql-local`, and a `node` whose command is
 `RuntimeSidecars` reads that file for the backing services a repository implies
 but does not run. `app`, `queue` and `scheduler` are recognised as the
 application and dropped; `mysql-local` is dropped as opt-in (`profiles:`).
-`webserver` and `node` are neither, so they were kept:
+`webserver` and `node` are neither, so they are kept:
 
 ```
 Keeping runtime services from compose: webserver, node
 ```
 
-and merged into the generated stack. What came up was `scart-nginx` and
-`scart-node`; the port probe on 8000 answered `Recv failure: Connection reset by
-peer` — nginx, alive, proxying FastCGI to an `app:9000` that does not exist here,
-because in the generated stack the application is Apache on 8000 in the shared
-PHP base image — and the domain answered 502. `node` would meanwhile have run
-`npm install` at container start and held a Vite dev server open, on an account
-capped at 1800 MB.
+and merged into the generated stack. The nginx then answers on 8000 by proxying
+FastCGI to an `app:9000` that does not exist here — in the generated stack the
+application is Apache on 8000 in the shared PHP base image — and the domain
+answers 502. `node` would meanwhile run `npm install` at container start and
+hold a Vite dev server open on the account.
 
 `hooks/prepare.sh` moves the file into `docker/`. It has to move
 `docker-compose.prod.yml` too: with the primary name gone, the fallback scan
@@ -68,8 +65,7 @@ None of the three install commands passes `--force` to the migrations it runs �
 `GP247\Front\Commands\FrontInstall` and `GP247\Shop\Commands\ShopInstall`
 alike — and Laravel's `ConfirmableTrait` stops an unforced migration in
 production. In a non-interactive session the confirmation defaults to no, so the
-first deploy of this recipe logged three cancelled migrations reported as
-successes:
+install logs three cancelled migrations reported as successes:
 
 ```
 APPLICATION IN PRODUCTION.
@@ -117,7 +113,7 @@ site would not serve the shop at all; without the database check a rebuild would
 reinstall over the live shop. A database it cannot reach fails the step rather
 than guessing.
 
-### 3. The admin account was `admin` / `admin`
+### 3. The admin account is `admin` / `admin`
 
 `GP247\Core\Database\Seeders\DataDefaultSeeder` creates the single
 administrator with a hardcoded hash:
@@ -160,14 +156,12 @@ manifest would run every command twice" — while `install_command` and
 projections of the *manifest's* staged commands. A build-stage command written
 in a source recipe therefore never reaches the host build.
 
-Measured: with `composer-install`, `package-discover` and `asset-publish`
-declared here exactly as `laravel.yaml` spells them, the deploy logged
-`[panelalpha] build: dependencies` and a composer run underneath it, and
-neither `package:discover` nor `vendor:publish` appeared anywhere in the log.
-What ran was `PhpHostBuild::DEFAULT_INSTALL` — the same
+Declaring `composer-install`, `package-discover` and `asset-publish` here
+exactly as `laravel.yaml` spells them would claim work that does not happen:
+what runs is `PhpHostBuild::DEFAULT_INSTALL` — the same
 `composer install --no-dev --no-interaction --no-scripts --no-plugins
---optimize-autoloader` — so the tree is resolved either way, and the three
-declarations were claiming work that does not happen.
+--optimize-autoloader` — so the tree is resolved either way, and neither
+`package:discover` nor `vendor:publish` runs.
 
 Package discovery is done in the install stage instead, inside the container,
 where an app config's commands do run. Laravel's `PackageManifest` would build
@@ -176,14 +170,13 @@ doing it once, first, means the three gp247 providers are registered before
 anything depends on them rather than as a side effect of the first thing that
 does.
 
-## MariaDB, not SQLite — measured
+## MariaDB, not SQLite
 
 `config/database.php` reads `env('DB_DATABASE', database_path('database.sqlite'))`
-with no wrapping, so `PhpEnvironment::sqlitePath()`'s doubling trap (engine#167,
+with no wrapping, so `PhpEnvironment::sqlitePath()`'s doubling trap (as seen with
 Heimdall) does not apply: an absolute path would be used as given. And SQLite
-very nearly works. On a local SQLite install of this commit, `gp247:install`
-migrated and seeded in about a second, `/` served the storefront, and the admin
-login form rendered and accepted `admin`/`admin`.
+very nearly works: `gp247:install` migrates and seeds, `/` serves the
+storefront, and the admin login form renders and signs in.
 
 The page it logs you in to is the one that fails.
 `GP247\Shop\Admin\Models\AdminOrder` builds the dashboard's four statistics out
@@ -218,9 +211,8 @@ the first boot.
 The generated service loads `.env` through `env_file:`, and Compose reads that
 when the container is **created**: an `APP_KEY=` line makes `APP_KEY` a real,
 empty environment variable, and Laravel's Dotenv is immutable, so it never
-overwrites one. Measured on Winter CMS: `key:generate` wrote a perfectly good key
-into `.env` and every request still answered `MissingAppKeyException`, with
-`printenv APP_KEY` printing an empty line and the file printing the key.
+overwrites one. A `key:generate` inside the container writes a good key into
+`.env` while every request still answers `MissingAppKeyException`.
 
 So the key is generated in the prepare hook, on the host, before the container
 exists — and `panelalpha.yaml` states the whole manifest rather than
@@ -236,11 +228,11 @@ manifest's and never matched by id: there is no way to *remove* the platform's
 Both keys and the database password are generated once into
 `~/.panelalpha/scart/secrets.env` (0600 in a 0700 dir) and written into `.env`
 from there. They cannot live only in `.env`: the engine empties `~/project` on
-every deploy. An earlier version guarded on `.env` not existing, and a rebuild
-generated all three again — the install stage then died on
+every deploy. A guard on `.env` not existing would generate all three again on
+a rebuild — the install stage would then die on
 `SQLSTATE[HY000] [1045] Access denied for user 'scart'` against the MariaDB
-volume created with the old password, and the new keys would have made the
-sessions and every encrypted column unreadable.
+volume created with the old password, and the new keys would make the sessions
+and every encrypted column unreadable.
 
 ## What survives a rebuild
 
@@ -307,42 +299,3 @@ queued mail or scheduled jobs needs them back.
 | `files/panelalpha/install.sh` | runs `gp247:install --force=1` exactly once, guarded on GP247's own marker and on a seeded database, as `APP_ENV=local` so its unforced migrations are not cancelled; on a redeploy re-publishes the install's files and restores the marker |
 | `files/panelalpha/set-admin-password.php` | replaces the seeded `admin`/`admin` credential and records the new one |
 | `overrides/docker-compose.override.yml` | bind-mounts `~/.panelalpha/scart` (uploads, password note) into the app; a two-request healthcheck plus a `ready` gate, so the deploy waits for the database, the three installs and the template publish |
-
-## Verified
-
-On a 2-core / 3.7 GB engine, account capped at 1800 MB: `deploy-ok`, deploy
-120.8s, port probe `HTTP 200`, domain `200`, `serving: ok`, all twelve baseline
-and PHP checks passing, and `GET /` returning the storefront with the title
-`Demo GP247 CMS`.
-
-Beyond the status code, on a second account kept alive for it:
-
-- `POST /gp247_admin/auth/login` with `admin` and the password from
-  `~/.panelalpha/scart/admin-password` redirects to `/gp247_admin`, and as
-  that session `/gp247_admin` is `GP247 Admin | Dashboard`, `/gp247_admin/user`
-  is `User manager` and `/gp247_admin/store_info` is `Website infomation` — all
-  200. The dashboard is the page that 500s on SQLite.
-- `admin` / `admin` is refused: the login POST bounces back to the form and
-  `/gp247_admin` still 302s to it.
-- Anonymous, `/gp247_admin` and `/gp247_admin/user` both 302 to the login form;
-  `/.env` is 403 and `/storage/logs/laravel.log` and `/vendor/autoload.php` are
-  404.
-- The redirect `Location` is `https://`, so `TRUSTED_PROXIES=REMOTE_ADDR` is
-  doing its job — without it these would be `http://` on an https page.
-- Re-running `panelalpha/set-admin-password.php` prints *"the admin account no
-  longer has the seeded password; left alone"* and leaves the credentials file
-  byte for byte unchanged; re-running `panelalpha/install.sh` prints *"GP247 is
-  already installed … skipping"* and touches nothing.
-- `bootstrap/cache/packages.php` and `storage/app/private/gp247-installed.txt`
-  are both present after the install stage.
-- Steady-state memory: `project-app-1` 112 MiB, `project-db-1` 120.6 MiB of its
-  512 MiB limit.
-
-Uploads across a rebuild (mariusz.panelalpha.tools, engine 705f250a, memory
-limit 2500): a PNG uploaded as the admin through the file manager's own
-`POST /gp247_admin/uploads/upload` landed in
-`~/.panelalpha/scart/uploads/product/` and `GET /storage/product/<file>` served
-it over HTTPS (200, `image/png`, same md5). After
-`POST /projects/<name>/rebuild` the same URL served the same bytes, the admin
-still logged in with the password from `~/.panelalpha/scart/admin-password`
-(unchanged md5), and `/.env` and `/.git/config` were 403.

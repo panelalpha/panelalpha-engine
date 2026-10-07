@@ -23,7 +23,7 @@ services:
       # The one way to give this container a php.ini. The base image loads none
       # at all -- `php --ini` says "Loaded Configuration File: (none)",
       # measured -- and scans /usr/local/etc/php/conf.d, a directory inside the
-      # image that the account uid cannot write to (engine #185). PHP reads
+      # image that the account uid cannot write to. PHP reads
       # PHP_INI_SCAN_DIR from its own environment at startup whatever the SAPI,
       # so naming a second directory here reaches mod_php and the CLI both, and
       # both need it: the CLI runs the install stage, mod_php serves every
@@ -37,11 +37,11 @@ services:
       PHP_INI_SCAN_DIR: /usr/local/etc/php/conf.d:/app/panelalpha/php
 
     # The administrator account, by a path that climbs out of the checkout.
-    # ~/.panelalpha survives the clone; ~/project does not (engine #173), and
+    # ~/.panelalpha survives the clone; ~/project does not, and
     # hooks/prepare.sh writes this file before compose runs. env_file rather
     # than `environment:` because nothing else sets these keys, so nothing
     # outranks the file -- and because .env would put a login credential into
-    # .env.default at mode 644 (engine #173).
+    # .env.default at mode 644.
     #
     # Read at container *creation*: a value written into this file afterwards
     # never reaches the process, which is why the hook writes it first and why
@@ -124,7 +124,7 @@ services:
     #      (set up, healthy) and "Missing data" (not set up, unhealthy), and
     #      neither writes anything.
     #
-    # No `ready` service gating on this. The engine #90 workaround is for a
+    # No `ready` service gating on this. That workaround is for a
     # deploy whose install stage is still loading a schema into a starting
     # datastore when the probe fires; here the install stage creates five
     # directories and writes three files onto a local mount, measured well

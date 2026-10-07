@@ -154,7 +154,7 @@ reset; touch "$W/flushed"
 expect "flushed chains with --restart-docker: created" "0" "$(run --create --restart-docker)"
 expect "after one restart" "1" "$(grep -c '^service docker restart' "$W/calls")"
 
-# engine#529: every running member is bound to its port, MAC and address.
+# Every running member is bound to its port, MAC and address.
 reset; echo "10.200.0.0/16" >"$W/tenants"
 printf 'shared-hosting-sites-db-1 9a:2a:26:9f:10:1c 10.200.0.2/16\nalice 26:e3:f2:d4:b6:68 10.200.128.1/16\nstopped 02:00:00:00:00:09 10.200.128.9/16\n' >"$W/members"
 printf 'shared-hosting-sites-db-1 4242\nalice 4343\nstopped 0\n' >"$W/pids"
@@ -178,7 +178,7 @@ reset; echo "10.200.0.0/16" >"$W/tenants"
 expect "no members: an empty binding, so every port is cut off" "0" "$(run)"
 expect "the sets have no elements" "0" "$(grep -c 'elements' "$W/nft.in")"
 
-# engine#541: before Docker, from .env alone, everything closed until bound.
+# Before Docker, from .env alone, everything closed until bound.
 reset; echo "TENANT_NETWORK_PREFIX=10.250" >>"$W/env"
 expect "boot: applied without Docker" "0" "$(run --boot)"
 expect "Docker is never asked" "0" "$(grep -c '^docker' "$W/calls")"

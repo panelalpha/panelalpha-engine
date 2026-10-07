@@ -34,7 +34,7 @@ description: >-
   (jsclient/src/const.js). Because the per-account public domain is unknown at
   build time, the front is built with REACT_APP_API_URL=/api -- a relative,
   domain-independent value. nginx (the only service that publishes a host port,
-  so the engine's port scan takes it as primary, engine#231) then serves the SPA
+  so the engine's port scan takes it as primary) then serves the SPA
   at / and proxies /api/ to the API server with the /api prefix stripped, so the
   flask-restx API (mounted at root) receives clean paths and the SPA and API
   never collide on one domain, whatever that domain turns out to be.

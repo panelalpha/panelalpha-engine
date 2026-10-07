@@ -16,9 +16,3 @@ description: >-
 
   First run is left as upstream ships it: the admin user is created with
   Yaade's default password `password`, to be changed under Settings > Account.
-
-  Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 2500:
-  create success in 49s, / is <title>Yaade</title> (SPA shell, bundles load),
-  admin/password logs in through /api/login. A collection created before a
-  rebuild (40s) is still listed after it. /.env and /.git/config are 404. App
-  ~300 MiB.

@@ -9,4 +9,4 @@ description: >-
   (webreaper/damselfly:4.5.3), as docs/Installation.md runs it: config
   (SQLite database), thumbnails and the photo library on named volumes. hooks/prepare.sh removes the
   repo's Visual Studio docker-compose.override.yml, which the engine would
-  otherwise layer over the replacement (engine#416).
+  otherwise layer over the replacement.

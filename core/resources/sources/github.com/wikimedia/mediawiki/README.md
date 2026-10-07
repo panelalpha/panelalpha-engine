@@ -7,18 +7,13 @@ artefacts and the difference is the whole of this recipe: the tarball ships
 checkout ships neither, and ships a `docker-compose.yml` for MediaWiki-Docker
 that the tarball does not.
 
-Tracker: `panelalpha/playground/supported-apps#363`.
+## What goes wrong without it
 
-## What the original failure was
-
-Measured on `mariusz.panelalpha.tools`, with no recipe, project `mwctl`:
-
-| | |
-|---|---|
-| detection | `Detected project type: Docker Compose` → `Using strategy: compose` |
-| images started | `docker-registry.wikimedia.org/dev/bookworm-php85-fpm:1.0.0`, `…/bookworm-apache2:1.0.1-s3`, `…/bookworm-php85-jobrunner:1.0.0` |
-| deploy | finished successfully in **62 s** |
-| serving | `error_page`, HTTP **500** on `/`, 939 bytes |
+Detection reads the repository's `docker-compose.yml` (`Using strategy:
+compose`) and starts MediaWiki-Docker's development images
+(`docker-registry.wikimedia.org/dev/bookworm-php85-fpm`, `…/bookworm-apache2`,
+`…/bookworm-php85-jobrunner`). The deploy finishes, and `/` answers HTTP
+**500**.
 
 The page says `MediaWiki 1.47 internal error — Installing some dependencies is
 required.` It is **not** the missing `LocalSettings.php`. It is
@@ -53,44 +48,13 @@ web installer, which is first-visitor-wins.
 | `files/.htaccess` | Denies `vendor/`, `docker-compose.*`, any stray `LocalSettings*`, and `*.log|sql|sqlite|bak|orig|rej|swp|save`. |
 | `files/mw-config/.htaccess` | `Require all denied`. |
 
-## Measured
-
-Same host, same repository, same hour.
-
-| | control (no recipe) | recipe |
-|---|---|---|
-| strategy | `compose` | `php` |
-| containers | 3 wikimedia dev images | 1 app + 1 `ready` that exits |
-| first deploy | 62 s | **54 s** (55 s on the run before the last two settings lines) |
-| redeploy (`POST /projects/mwrec/rebuild`) | — | **29 s** |
-| `GET /` | 500, `error_page` | **200**, `serving: ok` |
-| app container memory | — | **74.9 MiB** fresh, **137.5 MiB** after the verification traffic, cap 768 MiB |
-| account container on the host | 107 MiB | **143–189 MiB** |
-| `~/project` on disk | 249 MB | 288 MB (`vendor/` is the difference) |
-
-Past the health probe, over the account's real public HTTPS domain: log in as
-the bureaucrat (`clientlogin` → `PASS`, groups `bureaucrat, interface-admin,
-sysop`), create a page, edit it again, read both revisions back, render it
-anonymously with its wikitext markup intact, find it through the search API
-and through `Special:Search`, read it through `api.php` and `rest.php`, upload
-a 1200×900 PNG and fetch both the original and a generated 320 px thumbnail
-back anonymously with `X-Content-Type-Options: nosniff` and MediaWiki's
-sandboxing CSP on both.
-
-Across the redeploy: `LocalSettings.php` byte-identical (so `$wgSecretKey`,
-`$wgUpgradeKey` and `$wgDBpassword` unchanged), the bureaucrat's password
-unchanged and still accepted, both page revisions still there, the uploaded
-file byte-identical and still served with its thumbnail — while a marker file
-dropped in `~/project` was gone, which is what proves the re-clone really
-happened.
-
 ## Exposure
 
 Bodies, not status codes. MediaWiki has a front controller, so a 404 from
 Apache and a 404 from MediaWiki mean opposite things, and a 200 can be a PHP
 file that executed and printed nothing rather than a file that leaked.
 
-Denied (403, 335-byte Apache body): `/LocalSettings.php`, `/.env`,
+Denied (403, Apache's own body): `/LocalSettings.php`, `/.env`,
 `/docker-compose.yml`, `/docker-compose.override.yml`, `/panelalpha-setup.sh`,
 `/panelalpha-entrypoint.sh`, `/.git/config`, `/.git/HEAD`,
 `/vendor/autoload.php`, `/vendor/composer/installed.json`, `/mw-config/`,
@@ -100,9 +64,8 @@ Denied (403, 335-byte Apache body): `/LocalSettings.php`, `/.env`,
 `/.htaccess`.
 
 An uploaded `.php` under `/images/` is **not executed** — upstream's
-`images/.htaccess` `php_flag engine off` is in force through the symlink. The
-control proves it: the identical file answers 32 bytes of executed output at
-the document root and 50 bytes of literal source under `/images/`.
+`images/.htaccess` `php_flag engine off` is in force through the symlink, so it
+is served as literal source.
 
 Served on purpose, and all of it is public in a public repository:
 `composer.json`, `composer.lock`, `package.json`, `README.md`, `INSTALL`,
@@ -112,11 +75,10 @@ it is executed, not shown.
 ## Known limits
 
 * **The engine's public proxy will not carry a `multipart/form-data` POST.**
-  A GET is 200 and a `application/x-www-form-urlencoded` POST is 200 on the
-  same URL, but a multipart POST — any size, with or without a file — is
-  answered `302 → https://www.withoutdns.com/internal-server-error.html` and
-  then hangs. The same request made inside the container against
-  `127.0.0.1:8000` succeeds and the upload completes. This is not MediaWiki
+  A GET and an `application/x-www-form-urlencoded` POST go through, but a
+  multipart POST — any size, with or without a file — is answered
+  `302 → https://www.withoutdns.com/internal-server-error.html` and then hangs,
+  while the same request inside the container succeeds. This is not MediaWiki
   and not this recipe; it means `Special:Upload` in a browser cannot work over
   a `panelalpha.online` name until it is fixed.
 * Article URLs are `/index.php/Page_Title`, not short `/Page_Title`. Short
@@ -135,6 +97,6 @@ it is executed, not shown.
   is the Gerrit mirror, and its HEAD is MediaWiki's development trunk; the
   stable lines are `REL1_41` … `REL1_46`. A recipe cannot pin a branch — the
   branch is an input to the deploy (`git_branch`), not a manifest key — so an
-  operator who wants a release should ask for one. Everything here was
-  measured on `master`; the `install`/`update` pair is exactly what upstream
-  supports on a release branch too, so nothing in the recipe is trunk-specific.
+  operator who wants a release should ask for one. The `install`/`update` pair
+  is exactly what upstream supports on a release branch too, so nothing in the
+  recipe is trunk-specific.

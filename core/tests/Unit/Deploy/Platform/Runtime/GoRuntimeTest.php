@@ -152,7 +152,7 @@ class GoRuntimeTest extends TestCase
     }
 
     /**
-     * Dropserver (#94): `ds-dev` is a development helper beside the server
+     * Dropserver: `ds-dev` is a development helper beside the server
      * `ds-host`, and won only by being the shorter name.
      */
     public function test_a_development_helper_is_not_picked_over_the_server(): void

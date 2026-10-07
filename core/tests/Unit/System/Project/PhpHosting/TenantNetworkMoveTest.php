@@ -11,7 +11,7 @@ use App\System\Project\PhpHosting\TenantNetworkMove;
 use Tests\TestCase;
 
 /**
- * engine#217: a PHP-hosting account moves from pash-default-network to
+ * A PHP-hosting account moves from pash-default-network to
  * pash-tenants live: join, be bound, rename the network in its compose file,
  * then leave. Nothing in it pins an address, so nothing is recreated.
  */

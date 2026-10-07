@@ -26,4 +26,4 @@ and language packs added after install (they live in the checkout).
 composer.json requires `ext-mcrypt`. The engine builds a variant PHP base with
 it in the background; on a host that does not have it yet the first deploy
 fails with `This project needs the PHP extension mcrypt` and a redeploy a few
-minutes later succeeds (engine#342).
+minutes later succeeds.

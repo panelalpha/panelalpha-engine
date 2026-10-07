@@ -26,7 +26,7 @@ description: >-
   ships four dev/ci compose files, none a hosting stack). With no platform
   block, detection reaches the compose strategy by walk (compose priority 980)
   and UserComposeStrategy runs the file as written, so ComposePlaceholders runs
-  and engine#221 (the fromSource platform-declaration trap) does not bite. The
+  and the fromSource platform-declaration trap does not bite. The
   app's public address is the one value the checkout cannot supply:
   app__BASE_URL is set to http://localhost/ in the webapp environment block,
   where ComposePlaceholders::isLocalPublicUrl() rewrites it to the account's
@@ -49,8 +49,8 @@ description: >-
   command wrapper (what upstream's own guide does: chown -R 33:33). Chowning a
   host bind mount to 33 from inside the container (sysbox userns) would instead
   take the directory out of the account's ownership. Named-volume survival
-  across project_rebuild is verified here as with the DB (engine#173 is why
-  ~/project itself cannot hold it).
+  across project_rebuild is verified here as with the DB (~/project itself is
+  emptied on every deploy, so it cannot hold it).
 
   Secrets are generated once by hooks/prepare.sh and kept in
   ~/.panelalpha/geeftlist/geeftlist.env, then written into ~/project/.env for
@@ -65,7 +65,7 @@ description: >-
   once a schema exists. So a one-shot `installer` service runs
   `setup/isInstalled ? setup/upgrade : setup/install` (RETURN_YES=0/RETURN_NO=
   200), gating the webapp on its clean completion; a `ready` service then gates
-  `docker compose up -d` on the webapp's healthcheck (engine#204: up -d returns
+  `docker compose up -d` on the webapp's healthcheck (up -d returns
   without --wait, so without this the deploy is called done before the site
   answers).
 

@@ -18,4 +18,4 @@ description: >-
   outbound); USB/GPU/Coral devices are not available to an account. The
   image is large (3 GB compressed, about 9 GB of account disk). The live view
   uses a websocket (/websocket), which the shared *.panelalpha.online test
-  front strips (engine#170); on the engine host or a real domain it upgrades.
+  front strips; on the engine host or a real domain it upgrades.

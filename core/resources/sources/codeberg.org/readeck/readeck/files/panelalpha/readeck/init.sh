@@ -8,7 +8,7 @@
 # Two jobs, in order:
 #   1. Migrate the schema.
 #   2. Create this account's administrator when the instance has none, which
-#      closes the anonymous /onboarding form (engine#200).
+#      closes the anonymous /onboarding form.
 set -e
 
 say() { echo "[panelalpha] readeck init: $*"; }

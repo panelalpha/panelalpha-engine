@@ -158,7 +158,7 @@ class PrepareFromSource
         }
 
         // `database:` is provisioned only by the writers that generate the app
-        // service; anywhere else it used to do nothing, silently (engine#210).
+        // service; anywhere else it used to do nothing, silently.
         $inertDatabase = ManifestDatabase::inertWarning($decision);
         if ($inertDatabase !== null) {
             $logger?->warn($inertDatabase);

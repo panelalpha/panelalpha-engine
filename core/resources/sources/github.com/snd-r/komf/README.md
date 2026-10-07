@@ -27,5 +27,5 @@ Nothing is required to start. Connect a media server either in the web UI
   settings into it.
 
 The web UI assets exist only gzipped and are served when the browser accepts
-gzip. The `*.panelalpha.online` test edge drops `Accept-Encoding` (engine#170),
+gzip. The `*.panelalpha.online` test edge drops `Accept-Encoding`,
 so there the page stays blank; on a domain pointed at the host it loads.

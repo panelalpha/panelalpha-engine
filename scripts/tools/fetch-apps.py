@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Fetch unlabeled supported-apps issues from GitLab into scripts/tools/apps.json.
+"""Fetch unlabeled app-support issues from GitLab into scripts/tools/apps.json.
 
-Issues are selected from panelalpha/playground/supported-apps in creation
-order; those that already have a verdict in --outdir are skipped so the batch
-runner works through the backlog one app at a time. `--reset` rebuilds the
-file from scratch.
+Issues are selected from the tracker project (PROJECT) in creation order;
+those that already have a verdict in --outdir are skipped so the batch runner
+works through the backlog one app at a time. `--reset` rebuilds the file from
+scratch.
 
 Usage:
-  GITLAB_API=https://<gitlab>/api/v4 GITLAB_TOKEN=TOKEN python3 scripts/tools/fetch-apps.py [--outdir=DIR] [--limit=N] [--reset]
+  GITLAB_API=https://<gitlab>/api/v4 GITLAB_PROJECT=<group/project> GITLAB_TOKEN=TOKEN python3 scripts/tools/fetch-apps.py [--outdir=DIR] [--limit=N] [--reset]
 """
 
 import argparse
@@ -20,7 +20,7 @@ import urllib.parse
 import urllib.error
 
 API = os.environ.get("GITLAB_API", "")
-PROJECT = "panelalpha%2Fplayground%2Fsupported-apps"
+PROJECT = urllib.parse.quote(os.environ.get("GITLAB_PROJECT", ""), safe="")
 TOKEN = os.environ.get("GITLAB_TOKEN", "")
 VERDICT_LABELS = ("Supported", "Unsupported")
 
@@ -97,8 +97,8 @@ def main():
     ap.add_argument("--reset", action="store_true",
                     help="ignore existing result records; rebuild the whole list")
     args = ap.parse_args()
-    if not API or not TOKEN:
-        sys.exit("GITLAB_API and GITLAB_TOKEN required")
+    if not API or not TOKEN or not PROJECT:
+        sys.exit("GITLAB_API, GITLAB_PROJECT and GITLAB_TOKEN required")
 
     done = set() if args.reset else done_apps(args.outdir)
 

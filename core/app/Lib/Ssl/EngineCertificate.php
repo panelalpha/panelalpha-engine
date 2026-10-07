@@ -92,8 +92,8 @@ final class EngineCertificate
 
         // A certificate nobody holds the key to covers nothing. Both files can
         // be readable, valid and even in date while belonging to different
-        // pairs -- the state a rotation left crt/server.cert in on a dev host,
-        // where nginx started without a word and then refused every handshake
+        // pairs -- the state a rotation can leave crt/server.cert in, where
+        // nginx starts without a word and then refuses every handshake
         // with `SSL alert number 40`. Serving that to a project would hand it
         // a certificate no client can complete a connection with, so the
         // project is better off signing its own.

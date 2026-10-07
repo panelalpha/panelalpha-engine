@@ -2,7 +2,7 @@
 
 return [
     /*
-     * The Docker network host build containers run on (engine#246). The engine
+     * The Docker network host build containers run on. The engine
      * creates it and scripts/build-network-firewall.sh lets it reach the
      * internet only -- not the engine API, the host, its private network or
      * 169.254.169.254. Empty runs builds on Docker's default bridge as before,
@@ -14,7 +14,7 @@ return [
      * Memory a host build container may use, or empty to size it from the host.
      *
      * Empty (the default) gives it 8g. Set or not, it never gets more than half
-     * the host's RAM, nor the host's RAM less engine_memory below (engine#295).
+     * the host's RAM, nor the host's RAM less engine_memory below.
      * Builds run one at a time (HostBuildSlot).
      *
      * Accepts a Docker size string: 512m, 2g, 4096m. An unparseable value

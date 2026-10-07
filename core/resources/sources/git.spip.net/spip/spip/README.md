@@ -1,9 +1,8 @@
 # SPIP — git.spip.net/spip/spip
 
 SPIP 5.0.x-dev, the French CMS *Système de Publication pour l'Internet*
-(GPL-3.0). supported-apps#1267. The canonical `git.spip.net/spip/spip` clones
-anonymously (verified `git ls-remote`), so the recipe is keyed to it — no mirror
-row needed.
+(GPL-3.0). The canonical `git.spip.net/spip/spip` clones anonymously, so the
+recipe is keyed to it — no mirror row needed.
 
 SPIP 5 is a **Composer distribution**, not the application tree: git ships only
 `spip.php`, `index.php`, `bin/spip`, `config/spip/` and `composer.json`. The
@@ -11,15 +10,14 @@ whole application (`ecrire/`, `prive/`, `plugins-dist/`, `squelettes-dist/`,
 `vendor/`) is fetched by `composer install` from `get.spip.net`. `spip.php`
 boots `SpipHttpKernel` through `vendor/autoload_runtime.php` (symfony/runtime).
 `composer.json` requires `php: ^8.4`, so the engine resolves **PHP 8.4**
-(in-range 8.1–8.5); HEAD runs clean there (verified: `panelalpha/php:8.4`).
+(in-range 8.1–8.5).
 Detection reads it as plain `php` (composer.json, no artisan).
 
 ## What the bare deploy gets wrong
 
-A no-recipe control deploy **fails**: the engine's stock php install runs
-`composer install --no-dev --no-scripts --no-plugins` (verified in the deploy
-log: *"The spip-league/composer-installer plugin was not loaded as plugins are
-disabled"*), so the layout plugin never runs, `ecrire/`/`prive/` are left under
+Without the recipe the deploy **fails**: the engine's stock php install runs
+`composer install --no-dev --no-scripts --no-plugins`, so the layout plugin
+(`spip-league/composer-installer`) never runs, `ecrire/`/`prive/` are left under
 `vendor/`, and the kernel 500s on every request. On top of that there is no
 database, no persistence, no docroot pinning and a world-open installer.
 
@@ -36,8 +34,8 @@ The recipe fixes it, none of it a change to upstream source:
    is mostly the plugin placing the tree; gated on `ecrire/` being absent, so a
    restart skips it.
 
-2. **URLs, config and media live in the checkout, wiped every redeploy**
-   (engine#173). SPIP keeps its DB connection file and crypto keys in
+2. **URLs, config and media live in the checkout, wiped every redeploy**.
+   SPIP keeps its DB connection file and crypto keys in
    `config/connect.php` + `config/cles.php` (both under `_DIR_ETC`) and uploaded
    media in `IMG/`. `SPIP_ETC_DIR=/pa-data/spip/config` (manifest env) points
    `_DIR_ETC` at the bind-mounted account home, so connect.php + cles.php +
@@ -88,10 +86,9 @@ The `php -S` server binds `127.0.0.1` only and is killed as soon as the walk
 finishes, so nothing but the script ever reaches the wizard. `PHP_CLI_SERVER_WORKERS`
 gives it concurrency, without which SPIP's own self-request during the final
 install step deadlocks a single-threaded server. If the walk somehow fails, the
-boot still serves and the owner can install by hand — but the verified path
-needs no owner action.
+boot still serves and the owner can install by hand.
 
-## Engine gap (verified, not a recipe fault)
+## Engine gap (not a recipe fault)
 
 A source recipe cannot override the PHP **build** command. `AppConfig::manifest()`
 drops `commands`/`env` (applied separately), and `PhpStrategy::apply()` passes
@@ -107,21 +104,3 @@ whitelisted `symfony/runtime`). Either fix — whitelist the plugin, or fold a
 source recipe's build command into the decision — would let this recipe drop the
 in-container composer re-run (fix 1). The in-container re-run is the workaround
 until then.
-
-## Verified (a dev host, PHP 8.4, 2026-09-21)
-
-Fresh deploy, no manual steps. Deploy ~18s engine + container-boot layout +
-headless install (well within the 300s start-hook budget); app container
-**61 MiB**. **Window closed:** the first anonymous request to a freshly deployed
-site got `/` → 200 (installed "Mon site SPIP"), `?exec=install` → **403**,
-`ecrire/` → 302 — the webmestre was already seeded. Login verified with the
-auto-generated password from `~/.panelalpha/spip/` (SPIP `auth_identifier_login`
-OK; bad password rejected). An article published through SPIP's editing pipeline
-renders on the public site (title, breadcrumb, body, 200). Exposure by body:
-`/config/connect.php`, `/config/cles.php`, `/.env`, `/.git/config`, `/tmp/`,
-`/IMG/` listing and `/panelalpha/*` all **403**, `/composer.json` 404,
-`/htaccess.txt`/`*.md` 404, DB password present nowhere. **Redeploy survival**
-(`project_rebuild`): site live with no re-install, `?exec=install` still 403,
-seeded admin still authenticates (cles.php persisted), the article persists
-(MySQL), an uploaded `IMG/` file persists byte-for-byte (bind mount), and the
-seed is a no-op — `spip_auteurs` holds exactly one webmestre, no duplicate.

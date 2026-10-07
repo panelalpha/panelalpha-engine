@@ -90,7 +90,7 @@ class EngineServer extends Server
     ];
 
     // One page over the whole catalogue: Cursor and Codex ignore nextCursor
-    // and lose every tool past the first page (#55). Both properties matter —
+    // and lose every tool past the first page. Both properties matter —
     // perPage() is min($requested ?? $default, $max).
     public int $maxPaginationLength = 1000;
 

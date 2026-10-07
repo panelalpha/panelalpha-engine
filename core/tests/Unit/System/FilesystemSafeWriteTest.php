@@ -11,7 +11,7 @@ use Symfony\Component\Process\Process;
 use Tests\Unit\System\Project\LocalHostSystem;
 
 /**
- * engine#524: writing an account's template files must not open whatever is
+ * Writing an account's template files must not open whatever is
  * already at the target path, because a tenant who still has that directory
  * mounted read-write can put a symlink there between two commands that would
  * otherwise `rm` then `cp` it back. `LocalHostSystem` applies `sudo` file

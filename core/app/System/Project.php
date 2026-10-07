@@ -386,7 +386,7 @@ class Project
 
     /**
      * The row goes before the proxy rebuild, and the rebuild is best-effort: a
-     * sites-http that is down or restarting left the deleted project's row behind (#63).
+     * sites-http that is down or restarting left the deleted project's row behind.
      */
     public function deleteAccountRow(ModelsUser $user): void
     {
@@ -805,7 +805,7 @@ class Project
 
     /**
      * False when a limit was asked for and setquota refused it -- typically
-     * because quota is off on the host filesystem (#244), so it is not enforced.
+     * because quota is off on the host filesystem, so it is not enforced.
      */
     public function configureQuota(): bool
     {

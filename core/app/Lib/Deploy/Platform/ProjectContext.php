@@ -79,7 +79,7 @@ class ProjectContext
 
     /**
      * scandir() that lists an unreadable directory as empty. The account owns
-     * its checkout and may chmod 700 anything in it (#191); a walk skips it.
+     * its checkout and may chmod 700 anything in it; a walk skips it.
      *
      * @return list<string>
      */

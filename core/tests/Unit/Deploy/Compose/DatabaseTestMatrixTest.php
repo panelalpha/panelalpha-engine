@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * Three or more SQL engines that the app's environment names none of are a
- * test matrix, not a stack (Shlink, engine#597): none of it is kept.
+ * test matrix, not a stack (Shlink): none of it is kept.
  */
 class DatabaseTestMatrixTest extends TestCase
 {

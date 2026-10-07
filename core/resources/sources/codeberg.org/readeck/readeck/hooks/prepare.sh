@@ -34,8 +34,8 @@ fi
 # ---------------------------------------------------------------------------
 # 1 + 2. Secrets and config.toml.
 #
-# ~/project is emptied and re-cloned on every deploy (engine#173,
-# GitRepository.php:89) and ~ is chown root:root on every rebuild
+# ~/project is emptied and re-cloned on every deploy
+# (GitRepository.php:89) and ~ is chown root:root on every rebuild
 # (Project.php:813); ~/.panelalpha is the only directory that both survives and
 # belongs to the account. secret_key signs every session cookie, so it must not
 # change on a redeploy, and Readeck has no fixed default for it -- `readeck

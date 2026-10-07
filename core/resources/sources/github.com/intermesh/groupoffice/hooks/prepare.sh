@@ -8,7 +8,7 @@
 #   2. the data directory, which must exist before Docker makes the bind mount.
 #
 # Nothing here moves a compose file aside. Group Office ships none, and the
-# glob that would do it is the trap in engine#166: by the time this hook runs
+# glob that would do it is a trap: by the time this hook runs
 # the engine has already written overrides/docker-compose.override.yml into the
 # project root under exactly that name, so `mv docker-compose.*` would take
 # this recipe's own healthcheck with it and the deploy would still report
@@ -25,7 +25,7 @@ say() { echo "[groupoffice] $*"; }
 # password generated beside the code would be a new password on every redeploy,
 # matching nothing. ~/.panelalpha is where it goes, and a directory rather than
 # the home itself because account homes are root-owned and 0755: an account
-# cannot create a file directly in its own home. engine#173 also writes
+# cannot create a file directly in its own home. The engine also writes
 # .env.default into the checkout 0644 and readable by every other tenant, which
 # is the other reason nothing secret belongs in ~/project.
 STORE_DIR="$HOME/.panelalpha"

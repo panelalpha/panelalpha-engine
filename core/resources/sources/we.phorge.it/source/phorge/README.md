@@ -82,11 +82,6 @@ Apache's subprocess environment rather than the container's — it would satisfy
 | `install` / `upgrade` | `panelalpha/phorge-setup.sh`: replace the database's engine-default credentials, write `conf/local/local.json`, `bin/storage upgrade --force` (54 schemas, ~900 patches), create the first administrator and the auth provider, purge caches |
 | healthcheck | `/` redirects **and** `/auth/start/` renders a password field; the `ready` service gates `docker compose up -d` on it |
 
-Measured on a dev host (15 GB, shared with other work), with the
-shared PHP 8.3 base image and `mysql:8.0` already in the host cache:
-**about 135 seconds** from API call to a healthy site, of which the storage
-upgrade is roughly 35.
-
 ## Logging in
 
     ssh <account>@<host>            # or the panel's file manager
@@ -114,12 +109,12 @@ commands at all).
 install stage, before the container is healthy, and it both creates the
 administrator and configures the username/password provider **with registration
 switched off** — either alone ends first-time setup, and the second is what
-stops `/auth/register/` being a signup form afterwards. Verified on a live
-deploy: logged out, `/auth/start/` offers a username and password and no
-"Register New Account" button, and `/auth/register/` answers "There are no
-configured default registration providers."
+stops `/auth/register/` being a signup form afterwards. Logged out,
+`/auth/start/` then offers a username and password and no "Register New
+Account" button, and `/auth/register/` answers "There are no configured default
+registration providers."
 
-**Exposure, measured over the public HTTPS domain.** The document root is
+**Exposure.** The document root is
 `webroot/`, so nothing else in the checkout is a candidate for being served at
 all; everything unmatched goes through `index.php` and comes back as Phorge's
 login page.
@@ -175,10 +170,9 @@ long-running process, which this platform has nowhere to put.
     files/panelalpha/phorge-bootstrap.php    the first administrator and the auth provider
     overrides/docker-compose.override.yml    /arcanist, /panelalpha, the database, the readiness gate
 
-## Engine behaviour this recipe had to work around
+## Engine behaviour this recipe works around
 
-Each of these was measured on this engine while writing the recipe; the file
-that deals with each carries the detail.
+The file that deals with each carries the detail.
 
 1. **`extends: php` is refused for an application with no `composer.json`.**
    `DeployabilityCheck::REQUIRED_ROOT_FILE` maps the `php` strategy to
@@ -186,7 +180,7 @@ that deals with each carries the detail.
    carries the same strategy and a different platform id, which is the intended
    answer.
 2. **A 0700 directory in the checkout fails the deploy.** After the prepare hook
-   the engine walks the project tree as www-data; `chmod 700 conf/local` ended
+   the engine walks the project tree as www-data; `chmod 700 conf/local` ends
    the deploy with `scandir(/home/<acct>/project/conf/local): Failed to open
    directory: Permission denied`. The secret is protected on the file instead.
 3. **`metamta.mail-adapter` no longer exists in Phorge** (it is `cluster.mailers`
@@ -195,6 +189,6 @@ that deals with each carries the detail.
 4. **The engine's own health probe is a different site.** Phorge answers a
    request whose Host matches no configured URI with a 500 "Site Not Found"
    page, and the probe uses `http://127.0.0.1:8000/`. A completely working
-   install was scored `serving-error_page` until
-   `phabricator.allowed-uris` learned about the loopback address.
+   install scores `serving: error_page` unless `phabricator.allowed-uris` names
+   the loopback address.
 5. **The harvested sidecar's credentials** — see Security, above.

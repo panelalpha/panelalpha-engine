@@ -1,6 +1,6 @@
 #!/bin/bash
 # Generate AUTH_SECRET once, where a redeploy will not wipe it (~/project is
-# emptied on every deploy, engine#173). The owner's login is the engine's
+# emptied on every deploy). The owner's login is the engine's
 # (`credentials:` in panelalpha.yaml), in ~/.panelalpha/app-credentials.env.
 set -e
 cd ~/project

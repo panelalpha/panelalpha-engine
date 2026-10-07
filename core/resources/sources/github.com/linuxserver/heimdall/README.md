@@ -4,15 +4,14 @@ Application dashboard — a page of tiles linking to the things you host, with
 live status for the ones it knows. A Laravel 13 app on SQLite: no database
 server, no queue, no cache, no build step that produces anything.
 
-Detection: `laravel` — `composer.json` and `artisan`. That was already right,
-and so was everything the strategy did with it. The repository commits
-`vendor/` (15 210 files) and the compiled `public/css`, `public/js` and
-`public/mix-manifest.json`, so the clone is a runnable Heimdall before Composer
-runs at all; the host pass only drops 33 dev packages and re-discovers
-providers. PHP 8.4 against `"php": "^8.4"`, `public/` as the document root, the
-account's public https URL in `APP_URL`. The deploy reported success and the
-container restart-looped on exit 1 — the `serving-unknown` verdict this recipe
-turns into a served page.
+Detection picks `laravel` — `composer.json` and `artisan` — and is right, as is
+everything the strategy does with it. The repository commits `vendor/` and the
+compiled `public/css`, `public/js` and `public/mix-manifest.json`, so the clone
+is a runnable Heimdall before Composer runs at all; the host pass only drops the
+dev packages and re-discovers providers. PHP 8.4 against `"php": "^8.4"`,
+`public/` as the document root, the account's public https URL in `APP_URL`.
+Without the recipe the deploy reports success and the container restart-loops
+on exit 1.
 
 ## Why the source, and not `lscr.io/linuxserver/heimdall`
 
@@ -31,7 +30,7 @@ from a different repository would replace a working deploy of *this* checkout
 with a deploy of something else, and would trade the engine's uid and bind
 mount for s6's. So the recipe keeps the source.
 
-## The one thing that was wrong: `DB_DATABASE`
+## The one thing the engine gets wrong: `DB_DATABASE`
 
 The engine already knows about this application.
 `PhpEnvironment::sqlitePath()` carries the comment
@@ -62,7 +61,7 @@ because No such file or directory
 at app/Providers/AppServiceProvider.php:167
 ```
 
-`set -e` in the generated entrypoint made that exit 1, on `key:generate` and
+`set -e` in the generated entrypoint makes that exit 1, on `key:generate` and
 then on every restart.
 
 `panelalpha.yaml` restates `DB_DATABASE: app.sqlite` — the bare filename
@@ -75,7 +74,7 @@ Note that `.env` cannot be where this is corrected. The generated service loads
 `.env` through `env_file:` **and** names `DB_DATABASE` under `environment:`, and
 compose gives `environment:` precedence — so Heimdall's own
 `DB_DATABASE=app.sqlite`, which is already sitting in the `.env` the engine
-copied from `.env.example`, was being shadowed the whole time.
+copied from `.env.example`, is shadowed.
 
 ## Readiness
 
@@ -86,7 +85,7 @@ install stage runs `key:generate`, `storage:link` and `migrate`, and inside the
 `AppServiceProvider::boot()` runs for artisan as well as for a request:
 `setupDatabase()` creates `database/app.sqlite`, runs `migrate --seed` over it
 (20 migrations, the settings and users seeders) and then
-`ProcessApps::dispatchSync()` fetches the 320 KB supported-apps list over the
+`ProcessApps::dispatchSync()` fetches the supported-apps list over the
 network. Apache binds after all of it.
 
 `overrides/docker-compose.override.yml` adds a healthcheck and a no-op `ready`
@@ -120,9 +119,8 @@ if (empty($current_user->password)) {
 ```
 
 So a freshly seeded Heimdall serves **every route** to anyone who has the
-address. Measured on a real deploy of this repository, before this recipe:
-`/settings`, `/users` and `/items/create` all HTTP 200, no credentials, full
-administration. That is the correct default for the LAN dashboard Heimdall was
+address: `/settings`, `/users` and `/items/create` all answer without
+credentials, full administration. That is the correct default for the LAN dashboard Heimdall was
 written to be, and the wrong one for an account the engine has just given a
 public HTTPS name and a certificate.
 
@@ -185,32 +183,3 @@ understand it is turning off an SSRF guard.
 | `panelalpha.yaml` | `extends: laravel`, `DB_DATABASE: app.sqlite`, the admin-password command, and the account of what was wrong |
 | `files/panelalpha/set-admin-password.php` | gives the seeded `admin` account a password while it still has none, and records it |
 | `overrides/docker-compose.override.yml` | a two-request healthcheck plus a `ready` gate, so the deploy waits for the migration, the seeders and the app-list fetch |
-
-## Verified
-
-On a 2-core / 3.7 GB engine, account capped at 1200 MB: `deploy-ok`, deploy
-60s with the shared PHP base image already built (the first deploy on a host
-without it spends about 195s more building that image), port probe `HTTP 302`,
-domain `302`, `serving: ok`, all twelve baseline checks passing, and HTTP 200
-with the title `Heimdall` once the redirect is followed.
-
-Beyond the status code:
-
-- `/`, `/settings`, `/users` and `/items/create` all 302 to `/login` for an
-  anonymous client; after `POST /login` with the password from
-  `~/project/.panelalpha-admin-password`, `/settings` renders 18 KB of the real
-  settings form. A wrong password leaves it at 302.
-- `POST /items` as that session creates an item and the dashboard renders it —
-  a real authenticated write through to SQLite.
-- `database/app.sqlite` holds the 15 seeded settings rows and one `admin` user
-  whose password is now a `$2y$12$` bcrypt hash;
-  `storage/app/supportedapps.json` is 324 KB of app definitions fetched at
-  first boot.
-- Re-running `panelalpha/set-admin-password.php` prints *"the admin account
-  already has a password; left alone"* and leaves the credentials file byte
-  for byte unchanged.
-- With `database/app.sqlite`, the credentials file and the config cache
-  deleted, `docker compose up -d` printed `Waiting` then `Healthy` for the app
-  before starting `ready` and returned in 7.6s — the whole first run (key,
-  migrate, seed, the app-list fetch, a fresh password) inside that window,
-  which is the window a probe without the gate lands in.

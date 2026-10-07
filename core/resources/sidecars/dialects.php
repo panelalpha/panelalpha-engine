@@ -82,14 +82,14 @@ return [
         //    `$$` is compose's own escape: the container's shell gets `$` and
         //    expands it from the container's environment, where it is set.
         //  - `mariadb-admin` first. `mysqladmin` no longer exists in MariaDB
-        //    11+ images -- measured on mariadb:lts (12.3.3), it exits 127,
-        //    "not found" -- and `mariadb-admin` does not exist in mysql's.
-        //    Trying both covers every image either name appears in; measured
-        //    exit 0 on mariadb:lts and on mysql:8.
+        //    11+ images -- on mariadb:lts (12.3.3) it exits 127, "not found"
+        //    -- and `mariadb-admin` does not exist in mysql's. Trying both
+        //    covers every image either name appears in; it exits 0 on
+        //    mariadb:lts and on mysql:8.
         //  - Over TCP. On first boot the entrypoint runs a temporary server
         //    with networking off; a socket ping reports it healthy, and an app
         //    waiting on `service_healthy` then got "Can't connect to server on
-        //    'db' (115)" (engine#187, measured on mariadb:11).
+        //    'db' (115)" on mariadb:11.
         'service' => [
             'environment' => ['MYSQL_ROOT_HOST' => '%'],
             'mem_limit' => '512m',
@@ -103,7 +103,7 @@ return [
                 'interval' => '2s',
                 'timeout' => '5s',
                 'retries' => 15,
-                // The app now waits for `healthy` (engine#187), so a first boot
+                // The app now waits for `healthy`, so a first boot
                 // that initialises the datadir must not be counted as failing.
                 'start_period' => '60s',
             ],

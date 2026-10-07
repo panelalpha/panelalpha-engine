@@ -10,7 +10,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * After the health probe: a site routed to the lowest of one service's ports
- * moves to the one other port that served a page (Cabernet, engine#352).
+ * moves to the one other port that served a page (Cabernet).
  */
 class AppLauncherRerouteTest extends TestCase
 {

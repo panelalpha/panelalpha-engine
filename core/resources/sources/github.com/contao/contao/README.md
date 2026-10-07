@@ -14,10 +14,10 @@ HTTP. The README says it in as many words:
 > **Please do not use `contao/contao` in production**! Use the split packages
 > instead.
 
-Detection read it correctly: `composer.json` and no `artisan`, so the `php`
+Detection reads it correctly: `composer.json` and no `artisan`, so the `php`
 strategy, PHP 8.4 against `"php": "^8.4"`, the shared Apache base image with
-`~/project` bind-mounted — and no `index.php` anywhere. The tracker's
-`serving-missing_entry` was a true statement about the tree.
+`~/project` bind-mounted — and no `index.php` anywhere, so without the recipe
+there is nothing to serve.
 
 ## Why there is a recipe here anyway
 
@@ -76,8 +76,7 @@ in the back end, or drop the backup file before the first deploy.
 
 `var/backups/backup__20260101000000.sql` contains `tl_user` row 1: `k.jones`
 (Kevin Jones), `admin = 1`, `login = 1`, with a bcrypt hash that
-`password_verify()` matches against **`kevinjones`** — checked against this
-dump, not assumed. `tl_member` seeds `j.smith` the same way. Restored
+`password_verify()` matches against **`kevinjones`**. `tl_member` seeds `j.smith` the same way. Restored
 unchanged onto a public domain, that is the Contao back end handed to anyone
 who has read the demo's documentation.
 
@@ -85,10 +84,7 @@ who has read the demo's documentation.
 password and sets `disable = 1`, in the install stage, before Apache is
 started. Disabled rather than deleted: the demo's pages, articles and news
 items carry those ids in their author and permission columns, and removing the
-rows would leave the example site pointing at users that do not exist. Verified
-on the deployed site over its own HTTPS domain: `admin` and the generated
-password land on the Dashboard, while `k.jones` / `kevinjones` is bounced back
-to `/contao/login` and `/contao` keeps rendering the login form.
+rows would leave the example site pointing at users that do not exist.
 
 To use a demo member account, re-enable it in the back end and set a password
 there.
@@ -112,8 +108,7 @@ because the answer decides what a visitor can fetch. Outside the document root
 and therefore unreachable: `.env`, `.env.local`,
 `.panelalpha-admin-password`, `composer.json`, `composer.lock`, `.git/`,
 `vendor/`, `var/` (logs, cache, the database dump) and the whole
-`.contao-monorepo/` tree. Verified on the deployed site: the dotfiles and
-`.contao-monorepo/` answer 403, the rest 404, and none of them return content.
+`.contao-monorepo/` tree.
 
 `files/` *is* reachable, through the `public/files/contaodemo` symlink
 `contao:symlinks` creates. That is Contao's media library and is meant to be:
@@ -141,9 +136,8 @@ on that list, and both are load-bearing:
   `assets/`. With the plugin off they stay in `vendor/` and every back-end
   script and stylesheet is a 404.
 
-Measured on this host: that host pass installs 180 packages in about 25 s and
-leaves no `public/`, no `assets/` and no `plugins.php`. This is the shape of
-engine#168.
+So the host pass leaves no `public/`, no `assets/` and no `plugins.php`. This
+is what a lock pinning plugins outside that allowlist looks like.
 
 So the host pass is left to do the part it is good at — resolving the graph and
 writing `composer.lock`, with a per-account Composer cache, which makes the
@@ -156,7 +150,7 @@ into it; the manager plugin writes `plugins.php`; and the root package's
 (`public/index.php`, `public/preview.php`, `public/.htaccess`, `bin/console`),
 the bundle assets, the symlinks and a warm prod cache. The stale
 `vendor/contao-components/*` copies the first pass left behind are then
-deleted — about 30 MB.
+deleted.
 
 The demo's own `composer.json` is **not** used verbatim: it carries no
 `config.allow-plugins`, because it is meant to be installed by `composer
@@ -184,8 +178,7 @@ whenever the kernel secret it sees is empty, and it runs on every deploy. Left
 alone, the secret would rotate on each redeploy and take every session and
 remember-me cookie with it. `prepare.sh` writes the generated secret into
 `.env` instead, where it is a process environment variable before contao-setup
-looks — measured: after a full install `.env.local` contains `DATABASE_URL`
-and nothing else.
+looks.
 
 `DATABASE_URL` goes the other way, into `.env.local`: the credentials do not
 exist when the prepare hook runs. The password is `rawurlencode`d before it is
@@ -227,10 +220,9 @@ unload every `docker-php-ext-*.ini` — intl, gd, pdo_mysql, opcache, the lot.
 ## Readiness
 
 `AppLauncher` runs `docker compose up -d` without `--wait` and the probe hits
-as soon as it returns (engine#90). The install stage here is a Composer
-install, a database restore and a migration — minutes on a shared host — and a
-Contao whose prod cache is still being built answers 500, which was seen
-repeatedly while developing this recipe.
+as soon as it returns. The install stage here is a Composer
+install, a database restore and a migration, which take minutes, and a Contao
+whose prod cache is still being built answers 500.
 
 `ready` — `alpine:3`, `entrypoint: exit 0`, `restart: "no"` — waits on the app
 healthcheck, so `up -d` blocks until Contao answers. A clean `exit 0` is not a
@@ -265,10 +257,9 @@ names — which also means `X-Forwarded-Host` stays untrusted.
 
 `mem_limit: 1400m` on the app, 64m on `ready`: 1464 m inside a 2000 m account.
 `ServiceLimits` caps an app-role service it did not write at 384m and the
-install stage does not fit in it — a Composer install over 180 packages, then
-contao-setup, then the demo restore and `contao:migrate`. In an override file
-the limit reaches Docker as written; the hardener never sees it. Measured idle
-after a first boot: about 115 MB.
+install stage does not fit in it — a Composer install of the whole Managed
+Edition, then contao-setup, then the demo restore and `contao:migrate`. In an
+override file the limit reaches Docker as written; the hardener never sees it.
 
 ## Not configured
 

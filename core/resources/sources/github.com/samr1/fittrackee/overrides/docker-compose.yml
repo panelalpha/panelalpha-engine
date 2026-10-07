@@ -103,7 +103,7 @@ services:
       - staticmap-cache:/usr/src/app/.staticmap_cache
       - logs:/usr/src/app/logs
     ports:
-      # Only the app publishes a port (engine#231/#234).
+      # Only the app publishes a port.
       - "5000:5000"
     depends_on:
       fittrackee-db:
@@ -152,7 +152,7 @@ services:
     mem_limit: 512m
 
   # No-op gate: `docker compose up` blocks on these depends_on conditions, so up
-  # returns only once the site answers AND the admin has been seeded (engine#204)
+  # returns only once the site answers AND the admin has been seeded
   # -- the deploy never turns green without an owner account.
   ready:
     image: fittrackee/fittrackee:v1.3.5

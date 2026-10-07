@@ -9,7 +9,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * The probe reports the path that answered, and follows a path-relative
- * Location to get there (#200). Runs the generated script against a real
+ * Location to get there. Runs the generated script against a real
  * server, as HealthProbeRedirectTest does.
  */
 class HealthProbeLandingTest extends TestCase

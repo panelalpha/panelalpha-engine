@@ -9,7 +9,7 @@ use App\System\Project\Dind\TenantEgressGuard;
 use Tests\TestCase;
 
 /**
- * engine#217: the guard's service is turned on exactly when its script is
+ * The guard's service is turned on exactly when its script is
  * written, through whichever init the account runs.
  */
 class TenantEgressGuardServiceTest extends TestCase

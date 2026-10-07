@@ -2,11 +2,11 @@
 #
 # configure-quota.sh against stubbed findmnt/quotaon/mount, without root and
 # without touching a real filesystem. The real run, against a loopback ext4,
-# is recorded in the MR for #244.
+# is recorded in the merge request for this fix.
 #
 #   bash scripts/configure-quota.test.sh
 #
-# The regression this guards (#244): the installer installed the `quota`
+# The regression this guards: the installer installed the `quota`
 # package and nothing ever turned quota on, so every setquota the engine ran
 # was a no-op and no disk limit was enforced.
 

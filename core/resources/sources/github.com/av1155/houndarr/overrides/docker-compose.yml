@@ -34,7 +34,7 @@ services:
       # Served over HTTPS by the engine's proxy.
       HOUNDARR_SECURE_COOKIES: "true"
       # HOUNDARR_TRUSTED_PROXIES stays unset on purpose: Houndarr would take
-      # the left-most X-Forwarded-For, which a visitor controls (engine#319).
+      # the left-most X-Forwarded-For, which a visitor controls.
     volumes:
       - data:/data
     ports:

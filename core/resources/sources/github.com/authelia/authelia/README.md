@@ -4,9 +4,8 @@ An authentication and authorization server: one Go binary serving a React
 login portal and a JSON API on `:9091`, with SQLite behind it and a YAML file
 or LDAP as its user directory.
 
-Detection: `dockerfile`, and that part was right. The verdict was
-`serving-unknown` — `app (Restarting (1) 9 seconds ago)`, nothing ever
-listening on 9091.
+Detection picks `dockerfile`, which is right. Without the recipe the container
+restarts in a loop and nothing ever listens on 9091.
 
 ## Is a standalone Authelia worth deploying at all?
 
@@ -33,7 +32,7 @@ So: a usable identity provider on its own domain, not a way to gate the
 neighbours. Deploying it is worthwhile; expecting it to protect a second
 PanelAlpha account is not.
 
-## Why it exited
+## Why it does not start on its own
 
 Authelia will not start without a configuration file, and the configuration has
 four things in it that nothing in the checkout knows.
@@ -156,32 +155,9 @@ the image's: `/app/healthcheck.sh` sources `/app/.healthcheck.env` and
 as far as writing that file reports *healthy*. The override polls
 `http://127.0.0.1:9091/api/health` instead.
 
-## Verified
+## Version string
 
-Two `deploy-ok` runs on mariusz, 165.8s and 256.1s (both full no-cache builds;
-the second shared the host with three other batches). `app Up (healthy)`,
-`ready Exited (0)`, health probe green on 9091, HTTP 200 on the account's
-domain, every `_baseline` check passing. The container log is clean —
-`Storage schema migration from 0 to 29 is complete`, `Startup complete`,
-`Listening for non-TLS connections on '[::]:9091'` — with one warning, that no
-access-control rules were specified, which is true and is the point.
-
-Beyond the 200, over the public https domain on the second account:
-
-- `GET /` serves the portal with `<base href="https://<account>.panelalpha.online/" />`,
-  and the bundle carries no istanbul instrumentation (which is what the
-  `pnpm build` substitution was for).
-- `GET /api/health` → `{"status":"OK"}`.
-- `POST /api/firstfactor` with the generated admin password → `{"status":"OK"}`
-  and an `authelia_session` cookie scoped to the account's domain.
-- `GET /api/state` with that cookie →
-  `{"username":"admin","authentication_level":1,"factor_knowledge":true}`.
-- `GET /api/user/info` → the `admin` account, `has_totp: false`, i.e. the
-  enrolment path is reachable.
-- A wrong password → `401`, and after three the regulator refuses the *correct*
-  password too, for the configured `ban_time`.
-
-One cosmetic thing is not fixed: the instance logs its version as
+The instance logs its version as
 `Authelia untagged-unknown-dirty (master, unknown) is starting`. Those values
 come from `-X` ldflags upstream's CI sets (`BuildTag`, `BuildCommit`,
 `BuildState`), and nothing in the repository's Dockerfiles sets them — a

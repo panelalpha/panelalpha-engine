@@ -7,7 +7,7 @@ use App\System\Project\Dind as DindProject;
 /**
  * Which running containers bind-mount something under ~/project. Those keep
  * reading the old, unlinked tree once a rebuild replaces it, so only they
- * force the app down before the wipe (engine#33).
+ * force the app down before the wipe.
  */
 final class ProjectBindMounts
 {

@@ -13,14 +13,14 @@ description: >-
   UDP. --trust-proxy (upstream's flag for running behind a reverse proxy)
   makes the tracker record the visitor's address from X-Forwarded-For rather
   than the account gateway's; it takes the first entry, which a client can
-  set itself (engine#319). The tracker keeps its swarm state in memory only,
+  set itself. The tracker keeps its swarm state in memory only,
   so there is no data to keep across redeploys.
 extends: express
 commands:
   - id: npm-install
     stage: build
     role: dependencies
-    # {{js.install}} is not resolved in a recipe (engine#351); the repo has no lockfile.
+    # {{js.install}} is not resolved in a recipe; the repo has no lockfile.
     run: 'npm install --omit=dev --no-audit --no-fund'
   # Not `serve`: under that id the node platform swaps in package.json's `bin`.
   - id: tracker-serve

@@ -18,7 +18,7 @@ description: >-
   then falls back to a PUBLIC hardcoded default "onloc-access-token-secret",
   letting anyone forge a valid admin JWT for a location database), and keeps its
   data and uploads in ./data and ./uploads bind mounts under ~/project, which
-  the engine wipes on every redeploy (engine#173). The replacement pulls the
+  the engine wipes on every redeploy. The replacement pulls the
   same four official images but: generates the DB password and both token
   secrets once into ~/.panelalpha/onloc/ (0600, reused across redeploys so the
   database and existing sessions survive), moves the database and uploads onto

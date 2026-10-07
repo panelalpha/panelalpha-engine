@@ -91,7 +91,7 @@ class DeployFailureExplainer
     /**
      * Whether $output shows the compose building the image $ref locally. Docker
      * compose pulls an image a sibling service builds before building it (the
-     * local-tag pattern that sidesteps engine#229), and that pull's `failed to
+     * local-tag pattern that sidesteps an image-seed NotFound), and that pull's `failed to
      * resolve reference ... not found` is benign, not a missing base image.
      * BuildKit tags what it builds with `naming to <ref>`, so that line for the
      * same repository is the signal the tag was produced here, not fetched.
@@ -365,7 +365,7 @@ class DeployFailureExplainer
                 '/(The pkg-config command could not be found'
                     . '|Package \\S+ was not found in the pkg-config search path'
                     . '|Could not find \\S+ using pkg-config'
-                    // lxml's own sdist build (engine#120).
+                    // lxml's own sdist build.
                     . '|make sure the \\S+ (?:and \\S+ )?development packages are installed)/i',
                 static fn (): string =>
                     'A dependency has to be compiled and needs development headers that the build '
@@ -590,7 +590,7 @@ class DeployFailureExplainer
 
             // An uppercase image name. The daemon takes a first component it cannot read as a
             // repository for a registry host, so `HaschekSolutions/pictshare:3` failed as a DNS
-            // lookup of `HaschekSolutions` and read as an unreachable registry (#125).
+            // lookup of `HaschekSolutions` and read as an unreachable registry.
             // Above base-image-unavailable, which would otherwise claim it.
             'image-reference-invalid' => [
                 '/(?:failed to resolve reference "([^"\n]+)"'
@@ -650,7 +650,7 @@ class DeployFailureExplainer
             ],
 
             // runc could not reach the account daemon's libnetwork socket, so no RUN step
-            // can start (engine#111). The trailing BuildKit EOF says nothing.
+            // can start. The trailing BuildKit EOF says nothing.
             'build-daemon-fault' => [
                 '/error running prestart hook[^\n]*libnetwork\/\S+\.sock/',
                 static fn (): string =>
@@ -660,7 +660,7 @@ class DeployFailureExplainer
             ],
 
             // `FROM ${BASE_IMAGE}` with no default, the value only the repo's CI passes
-            // (livebook, engine#143). BuildKit refuses before pulling anything.
+            // (livebook). BuildKit refuses before pulling anything.
             'build-arg-unset' => [
                 '/base name \(\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?\) should not be blank/',
                 static fn (array $m): string =>
@@ -685,15 +685,15 @@ class DeployFailureExplainer
             // the ambiguous one: it is also the benign compose pull of a locally-built tag, so
             // a ref this same log then builds (see tagBuiltLocally) is not a missing base image.
             // The sentence says which of not-found / private / unreachable the daemon
-            // reported (engine#100); the slug stays one, for telemetry's history.
+            // reported; the slug stays one, for telemetry's history.
             'base-image-unavailable' => [
                 self::REGISTRY_ERROR,
                 static fn (array $m, string $output = ''): ?string => self::baseImageFailure($output),
             ],
 
             // A base image whose distribution release is end of life: bullseye-security
-            // 404s on the +deb11uN packages its index names (engine#114), CentOS 7's
-            // mirrorlist host is gone (engine#102). The generic exit code named neither.
+            // 404s on the +deb11uN packages its index names, CentOS 7's
+            // mirrorlist host is gone. The generic exit code named neither.
             'package-archive-gone' => [
                 '/(E: Failed to fetch \S+\s+404\s+Not Found|Could not resolve host: mirrorlist\.centos\.org)/i',
                 static fn (): string =>
@@ -927,7 +927,7 @@ class DeployFailureExplainer
             ],
 
             // The remote listed its refs, then refused the next request: it is
-            // readable, and a private repo is refused before that line (#188).
+            // readable, and a private repo is refused before that line.
             'repo-read-interrupted' => [
                 '/expected flush after ref listing/i',
                 static fn (): string =>
@@ -950,7 +950,7 @@ class DeployFailureExplainer
 
             // A COPY/ADD of a path the checkout does not have: a packaging Dockerfile that
             // expects CI to have built `target/` or `dist/` into the context first.
-            // Also damselfly's `dotnet publish` output (engine#133).
+            // Also damselfly's `dotnet publish` output.
             'build-context-missing' => [
                 '/failed to (?:compute cache key|calculate checksum of ref)[^\n]*?"\/?([^"\n]+)": not found/i',
                 static fn (array $m): string =>
@@ -960,7 +960,7 @@ class DeployFailureExplainer
                         . '.dockerignore excludes it.',
             ],
 
-            // hitobito (engine#116): a rake task requires a gem from a group the
+            // hitobito: a rake task requires a gem from a group the
             // Dockerfile's own BUNDLE_WITHOUT leaves out.
             'ruby-gem-not-loaded' => [
                 '/LoadError: cannot load such file -- (\S+)/',

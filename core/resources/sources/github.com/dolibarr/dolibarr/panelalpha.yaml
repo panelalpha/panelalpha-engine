@@ -6,8 +6,8 @@ description: >-
   at the root, only `composer.json.disabled` with `vendor-dir` pointed at
   `htdocs/includes`, so `php.yaml`'s `none: [file: composer.json]` holds, the
   `php-plain` manifest claims it, and nothing resolves a dependency tree
-  because the dependencies are committed. A deploy takes 45 s. Four things
-  still have to be said, and only the first is the document root.
+  because the dependencies are committed. Four things still have to be said,
+  and only the first is the document root.
 
   **The document root is `htdocs/`.** As committed,
   `PhpDocroot::CANDIDATES` is `['public', 'web', 'public_html', 'webroot']` and
@@ -17,8 +17,7 @@ description: >-
   emits no `PA_DOCROOT`, the base image serves `/app`, and Apache answers 403 —
   which `resources/checks/php/entry-served.yaml` reports as
   `serving: missing_entry`. `docroot: htdocs` states it; being a plain relative
-  path it survives `PlatformManifest::readDocroot()`, where `.` would not
-  (engine #172).
+  path it survives `PlatformManifest::readDocroot()`, where `.` would not.
 
   **Serving `htdocs/` is also most of what makes this safe to host.** `dev/`
   (which ships a development compose file and a Dockerfile), `doc/`,
@@ -27,16 +26,15 @@ description: >-
   `docker-compose.yml` and `.env` are all *siblings* of the document root and
   unreachable by construction rather than by a rule.
 
-  **The install wizard is first-visitor-wins, and that is the real finding
-  here.** `htdocs/filefunc.inc.php:222` sends every request to
-  `install/index.php` when `conf/conf.php` is missing, and that wizard takes
-  the database credentials, the data directory and the administrator password
-  from whoever asks first, with no authentication of any kind. Measured
-  without this recipe on a public HTTPS domain: `/` answers `302` to
+  **The install wizard is first-visitor-wins.** `htdocs/filefunc.inc.php:222`
+  sends every request to `install/index.php` when `conf/conf.php` is missing,
+  and that wizard takes the database credentials, the data directory and the
+  administrator password from whoever asks first, with no authentication of any
+  kind. Without this recipe, on a public HTTPS domain, `/` answers `302` to
   `install/index.php`, which answers `200` with the wizard — and the engine
-  scores that account `deploy-ok`, `serving: ok`, because a redirect to a 200
-  is indistinguishable from a working site. The window is however long it
-  takes the owner to open a browser.
+  scores that account `serving: ok`, because a redirect to a 200 is
+  indistinguishable from a working site. The window is however long it takes the
+  owner to open a browser.
 
   `files/panelalpha-dolibarr-setup.php` closes it on the install stage, before
   Apache binds, by driving Dolibarr's own wizard rather than reimplementing
@@ -57,8 +55,8 @@ description: >-
   **`documents/` is Dolibarr's data directory and its default is inside the
   checkout.** `install/inc.php:224` defaults `$dolibarr_main_data_root` to
   `DOL_DOCUMENT_ROOT.'/../documents'`, which here is `/app/documents` — and
-  `ProjectTree::clearContents()` empties `~/project` before every clone
-  (engine #173). Left alone, every attachment, every generated invoice PDF and
+  `ProjectTree::clearContents()` empties `~/project` before every clone.
+  Left alone, every attachment, every generated invoice PDF and
   `install.lock` itself would be deleted on each redeploy. The compose override
   bind-mounts `~/.panelalpha/dolibarr` at `/data`, and `conf.php`,
   `documents/` and `custom/` (external modules) all live there. `conf.php`
@@ -95,12 +93,12 @@ database: mysql
 commands:
   # No `id:`, deliberately. A stale detection cache drops every stage command
   # from a recipe that carries one while the log still reports "Recipe named
-  # by ..." (engine #169); omitting it and extending a shipped manifest is the
+  # by ..."; omitting it and extending a shipped manifest is the
   # mitigation.
   #
   # Declaring `commands:` replaces what php-plain.yaml declared, which is
   # `commands: {}` — there is nothing to lose. Nothing runs on the `build`
-  # stage: it would be inert for a source recipe anyway (engine #171), and
+  # stage: it would be inert for a source recipe anyway, and
   # there is no dependency tree to resolve.
   - stage:
       - install

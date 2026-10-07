@@ -38,7 +38,7 @@ services:
     mem_limit: 1536m
 
   mongodb:
-    # mongo:7.0 rather than upstream's 8.0 (MongoDB 8 does not start on kernel 6.19+, engine#146).
+    # mongo:7.0 rather than upstream's 8.0 (MongoDB 8 does not start on kernel 6.19+).
     image: mongo:7.0
     restart: unless-stopped
     command: ["mongod", "--noauth", "--quiet", "--bind_ip_all"]

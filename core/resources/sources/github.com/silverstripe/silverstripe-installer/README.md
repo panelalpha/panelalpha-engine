@@ -8,10 +8,10 @@ pulls in. The default branch is `6`, and every SilverStripe requirement on it
 is a `x-dev` constraint under `minimum-stability: dev` — that is how upstream
 develops, and it resolves against Packagist like any other tree.
 
-## What was wrong
+## What goes wrong without it
 
-Before this recipe the deploy finished `deploy-ok` and the site answered
-**403** in 45s. Nothing in the engine was broken; one Composer flag was.
+Without this recipe the deploy finishes and the site answers **403**. Nothing
+in the engine is broken; one Composer flag is.
 
 `platforms/php.yaml` installs dependencies with `--no-plugins`, because a
 Composer plugin is arbitrary PHP out of a customer repository and the host
@@ -25,7 +25,7 @@ Composer plugins:
 | `silverstripe/vendor-plugin` | exposes each module's `client/dist` into `public/_resources/` |
 
 All three are pinned by the project's own `config.allow-plugins`. With them
-disabled the deploy logged
+disabled the deploy logs
 
 ```
 The "composer/installers" plugin was not loaded as plugins are disabled.
@@ -33,11 +33,11 @@ The "silverstripe/recipe-plugin" plugin was not loaded as plugins are disabled.
 The "silverstripe/vendor-plugin" plugin was not loaded as plugins are disabled.
 ```
 
-and left `public/` holding `assets/`, `_graphql/` and `favicon.ico` — no index
-file. `PhpDocroot::detect()` then found no index anywhere in the tree and
-returned `''`, so `PhpStrategy::documentRoot()` emitted no `PA_DOCROOT`, and
-`/usr/local/bin/panelalpha-serve` fell back to its own `[ -d /app/public ]`
-test and pointed Apache at that empty directory. Apache's answer to a document
+and leaves `public/` holding `assets/`, `_graphql/` and `favicon.ico` — no index
+file. `PhpDocroot::detect()` then finds no index anywhere in the tree and
+returns `''`, so `PhpStrategy::documentRoot()` emits no `PA_DOCROOT`, and
+`/usr/local/bin/panelalpha-serve` falls back to its own `[ -d /app/public ]`
+test and points Apache at that empty directory. Apache's answer to a document
 root with no `DirectoryIndex` match and `-Indexes` is 403.
 
 ## What this recipe does
@@ -46,8 +46,8 @@ root with no `DirectoryIndex` match and `-Indexes` is 403.
   file is written rather than inferred from whatever the build left behind.
 * **`silverstripe-composer-install`** (install + upgrade) — `rm -rf vendor &&
   composer install`, inside the account's container, with the plugins on. The
-  host build's `composer.lock` makes it resolve nothing. Two other shapes were
-  tried and measured: a plain `composer install` over the existing tree does no
+  host build's `composer.lock` makes it resolve nothing. Two other shapes do
+  not work: a plain `composer install` over the existing tree does no
   package operation at all, so no plugin event fires; `composer reinstall
   "*/*"` fires the events but reinstalls each package into the path already in
   `vendor/composer/installed.json`, which leaves `silverstripe/startup-theme`

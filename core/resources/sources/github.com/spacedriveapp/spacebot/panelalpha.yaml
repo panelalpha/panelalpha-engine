@@ -4,7 +4,7 @@ description: >-
   API on :19898 (Rust). The plain deploy builds the repo's Dockerfile, a
   `cargo build --release` with LTO that is OOM-killed inside a 4096 MB
   account (BuildKit ResourceExhausted, reported as "Rust code does not
-  compile", engine#353).
+  compile").
 
   This recipe runs the image upstream publishes for the current release,
   ghcr.io/spacedriveapp/spacebot:v0.5.0, as upstream's Docker docs do. Nothing

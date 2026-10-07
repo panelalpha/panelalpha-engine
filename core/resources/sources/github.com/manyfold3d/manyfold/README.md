@@ -14,8 +14,7 @@ SMTP and other options are upstream's env vars (`MULTIUSER=enabled`, ...).
 
 - `overrides/docker-compose.yml` runs upstream's single-container image
   `manyfold3d/manyfold-solo` 0.150.0 (SQLite + bundled Redis) instead of the
-  engine's Rails source build, which fails on `ruby file: ".ruby-version"`
-  (engine#421).
+  engine's Rails source build, which fails on `ruby file: ".ruby-version"`.
 - `hooks/prepare.sh` generates `SECRET_KEY_BASE` once into
   `~/.panelalpha/manyfold/app.env`.
 - `/config` (database, plugins) and `/libraries` are named volumes; a one-shot

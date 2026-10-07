@@ -28,7 +28,7 @@ final class SourceRecipes
 
     /**
      * root => the walk's signature and what it found. The signature is checked
-     * on every call, so a recipe added to a running worker is seen (engine#169).
+     * on every call, so a recipe added to a running worker is seen.
      *
      * @var array<string, array{signature: string, manifests: list<PlatformManifest>}>
      */
@@ -253,7 +253,7 @@ final class SourceRecipes
         $root = rtrim($directory ?? self::defaultDirectory(), '/');
         // A queue worker outlives the tree it first read. Caching the walk
         // unconditionally made findById() miss a recipe for() had just found,
-        // and the deploy then ran none of its commands (engine#169).
+        // and the deploy then ran none of its commands.
         $directories = self::directories($root);
         $signature = self::signature($directories);
         if (isset(self::$allCache[$root]) && self::$allCache[$root]['signature'] === $signature) {

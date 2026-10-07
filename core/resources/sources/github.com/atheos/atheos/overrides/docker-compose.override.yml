@@ -27,7 +27,7 @@ services:
       #
       # Upstream puts the first two inside the checkout -- WORKSPACE and DATA
       # both default to BASE_PATH . "/..." -- and a redeploy re-clones
-      # ~/project after clearing it (engine#173). For a blog that loses a cache;
+      # ~/project after clearing it. For a blog that loses a cache;
       # for an IDE it deletes the customer's source code and their login. The
       # generated config.php points both constants here instead.
       #

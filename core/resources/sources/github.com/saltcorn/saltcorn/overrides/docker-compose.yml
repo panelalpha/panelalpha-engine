@@ -8,7 +8,7 @@ services:
     # -a adds the Saltcorn schema to an empty database on first start.
     command: ["serve", "-a"]
     # Not .env: the engine seeds it from upstream's .env.example, a local-testing
-    # file with SQLITE_FILEPATH and a fixed session secret (engine#218).
+    # file with SQLITE_FILEPATH and a fixed session secret.
     env_file:
       - ../.panelalpha/saltcorn/db.env
       - ../.panelalpha/saltcorn/app.env

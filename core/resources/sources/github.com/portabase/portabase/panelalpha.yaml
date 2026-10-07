@@ -23,14 +23,3 @@ description: >-
   PROJECT_URL/api/config, so the site address must carry a certificate the
   container trusts (a real one; the self-signed panelalpha.direct fallback
   makes every page 500 with DEPTH_ZERO_SELF_SIGNED_CERT).
-
-  == Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 2500 ==
-
-  Trusted certificate, no TLS override. Fresh create: success, health :8887
-  200. / answers 200 with a redirect to the onboarding at /welcome (<title>Portabase</title>);
-  /api/config reports the https site address. Signed up over https (first
-  user got role superadmin) and signed in with a session. /.env and
-  /.git/config are the app's 404 page. Rebuild: success in 31 s, the same
-  user signed in again (bundled PostgreSQL on the /data volume). Also
-  verified on 10.10.10.25, which needed NODE_TLS_REJECT_UNAUTHORIZED=0 for
-  its self-signed name.

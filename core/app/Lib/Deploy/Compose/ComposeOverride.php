@@ -8,7 +8,7 @@ use Symfony\Component\Yaml\Yaml;
 
 /**
  * A compose file layered over the engine's run file with `-f`, made as safe as
- * the run file itself (engine#48, item 9).
+ * the run file itself.
  *
  * The run file goes through {@see ServiceHardener}; an override used to reach
  * Docker as written, so `privileged: true` or a docker.sock mount came back

@@ -8,7 +8,7 @@ services:
   app:
     # The embedded database (users, entities, settings, every analytics event)
     # is all the state Liwan has, and ~/project is wiped and re-cloned on every
-    # deploy (engine#173). A named volume survives rebuilds; a bind mount into
+    # deploy. A named volume survives rebuilds; a bind mount into
     # ~/project would not.
     volumes:
       - liwan-data:/data

@@ -6,8 +6,8 @@
 # frontend (:3000) and backend (:5000) internally, so the app is a single
 # origin on one port. PostgreSQL is the one external datastore.
 #
-# Seeding a Docker Hub image also sidesteps engine#229 (image-seed NotFound on
-# a from-registry seed, which is the GHCR case, not Hub).
+# Seeding a Docker Hub image also sidesteps the image-seed NotFound on
+# a from-registry seed (the GHCR case, not Hub).
 services:
   db:
     # Ryot needs Postgres >= 15; upstream's own compose pins 18-alpine. Ryot
@@ -61,7 +61,7 @@ services:
       # un-rewritten localhost fallback does not 400 the site.
       FRONTEND_URL: "http://localhost:8000"
     # Only the app publishes a port; the engine's port scan takes 8000 as the
-    # primary (engine#231/#234).
+    # primary.
     ports:
       - "8000:8000"
     healthcheck:
@@ -96,8 +96,7 @@ services:
 
   # Starts nothing, exits 0, and gates on the owner having been claimed, so
   # `docker compose up -d` returns -- and the deploy reports finished -- only
-  # once Ryot answers AND its owner exists, not the moment a container launches
-  # (engine#204).
+  # once Ryot answers AND its owner exists, not the moment a container launches.
   ready:
     image: alpine:3
     entrypoint: ["/bin/sh", "-c", "exit 0"]

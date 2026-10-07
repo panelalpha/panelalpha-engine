@@ -5,10 +5,10 @@
 # not-an-open-installer is asked only when the redirects from `/` end under an
 # installer path. Matomo without config.ini.php and Nextcloud before its first
 # administrator answer `/` with a 200 and the wizard, no redirect, so that
-# check never looked and the deploy said `serving: ok` (#521).
+# check never looked and the deploy said `serving: ok`.
 #
-# Asked wherever the probe lands, so the markers carry it alone. Each was
-# measured on the unfinished installer of the stock image and is absent from
+# Asked wherever the probe lands, so the markers carry it alone. Each is
+# present on the unfinished installer of the stock image and absent from
 # the same application's other pages: Matomo's installer stylesheet is linked
 # only from plugins/Installation/templates/layout.twig (its `&rsaquo;
 # Installation` title is WordPress's too), and Nextcloud's login page loads

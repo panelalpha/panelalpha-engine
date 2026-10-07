@@ -3,14 +3,12 @@
 Fusio is a self-hosted API management platform: a PSX application on Symfony's
 dependency-injection container and Doctrine DBAL, whose routes, operations,
 schemas, apps and users all live in its own database, with a downloadable
-administration interface served from `public/apps/fusio`. Tracker issue
-[#777](https://git.modulesgarden.tech/panelalpha/playground/supported-apps/-/work_items/777).
+administration interface served from `public/apps/fusio`.
 
 Detection reads the repository correctly on its own — `composer.json` and no
 `artisan`, so the `php` strategy, PHP 8.4, the shared Apache base image with
-`~/project` bind-mounted, `composer install` on the host. The deploy finished
-successfully without this recipe and every request answered **HTTP 500**, which
-is the `serving-error_page` verdict it exists to fix.
+`~/project` bind-mounted, `composer install` on the host. Without this recipe
+the deploy finishes and every request answers **HTTP 500**.
 
 ## What the engine could not infer
 
@@ -122,8 +120,10 @@ The healthcheck asks for two things, and the second is the interesting one:
 1. `GET /` — `meta.getAbout`, a public operation that only exists once the
    migrations have inserted it, answered by a router that reads its routes out
    of the database. A 200 means the schema is built and Doctrine can reach it.
-2. `GET /system/health` — grepped for `"healthy":true`, not trusted for its
-   status code, because the operation answers 200 either way. What it reports
+2. `GET /system/health` — grepped for a true `healthy`, not trusted for its
+   status code, because the operation answers 200 either way. PSX
+   pretty-prints its JSON whatever `psx_debug` says, so the body reads
+   `"healthy": true` and the pattern has to allow the space. What it reports
    is a live ping of every connection stored in the database, and those
    connection configs are encrypted with `APP_PROJECT_KEY` — so this is the one
    request that proves the key the deploy generated is the key the data was
@@ -150,42 +150,10 @@ account's address nor its domain. Override either with `FUSIO_ADMIN_USER` /
 
 Sign in at `https://<domain>/apps/fusio`.
 
-## Verified on mariusz, 2026-09-20
+## Known limits
 
-- Batch run from a clean account: `deploy-ok`, `serving: ok`, HTTP 200, 12 of
-  12 health checks pass, 90s with the base image cached (the run that had to
-  build it took about fifteen minutes).
-- The install stage's own log: the migrations through
-  `Version20260829083317`, `created administrator admin <admin@example.com>`,
-  `Installed app fusio/fusio`, `installed the backend app at /apps/fusio`.
-- A real password login over the public domain, with the generated password:
-  `POST /authorization/token`, `grant_type=password`, → 200 with an access
-  token whose `iss` is the account's own https URL.
-- An authenticated call with it: `GET /backend/account` → 200,
-  `"name": "admin"`, role 1, all 57 backend and consumer scopes.
-- `GET /apps/fusio/` → 200, and its `index.html` carries
-  `FUSIO_URL = 'https://<domain>/'` — the URL substitution the CLI could only
-  get right because `APP_URL` was written first.
-- Exposure: `.env`, `.panelalpha-admin-password`, `docker-compose.yml` and
-  `.git/config` answer 403; `configuration.php`, `provider.php`,
-  `container.php`, `composer.json`, `panelalpha/fusio-setup.sh` and
-  `install.php` answer 404, all of them being outside `public/`.
-
-Two things worth knowing if this recipe is changed. The first attempt at the
-healthcheck grepped for `"healthy":true` and never went healthy: PSX
-pretty-prints its JSON whatever `psx_debug` says, so the body reads
-`"healthy": true` and the `ready` gate held `docker compose up -d` open until
-it timed out — with a perfectly working application behind it. And an earlier
-`hooks/prepare.sh` kept its secrets in `$HOME`, which fails the deploy at the
-redirection: an account home is root-owned and `755`.
-
-## Not done
-
-- No `overrides/app.sh`: no `info`, `install`, `users:*` or SSO. The material
-  is there — `system:user_add` and `system:token` cover creating a user and
-  minting a token for it, and the backend API has full user CRUD — so the
-  strategy would be "built-in CLI commands", the simplest one. This recipe
-  only gets the application deployed, installed and safe.
+- No `overrides/app.sh`: no `info`, `install`, `users:*` or SSO from the panel.
+  Users are managed in Fusio's own backend.
 - Fusio's cronjobs (`system:cronjob_execute`) and the messenger consumer
   (`messenger:consume`, configured as `doctrine://default`) are not scheduled
   or run. Nothing in the default installation needs them, but an account that

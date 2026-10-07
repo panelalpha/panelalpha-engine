@@ -60,7 +60,7 @@ final class EnvironmentLines
     /**
      * `key=value`, double-quoted when the value holds anything else. Written
      * bare, `ENV A=x y` fails the build ("can't find = in y") and a newline
-     * starts a new Dockerfile instruction (engine#48 item 23).
+     * starts a new Dockerfile instruction.
      */
     private static function pair(string $key, string $value): string
     {

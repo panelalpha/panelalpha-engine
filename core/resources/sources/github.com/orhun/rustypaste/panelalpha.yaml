@@ -11,8 +11,8 @@ description: >-
   orhunp/rustypaste on Docker Hub and tags every release; this recipe runs that
   official image with a compose-replace, pinned to the current stable release
   0.18.1. Building from source would compile a Rust binary on the host for no
-  gain, and a Docker Hub seed also sidesteps engine#229 (image-seed NotFound is
-  the GHCR/registry-save case, not Hub). The image is FROM scratch (no shell),
+  gain, and a Docker Hub seed also sidesteps the image-seed
+  NotFound (the GHCR/registry-save case, not Hub). The image is FROM scratch (no shell),
   so all health probing is done by an external curl sidecar.
 
   WHY COMPOSE-REPLACE. The repo's own docker-compose.yml is the bare
@@ -50,9 +50,9 @@ description: >-
   to 1000:1000 before the app starts -- keeping the app itself non-root.
 
   PORT. The app serves the landing page, uploads and retrieval on 8000; published
-  as 8000:8000, the only service that publishes a port (engine#234). A curl
+  as 8000:8000, the only service that publishes a port. A curl
   health sidecar plus a `ready` gate make `docker compose up` block until
-  rustypaste actually answers (engine#204).
+  rustypaste actually answers.
 credentials:
   adopt_from: .panelalpha/rustypaste/app.env
   fields:

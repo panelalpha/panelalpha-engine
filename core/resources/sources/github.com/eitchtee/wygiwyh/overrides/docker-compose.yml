@@ -88,7 +88,7 @@ services:
     volumes:
       - media:/usr/src/app/attachments
     # gunicorn binds :8000; publish it on 8080 so the port scan takes it as the
-    # primary (engine#231). No other service publishes a port.
+    # primary. No other service publishes a port.
     ports:
       - "8080:8000"
     healthcheck:
@@ -104,8 +104,7 @@ services:
 
   # Starts nothing, exits 0, waits on web's healthcheck. `docker compose up -d`
   # blocks on a depends_on health condition, so this makes `up` return only once
-  # the site actually answers rather than the moment containers start
-  # (engine#204).
+  # the site actually answers rather than the moment containers start.
   ready:
     image: docker.io/library/alpine:3
     entrypoint: ["/bin/sh", "-c", "exit 0"]

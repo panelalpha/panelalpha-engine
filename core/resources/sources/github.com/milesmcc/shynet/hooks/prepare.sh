@@ -24,7 +24,7 @@ fi
 # ---------------------------------------------------------------------------
 # 1. Secrets.
 #
-# engine#173: every deploy re-clones and ProjectTree::clearContents()
+# Every deploy re-clones and ProjectTree::clearContents()
 # (GitRepository.php:89) empties ~/project first, so a guard on a file in
 # there never fires. Regenerating DJANGO_SECRET_KEY logs every session out and
 # invalidates every outstanding password-reset link; regenerating the postgres

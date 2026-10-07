@@ -13,9 +13,9 @@ description: >-
   image instead of rebuilding it. A source recipe cannot use the compose
   strategy (PlatformSelector::fromSource() describes without probe data, so
   DeployabilityCheck fails "Compose strategy selected but compose file is
-  missing" even though bootstrap already wrote the compose file — measured on
-  the gancio recipe), so it ships a one-line `FROM` Dockerfile through the
-  dockerfile strategy: no build steps run, the published image is pulled, and
+  missing" even though bootstrap already wrote the compose file), so it ships
+  a one-line `FROM` Dockerfile through the dockerfile strategy: no build steps
+  run, the published image is pulled, and
   the hosting shape it needs is layered through the compose override. The only
   addition to the image is `apk add curl`, used once at boot to seed the admin
   through yarnd's own gated setup wizard — provisioning an ops tool, not a
@@ -27,14 +27,14 @@ description: >-
   BASE_URL (PublicUrlEnvironment), and yarnd maps env→flag by lowercasing
   (BASE_URL -> --base-url), so feeds carry the account domain with no rewrite.
 
-  Persistence. -d /data holds EVERYTHING and ~/project is wiped every redeploy
-  (engine#173), so /data is bind-mounted to the account's persistent
+  Persistence. -d /data holds EVERYTHING and ~/project is wiped every redeploy,
+  so /data is bind-mounted to the account's persistent
   ~/.panelalpha/yarn (the only writable, rebuild-surviving dir). The image runs
   as root via its /init entrypoint, chowns /data and drops privileges with
   su-exec; the prepare hook records the account uid/gid and the override passes
   them as PUID/PGID so the process runs as — and /data stays owned by — the
   account that wrote the bind mount. A posted twt and the admin account survive
-  a rebuild (verified).
+  a rebuild.
 
   Secrets. A production pod MUST set COOKIE_SECRET, API_SIGNING_KEY and
   MAGICLINK_SECRET; the image's entrypoint otherwise generates fresh random
@@ -45,7 +45,7 @@ description: >-
 
   Admin + registration. yarnd ships a first-run setup wizard that gates the
   whole site (every route 302s to /setup until an admin exists) — a
-  first-visitor-wins window (engine#200) if left for a stranger. The boot
+  first-visitor-wins window if left for a stranger. The boot
   command closes it: it starts yarnd, waits for it to listen, and POSTs /setup
   on localhost with the owner admin login the engine generates (`credentials:`
   below; returned by GET /projects/{name}/app-credentials, MCP

@@ -6,7 +6,7 @@
 #   bash scripts/secure-env-core.test.sh
 #   docker run --rm -v "$PWD/scripts:/s:ro" debian:trixie-slim bash /s/secure-env-core.test.sh
 #
-# The regression this guards (engine#48 item 23): the installer created
+# The regression this guards: the installer created
 # .env-core with `cp -n` under the default umask, so APP_KEY and the core
 # database password were world-readable at 0644.
 

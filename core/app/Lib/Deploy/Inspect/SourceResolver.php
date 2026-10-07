@@ -455,8 +455,7 @@ final class SourceResolver
      * submodule, inspect saw empty directories, found no composer.json and no
      * .php anywhere, and answered `deployable: false` with
      * "Runtime 'php' is required but could not be resolved" — while the very
-     * next deploy of the same URL with the same recipe came up in 120 s
-     * (ESMira, supported-apps#1216).
+     * next deploy of the same URL with the same recipe came up.
      *
      * Guarded on `.gitmodules`, so a repository without submodules — nearly
      * all of them — pays one stat. Best effort: a submodule that needs a
@@ -477,7 +476,7 @@ final class SourceResolver
             '-c', 'core.askpass=',
             '-C', $target,
             // Shallow, to match the --depth=1 clone: inspect reads a tree, not
-            // a history. Measured on ESMira at 3.9 s / 11.8 MB.
+            // a history.
             'submodule', 'update', '--init', '--recursive', '--depth=1',
         ];
         if ($askPass !== null) {

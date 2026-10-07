@@ -9,7 +9,7 @@ description: >-
   maintainer publishes to Docker Hub, 2fauth/2fauth, exactly as the upstream
   install docs do. Pinned to 8.0.2, the current release (repo tag v8.0.2,
   Docker Hub "latest") -- a Hub-published tag the engine pulls normally, so the
-  from-source seed path (engine#229) never applies.
+  from-source seed path never applies.
 
   The image is a single Alpine container running nginx + php-fpm 8.4 under
   supervisord, serving on internal port 8000 (docker/nginx.conf). Its own
@@ -19,7 +19,7 @@ description: >-
   (/2fauth/database.sqlite, symlinked from /srv/database) and storage
   (/2fauth/storage, symlinked from /srv/storage, which also holds the Passport
   OAuth keys and the file cache). One named volume mounted at /2fauth therefore
-  persists the whole app state; ~/project is wiped every deploy (engine#173),
+  persists the whole app state; ~/project is wiped every deploy,
   so nothing that matters lives there.
 
   APP_KEY is minted once by the prepare hook into ~/.panelalpha/2fauth/ (0600
@@ -56,8 +56,8 @@ description: >-
   later, and a redeploy leaves both alone.
 
   A no-op `ready` service gated on the app healthcheck makes `docker compose up`
-  return only once 2FAuth actually answers (engine#204). Only the app publishes
-  a port (8000, engine#234).
+  return only once 2FAuth actually answers. Only the app publishes
+  a port (8000).
 credentials:
   login_path: /login
   adopt_from: .panelalpha/2fauth/secrets.env

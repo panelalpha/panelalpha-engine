@@ -4,9 +4,9 @@ description: >-
   shipped laravel recipe builds it (Composer and Vite on the host) and keeps
   the MySQL and Redis services of the repo's Laravel Sail workstation compose;
   the plain deploy then fails at start because it also keeps Sail's
-  Elasticsearch, whose memlock ulimit the account's Docker refuses
-  (engine#346), and Sail's MySQL mounts a script from the dev-only
-  laravel/sail package, which is not installed (engine#439).
+  Elasticsearch, whose memlock ulimit the account's Docker refuses,
+  and Sail's MySQL mounts a script from the dev-only
+  laravel/sail package, which is not installed.
 
   overrides/docker-compose.override.yml mounts only the data volume on MySQL,
   turns Elasticsearch into a no-op (Bagisto's catalog search defaults to the

@@ -22,7 +22,7 @@ use App\Lib\Deploy\Platform\DockerfileBuilder;
  *   env_vars, which must not be baked into an image;
  * - an empty `.env` the engine created for `env_file:`, when the Dockerfile
  *   does not copy it by name: Apache Guacamole's RAT license check failed on
- *   it and on the compose file (engine#162). See {@see excludesEnv()}.
+ *   it and on the compose file. See {@see excludesEnv()}.
  */
 final class BuildContextIgnore
 {

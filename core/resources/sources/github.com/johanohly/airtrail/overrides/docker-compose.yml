@@ -73,9 +73,9 @@ services:
       start_period: 60s
     mem_limit: 2g
 
-  # No-op gate. `docker compose up -d` returns before the app is up (engine#90)
+  # No-op gate. `docker compose up -d` returns before the app is up
   # but does block on a depends_on condition, so this makes `up -d` return only
-  # once AirTrail's healthcheck passes (engine#204). alpine:3, not the app image,
+  # once AirTrail's healthcheck passes. alpine:3, not the app image,
   # to avoid a dependency cycle and any extra pull; a clean exit 0 is not a crash
   # loop to AppHealth.
   ready:

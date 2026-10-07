@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Route;
 use Tests\TestCase;
 
 /**
- * engine#48 item 23: `throttle:api` was commented out of the api group, so
+ * `throttle:api` was commented out of the api group, so
  * /api answered a token, or a tokenless route, as fast as anyone could ask.
  */
 class ApiRateLimitTest extends TestCase

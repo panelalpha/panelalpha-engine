@@ -18,8 +18,8 @@ cd ~/project
 
 say() { echo "[wastebin] $*" >&2; }
 
-# ~/.panelalpha survives a redeploy; ~/project is emptied every deploy
-# (engine#173). The secrets must live here or they would be regenerated on every
+# ~/.panelalpha survives a redeploy; ~/project is emptied every deploy.
+# The secrets must live here or they would be regenerated on every
 # rebuild.
 STORE_DIR="${HOME}/.panelalpha/wastebin"
 APP_ENV="${STORE_DIR}/app.env"

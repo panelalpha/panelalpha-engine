@@ -255,7 +255,7 @@ class FileManager
         // The size is counted off a root-owned read-only copy, and that copy is
         // what gets extracted: the account can rewrite its own file between a
         // check and an unpack. Without this a 6 MB zip wrote 6 GB here while
-        // the deploy path refused the same archive (engine#244).
+        // the deploy path refused the same archive.
         $system = $this->project->system();
         $stageDir = $this->unzipStageRoot . '/' . bin2hex(random_bytes(8));
         $staged = $stageDir . '/' . $filename;

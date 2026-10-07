@@ -6,8 +6,7 @@ RSS reader and aggregator, PHP + SQLite, served by nginx/php-fpm on :8888.
 
 - `overrides/docker-compose.yml` runs `rsprta/selfoss:2.19`, the image the
   selfoss installation docs link to, at the current release. `master` is the
-  unreleased 2.20-SNAPSHOT, and its plain php deploy fails (engine#342,
-  engine#417).
+  unreleased 2.20-SNAPSHOT, and its plain php deploy fails.
 - `/selfoss/data` is the named volume `selfoss-data`: `config.ini`, the SQLite
   database, favicons and thumbnails survive redeploys.
 - The image's own cron service fetches feeds every 15 minutes.

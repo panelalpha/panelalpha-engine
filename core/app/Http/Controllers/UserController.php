@@ -491,7 +491,7 @@ class UserController extends Controller
     }
 
     /**
-     * An archive cannot replace a project that deploys from git (engine#269).
+     * An archive cannot replace a project that deploys from git.
      *
      * The deploy treated the uploaded tree as the repository's checkout -- its
      * recipe, its app config, its HEAD -- found no .git, and failed only after

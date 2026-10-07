@@ -10,7 +10,7 @@ use App\System\Project\Dind\SilentPortCheck;
 use Tests\TestCase;
 
 /**
- * engine#569: a container that is up and listens on nothing yet when the
+ * A container that is up and listens on nothing yet when the
  * deploy's ~105 s probe gives up is still installing itself (Magento's
  * setup:install at start). The deploy keeps reading its sockets instead of
  * calling it partial.

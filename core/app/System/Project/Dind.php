@@ -549,12 +549,12 @@ class Dind implements DeployableDindProject, Runtime
      * `failed to connect to the docker API at unix:///var/run/docker.sock`,
      * which reads as a broken daemon rather than as "too early".
      *
-     * Measured on a dev host: the socket appears 5-6s after the container
-     * starts, and the deploy path is slow enough (preparing, os user, dirs,
-     * quota) not to notice. `Projects::copy()` is not: it copies the home dir
-     * and prepares volumes five seconds in, inside the window. Issue #58 --
-     * every staging copy of a DinD project failed there and the job deleted
-     * the destination account, so the whole feature was unusable.
+     * The socket appears 5-6s after the container starts, and the deploy path
+     * is slow enough (preparing, os user, dirs, quota) not to notice.
+     * `Projects::copy()` is not: it copies the home dir and prepares volumes
+     * five seconds in, inside the window. Every staging copy of a
+     * DinD project failed there and the job deleted the destination account, so
+     * the whole feature was unusable.
      *
      * Deliberately silent and deliberately bounded. It runs on paths that have
      * no deploy log to write into, and the caller's own error is a better
@@ -671,7 +671,7 @@ class Dind implements DeployableDindProject, Runtime
     }
 
     /**
-     * engine#524: each script is replaced by renaming a temp file over it,
+     * Each script is replaced by renaming a temp file over it,
      * never by removing everything up front and writing the real names back
      * in -- a tenant who still has entrypoint.d mounted read-write could
      * otherwise put a symlink where a name briefly did not exist and have
@@ -717,7 +717,7 @@ class Dind implements DeployableDindProject, Runtime
      * For an account whose compose already bind-mounts daemon.json: a rename
      * would swap in a new inode the mount would not show until the container
      * is recreated, so this writes the existing file's content in place
-     * instead. Refuses when the path is a symlink (engine#524) -- the mount
+     * instead. Refuses when the path is a symlink -- the mount
      * itself is read-only, so only an account from before it existed could
      * still have one there.
      *

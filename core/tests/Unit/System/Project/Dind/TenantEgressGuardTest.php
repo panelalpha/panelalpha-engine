@@ -8,7 +8,7 @@ use App\System\Project\Dind\TenantEgressGuard;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#217: from inside an account, customer code reached core (:2011,
+ * From inside an account, customer code reached core (:2011,
  * :80), SFTP, FTP, phpMyAdmin and other accounts on pash-default-network, the
  * host on every port, and 169.254.169.254. The guard is run for real here,
  * with iptables and getent replaced by shims that record what it does.
@@ -134,7 +134,7 @@ SH));
         $this->guardRun();
         file_put_contents($this->dir . '/nodns', '');
         // Something else changed, so the chain is rebuilt -- with MySQL still in it.
-        file_put_contents($this->dir . '/guard.sh', TenantEgressGuard::script(['178.104.84.46']));
+        file_put_contents($this->dir . '/guard.sh', TenantEgressGuard::script(['203.0.113.46']));
 
         $rules = $this->rules($this->guardRun());
         $this->assertContains('-A PA-TENANT-EGRESS -d 172.25.0.3 -p tcp --dport 3306 -j RETURN', $rules);

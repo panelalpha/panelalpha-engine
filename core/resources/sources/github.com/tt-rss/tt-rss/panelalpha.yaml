@@ -37,7 +37,7 @@ description: >-
   its own header says -- declares `db`, `app`, `updater` and `web-nginx`
   against ghcr.io images, with POSTGRES_PASSWORD taken from .env-dist's
   `TTRSS_DB_PASS=password`. Services in it that are not recognised as the app
-  are kept as runtime sidecars (engine #166), so left in place it contributes a
+  are kept as runtime sidecars, so left in place it contributes a
   postgres whose password is published in the repository. hooks/prepare.sh
   moves it, and anything matching docker-compose.*.yml, to
   ~/.panelalpha/upstream-compose/ before detection can see it.
@@ -46,7 +46,7 @@ description: >-
   worth saying: index.php, public.php, backend.php and prefs.php are all at the
   top and there is no public/, web/ or webroot/, so PhpDocroot's probe falls
   through to /app. `docroot: .` would be the honest way to write that and is
-  folded away rather than honoured (engine #172), so PA_DOCROOT is set in the
+  folded away rather than honoured, so PA_DOCROOT is set in the
   compose override instead. The consequence is that cache/ is inside the
   document root, and cache/ is where tt-rss puts downloaded article media,
   user uploads and generated exports. Upstream's nginx marks that whole prefix

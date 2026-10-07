@@ -14,7 +14,7 @@ services:
     # ~/.panelalpha/yarn (relative to the compose dir ~/project) -> /data. Holds
     # the bitcask db, every twtxt feed, avatars/media, the index, the instance
     # config and the pod secrets — all of yarnd's state, surviving the per-deploy
-    # ~/project wipe (engine#173).
+    # ~/project wipe.
     volumes:
       - "../.panelalpha/yarn:/data"
       # The admin login, generated and kept by the engine; read by pa-run.sh.

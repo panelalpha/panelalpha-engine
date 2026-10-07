@@ -85,9 +85,8 @@ fi
 #     nineteen contao-components packages land in vendor/ and assets/ is never
 #     created, so every back-end script and stylesheet is a 404.
 #
-# Measured on this host: `--no-dev --no-scripts --no-plugins` over this
-# manifest installs 180 packages in 25 s and leaves no public/, no assets/ and
-# no .generated/plugins.php.
+# So `--no-dev --no-scripts --no-plugins` over this manifest leaves no public/,
+# no assets/ and no .generated/plugins.php.
 #
 # Running it again here, with plugins and scripts on, is cheap: the lock the
 # host pass wrote is authoritative, so nothing is re-resolved. Composer asks
@@ -101,8 +100,8 @@ echo "[contao] running composer install with plugins enabled"
 composer install --no-dev --no-interaction --optimize-autoloader --no-progress
 
 # The copies the host pass left in vendor/ are dead weight once the real ones
-# are in assets/ -- around 30 MB of a 2000 MB account, and a second copy of
-# TinyMCE and MooTools inside the project is a confusing thing to find.
+# are in assets/ -- disk the account pays for, and a second copy of TinyMCE
+# and MooTools inside the project is a confusing thing to find.
 if [ -d vendor/contao-components ]; then
     for comp in vendor/contao-components/*; do
         name=$(basename "${comp}")
@@ -161,10 +160,9 @@ php "${CONSOLE}" contao:filesync || true
 # --- credentials -----------------------------------------------------------
 #
 # THE DEMO DUMP SHIPS A WORKING ADMINISTRATOR. tl_user row 1 is `k.jones`
-# (Kevin Jones), admin=1, login=1, with the bcrypt hash of `kevinjones` --
-# verified against this dump with password_verify(). It is a published default
-# credential on a back end that is one URL away from the public internet, and
-# tl_member ships `j.smith` the same way. So every account the dump created is
+# (Kevin Jones), admin=1, login=1, with the bcrypt hash of `kevinjones`. It is
+# a published default credential on a back end that is one URL away from the
+# public internet, and tl_member ships `j.smith` the same way. So every account the dump created is
 # given a random password and disabled here, before anything is served, and the
 # account's own administrator is created separately below.
 #
@@ -224,7 +222,7 @@ fi
 # contao-setup ran as part of the Composer install above, before the schema
 # existed. Warming again now that it does keeps the first real request off the
 # slow path -- and a cold prod cache is what turns the first seconds after
-# `up -d` into 500s (engine#90; the compose override's healthcheck is the other
+# `up -d` into 500s (the compose override's healthcheck is the other
 # half of that).
 php "${CONSOLE}" cache:clear --no-warmup --env=prod
 php "${CONSOLE}" cache:warmup --env=prod

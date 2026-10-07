@@ -1,7 +1,7 @@
 #!/bin/bash
 # Generate every secret once, persist it where a rebuild cannot reach, and
 # materialise the ~/project/.env that docker compose interpolates ${VAR} from.
-# ~/project is wiped on every redeploy (engine#173); ~/.panelalpha is not. The
+# ~/project is wiped on every redeploy; ~/.panelalpha is not. The
 # administrator login is the engine's (`credentials:` in panelalpha.yaml), in
 # ~/.panelalpha/app-credentials.env.
 set -e

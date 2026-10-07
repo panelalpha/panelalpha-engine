@@ -1,6 +1,6 @@
 # Stands in for the repository's development override (source builds, bind
 # mounts, published dev ports, mailpit), which the engine would otherwise
-# layer over the replaced compose file (engine#416). Deliberately a no-op.
+# layer over the replaced compose file. Deliberately a no-op.
 services:
   nginx:
     restart: unless-stopped

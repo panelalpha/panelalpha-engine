@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 /**
- * engine#33: the switch to the second generation and back is the account's
+ * The switch to the second generation and back is the account's
  * own HTTP proxy rules moving between ports, then one graceful reload.
  */
 class RouteSwitchTest extends TestCase
@@ -141,7 +141,7 @@ class RouteSwitchTest extends TestCase
         $this->assertSame('acme.example.test', RouteSwitch::tunnelledDomain($switch->httpRulesTo([3000])));
     }
 
-    /** engine#691: an operator's own rules to the app's port go with the switch, and nginx sees it. */
+    /** An operator's own rules to the app's port go with the switch, and nginx sees it. */
     public function test_an_operators_rules_to_the_app_port_switch_with_the_site(): void
     {
         $this->domain('acme.example.test');

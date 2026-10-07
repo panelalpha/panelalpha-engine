@@ -238,7 +238,7 @@ class HostCompilePhpPlatformPinTest extends TestCase
 
     /**
      * The classmap directories come from the app root's composer.json, the
-     * same file the install reads (#119, ILIAS).
+     * same file the install reads (ILIAS).
      */
     public function test_missing_classmap_directories_are_read_from_the_app_root(): void
     {
@@ -546,7 +546,7 @@ class HostCompilePhpPlatformPinTest extends TestCase
     }
 
     /**
-     * Engine #168. bolt/project, pimcore/skeleton and thelia/thelia commit no
+     * bolt/project, pimcore/skeleton and thelia/thelia commit no
      * composer.lock, so the lock-keyed gate always built them --no-plugins
      * and symfony/runtime never wrote vendor/autoload_runtime.php. Now the
      * install runs with plugins, under the runtime manifest's allow-plugins,

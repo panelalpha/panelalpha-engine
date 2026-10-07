@@ -16,7 +16,7 @@ services:
   app:
     # Pinned to the current maintained release line (composer.json is 0.18.0).
     # A Hub-published image, pulled normally -- the from-source seed path
-    # (engine#229) does not apply.
+    # does not apply.
     image: brufdev/many-notes:0.18
     restart: unless-stopped
     # .env is the platform-merged account env (touched by the prepare hook so
@@ -75,7 +75,7 @@ services:
     # whole s6 tree fits. This is a runtime knob, not a patch to the app.
     pids_limit: 4096
     # 8080 inside (serversideup nginx), published so the port scan takes it as
-    # the primary (engine#231/#234). No other service publishes a port.
+    # the primary. No other service publishes a port.
     ports:
       - "8000:8080"
     # Two probes. /up is Laravel's framework health route (registered in

@@ -136,7 +136,7 @@ YAML);
         $this->assertSame('http://localhost:8079', $env['UPSTASH_REDIS_REST_URL']);
     }
 
-    /** engine#236: a localhost placeholder is rewritten on any port, not just an allowlist. */
+    /** A localhost placeholder is rewritten on any port, not just an allowlist. */
     public function test_it_rewrites_a_localhost_url_on_a_non_allowlisted_port(): void
     {
         $compose = ['services' => ['fittrackee' => ['environment' => [
@@ -331,7 +331,7 @@ YAML);
     }
 
     /**
-     * Compose's fail-closed form. RSS Monster (#147) and Etherpad (#116) both
+     * Compose's fail-closed form. RSS Monster and Etherpad both
      * died before a container existed, because nothing supplies a value and
      * `docker compose up` refuses to interpolate.
      */
@@ -503,7 +503,7 @@ YAML);
     }
 
     /**
-     * Pad (#2156): the password is required as the database's whole value and
+     * Pad: the password is required as the database's whole value and
      * again inside the app's DSN. Filling only the first left Compose to abort
      * on the second, behind a log saying it had been generated.
      */
@@ -572,7 +572,7 @@ YAML);
     }
 
     /**
-     * oc8 (#2197) keeps its required secrets in an `x-` fragment merged into
+     * oc8 keeps its required secrets in an `x-` fragment merged into
      * each service. Compose interpolates the fragment too, so filling only the
      * merged copies still aborted on the original.
      */
@@ -610,7 +610,7 @@ YAML);
     }
 
     /**
-     * EcomGen (#2220): the account set ECOMGEN_MASTER_KEY and the generated
+     * EcomGen: the account set ECOMGEN_MASTER_KEY and the generated
      * value was baked over it. The account's own value is used everywhere
      * the variable appears, written so Compose does not interpolate its `$`.
      */
@@ -632,7 +632,7 @@ YAML);
     }
 
     /**
-     * Scrob (#2009) ships `changeme` as the database password and again in
+     * Scrob ships `changeme` as the database password and again in
      * the app's DATABASE_URL. Too common a word to search for, but the
      * password slot of a URL is exact, so both sides get the same value.
      */

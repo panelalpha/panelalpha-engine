@@ -16,7 +16,7 @@
 #      as this account's uid, cannot write to them.
 #
 # Nothing here moves a compose file aside. tine ships none at the repository
-# root, and the glob that would do it is the trap in engine#166: by the time
+# root, and the glob that would do it is a known trap: by the time
 # this hook runs the engine has already written this recipe's
 # docker-compose.override.yml into the project root, so `mv docker-compose.*`
 # would carry off this recipe's own healthcheck and the deploy would still
@@ -28,10 +28,10 @@ say() { echo "[tine] $*"; }
 
 # ------------------------------------------------------------------ store --
 #
-# Not ~/project: every deploy re-clones over it (engine#173) while the
+# Not ~/project: every deploy re-clones over it while the
 # account's MySQL database -- and the password hash in tine20_accounts -- stays
 # exactly where it was, so a password generated beside the code would be a new
-# password on every redeploy, matching nothing. engine#173 also writes
+# password on every redeploy, matching nothing. The engine also writes
 # .env.default into the checkout 0644, readable by every other tenant, which is
 # the other reason nothing secret belongs there.
 #

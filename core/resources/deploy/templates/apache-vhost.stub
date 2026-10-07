@@ -11,7 +11,7 @@ ServerName localhost
 # The engine's proxy reaches the container through a Docker bridge, so without
 # this every visitor is the bridge gateway (172.x) to PHP, to .htaccess
 # `Require ip` and to the access log. Trust X-Real-IP only from private
-# sources, as the classic stack's remoteip.conf does (engine#11).
+# sources, as the classic stack's remoteip.conf does.
 RemoteIPHeader X-Real-IP
 RemoteIPTrustedProxy 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 127.0.0.0/8
 

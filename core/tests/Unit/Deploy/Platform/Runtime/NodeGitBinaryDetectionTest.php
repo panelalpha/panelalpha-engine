@@ -10,8 +10,7 @@ use PHPUnit\Framework\TestCase;
  * Which Node projects need git in their image.
  *
  * The slim image has no git, and the host-compile path cannot apt-get one, so
- * getting this wrong is a failed deploy. It failed in two ways at once on
- * tine (supported-apps#1220), one deploy at 149 s:
+ * getting this wrong is a failed deploy. It failed in two ways at once on tine:
  *
  *   the detector required the subcommand to follow `git` immediately, so
  *   `git -C /app submodule update` did not match -- and `-C` and

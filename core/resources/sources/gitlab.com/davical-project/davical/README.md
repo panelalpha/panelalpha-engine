@@ -1,16 +1,11 @@
 # DAViCal
 
-Upstream: <https://gitlab.com/davical-project/davical> · tracker:
-panelalpha/playground/supported-apps#1249
+Upstream: <https://gitlab.com/davical-project/davical>
 
 A CalDAV and CardDAV server. Flat PHP with no Composer and no build step,
 served from `htdocs/`, with PostgreSQL underneath doing a great deal of the
 work — permission arithmetic, recurrence expansion and free/busy are stored
 procedures, not PHP.
-
-Verdict before this recipe: `serving-missing_entry`. Verdict with it:
-`deploy-ok`, `serving: ok`, HTTP 200 — and, which matters more for a CalDAV
-server, a working protocol (see **Verification** below).
 
 ## What the engine got right on its own
 
@@ -20,7 +15,7 @@ depth 1 and puts the checkout on `php-plain` — the `php` strategy at PHP 8.3,
 the shared `php:{version}-apache-bookworm` base image, `~/project` bind-mounted
 at `/app`, Apache on 8000. Every extension DAViCal checks for in
 `htdocs/setup.php` — `pgsql`, `PDO`, `pdo_pgsql`, `gettext`, `iconv`, `xml`,
-`curl` — is already in `PhpBaseImage::EXTENSIONS`, so nothing had to be added
+`curl` — is already in `PhpBaseImage::EXTENSIONS`, so nothing has to be added
 to the image. `mod_rewrite` and `mod_headers` are both enabled
 (`PhpApacheConfig::MODULES`), which is what makes the `.htaccess` this recipe
 installs work at all.
@@ -33,10 +28,8 @@ candidate for `index.php` only. DAViCal serves from `htdocs/`, which is on
 none of those lists, and the repository root has no index file — so `detect()`
 falls through everything, emits no `PA_DOCROOT`, and the base image serves
 `/app`, which holds `README`, `INSTALL`, `Makefile`, `ChangeLog` and no index.
-Apache answers 403 and the report says the entry point is missing. `docroot:
-htdocs` is the fix and the only thing that can say it; being a plain relative
-path it survives `PlatformManifest::readDocroot()`, where `.` would not
-(engine #172).
+Apache answers 403. `docroot: htdocs` is the fix and the only thing that can say it; being a plain relative
+path it survives `PlatformManifest::readDocroot()`, where `.` would not.
 
 **That there is a second repository.** This is the part a docroot line does
 not cover, and on its own it is fatal. `htdocs/always.php` is the first line
@@ -62,7 +55,7 @@ exits — for the admin pages and for every CalDAV request alike.
 The engine clones one repository and there is no manifest key for a second, so
 `hooks/prepare.sh` fetches the `r0.65` tag into `~/.panelalpha/awl-r0.65` once
 and copies it to `~/project/awl` on every deploy (the checkout is wiped and
-re-cloned each time — engine #173 — and a cached copy also means a redeploy
+re-cloned each time, and a cached copy also means a redeploy
 works when gitlab.com does not). `files/panelalpha/php/zz-davical.ini` puts
 `/app/awl/inc` on the `include_path` so the *first* `include_once` succeeds
 rather than falling through to paths that cannot exist here. The tag is pinned
@@ -101,8 +94,7 @@ pays for the same reason, and it is not avoidable while `DATABASES` is
 roles with `CREATE USER`, expects a superuser, and hands the rest to
 `dba/update-davical-database`, a Perl program needing DBI, DBD::Pg and YAML.
 The shared PHP base image has no `postgresql-client` at all and a Perl with
-neither module — verified by running `php -m` and `which psql` against
-`panelalpha/php:8.3-apache-bookworm`.
+neither module.
 
 What that script *does*, once the shell is taken out, is a fixed list of SQL
 files in a fixed order plus one UPDATE, and `files/panelalpha-davical-setup.php`
@@ -138,12 +130,9 @@ before Apache binds, with the password the engine generates (`credentials:` in
 `panelalpha.yaml`; returned by `GET /projects/{name}/app-credentials`, MCP
 `app_credentials_get`), stored as AWL's
 salted-SHA1 `*<salt>*{SSHA}<hash>` form rather than as plaintext — the
-strongest of the three formats the application can verify. Verified in the
-database after a deploy: `usr.password` for `admin` is `*TbRvA0aQ9*{SS…`, 57
-characters, not `**nimda`. It is only rewritten while the seeded value is still
-in place, so a redeploy leaves a password the owner has since changed alone
-(verified: the second deploy logged *"built-in admin password is not
-base-data.sql's seeded value; left untouched"*).
+strongest of the three formats the application can verify. It is only
+rewritten while the seeded value is still in place, so a redeploy leaves a
+password the owner has since changed alone.
 
 **`htdocs/setup.php` embeds the whole of `phpinfo()`** in its page
 (`setup.php:497`). Its own gate is `$session->LoginRequired(null)` — *any*
@@ -154,25 +143,23 @@ sets. But that call sits inside a `try` whose `catch` installs a
 and what lands in that catch is always.php failing — which is what a database
 that has not finished starting looks like. The one state in which the page is
 unauthenticated is the one in which something is already wrong, so it is denied
-outright in `htdocs/.htaccess` as well. Verified 403 both anonymously and
-while logged in as `admin`.
+outright in `htdocs/.htaccess` as well.
 
-**The session cookie had no flags.** AWL writes it with the four-argument form
+**AWL's session cookie has no flags.** AWL writes it with the four-argument form
 of `setcookie` (`awl/inc/Session.php:461`), which cannot express `httponly` or
 `samesite`, and it is not a PHP session cookie, so `session.cookie_httponly`
 does not reach it. `htdocs/.htaccess` rewrites it on the way out with
 `Header edit Set-Cookie`. `Header always edit` does **not** work here — the two
 operate on different header tables and PHP's `setcookie()` lands in
-`headers_out`, not `err_headers_out`; measured, with `always` the cookie came
-back unchanged and nothing was logged. `Secure` is deliberately not added: TLS
+`headers_out`, not `err_headers_out`; with `always` the cookie comes back
+unchanged and nothing is logged. `Secure` is deliberately not added: TLS
 terminates at the engine's proxy, so an account also reachable over `http://`
 would get a login form that never logs anyone in.
 
-**Exposure, measured against a baseline 404 body rather than by status code.**
-Everything outside `htdocs/` — `config/config.php`, `awl/inc/AwlQuery.php`,
-`dba/patches/*.sql`, `inc/`, `scripts/`, `testing/`, `COPYING` — returns a 404
-whose body is byte-identical to the 404 for a path that never existed, so
-nothing is being rewritten to a front controller. `.git/`, `.env`,
+**Exposure.** Everything outside `htdocs/` — `config/config.php`,
+`awl/inc/AwlQuery.php`, `dba/patches/*.sql`, `inc/`, `scripts/`, `testing/`,
+`COPYING` — returns the plain 404 of a path that never existed, so nothing is
+being rewritten to a front controller. `.git/`, `.env`,
 `.env.default`, `docker-compose.yml` and `panelalpha-*` are 403 from the
 generated vhost; `images/`, `js/` and `css/` are 403 rather than listings
 (`Options -Indexes`). `metrics.php` answers unauthenticated but returns
@@ -190,56 +177,21 @@ password hash by any modern standard; it is simply what
 `session_validate_password` can verify, and the alternative in the same
 function is plaintext.
 
-**The database password is in `~/project/.env.default` at mode 644** (engine
-#173). It has to be in `.env` for compose to interpolate it into the sidecar's
+**The database password is in `~/project/.env.default` at mode 644**.
+It has to be in `.env` for compose to interpolate it into the sidecar's
 `environment:`, which is the only field that outranks what the sidecar miner
-writes (engine #166, #189); `ProjectEnvironment::apply()` then copies it. Both
+writes; `ProjectEnvironment::apply()` then copies it. Both
 files are outside the document root here, so neither is web-readable, but this
 is a known engine defect rather than something the recipe can close.
 
-## Verification
+## Through a `*.panelalpha.online` name
 
-Deployed on `mariusz.panelalpha.tools` at host load ~1.1–2.4, twice from
-scratch on two separate accounts: `deploy-ok` in 60 s (preparing 8 s, cloning
-4 s, running 40 s), `serving: ok`, HTTP 200, every baseline and `php` health
-check passing. Runtime footprint: app 28 MiB of a 768 MiB cap, postgres 17 MiB
-of 448 MiB, 178 MiB for the whole account.
-
-A rendered admin page proves nothing about CalDAV, so the protocol was
-exercised end to end over the public HTTPS domain:
-
-* logged into the admin UI as `admin` with the generated password and created a
-  principal `calendaruser` through the web form — DAViCal reported *"Creating
-  new Principal record. Home calendar added. calendar / .out / .in. Home
-  addressbook added. addresses"*;
-* `PROPFIND` `Depth: 0` on `/caldav.php/calendaruser/calendar/` with that
-  user's Basic credentials → **207 Multi-Status** with
-  `<resourcetype><collection/><C:calendar/></resourcetype>`, the displayname,
-  `<C:supported-calendar-component-set>` listing VEVENT/VTODO/VJOURNAL, and
-  `<C:calendar-home-set>`;
-* the same request with a wrong password → 401; with no credentials → 401;
-  `calendaruser` PROPFINDing `/caldav.php/admin/` → 403;
-* `OPTIONS` advertises `DAV: 1, 2, 3, access-control, calendar-access,
-  calendar-schedule, extended-mkcol, bind, addressbook,
-  calendar-auto-schedule, calendar-proxy`;
-* `PUT` of a VEVENT with `RRULE:FREQ=WEEKLY;COUNT=3` → 201 with an ETag; `GET`
-  returns it; a `REPORT` `calendar-query` with a `<C:time-range>` covering the
-  second and third occurrences matches it — which only works if
-  `caldav_functions.sql` and `rrule_functions.sql` really loaded, since the
-  recurrence expansion is a stored procedure;
-* `/.well-known/caldav` and `/.well-known/carddav` 301 to `/caldav.php/`
-  through the rewrite in `htdocs/.htaccess`.
-
-One caveat about *how* the principal was created, which is about the test
-domain and not about DAViCal. The admin form is `enctype="multipart/form-data"`,
-and a `*.panelalpha.online` name resolves to `eu1.withoutdns.com`, whose
-openresty front end answers a genuine multipart POST with `302 ->
-https://www.withoutdns.com/internal-server-error.html` — the request never
-reaches the account. The same POST succeeds when pinned to the origin IP, and a
-urlencoded POST of the same fields succeeds through the forwarder, which is how
-the principal above was created. Nothing in the engine or this recipe is
-involved; it is worth knowing because any app-support test of a file upload
-through a withoutdns domain will fail this way.
+The admin form is `enctype="multipart/form-data"`, and the
+`*.panelalpha.online` forwarding front answers a genuine multipart POST with
+`302 -> https://www.withoutdns.com/internal-server-error.html` — the request
+never reaches the account, so the admin form does not submit through a test
+name. Nothing in the engine or this recipe is involved, and a real domain is
+not affected.
 
 ## What a redeploy does to the data
 
@@ -247,9 +199,7 @@ Nothing. Principals, collections, every event and every vCard live in the
 PostgreSQL volume, which survives; DAViCal writes no uploads to the filesystem
 at all. The only per-deploy state in `~/project` is the vendored `awl/`, the
 generated `config/config.php` and one line in `.env`, all three of which
-`hooks/prepare.sh` recreates. Verified across two redeploys: the test event was
-still readable over CalDAV afterwards and the admin password was untouched.
-That is a better position than most PHP applications on this engine, and it is
+`hooks/prepare.sh` recreates. That is a better position than most PHP applications on this engine, and it is
 a property of DAViCal's design rather than of this recipe. The account still
 cannot see or back up that volume through the panel.
 

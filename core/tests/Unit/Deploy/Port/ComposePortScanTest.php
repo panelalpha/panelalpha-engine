@@ -87,7 +87,7 @@ class ComposePortScanTest extends TestCase
         $this->assertSame([8000, 4200, 9999], ComposePortScan::of($path)['all']);
     }
 
-    /** Haraka's `EXPOSE 25` was taken for the site (engine#88). */
+    /** Haraka's `EXPOSE 25` was taken for the site. */
     public function test_a_non_web_port_sorts_after_every_other(): void
     {
         $path = $this->compose(<<<'YAML'
@@ -276,7 +276,7 @@ class ComposePortScanTest extends TestCase
     }
 
     /**
-     * engine#214: zabbix/zabbix-web-nginx-mysql is the frontend, not the
+     * Zabbix/zabbix-web-nginx-mysql is the frontend, not the
      * database -- its MYSQL_* env names the one it connects to. It read as a
      * datastore, its only port was refused, and the proxy fell back to a port
      * nothing listens on. Filtering must never empty the set.

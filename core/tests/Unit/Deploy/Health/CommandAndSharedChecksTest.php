@@ -23,7 +23,7 @@ use PHPUnit\Framework\TestCase;
  *
  * The framework checks in `command` are the exception: Django's DisallowedHost
  * page reads the same whoever built the image, so compose and dockerfile
- * borrow that group (#209). Each is guarded by `when: file:`.
+ * borrow that group. Each is guarded by `when: file:`.
  */
 class CommandAndSharedChecksTest extends TestCase
 {

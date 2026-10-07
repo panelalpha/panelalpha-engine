@@ -97,7 +97,7 @@ final class AppDatabase
 
     /**
      * $yaml with every `extra_hosts` pin of the database name moved to
-     * $address. An account changing network (engine#519) leaves its app
+     * $address. An account changing network leaves its app
      * pinned to an address it can no longer reach.
      */
     public static function repinned(string $yaml, string $address): string
@@ -113,7 +113,7 @@ final class AppDatabase
 
     /**
      * Core resolves sites-db on its own network, which an account on
-     * pash-tenants cannot reach (engine#519); there it has a pinned address.
+     * pash-tenants cannot reach; there it has a pinned address.
      */
     private static function tenantNetworkAddress(DindProject $account): ?string
     {

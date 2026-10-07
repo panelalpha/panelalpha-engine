@@ -272,7 +272,7 @@ final class GoRuntime implements Runtime
                     return str_ends_with($name, '.go') && !str_ends_with($name, '_test.go');
                 }
             ),
-            // An unreadable directory is skipped, not fatal (#191).
+            // An unreadable directory is skipped, not fatal.
             \RecursiveIteratorIterator::LEAVES_ONLY,
             \RecursiveIteratorIterator::CATCH_GET_CHILD
         );

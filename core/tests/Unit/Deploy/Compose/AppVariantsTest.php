@@ -7,7 +7,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * A workstation compose file with several variants of the app and a test
- * suite beside them (Zerobyte, engine#422): the build stands in for the
+ * suite beside them (Zerobyte): the build stands in for the
  * production variant, and the suite's helpers do not run in the tenant.
  */
 class AppVariantsTest extends TestCase

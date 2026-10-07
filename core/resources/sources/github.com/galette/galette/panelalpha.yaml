@@ -1,12 +1,11 @@
 # yaml-language-server: $schema=../../../_schema.json
 description: >-
   Galette, a membership-management web app for non-profit associations (members,
-  contributions, mailings), GPL-3.0. supported-apps#1185. PHP, backed by the
-  account's own MySQL. No official image, so this is a php-strategy source
-  recipe. Verified against stable tag 1.2.1 and the develop branch (composer.json
-  requires php >=8.2 and >=8.3; the panelalpha/php image already carries every
-  extension Galette declares -- gd, intl, gettext, curl, simplexml, pdo_mysql,
-  fileinfo, mbstring).
+  contributions, mailings), GPL-3.0. PHP, backed by the account's own MySQL. No
+  official image, so this is a php-strategy source recipe. Stable tag 1.2.1 and
+  the develop branch (composer.json requires php >=8.2 and >=8.3; the
+  panelalpha/php image already carries every extension Galette declares -- gd,
+  intl, gettext, curl, simplexml, pdo_mysql, fileinfo, mbstring).
 
   The repository is not its own application root: the app tree lives under
   galette/ and the build tooling (package.json, gulpfile.js, ui/) is at the top.
@@ -30,13 +29,13 @@ description: >-
      runs `npm ci && npm run build`, but Galette's `build` script is only
      `npx gulp`, and gulpfile.js require()s ./semantic/tasks/build, which exists
      only after the separate `fomantic-install` step. So the stock build dies
-     with MODULE_NOT_FOUND and aborts the whole deploy (verified in node:20).
+     with MODULE_NOT_FOUND and aborts the whole deploy.
      `frontend_build` runs Galette's OWN `fomantic-install` then gulp instead (the
      same two steps its `first-build` script chains), so package.json and its
      lockfile stay as each ref ships them.
 
-  2. **config/ and data/ live in the checkout, wiped every redeploy** (engine#173,
-     ~/project is emptied). Galette keeps its DB connection (config/config.inc.php,
+  2. **config/ and data/ live in the checkout, wiped every redeploy**
+     (~/project is emptied). Galette keeps its DB connection (config/config.inc.php,
      which holds the DB password) in config/ and all uploads/logs/exports/photos
      in data/. galette-setup.sh seeds ~/.panelalpha/galette/{config,data} once
      from the fresh checkout, then symlinks /app/config and /app/data onto it, so
@@ -59,11 +58,10 @@ description: >-
      config.inc.php means already-installed, so a redeploy skips install and only
      re-links and re-locks.
 
-  engine#231 (port alignment) does not apply: this is a php/Apache app on the
+  Port alignment does not apply: this is a php/Apache app on the
   engine's php image, serving on the standard port.
 
-  SOURCE: keyed to github.com/galette/galette (clones anonymously, verified
-  git ls-remote). supported-apps#1185.
+  SOURCE: keyed to github.com/galette/galette (clones anonymously).
 extends: php
 app_root: galette
 docroot: webroot

@@ -63,7 +63,7 @@ trait ReportsProblems
 
     /**
      * What a field holds, said in the problem so a caller can fix the value
-     * without reading the docs (#83): `expected`, and `examples` where useful.
+     * without reading the docs: `expected`, and `examples` where useful.
      *
      * @return array<string, array{expected: string, examples?: list<string>}>
      */

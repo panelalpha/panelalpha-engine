@@ -9,7 +9,7 @@ use App\System\Project\Dind\AppHealth;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#182: a source recipe's `check:` list and `checks/` directory never ran.
+ * A source recipe's `check:` list and `checks/` directory never ran.
  *
  * declaredChecks() walked PlatformRegistry::all(), which has no source recipes,
  * runChecks() called the two-argument CheckRunner::for(), so the persisted

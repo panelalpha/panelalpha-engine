@@ -8,7 +8,7 @@ cd ~/project
 #
 # 1. Where the files it writes live. WORKSPACE and DATA both default to
 #    BASE_PATH . "/..." -- inside the checkout. A redeploy re-clones ~/project
-#    after clearing it (engine#173), so an account would lose every file it had
+#    after clearing it, so an account would lose every file it had
 #    written in the editor *and* its own login on the next deploy. Everything
 #    persistent goes under ~/.panelalpha/atheos, which the compose override
 #    bind-mounts at /data.
@@ -135,7 +135,7 @@ if ! grep -q 'Written by PanelAlpha' .htaccess 2>/dev/null; then
 # One notice takes the whole application down. config.php sets these too, but
 # config.php is written by the install stage and this file is written by the
 # after-clone hook, which runs earlier and unconditionally -- so this is the
-# copy that holds when a stage command does not run (engine#169).
+# copy that holds when a stage command does not run.
 #
 # <IfModule> because these directives only exist under mod_php, which is what
 # this image runs; a server without it skips them rather than refusing to

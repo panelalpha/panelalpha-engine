@@ -5,9 +5,9 @@
 # layered over the generated file rather than replacing it.
 services:
   opensearch:
-    # 2.19.6 rather than latest: this is the version the store was proven
-    # against by hand on this engine, and Magento validates the search
-    # engine's version at setup:install rather than at first query.
+    # 2.19.6 rather than latest: this is the version the recipe is known to
+    # work with, and Magento validates the search engine's version at
+    # setup:install rather than at first query.
     image: opensearchproject/opensearch:2.19.6
     restart: unless-stopped
     environment:
@@ -26,9 +26,9 @@ services:
     # here is what keeps the two numbers consistent -- 512m of heap plus the
     # JVM's own off-heap use does not fit in 384m, and the failure would be a
     # cgroup kill partway through the first indexing run.
-    # 1g is not enough: measured on this engine, an idle 2.19.6 with the
-    # stock plugin set (ML commons, security analytics, ISM) sits at 840 MiB
-    # against a 512m heap, and Magento's first reindex is not idle.
+    # 1g is not enough: an idle 2.19.6 with the stock plugin set (ML commons,
+    # security analytics, ISM) uses most of a gigabyte against a 512m heap,
+    # and Magento's first reindex is not idle.
     mem_limit: 1536m
     ulimits:
       # No memlock here. An account is a Sysbox container and its nested

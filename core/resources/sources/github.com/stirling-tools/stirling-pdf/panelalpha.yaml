@@ -4,8 +4,8 @@ description: >-
   sign): a Spring Boot backend serving the React UI and REST API on :8080,
   with LibreOffice, Tesseract and qpdf in the image. The repository is a Gradle
   multi-project whose root build/libs holds only restart-helper.jar (the boot
-  jar is in app/core/build/libs, engine#333), and the build targets a Java 25
-  toolchain that the engine's JDK 21 runtime cannot load (engine#131); its
+  jar is in app/core/build/libs), and the build targets a Java 25
+  toolchain that the engine's JDK 21 runtime cannot load; its
   Dockerfiles live under docker/ and build the frontend too.
 
   This recipe runs upstream's official image of the current release,

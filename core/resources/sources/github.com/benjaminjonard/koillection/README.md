@@ -17,26 +17,23 @@ Open `https://<domain>/` and create the account as the first thing you do after
 the deploy. This is the pretix/grocy problem in a different shape: not a
 published password, but an unclaimed one.
 
-## What went wrong without the recipe
+## Why the generic platform fails
 
-The tracker run ended `serving-unknown`: port 8000 answered `Recv failure:
-Connection reset by peer`, the domain answered 502, and the health report's
-`app-restart-looping` check named `postgresql (Restarting (1))`.
+Without the recipe nothing ever listens: the `postgresql` sidecar restart-loops
+and the app container is never started. Two separate things:
 
-Two separate things:
-
-1. **The Dockerfile was not used, and correctly so.** The repository's root
+1. **The Dockerfile is not used, and correctly so.** The repository's root
    `Dockerfile` is a real production file — its own `docker-release.yml`
    workflow builds and publishes from it — but it declares `ENV PUID=1001` /
    `ENV PGID=1001` and calls `addgroup --gid "$PGID"`.
    `ComposeFileInspector::isHostUidMappedDockerfile()` treats a uid-mapping
    Dockerfile as deployable only when the variable has an `ARG NAME=<digits>`
-   default; an `ENV` is not that. So the `dockerfile` probe returned false and
-   detection fell through to `php` (composer.json, no artisan).
+   default; an `ENV` is not that. So the `dockerfile` probe returns false and
+   detection falls through to `php` (composer.json, no artisan).
 
 2. **The dev compose file poisoned the sidecars.** `docker-compose.dist.yml`
    ("provided for dev purposes") is not run, but `RuntimeSidecars` mines it for
-   backing services and took both `postgresql` and `mysql` verbatim — including
+   backing services and takes both `postgresql` and `mysql` verbatim — including
    `image: postgres:18` with `./docker/volumes/postgresql:/var/lib/postgresql/data`.
    Postgres 18 moved `PGDATA` to `/var/lib/postgresql/18/docker` and its
    entrypoint now refuses to start when the old path is a mount point:
@@ -46,14 +43,11 @@ Two separate things:
           format which is compatible with "pg_ctlcluster" ...
    ```
 
-   (reproduced directly with `docker run -v /tmp/x:/var/lib/postgresql/data
-   postgres:18`; see docker-library/postgres#1259). Postgres exited 1 on every
-   start, and because the generated app service inherited `depends_on:
-   postgresql`, compose never started the app container at all — the deploy log
-   shows `Container project-app-1 Created` and no `Started` line. Nothing was
-   ever listening.
+   (see docker-library/postgres#1259). Postgres exits 1 on every start, and
+   because the generated app service inherits `depends_on: postgresql`, compose
+   never starts the app container at all.
 
-The docroot was never the problem: `PhpDocroot` probes `public` first and
+The docroot is not the problem: `PhpDocroot` probes `public` first and
 Koillection's front controller is `public/index.php`.
 
 ## What the recipe does
@@ -62,8 +56,8 @@ Koillection's front controller is `public/index.php`.
 what makes this a compose project — an app config is applied before detection,
 and the `compose` platform (priority 980) then wins the walk over `php` (930).
 
-It runs Koillection's **published image** (`koillection/koillection:<version>`,
-602 MB) rather than the checkout, because the php strategy cannot build this
+It runs Koillection's **published image** (`koillection/koillection:<version>`)
+rather than the checkout, because the php strategy cannot build this
 app's frontend:
 
 - the Vite bundle's `package.json` is in `assets/`, and `HostCompile::runForPhp`
@@ -118,23 +112,6 @@ The hook also has to *delete before appending*: Koillection commits a root
 `.env` with `DB_PASSWORD=koillection` and an empty `APP_SECRET`, and compose
 reads that same file for interpolation. Ghost's `if [ ! -f .env ]` guard would
 never fire here.
-
-## Verified
-
-Deployed on a 2500 MB account: `deploy-ok`, 75 s end to end (about 45 s of that
-is the image pull), loopback `:8000` HTTP 200, domain HTTP 200 titled
-"Koillection", all `_baseline` checks pass. `project-ready-1` exited 0 seven
-seconds after the app container started, and `RestartCount` stayed 0.
-
-Driven as a user, not just probed: `/` → `/first-connection`, form submitted,
-landed authenticated on `/collections`; logged out; logged back in with
-`_login` + `_password` and got `PHPSESSID` + `REMEMBERME` back. The session
-cookie comes back `secure; httponly; samesite=strict`, which is
-`cookie_secure: auto` resolving correctly through `SYMFONY_TRUSTED_PROXIES`.
-`/build/*` assets and `/api/docs` answer 200. After `docker restart` of the app
-container, `POST /api/authentication_token` still returns a token and the
-existing session still works — the point of pinning `JWT_PASSPHRASE` and
-`APP_SECRET`.
 
 ## Not configured
 

@@ -1,5 +1,5 @@
 # Compose-replace: the repo compose leaves APP_KEY empty, pulls the AI face
-# recognition service, and relies on cap_add (stripped by the engine, engine#349).
+# recognition service, and relies on cap_add (stripped by the engine).
 # Runs upstream's api + worker + MariaDB shape on the current release.
 x-lychee: &lychee
   image: ghcr.io/lycheeorg/lychee:v7.10.0

@@ -26,23 +26,11 @@ description: >-
      site is reachable; there is no public registration or installer.
   2. ORIGIN and BASE_URL from ${PA_PUBLIC_URL} (SvelteKit CSRF check, share
      links). BACKEND_URL is http://app:3000, the service's own name: the
-     engine rewrites any *_URL=http://localhost:... to the public address
-     (engine#320), which points the frontend at itself.
+     engine rewrites any *_URL=http://localhost:... to the public address,
+     which points the frontend at itself.
   3. Persistence: /app/data on the named volume invio_data. `ready` waits on
      a healthcheck of both processes so `up -d` returns only once the app
-     answers (engine#204). Only :8000 is published.
-
-  == Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 2500 ==
-
-  Fresh create: success in 66s. /login title "Invio" (16.5 kB). admin/supersecret
-  refused by the API (401 "Invalid credentials") and by the login form; the
-  generated login returns a token and the form redirects to /dashboard.
-  Customer + invoice (3 x 125.50 EUR) created via /api/v1, read back, and
-  /api/v1/invoices/<id>/pdf returns a 20 kB PDF naming the customer, the
-  line and EUR 376.50. Rebuild 29s: secrets reused, default login still
-  refused, admin, customer, invoice and PDF intact. /.env, /.git/config,
-  /invio.db, /app/data/invio.db serve the app's 404 page; /users and
-  /settings 303 to /login; /api/v1/users 401 without a token. App ~375-420 MiB (mem_limit 1g).
+     answers. Only :8000 is published.
 
   More users: the Users page (admin only).
 credentials:

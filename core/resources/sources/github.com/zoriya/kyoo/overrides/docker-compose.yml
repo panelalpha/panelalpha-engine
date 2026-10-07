@@ -1,6 +1,6 @@
 # Upstream's release compose (v5.2.1) with the release images pinned, state on
 # named volumes, generated secrets, and upstream's traefik routing done by
-# Caddy (engine#334). Hardware-transcoding profiles are left out (no GPU).
+# Caddy. Hardware-transcoding profiles are left out (no GPU).
 x-kyoo-env: &kyoo-env
   env_file:
     - ./panelalpha/kyoo-defaults.env
@@ -64,7 +64,7 @@ services:
       - transcoder_cache:/cache
       - transcoder_metadata:/metadata
 
-  # Upstream's router, as Caddy: the engine drops any traefik service (engine#334).
+  # Upstream's router, as Caddy: the engine drops any traefik service.
   proxy:
     image: docker.io/library/caddy:2.11.4-alpine
     restart: unless-stopped

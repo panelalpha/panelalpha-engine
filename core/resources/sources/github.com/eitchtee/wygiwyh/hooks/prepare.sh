@@ -8,8 +8,8 @@ cd ~/project
 
 say() { echo "[wygiwyh] $*" >&2; }
 
-# ~/.panelalpha/wygiwyh/ survives a redeploy; ~/project is emptied every deploy
-# (engine#173). A secret written under ~/project would be regenerated on every
+# ~/.panelalpha/wygiwyh/ survives a redeploy; ~/project is emptied every deploy.
+# A secret written under ~/project would be regenerated on every
 # rebuild -- a new SECRET_KEY logs everyone out, and a new DB password locks the
 # app out of the pgdata volume that still holds the old one. db.env holds only
 # what the postgres container needs; app.env holds what the app needs. The admin

@@ -16,7 +16,7 @@ fi
 chmod 600 "${STORE}/pin.env"
 
 # Upstream's .env.example is UTF-16 and the engine would copy it into a .env
-# that compose rejects (engine#315). Nothing here needs values from .env.
+# that compose rejects. Nothing here needs values from .env.
 printf '# DumbPad takes its settings from docker-compose.yml and ~/.panelalpha/dumbpad/pin.env\n' > .env
 
 chmod +r panelalpha/dumbpad-proxy.conf.template

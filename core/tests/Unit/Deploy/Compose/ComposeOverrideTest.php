@@ -7,7 +7,7 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * engine#48, item 9: a compose override is layered over the hardened run file
+ * A compose override is layered over the hardened run file
  * with `-f`, so what the run file had removed came back through it.
  */
 class ComposeOverrideTest extends TestCase

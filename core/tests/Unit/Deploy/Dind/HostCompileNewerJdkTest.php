@@ -16,7 +16,7 @@ use Tests\TestCase;
 
 /**
  * Tigase takes its Java release from a parent pom in its own repository, so
- * detection picked JDK 21 and javac refused `release 25` (#109). The compile
+ * detection picked JDK 21 and javac refused `release 25`. The compile
  * runs again on the catalogued JDK and the app is then run on it.
  */
 class HostCompileNewerJdkTest extends TestCase

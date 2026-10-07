@@ -10,7 +10,7 @@ use App\Lib\Deploy\Platform\Runtime\Images;
 use Tests\TestCase;
 
 /**
- * engine#246: a host build ran the customer's scripts on Docker's default
+ * A host build ran the customer's scripts on Docker's default
  * bridge, from where it reached the engine API (bridge gateway and public
  * address), the host's private network and 169.254.169.254. Builds now run on
  * a network the firewall script limits to the internet.
@@ -79,7 +79,7 @@ class BuildNetworkTest extends TestCase
         // icc=false would make Docker load br_netfilter host-wide.
         $this->assertNotContains('com.docker.network.bridge.enable_icc=false', $argv);
         $this->assertSame('panelalpha-build', $argv[array_key_last($argv)]);
-        // br- so engine#241's DNAT for :2011 leaves it to docker-proxy like any bridge.
+        // br- so the DNAT for :2011 leaves it to docker-proxy like any bridge.
         $this->assertStringStartsWith('br-', BuildNetwork::BRIDGE);
         $this->assertLessThanOrEqual(15, strlen(BuildNetwork::BRIDGE), 'Linux interface names stop at 15');
     }

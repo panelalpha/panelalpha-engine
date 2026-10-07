@@ -1,6 +1,6 @@
 # Upstream's docker/compose/docker-compose.simple.yml written out at the root:
 # the root file only include:s it, which the engine neither hardens nor
-# scans for ports (engine#368).
+# scans for ports.
 services:
   app:
     image: onetimesecret/onetimesecret:v0.26.13

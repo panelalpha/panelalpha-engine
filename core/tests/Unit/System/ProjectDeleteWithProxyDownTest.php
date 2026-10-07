@@ -8,7 +8,7 @@ use App\System;
 use Mockery;
 use Tests\TestCase;
 
-// Deleting a project must not depend on sites-http being up (#63).
+// Deleting a project must not depend on sites-http being up.
 class ProjectDeleteWithProxyDownTest extends TestCase
 {
     /** @param list<string> $calls */

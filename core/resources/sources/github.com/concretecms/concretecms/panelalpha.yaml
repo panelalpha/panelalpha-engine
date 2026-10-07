@@ -20,27 +20,27 @@ description: >-
   The 158 packages the lock names are still installed, but Composer's
   autoload dump walks the *root package's* requirements, and the root requires
   nothing but the plugin: the generated `concrete/vendor/composer/
-  autoload_psr4.php` held one entry and the classmap nine classes. Measured on
-  this host, 2026-09-20:
+  autoload_psr4.php` holds one entry and the classmap nine classes, and every
+  request ends in
 
-      GET /  ->  200, 358 bytes
       Fatal error: Uncaught Error: Class "Concrete\Core\Foundation\
       ClassAutoloader" not found in /app/concrete/bootstrap/autoload.php:11
 
   hooks/prepare.sh does the merge itself, before the build, in twelve lines of
   PHP: it copies `concrete/composer.json`'s package requirements and its
   `autoload` block into the root `composer.json` with the paths rebased. The
-  engine's own `--no-plugins` install then dumps 9627 classes instead of 9,
-  and **no Composer plugin ever runs** -- on the host or anywhere else. That
-  is the whole difference between a recipe here and the plugin exception in
-  PhpHostBuild: the exception would have to trust three plugins; this trusts
-  none. See README.md for the one visible cost (a lock-file warning).
+  engine's own `--no-plugins` install then dumps the whole classmap instead of
+  nine classes, and **no Composer plugin ever runs** -- on the host or anywhere
+  else. That is the whole difference between a recipe here and the plugin
+  exception in PhpHostBuild: the exception would have to trust three plugins;
+  this trusts none. See README.md for the one visible cost (a lock-file
+  warning).
 
   **The document root is the repository root.** There is no `public/` in this
   repository -- `index.php` is at the top level next to `.git`, `composer.json`
   and `concrete/vendor/` -- so PhpDocroot falls through its candidates to the
   root, which is correct and is why the app answered 200 at all. It also means
-  Composer's 452 KB `installed.json` and every file under `concrete/vendor/`
+  Composer's `installed.json` and every file under `concrete/vendor/`
   were one request away. The engine's vhost already denies dotfiles,
   `docker-compose.*` and `panelalpha*`; files/.htaccess closes the rest and
   adds the pretty-URL rewrite Concrete has no .htaccess of its own for.
@@ -57,15 +57,15 @@ description: >-
   is told from the dashboard into `application/config/` -- the database
   credentials, `generated_overrides/`, the Doctrine proxies -- and every
   uploaded file into `application/files/`. Both live inside ~/project, which
-  GitRepository::cloneConfiguredRepository() empties before every deploy
-  (engine#173), so both are bind-mounted out to ~/.panelalpha/concrete/ by
+  GitRepository::cloneConfiguredRepository() empties before every deploy,
+  so both are bind-mounted out to ~/.panelalpha/concrete/ by
   overrides/docker-compose.override.yml, along with `packages/` for
   marketplace add-ons.
 extends: php
 # No `docroot:`. There is no public/, web/, public_html/ or webroot/ in this
 # repository, so PhpDocroot::readDocroot() falls through CANDIDATES to the
 # repository root on its own -- which is where index.php is. Saying `.` here
-# would be worse than saying nothing (engine#172).
+# would be worse than saying nothing.
 #
 # No `requires:` either. The php manifest's `node: {role: build, optional:
 # true}` costs nothing: there is no package.json anywhere in this repository,
@@ -96,9 +96,7 @@ commands:
       every one after. Idempotent -- it decides which by asking the database
       whether Concrete's own tables are there.
     run: 'sh panelalpha/concrete-setup.sh'
-    # The install builds ~250 tables and imports the starting point; 43s
-    # measured on this host with nothing else running, and this host is not
-    # the slow case.
+    # The install builds ~250 tables and imports the starting point.
     timeout: 900
 credentials:
   login_path: /login

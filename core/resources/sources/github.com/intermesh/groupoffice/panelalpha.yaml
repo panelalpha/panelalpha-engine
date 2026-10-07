@@ -37,10 +37,9 @@ description: >-
     (app/Lib/Deploy/Dind/DindHostBuilder.php:367), so declaring it puts
     Composer where the manifest is.
   * *The PHP version.* `www/composer.json` pins `config.platform.php` to 8.2
-    beside `require.php >=8.1`; read at the repository root there is no
-    manifest and the deploy takes the engine default, which is how this app was
-    reported as PHP 8.3. Resolved through `app_root` it is 8.2, and the same
-    image both resolves the tree and serves it.
+    beside `require.php >=8.1`; read at the repository root there is no manifest
+    and the deploy takes the engine default. Resolved through `app_root` it is
+    8.2, and the same image both resolves the tree and serves it.
   * *What is web-reachable.* With `docroot: www` the whole checkout is still
     bind-mounted at /app and only the vhost keeps `.git/`, the generated
     `docker-compose.yml` and `.env.default` out of reach. With `app_root: www`
@@ -50,8 +49,8 @@ description: >-
 
   Once `www/` is the application root, the probe answers correctly on its own:
   `www/index.php` exists, `PhpDocroot::detect()` returns `ROOT` and
-  `PA_DOCROOT` is `/app`. No `docroot:` key is needed, and #172 -- which folds
-  a literal `docroot: .` into "undeclared" -- never comes up.
+  `PA_DOCROOT` is `/app`. No `docroot:` key is needed, and readDocroot() folding
+  a literal `docroot: .` into "undeclared" never comes up.
 
   **The frontend has to be built, and `runForPhp` will not do it for you.**
   `.gitignore` excludes `/**/*.css`, so a checkout ships no compiled CSS at
@@ -71,8 +70,7 @@ description: >-
   `www/package.json` declares npm workspaces and no `build` script, so even
   reached it would return false. So this recipe puts a `package.json` at the
   checkout root whose only job is a `build` script, and
-  `files/panelalpha-build.sh` beside it runs upstream's build. Measured on
-  mariusz2: ~30s for 204 packages, the SASS pass and the GOUI esbuild bundles.
+  `files/panelalpha-build.sh` beside it runs upstream's build.
 
   **The first administrator is created from the deploy, and the installer is
   denied.** `www/install/` is an unauthenticated four-step wizard and the worst
@@ -103,7 +101,7 @@ description: >-
   `community`, so in a git checkout it does not exist -- `file_get_contents`
   raises E_WARNING, Group Office's own error handler turns that into an
   ErrorException, and `Installer::install()` dies inside
-  `registerCoreEntities()`. Measured, with the full stack. So
+  `registerCoreEntities()`. So
   files/www/go/modules/business/license/model/License.php is written as an
   empty commented file: `ClassFinder::fileIsEncoded()` reads it, finds no
   `sg_load`, and `hasIoncube()` correctly answers "this source is not
@@ -117,7 +115,7 @@ description: >-
   (`Blob::buildPath()`, go/core/fs/Blob.php:380-384), which is a plain config
   value. This recipe points it at `/data/files`, which the compose override
   bind-mounts from `~/.panelalpha/groupoffice` -- so the clone that wipes
-  `~/project` on every deploy (#173) cannot touch a single user file. The
+  `~/project` on every deploy cannot touch a single user file. The
   database is the account's own MySQL from `database: mysql` and survives a
   redeploy the same way. The one thing that has to be *dropped* on a redeploy
   is the compiled client bundle Extjs3 caches at
@@ -144,7 +142,7 @@ description: >-
   `install/configfile.php` writes the database password into `www/config.php`
   in clear with `var_export()` -- which is why this recipe writes that file
   itself, as a list of `getenv()` calls, and denies the page that would replace
-  it. And the base image loads no php.ini at all (#185), so `display_errors` is
+  it. And the base image loads no php.ini at all, so `display_errors` is
   on, `expose_php` is on and `post_max_size` is the compiled-in 8M -- which for
   groupware means a 2 MB ceiling on every attachment. files/www/.panelalpha/php
   fixes all three through PHP_INI_SCAN_DIR.
@@ -154,7 +152,7 @@ extends: php
 app_root: www
 # No `docroot:`. With app_root pointing at www/, PhpDocroot's own probe finds
 # www/index.php and answers PA_DOCROOT=/app, which is right. Saying `docroot: .`
-# here would be worse than saying nothing: readDocroot() folds it to '' (#172).
+# here would be worse than saying nothing: readDocroot() folds it to ''.
 #
 # MySQL or nothing. www/composer.json requires ext-pdo_mysql, go/core/db speaks
 # MySQL dialect throughout, go/core/install/install.sql is MySQL DDL and there
@@ -162,7 +160,7 @@ app_root: www
 # to point itself at a server, so without this the engine has nothing to hand it
 # and www/config.php.example's `groupoffice:secret@localhost` placeholder is all
 # there is. Declaring it also keeps PhpStrategy from mining the checkout for
-# sidecars (#166) -- not that there is a compose file here to mine.
+# sidecars -- not that there is a compose file here to mine.
 database: mysql
 commands:
   - id: groupoffice-setup

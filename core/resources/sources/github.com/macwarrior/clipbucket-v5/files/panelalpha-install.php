@@ -42,7 +42,7 @@ if (PHP_SAPI !== 'cli') {
 
 // Anything PHP has to say goes to stderr. `check` and `version` print shell
 // assignments that the caller eval's, and a warning on stdout would be eval'd
-// with them. engine#185 leaves the platform with display_errors=1 and no
+// with them. The shared PHP base image leaves the platform with display_errors=1 and no
 // php.ini to fix it centrally, so this is not theoretical.
 ini_set('display_errors', 'stderr');
 
@@ -92,7 +92,7 @@ if ($mode === 'config') {
     // substitute, so there is nothing to inject and no second copy of the
     // password on disk. includes/ is outside the document root's reach anyway
     // -- upload/.htaccess bounces `includes/` to /403 -- but the secret has no
-    // reason to exist twice, and engine#173 re-clones this directory into a
+    // reason to exist twice, and the engine re-clones this directory into a
     // world-readable .env.default on every deploy.
     //
     // includes/common.php reads $DBHOST/$DBNAME/$DBUSER/$DBPASS/$DBPORT and the

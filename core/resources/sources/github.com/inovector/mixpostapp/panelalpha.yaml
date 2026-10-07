@@ -24,7 +24,7 @@ description: >-
 
   `APP_URL` is left as `http://localhost` in the compose environment on purpose:
   the platform rewrites it to the project's public https URL before the stack
-  starts (engine#221 avoided), so Mixpost builds its links and Inertia redirects
+  starts, so Mixpost builds its links and Inertia redirects
   against the address a visitor actually typed without the recipe having to know
   it. Social-account providers (X/Twitter, Mastodon, Facebook, …) need operator
   API keys and are configured from the running dashboard; they are left

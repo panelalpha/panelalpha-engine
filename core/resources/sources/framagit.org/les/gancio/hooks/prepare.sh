@@ -4,7 +4,7 @@ cd ~/project
 
 # Gancio keeps everything mutable under GANCIO_DATA=/app/data: the SQLite DB,
 # config.json (which holds the session `secret`), uploaded event images, logs.
-# ~/project is wiped every deploy (engine#173), so the data must live in
+# ~/project is wiped every deploy, so the data must live in
 # ~/.panelalpha/gancio/data, which the wipe never touches. ~/.panelalpha is
 # owned by this account, so the hook can create the tree here.
 DATA_DIR="${HOME}/.panelalpha/gancio/data"
@@ -17,7 +17,7 @@ mkdir -p "${DATA_DIR}"
 # owned by the user it runs as. Both are consumed by ${...} interpolation from
 # ~/project/.env at `docker compose up`. Writing .env here also makes the
 # engine treat the env as already-prepared (ProjectEnvironment sees .env and
-# does not copy the repo's .env.example over it, engine#218).
+# does not copy the repo's .env.example over it).
 {
   echo "CONTAINER_UID=$(id -u)"
   echo "GANCIO_DATA_DIR=${DATA_DIR}"

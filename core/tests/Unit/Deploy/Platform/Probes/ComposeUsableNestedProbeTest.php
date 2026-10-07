@@ -7,7 +7,7 @@ use App\Lib\Deploy\Platform\Probes\ComposeUsableNestedProbe;
 
 /**
  * A compose stack kept under docker/ or deploy/ is found, but only for a
- * project nothing else claims (engine#91).
+ * project nothing else claims.
  */
 class ComposeUsableNestedProbeTest extends ProbeTestCase
 {

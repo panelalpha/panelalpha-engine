@@ -56,7 +56,7 @@ services:
     volumes:
       # ~/.panelalpha/wishlist, not ./data and ./uploads. Upstream mounts both
       # inside the project directory, and a redeploy clears and re-clones
-      # ~/project (engine#173): every list, item, claim and uploaded image
+      # ~/project: every list, item, claim and uploaded image
       # would be destroyed by the next deploy. Relative paths resolve against
       # --project-directory, which is ~/project, so `..` is the account's home.
       # hooks/prepare.sh creates all three before this mount is made, so Docker
@@ -65,7 +65,7 @@ services:
       - ../.panelalpha/wishlist/uploads:/usr/src/app/uploads
       # The generated admin password, read once by the install step and never
       # put in the environment: the compose file the engine writes is 0644 and
-      # readable by every other tenant (engine#173), and `docker inspect` on
+      # readable by every other tenant, and `docker inspect` on
       # the account would show it too. 0600 on the host, root in the container.
       - ../.panelalpha/wishlist/credentials:/usr/src/app/panelalpha-credentials:ro
       # Upstream's entrypoint plus one line; see files/panelalpha/entrypoint.sh.
@@ -76,8 +76,8 @@ services:
     # answers -- with a 502 -- for the whole of the first boot: 45 Prisma
     # migrations, the seed, three patches and the install step. Without
     # something to wait on, `docker compose up -d` returns into that window and
-    # the engine probes a site that is not up yet. This is the gate for
-    # engine#90, and `ready` below is what makes `up -d` block on it.
+    # the engine probes a site that is not up yet. This is the readiness
+    # gate, and `ready` below is what makes `up -d` block on it.
     # /login is unauthenticated (hooks.server.ts nonPrivateRoutes) and is
     # served by SvelteKit rather than by Caddy's static handler, so it is only
     # 200 once node is really serving. The image is node on debian-slim: no

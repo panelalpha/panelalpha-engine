@@ -781,7 +781,7 @@ class User extends Authenticatable
 
     /**
      * The limit the account runs with: its own, or the default for a project
-     * made before every project had one (#294).
+     * made before every project had one.
      */
     public function effectiveMemoryLimit(): int
     {

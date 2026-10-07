@@ -3,7 +3,7 @@ set -e
 cd ~/project
 
 # Secrets live outside ~/project, not in it. The engine wipes and re-clones
-# ~/project on every deploy (engine#173), so a guard on a file there never
+# ~/project on every deploy, so a guard on a file there never
 # fires on a redeploy -- it would regenerate the database password while the
 # db_data volume still holds the old one. ~/.panelalpha survives the clone, so
 # that is where the account's secrets are kept. The admin login is the engine's
@@ -87,7 +87,7 @@ fi
 # project at all.
 #
 # That is not tidiness. The engine copies ~/project/.env to
-# ~/project/.env.default at mode 644 (ProjectEnvironment::apply, engine#173),
+# ~/project/.env.default at mode 644 (ProjectEnvironment::apply),
 # and an account's home is root-owned 0755 with the project directory 0755
 # inside it -- so anything written to .env is readable by every other account's
 # uid on the host. Confirmed by reading one account's .env.default as another

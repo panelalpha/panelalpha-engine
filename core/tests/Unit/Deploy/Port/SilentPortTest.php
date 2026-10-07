@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * A container that is up and does not answer on the port it publishes, and
- * what it listens on instead (engine#90).
+ * what it listens on instead.
  */
 class SilentPortTest extends TestCase
 {

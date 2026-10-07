@@ -75,8 +75,7 @@ services:
     mem_limit: 3g
 
   # Starts nothing, exits 0, waits on app's healthcheck so `docker compose up -d`
-  # returns only once the site actually answers, not the moment the JVM launches
-  # (engine#204).
+  # returns only once the site actually answers, not the moment the JVM launches.
   ready:
     image: docker.io/library/alpine:3
     entrypoint: ["/bin/sh", "-c", "exit 0"]

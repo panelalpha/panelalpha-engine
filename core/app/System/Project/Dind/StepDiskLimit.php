@@ -8,7 +8,7 @@ use App\System\Project\Dind as DindProject;
 
 /**
  * Disk checked while a deploy step runs, not only before it starts: one pull
- * took a host from 34 GB free to 0 (engine#244). The account's inner Docker
+ * took a host from 34 GB free to 0. The account's inner Docker
  * store lands on the host as uid 0, so user quota never counts it.
  */
 final class StepDiskLimit

@@ -29,11 +29,6 @@ description: >-
   the superuser and PATCHes that user to "admin" through the PocketBase API,
   only while it is the sole user with role "user"; on later deploys it leaves
   roles alone. APP_URL is set to the account's public URL.
-
-  Measured on mariusz.panelalpha.tools: fresh deploy 34s, hub 11 MiB of its
-  512 MiB cap; first-run false, create-user 404, anonymous sign-up 403; login
-  as the seeded user returns role admin; a system created through the API reads
-  back; after rebuild the stored login, the user and the system are unchanged.
 credentials:
   adopt_from: .panelalpha/beszel/admin.env
   fields:

@@ -6,7 +6,7 @@ description: >-
   (LiveView) app backed by PostgreSQL, delivered as one official image
   (ghcr.io/b310-digital/mindwendel). This recipe is the compose-REPLACE pattern
   (cannery/calcom/n8n): no platform block is declared, so detection runs via
-  fromWalk and engine#221 does not bite; ComposePlaceholders rewrites the one
+  fromWalk and the fromSource platform-declaration trap does not bite; ComposePlaceholders rewrites the one
   *_URL value below to the account's public https address.
 
   IMAGE, MATCHES HEAD. The tracker Repository URL resolves to the repo's default
@@ -27,7 +27,7 @@ description: >-
   supplied. This override replaces it with a working stack: a postgres:16-alpine
   sidecar on a NAMED volume (survives project_rebuild and storage reclaim; only
   account deletion / failed-deploy rollback wipe it), the official app image,
-  and a `ready` gate (engine#204) so `docker compose up -d` returns only once
+  and a `ready` gate so `docker compose up -d` returns only once
   the site actually answers on :4000. Migrations are not a separate step: the
   image's own /app/bin/server waits for the database (pg_isready) then runs
   Mindwendel.Release.migrate before starting Phoenix, so the schema is created
@@ -43,7 +43,7 @@ description: >-
   SECRETS, PERSISTED ONCE. hooks/prepare.sh generates and stores
   SECRET_KEY_BASE (64 bytes) and the database password under
   ~/.panelalpha/mindwendel/ (0600 in 0700), the only writable place a deploy
-  does not delete (~/project is emptied every redeploy, engine#173). A rebuild
+  does not delete (~/project is emptied every redeploy). A rebuild
   reuses them: a new SECRET_KEY_BASE would log every board-holder's session out,
   a new DB password would lock the app out of the pgdata volume that still holds
   the old one. URL_HOST cannot be baked in -- it is the account domain, unknown
@@ -88,5 +88,5 @@ description: >-
   correct; but the shared panelalpha.online (WithoutDNS) tunnel may not carry the
   upgrade, in which case live edits stall while dead-render reads still work.
   On an account with its own domain pointed straight at the engine the LiveView
-  UI works. This is the WebSocket analogue of the engine#170 tunnel caveat, an
+  UI works. This is the WebSocket analogue of the panelalpha.online tunnel caveat, an
   engine/tunnel limitation to report, not a recipe or app failure.

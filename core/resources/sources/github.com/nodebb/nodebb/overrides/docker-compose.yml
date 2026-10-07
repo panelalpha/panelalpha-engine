@@ -22,7 +22,7 @@ services:
       mongo__database: nodebb
       # The session cookie is Secure (https url); without proxy trust the
       # request looks like plain HTTP and login fails with 403. Private-range
-      # hops only, so req.ip is the last address the proxies added (engine#319).
+      # hops only, so req.ip is the last address the proxies added.
       trust_proxy: "loopback, linklocal, uniquelocal"
     volumes:
       - nodebb-build:/usr/src/app/build
@@ -40,7 +40,7 @@ services:
       start_period: 20s
 
   mongo:
-    # 7.0: every 8.x image refuses to start on this kernel (engine#146).
+    # 7.0: every 8.x image refuses to start on this kernel.
     image: mongo:7.0
     restart: unless-stopped
     command: ["mongod", "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.25"]

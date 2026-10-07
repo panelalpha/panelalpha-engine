@@ -7,7 +7,7 @@ Upstream creates the Super Admin only when `LISTMONK_ADMIN_USER` and
 `LISTMONK_ADMIN_PASSWORD` are set on the first start. Its compose file leaves
 them empty, so a fresh install serves "This is a fresh install. Pick a username
 and password for the Super Admin account." at `/admin/login` to whoever opens it
-first (#263).
+first.
 
 - The engine generates the login (`credentials:` in `panelalpha.yaml`), keeps it
   and returns it from `GET /projects/{name}/app-credentials` (MCP

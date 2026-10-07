@@ -10,7 +10,7 @@ x-env: &env
 services:
   # One-shot: MonitoRSS is a Discord bot and its panel logs in with Discord,
   # so the deploy fails here naming each missing variable. Read from .env at
-  # runtime, not interpolated (engine#336).
+  # runtime, not interpolated.
   check:
     image: ghcr.io/synzen/monitorss-monolith:7.4.0
     restart: "no"
@@ -280,7 +280,7 @@ services:
         condition: service_healthy
     mem_limit: 768m
 
-  # No-op gate: `compose up -d` returns only once the panel answers (engine#204).
+  # No-op gate: `compose up -d` returns only once the panel answers.
   ready:
     image: ghcr.io/synzen/monitorss-monolith:7.4.0
     restart: "no"

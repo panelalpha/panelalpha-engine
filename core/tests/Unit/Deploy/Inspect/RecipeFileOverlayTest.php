@@ -9,7 +9,7 @@ use App\Lib\Deploy\Inspect\RecipeFileOverlay;
 use Tests\TestCase;
 
 /**
- * engine#270: the deploy lays a recipe's files over the checkout before
+ * The deploy lays a recipe's files over the checkout before
  * detection; inspect read the bare clone and called ESMira undeployable.
  */
 class RecipeFileOverlayTest extends TestCase

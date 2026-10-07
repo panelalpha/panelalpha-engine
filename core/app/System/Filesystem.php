@@ -48,8 +48,8 @@ class Filesystem
      *
      * `cp`/`copyFile()` write through a symlink at $path to wherever it
      * points -- fine when $path is ours alone, not when a directory holding
-     * it is (or used to be) writable from inside a tenant's account
-     * (engine#524). `mv` replaces the directory entry for $path directly, so
+     * it is (or used to be) writable from inside a tenant's account.
+     * `mv` replaces the directory entry for $path directly, so
      * a symlink there is swapped out, never followed; `-T` keeps that true
      * even if $path currently is a directory or a symlink to one.
      */

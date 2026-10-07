@@ -14,12 +14,12 @@ description: >-
   the database every page redirects to /identity-server/setup, which creates
   the first admin.
 
-  NGINX FRONT (engine#429). The engine's health probe requests the app over
+  NGINX FRONT. The engine's health probe requests the app over
   plain http with no X-Forwarded-Proto; Squidex's antiforgery cookie is
   secure-only, so the setup and login pages answer that probe 500 and the
   deploy ends "partial" while visitors get 200. A small nginx:1-alpine `web`
   service (files/panelalpha/front.conf) sets X-Forwarded-Proto to https only
   when the request carries none (every request through the engine's proxy
-  does), sends `Connection: upgrade` only for real upgrades (engine#323), and
+  does), sends `Connection: upgrade` only for real upgrades, and
   is the only service publishing a port (5000). It can be dropped once
-  engine#429 is fixed.
+  the engine's probe no longer needs it.

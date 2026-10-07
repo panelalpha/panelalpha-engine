@@ -6,7 +6,7 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * engine#312: an account's /etc/docker/daemon.json is rendered on the host
+ * An account's /etc/docker/daemon.json is rendered on the host
  * ({@see \App\System\Project\Dind\AccountTemplate::daemonJson()}) and mounted
  * in, instead of being patched with a shell inside the account.
  */

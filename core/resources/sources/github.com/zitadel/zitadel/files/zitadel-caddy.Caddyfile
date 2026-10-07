@@ -1,5 +1,5 @@
 # Upstream's Traefik routes (deploy/compose/docker-compose.yml labels). The
-# engine drops a traefik service from a compose file (engine#334), so Caddy
+# engine drops a traefik service from a compose file, so Caddy
 # does the same routing here.
 {
 	admin off

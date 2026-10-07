@@ -9,7 +9,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * A dependency that never came up is reported by what it printed, not by
- * compose's `dependency failed to start` (engine#97).
+ * compose's `dependency failed to start`.
  */
 class DependencyFailureTest extends TestCase
 {

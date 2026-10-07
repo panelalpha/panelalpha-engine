@@ -139,8 +139,8 @@ class CheckRunnerTest extends TestCase
     }
 
     /**
-     * Measured on a live deploy: delete a site's entry document and `/`
-     * answers 404 while every other page answers 200.
+     * Delete a site's entry document and `/` answers 404 while every other page
+     * answers 200.
      */
     public function test_a_static_site_that_lost_its_front_page_is_reported(): void
     {

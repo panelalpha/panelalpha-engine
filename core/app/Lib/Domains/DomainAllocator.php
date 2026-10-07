@@ -179,8 +179,8 @@ class DomainAllocator
     }
 
     /**
-     * The last time PanelAlpha Online refused or failed, for `GET /system/info`
-     * (#79): a used-up site quota is an engine-wide fact, not one project's.
+     * The last time PanelAlpha Online refused or failed, for `GET /system/info`:
+     * a used-up site quota is an engine-wide fact, not one project's.
      * Cleared by the next label it sells.
      */
     public static function lastOnlineError(): ?array

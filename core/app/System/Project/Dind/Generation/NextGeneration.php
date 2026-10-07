@@ -7,7 +7,7 @@ use Symfony\Component\Yaml\Yaml;
 
 /**
  * The second copy of the routed service a redeploy starts beside the running
- * one (engine#33): the same compose files plus an override, its own compose
+ * one: the same compose files plus an override, its own compose
  * project, ports left to Docker, the running project's networks and volumes.
  */
 final class NextGeneration

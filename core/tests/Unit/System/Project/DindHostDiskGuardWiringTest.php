@@ -11,7 +11,7 @@ use Tests\TestCase;
 
 /**
  * Both entry points every deploy passes through refuse on a nearly full host
- * before doing any work (engine#87).
+ * before doing any work.
  */
 class DindHostDiskGuardWiringTest extends TestCase
 {

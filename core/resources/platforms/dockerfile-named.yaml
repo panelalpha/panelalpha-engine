@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=./_schema.json
-# A root `<name>.dockerfile` (engine#91). Below every other manifest, compose
+# A root `<name>.dockerfile`. Below every other manifest, compose
 # under docker/ included, and its probe steps aside for anything Railpack
 # recognises, so it only ever takes a repository that would otherwise reach
 # `fallback`.

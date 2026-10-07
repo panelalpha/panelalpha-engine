@@ -3,7 +3,7 @@
 # libretranslate/libretranslate on Docker Hub as a SINGLE container (Flask +
 # gunicorn + Argos Translate). This runs that official image directly (pulled,
 # not built), pinned to the current stable release v1.9.6. Seeding a Docker Hub
-# image also sidesteps engine#229 (image-seed NotFound is the GHCR case, not Hub).
+# image also sidesteps the image-seed NotFound (the GHCR case, not Hub).
 #
 # WHY COMPOSE-REPLACE. A hosted deploy needs four things bare detection cannot
 # give: the large Argos models on a volume (first download is minutes), the API
@@ -104,7 +104,7 @@ services:
       # SQLite API-key DB (and the recreated-each-boot prometheus dir).
       - lt-db:/app/db
     # Flask/gunicorn listens on 5000; publish it so the engine's port scan takes
-    # it as the primary (engine#234). No other service publishes a port.
+    # it as the primary. No other service publishes a port.
     ports:
       - "5000:5000"
     mem_limit: 4096m
@@ -133,7 +133,7 @@ services:
   # Starts nothing, exits 0, waits on the health probe. `docker compose up -d`
   # blocks on a depends_on completion condition, so `up` returns -- and the engine
   # reports the deploy finished -- only after LibreTranslate actually answers
-  # (engine#204: up -d returns before the app is up).
+  # (up -d returns before the app is up).
   ready:
     image: alpine:3
     entrypoint: ["/bin/sh", "-c", "exit 0"]

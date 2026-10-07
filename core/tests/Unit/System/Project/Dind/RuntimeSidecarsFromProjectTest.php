@@ -199,7 +199,7 @@ class RuntimeSidecarsFromProjectTest extends TestCase
     }
 
     /**
-     * Zerobyte (engine#422): every service kept from its workstation file was
+     * Zerobyte: every service kept from its workstation file was
      * its e2e suite. Dropping them must not drop the production variant's env
      * too, which the app used to get with them.
      */
@@ -273,7 +273,7 @@ class RuntimeSidecarsFromProjectTest extends TestCase
 
     /**
      * The production file says what runs beside the app; the workstation file
-     * added caddy, a second database and a debug server (engine#166).
+     * added caddy, a second database and a debug server.
      */
     public function test_a_production_compose_beats_the_development_one(): void
     {

@@ -11,7 +11,7 @@ description: >-
 
   This recipe is upstream's compose.yml with three changes: port 8000 is
   published, BASE_URL is the site's address, and SECRET_KEY_BASE (64+ bytes,
-  which the engine's generated 48-character secrets do not reach, engine#338)
+  which the engine's generated 48-character secrets do not reach)
   plus the PostgreSQL password are generated once into ~/.panelalpha/plausible-ce
   by hooks/prepare.sh. A gate service waits for Plausible's own /api/health.
   First run is as upstream ships it: the site opens Plausible's registration

@@ -16,7 +16,7 @@ cd ~/project
 # generated beside the code would be a new password on every redeploy, matching
 # nothing. ~/.panelalpha is where it goes, and a directory rather than the home
 # itself because account homes are root-owned and 0755: an account cannot
-# create a file directly in its own home. #173 also writes .env.default into
+# create a file directly in its own home. The engine also writes .env.default into
 # the checkout 0644 and readable by every other tenant, which is the other
 # reason nothing secret belongs in ~/project.
 STORE_DIR="$HOME/.panelalpha"
@@ -65,7 +65,7 @@ chmod -R 755 tmp www/data
 
 # ---------------------------------------------------------- display_errors --
 #
-# #185: the shared PHP base image loads no php.ini, so display_errors is on
+# The shared PHP base image loads no php.ini, so display_errors is on
 # platform-wide, and upstream's www/.htaccess then asserts it again --
 # `php_value display_errors 1` under <IfModule php_module>, which is the mod_php
 # 8 module name, and the base image is mod_php (panelalpha-serve.sh execs

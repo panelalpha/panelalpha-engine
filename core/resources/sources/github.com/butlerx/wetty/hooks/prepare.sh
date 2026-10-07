@@ -31,7 +31,7 @@ ACCOUNT_UID="$(id -u)"
 ACCOUNT_GID="$(id -g)"
 
 # ~ itself is chown root:root on every rebuild (Project.php:813) and ~/project
-# is cleared and re-cloned (engine#173), so ~/.panelalpha is the only place a
+# is cleared and re-cloned, so ~/.panelalpha is the only place a
 # generated file both survives a redeploy and belongs to the account
 # (Project.php:814).
 mkdir -p "${AUTH_DIR}"
@@ -106,8 +106,8 @@ chmod 600 "${DATA_HOME}/identity.env"
 # An /etc/passwd for the app container, because it runs as the account and the
 # account is nobody inside the wetty image. OpenSSH calls getpwuid() on its own
 # uid before it does anything else and refuses outright when there is no entry:
-# measured, every session died at `No user exists for uid 1002` before a
-# password was ever asked for. The alternative is running the web-facing Node
+# every session dies at `No user exists for uid <uid>` before a password is
+# ever asked for. The alternative is running the web-facing Node
 # process as root, which is a worse answer to a smaller problem.
 #
 # Two lines, no shadow file, no secrets: it replaces the image's /etc/passwd
@@ -164,7 +164,7 @@ say "wrote docker-compose.override.yml (app and auth as ${ACCOUNT_UID})"
 # ---------------------------------------------------------------------------
 # containers/wetty/Dockerfile:9 is `COPY . /usr/src/app` in the base stage, so
 # every layer under it -- two pnpm installs, the node-pty rebuild and the
-# esbuild run, 89s of the 106s control deploy -- is thrown away by anything in
+# esbuild run, most of the build time -- is thrown away by anything in
 # the checkout that differs between two deploys. Two things do: .git, which is
 # never identical across two clones of the same commit, and the files the
 # platform and this recipe put in ~/project beside the application. None of

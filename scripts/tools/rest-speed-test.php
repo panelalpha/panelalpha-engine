@@ -128,13 +128,13 @@ const FIXTURES = [
         // than a framework, so 8.3 is covered by two different code paths.
         'runtime' => 'php 8.3',
         'env' => [],
-        // Measured 2026-09-04: the stock recipe deploys Grav and the site
-        // answers HTTP 500 — `Theme 'quark2' does not exist`. Grav's git
-        // repository ships `user/themes` and `user/plugins` EMPTY; the theme
-        // and the error/problems plugins are fetched by `bin/grav install`,
-        // which no platform recipe knows to run. Naming the build stage here
-        // replaces it, so composer install has to be restated: a stage given
-        // in the request takes over that stage entirely.
+        // The stock recipe deploys Grav and the site answers HTTP 500 — `Theme
+        // 'quark2' does not exist`. Grav's git repository ships `user/themes`
+        // and `user/plugins` EMPTY; the theme and the error/problems plugins
+        // are fetched by `bin/grav install`, which no platform recipe knows to
+        // run. Naming the build stage here replaces it, so composer install has
+        // to be restated: a stage given in the request takes over that stage
+        // entirely.
         'stages' => [
             'build' => [
                 [
@@ -241,13 +241,13 @@ const FIXTURES = [
         // port the python platform manifest publishes. An app that binds
         // 127.0.0.1 or another port would deploy and never answer.
         'env' => [],
-        // Measured 2026-09-04: the stock recipe deploys it and every request
-        // is a 500 — `TypeError: unhashable type: 'dict'` out of Jinja. The
-        // repository calls `templates.TemplateResponse('index.html', {...})`,
-        // the argument order Starlette 0.47 removed, and its requirements.txt
-        // pins nothing, so a fresh pip install gets the version that refuses
-        // it. Upstream rot, not an engine fault — constrained here rather than
-        // forked, and the constraint is visible in the report.
+        // The stock recipe deploys it and every request is a 500 — `TypeError:
+        // unhashable type: 'dict'` out of Jinja. The repository calls
+        // `templates.TemplateResponse('index.html', {...})`, the argument order
+        // Starlette 0.47 removed, and its requirements.txt pins nothing, so a
+        // fresh pip install gets the version that refuses it. Upstream rot, not
+        // an engine fault — constrained here rather than forked, and the
+        // constraint is visible in the report.
         'stages' => [
             'build' => [
                 [
@@ -693,7 +693,7 @@ function unprewarm(string $sshTarget, string $runtimeId, string $version, bool $
     }
 
     // Removing the tag is not enough to make the next build a real one:
-    // BuildKit keeps the layers, so the second app measured on a given PHP
+    // BuildKit keeps the layers, so the second app benchmarked on a given PHP
     // minor rebuilds its base from cache in seconds. Pruning the host's build
     // cache is what makes mode 1 mean "never built".
     //
@@ -847,14 +847,14 @@ const PHASE_MODEL = [
     ],
     'deploy-files' => [
         // Named for the last thing it logs, which is not the same as what it
-        // spends its time on. Measured 2026-09-04 on a dev host: between
-        // `Using default environment variables` and the next line the pipeline
-        // writes, a Node deploy spends 13s with the host image present and 35s
-        // without it — the difference being a `docker pull` of
-        // node:20-bookworm-slim that is never logged, by a line that then
-        // reports the image as coming "from host cache". Any phase model built
-        // on the log inherits that blind spot, so this one says so out loud
-        // rather than presenting the whole window as file writing.
+        // spends its time on. Between `Using default environment variables` and
+        // the next line the pipeline writes, a Node deploy spends 13s with the
+        // host image present and 35s without it — the difference being a
+        // `docker pull` of node:20-bookworm-slim that is never logged, by a
+        // line that then reports the image as coming "from host cache". Any
+        // phase model built on the log inherits that blind spot, so this one
+        // says so out loud rather than presenting the whole window as file
+        // writing.
         'what' => 'writing the Dockerfile, compose file and environment — plus whatever else runs before the next logged line',
         'patterns' => [
             '/environment variables/i',
@@ -943,12 +943,12 @@ function layer_role(string $command): string
  *
  * There are three states, not two, and the third is a trap: `docker rmi`
  * removes the image *tag* and leaves BuildKit's layer cache untouched, so the
- * second app to be measured on a given PHP minor rebuilds its base image from
- * cached layers in seconds and looks like a cheap no-prewarm deploy. Measured
- * 2026-09-04: laravel built the php 8.3 base in 275.8s with 0 layers cached;
- * grav, minutes later on the same minor, "built" it in 3.3s with 15 of 18
- * layers cached. Same log line, two completely different measurements — so
- * the layer cache decides the wording, not the log line alone.
+ * second app to be benchmarked on a given PHP minor rebuilds its base image
+ * from cached layers in seconds and looks like a cheap no-prewarm deploy. A
+ * base built with 0 layers cached takes minutes; the same base "built" again on
+ * the same minor takes seconds with most layers cached. Same log line, two
+ * completely different measurements — so the layer cache decides the wording,
+ * not the log line alone.
  *
  * @param list<array<string, mixed>> $timeline
  * @param array<string, mixed> $build

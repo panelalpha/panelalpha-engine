@@ -1,7 +1,7 @@
 #!/bin/sh
 # PanelAlpha headless install for SPIP 5. Runs in the app container during the
 # start hook, BEFORE Apache serves, so the site is never publicly reachable with
-# an empty, first-visitor-wins installer (engine#200).
+# an empty, first-visitor-wins installer.
 #
 # SPIP ships no CLI installer and its boot is not CLI-safe on an empty database
 # (the SQL-error path renders an HTML template and reads HTTP inputs, which

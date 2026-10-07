@@ -329,7 +329,7 @@ class ComposeUsableProbeTest extends ProbeTestCase
     }
 
     /**
-     * rapidbay (#122) ships a Compose v1 file: the service at the top level,
+     * rapidbay ships a Compose v1 file: the service at the top level,
      * no `services:`. Compose v2 refuses it (`additional properties
      * 'rapidbay' not allowed`), so claiming it only guaranteed a failed
      * deploy while the root Dockerfile next to it builds.

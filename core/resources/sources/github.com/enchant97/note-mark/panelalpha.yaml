@@ -9,11 +9,10 @@ description: >-
 
   The repo ships no compose file; detection picks `dockerfile`
   (docker/Dockerfile), which compiles rustup + wasm32, pnpm and Go on every
-  deploy (254.7s of layers on the batch host, 0/25 cached) and then
-  crash-loops, because the image refuses to start without AUTH_TOKEN__SECRET
-  and PUBLIC_URL (config.go: both `notEmpty`). The upstream install guide
-  deploys ghcr.io/enchant97/note-mark:<version> with exactly those two
-  variables, so this recipe runs that image (tag 1.1, the current release
+  deploy and then crash-loops, because the image refuses to start without
+  AUTH_TOKEN__SECRET and PUBLIC_URL (config.go: both `notEmpty`). The upstream
+  install guide deploys ghcr.io/enchant97/note-mark:<version> with exactly those
+  two variables, so this recipe runs that image (tag 1.1, the current release
   line; override with NOTEMARK_IMAGE in the account's env_vars).
 
   == What the recipe supplies ==
@@ -21,7 +20,7 @@ description: >-
   1. AUTH_TOKEN__SECRET (base64, 48 bytes) generated once by
      hooks/prepare.sh into ~/.panelalpha/notemark/secret.env; it signs every
      login token, and a token issued before a redeploy is still accepted
-     after it (measured).
+     after it.
   2. PUBLIC_URL from ${PA_PUBLIC_URL}: the CORS allowed origin and the
      Secure flag of the session cookie both derive from it.
   3. An owner, created before the port opens. Signup is open by default
@@ -39,17 +38,7 @@ description: >-
      usernames.
   5. Persistence: /data (db.sqlite + notes/) on the named volume
      notemark-data. `healthgate` + `ready` (alpine wget on /api/info) make
-     `up -d` return only once the app answers (engine#204).
-
-  == Verified on mariusz2 (engine 705f250a), memory_limit 1200 ==
-
-  Deploy success in 42s. `/` title "Note Mark App"; /api/info reports
-  allowInternalSignup false. POST /api/users -> 403 "user signup has been
-  disabled by the administrator". Password-grant login as admin, PUT a note,
-  GET it back; anonymous GET of the note -> 404. Two rebuilds (23s each):
-  init logged "owner 'admin' already exists", the note and a pre-rebuild
-  token both still valid. /.env, /.git/config, /db.sqlite serve only the SPA
-  shell (1198 bytes). App container ~5 MiB, account ~120 MiB.
+     `up -d` return only once the app answers.
 
   Login: GET /projects/{name}/app-credentials (MCP app_credentials_get). More users:
   `docker compose -p project exec app /note-mark user add -u <name> -p <pw>`.

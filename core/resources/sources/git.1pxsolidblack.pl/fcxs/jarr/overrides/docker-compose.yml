@@ -10,7 +10,7 @@
 # local-dev heuristic in ComposeFileInspector): the only build service (front)
 # mounts nothing, and the services that bind-mount ./panelalpha do not build.
 # Only nginx publishes a host port, so the engine's port scan takes it as the
-# primary (engine#231).
+# primary.
 services:
   db:
     # Pinned major: a datadir cannot be migrated backwards, so a floating latest
@@ -70,7 +70,7 @@ services:
     # No `expose:` on internal services: nginx reaches them by service name on
     # their container port regardless, and the engine's port scan reads `expose`
     # too (ComposePortScan), where a bare 80 would outrank nginx's published 8080
-    # in its PREFERRED order and become the proxy upstream (engine#231) -- a port
+    # in its PREFERRED order and become the proxy upstream -- a port
     # nothing publishes, giving a 502.
     mem_limit: 256m
 
@@ -169,7 +169,7 @@ services:
     mem_limit: 128m
 
   # Starts nothing, exits 0, waits on nginx's healthcheck. The engine runs
-  # `docker compose up -d` without --wait (engine#204), so without this gate the
+  # `docker compose up -d` without --wait, so without this gate the
   # deploy is "done" the moment containers start and the probe lands before the
   # site answers. A clean exit 0 is not a crash loop to AppHealth.
   ready:

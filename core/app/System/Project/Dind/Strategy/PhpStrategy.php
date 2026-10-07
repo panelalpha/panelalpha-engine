@@ -79,7 +79,7 @@ class PhpStrategy
             : ($artisan ? EnvFile::databaseSettings($projectDir, $this->dind->projectTree()->read(...)) : []);
         if (!$accountDb && !$hasMysql && MysqlSidecar::isNeeded($db)) {
             // Before anything reads DB_PASSWORD, so the sidecar and the app
-            // get the same one (engine#189).
+            // get the same one.
             $db = MysqlSidecar::withPassword($db, $strategy->sidecars()->passwords());
         }
         $needsMysql = $hasMysql || MysqlSidecar::isNeeded($db);

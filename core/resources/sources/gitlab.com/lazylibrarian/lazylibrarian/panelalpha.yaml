@@ -23,7 +23,7 @@ description: >-
   Two things this app needs that the file alone cannot give it.
 
   Persistence: LazyLibrarian keeps EVERYTHING in the datadir and ~/project is
-  wiped on every redeploy (engine#173), so the datadir must not live there.
+  wiped on every redeploy, so the datadir must not live there.
   overrides/docker-compose.override.yml bind-mounts the account's persistent
   ~/.panelalpha/lazylibrarian onto /pa-data/lazylibrarian and the CMD points
   --datadir there, so lazylibrarian.db, config.ini and the cache survive

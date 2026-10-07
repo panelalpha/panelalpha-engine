@@ -51,7 +51,7 @@ services:
       start_period: 10s
     mem_limit: 1g
 
-  # `up -d` runs without --wait (engine#204); this blocks it until Forgejo answers.
+  # `up -d` runs without --wait; this blocks it until Forgejo answers.
   ready:
     image: codeberg.org/forgejo/forgejo:16.0.5-rootless
     restart: "no"

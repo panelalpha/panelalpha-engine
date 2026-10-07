@@ -21,10 +21,3 @@ description: >-
   visitors appear with the proxy's address (no per-visitor country, one shared
   login rate limit); HITKEEP_TRUSTED_PROXIES and the HITKEEP_MAIL_* settings can
   be set as project environment variables.
-
-  Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 2500:
-  create success in 153s (the first boot's own migrations take ~110s before
-  :8080 listens), / is <title>HitKeep</title> (15.8 kB), /healthz "ok". After
-  creating the first account through /api/initial-user, a rebuild (33s) kept
-  the account and the existing session cookie stayed valid (same JWT secret).
-  /.env and /.git/config are 404. App ~150 MiB idle.

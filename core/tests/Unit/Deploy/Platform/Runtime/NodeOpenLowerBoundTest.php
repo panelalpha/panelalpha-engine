@@ -9,7 +9,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#279: `>=14` is a floor, not a pin. It used to resolve to the oldest
+ * `>=14` is a floor, not a pin. It used to resolve to the oldest
  * shipped major (18, EOL) instead of the default.
  */
 class NodeOpenLowerBoundTest extends TestCase

@@ -9,15 +9,14 @@
 #   vendor/fortawesome/font-awesome/css/font-awesome.min.css  (+ its fonts)
 #
 # -- so `Require all denied` here would strip the site of jQuery and every
-# icon. Measured on a live deploy before this file existed:
+# icon. Without this file the tree is open:
 #
-#   GET /vendor/composer/installed.json           200, 35,941 bytes -- the
-#       exact installed version of every dependency, which is a CVE shopping
-#       list for whoever asks;
-#   GET /vendor/smarty/smarty/composer.json       200;
-#   GET /vendor/filp/whoops/src/Whoops/Run.php    500 with an empty body --
-#       which is Apache *executing* a library file out of context, not serving
-#       it. Nothing in this tree is meant to be entered from the network.
+#   /vendor/composer/installed.json  is the exact installed version of every
+#       dependency, which is a CVE shopping list for whoever asks;
+#   /vendor/smarty/smarty/composer.json and the like are package metadata;
+#   /vendor/filp/whoops/src/Whoops/Run.php and other library PHP files are
+#       *executed* by Apache out of context, not served. Nothing in this tree
+#       is meant to be entered from the network.
 #
 # So this is an allow-list rather than a deny-list: a request under vendor/ is
 # served only if it ends in an extension a browser asks for as an asset, and

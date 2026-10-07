@@ -6,7 +6,7 @@ use App\System\Project\Dind\AppDatabase;
 use Tests\TestCase;
 
 /**
- * engine#519: an account moved onto pash-tenants keeps an app pinned to
+ * An account moved onto pash-tenants keeps an app pinned to
  * sites-db's address on the old network until the pin is rewritten.
  */
 class AppDatabaseRepinTest extends TestCase

@@ -242,9 +242,9 @@ runtimes:
         # packages come from. Ruby's per-project Dockerfile installs them
         # itself, so the stock image is a complete answer. Python has no
         # per-project Dockerfile: this image is the only place the headers
-        # exist. Measured: with this false, the first deploy of a Django
-        # project with psycopg2 failed on `pg_config executable not found`
-        # while the base built in the background, and only the retry succeeded.
+        # exist. With this false, the first deploy of a Django project with
+        # psycopg2 fails on `pg_config executable not found` while the base
+        # builds in the background, and only the retry succeeds.
         runnable: true
     # Walked oldest-first: the lowest listed minor satisfying `requires-python`
     # wins. A project asking for something newer is still honoured and pulled
@@ -328,11 +328,11 @@ runtimes:
       # would suggest an operator could pick a minor here. They cannot.
       from: "rust:1-slim-bookworm"
       # ...but the slim tag is only right for *running* the binary. A host
-      # compile runs as the account and cannot apt-get anything, and measured
-      # on this host slim has no g++, no pkg-config, no openssl headers and no
-      # libssl -- so every crate whose build script probes for one of them
-      # fails the deploy. The full tag is 2.2GB against 1.23GB and is loaded
-      # once on the host for every deploy to share.
+      # compile runs as the account and cannot apt-get anything, and slim has no
+      # g++, no pkg-config, no openssl headers and no libssl -- so every crate
+      # whose build script probes for one of them fails the deploy. The full tag
+      # is 2.2GB against 1.23GB and is loaded once on the host for every deploy
+      # to share.
       build_from: "rust:1-bookworm"
     # Listed but not warmed: a project reaching this is rare enough that the
     # host pull it costs beats the disk to hold it. Being listed is still what

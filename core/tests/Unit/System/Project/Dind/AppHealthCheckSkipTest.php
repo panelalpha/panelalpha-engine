@@ -10,7 +10,7 @@ use App\System\Project\Dind\AppHealth;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#182, the Apaxy follow-up. Apaxy's product is a directory listing, so
+ * The Apaxy follow-up. Apaxy's product is a directory listing, so
  * `_baseline/no-directory-listing` scored the working application
  * `serving: directory_listing`. The recipe now skips that check, covered by its
  * own `apaxy-theme-applied`; the skip is reported, and it lifts only while

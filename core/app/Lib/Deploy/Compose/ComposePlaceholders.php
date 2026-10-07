@@ -138,7 +138,7 @@ class ComposePlaceholders
     /**
      * The account's address, given to every service that is not a datastore
      * and substituted where a compose file writes `${PA_PUBLIC_URL}`, so a
-     * stack can hand it to whatever key its app reads (engine#192).
+     * stack can hand it to whatever key its app reads.
      */
     public const PUBLIC_URL_VARIABLE = 'PA_PUBLIC_URL';
 

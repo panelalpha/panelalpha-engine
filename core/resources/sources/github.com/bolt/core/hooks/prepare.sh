@@ -37,7 +37,6 @@ fi
 #    try/catch for exactly this reason; configureRoutes() does not, so the
 #    router throws FileLocatorFileNotFoundException while building its cache
 #    and every single request -- frontend, /bolt, anything -- answers 500.
-#    That is the `serving-error_page` verdict this recipe exists to fix.
 #
 #    Both files are regenerated from the installed extensions by
 #    `bin/console extensions:configure`, which the install/upgrade stage runs
@@ -95,8 +94,7 @@ fi
 #    carries `env_file: - .env`, so every line of the repository's .env becomes
 #    a real process environment variable, and Dotenv::populate() never
 #    overwrites one of those. An APP_SECRET in .env.local is read, found to be
-#    shadowed, and discarded. Measured on a deploy that had one:
-#    `printenv APP_SECRET` in the container printed `!ChangeMe!`.
+#    shadowed, and discarded.
 #
 #    So the placeholder is replaced in place. Only the exact published value is
 #    matched, which makes this idempotent and leaves an operator's own secret

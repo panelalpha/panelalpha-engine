@@ -16,7 +16,7 @@ use PHPUnit\Framework\TestCase;
 /**
  * A PHP base variant carrying `system_packages:` must be waited for, never
  * swapped for the plain base: the plain base has no ffmpeg, and ClipBucket on
- * it accepts every upload and converts none (engine#193).
+ * it accepts every upload and converts none.
  */
 class SharedPhpBaseSystemPackagesTest extends TestCase
 {
@@ -119,9 +119,9 @@ class SharedPhpBaseSystemPackagesTest extends TestCase
     }
 
     /**
-     * dokuwiki on a dev host: the plain base could not be provided, the deploy
-     * fell back to the stock php image and died in the host build on
-     * `composer: not found`. The base is the runtime, so that is a failure here.
+     * When the plain base cannot be provided, the deploy falls back to the
+     * stock php image and dies in the host build on `composer: not found`. The
+     * base is the runtime, so that is a failure here.
      */
     public function test_a_plain_base_that_cannot_be_provided_fails_with_the_cause(): void
     {

@@ -8,7 +8,7 @@ description: >-
   v4.19.3 images: zitadel (API and console), zitadel-login (login v2), Postgres
   17 on a named volume and Caddy routing /, /ui/v2/login, /api and the rest
   exactly as upstream's Traefik labels do (the engine drops a traefik service
-  from a compose file, engine#334). The external domain is the project's domain.
+  from a compose file). The external domain is the project's domain.
   hooks/prepare.sh generates the masterkey, the login cookie secret and the
   database password once into ~/.panelalpha/zitadel/, fed as env_files. The
   first instance and its admin are created by ZITADEL's own first start, with

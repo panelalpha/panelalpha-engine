@@ -13,7 +13,7 @@ Federated social platform (Elixir/Phoenix LiveView).
 - `hooks/prepare.sh` generates `SECRET_KEY_BASE`, `SIGNING_SALT`,
   `ENCRYPTION_SALT`, `RELEASE_COOKIE` and the database password once into
   `~/.panelalpha/bonfire/bonfire.env` (0600), read by both services through
-  `env_file` (POSTGRES_* in `environment:` trips engine#419).
+  `env_file` (POSTGRES_* in `environment:` trips a known engine defect).
 - `HOSTNAME` is the project domain, `PUBLIC_PORT=443`, port 4000.
 - `DB_MIGRATE_INDEXES_CONCURRENTLY=false`, as upstream's `public.env`
   template sets it: without it the startup migrations fail with

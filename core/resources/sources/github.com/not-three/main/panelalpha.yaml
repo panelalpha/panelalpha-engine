@@ -16,6 +16,6 @@ description: >-
   never writes). Rate limits and bans key on the X-Real-Ip header the engine
   proxy sets, not on the first, client-supplied X-Forwarded-For entry; on a
   *.panelalpha.online domain that header is still the shared front address
-  until engine#319 resolves it. Caddy rather than upstream's Traefik because
-  the engine drops every traefik service (engine#334). Everything else is
+  for now. Caddy rather than upstream's Traefik because
+  the engine drops every traefik service. Everything else is
   upstream's default.

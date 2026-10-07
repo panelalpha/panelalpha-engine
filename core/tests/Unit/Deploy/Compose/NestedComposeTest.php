@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * A compose file under docker/ run from the project root keeps meaning what
- * it meant where it was written (engine#91).
+ * it meant where it was written.
  */
 class NestedComposeTest extends TestCase
 {

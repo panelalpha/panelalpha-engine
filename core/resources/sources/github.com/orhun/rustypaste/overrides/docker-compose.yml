@@ -6,7 +6,7 @@
 # ships none and the binary panics without one), the public origin filled in at
 # deploy time, and the upload dir on a named volume so pastes survive a rebuild.
 # Pulling a Docker Hub image (not building) keeps detection on `compose` and
-# sidesteps engine#229 (image-seed NotFound is the GHCR case, not Hub).
+# sidesteps the image-seed NotFound (the GHCR case, not Hub).
 #
 # SECURITY: the upload endpoint (POST /) is world-writable unless a token is set
 # (config.rs). AUTH_TOKEN (generated and kept by the engine, `credentials:`) is
@@ -59,7 +59,7 @@ services:
       # MUST survive a redeploy.
       - rustypaste_upload:/app/upload
     # The app (landing page + upload + retrieval) listens on 8000; publish it so
-    # the engine's port scan takes it as the primary (engine#234).
+    # the engine's port scan takes it as the primary.
     ports:
       - "8000:8000"
     mem_limit: 256m
@@ -87,7 +87,7 @@ services:
 
   # Starts nothing, exits 0, waits on the health probe. `docker compose up -d`
   # blocks on a depends_on completion condition, so the engine reports the deploy
-  # finished only after rustypaste actually answers (engine#204).
+  # finished only after rustypaste actually answers.
   ready:
     image: alpine:3
     entrypoint: ["/bin/sh", "-c", "exit 0"]

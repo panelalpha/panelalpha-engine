@@ -151,7 +151,7 @@ final class DeployabilityCheck
         $path = $this->decision['compose_path'] ?? null;
         if (!is_string($path) || !is_file($path)) {
             // A file that is there but was passed over is a different fault
-            // from one that is absent, and the message has to say which (#183).
+            // from one that is absent, and the message has to say which.
             foreach (ComposeFileInspector::COMPOSE_FILE_CANDIDATES as $name) {
                 if (is_file($this->path($name))) {
                     throw new InvalidArgumentException(

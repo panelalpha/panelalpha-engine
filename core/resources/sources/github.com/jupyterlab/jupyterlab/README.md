@@ -25,5 +25,5 @@ Deploy the Git URL. Open the site: JupyterLab asks for a token.
 
 Kernels talk to the browser over a websocket. The engine's vhost upgrades it
 (`101 Switching Protocols` straight to the host), but the `*.panelalpha.online`
-test edge does not (engine#170): there the page loads and kernels start, yet
+test edge does not: there the page loads and kernels start, yet
 cells do not run. Use a real domain.

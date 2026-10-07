@@ -129,7 +129,7 @@ class ComposeEnvironmentTest extends TestCase
     }
 
     /**
-     * engine#432: a recipe's `${PA_PUBLIC_HOST}` reached the generated compose
+     * A recipe's `${PA_PUBLIC_HOST}` reached the generated compose
      * literally and Compose interpolated it to ''.
      */
     public function test_the_public_address_placeholders_are_resolved_for_a_generated_compose(): void

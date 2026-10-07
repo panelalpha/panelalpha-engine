@@ -8,7 +8,7 @@ use Tests\TestCase;
 /**
  * An absolute Location built inside the account (Apache's trailing-slash 301,
  * a .htaccess Redirect) names the container's scheme and port, which the
- * visitor cannot reach. The DinD vhost rewrites those to relative (engine#177).
+ * visitor cannot reach. The DinD vhost rewrites those to relative.
  */
 class DindVhostProxyRedirectTest extends TestCase
 {

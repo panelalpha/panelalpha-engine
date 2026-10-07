@@ -11,7 +11,7 @@ use Symfony\Component\Process\Process;
  * worker, so a hung step would otherwise block every account until its
  * overall timeout. Any output resets the clock, and so does a step that is
  * silent but still using CPU: rustc on a workspace's last crate prints nothing
- * for longer than the limit (#153).
+ * for longer than the limit.
  */
 class StepWatchdog
 {
@@ -48,7 +48,7 @@ class StepWatchdog
      * @param ?\Closure(): bool $busy asked once the limit is reached; true means
      *        the step is working, not hung, and gets another window
      * @param ?\Closure(): ?string $diskFull asked every DISK_CHECK_SECONDS; a
-     *        reason stops the step, so a pull cannot fill the host (engine#244)
+     *        reason stops the step, so a pull cannot fill the host
      */
     public function __construct(
         private readonly int $idleSeconds,

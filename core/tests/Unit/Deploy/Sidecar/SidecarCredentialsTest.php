@@ -134,7 +134,7 @@ class SidecarCredentialsTest extends TestCase
 
         $env = SidecarCredentials::pinSidecarCredentials('db', $service, [], $passwords)['environment'];
 
-        // Names stay `app`; only secrets change (engine#189).
+        // Names stay `app`; only secrets change.
         $this->assertSame('app', $env['MYSQL_USER']);
         $this->assertSame('app', $env['MYSQL_DATABASE']);
         $this->assertSame($passwords->for('MYSQL_PASSWORD'), $env['MYSQL_PASSWORD']);

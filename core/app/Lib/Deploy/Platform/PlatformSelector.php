@@ -123,7 +123,7 @@ final class PlatformSelector
     /**
      * Where the compose file or Dockerfile is, for a recipe that runs one. A
      * recipe is found by its path, so no detect ran and nothing else fills
-     * `compose_path` (engine#221, #183) or `dockerfile`/`port_hint`. Other
+     * `compose_path` or `dockerfile`/`port_hint`. Other
      * strategies' probes would change what existing recipes build.
      *
      * @param array<string, mixed> $declared the keys the recipe itself states

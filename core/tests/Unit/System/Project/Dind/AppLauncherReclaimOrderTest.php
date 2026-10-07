@@ -9,8 +9,8 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * The pre-build reclaim is `docker system prune -af`. Run after the preloads it
- * deleted the PHP base the deploy had just pulled (pmwiki on a dev host, a
- * host at 88% disk), and compose then looked for panelalpha/php on Docker Hub.
+ * deleted the PHP base the deploy had just pulled (on a host at 88% disk), and
+ * compose then looked for panelalpha/php on Docker Hub.
  */
 class AppLauncherReclaimOrderTest extends TestCase
 {

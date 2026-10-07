@@ -9,7 +9,7 @@ cd ~/project
 say() { echo "[libredesk] $*" >&2; }
 
 # ~/.panelalpha/libredesk/ survives a redeploy; ~/project is emptied every
-# deploy (engine#173). A secret written under ~/project would be regenerated on
+# deploy. A secret written under ~/project would be regenerated on
 # every rebuild -- a new DB password locks the app out of the postgres volume
 # that still holds the old one, and a new encryption_key breaks stored encrypted
 # data. The System user's login is the engine's (`credentials:` in

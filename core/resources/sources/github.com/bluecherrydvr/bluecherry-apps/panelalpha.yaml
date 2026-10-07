@@ -6,14 +6,13 @@ description: >-
   lib/ built by a hand-written Makefile over libavcodec, libconfig, pugixml and
   ONVIF, with www/ holding the 449-file PHP interface. Detection found no
   compose file Docker would auto-load, no Dockerfile at the root and a
-  composer.json under www/, and settled on strategy php. That produced a
-  serving-missing_entry 403 until `www` was added to PhpDocroot::LATE_CANDIDATES,
-  after which the same run reported deploy-ok with the PHP interface on screen.
+  composer.json under www/, and settled on strategy php, which serves the PHP
+  interface from www/ (PhpDocroot::LATE_CANDIDATES).
 
-  That deploy-ok was the trap, not the result. What Apache was serving is the
-  administration UI on its own, with no bc-server behind it, no database, and
-  no /etc/bluecherry.conf for www/lib/db.php to read credentials from. It is
-  the console of a recorder that is not running. Recording, the ONVIF and RTSP
+  That deploy is the trap, not the result. What Apache serves is the
+  administration UI on its own, with no bc-server behind it, no database, and no
+  /etc/bluecherry.conf for www/lib/db.php to read credentials from. It is the
+  console of a recorder that is not running. Recording, the ONVIF and RTSP
   clients, the HLS live-view stream on :7003 and the JSON API on :7005 are all
   bc-server, a compiled binary that the PHP strategy neither builds nor starts.
 
@@ -21,11 +20,10 @@ description: >-
   is what the recipe exists to correct. lib/v4l2_device_solo6x10.cpp,
   lib/v4l2_device_tw5864.cpp and the libudev PCI enumerator in
   server/bc-detect.cpp are all present, and all of them are for Bluecherry's own
-  optional capture cards. It was deployed to check: in an ordinary unprivileged
-  container with no /dev/video*, no --device and no kernel module, the
-  enumerator finds nothing and bc-server carries on with the IP-camera path,
-  which is how the product is sold today. Idle footprint measured 49.5 MiB for
-  the application container and 104.7 MiB for MariaDB.
+  optional capture cards. In an ordinary unprivileged container with no
+  /dev/video*, no --device and no kernel module, the enumerator finds nothing
+  and bc-server carries on with the IP-camera path, which is how the product is
+  sold today.
 
   So overrides/docker-compose.yml runs upstream's published image, which is
   built from this same repository: actions/Dockerfile, actions/entrypoint.sh and
@@ -93,19 +91,18 @@ description: >-
   compose reads it at ../.panelalpha/bluecherry.env, relative to the
   --project-directory the engine passes. ~/project/.env holds one line, the
   image tag. Two engine behaviours make that the right shape rather than a
-  preference. The engine wipes and re-clones ~/project on every deploy
-  (engine#173), so a guard on a file there never fires on a redeploy and the
+  preference. The engine wipes and re-clones ~/project on every deploy,
+  so a guard on a file there never fires on a redeploy and the
   database password would be regenerated while the volume still held the old
   one. And .env is copied to .env.default at mode 644
   (ProjectEnvironment::apply) inside a home that is root-owned 0755, which
   makes anything written there readable by every other account's uid on the
-  host -- confirmed by reading one account's .env.default as another account's
-  user. ~/.panelalpha survives the clone and is readable only by its owner; the
+  host. ~/.panelalpha survives the clone and is readable only by its owner; the
   home being root-owned 0755 is also why prepare.sh creates that directory
   rather than assuming it.
 
   One service is a no-op that exits 0, for the reason it is in most of these
-  recipes: the engine runs `docker compose up -d` without --wait (engine#90) and
+  recipes: the engine runs `docker compose up -d` without --wait and
   calls the deploy finished when that returns, which is when containers have
   been started. `ready` waits for `setup`, which waits for the application's
   healthcheck, which greps the login page's own title out of http://127.0.0.1/
@@ -127,9 +124,7 @@ description: >-
   added by the customer against their own RTSP or ONVIF endpoints. The UI has a
   Licenses page that activates a key through /usr/lib/bluecherry/licensecmd
   against Bluecherry's own service; nothing here activates one, and no camera
-  limit was found enforced anywhere in the tree -- though that was not tested
-  with cameras attached, which is the one part of this application no deploy
-  here exercises.
+  limit was found enforced anywhere in the tree.
 credentials:
   adopt_from: .panelalpha/bluecherry.env
   fields:

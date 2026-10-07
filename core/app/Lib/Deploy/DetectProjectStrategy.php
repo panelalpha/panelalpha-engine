@@ -74,7 +74,7 @@ class DetectProjectStrategy
             return null;
         }
 
-        // The project's app config speaks for the build stage too (engine#171).
+        // The project's app config speaks for the build stage too.
         $appConfig = AppConfigLocator::findCandidate(
             new LocalAppConfigSource(),
             $context->projectDir,

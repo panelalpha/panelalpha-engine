@@ -31,7 +31,7 @@ services:
       start_period: 20s
     mem_limit: 768m
 
-  # No-op gate: `up -d` returns only once the app answers (engine#204).
+  # No-op gate: `up -d` returns only once the app answers.
   ready:
     image: docker.io/library/alpine:3
     entrypoint: ["/bin/sh", "-c", "exit 0"]

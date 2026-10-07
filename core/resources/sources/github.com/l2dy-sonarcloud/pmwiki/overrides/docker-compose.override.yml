@@ -1,5 +1,5 @@
 # Persist PmWiki's page store (wiki.d) and attachments (uploads) across the
-# redeploy that empties ~/project (engine#173). The account home survives, so
+# redeploy that empties ~/project. The account home survives, so
 # mount ~/.panelalpha/pmwiki (../.panelalpha relative to this file, which sits in
 # ~/project; hooks/prepare.sh creates it) into the app container, where
 # pmwiki-setup.sh writes, and the engine's login file read-only. Never the

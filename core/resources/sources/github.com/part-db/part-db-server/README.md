@@ -31,7 +31,7 @@ an administrator under Tools → Users.
 Migration `Version1` creates a second row in `users` beside `admin`:
 `anonymous`, id 1, in the `readonly` group. That row is the identity of a
 visitor who has not logged in, and on a stock install it is not read-only
-enough for a public domain. Measured on a deployed account, with no cookie:
+enough for a public domain. What a visitor with no cookie gets:
 
 | request | stock Part-DB | with this recipe |
 |---|---|---|
@@ -78,13 +78,6 @@ nothing in the checkout is data. Two places are not in the checkout:
   `chown root:root` on every rebuild; this subdirectory is the account's and
   survives.
 
-Measured across a real `POST /projects/pdbrec/rebuild`: 1 part, 1 category, 1
-storage location, 1 part lot of 250, 3 attachments and 3 users before and
-after; the uploaded attachment file byte-identical by md5; `APP_SECRET`
-unchanged, so sessions and remember-me cookies were not invalidated; the
-administrator and a second user both signed in with passwords they had
-changed *before* the rebuild.
-
 **Attachments survive.** Both the row and the file.
 
 ## Why not `database: mysql`
@@ -94,20 +87,13 @@ visible in the panel, reachable in phpMyAdmin, inside the account's backups.
 It is not available here: `database:` is read in exactly one place,
 `PhpStrategy.php:67` and `:73`, and is silently ignored by every other
 strategy. Getting it would mean taking the `php` strategy, which means giving
-up this image: PHP 8.3 instead of 8.4, no php.ini at all (engine#185) so
+up this image: PHP 8.3 instead of 8.4, no php.ini at all so
 `upload_max_filesize` is PHP's 2M default on an attachment manager, no
 `<Directory public/media>` block refusing to execute PHP out of the upload
 directory, and `composer install --no-plugins` with no way to lift it
-(engine#199) so `symfony/runtime` never writes `vendor/autoload_runtime.php`
+so `symfony/runtime` never writes `vendor/autoload_runtime.php`
 and `public/index.php` dies on its second line.
 
 SQLite in the `uploads` volume is upstream's own default for this image
 (`ENV DATABASE_URL="sqlite:///%kernel.project_dir%/uploads/app.db"`), and it
 is a single-writer inventory for a small team.
-
-## Costs
-
-* image `project-app:latest`, 994 MB; build cache 5.2 GB after two builds,
-  4.2 GB of it reclaimable
-* container 144 MiB resident idle; the account's whole dind 298 MiB
-* first deploy 4m25s, rebuild 4m11s, both dominated by the image build

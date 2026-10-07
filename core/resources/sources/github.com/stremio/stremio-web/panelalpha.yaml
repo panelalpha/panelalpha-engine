@@ -7,7 +7,7 @@ description: >-
   Dockerfile but failed at `pnpm build`: webpack.config.js runs
   `git rev-parse HEAD` to name its asset directories, and the engine's
   generated Dockerfile.dockerignore leaves .git out of the build context
-  because GitHistoryUse does not look at webpack.config.js (engine#413).
+  because GitHistoryUse does not look at webpack.config.js.
   files/Dockerfile.dockerignore takes the place of the generated one: upstream's
   own .dockerignore (node_modules) plus the engine's .env and compose files,
   and .git kept in. The final image copies only build/ and http_server.js,

@@ -1,7 +1,7 @@
 # Upstream compose.example.yml on the 0.7.4 release image, with generated
 # secrets from ~/.panelalpha (hooks/prepare.sh) and named volumes.
 # POSTGRES_USER/POSTGRES_DB come from app.env: declared here they make the
-# engine take web/worker for Postgres servers (engine#419).
+# engine take web/worker for Postgres servers.
 x-rails-env: &rails_env
   SELF_HOSTED: "true"
   RAILS_FORCE_SSL: "false"

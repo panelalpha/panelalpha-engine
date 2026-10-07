@@ -47,7 +47,7 @@ class InstallWithoutBuildingTheProjectTest extends TestCase
     /**
      * ajslater/codex names `uv_build` as its backend, and its `bin/manage.py`
      * imports the `codex` package: without the project installed every deploy
-     * died with `ModuleNotFoundError: No module named 'codex'` (issue #2076).
+     * died with `ModuleNotFoundError: No module named 'codex'`.
      */
     public function test_a_uv_project_with_a_build_backend_installs_itself(): void
     {

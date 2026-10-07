@@ -89,7 +89,7 @@ services:
     mem_limit: 1536m
 
   # Exits 0 once the app is healthy, so `compose up -d` returns only when
-  # Linkwarden answers (engine#204).
+  # Linkwarden answers.
   ready:
     image: docker.io/library/alpine:3
     entrypoint: ["/bin/sh", "-c", "exit 0"]

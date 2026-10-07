@@ -31,7 +31,7 @@
 
     # setup.php is denied outright, and this is the one place this recipe is
     # deliberately stricter than upstream (which puts HTTP basic auth in front
-    # of it). Two reasons, both measured:
+    # of it). Two reasons:
     #
     #   * Setup_Server_Json.php:62-76 only checks the json key and the session
     #     user `&& Setup_Core::configFileExists()`. With no config.inc.php --
@@ -81,19 +81,18 @@
 </FilesMatch>
 
 # The build manifests. Not secret -- this is a public repository and the tag is
-# in every page's X-Tine20-Version -- but composer.lock is 572 KB naming the
-# exact commit of 193 dependencies, and handing an attacker the version of every
-# library in one request is work they should have to do themselves. Measured as
-# served before this rule existed.
+# in every page's X-Tine20-Version -- but composer.lock names the exact commit
+# of every dependency, and handing an attacker the version of every library in
+# one request is work they should have to do themselves. Without this rule they
+# are served.
 <FilesMatch "^(composer\.(json|lock)|package\.json|npm-shrinkwrap\.json|package-lock\.json|build\.xml|phpcs\.baseline\.xml|phpstan(-baseline)?\.neon)$">
     Require all denied
 </FilesMatch>
 
-# vendor/ is a dependency tree and none of it is web content. Checked rather
-# than assumed: nothing in the built client, the twig templates or the compiled
-# CSS references a `vendor/` URL, while `/vendor/composer/installed.json` -- 508
-# KB naming every installed package and its version -- was served with a 200
-# before this rule. The `.php` rewrite above already covered the code; this
+# vendor/ is a dependency tree and none of it is web content: nothing in the
+# built client, the twig templates or the compiled CSS references a `vendor/`
+# URL, while `/vendor/composer/installed.json` -- naming every installed
+# package and its version -- is served with a 200 without this rule. The `.php` rewrite above already covered the code; this
 # covers everything else in there.
 #
 # library/ is deliberately NOT denied the same way: the compiled client does

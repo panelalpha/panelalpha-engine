@@ -231,7 +231,7 @@ class ComposeHardenTest extends TestCase
 
     /**
      * A repository's own image reads its own variables: MeTube took `HTTPS=on`
-     * as "serve TLS" and crash-looped without a certificate (engine#289).
+     * as "serve TLS" and crash-looped without a certificate.
      */
     public function test_url_environment_for_an_image_names_the_https_url_but_sets_no_tls_flags(): void
     {
@@ -819,7 +819,7 @@ YAML
 
     /**
      * An expose-only app service gets its detected primary port published, so
-     * the account container binds the port the DinD proxy targets (engine#234).
+     * the account container binds the port the DinD proxy targets.
      */
     public function test_publishes_the_detected_primary_port_for_an_expose_only_service(): void
     {

@@ -50,33 +50,25 @@ fresh claim.
 
 ## Why the front proxy
 
-Measured on 705f250a with the stock engine vhost and Plex alone:
+With the stock engine vhost and Plex alone:
 
 - Plex honours X-Forwarded-For: an anonymous `X-Forwarded-For: 127.0.0.1`
-  through the domain logged `Using X-Forwarded-For: 127.0.0.1 as remote
-  address` / `(Loopback)`. It stayed 401 only because Plex also treats a
+  through the domain is logged as `Using X-Forwarded-For: 127.0.0.1 as remote
+  address` / `(Loopback)`. It stays 401 only because Plex also treats a
   Host it does not recognise (the domain) as non-local.
-- Hosts Plex recognises (verified, peer on its subnet): IP literals,
+- Hosts Plex recognises (peer on its subnet): IP literals,
   `[::1]`, `localhost`/`localhost.`, its container name, `*.plex.direct`,
-  and an empty Host. From a container on the engine bridge,
-  `Host: 172.18.0.2` + `X-Forwarded-For: 127.0.0.1` got **200** on
-  `/library/sections` and `/:/prefs`, and `POST /myplex/claim` went through
-  to `servers.plex.tv/api/claim/exchange` (403 only because the token was
-  fake). Tenants cannot reach another account's port (PA-TENANT-EGRESS drops
+  and an empty Host. From a container on the engine bridge, an IP-literal
+  `Host` + `X-Forwarded-For: 127.0.0.1` gets **200** on `/library/sections`
+  and `/:/prefs`, and `POST /myplex/claim` goes through to
+  `servers.plex.tv/api/claim/exchange`. Tenants cannot reach another account's port (PA-TENANT-EGRESS drops
   172.25.0.0/24), so this needs host-level access, but it shows what "local"
   unlocks.
 
 The front replaces X-Forwarded-For with its own resolved address, maps every
 recognised-as-local Host to `plex.invalid`, and returns 403 for
-`/myplex/claim`. After it, the same probes are 401/403 in every combination.
+`/myplex/claim`. Behind it, those requests are 401/403 in every combination.
 
 Inside the account, `docker compose -p project exec pms curl
 http://127.0.0.1:32400/...` is loopback and fully trusted - the equivalent of
 Plex's "SSH tunnel to localhost" setup path.
-
-## Not verified here
-
-A real claim (needs a plex.tv account): sign-in through `/web`, library
-browsing with the owner's token, playback. Verified: the gate's three paths
-(unclaimed, rejected token, stubbed `claimed="1"`), anonymous rejection,
-persistence of a library created through the loopback API across rebuilds.

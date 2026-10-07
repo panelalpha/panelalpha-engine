@@ -11,11 +11,10 @@ use PHPUnit\Framework\TestCase;
  *
  * `PhpDocroot::detect()` returns '' for a repository with no index file in any
  * candidate directory, `environment()` then emits no PA_DOCROOT, and the serve
- * script decided. It used to answer `/app` -- the whole checkout, with
- * Apache's PHP handler active over it. Measured on inovector/mixpost, a
- * Laravel *package* with no index.php anywhere: `composer.lock` came back 200
- * at 418,679 bytes, and every .php under src/, config/, routes/ and vendor/
- * was directly invocable.
+ * script decided. It used to answer `/app` -- the whole checkout, with Apache's
+ * PHP handler active over it. On inovector/mixpost, a Laravel *package* with no
+ * index.php anywhere: `composer.lock` came back 200 at 418,679 bytes, and every
+ * .php under src/, config/, routes/ and vendor/ was directly invocable.
  *
  * The distinction the script now makes is the one that was missing: an app
  * with a front controller in an unexpected place is still worth guessing at,

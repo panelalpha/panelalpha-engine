@@ -3,7 +3,7 @@
 services:
   # One-shot: upstream's entrypoint installs headlessly and refuses to start
   # without the first Owner admin, so the deploy fails here naming what is
-  # missing. Read from .env, not interpolated (engine#336).
+  # missing. Read from .env, not interpolated.
   check:
     image: ghcr.io/sbpp/sourcebans-pp:2.2.1
     restart: "no"

@@ -9,7 +9,7 @@ use Closure;
  *
  * It used to be five Laravel rules, so a bad name came back as up to three
  * sentences like "The username format is invalid." with no word on what the
- * format is (#83).
+ * format is.
  */
 final class ProjectName implements ProblemRule
 {

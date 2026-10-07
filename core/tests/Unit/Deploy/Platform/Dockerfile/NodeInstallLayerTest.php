@@ -87,7 +87,7 @@ class NodeInstallLayerTest extends TestCase
     }
 
     /**
-     * engine#152: zigbee2mqtt ships `.npmrc` and lists it in its own
+     * Zigbee2mqtt ships `.npmrc` and lists it in its own
      * `.dockerignore`, so BuildKit has no `/.npmrc` to COPY.
      */
     public function test_a_file_the_projects_dockerignore_drops_is_not_copied(): void

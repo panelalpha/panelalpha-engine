@@ -220,7 +220,7 @@ class UserStoreRequestSecurityTest extends TestCase
         $this->assertSame('email_email', $problem['code']);
     }
 
-    // ---- #83: every problem says what was expected, under the caller's field name
+    // ---- Every problem says what was expected, under the caller's field name
 
     /** "The username format is invalid." named neither the field sent nor the format. */
     public function test_a_bad_name_is_one_problem_that_states_the_format(): void

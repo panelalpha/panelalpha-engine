@@ -54,7 +54,7 @@ class EntrypointWriter
     }
 
     /**
-     * Detection named a platform the registry cannot find (engine#169: a
+     * Detection named a platform the registry cannot find (a
      * worker's stale recipe list). No entrypoint follows, so every stage
      * command is dropped; this is the line that says so.
      *

@@ -56,12 +56,11 @@ if ($host === '' || $name === '') {
 
 // The engine already gates this: `database: mysql` makes the generated
 // entrypoint run its own `wait-for-mysql` step -- 60 tries at 2s, opening a
-// PDO connection to the server -- immediately before this command, so engine#90
-// is already answered for the database and nothing here has to re-answer it.
+// PDO connection to the server -- immediately before this command, so the server
+// answering is already covered for the database and nothing here has to re-answer it.
 // What that step does not cover is the database *and user* existing rather than
-// the server answering, which is a different part of the deploy. Measured on
-// this host over four deploys and three restarts, this connected on attempt 1
-// every time; five tries is a guard against a race, not a wait for one.
+// the server answering, which is a different part of the deploy. Five tries is
+// a guard against a race, not a wait for one.
 $dsn = sprintf('mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4', $host, $port, $name);
 $db = null;
 $attempts = 0;

@@ -439,8 +439,8 @@ final class PythonRuntime implements Runtime
             return self::python() . ' ' . $file;
         }
 
-        // 3. A Django project laid out in a subdirectory -- NetBox, issue
-        //    #414 -- and a declared server to run it. Only reached when the
+        // 3. A Django project laid out in a subdirectory -- NetBox --
+        //    and a declared server to run it. Only reached when the
         //    root offered nothing.
         if ($server !== null) {
             $nested = self::nestedServableModule($projectDir);
@@ -655,7 +655,7 @@ final class PythonRuntime implements Runtime
      * anchored the same way: the package directory holding `wsgi.py` sits
      * beside the `manage.py` that runs the project. At the root that is
      * `manage.py` beside `NAME/wsgi.py` (module `NAME.wsgi`); run inside a
-     * subdirectory — NetBox, issue #414 — it is `netbox/manage.py` beside
+     * subdirectory — NetBox — it is `netbox/manage.py` beside
      * `netbox/netbox/wsgi.py` (module `netbox.wsgi`, needing `netbox/` on the
      * import path).
      *

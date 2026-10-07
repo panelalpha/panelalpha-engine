@@ -439,7 +439,7 @@ class RuntimeSidecars
     }
 
     /**
-     * The password a database sidecar gets when nobody set one (engine#189):
+     * The password a database sidecar gets when nobody set one:
      * per account, unless the account's databases were initialised under the
      * old `app` and would lock the app out if it changed. Decided on the
      * first deploy that asks and stored with the account.

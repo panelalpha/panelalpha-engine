@@ -127,7 +127,7 @@ class TelemetrySection implements Section
         }
 
         // The stored preference this section toggles; Telemetry::enabled()
-        // ignores it under test (engine#276).
+        // ignores it under test.
         try {
             return NotificationPreferences::isTelemetryEnabled();
         } catch (Throwable) {
@@ -199,7 +199,7 @@ class TelemetrySection implements Section
                     . 'username, no repository token, no host address.'
         );
 
-        // No by default: Enter leaves a toggle as it is (#255). unchanged()
+        // No by default: Enter leaves a toggle as it is. unchanged()
         // says so, so a No does not read as the wizard ignoring the key.
         if (!confirm(label: $on ? 'Stop sending reports?' : 'Start sending reports?', default: false)) {
             $this->unchanged();

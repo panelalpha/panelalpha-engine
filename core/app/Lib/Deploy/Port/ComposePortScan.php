@@ -489,7 +489,7 @@ final class ComposePortScan
 
     /**
      * A non-web port (SMTP, SSH, epmd) sorts after every other: Haraka's
-     * `EXPOSE 25` became a site's front door (engine#88). Kept rather than
+     * `EXPOSE 25` became a site's front door. Kept rather than
      * dropped, so a stack that offers nothing else still has a port.
      */
     private static function rankOf(int $port): int

@@ -14,7 +14,7 @@ use Illuminate\Console\Command;
  * manifest link and never calls the vacuum, so the manifest blob and its tag
  * links stay on disk for good. Kilobytes per digest, forever.
  *
- * The store is a named volume (#285), so a restart alone keeps everything.
+ * The store is a named volume, so a restart alone keeps everything.
  * The wipe removes the storage tree and scheduler-state.json; the restart
  * then drops the scheduler's in-memory copy of the entries it just lost.
  *

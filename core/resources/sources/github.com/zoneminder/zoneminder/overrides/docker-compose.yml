@@ -1,5 +1,5 @@
 # ZoneMinder 1.38.4 from the zoneminder-containers image with MariaDB, as in
-# that project's docker-compose.yml. MYSQL_* come from an env_file (engine#419).
+# that project's docker-compose.yml. MYSQL_* come from an env_file.
 services:
   db:
     image: mariadb:11.8

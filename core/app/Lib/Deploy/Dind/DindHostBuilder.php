@@ -81,7 +81,7 @@ final class DindHostBuilder implements HostBuilder
 
     /**
      * A build is a host resource: up to 8 GB, held to half the server's RAM
-     * and its RAM less DEPLOY_ENGINE_MEMORY (engine#295). Passed in, not read from config,
+     * and its RAM less DEPLOY_ENGINE_MEMORY. Passed in, not read from config,
      * because this class has no Laravel dependencies; see {@see DindEngine}.
      */
     public function __construct(
@@ -535,13 +535,13 @@ final class DindHostBuilder implements HostBuilder
             // Equal to --memory: no swap on top of it, so the limit is what the build can use.
             '--memory-swap',
             $this->memoryLimit(),
-            // If the host runs out anyway, the kernel kills the build, not core or an app (engine#295).
+            // If the host runs out anyway, the kernel kills the build, not core or an app.
             '--oom-score-adj',
             '1000',
             '--pids-limit',
             '512',
             // Internet only: not the engine API, the host, its LAN or the
-            // metadata address (engine#246).
+            // metadata address.
             ...($this->network !== null ? ['--network', $this->network] : []),
         ];
     }

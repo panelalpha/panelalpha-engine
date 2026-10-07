@@ -23,7 +23,7 @@ commands:
   - id: npm-install
     stage: build
     role: dependencies
-    # {{js.install}} is not resolved in a recipe (engine#351). postinstall builds lib/ and the player.
+    # {{js.install}} is not resolved in a recipe. postinstall builds lib/ and the player.
     run: 'npm ci --no-audit --no-fund'
   # Not `serve`: under that id the node platform may swap in package.json's own start.
   - id: cytube-serve

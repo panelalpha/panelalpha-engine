@@ -94,14 +94,14 @@ class BuildMemoryLimitTest extends TestCase
         $this->assertSame('4096m', $this->memoryFlag($this->argv((string) (4096 * 1024 * 1024))));
     }
 
-    /** engine#295: no floor, so a small host is not handed more than it has. */
+    /** No floor, so a small host is not handed more than it has. */
     public function test_a_small_value_is_kept(): void
     {
         $this->assertSame('512m', $this->memoryFlag($this->argv('512m')));
         $this->assertSame('1024m', $this->memoryFlag($this->argv('1g')));
     }
 
-    /** engine#295: unset, a build gets 8 GB, held to half the host's RAM and its RAM less the engine's share. */
+    /** Unset, a build gets 8 GB, held to half the host's RAM and its RAM less the engine's share. */
     #[DataProvider('hosts')]
     public function test_the_host_sizes_the_ceiling(HostMemory $host, string $limit): void
     {
@@ -116,7 +116,7 @@ class BuildMemoryLimitTest extends TestCase
             '15 GB host gets half' => [HostMemoryProbe::fromReadings("MemTotal:       15728640 kB\n"), '7680m'],
             '16 GB host reaches 8 GB' => [new HostMemory(16384), '8192m'],
             '128 GB host gets the 8 GB cap' => [new HostMemory(131072), '8192m'],
-            // mariusz2, the host #295 was filed from: half its RAM, not the old 2048 MB floor.
+            // A 3.8 GB host: half its RAM, not the old 2048 MB floor.
             '3.7 GB host' => [new HostMemory(3790), '1895m'],
             'a large engine share binds first' => [new HostMemory(2048, 1536), '512m'],
         ];
@@ -152,7 +152,7 @@ class BuildMemoryLimitTest extends TestCase
         ]);
     }
 
-    /** engine#295: not even the operator's number goes past half the host. */
+    /** Not even the operator's number goes past half the host. */
     public function test_the_setting_is_held_to_the_host_ceiling(): void
     {
         $memory = DindEngine::buildMemory('12g', new HostMemory(4096));
@@ -260,7 +260,7 @@ class BuildMemoryLimitTest extends TestCase
     /**
      * Cargo's default is one job per CPU, and each job of a C++ `-sys` crate is
      * a compiler of its own. liwan's libduckdb-sys: 8 jobs, 5202m, cc1plus
-     * OOM-killed at ~1.2 GB each (engine#104 retest).
+     * OOM-killed at ~1.2 GB each, on a retest.
      */
     public function test_cargo_jobs_follow_the_configured_limit(): void
     {
@@ -335,7 +335,7 @@ class BuildMemoryLimitTest extends TestCase
         ];
     }
 
-    /** engine#184: what the deploy log reports is what `--memory` gets. */
+    /** What the deploy log reports is what `--memory` gets. */
     public function test_the_reported_limit_matches_the_container_flag(): void
     {
         foreach (['5202m' => 5202, '6g' => 6144, '4096' => 4096, '1g' => 1024, 'lots' => 2048] as $configured => $mb) {

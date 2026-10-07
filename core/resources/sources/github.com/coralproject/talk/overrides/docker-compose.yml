@@ -1,5 +1,5 @@
 # Compose-replace: the release image instead of the repo's source build; the
-# repo compose is a dev file with MongoDB 8.0.3 (engine#146), so mongo:7.0.
+# repo compose is a dev file with MongoDB 8.0.3, so mongo:7.0.
 services:
   talk:
     image: coralproject/talk:9.11.8

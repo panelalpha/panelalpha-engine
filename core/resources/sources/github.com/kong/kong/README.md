@@ -18,8 +18,7 @@ Nothing is required.
 - `hooks/prepare.sh` generates the database password once into
   `~/.panelalpha/kong/db.env` (0600). The database is the named volume
   `kong-db`, so services, routes and plugins survive redeploys.
-- `KONG_NGINX_WORKER_PROCESSES=2`: `auto` would count every host core
-  (engine#426).
+- `KONG_NGINX_WORKER_PROCESSES=2`: `auto` would count every host core.
 - The Admin API stays on the container's `127.0.0.1:8001` and Kong Manager on
   its unpublished port, as the image ships them. Configure Kong from inside
   the account, e.g. from a container sharing the app's network namespace

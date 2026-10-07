@@ -18,7 +18,7 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 
 /**
- * The manifest's `frontend_build` in the PHP host frontend pass (engine#433):
+ * The manifest's `frontend_build` in the PHP host frontend pass:
  * false skips it, a command replaces the `build` script and runs even when
  * package.json has none, absent keeps the build-script rule.
  */

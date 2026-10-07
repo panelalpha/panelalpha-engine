@@ -7,7 +7,7 @@ use App\System\Project\Dind\StepDiskLimit;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#244: what stops a running deploy step for disk -- the host minimum
+ * What stops a running deploy step for disk -- the host minimum
  * and the project's own limit, which user quota never applied to the
  * account's Docker store.
  */

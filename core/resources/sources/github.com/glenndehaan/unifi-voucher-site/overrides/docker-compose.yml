@@ -4,7 +4,7 @@
 # anything unset keeps the app's own default, which matches upstream's compose.
 services:
   # One-shot: the app exits at boot without these, so the deploy fails here
-  # naming each missing one. Read from .env, not interpolated (engine#336).
+  # naming each missing one. Read from .env, not interpolated.
   env-check:
     image: glenndehaan/unifi-voucher-site:8.13.1
     restart: "no"

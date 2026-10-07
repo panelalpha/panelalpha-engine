@@ -6,9 +6,9 @@ use App\System\Project\Dind\AppHealth;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#633: `docker stop` on the app container left the sweep with no
- * failed check at all, so a site that answered nothing counted as serving.
- * Rows are `docker compose ps --format json` as the test host printed them.
+ * `docker stop` on the app container left the sweep with no failed
+ * check at all, so a site that answered nothing counted as serving. Rows are
+ * `docker compose ps --format json` as Docker prints them.
  */
 class AppStoppedCheckTest extends TestCase
 {

@@ -10,7 +10,7 @@ use App\System\Project\Dind\InnerDocker;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#244: after a step is stopped for disk, the account gets back what
+ * After a step is stopped for disk, the account gets back what
  * the step took. Measured: the killed build's 1.2 GB layer stayed leased and
  * unprunable until the inner daemon restarted.
  */

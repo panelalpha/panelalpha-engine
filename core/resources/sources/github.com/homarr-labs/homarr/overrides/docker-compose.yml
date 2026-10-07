@@ -1,19 +1,19 @@
 # The stack for a repository that ships no compose file of any kind: Homarr is
 # a pnpm/turbo monorepo with one Dockerfile, and `docker compose` has nothing
 # to load. Without this file the engine generates one that builds that
-# Dockerfile -- 427s of a 486s deploy on the batch host, and on an 8-core
-# account capped at 7.5 GB the `pnpm turbo build` layer dies with
-# "ResourceExhausted: cannot allocate memory" instead of finishing.
+# Dockerfile, and within an ordinary account's memory limit the
+# `pnpm turbo build` layer dies with "ResourceExhausted: cannot allocate
+# memory" instead of finishing.
 #
 # So this runs upstream's own published image, and the checkout is reduced to
 # one field: hooks/prepare.sh reads `version` out of package.json and pins
 # HOMARR_IMAGE to that tag in the generated docker-compose.override.yml. The
-# fallback below is what the recipe was written and verified against.
+# fallback below is a pinned release.
 #
 # The service order is Tandoor's, and it is the security control, not a
 # nicety: `init` closes Homarr's onboarding before `app` is allowed to start,
 # so there is never a moment when the public domain serves a /init page that
-# would hand the instance to whoever loads it first (engine#200).
+# would hand the instance to whoever loads it first.
 services:
   # One-shot. Runs the database migrations, creates this account's
   # administrator, and marks onboarding finished -- then exits 0. It runs as
@@ -102,8 +102,8 @@ services:
       timeout: 10s
       retries: 30
       start_period: 60s
-    # nginx + redis + node in one container. The Next.js server idles at about
-    # 200 MB and grows with the number of widgets polling; 1 GB leaves room
+    # nginx + redis + node in one container. The Next.js server grows with the
+    # number of widgets polling; 1 GB leaves room
     # without letting a runaway widget take the account down.
     mem_limit: 1024m
     # ServiceHardener puts 0.75 on anything it is not told about
@@ -112,7 +112,7 @@ services:
     cpus: 1.5
 
   # Does nothing and exits 0. `docker compose up -d` runs without `--wait`
-  # (engine#204) and the deploy is declared finished the moment it returns
+  # and the deploy is declared finished the moment it returns
   # (DeploymentWorkflow.php:73), so without this the deploy would end while the
   # server was still starting. Compose does block on a depends_on health
   # condition, so waiting on app's healthcheck makes `up -d` return only once

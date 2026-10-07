@@ -1,7 +1,6 @@
 # Omeka Classic
 
-<https://github.com/omeka/Omeka> — tracker issue
-[#1002](https://git.modulesgarden.tech/panelalpha/playground/supported-apps/-/work_items/1002).
+<https://github.com/omeka/Omeka>.
 
 A digital-collections publishing platform: Zend Framework 1 (vendored in
 `application/libraries`), MySQL through mysqli, a public site at `/`, an admin
@@ -19,18 +18,18 @@ The recipe directory must be lowercase `omeka/omeka`. `RepoUrl::segments()`
 lowercases host, owner and repo, so a directory named `omeka/Omeka` matches
 nothing.
 
-## What was wrong
+## What goes wrong without it
 
-Detection was right about everything it decided — `php` strategy, PHP 8.3, the
+Detection is right about everything it decides — `php` strategy, PHP 8.3, the
 shared Apache base image, `~/project` bind-mounted, the repository root as the
-document root — the deploy reported success in 60 seconds, and every request
-answered **HTTP 500** with Omeka's own page:
+document root — the deploy reports success, and every request answers
+**HTTP 500** with Omeka's own page:
 
 > Omeka has encountered an error
 
 In production Omeka prints no more than that (`$displayError =
 $this->getEnvironment() != 'production'` in `Omeka_Application::_displayErrorPage`).
-Re-run under `APPLICATION_ENV=development`:
+Under `APPLICATION_ENV=development` the cause shows:
 
 ```
 Omeka fatal error: Your Omeka database configuration file is missing.
@@ -77,8 +76,7 @@ install stage instead, before Apache binds, with the login the engine
 generates (`credentials:` in `panelalpha.yaml`), returned by
 `GET /projects/{name}/app-credentials` (MCP `app_credentials_get`). Afterwards `/install` answers *"Omeka is installed."*
 
-Two things the browser does for the web installer had to be done by hand, and
-both were found by running it, not by reading it:
+Two things the browser does for the web installer have to be done by hand:
 
 * **`Resource matching "Helpers" not found`** — `install/application.ini` asks
   for `resources.layout`; Zend's Layout resource bootstraps FrontController;
@@ -97,17 +95,17 @@ both were found by running it, not by reading it:
 Every file in `application/schema` is `CREATE TABLE IF NOT EXISTS`, and MySQL
 commits DDL implicitly — so the transaction `Installer_Default::install()`
 opens rolls back neither the schema nor the rows the first three tasks wrote.
-When the fourth task failed (the router bug above), the database was left in
-precisely the state upstream's `isInstalled()` reads as installed. The next
-deploy took the migrate branch and replayed fifteen years of migrations against
-a current schema:
+When the fourth task fails (the router bug above, for one), the database is
+left in precisely the state upstream's `isInstalled()` reads as installed. The
+next deploy takes the migrate branch and replays fifteen years of migrations
+against a current schema:
 
 ```
 Zend_Db_Statement_Mysqli_Exception: Duplicate column name 'added'
   application/migrations/20100810120000_detachCollectorsFromEntities.php:28
 ```
 
-and the account was unrecoverable. So the marker this recipe uses is the last
+and the account is unrecoverable. So the marker this recipe uses is the last
 thing a successful install writes — the `omeka_version` option, which
 `Installer_Task_Migrations` inserts empty and only `Installer_Task_Options`
 fills in. Empty version **and** an empty items table means a site nobody has
@@ -141,14 +139,14 @@ there.
 `bootstrap.php` hard-codes both `FILES_DIR = BASE_DIR . '/files'` (where Omeka
 writes) and `WEB_FILES = WEB_ROOT . '/files'` (the URL a visitor fetches), so
 originals and derivatives are inside the directory a redeploy deletes and
-re-clones (engine#173), while the `omeka_files` rows pointing at them survive.
+re-clones, while the `omeka_files` rows pointing at them survive.
 `storage.adapterOptions.localDir` would move the writes but not the URL, so
 `prepare.sh` replaces `files/` with a symlink to the `/data` bind mount —
 Castopod's arrangement, for the same reason.
 
-The size limit is engine#185: with no php.ini loaded, `upload_max_filesize` is
-the compiled-in 2M. Measured — the add-item form says *"The maximum file size
-is 2 MB."* without `files/panelalpha-php.ini` and *"128 MB."* with it.
+The size limit comes from the engine's base image: with no php.ini loaded, `upload_max_filesize` is
+the compiled-in 2M, which the add-item form reports as *"The maximum file size
+is 2 MB."*; with `files/panelalpha-php.ini` it is 128 MB.
 
 ## Two things the engine gets right that this depends on
 
@@ -163,25 +161,6 @@ is 2 MB."* without `files/panelalpha-php.ini` and *"128 MB."* with it.
   `auto_prepend_file` (`panelalpha-proxy.ini`) sets. That is why
   `PHP_INI_SCAN_DIR` lists the image's own `conf.d` first and explicitly: it
   *replaces* the compiled-in path rather than adding to it.
-
-## Verified
-
-Clean deploy, `deploy-ok`, `serving: ok`, HTTP 200 on the public domain, 75s.
-Then, on that account:
-
-1. signed in at `/admin/users/login` over the public HTTPS domain with the
-   generated credential → 302 `/admin/`, dashboard 200;
-2. created an item with a 3.2 MB PNG attached;
-3. the public `/items/show/1` renders it, and `/files/original/<hash>.png` and
-   `/files/fullsize/<hash>.jpg` both answer 200 — the derivative proves the
-   Imagick strategy;
-4. redeployed: `~/project` was emptied (a marker file placed there is gone),
-   the setup script took the upgrade branch (*"already installed and up to
-   date (version 3.2.1)"*), the generated password was not regenerated, and the
-   item, the original and the derivatives were all still served.
-
-`db.ini`, `application/config/config.ini`, `docker-compose.override.yml`,
-`panelalpha-*` and `application/logs/*` all answer 403.
 
 ## Left alone
 
@@ -201,8 +180,7 @@ Then, on that account:
 ## Not this recipe's bug
 
 Uploading through the `*.panelalpha.online` edge does not work, and it is not
-Omeka. Measured against a deployed account: a `multipart/form-data` POST of
-100 KB, 500 KB or 1 MB **stalls** until the client gives up (engine#170), and
-one of 2 MB or 5 MB is refused immediately with **HTTP 413**. The same POST to
-the account's own address succeeds in 0.3 s. Ordinary form posts (the login)
-and every GET go through the edge fine.
+Omeka: a small `multipart/form-data` POST **stalls** there until the client
+gives up, and one of a few MB is refused immediately with
+**HTTP 413**. The same POST to the account's own address succeeds. Ordinary
+form posts (the login) and every GET go through the edge fine.

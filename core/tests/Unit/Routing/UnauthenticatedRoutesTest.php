@@ -7,7 +7,7 @@ use Illuminate\Routing\RouteCollection;
 use Illuminate\Support\Facades\Route;
 use Tests\TestCase;
 
-// Debug and documentation routes that answered without a token (#48, items 15, 17, 22).
+// Debug and documentation routes that answered without a token.
 class UnauthenticatedRoutesTest extends TestCase
 {
     /** @return list<string> */

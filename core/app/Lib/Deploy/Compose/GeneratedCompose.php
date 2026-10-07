@@ -244,7 +244,7 @@ final class GeneratedCompose
     /**
      * The long form, so the app waits for a sidecar that can say it is ready.
      * The short form only waits for the container to start, and an app that
-     * migrates on boot then races its own database (engine#187).
+     * migrates on boot then races its own database.
      *
      * @param list<mixed> $names
      * @param array<string, array<string, mixed>> $sidecars

@@ -13,7 +13,7 @@
 # lib/v4l2_device_tw5864.cpp and the libudev enumerator in server/bc-detect.cpp
 # are for Bluecherry's own optional PCI cards; with no /dev/video* the
 # enumerator finds nothing and bc-server carries on with the IP-camera path
-# (RTSP/ONVIF), which is how the product is sold. Verified in an ordinary
+# (RTSP/ONVIF), which is how the product is sold. It runs in an ordinary
 # unprivileged container: no --privileged, no --device, no kernel module.
 services:
   # MariaDB rather than MySQL, and pinned. The image's mysql-client talks to
@@ -32,7 +32,7 @@ services:
     # directory) and the path is relative to compose's --project-directory,
     # which is ~/project. Nothing secret is written into the project, because
     # the engine copies ~/project/.env to .env.default at mode 644
-    # (ProjectEnvironment::apply, engine#173) inside a world-traversable home.
+    # (ProjectEnvironment::apply) inside a world-traversable home.
     env_file:
       - ../.panelalpha/bluecherry.env
     environment:
@@ -120,9 +120,8 @@ services:
       #
       # An NVR writes continuously, and the seeded thresholds are 95% before it
       # starts deleting and 90% after. Those are percentages of the filesystem
-      # this volume lands on, and measured on a live account that is the host's
-      # root filesystem, shared with every other tenant -- not a quota of the
-      # account's own. See README.md before offering this to anyone.
+      # this volume lands on, which is the host's root filesystem, shared with
+      # every other tenant -- not a quota of the account's own. See README.md before offering this to anyone.
       - bluecherry_data:/var/lib/bluecherry
     depends_on:
       db:
@@ -132,7 +131,7 @@ services:
     # adds, through php-fpm, and greps for the login page's own title so a PHP
     # fatal rendered with a 200 does not pass. curl is in the image
     # (actions/Dockerfile installs it). nginx has `server_name _`, so the
-    # loopback Host header is fine (engine#165 does not apply).
+    # loopback Host header is fine.
     healthcheck:
       test:
         - CMD-SHELL
@@ -142,10 +141,9 @@ services:
       retries: 60
       start_period: 30s
     # bc-server is one process with a thread per camera plus its HLS and API
-    # listeners; nginx, php-fpm and rsyslogd share the container. Measured
-    # 49.5 MiB idle with no cameras, and recording is ffmpeg muxing inside
-    # bc-server, so this is headroom for a handful of streams rather than a
-    # measurement of an empty instance.
+    # listeners; nginx, php-fpm and rsyslogd share the container. Recording is
+    # ffmpeg muxing inside bc-server, so this is headroom for a handful of
+    # streams rather than the size of an empty instance.
     mem_limit: 768m
     # The hardener's default 256 counts threads. bc-server spawns per-camera
     # threads on top of php-fpm's pool and nginx's workers.
@@ -187,7 +185,7 @@ services:
     mem_limit: 128m
 
   # Does nothing and exits 0. It exists because the engine runs
-  # `docker compose up -d` without `--wait` (engine#90) and takes the deploy to
+  # `docker compose up -d` without `--wait` and takes the deploy to
   # be finished when that returns -- which is when every service has been
   # *started*. Here that gap is the whole first boot: MariaDB initialises a
   # data directory, then the application's entrypoint waits for it, creates the

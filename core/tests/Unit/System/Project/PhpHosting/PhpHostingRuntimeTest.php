@@ -111,7 +111,7 @@ class PhpHostingRuntimeTest extends TestCase
         $this->assertContains('compose-down', $system->journal);
     }
 
-    /** engine#217: the account joins pash-tenants, and its port is bound once it exists. */
+    /** The account joins pash-tenants, and its port is bound once it exists. */
     public function test_start_applies_the_tenant_network_firewall_around_compose_up(): void
     {
         $model = $this->userModel('erin');

@@ -9,14 +9,14 @@ description: >-
   Dockerfile is a full multi-stage `dotnet publish` that also installs Node 22
   and compiles the app plus its `Memtly.Core` git submodule from source, minutes
   and well over the account's memory budget per account to arrive at the image
-  that is already published -- and the published image dodges engine#229's
+  that is already published -- and the published image dodges the image-seed
   docker-save stub because it lives on Docker Hub, not GHCR.
 
   Storage is SQLite, the image's default: `appsettings.json` ships
   `Data Source=./config/memtly.db`, and the app runs its EF Core migrations on
   start (measured: "Initialization complete", schema created, no separate init
   step needed). SQLite plus four data directories all live under /app; a
-  redeploy wipes and re-clones ~/project (engine#173) but never touches a named
+  redeploy wipes and re-clones ~/project but never touches a named
   volume, so config (the database AND the ASP.NET DataProtection keyring the
   app writes there), uploads, thumbnails and custom_resources are each on their
   own named volume. That keyring on the config volume is what keeps auth cookies
@@ -24,7 +24,7 @@ description: >-
   expected for a keyring on a private per-account volume.
 
   Only the app publishes a port -- `8080:5000`, explicit so the engine sees it
-  (engine#234) and 5000 is the container port Kestrel actually binds. There is
+  and 5000 is the container port Kestrel actually binds. There is
   no datastore sidecar and nothing else listens.
 
   The installation is given a real owner instead of the shipped default. The

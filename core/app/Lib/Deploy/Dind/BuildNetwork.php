@@ -3,7 +3,7 @@
 namespace App\Lib\Deploy\Dind;
 
 /**
- * The Docker network host build containers run on (engine#246).
+ * The Docker network host build containers run on.
  *
  * A host build runs the customer's install and build scripts on the *host*
  * daemon. On the default bridge that container could reach the engine API on
@@ -19,7 +19,7 @@ final class BuildNetwork
 {
     public const DEFAULT_NAME = 'panelalpha-build';
 
-    /** Fixed so the firewall matches it by name; `br-` so engine#241's DNAT skips it like any bridge. */
+    /** Fixed so the firewall matches it by name; `br-` so the DNAT rules skip it like any bridge. */
     public const BRIDGE = 'br-pa-build';
 
     public const FIREWALL_SCRIPT = '/opt/panelalpha/shared-hosting/scripts/build-network-firewall.sh';

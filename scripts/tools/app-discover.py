@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Find self-hostable open-source apps that are not yet in the supported-apps tracker.
+"""Find self-hostable open-source apps that are not yet in the app-support tracker.
 
 Every run reads the *whole* current list of each source, so the first run is a gap
 analysis and later runs surface only what those sources added since. "New" means:

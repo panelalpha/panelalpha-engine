@@ -20,7 +20,7 @@ STORE="${HOME}/.panelalpha"
 # Account homes are root-owned 755, so this directory has to be created rather
 # than written into $HOME directly, and it is the only place a generated secret
 # survives a deploy: GitRepository::cloneConfiguredRepository empties ~/project
-# before every clone (engine #173), while the postgres volume does not.
+# before every clone, while the postgres volume does not.
 mkdir -p "${STORE}"
 chmod 700 "${STORE}"
 
@@ -52,7 +52,7 @@ AWL_TAG="r0.65"
 AWL_CACHE="${STORE}/awl-${AWL_TAG}"
 
 # Cached outside ~/project, cloned once. ~/project is wiped and re-cloned on
-# every deploy (engine #173) and copying 4 MB from the account's own disk beats
+# every deploy and copying 4 MB from the account's own disk beats
 # a network round trip to gitlab.com on every redeploy -- and means a redeploy
 # still works when gitlab.com does not.
 if [ ! -f "${AWL_CACHE}/inc/AWLUtilities.php" ]; then
@@ -93,13 +93,13 @@ cp -a "${AWL_CACHE}" awl
 #   PA_DAVICAL_DB_PASSWORD -> ~/project/.env, where `docker compose` reads
 #       variables for `${...}` interpolation. The postgres service cannot use
 #       env_file: RuntimeSidecars mines docker-compose.override.yml and writes
-#       `POSTGRES_PASSWORD: app` into the generated compose as `environment:`
-#       (engine #166, #189), which outranks any env_file. The override's own
+#       `POSTGRES_PASSWORD: app` into the generated compose as `environment:`,
+#       which outranks any env_file. The override's own
 #       `environment:` is the only thing that wins that merge, and an
 #       `environment:` value has to come from a compose variable.
 #
-# ProjectEnvironment::apply() then copies .env to .env.default at mode 644
-# (engine #173), so the database password is in the account's home twice. Both
+# ProjectEnvironment::apply() then copies .env to .env.default at mode 644,
+# so the database password is in the account's home twice. Both
 # are dotfiles, which the generated vhost denies outright
 # (apache-vhost.stub's `FilesMatch "^\.(?!well-known)"`) -- and both are
 # outside the document root here anyway, which is htdocs/. The admin password,
@@ -178,8 +178,8 @@ chmod 600 .env
 #
 # The repository .gitignore's config/config.php and ships config/
 # example-config.php instead, so a clone never has one: this is the file the
-# engine has no way to infer and the whole reason a `serving-missing_entry`
-# verdict would not have been fixed by the docroot alone.
+# engine has no way to infer and the whole reason the docroot alone would not
+# fix a plain deploy.
 #
 # It holds no secret. Every value that is one is read from the container's
 # environment at request time -- the same posture as the zentao recipe's
@@ -298,8 +298,8 @@ cat > htdocs/.htaccess <<'EOF'
 # AWL writes it with the four-argument form of setcookie --
 # `setcookie('sid', $sid, 0, '/')` (awl/inc/Session.php:461) -- which cannot
 # express httponly or samesite, and it is not a PHP session cookie, so
-# session.cookie_httponly in the ini does not reach it. Measured: the cookie
-# arrives with no flags at all, readable by any script on the page.
+# session.cookie_httponly in the ini does not reach it: the cookie arrives with
+# no flags at all, readable by any script on the page.
 #
 # mod_headers is enabled in the shared base image
 # (PhpApacheConfig::MODULES = ['rewrite', 'headers']), and rewriting the header
@@ -315,9 +315,8 @@ cat > htdocs/.htaccess <<'EOF'
 # for CalDAV, which authenticates with HTTP Basic and never sends this cookie.
 # `edit`, not `always edit`. The two operate on different header tables:
 # `always` is Apache's err_headers_out, and PHP's setcookie() lands in
-# headers_out. Measured on a deployed account -- with `always` the cookie came
-# back exactly as AWL wrote it, with no flags and no error anywhere; without
-# it the flags are appended.
+# headers_out. With `always` the cookie comes back exactly as AWL wrote it,
+# with no flags and no error anywhere; without it the flags are appended.
 <IfModule mod_headers.c>
     Header edit Set-Cookie "^(sid=.*)$" "$1; HttpOnly; SameSite=Lax"
 </IfModule>
@@ -349,7 +348,7 @@ chmod 644 htdocs/.htaccess
 #
 # DAViCal 1.1.13 ships no docker-compose.yml, no compose.yaml and no
 # Dockerfile -- checked. Were one to appear, the php strategy would mine it for
-# backing services (engine #166) and this account would grow whatever database
+# backing services and this account would grow whatever database
 # upstream uses for its own CI. Moved by name and never by a
 # `docker-compose.*.yml` glob, which matches this recipe's own override and
 # would take the postgres sidecar and the healthcheck with it while the deploy
@@ -358,7 +357,7 @@ mkdir -p "${STORE}/upstream-compose"
 for f in docker-compose.yml docker-compose.yaml compose.yml compose.yaml; do
     [ -f "$f" ] || continue
     mv -f "$f" "${STORE}/upstream-compose/"
-    echo "[davical] moved $f out of the checkout (engine #166)"
+    echo "[davical] moved $f out of the checkout"
 done
 
 echo "[davical] prepare finished"

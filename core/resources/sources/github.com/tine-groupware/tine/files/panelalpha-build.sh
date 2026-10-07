@@ -47,14 +47,13 @@ cd /app/tine20/Tinebase/js
 # the only lever a project has over the image variant, and without it the pass
 # runs in node:24-bookworm-slim, which has no git binary and fails the install
 # with `npm error syscall spawn git` / `npm error git dep preparation failed`.
-# Measured; it cost one deploy.
 say "installing frontend dependencies"
 npm install --no-audit --no-fund --omit=optional --ignore-scripts
 
 # webpack/panelalpha.mjs, this recipe's own, copied in beside upstream's:
 # common.mjs unchanged, prod.mjs's source maps, unminified second bundle set
 # and brotli pass dropped. The reason is in that file's header -- prod.mjs as
-# written is OOM-killed in the engine's build container, measured. Its
+# written can be OOM-killed in the engine's build container. Its
 # output.path is common.mjs's `baseDir` = tine20/, so every bundle lands in the
 # tree the container serves and nothing has to be moved afterwards.
 #
@@ -80,7 +79,7 @@ fi
 # node_modules has done its job and nothing at runtime reads it: the one thing
 # outside the bundles that comes from it is bootstrap's CSS, which
 # copy-webpack-plugin has already written to Tinebase/styles/build/bootstrap/.
-# Leaving it costs the account 567 MB of quota (measured) inside the document
+# Leaving it costs the account over half a gigabyte of quota inside the document
 # root, where every .js in it is web-readable -- the .htaccess rewrite covers
 # .php files, not JavaScript. A redeploy re-clones ~/project and would lose it
 # regardless; with the host npm cache warm the reinstall is the same cost

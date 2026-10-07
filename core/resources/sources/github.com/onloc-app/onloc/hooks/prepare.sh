@@ -3,7 +3,7 @@ set -e
 cd ~/project
 
 # Onloc's compose reads its secrets from ~/project/.env via ${...}. But ~/project
-# is wiped on every redeploy (engine#173), so the values themselves are kept in
+# is wiped on every redeploy, so the values themselves are kept in
 # ~/.panelalpha/onloc/ — the only account-writable directory that survives a
 # rebuild — and reused. Regenerating them would change the database password out
 # from under the persisted postgres volume (auth failures) and invalidate every

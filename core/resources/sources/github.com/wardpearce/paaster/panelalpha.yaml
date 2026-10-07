@@ -3,8 +3,8 @@ description: >-
   paaster, an end-to-end encrypted pastebin (SvelteKit on Node, :3000) that
   keeps paste metadata in MongoDB and the encrypted chunks in S3, MongoDB or
   on the filesystem. The repository's docker-compose.yml runs the published
-  image with an unpinned `mongo` (latest, restarting in the account; see
-  engine#146) and an unconfigured Garage S3 node that also restarts, so a plain deploy
+  image with an unpinned `mongo` (latest, restarting in the
+  account) and an unconfigured Garage S3 node that also restarts, so a plain deploy
   answers 500 (`getaddrinfo ENOTFOUND paaster_mongodb`).
 
   This recipe follows upstream's documented filesystem deployment

@@ -15,7 +15,7 @@ Team password manager (CakePHP), run from upstream's release image.
   `~/.panelalpha/passbolt/db.env`.
 - `ready` makes `compose up -d` wait for `/healthcheck/status.json`.
 
-The plain php-platform deploy of this checkout crash-loops (engine#423): the
+The plain php-platform deploy of this checkout crash-loops: the
 account uid has no passwd entry and Passbolt calls `posix_getpwuid()`.
 
 ## First run

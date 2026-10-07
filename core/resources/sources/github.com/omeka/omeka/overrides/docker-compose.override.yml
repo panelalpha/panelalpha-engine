@@ -33,7 +33,7 @@ services:
       #                           root.
       #   /data/php/zz-omeka.ini  the php.ini the base image does not load.
       #
-      # A redeploy empties and re-clones ~/project (engine#173), so a
+      # A redeploy empties and re-clones ~/project, so a
       # collections site that kept its uploads under the document root would
       # lose every file on the next deploy -- and the `omeka_files` rows
       # pointing at them would survive, so every item page would show a broken
@@ -50,7 +50,7 @@ services:
       # The one way to give this container a php.ini. The base image loads none
       # at all -- `php --ini` says "Loaded Configuration File: (none)" -- and
       # scans /usr/local/etc/php/conf.d, a directory inside the image that the
-      # account uid cannot write to (engine#185). PHP reads PHP_INI_SCAN_DIR
+      # account uid cannot write to. PHP reads PHP_INI_SCAN_DIR
       # from its own environment at startup whatever the SAPI, so naming a
       # second directory here reaches the Apache module and the CLI both --
       # and both need it: the CLI runs the installer, the Apache module takes
@@ -103,8 +103,8 @@ services:
     #                  reports success has been asked the same question they
     #                  will ask.
     #
-    # Host is `127.0.0.1:8000` for both, as it is for AppHealth's own probe
-    # (engine#190). Omeka accepts it: bootstrap.php builds WEB_ROOT from
+    # Host is `127.0.0.1:8000` for both, as it is for AppHealth's own
+    # probe. Omeka accepts it: bootstrap.php builds WEB_ROOT from
     # whatever Host arrives and no route here is host-dependent.
     #
     # Idempotent, so a retry replays it harmlessly. curl is in the base image.
@@ -126,9 +126,9 @@ services:
   # own, but it does block on a `depends_on` health condition -- so a service
   # that waits for the app is what makes `up -d` return only once Omeka has
   # built its schema, created its super user and answered, and what the health
-  # probe then meets (engine#90). alpine:3 rather than a datastore image:
+  # probe then meets. alpine:3 rather than a datastore image:
   # anything the sidecar miner recognises as a backing service here produces
-  # `dependency cycle detected: app -> ready -> app` (engine#166). A clean
+  # `dependency cycle detected: app -> ready -> app`. A clean
   # exit 0 is not a crash loop as far as AppHealth is concerned.
   ready:
     image: alpine:3

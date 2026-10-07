@@ -91,7 +91,7 @@ for entry in * .[!.]*; do
 done
 
 # A repository that ships a workstation compose file has it mined for runtime
-# sidecars even when it is never run (engine#166). The monorepo ships none
+# sidecars even when it is never run. The monorepo ships none
 # today; the glob is here so that a branch which starts to does not quietly
 # acquire a database container it did not ask for.
 for f in .contao-monorepo/docker-compose.*.yml; do

@@ -51,13 +51,13 @@ services:
       # /config; a named volume keeps them across a redeploy.
       - config:/config
     # nginx serves on :8000 inside the container; Baby Buddy is the only service
-    # that publishes a port (engine#234: publish explicitly).
+    # that publishes a port (publish explicitly).
     ports:
       - "8000:8000"
     healthcheck:
       # /login/ is Baby Buddy's one unauthenticated page; a 200 proves nginx is
       # up and gunicorn opened the SQLite database. busybox wget is always in the
-      # Alpine base. start_period is generous: this host is slow (mariusz2).
+      # Alpine base. start_period is generous for a slow host.
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8000/login/ || exit 1"]
       interval: 10s
       timeout: 10s
@@ -90,7 +90,7 @@ services:
 
   # No-op gate: `docker compose up` blocks on these depends_on conditions, so
   # `up` returns only once the site answers AND the admin has been rotated
-  # (engine#204/#90) -- the deploy never turns green with admin/admin live.
+  # -- the deploy never turns green with admin/admin live.
   ready:
     image: linuxserver/babybuddy:v2.11.0-ls251
     restart: "no"

@@ -19,9 +19,9 @@
 # panelalpha.yaml gets one on the account's own MySQL server: visible in the
 # panel, openable in phpMyAdmin, inside the account's backup, and costing this
 # 3.7 GB host neither a container nor a volume. It is also what keeps the
-# checkout from being mined for sidecars (#166), and it is why #189 -- the
+# checkout from being mined for sidecars, and it is why the
 # harvested MySQL sidecar handed the literal password `app` for user and root
-# -- is not reachable from here.
+# is not reachable from here.
 services:
   app:
     volumes:
@@ -40,7 +40,7 @@ services:
       #                 through api/download.php.
       #   /data/tmp     tmpdir. Sessions, the disk cache and upload staging.
       #
-      # A redeploy clears and re-clones ~/project (engine#173), so a groupware
+      # A redeploy clears and re-clones ~/project, so a groupware
       # site that kept attachments under the document root would lose every one
       # of them while the database rows pointing at them survived. ~ itself is
       # root-owned 0755 and nothing can be created in it; ~/.panelalpha is
@@ -52,7 +52,7 @@ services:
       # The one way to give this container a php.ini. The base image loads none
       # at all -- `Loaded Configuration File => (none)`, measured -- and scans
       # /usr/local/etc/php/conf.d, a directory inside the image the account uid
-      # cannot write to (engine#185). PHP reads PHP_INI_SCAN_DIR from its own
+      # cannot write to. PHP reads PHP_INI_SCAN_DIR from its own
       # environment at startup whatever the SAPI, so naming a second directory
       # here reaches the Apache module and the CLI both -- and both need it:
       # the CLI runs the install, the Apache module takes the attachment.
@@ -99,7 +99,7 @@ services:
     # be built -- and it is emitted from the compiled client bundle path, so it
     # also fails if the frontend build did not produce a theme.
     #
-    # Host is 127.0.0.1:8000, as it is for AppHealth's own probe (#190). Group
+    # Host is 127.0.0.1:8000, as it is for AppHealth's own probe. Group
     # Office accepts it: it selects no site by Host header, and findConfigFile()
     # only consults HTTP_HOST for /etc/groupoffice/multi_instance/, which does
     # not exist here.
@@ -119,7 +119,7 @@ services:
   # own, but it does block on a `depends_on` health condition -- so a service
   # that waits for the app is what makes `up -d` return only once Group Office
   # has built its schema, created its administrator and rendered a page, and
-  # what the health probe then meets (engine#90).
+  # what the health probe then meets.
   #
   # alpine:3 and not a datastore image: anything the sidecar miner recognises
   # as a backing service here produces `dependency cycle detected: app -> ready

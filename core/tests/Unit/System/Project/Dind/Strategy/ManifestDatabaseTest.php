@@ -21,7 +21,7 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * engine#210: `database: mysql` outside the PHP strategy. The dockerfile and
+ * `database: mysql` outside the PHP strategy. The dockerfile and
  * generated-framework writers provision the account's database and hand the
  * app DATABASE_URL + DB_* + the extra_hosts pin; the rest are warned about.
  */

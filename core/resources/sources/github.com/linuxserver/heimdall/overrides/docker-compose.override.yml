@@ -24,7 +24,7 @@ services:
     # `key:generate`, `storage:link`, `migrate`, and -- inside the very first of
     # those, because AppServiceProvider::boot() runs for artisan as well --
     # Heimdall's own setupDatabase(), which creates database/app.sqlite, runs
-    # `migrate --seed` over it and then fetches the 320 KB supported-apps list
+    # `migrate --seed` over it and then fetches Heimdall's SupportedApps list
     # over the network (SupportedApps::getList(), 15s connect timeout). The
     # engine runs `docker compose up -d` without --wait and probes as soon as it
     # returns, which is while all of that is still going: nothing is listening
@@ -50,7 +50,7 @@ services:
       interval: 10s
       timeout: 40s
       retries: 24
-      # The install stage on a 2-core host, with the supported-apps fetch in it.
+      # Room for the install stage on a 2-core host, app-list fetch included.
       # A failing check inside this window neither counts against retries nor
       # marks the container unhealthy.
       start_period: 240s

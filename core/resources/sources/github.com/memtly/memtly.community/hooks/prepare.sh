@@ -1,7 +1,7 @@
 #!/bin/bash
 # Generate the gallery encryption key/salt once, persist them where a rebuild
 # cannot reach, and materialise the ~/project/.env that docker compose
-# interpolates ${VAR} from. ~/project is wiped on every redeploy (engine#173);
+# interpolates ${VAR} from. ~/project is wiped on every redeploy;
 # ~/.panelalpha is not.
 #
 # The image ships admin@example.com / "admin" and an encryption key/salt of the

@@ -6,7 +6,7 @@ use App\System\Project\Dind\AppHealth;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Which answers the port probe keeps waiting on (engine#280).
+ * Which answers the port probe keeps waiting on.
  *
  * An image that runs its own proxy in front of the app (Pingvin Share X:
  * Caddy) binds the port at once and answers 502 until the backend is up. The

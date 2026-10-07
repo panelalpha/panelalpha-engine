@@ -14,7 +14,7 @@ use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
 
 /**
- * engine#246: before a host build the network is made if missing and its
+ * Before a host build the network is made if missing and its
  * firewall applied. Neither may fail a deploy: without them the build runs as
  * it did before the network existed, with a warning.
  */

@@ -176,10 +176,10 @@ class PhpBaseImageTest extends TestCase
         $dockerfile = (string) PhpBaseImage::dockerfile('php:8.3-apache-bookworm');
 
         // ResourceSpace detects an upload's type only through exiftool and
-        // renders previews with `convert` (engine#222).
+        // renders previews with `convert`.
         $this->assertStringContainsString('libimage-exiftool-perl', $dockerfile);
         $this->assertStringContainsString('imagemagick', $dockerfile);
-        // A third of the image for every account; not baked (engine#193).
+        // A third of the image for every account; not baked.
         $this->assertStringNotContainsString('ffmpeg', preg_replace('/^#.*$/m', '', $dockerfile));
     }
 
@@ -237,7 +237,7 @@ class PhpBaseImageTest extends TestCase
 
     /**
      * ffmpeg is +371 MB on a 1.09 GB image, so it goes into a variant of its
-     * own rather than the base every account loads (engine#193).
+     * own rather than the base every account loads.
      */
     public function test_system_packages_get_their_own_variant_tag(): void
     {

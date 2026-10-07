@@ -30,14 +30,14 @@ final class OuterLifecycle
             '-d',
             '--remove-orphans',
         ]);
-        // engine#529: a port is bound to its container's address only once the
+        // A port is bound to its container's address only once the
         // container exists, and until then the bridge drops its frames.
         $this->prepareTenantNetwork();
     }
 
     /**
      * The account joins pash-tenants, which compose cannot start without, and
-     * whose firewall a reboot drops (engine#519). One that
+     * whose firewall a reboot drops. One that
      * cannot be applied is a warning, not an account left down: with no rules
      * enable_icc still drops traffic between the network's members.
      */

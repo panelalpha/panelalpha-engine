@@ -17,8 +17,8 @@
 #    build, so this is mostly the plugin's file placement. Gated on ecrire/
 #    being absent, so a plain restart skips it.
 #
-# 2. Persist config + media across the redeploy that empties ~/project
-#    (engine#173). SPIP_ETC_DIR (manifest env) points SPIP's config dir at
+# 2. Persist config + media across the redeploy that empties ~/project.
+#    SPIP_ETC_DIR (manifest env) points SPIP's config dir at
 #    /pa-data/spip/config, so connect.php + cles.php (DB DSN + crypto keys)
 #    live on the bind-mounted account home. That dir also has to carry SPIP's
 #    framework config (config/spip/*.php) and mes_options.php, both copied in
@@ -83,7 +83,7 @@ rm -rf /app/.git
 
 # --- 4. Headless install seed. Create the schema + super-admin BEFORE Apache
 # serves, so the site is never publicly reachable with an empty, first-visitor-
-# wins installer (engine#200). Drives SPIP's own web wizard over a throwaway
+# wins installer. Drives SPIP's own web wizard over a throwaway
 # loopback php -S; idempotent (a no-op once a webmestre exists), so a redeploy
 # just skips it. Non-fatal: if it cannot complete, the boot still serves and the
 # owner can install by hand.

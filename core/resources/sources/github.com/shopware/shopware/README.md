@@ -1,7 +1,6 @@
 # shopware/shopware — Shopware 6.7 Community Edition
 
-Upstream: <https://github.com/shopware/shopware> · tracker issue
-[#692](https://git.modulesgarden.tech/panelalpha/playground/supported-apps/-/work_items/692)
+Upstream: <https://github.com/shopware/shopware>
 
 A Symfony 7 e-commerce platform: a Twig-rendered storefront, a Vue
 administration SPA, and a MySQL-backed Data Abstraction Layer. This directory
@@ -12,14 +11,14 @@ engine's host Node stage for the two frontends.
 
 | # | Symptom | Cause | Fixed by |
 |---|---------|-------|----------|
-| 1 | `serving-error_page`, strategy `compose` | The root `compose.yaml` is upstream's *workstation*: `ghcr.io/shopware/docker-dev`, a MariaDB with `root`/`root`, an Adminer on 9080, Mailpit, Valkey, OpenSearch. Nothing in it installs Shopware, so Caddy served `public/index.php` against an empty `vendor/`. | `extends: php` in `panelalpha.yaml` (resolved by `PlatformSelector::fromSource()` ahead of the detection walk) and `hooks/prepare.sh` moving `compose.yaml` to `.panelalpha/` so engine defect **#166** cannot mine its services as sidecars |
-| 2 | Every request and every console command fatals | No `composer.lock` (it is in `.gitignore`), so the `php` manifest's `--no-plugins` is never lifted and `symfony/runtime` never writes `vendor/autoload_runtime.php` — required on line 11 of `public/index.php`. Engine defect **#168**. | one `composer dump-autoload` in the account's own container, `files/panelalpha/shopware-setup.sh` |
+| 1 | `serving-error_page`, strategy `compose` | The root `compose.yaml` is upstream's *workstation*: `ghcr.io/shopware/docker-dev`, a MariaDB with `root`/`root`, an Adminer on 9080, Mailpit, Valkey, OpenSearch. Nothing in it installs Shopware, so Caddy served `public/index.php` against an empty `vendor/`. | `extends: php` in `panelalpha.yaml` (resolved by `PlatformSelector::fromSource()` ahead of the detection walk) and `hooks/prepare.sh` moving `compose.yaml` to `.panelalpha/` so the engine cannot mine its services as sidecars |
+| 2 | Every request and every console command fatals | No `composer.lock` (it is in `.gitignore`), so the `php` manifest's `--no-plugins` is never lifted and `symfony/runtime` never writes `vendor/autoload_runtime.php` — required on line 11 of `public/index.php`. An engine defect. | one `composer dump-autoload` in the account's own container, `files/panelalpha/shopware-setup.sh` |
 | 3 | `theme:change` throws `ThemeCompileException` | The storefront's built assets are not in the repository. `theme.json` resolves its SCSS `vendor` alias to a directory `copy-to-vendor.js` fills from `node_modules/bootstrap`, and lists `dist/storefront/storefront.js` under `script`, which `ThemeFileResolver::processDirectFile()` throws on. | `files/package.json` (a dependency-free bridge — `HostCompile::runForPhp()` only fires on a **root** build script, and Shopware's npm projects are nested) driving `files/panelalpha/build-assets.sh` |
 | 4 | Node stage dies: `/app/var/plugins.json could not be found` | `webpack.config.js:61-64` throws without it, and only `bin/console bundle:dump` writes it — there is no PHP in the Node container. | `build-assets.sh` writes `{}`; webpack reads that file only for third-party plugin entries and a fresh clone has none |
 | 5 | `npm warn EBADENGINE … npm: >=11.8.0` | Image chosen from `engines.node`, then `.nvmrc` — and `.nvmrc` here is `lts/*`, which resolves to nothing, so Node 20 / npm 10.8.2 was used. | `engines.node: "24"` in `files/package.json` |
 | 6 | HTTP 400 "Domain Mapping Misconfiguration" | Shopware resolves a request to a sales channel by matching scheme+host against `sales_channel_domain.url`. | `sales-channel:create:storefront --url="$APP_URL"`, which `PublicUrlEnvironment::for()` sets to the account's own origin; re-pointed on the upgrade stage when the address changed |
 | 7 | Every route but `/` is a 404 | `public/.htaccess` is not in the clone — `.gitignore` un-ignores only `index.php` and `.htaccess.dist`. | the setup script copies `.htaccess.dist` on install *and* on every redeploy (the re-clone loses it) |
-| 8 | Probe hits a container still installing | Engine defect **#90**: `docker compose up -d` without `--wait`. | healthcheck + no-op `ready` service in `overrides/docker-compose.override.yml` |
+| 8 | Probe hits a container still installing | An engine defect: `docker compose up -d` without `--wait`. | healthcheck + no-op `ready` service in `overrides/docker-compose.override.yml` |
 
 ## Security
 
@@ -57,8 +56,8 @@ administration. Measured three times at the same commit, each at the heap
 That cgroup is **not** the account's `--memory-limit`.
 `DindHostBuilder::sandboxPrefix()` passes `--memory $this->memoryLimit()`, and
 that value comes from `DindEngine::buildMemory()`: `DEPLOY_BUILD_MEMORY` if an
-operator set one, otherwise 8192 MB, and never more than half the host's RAM
-(engine#295). So it is a property of the **engine host**:
+operator set one, otherwise 8192 MB, and never more than half the host's RAM.
+So it is a property of the **engine host**:
 
 * 15 GB host → 8192 MB → the administration builds.
 * a host with less than ~5.3 GB of RAM → under 2700 MB → it is skipped,

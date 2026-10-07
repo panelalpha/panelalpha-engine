@@ -6,7 +6,7 @@
 # registry-proxy replaced it on the same host port, 127.0.0.1:5001. Its key is
 # gone from docker-compose.yml, so a plain `docker compose up -d` leaves the old
 # container holding the port and registry-proxy crash-loops, and `down -v`
-# never removes its cache volume, which nothing bounds (#87). An .env naming
+# never removes its cache volume, which nothing bounds. An .env naming
 # the old profile would start no proxy at all. Idempotent: install, update and
 # uninstall all run it.
 set -u

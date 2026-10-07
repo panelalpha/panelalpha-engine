@@ -1,16 +1,15 @@
 # Galette — github.com/galette/galette
 
 Galette, a membership-management web app for non-profit associations (members,
-contributions, mailings), GPL-3.0. supported-apps#1185. PHP, backed by the
-account's own MySQL. No official Docker image, so this is a **php-strategy**
-source recipe. Verified against **stable tag 1.2.1** and the **develop**
-branch, whose layouts differ (below).
+contributions, mailings), GPL-3.0. PHP, backed by the account's own MySQL. No
+official Docker image, so this is a **php-strategy** source recipe. It handles
+both the **stable 1.2 tags** and the **develop** branch, whose layouts differ
+(below).
 
 ## PHP gate
 
 `composer.json` requires `php: >=8.2` (1.2.1) or `>=8.3` (develop), so the engine
-resolves an in-range PHP and Galette runs clean on
-it. Every extension Galette declares (gd, intl, gettext, curl, simplexml,
+resolves an in-range PHP. Every extension Galette declares (gd, intl, gettext, curl, simplexml,
 pdo_mysql, fileinfo, filter, mbstring, session) is already in the engine's php
 image, so the stock `composer install --no-plugins` satisfies the platform check
 with nothing added.
@@ -36,7 +35,7 @@ Composer installs exactly what it pins.
 
 ## What a bare deploy gets wrong
 
-A no-recipe control deploy **fails** (verified): the engine's php frontend build
+Without the recipe the deploy **fails**: the engine's php frontend build
 runs `npm ci && npm run build`, but Galette's `build` script is only `npx gulp`,
 and `gulpfile.js` require()s `./semantic/tasks/build`, which exists only after the
 separate `fomantic-install` step. So the stock build dies with
@@ -48,15 +47,14 @@ whole deploy. None of the three fixes is a change to upstream source:
    its `first-build` script chains). `package.json` and `package-lock.json` stay
    as the deployed ref ships them, so `npm ci` matches on every ref.
 
-2. **config/ and data/ live in the checkout, wiped every redeploy** (engine#173,
-   ~/project is emptied). Galette keeps its DB connection (`config/config.inc.php`,
+2. **config/ and data/ live in the checkout, wiped every redeploy**
+   (~/project is emptied). Galette keeps its DB connection (`config/config.inc.php`,
    which holds the DB password) in `config/` and all uploads/logs/exports/photos
    in `data/`. `overrides/docker-compose.override.yml` bind-mounts `~/.panelalpha/galette`
    (created by `hooks/prepare.sh`) into the `app` container as `/pa-data/galette`; `files/galette/panelalpha/galette-setup.sh`
    seeds `~/.panelalpha/galette/{config,data}` once from the fresh checkout, then
    symlinks `/app/config` and `/app/data` onto it. Relational content is in the
-   account MySQL (`database: mysql`), which survives on its own. Verified: a
-   created member and the admin login both survive `project_rebuild`.
+   account MySQL (`database: mysql`), which survives on its own.
 
 3. **The installer is open to the first visitor.** Galette's
    `webroot/installer.php` never checks whether Galette is already installed — it
@@ -78,12 +76,10 @@ whole deploy. None of the three fixes is a change to upstream source:
 The owner gets the super-admin login from `GET /projects/{name}/app-credentials`
 (MCP `app_credentials_get`). An account installed before the engine owned the
 login keeps its password: it is adopted from
-`~/.panelalpha/galette/secrets/admin.txt`, which the older recipe wrote. No default
-credential works — every guessable pair (admin/admin, superadmin/admin, …) is
-refused. `install/` and `installer.php` are closed to anonymous visitors.
+`~/.panelalpha/galette/secrets/admin.txt`, which the older recipe wrote. There is
+no default credential. `install/` and `installer.php` are closed to anonymous visitors.
 
-engine#231 (port alignment) does not apply: a php/Apache app on the engine's php
+Port alignment does not apply: a php/Apache app on the engine's php
 image serves on the standard port.
 
-SOURCE: keyed to `github.com/galette/galette`, which clones anonymously
-(verified `git ls-remote`). supported-apps#1185.
+SOURCE: keyed to `github.com/galette/galette`, which clones anonymously.

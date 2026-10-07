@@ -362,7 +362,7 @@ class RuntimeSidecarsTest extends TestCase
     {
         // Phorge's recipe ships exactly this: a mysql service with no
         // environment at all. It used to come up as app/app with root@'%'
-        // on `app` too (engine#189).
+        // on `app` too.
         $passwords = SidecarPasswords::derived('account-seed');
         $result = RuntimeSidecars::fromYaml(
             "services:\n  db:\n    image: mysql:8.0\n    volumes:\n      - db:/var/lib/mysql\nvolumes:\n  db: {}\n",
@@ -1273,7 +1273,7 @@ class RuntimeSidecarsTest extends TestCase
         $this->assertSame('redis', $result['env']['REDIS_HOST']);
     }
 
-    /** godoxy's compose.example.yml (#142): the socket proxy's bind source is a variable. */
+    /** godoxy's compose.example.yml: the socket proxy's bind source is a variable. */
     public function test_a_template_bind_mount_through_a_variable_declares_no_volume(): void
     {
         $result = RuntimeSidecars::fromYaml(<<<'YAML'
@@ -1295,7 +1295,7 @@ YAML, true, null, 'yusing/godoxy');
     }
 
     /**
-     * foodsoft's docker-compose.ci.yml (#108): the app service is `image: ${IMAGE}`
+     * foodsoft's docker-compose.ci.yml: the app service is `image: ${IMAGE}`
      * with no `build:`. Kept, it interpolated to nothing and compose rejected the
      * project: service "foodsoft" has neither an image nor a build context.
      */

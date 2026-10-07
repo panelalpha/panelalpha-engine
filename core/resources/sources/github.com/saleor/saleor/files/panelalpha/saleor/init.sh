@@ -112,11 +112,10 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# engine#200: an application that ships a default credential must not reach the
+# An application that ships a default credential must not reach the
 # public port still holding it. Saleor's is populatedb's admin@example.com. It
 # is only ever created by that command, but "only ever" is a reading of the
-# source and this is a measurement -- and a database restored from an upstream
-# demo dump would carry it.
+# source -- and a database restored from an upstream demo dump would carry it.
 leftover="$(python3 manage.py shell --no-imports -c \
     'from saleor.account.models import User; print(User.objects.filter(email="admin@example.com").exclude(email__iexact="'"${SALEOR_ADMIN_EMAIL}"'").count())' \
     2>/dev/null | tail -n 1 | tr -dc '0-9')"

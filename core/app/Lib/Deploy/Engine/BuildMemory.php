@@ -6,7 +6,7 @@ use App\Lib\Host\HostMemory;
 
 /**
  * A host build container's memory and where the figure came from, so the
- * deploy log can say which lever sets it (engine#184).
+ * deploy log can say which lever sets it.
  */
 final class BuildMemory
 {
@@ -16,7 +16,7 @@ final class BuildMemory
     /** `DEPLOY_BUILD_MEMORY` above the build ceiling, held to it. */
     public const SETTING_CAPPED = 'setting_capped';
 
-    /** Nothing set: 8 GB, held to half the server's RAM and its RAM less DEPLOY_ENGINE_MEMORY (engine#295). */
+    /** Nothing set: 8 GB, held to half the server's RAM and its RAM less DEPLOY_ENGINE_MEMORY. */
     public const HOST = 'host';
 
     /**

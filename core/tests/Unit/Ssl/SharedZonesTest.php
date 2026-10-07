@@ -25,9 +25,9 @@ class SharedZonesTest extends TestCase
     public function test_a_shared_zone_is_recognised_but_not_refused(): void
     {
         foreach ([
-            'app.178-104-84-45.sslip.io',
-            'app.178-104-84-45.nip.io',
-            'demo.178-104-84-45.panelalpha.direct',
+            'app.203-0-113-45.sslip.io',
+            'app.203-0-113-45.nip.io',
+            'demo.203-0-113-45.panelalpha.direct',
             'panelalpha.direct',
         ] as $domain) {
             $this->assertTrue(SharedZones::covers($domain), $domain);
@@ -62,21 +62,21 @@ class SharedZonesTest extends TestCase
      */
     public function test_names_no_authority_will_ever_certify_are_refused(): void
     {
-        foreach (['', 'localhost', 'app', '178.104.84.45', 'app.local', 'site.test', '-bad.example.com'] as $domain) {
+        foreach (['', 'localhost', 'app', '203.0.113.45', 'app.local', 'site.test', '-bad.example.com'] as $domain) {
             $this->assertNotNull(SharedZones::ineligibleReason($domain), $domain ?: '(empty)');
         }
     }
 
     public function test_an_address_is_not_a_hostname(): void
     {
-        $this->assertFalse(SharedZones::isPubliclyIssuable('178.104.84.45'));
+        $this->assertFalse(SharedZones::isPubliclyIssuable('203.0.113.45'));
         $this->assertFalse(SharedZones::isPubliclyIssuable('::1'));
         $this->assertTrue(SharedZones::isPubliclyIssuable('app.example.com'));
     }
 
     public function test_case_and_a_trailing_dot_do_not_change_the_answer(): void
     {
-        $this->assertTrue(SharedZones::covers('APP.178-104-84-45.SSLIP.IO'));
+        $this->assertTrue(SharedZones::covers('APP.203-0-113-45.SSLIP.IO'));
         $this->assertTrue(SharedZones::covers('app.sslip.io.'));
     }
 

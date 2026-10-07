@@ -6,7 +6,7 @@ use App\System\Project\Dind\ProjectBindMounts;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#33: a rebuild took the app down before cloning, and kept it down
+ * A rebuild took the app down before cloning, and kept it down
  * through the whole build. Only a container that reads ~/project through a
  * bind mount has to stop first.
  */

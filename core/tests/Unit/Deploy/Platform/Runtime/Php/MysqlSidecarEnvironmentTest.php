@@ -101,7 +101,7 @@ class MysqlSidecarEnvironmentTest extends TestCase
 
     /**
      * The path PhpStrategy takes when it adds the sidecar: `.env.example`'s
-     * `DB_HOST=db` is in the generated env, and has to lose (engine#288).
+     * `DB_HOST=db` is in the generated env, and has to lose.
      */
     public function test_adding_the_sidecar_repoints_an_example_db_host_at_loopback(): void
     {

@@ -18,11 +18,10 @@ use Illuminate\Support\Facades\Log;
  * reads `running` for good and every poller waits on a job that no longer
  * exists.
  *
- * Observed on a dev host: a reboot at 15:34 left 8 tasks `running` with a null
- * pid, and a batch runner polled them for 25 minutes before anyone noticed
- * the work had died with the previous boot. `task:prune` cannot help -- it
- * skips non-terminal rows by design, since deleting an in-flight task would
- * be worse than a stuck one.
+ * A reboot leaves tasks `running` with a null pid, and a poller waits on them
+ * indefinitely though the work died with the previous boot. `task:prune`
+ * cannot help -- it skips non-terminal rows by design, since deleting an
+ * in-flight task would be worse than a stuck one.
  *
  * **The queue is the evidence, not the deploy log.** A job keeps its row in
  * the `jobs` table while it is pending or reserved by a worker, and loses it
@@ -32,14 +31,14 @@ use Illuminate\Support\Facades\Log;
  * The read must go through the *payload*, not the uuid: the uuid is a field
  * inside it. A lookup keyed by the bare uuid silently misses every time --
  * which is what the first version of this class did against Redis, and it
- * retired nothing at all on two dev hosts. {@see queueCheck()}
+ * retired nothing at all. {@see queueCheck()}
  *
  * The deploy log looks like evidence and is not. It is written *by* the work,
  * so it cannot outlive it -- and it is deleted with the account on rollback,
  * which is the last thing every failed deploy does. An earlier version of
  * this class read a missing log as "the work died", and a sweep run by hand
  * with no grace period then cancelled two deploys that were mid-rollback and
- * very much alive (flowfuse, operationalco). A signal that is absent both
+ * very much alive. A signal that is absent both
  * when a job died *and* when it is finishing normally cannot be the signal.
  *
  * The log is still worth reading once the queue has said the job is gone: its

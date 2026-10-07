@@ -9,7 +9,7 @@ use ReflectionMethod;
 use Tests\TestCase;
 
 /**
- * engine#269: an archive deployed into a project that deploys from git failed
+ * An archive deployed into a project that deploys from git failed
  * with "Git HEAD is not readable after clone" -- after it had already replaced
  * ~/project. It is refused up front now, with what to do instead.
  */

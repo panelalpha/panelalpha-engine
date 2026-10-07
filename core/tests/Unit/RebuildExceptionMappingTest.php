@@ -91,7 +91,7 @@ class RebuildExceptionMappingTest extends TestCase
         $this->assertStringContainsString('exited with code 127', $problem->problems[0]['message']);
     }
 
-    /** engine#272: the stage the deploy log was in reaches the problem. */
+    /** The stage the deploy log was in reaches the problem. */
     public function test_a_failure_names_the_stage_it_happened_in(): void
     {
         $username = 'rbstage' . bin2hex(random_bytes(3));

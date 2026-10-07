@@ -25,15 +25,6 @@ description: >-
   minutes) keys on the proxy-added address: rotating a spoofed
   X-Forwarded-For does not get past it. The built-in Mercure hub answers
   anonymous subscribers, but the app publishes nothing to it.
-
-  Measured on 10.10.10.25 (2026-09-29, engine 705f250a): deploy 64s, rebuild
-  47s; app 124 MiB. Anonymous /, /admin/settings, /admin/settings/export ->
-  302 /login, /setup/admin -> 302, /setup/tmdb|managers|finish -> 302 /, and
-  an anonymous POST /setup/admin creates nobody (one user in the database).
-  The generated admin logs in ("Dashboard - Prismarr", 157 kB); a Radarr
-  instance added under Settings reads back from the page and the database,
-  and admin and instance survive a rebuild with the seed reporting "setup
-  already complete".
 credentials:
   login_path: /login
   adopt_from: .panelalpha/prismarr/admin.env

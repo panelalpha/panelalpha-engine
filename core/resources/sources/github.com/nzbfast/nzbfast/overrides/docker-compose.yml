@@ -1,7 +1,7 @@
 # Compose-replace: the repo compose keeps config on ./ bind mounts (wiped on
 # every deploy), downloads on a host path, and adds a Watchtower that needs the
 # Docker socket. It also pairs cap_drop: [ALL] with cap_add, and the engine keeps
-# only the drop (engine#349), so the entrypoint cannot switch to PUID
+# only the drop, so the entrypoint cannot switch to PUID
 # ("failed switching to 1000:1000"). Default capabilities here instead.
 services:
   app:

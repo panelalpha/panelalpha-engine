@@ -7,7 +7,7 @@ use App\Lib\Deploy\Platform\PlatformStage;
 use PHPUnit\Framework\TestCase;
 
 /**
- * #178: the laravel manifest's install-stage key:generate, run as the
+ * The laravel manifest's install-stage key:generate, run as the
  * entrypoint runs it, with a stand-in `php` that records what it was asked.
  *
  * The engine puts APP_KEY into .env, which compose loads as env_file. A

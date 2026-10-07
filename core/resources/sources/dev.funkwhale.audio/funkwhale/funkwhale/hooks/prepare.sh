@@ -16,7 +16,7 @@ if [ ! -f api/funkwhale_api/__init__.py ] && [ ! -f api/manage.py ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Secrets. engine#173: every deploy re-clones and empties ~/project first, so a
+# Secrets. Every deploy re-clones and empties ~/project first, so a
 # guard on a file in there never fires. ~/.panelalpha/funkwhale/ is the only
 # place in the account that survives the clone. Each value has a different
 # consequence if regenerated:

@@ -14,7 +14,7 @@ description: >-
   official image with a compose-replace, pinned to the current stable release
   0.8.3 (Hub `latest` at time of writing). Building from source would compile
   Go + a web UI on a small host for no gain. Seeding a Docker Hub image also
-  sidesteps engine#229 (image-seed NotFound on a from-registry seed, which is
+  sidesteps the image-seed NotFound on a from-registry seed (which is
   the GHCR case, not Hub).
 
   WHY COMPOSE-REPLACE. There is no datastore sidecar to add -- SQLite is
@@ -26,7 +26,7 @@ description: >-
   hardcoded. The scratch-based image has no shell, curl or wget, so it carries
   no internal healthcheck; a curl sidecar polls the public UI and a `ready` gate
   waits on it, so `compose up` returns only once Traggo actually answers
-  (engine#204: up -d returns before the app is up).
+  (up -d returns before the app is up).
 
   ADMIN BOOTSTRAP, NO LIVE DEFAULT CREDENTIALS. On first boot, when no users
   exist, Traggo creates one admin from TRAGGO_DEFAULT_USER_NAME /
@@ -51,7 +51,7 @@ description: >-
   plain HTTP; there is nothing cookie-related to configure.
 
   PORT. The binary EXPOSEs and listens on 3030; only the app publishes a port
-  (3030:3030) so the engine's port scan takes it as the primary (engine#234).
+  (3030:3030) so the engine's port scan takes it as the primary.
   The curl and ready helpers publish nothing.
 credentials:
   adopt_from: .panelalpha/traggo/traggo.env

@@ -33,7 +33,7 @@ const APP_DIR = '/app';
 
 // The bind mount the compose override adds: ~/.panelalpha/chyrp-lite on the
 // account. Everything that has to outlive a redeploy is here, because a
-// redeploy clears and re-clones ~/project (engine#173).
+// redeploy clears and re-clones ~/project.
 const STORAGE = '/data';
 
 function say(string $message): void
@@ -114,7 +114,7 @@ function credentials(): array
  * the checkout a redeploy clears. Set here rather than relied upon from the
  * process environment, because whether CLI PHP copies the environment into
  * $_SERVER depends on variables_order, and the base image loads no php.ini
- * at all (engine#185).
+ * at all.
  *
  * @param array<string, string> $post
  */

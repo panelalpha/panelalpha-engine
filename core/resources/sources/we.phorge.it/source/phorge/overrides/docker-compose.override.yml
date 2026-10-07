@@ -38,7 +38,7 @@ services:
     volumes:
       - ./arcanist:/arcanist:ro
       # The account's secrets, which live outside ~/project because ~/project
-      # is wiped and re-cloned on every deploy (engine defect #173) while the
+      # is wiped and re-cloned on every deploy while the
       # database volume is not. Read-only, and 0700/0600 on the host side.
       - ../.panelalpha/phorge:/panelalpha:ro
 
@@ -74,7 +74,7 @@ services:
       db:
         condition: service_healthy
 
-    # Engine defect #90. The install stage does all of Phorge's setup before
+    # The install stage does all of Phorge's setup before
     # Apache serves anything useful: 54 databases, ~900 storage patches, the
     # first administrator and the password auth provider. The engine runs
     # `docker compose up -d` without --wait and probes as soon as it returns,
@@ -212,7 +212,7 @@ services:
   # and what the health probe then meets. A clean exit 0 is not a crash loop as
   # far as AppHealth is concerned.
   #
-  # alpine:3, never a datastore image (engine defect #90).
+  # alpine:3, never a datastore image.
   ready:
     image: alpine:3
     entrypoint: ["/bin/sh", "-c", "exit 0"]

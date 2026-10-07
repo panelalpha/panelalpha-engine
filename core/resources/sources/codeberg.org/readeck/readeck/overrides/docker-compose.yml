@@ -6,7 +6,7 @@
 # Readeck runs from the image upstream publishes rather than from this checkout.
 # The checkout builds, but the image is 102 MB, pulls once, and is the same
 # binary; a source build wants the Go toolchain and the frontend asset pipeline
-# rebuilt on every redeploy (engine#208). hooks/prepare.sh reads one thing from
+# rebuilt on every redeploy. hooks/prepare.sh reads one thing from
 # the checkout -- its git ref -- to choose the image tag.
 #
 # Two files reach the containers that are not in this one:
@@ -19,7 +19,7 @@ services:
   # One-shot. Runs the migrations and creates this account's administrator,
   # then exits 0. `app` will not start until it has: on an instance with zero
   # users every path serves an anonymous /onboarding form that makes its
-  # submitter the first user (engine#200), so creating the administrator here,
+  # submitter the first user, so creating the administrator here,
   # before anything is listening on the public domain, is what closes it.
   init:
     image: ${READECK_IMAGE:-codeberg.org/readeck/readeck:latest}
@@ -70,8 +70,8 @@ services:
     command: ["/bin/readeck", "serve", "-config", "config.toml"]
     mem_limit: 1024m
 
-  # Does nothing and exits 0. `docker compose up -d` runs without --wait
-  # (engine#204), so the deploy is finished when containers have been started
+  # Does nothing and exits 0. `docker compose up -d` runs without --wait,
+  # so the deploy is finished when containers have been started
   # rather than when Readeck answers. Compose does block on a depends_on health
   # condition, so a leaf that waits on app's healthcheck makes `up -d` return
   # only once the site is really up. alpine, so nothing large is pulled.

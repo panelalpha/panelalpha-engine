@@ -156,7 +156,7 @@ class ProjectCreateAsyncTest extends TestCase
         Queue::assertNotPushed(DeployProject::class);
     }
 
-    /** #83: a caller that sent `name` hears about `name`, not `username`. */
+    /** A caller that sent `name` hears about `name`, not `username`. */
     public function test_a_taken_name_is_reported_under_the_field_sent(): void
     {
         Queue::fake();
@@ -177,7 +177,7 @@ class ProjectCreateAsyncTest extends TestCase
     }
 
     /**
-     * #83: a branch the remote does not have was accepted (202) and failed the
+     * A branch the remote does not have was accepted (202) and failed the
      * deploy at clone, after the account and its domain had been made.
      */
     #[\PHPUnit\Framework\Attributes\Group('network')]

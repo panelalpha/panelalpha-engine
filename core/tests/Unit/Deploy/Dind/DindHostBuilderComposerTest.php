@@ -12,10 +12,10 @@ use PHPUnit\Framework\TestCase;
  *
  * Composer resolves for whatever PHP it can see, which here is the Composer
  * image's own — newer than the app's. Left unpinned it locked
- * symfony/http-foundation 8.1 (php >=8.4.1) for a Laravel that runs on 8.3;
- * the container then died on a ParseError inside vendor/ before serving a
- * request, and the deploy still reported success. Verified on the test host:
- * pinned, the same project resolves symfony 7.4 and boots.
+ * symfony/http-foundation 8.1 (php >=8.4.1) for a Laravel that runs on 8.3; the
+ * container then died on a ParseError inside vendor/ before serving a request,
+ * and the deploy still reported success. Pinned, the same project resolves
+ * symfony 7.4 and boots.
  */
 class DindHostBuilderComposerTest extends TestCase
 {

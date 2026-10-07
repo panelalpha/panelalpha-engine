@@ -9,7 +9,7 @@ use App\Lib\Deploy\CacheManager\ImageCatalog;
 use PHPUnit\Framework\TestCase;
 
 /**
- * What the daily host prune may take (engine#87). Refs come from the shipped
+ * What the daily host prune may take. Refs come from the shipped
  * catalogue rather than being spelled out, so an edited images.yaml does not
  * turn these into tests of the config.
  */

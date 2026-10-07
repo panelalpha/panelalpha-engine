@@ -18,7 +18,7 @@ upstream env vars from the README can be set on the project.
 - `JWT_SECRET` is `${JWT_SECRET:?}`: the engine generates it per account,
   stable across redeploys.
 - `mongo:7.0` instead of upstream's `mongo:8.0`: MongoDB 8 fails on kernel
-  6.19+ (engine#146). Data on the `mongo-data` named volume.
+  6.19+. Data on the `mongo-data` named volume.
 - The repository's `docker/Dockerfile` is not built: its frontend build is
   OOM-killed in a 2 GB account.
 - Behind the engine every visitor reaches Checkmate from the proxy's address

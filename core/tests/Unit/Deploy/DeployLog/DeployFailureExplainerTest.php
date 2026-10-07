@@ -9,7 +9,7 @@ use PHPUnit\Framework\TestCase;
 
 class DeployFailureExplainerTest extends TestCase
 {
-    /** The failure that made github.com/henrygd/beszel fail on a live host. */
+    /** The failure that made github.com/henrygd/beszel fail. */
     public function test_explains_a_too_old_go_toolchain(): void
     {
         $output = <<<'OUT'
@@ -95,7 +95,7 @@ OUT;
             ],
             'angular project or target' => ['Cannot determine project or target for command.', 'refused to guess'],
             'private repo' => ['fatal: could not read Username for https://github.com', 'access token'],
-            // A 2026-09-20 sweep clone of github.com/BookStackApp/BookStack (#188).
+            // A clone of github.com/BookStackApp/BookStack.
             'interrupted clone' => [
                 "Cloning into '/home/bookstackwdtu/project'...\n"
                 . "error: unable to read askpass response from '/bin/false'\n"
@@ -537,7 +537,7 @@ OUT;
     }
 
     /**
-     * pictshare's compose (#125) names `HaschekSolutions/pictshare:3`. The
+     * pictshare's compose names `HaschekSolutions/pictshare:3`. The
      * daemon takes the capitalised first component for a registry host and
      * fails on DNS, which read as "may not exist, may be private, or its
      * registry may be unreachable" -- none of which is what went wrong.
@@ -594,7 +594,7 @@ OUT;
         $this->assertSame('registry-rate-limited', DeployFailureExplainer::match($output)['rule']);
     }
 
-    /** Foodsoft (engine#285): the image exists, a layer came back corrupted from the mirror. */
+    /** Foodsoft: the image exists, a layer came back corrupted from the mirror. */
     public function test_a_layer_digest_mismatch_is_not_a_missing_base_image(): void
     {
         $output = 'failed commit on ref "layer-sha256:5c1e0a5b4f2b": commit failed: unexpected commit digest '
@@ -834,7 +834,7 @@ OUT;
     }
 
     /**
-     * The real Alfresco Community deploy (#1117): Maven ran out of heap in
+     * The real Alfresco Community deploy: Maven ran out of heap in
      * the host build container, reported `Java heap space -> [Help 1]`, and
      * the deploy was then filed under `build-step-failed` quoting the maven
      * image's own entrypoint warning -- `mkdir: cannot create directory
@@ -915,7 +915,7 @@ OUT;
      * The same shape for V8, and the same reason it has to be named: the
      * Node form carries no exit 137 and no `Killed`, so before this it was
      * caught by `out-of-memory` — "needs more RAM than the plan allows" —
-     * when the real answer is the engine's heap cap. The dub #462 deploy
+     * when the real answer is the engine's heap cap. The dub deploy
      * reported exactly this, and the one-line summary it produced named
      * neither Node nor the heap.
      */
@@ -972,7 +972,7 @@ OUT;
     }
 
     /**
-     * farmOS (#129): every drupal/* requirement is unknown because the repo is a
+     * farmOS: every drupal/* requirement is unknown because the repo is a
      * Drupal profile with no packages.drupal.org. That is not a version conflict,
      * and the old sentence said it was.
      */
@@ -1016,7 +1016,7 @@ OUT;
     }
 
     /**
-     * ActivityWatch #528. The project is a Poetry application, not a package,
+     * ActivityWatch. The project is a Poetry application, not a package,
      * so pip asking poetry-core to build a wheel of it can never work. The
      * engine now installs such a project with `poetry install --no-root`, but
      * a project it does not detect still deserves the sentence rather than the
@@ -1042,12 +1042,12 @@ OUT;
     }
 
     /**
-     * engine#235. A compose that builds the app image to a local tag and has a
+     * A compose that builds the app image to a local tag and has a
      * sibling reference it makes `docker compose up` PULL that tag first: it
      * fails with a benign `failed to resolve reference ... not found`, then
      * builds it (`naming to ... done`). The container then dies on a missing
-     * entrypoint -- Limbas (supported-apps#1195) -- and that, not the benign
-     * pull, is the cause the reader needs.
+     * entrypoint -- Limbas -- and that, not the benign pull, is the cause the
+     * reader needs.
      */
     public function test_a_missing_entrypoint_wins_over_the_benign_local_build_pull(): void
     {
@@ -1109,7 +1109,7 @@ OUT;
 
     /**
      * The same shape with a one-shot exiting non-zero rather than a bad
-     * entrypoint -- Bitpoll (supported-apps#1085), whose init container exits 1.
+     * entrypoint -- Bitpoll, whose init container exits 1.
      */
     public function test_a_one_shot_exit_wins_over_the_benign_local_build_pull(): void
     {
@@ -1133,7 +1133,7 @@ OUT;
     /**
      * The local build itself fails, so BuildKit never prints `naming to`.
      * Compose's own `Image <ref> Building` is what says the tag is built here.
-     * Real `docker compose up` output (Compose v5.5.1) from a live deploy.
+     * Real `docker compose up` output (Compose v5.5.1).
      */
     public function test_a_failed_local_build_is_not_a_missing_base_image(): void
     {
@@ -1182,7 +1182,7 @@ OUT;
         $this->assertSame('build-step-failed', DeployFailureExplainer::match($output)['rule'] ?? null);
     }
 
-    /** url-to-png (engine#100): the host import says "access denied", the pull says "not found". */
+    /** url-to-png: the host import says "access denied", the pull says "not found". */
     public function test_a_removed_image_is_named_and_reported_as_missing(): void
     {
         $output = <<<'OUT'
@@ -1202,7 +1202,7 @@ OUT;
         $this->assertStringNotContainsString('private', $match['message']);
     }
 
-    /** Open Food Network (engine#127): a tag that was never published. */
+    /** Open Food Network: a tag that was never published. */
     public function test_a_tag_that_does_not_exist_names_the_tag(): void
     {
         $output = 'failed to solve: ruby:3.4.8-alpine3.19: failed to resolve source metadata for '
@@ -1236,7 +1236,7 @@ OUT;
         $this->assertStringContainsString('refused access', $message);
     }
 
-    /** CoreShop (engine#27): compose pulled a private ghcr.io image anonymously. */
+    /** CoreShop: compose pulled a private ghcr.io image anonymously. */
     public function test_a_registry_401_names_the_image_and_the_setting(): void
     {
         $output = 'time="2026-09-19T17:02:31Z" level=info msg="fetch failed" error="failed to authorize: failed to fetch '
@@ -1324,7 +1324,7 @@ OUT;
         $this->assertStringNotContainsString('ERROR', $message);
     }
 
-    /** Livebook (engine#143): `FROM ${BASE_IMAGE}` that only its CI fills in. */
+    /** Livebook: `FROM ${BASE_IMAGE}` that only its CI fills in. */
     public function test_an_unset_build_arg_in_from_is_named(): void
     {
         $output = <<<'OUT'
@@ -1342,7 +1342,7 @@ OUT;
         $this->assertStringContainsString('build argument BASE_IMAGE', $match['message']);
     }
 
-    /** Damselfly (engine#133): COPY of `dotnet publish` output nothing in the Dockerfile produces. */
+    /** Damselfly: COPY of `dotnet publish` output nothing in the Dockerfile produces. */
     public function test_a_copy_of_a_path_the_repository_lacks_is_named(): void
     {
         $output = <<<'OUT'
@@ -1360,7 +1360,7 @@ OUT;
     }
 
     /**
-     * qpixel (engine#114) on Debian 11 and flexisip (engine#102) on CentOS 7: the
+     * qpixel on Debian 11 and flexisip on CentOS 7: the
      * release's archive is gone, which the generic exit code never said.
      */
     #[DataProvider('endOfLifeArchiveProvider')]
@@ -1391,7 +1391,7 @@ OUT;
         ];
     }
 
-    /** kibitzr (engine#120): lxml's sdist build names the headers it lacks. */
+    /** kibitzr: lxml's sdist build names the headers it lacks. */
     public function test_lxml_missing_its_headers_is_a_headers_problem(): void
     {
         $output = <<<'OUT'
@@ -1404,7 +1404,7 @@ OUT;
         $this->assertSame('native-library-headers-missing', DeployFailureExplainer::match($output)['rule'] ?? null);
     }
 
-    /** Ghostfolio (engine#161): BuildKit's own wording for a step its cgroup starved. */
+    /** Ghostfolio: BuildKit's own wording for a step its cgroup starved. */
     public function test_buildkits_resource_exhausted_is_out_of_memory(): void
     {
         $output = 'failed to solve: ResourceExhausted: process "/bin/sh -c npm run build:production" '
@@ -1413,7 +1413,7 @@ OUT;
         $this->assertSame('out-of-memory', DeployFailureExplainer::match($output)['rule'] ?? null);
     }
 
-    /** minthcm (engine#111): the account daemon's libnetwork socket was missing. */
+    /** minthcm: the account daemon's libnetwork socket was missing. */
     public function test_a_missing_libnetwork_socket_is_a_server_fault(): void
     {
         $output = <<<'OUT'
@@ -1429,7 +1429,7 @@ OUT;
     }
 
     /**
-     * engine#126: Automad's `npm ci`, verbatim apart from the log path. The
+     * Automad's `npm ci`, verbatim apart from the log path. The
      * ERESOLVE lines are warnings npm resolved; the failure is the lockfile.
      */
     public function test_an_out_of_sync_lockfile_is_not_a_dependency_conflict(): void
@@ -1473,7 +1473,7 @@ OUT;
         $this->assertSame('dependency-conflict', DeployFailureExplainer::match($output)['rule'] ?? null);
     }
 
-    /** Vite's `--debug` config dump prints `createResolver` (Sunshine, engine#148). */
+    /** Vite's `--debug` config dump prints `createResolver` (Sunshine). */
     public function test_a_word_containing_eresolve_is_not_a_dependency_conflict(): void
     {
         $output = "  createResolver: [Function: createResolver],\nStatic build finished but dist/index.html is missing\n";

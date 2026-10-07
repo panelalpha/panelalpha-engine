@@ -52,7 +52,7 @@ final class FailureOutput
         '/Cannot change ownership to uid \d+, gid \d+: Invalid argument/',
         '/^failed to solve:/',                    // ...and the summary that names it
         '/^Error response from daemon:/',         // the daemon refusing to run a container
-        // `runc run failed:` is a RUN step that could not start (minthcm, engine#111).
+        // `runc run failed:` is a RUN step that could not start (minthcm).
         '/^runc (?:create|run) failed:/',
         // apt's own error lines (`E: Failed to fetch ... 404`), above the step's `#N ERROR:`.
         // The account's apt-lists denial is no finding (see NOISE).
@@ -132,7 +132,7 @@ final class FailureOutput
         // real failure is thousands of lines later. A `mkdir` naming anything
         // else is still a finding.
         // coreutils quotes it with ‘’, three bytes each, which a bare `.`
-        // never matched: the real line was never dropped (#86).
+        // never matched: the real line was never dropped.
         '/^mkdir: cannot create directory (?:\'|"|‘)\/root(?:\'|"|’):/',
         // `apk add` runs as the account, not root, so this is ignored -- a Go
         // host compile wraps it in `|| true`. `ERROR:` on another subject is
@@ -141,7 +141,7 @@ final class FailureOutput
         // `docker compose up`'s progress: an image, network, volume or
         // container changing state, and the per-layer pull lines. On a stack
         // pulling several images this is hundreds of lines and it was the
-        // whole reported "reason" for rero-ils (#112). A line saying `Error`
+        // whole reported "reason" for rero-ils. A line saying `Error`
         // matches neither and is kept.
         '/^\s*(?:Image|Network|Volume|Container)\s+\S+\s+(?:Pulling|Pulled|Building|Built|Creating|Created'
             . '|Starting|Started|Waiting|Healthy|Running|Recreate|Recreated|Stopping|Stopped|Removing|Removed'
@@ -157,7 +157,7 @@ final class FailureOutput
         '/^Digest: sha256:[0-9a-f]{64}$/',
         '/^Status: (?:Downloaded newer image|Image is up to date) for \S+$/',
         // The same for `apt-get update`, best effort in the Rust host compile
-        // (`|| true`): the account cannot write the apt lists (#86).
+        // (`|| true`): the account cannot write the apt lists.
         '/^E: List directory \/var\/lib\/apt\/lists\/partial is missing\. - Acquire \(13: Permission denied\)$/',
         // A Makefile's `git describe` in a build context with no .git (ntfy). Real
         // git failures (`fatal: repository ... not found`) still lead.
@@ -255,7 +255,7 @@ final class FailureOutput
      * is nothing but noise. The maven image's `mkdir: cannot create directory
      * '/root'` and the JVM's JAVA_TOOL_OPTIONS banner go to stderr while Maven
      * prints `[ERROR] ... release version 25 not supported` to stdout, and the
-     * banner was reported as the reason (#86).
+     * banner was reported as the reason.
      */
     public static function fromStreams(string $stderr, string $stdout): string
     {
@@ -342,7 +342,7 @@ final class FailureOutput
 
     /**
      * Tags compose says it builds (`Image <tag> Building`). That line is noise
-     * and is dropped, so the explainer cannot see it (#235).
+     * and is dropped, so the explainer cannot see it.
      *
      * @param list<string> $lines
      * @return array<string, true>

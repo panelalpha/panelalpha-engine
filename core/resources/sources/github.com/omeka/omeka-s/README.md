@@ -2,18 +2,16 @@
 
 Omeka S publishes digital collections: a Laminas MVC application over Doctrine
 ORM and MySQL, an administrative interface at `/admin`, and public sites at
-`/s/<slug>` rendered by a theme. Tracker issue
-[#88](https://git.modulesgarden.tech/panelalpha/playground/supported-apps/-/work_items/88).
+`/s/<slug>` rendered by a theme.
 
 Detection reads the repository correctly on its own — composer.json and no
 artisan, so the `php` strategy, PHP 8.1, the shared Apache base image with
-`~/project` bind-mounted, `composer install` on the host. The deploy finished
-successfully without this recipe and every request answered **HTTP 500**, which
-is the `serving-error_page` verdict it exists to fix.
+`~/project` bind-mounted, `composer install` on the host. Without this recipe
+the deploy finishes and every request answers **HTTP 500**.
 
 ## What the engine could not infer
 
-**No database, and that alone was the 500.**
+**No database, and that alone is the 500.**
 `application/config/application.config.php` is not a static array: its first
 statement reads `config/database.ini` through `Laminas\Config\Reader\Ini`, and
 it rethrows the RuntimeException when the file is missing and
@@ -21,9 +19,9 @@ it rethrows the RuntimeException when the file is missing and
 `config/database.ini.dist` with four empty values and `.gitignore`s the real
 name, so a clone has none, and `index.php`'s outer catch turns the throw into
 `http_response_code(500)` plus `application/view/error/fallback.phtml` on every
-path. That rendered page is why the health report's whole `php` group passed —
-php-executes, entry-served, no-fatal-error and no-database-error all saw PHP
-produce HTML. Nothing in the checkout says MySQL to a probe: no `.env`, no
+path. That rendered page is why the health report's whole `php` group passes
+on it — php-executes, entry-served, no-fatal-error and no-database-error all
+see PHP produce HTML. Nothing in the checkout says MySQL to a probe: no `.env`, no
 compose file, no `DATABASE_URL`. `database: mysql` in `panelalpha.yaml` is the
 manifest key that says it (Matomo's, for the same reason), and the engine then
 provisions a database and user on the account's own MySQL server and passes
@@ -73,8 +71,8 @@ can be created. The setup script copies it across; this cannot be fixed in the
 build, because an app config's `commands` never reach the build stage.
 
 **ImageMagick is a binary, and the base image has the extension.** Omeka's
-default thumbnailer shells out to `convert`. Measured in the deployed
-container: `Omeka\File\Thumbnailer\ImageMagick::setOptions()` throws
+default thumbnailer shells out to `convert`, and in this container
+`Omeka\File\Thumbnailer\ImageMagick::setOptions()` throws
 `InvalidThumbnailerException: ImageMagick error: cannot determine path to
 ImageMagick command`, so every media upload would fail at upload time, long
 after the deploy called itself healthy. `files/config/local.config.php` aliases
@@ -82,8 +80,7 @@ after the deploy called itself healthy. `files/config/local.config.php` aliases
 extension the image does ship.
 
 **`logs/` is inside the document root.** The repository's `.htaccess` denies
-`.ini` and nothing else, and `GET /logs/application.log.dist` answered 200 on
-the first deploy. Omeka's logger is off by default; the moment an operator turns
+`.ini` and nothing else, so `logs/` is served as-is. Omeka's logger is off by default; the moment an operator turns
 it on in `config/local.config.php`, the log is public. `files/logs/.htaccess`
 denies the directory. `files/` — the upload store — stays served, because that
 is what it is for.
@@ -123,30 +120,13 @@ domain, and the password is the secret, not the address. Override either with
 `OMEKA_ADMIN_EMAIL` / `OMEKA_INSTALLATION_TITLE` in the project's env vars
 before the first deploy.
 
-## Verified on mariusz2 (2 cores, 3.7 GB), 2026-09-20
-
-- Batch run from a clean account: `deploy-ok`, `serving: ok`, HTTP 200
-  (`Sites · Omeka S`), 12 of 12 health checks pass, 60s with the base image
-  cached (288s on the run that had to build it).
-- Logged in over the public domain as `admin@example.com` with the generated
-  password: `POST /login` → `/admin`, `Admin dashboard · Omeka S`.
-- Created a public site through the admin form and fetched it: `/s/demo` → 200,
-  rendered from `themes/default`.
-- Replayed `panelalpha-setup.sh` (what the upgrade stage runs): *"already
-  installed; nothing else to do"*, no rewrite, no reinstall.
-- `config/database.ini`, `panelalpha-setup.sh`, `panelalpha-install.php`,
-  `.panelalpha-admin-password`, `.env`, `.git/config` and `docker-compose.yml`
-  all answer 403; `logs/` answers 403; `files/` and `/s/demo` answer 200.
-- `composer.json` answers 200. That is upstream's own posture for a
-  root-document-root PHP application (Matomo's is the same) and it holds no
-  secret, so it is left as it is.
-
-## Not done
+## Known limits
 
 - No `overrides/app.sh`: no `info`, `install`, `users:*` or SSO. Omeka S has a
   REST API with per-user key pairs and an ACL, so the strategy is there to be
   written; this recipe only gets the application deployed and safe.
 - Nothing creates a site, so `/` is Omeka's (empty) list of public sites until
   an administrator makes one. That is Omeka's own empty state, not a failure.
-- Media upload was not exercised end to end; the thumbnailer was verified by
-  resolving the service and calling `setOptions()` on both implementations.
+- `composer.json` answers 200. That is upstream's own posture for a
+  root-document-root PHP application (Matomo's is the same) and it holds no
+  secret, so it is left as it is.

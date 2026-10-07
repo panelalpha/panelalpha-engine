@@ -6,7 +6,7 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * engine#524: entrypoint.sh and entrypoint.d/ are only ever read inside the
+ * Entrypoint.sh and entrypoint.d/ are only ever read inside the
  * account (entrypoint.sh runs each entrypoint.d/*.sh once at boot; the egress
  * guard service only reads entrypoint.d/egress-guard.sh). Mounting them
  * read-write let a tenant with root inside the account's own inner Docker

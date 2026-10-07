@@ -60,7 +60,7 @@ services:
       DB_NAME: evershop
       EVERSHOP_HOME_URL: ${PA_PUBLIC_URL}
       # One proxy in front: take the client address it appends, never an
-      # earlier X-Forwarded-For entry a visitor wrote (engine#319).
+      # earlier X-Forwarded-For entry a visitor wrote.
       TRUST_PROXY_HOPS: "1"
     ports:
       - "3000:3000"

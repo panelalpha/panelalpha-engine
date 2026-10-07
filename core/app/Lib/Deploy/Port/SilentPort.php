@@ -6,7 +6,7 @@ namespace App\Lib\Deploy\Port;
  * Why a running container does not answer on the port it publishes.
  *
  * "Connection reset by peer" on a published port means Docker accepted the
- * connection and found nothing listening behind it (engine#90: teslamate
+ * connection and found nothing listening behind it (teslamate
  * 4000, pretix 8080, pleroma 4000, teampass 8080, ofbiz 8443). The container
  * is alive, so the restart-loop check has nothing to say, and the deploy only
  * reported that nothing answered. What the process is listening on, read from

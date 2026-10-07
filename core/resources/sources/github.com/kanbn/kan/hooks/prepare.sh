@@ -8,8 +8,8 @@ cd ~/project
 
 say() { echo "[kan] $*" >&2; }
 
-# ~/.panelalpha/kan/ survives the clone; ~/project is emptied on every deploy
-# (engine#173), so a secret written there would be regenerated on every rebuild
+# ~/.panelalpha/kan/ survives the clone; ~/project is emptied on every deploy,
+# so a secret written there would be regenerated on every rebuild
 # -- a new BETTER_AUTH_SECRET logs everyone out and invalidates sessions, and a
 # new DB password locks the app out of the pgdata volume that still holds the
 # old one. Generated once, reused forever. The owner login is the engine's

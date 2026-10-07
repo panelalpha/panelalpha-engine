@@ -15,7 +15,7 @@ use Tests\TestCase;
 /**
  * A Java host build runs in one `docker run` of the gradle/maven image, which
  * has no Node. Tolgee's Gradle scripts look npm up while they configure, so
- * the build died before compiling anything (#141).
+ * the build died before compiling anything.
  */
 class HostCompileJavaNodeTest extends TestCase
 {

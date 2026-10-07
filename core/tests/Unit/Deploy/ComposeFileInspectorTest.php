@@ -175,7 +175,7 @@ YAML
 
     public function test_a_read_only_single_file_mount_into_a_build_service_is_not_a_dev_compose(): void
     {
-        // The #219 regression: a recipe's build service injects one generated
+        // A past regression: a recipe's build service injects one generated
         // file read-only. That is not live reload, so the compose must not be
         // demoted and skipped.
         $compose = <<<'YAML'

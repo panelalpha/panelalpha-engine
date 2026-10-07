@@ -50,7 +50,7 @@ fi
 #     nothing to an autoload map, and PhpRuntime::requirementFor() reads
 #     composer.json's constraints when the lock's platform is contradicted --
 #     so copying `"php": "^7.3||^8.0"` into the root could move the whole
-#     project onto an older minor than the control deploy resolved. The lock
+#     project onto an older minor than a deploy without it resolves. The lock
 #     already carries every one of them under `platform`.
 #
 #   * `provide`, `bin`, `config` and the rest are not copied. The install
@@ -125,7 +125,7 @@ PYMERGE
 # 2. The things that must outlive the checkout.
 #
 # GitRepository::cloneConfiguredRepository() empties ~/project before every
-# deploy (engine#173) and the account's MySQL database survives it. Everything
+# deploy and the account's MySQL database survives it. Everything
 # Concrete writes that is *data* -- the connection it was installed against,
 # every setting changed from the dashboard, every uploaded file, every
 # marketplace add-on -- is written inside ~/project, so all of it goes here
@@ -160,7 +160,7 @@ if [ ! -f "$STORE" ]; then
 # container as a second env_file (see overrides/docker-compose.override.yml).
 # Kept out of ~/project, which every deploy re-clones from scratch, and out of
 # .env, which ProjectEnvironment::apply() copies to a world-readable
-# .env.default (engine#173).
+# .env.default.
 #
 # The first administrator's login is not here: the engine generates it
 # (`credentials:` in panelalpha.yaml) into ~/.panelalpha/app-credentials.env.

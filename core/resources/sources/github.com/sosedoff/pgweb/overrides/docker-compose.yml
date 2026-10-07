@@ -45,7 +45,7 @@ services:
     mem_limit: 512m
 
   # `compose up -d` returns only once pgweb serves and refuses anonymous
-  # requests (engine#204); fails the deploy if it would be open.
+  # requests; fails the deploy if it would be open.
   ready:
     image: sosedoff/pgweb:0.17.0
     restart: "no"

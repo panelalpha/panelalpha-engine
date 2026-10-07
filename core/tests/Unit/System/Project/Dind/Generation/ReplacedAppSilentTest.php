@@ -28,7 +28,7 @@ use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
 /**
- * engine#757: the new version answered as a second copy, the site moved to it, and the app's own
+ * The new version answered as a second copy, the site moved to it, and the app's own
  * services were replaced by a version that does not answer on its port. The site never goes to it: the
  * previous version is started again and takes the site once it answers, and while nothing else answers
  * the copy keeps serving, through the deploy's own settle, the sweep and the next deploy.

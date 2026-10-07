@@ -3,7 +3,7 @@
 # They are libraries, included by index.php and admin/index.php, and asking
 # Apache for one directly runs it with none of the constants it needs. That is
 # a fatal error, and the shared base image loads no php.ini, so PHP prints it
-# with the file path in it (engine#185):
+# with the file path in it:
 #
 #   GET /includes/class/SQL.php
 #   -> 200  Fatal error: Uncaught Error: Undefined constant "INCLUDES_DIR"

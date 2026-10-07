@@ -7,7 +7,7 @@ use App\Lib\Deploy\Platform\Probes\DockerfileNamedProbe;
 
 /**
  * A root `<name>.dockerfile` is built, but only for a project nothing else
- * claims (engine#91: otobo's `otobo.web.dockerfile` form was never found).
+ * claims (otobo's `otobo.web.dockerfile` form was never found).
  */
 class DockerfileNamedProbeTest extends ProbeTestCase
 {

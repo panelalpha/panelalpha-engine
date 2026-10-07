@@ -12,10 +12,9 @@ use PHPUnit\Framework\TestCase;
  *
  * A host build prints thousands of lines, most of them advisory, and the whole
  * stream used to be handed over -- so the headline was whichever recognised
- * line came first. Measured on real deploys, that was an npm deprecation
- * warning three times: galette, glpi and octobercms all reported
- * "npm warn deprecated <package>" as the cause of a build that had failed
- * somewhere else entirely.
+ * line came first. That was an npm deprecation warning: galette, glpi and
+ * octobercms all reported "npm warn deprecated <package>" as the cause of a
+ * build that had failed somewhere else entirely.
  */
 class FailureOutputTest extends TestCase
 {
@@ -311,14 +310,14 @@ class FailureOutputTest extends TestCase
      * the cause.
      *
      * The engine compiles Java on the *host*, as the account. The image's HOME
-     * is /root, so its entrypoint cannot create the directory it wants and
-     * says so -- and then says the same thing itself, in the line above, as
-     * `Can not write to /root/.m2/copy_reference_file.log ... Carrying on
-     * ...`. Being the first cause-looking line in a reactor build, the mkdir
-     * won the selector while the real failure sat thousands of lines later:
-     * measured on openmeetings, whose deploy log is 1381 lines, the selected
-     * region opened on a compose banner and Maven's `[ERROR] Failed to
-     * execute goal org.apache.rat:...` was never reached.
+     * is /root, so its entrypoint cannot create the directory it wants and says
+     * so -- and then says the same thing itself, in the line above, as `Can not
+     * write to /root/.m2/copy_reference_file.log ... Carrying on ...`. Being
+     * the first cause-looking line in a reactor build, the mkdir won the
+     * selector while the real failure sat thousands of lines later: in
+     * openmeetings's 1381-line deploy log the selected region opened on a
+     * compose banner and Maven's `[ERROR] Failed to execute goal
+     * org.apache.rat:...` was never reached.
      *
      * {@see DeployFailureExplainer} already documents this decoy -- "twelve
      * Java apps were once filed under it" -- so this asserts the selector
@@ -412,7 +411,7 @@ class FailureOutputTest extends TestCase
     /**
      * AppLauncher's shape: the failed step's `#N` lines, then compose's stderr.
      * `Image ... Building` is noise, so without this the region kept the pull
-     * error and lost the proof the tag is built here (live deploy, #235).
+     * error and lost the proof the tag is built here.
      */
     public function test_the_pull_of_a_tag_compose_builds_is_not_the_reason(): void
     {
@@ -444,7 +443,7 @@ OUT;
 
     /**
      * `docker compose up -d` on a stack whose datastore never turned healthy,
-     * captured from Compose on Docker 29.8.1 and trimmed. rero-ils (#112) was
+     * captured from Compose on Docker 29.8.1 and trimmed. rero-ils was
      * reported by the layer downloads above the one line that said why.
      */
     public const COMPOSE_UNHEALTHY_DEPENDENCY = <<<'OUT'
@@ -518,10 +517,9 @@ OUT;
     }
 
     /**
-     * tigase-server on develop, 2026-09-23: the host compile's stderr is only
-     * the maven image's mkdir and the JVM banner, and Maven's own failure is on
-     * stdout. The deploy said "Failed to start app: mkdir: cannot create
-     * directory '/root'" (#86).
+     * tigase-server: the host compile's stderr is only the maven image's mkdir
+     * and the JVM banner, and Maven's own failure is on stdout. The deploy said
+     * "Failed to start app: mkdir: cannot create directory '/root'".
      */
     private const TIGASE_STDERR = "mkdir: cannot create directory ‘/root’: Permission denied\nPicked up JAVA_TOOL_OPTIONS: -Xmx3641m\n";
 

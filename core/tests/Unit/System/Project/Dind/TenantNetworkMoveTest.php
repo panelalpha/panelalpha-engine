@@ -12,7 +12,7 @@ use App\System\Project\Dind\TenantNetworkMove;
 use Tests\TestCase;
 
 /**
- * engine#519: an account moves from pash-default-network to pash-tenants live.
+ * An account moves from pash-default-network to pash-tenants live.
  * The order is the point: join, re-pin and recreate the app, then leave -- so
  * a failure on the way never leaves the app pinned to an address it cannot
  * reach.
@@ -94,7 +94,7 @@ class TenantNetworkMoveTest extends TestCase
     }
 
     /**
-     * The run file inlines env_vars and passwords, so it stays 0600 (engine#173)
+     * The run file inlines env_vars and passwords, so it stays 0600
      * when the repin rewrites it; an override keeps the 0644 its writers use.
      */
     public function test_the_repinned_run_file_stays_owner_only(): void

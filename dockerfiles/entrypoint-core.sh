@@ -55,7 +55,7 @@ if [ -f "$firewall_script" ]; then
     timeout 30 nsenter --target 1 --all bash "$firewall_script" --apply || true
 fi
 
-# engine#519: the accounts' firewall lives in the host's iptables, which a
+# The accounts' firewall lives in the host's iptables, which a
 # reboot empties. Core starts with the host, and accounts started by Docker
 # itself do not go through the engine.
 tenant_script=/opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh

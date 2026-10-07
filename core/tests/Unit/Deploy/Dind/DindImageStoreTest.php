@@ -210,7 +210,7 @@ SH);
     }
 
     /**
-     * engine#312: nothing runs inside the account to patch its registry
+     * Nothing runs inside the account to patch its registry
      * settings any more. daemon.json is rendered and rewritten on the host
      * ({@see \App\System\Project\Dind\AccountTemplate::daemonJson()}); these
      * three are the host-side argv a live refresh needs instead.

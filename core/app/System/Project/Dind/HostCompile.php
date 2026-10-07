@@ -867,7 +867,7 @@ class HostCompile
     private bool $buildNetworkUnavailable = false;
 
     /**
-     * Make sure the build network exists and its firewall is applied (engine#246).
+     * Make sure the build network exists and its firewall is applied.
      *
      * Both fail open, to what a build had before this network existed: a
      * network that cannot be made -- `docker network create` fails once a

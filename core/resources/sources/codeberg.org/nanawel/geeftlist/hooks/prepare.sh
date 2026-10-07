@@ -3,7 +3,7 @@
 #
 # Geeftlist's compose stack needs four secrets and a set of persistent paths
 # that a checkout cannot carry: ~/project is emptied and re-cloned on every
-# deploy (engine#173), so anything that must survive one lives in
+# deploy, so anything that must survive one lives in
 # ~/.panelalpha/geeftlist instead. The secrets are generated once and reused
 # forever after -- a rotated DB password would lock the app out of a database
 # that survived the redeploy, and a rotated GEEFTER_SESSION_SECRET_KEY would

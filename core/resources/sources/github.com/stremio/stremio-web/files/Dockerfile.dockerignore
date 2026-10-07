@@ -1,4 +1,4 @@
-# .git stays in: webpack.config.js runs `git rev-parse HEAD` (engine#413).
+# .git stays in: webpack.config.js runs `git rev-parse HEAD`.
 node_modules
 .env
 .env.*

@@ -5,7 +5,7 @@ description: >-
   (LiveView) app backed by PostgreSQL, delivered as one official image. Same
   author and same stack as Cannery, so this recipe is the identical
   compose-REPLACE pattern: no platform block is declared, so detection runs via
-  fromWalk and engine#221 does not bite; ComposePlaceholders rewrites the one
+  fromWalk and the platform-block caveat does not bite; ComposePlaceholders rewrites the one
   *_URL value below to the account's public https address.
 
   IMAGE, MATCHES HEAD. The tracker Repository URL resolves to the repo's default
@@ -80,6 +80,6 @@ description: >-
   or any non-tunnel address, the LiveView UI works. As with Cannery, the shared
   WithoutDNS tunnel does not carry the /live/websocket upgrade; reads (login,
   dead-render pages) work through the tunnel but live create/edit does not,
-  purely through that tunnel. This is the WebSocket analogue of the engine#170
+  purely through that tunnel. This is the WebSocket analogue of the
   tunnel-multipart caveat, an engine/tunnel limitation to report, not a recipe or
   app failure.

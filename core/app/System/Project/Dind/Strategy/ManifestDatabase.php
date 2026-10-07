@@ -11,7 +11,7 @@ use App\System\Project\Dind\AppDatabase;
 /**
  * A manifest's `database: mysql`, for the writers that generate their own app
  * service outside the PHP strategy: a repository Dockerfile (Kimai) and the
- * generated framework builds (engine#210).
+ * generated framework builds.
  *
  * Same database as {@see PhpStrategy} provisions -- {@see AppDatabase} on the
  * account's own MySQL server -- handed over as DATABASE_URL plus DB_*, with

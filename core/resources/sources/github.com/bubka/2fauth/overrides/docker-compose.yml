@@ -61,7 +61,7 @@ services:
     volumes:
       - twofauth_data:/2fauth
     # 8000 inside (docker/nginx.conf), published so the port scan takes it as
-    # the primary (engine#231/#234). No other service publishes a port.
+    # the primary. No other service publishes a port.
     ports:
       - "8000:8000"
     healthcheck:
@@ -82,7 +82,7 @@ services:
 
   # Does nothing and exits 0. `docker compose up -d` runs without --wait and
   # takes the deploy to be finished when it returns; a depends_on health gate
-  # makes it return only once 2FAuth actually answers (engine#204).
+  # makes it return only once 2FAuth actually answers.
   ready:
     image: 2fauth/2fauth:8.0.2
     entrypoint: ["/bin/sh", "-c", "exit 0"]

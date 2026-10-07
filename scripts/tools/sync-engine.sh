@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Sync the working tree to a test engine host.
 #
-#   scripts/tools/sync-engine.sh root@a dev host [--check]
+#   scripts/tools/sync-engine.sh root@<host> [--check]
 #
 # The engine's `core` is bind-mounted (`./core -> /var/www/html`), so files
 # land in the running container the moment they are copied -- no rebuild, no

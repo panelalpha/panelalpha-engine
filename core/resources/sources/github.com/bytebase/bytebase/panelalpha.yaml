@@ -17,8 +17,8 @@ description: >-
   3.23.0. Building from the clone would compile a Go backend plus a pnpm/Vite
   frontend on the host for no gain -- the published image already bundles the
   compiled frontend, the server and an embedded PostgreSQL 16. Seeding a Docker
-  Hub image also sidesteps engine#229 (image-seed NotFound on a from-registry
-  seed, which is the GHCR case, not Hub).
+  Hub image also sidesteps the image-seed NotFound on a from-registry
+  seed (the GHCR case, not Hub).
 
   WHY COMPOSE-REPLACE. There is no datastore sidecar to add -- PostgreSQL is
   embedded and managed by the binary under --data -- but a hosted deploy needs
@@ -67,15 +67,15 @@ description: >-
   PERSISTENCE. /var/opt/bytebase (the embedded Postgres cluster with the whole
   workspace: admin user, RBAC, projects, database instances and migration
   history) is a named volume, so it survives project_rebuild and storage
-  reclaim; ~/project is wiped every deploy (engine#173). The wrapper writes
+  reclaim; ~/project is wiped every deploy. The wrapper writes
   nothing to ~/project.
 
   PORT + READINESS. The binary listens on 8080 and only the app publishes a port
-  (8080:8080), so the engine's port scan takes it as the primary (engine#231/
-  #234). The alpine-based image ships curl, so an internal healthcheck polls
+  (8080:8080), so the engine's port scan takes it as the primary.
+  The alpine-based image ships curl, so an internal healthcheck polls
   /healthz (unauthenticated) and a `ready` gate waits on it, so `docker compose
   up` returns -- and the deploy reports finished -- only once Bytebase actually
-  answers, not the moment the container starts (engine#204).
+  answers, not the moment the container starts.
 credentials:
   adopt_from: .panelalpha/bytebase/admin.env
   fields:

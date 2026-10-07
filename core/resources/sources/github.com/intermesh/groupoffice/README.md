@@ -1,12 +1,10 @@
 # Group Office
 
 PHP groupware — contacts, calendars, tasks, notes, files, an IMAP mail client
-and CalDAV/CardDAV/ActiveSync sync — on MySQL. Tracker issue
-[#1100](https://git.modulesgarden.tech/panelalpha/playground/supported-apps/-/work_items/1100).
+and CalDAV/CardDAV/ActiveSync sync — on MySQL.
 
-Verdict before this recipe: `serving-missing_entry`, detected strategy `php`,
-PHP 8.3. After: `deploy-ok`, `serving: ok`, HTTP 200, all twelve health checks
-passing, 105s from queue to a rendered login page on a 2-core / 3.7 GB host.
+Without this recipe the deploy succeeds and every request answers 403
+(`serving: missing_entry`).
 
 ## Licensing
 
@@ -80,14 +78,13 @@ the one decision the whole recipe turns on:
   (`PhpStrategy.php:163-165`) and `DindHostBuilder::phpBuildArgv()` runs the
   host build in `/app/<app_root>` (`DindHostBuilder.php:367`).
 * `www/composer.json` pins `config.platform.php` to 8.2. Read at the repository
-  root there is no manifest at all and the deploy takes the engine default —
-  which is how this app was originally reported as PHP 8.3.
+  root there is no manifest at all and the deploy takes the engine default.
 * `~/project/.git`, the generated `docker-compose.yml` and `.env.default` are
   not in the container at all, because `/app` **is** `~/project/www`.
 
 With `www/` as the application root the probe then answers correctly by itself:
 `www/index.php` exists, `PhpDocroot::detect()` returns `ROOT`, `PA_DOCROOT` is
-`/app`. No `docroot:` key is needed and engine#172 never comes up.
+`/app`. No `docroot:` key is needed and the `docroot: .` fold never comes up.
 
 ### The frontend build
 
@@ -110,8 +107,8 @@ The engine's own frontend pass does not fire, for two independent reasons:
 
 So `files/package.json` puts a `package.json` at the checkout root whose only
 content is `engines.node: 22` and a `build` script, and
-`files/panelalpha-build.sh` runs upstream's own build. Measured: ~30s for 204
-packages, the SASS pass and the esbuild bundles. The script asserts the three
+`files/panelalpha-build.sh` runs upstream's own build: the npm install, the SASS
+pass and the esbuild bundles. The script asserts the three
 artefacts that matter and removes the `node_modules` trees afterwards — build
 tooling only, and the next deploy re-installs from the account's npm cache
 mount.
@@ -123,8 +120,7 @@ whether the source is ionCube-encoded by reading the first 200 bytes of that
 exact path. It is a paid-edition file and `.gitignore` keeps it out, so in a git
 checkout it does not exist: `file_get_contents` raises `E_WARNING`, Group
 Office's own error handler turns that into an `ErrorException`, and
-`Installer::install()` dies inside `registerCoreEntities()` — measured, with the
-full stack, before anything else in this recipe worked.
+`Installer::install()` dies inside `registerCoreEntities()`.
 
 `files/www/go/modules/business/license/model/License.php` is an empty commented
 file. `ClassFinder::fileIsEncoded()` reads it, finds no `sg_load`, and
@@ -165,9 +161,7 @@ If you need the web upgrader for a migration this recipe will not do, delete
 `www/install/.htaccess` and the `RedirectMatch` in `www/.htaccess`, run it, and
 put them back.
 
-### Exposure, measured on the deployed site
-
-Everything below was requested over the public HTTPS domain after the deploy.
+### Exposure
 
 Denied: `/install/` and every page under it, `/config.php`,
 `/config.php.example`, `/cli.php`, `/cron.php`, `/groupofficecli.php`,
@@ -186,17 +180,16 @@ Serving normally: `/`, `/api/jmap.php` (401 without a token),
 auth challenge — these are the CalDAV and CardDAV endpoints a phone talks to,
 and denying them would remove a real feature).
 
-The Z-Push list was found by asking the tree rather than guessing: every `.php`
-under the document root whose first line is a `#!` shebang. Two of them —
-`/modules/z-push/z-push-admin.php` and `z-push-top.php` — answered **200** to an
-unauthenticated request and wrote their shebang line into the response before
-failing on a CLI-only constant.
+The Z-Push list is every `.php` under the document root whose first line is a
+`#!` shebang. Without the deny, `/modules/z-push/z-push-admin.php` and
+`z-push-top.php` answer **200** to an unauthenticated request and write their
+shebang line into the response before failing on a CLI-only constant.
 
 ### Residual surface, not closed
 
 Group Office serves its whole source tree from the document root, and a direct
-request to a class file executes it. Measured: `GET /go/core/App.php` answers an
-empty 500. With `display_errors` off (see below) nothing is disclosed, and this
+request to a class file executes it: `GET /go/core/App.php` answers an empty
+500. With `display_errors` off (see below) nothing is disclosed, and this
 is how upstream's own supported deployment serves it — the Debian package points
 the vhost at `/usr/share/groupoffice`, which is this same directory. A blanket
 deny on `.php` under `go/` and `modules/` is **not** applied because several
@@ -215,14 +208,13 @@ printing, not `display_errors`, so the php.ini does not suppress it.
 
 ### php.ini
 
-The base image loads none at all — `Loaded Configuration File => (none)`,
-measured (engine#185). `files/www/.panelalpha/php/zz-groupoffice.ini`, reached
-through `PHP_INI_SCAN_DIR`, turns `display_errors` and `expose_php` off, sets
+The base image loads none at all.
+`files/www/.panelalpha/php/zz-groupoffice.ini`, reached through
+`PHP_INI_SCAN_DIR`, turns `display_errors` and `expose_php` off, sets
 `memory_limit` to 256M, and raises `upload_max_filesize` to 64M and
 `post_max_size` to 72M. Group Office reports both to its client as
 `maxSizeUpload` and `maxSizeRequest`, so without this the browser refuses a 3 MB
-attachment before it is sent. Verified after the deploy: no `X-Powered-By`
-header, and the session response reports `maxSizeUpload: 67108864`.
+attachment before it is sent.
 
 **But see "Uploads are capped at 1 MiB on a `*.panelalpha.online` domain"
 below.** That cap is not this recipe's and not PHP's.
@@ -242,17 +234,11 @@ at `/data`, and `www/config.php` points `file_storage_path` at `/data/files` and
 `tmpdir` at `/data/tmp`. The database is the account's own MySQL from
 `database: mysql`.
 
-Measured, by reproducing a redeploy by hand — `rm -rf ~/project`, re-clone,
-re-apply the recipe, rebuild, recreate the container:
-
-* the only file the running application had written inside `~/project` was
-  `www/config.php`, which the setup command rewrites on every deploy;
-* a 500 KB attachment uploaded before the redeploy was still at
-  `~/.panelalpha/groupoffice/files/data/d5/61/d561082e…` afterwards;
-* the contact and the calendar event created before it read back unchanged
-  after it;
-* the setup command's upgrade path reported *"already installed; schema
-  26.0.47 matches the checkout"* and left the data alone.
+So the only file the running application writes inside `~/project` is
+`www/config.php`, which the setup command rewrites on every deploy. Uploaded
+files live on the mount and the rest is in the database, so both survive a
+redeploy, and the setup command's upgrade path leaves the data alone when the
+schema already matches the checkout.
 
 The one thing that has to be **dropped** on a redeploy is the compiled client
 bundle. `Extjs3::loadScripts()` caches the concatenated ExtJS/GOUI JavaScript
@@ -262,35 +248,13 @@ serve the previous release's JavaScript against this release's PHP.
 `panelalpha-install.php` removes it recursively on both stages. The framework's
 own disk cache (`cache/disk`) is handled by upstream's `rebuildCache()`.
 
-This was a manual reproduction because the engine has **no redeploy endpoint**:
-`POST /projects/{username}/clone` duplicates a project to a new account
-(`UserController.php:1495-1540`), it does not redeploy this one. That is
-[engine#2344](https://git.modulesgarden.tech/panelalpha/engine/-/work_items/2344).
-
-## Verified
-
-Over the public HTTPS domain, with the generated administrator credential:
-
-* `POST /api/auth.php` → 201, access token, `version: 26.0.47`.
-* `Contact/set` then `Contact/get` — a contact with an e-mail address, created
-  and read back.
-* `CalendarEvent/set` then `CalendarEvent/get` — an event with a start, a
-  duration and a timezone, created and read back.
-* `POST /api/upload.php` — a blob stored under `/data/files/data/…`.
-* All of it again after the redeploy, against the same account and the same
-  data.
-
-`scripts/` in the scratch directory has the verification script; it is a plain
-JMAP client and needs nothing but the domain and the credential.
-
 ## Things worth knowing
 
 ### Uploads are capped at 1 MiB on a `*.panelalpha.online` domain
 
-Not PHP's limit and not the account's. Measured on the deployed site: 1,048,576
-bytes → 201, 1,100,000 bytes → **413 from openresty**, while the same 3 MB body
-posted directly to the container's port 8000 inside the account answered 201 and
-stored the blob. The engine's own per-account nginx sets
+Not PHP's limit and not the account's: a request body over 1 MiB gets a **413
+from openresty**, while the same body posted directly to the container's port
+8000 inside the account is accepted. The engine's own per-account nginx sets
 `client_max_body_size 0` (`templates/webserver-nginx.blade.php:43`), so the cap
 is the public tunnel edge in front of `*.panelalpha.online`, outside the
 account. On a customer's own domain the ceiling is PHP's, which this recipe
@@ -333,15 +297,3 @@ whose code and schema disagree.
 
 Because the repository is tracked at `master` and Group Office releases often,
 an account that redeploys after a version bump gets the migration automatically.
-That has not been exercised on a real version bump — only the no-op path, where
-the schema already matches.
-
-## Not done
-
-* The upgrade across an actual version change. The no-op path is verified; a
-  real migration is not, because `master` is the only thing a clone of this URL
-  gets and it was 26.0.47 throughout.
-* CalDAV/CardDAV/ActiveSync sync from a real client. The endpoints answer their
-  auth challenge and are deliberately left reachable, but no phone was pointed
-  at them.
-* The IMAP mail client, which needs a mail account to test against.

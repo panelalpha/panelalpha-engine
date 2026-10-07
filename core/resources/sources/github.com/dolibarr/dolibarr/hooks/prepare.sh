@@ -2,8 +2,8 @@
 # Account shell, after the clone and before the build. Runs on every deploy.
 #
 # Everything here exists because the clone is destructive: GitRepository's
-# ProjectTree::clearContents() empties ~/project before every deploy (engine
-# #173), and Dolibarr keeps its configuration, its documents and any external
+# ProjectTree::clearContents() empties ~/project before every deploy,
+# and Dolibarr keeps its configuration, its documents and any external
 # module *inside* the tree it is served from. So the state lives in
 # ~/.panelalpha/dolibarr and the checkout gets links to it.
 set -e
@@ -73,7 +73,7 @@ chmod 600 "${DATA}/README.txt"
 # 2. The administrator login is the engine's (`credentials:` in
 # panelalpha.yaml): ~/.panelalpha/app-credentials.env, delivered to the app
 # container by `env_file:`. Not through .env: ProjectEnvironment::apply()
-# copies .env to .env.default at mode 644 (engine #173).
+# copies .env to .env.default at mode 644.
 
 # ---------------------------------------------------------------------------
 # 3. The two links into the checkout.

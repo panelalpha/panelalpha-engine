@@ -16,9 +16,4 @@ description: >-
   and sign-up settings are optional project environment variables.
 
   First run is upstream's: the first visitor registers an account. The first
-  start downloads the 62.6 MB FDC nutrition database before it serves.
-
-  Measured on mariusz2.panelalpha.tools (2026-09-29, engine 705f250a): deploy
-  53s, rebuild 33s, app 16 MiB. / redirects to /guide/en/ (<title>Recipya</title>,
-  80 KB). An account registered through /auth/register logs in (Secure session
-  cookie), and a cookbook it created is still listed after a rebuild.
+  start downloads the FDC nutrition database before it serves.

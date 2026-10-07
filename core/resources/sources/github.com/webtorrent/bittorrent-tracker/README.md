@@ -23,5 +23,5 @@ the tracker's own response to a request that is not an announce or scrape.
 - No UDP tracker: an account has no inbound UDP.
 - `--trust-proxy` records each peer's address from `X-Forwarded-For` instead
   of the account gateway's. The tracker takes the first entry, which a
-  client can set itself (engine#319).
+  client can set itself.
 - Swarm state is in memory only; nothing is persisted.

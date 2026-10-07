@@ -50,7 +50,7 @@ services:
     # The image's JAVA_OPTS cap the heap at 1 GB; OCR and ffmpeg run beside it.
     mem_limit: 1536m
 
-  # `up -d` returns only once Teedy answers (engine#204).
+  # `up -d` returns only once Teedy answers.
   ready:
     image: docker.io/library/postgres:16-alpine
     restart: "no"

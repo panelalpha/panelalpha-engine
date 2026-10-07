@@ -24,8 +24,7 @@ description: >-
   The Filament panel has no registration.
 
   NO SCHEDULE BY DEFAULT. SPEEDTEST_SCHEDULE is left unset, so nothing runs
-  until the admin starts a test or sets a cron. One run on the test host moved
-  ~12 GB down and ~7 GB up at 8.7/4.5 Gbps; a schedule is the owner's call.
+  until the admin starts a test or sets a cron; a schedule is the owner's call.
   Upstream keeps /api/speedtest/latest public (the latest numbers and server
   name, for Homepage widgets); /prometheus is off until enabled in settings.
 

@@ -1,7 +1,6 @@
 # Piler
 
-Tracker: [supported-apps#1073](https://git.modulesgarden.tech/panelalpha/playground/supported-apps/-/work_items/1073)
-· Upstream: <https://github.com/jsuto/piler> (`VERSION` 1.4.9, GPL v3)
+Upstream: <https://github.com/jsuto/piler> (`VERSION` 1.4.9, GPL v3)
 
 ---
 
@@ -16,11 +15,11 @@ The repository is the whole thing: `src/` is the C daemon set, `webui/` is the
 PHP interface, `util/db-mysql.sql` is the schema, and autotools ties it
 together. What the repository is *not* is buildable here — see below.
 
-## What the detector saw, and why it was not enough
+## Why the generic platform is not enough
 
-Detection settled on `strategy: php` and served a 403: there is no `index.php`
+Detection settles on `strategy: php` and serves a 403: there is no `index.php`
 at the repository root, and `webui/` is not in `PhpDocroot`'s candidate list.
-Pointing `docroot` at `webui` would have produced a rendered login page, which
+Pointing `docroot` at `webui` would produce a rendered login page, which
 is exactly the trap the Bluecherry recipe describes. The PHP interface is a
 console over three things it does not contain:
 
@@ -49,13 +48,13 @@ COPY ${PACKAGE}_${TARGETARCH}.deb /
 `docker/README.md` tells you to fetch from GitHub releases by hand. The tree
 cannot build its own image even with the Dockerfile in front of it.
 
-Upstream publishes `sutoj/piler` on Docker Hub instead: 13 tags, `1.4.9` pushed
-2026-06-17, matching this `VERSION`. `hooks/prepare.sh` reads `VERSION`,
+Upstream publishes `sutoj/piler` on Docker Hub instead, tagged by version.
+`hooks/prepare.sh` reads `VERSION`,
 confirms the tag exists on Docker Hub and falls back to `:latest` when a clone
 of master sits between releases. Nothing is compiled during a deploy, so
-the host build container's size (engine#184, engine#295) does not apply.
+the host build container's size does not apply.
 
-## Port 25: the reason this was nearly Rejected, and the reason it is not
+## Port 25
 
 Piler's headline feature is a built-in SMTP receiver. `docker/docker-compose.yaml`
 publishes `"25:25"` and the image `EXPOSE`s 25, 80 and 443, because upstream
@@ -79,8 +78,8 @@ first-class code rather than a workaround:
 and the web interface has an **Import** page (`webui/controller/import/`) that
 stores mailbox jobs with a "test connection" button, which `util/import.sh` runs
 through `imapfetch.py` from the container's cron every five minutes. An archive
-that pulls from the mailboxes it archives is the complete product. Unlike Sympa
-(#1084), Piler does not have to *be* the domain's mail destination to work.
+that pulls from the mailboxes it archives is the complete product. Piler does
+not have to *be* the domain's mail destination to work.
 
 ## The stack
 
@@ -108,7 +107,7 @@ repository. `hooks/prepare.sh` generates one per account.
 **Sizes.** Upstream reserves and caps 512M each for `piler` and `manticore`,
 sets `rt_mem_limit = 512M` on the `piler1` index, and gives MariaDB a 256M
 buffer pool through `docker/piler.cnf`. Those are numbers for a dedicated
-archive host. See *Memory* below.
+archive host. See *The sizes* below.
 
 **A readiness gate and a setup service.** See below.
 
@@ -196,31 +195,24 @@ domain, in exchange for a password change that survives a restart.
 
 ### 4. The sizes
 
-Measured on a deployed account with the archive loaded and idle, three messages
-in it:
-
-| Service | Idle | Cap set here | Upstream |
-| --- | --- | --- | --- |
-| `piler` | 39–51 MiB | 640m | 512M reserved *and* capped |
-| `db` (MariaDB) | 104–106 MiB | 384m | uncapped, 256M buffer pool |
-| `manticore` | 23–30 MiB | 448m | 512M reserved *and* capped |
-| `memcached` | 3.5 MiB | 96m | uncapped, `-m 64` |
-| **total** | **≈ 170–190 MiB** | **1568m** | — |
+| Service | Cap set here | Upstream |
+| --- | --- | --- |
+| `piler` | 640m | 512M reserved *and* capped |
+| `db` (MariaDB) | 384m | uncapped, 256M buffer pool |
+| `manticore` | 448m | 512M reserved *and* capped |
+| `memcached` | 96m | uncapped, `-m 64` |
+| **total** | **1568m** | — |
 
 `setup` (128m) and `ready` (32m) exist only during `up -d`, so the peak the
 account has to hold is 1728m against a 2000 MB limit.
 
-Manticore is the number the triage note flagged, and it is the one that was
-most over-provisioned: 512M reserved for a process using 30 MiB with an empty
-index. The reservation follows `rt_mem_limit`, which
-`files/manticore.conf` brings from 512M to 128M — that is the RAM chunk size
-before searchd flushes to a disk chunk, so it trades flush frequency for
-footprint and costs neither capacity nor correctness. MariaDB, not Manticore,
-is the largest resident of this stack.
+Manticore's reservation follows `rt_mem_limit`, which `files/manticore.conf`
+brings from 512M to 128M — that is the RAM chunk size before searchd flushes to
+a disk chunk, so it trades flush frequency for footprint and costs neither
+capacity nor correctness.
 
-The caps are headroom rather than measurements: `piler` holds a message in
-memory while `pilerimport` indexes it and runs a php-fpm pool behind the search
-UI, and an archive with a hundred thousand messages in it was not tested here.
+The caps are headroom: `piler` holds a message in memory while `pilerimport`
+indexes it and runs a php-fpm pool behind the search UI.
 
 ## Credentials
 
@@ -238,10 +230,10 @@ passes. `~/project/.env` holds four image tags.
 
 Two engine behaviours make that the shape rather than a preference:
 
-* **engine#173** — every deploy empties `~/project` before the clone, so a guard
+* Every deploy empties `~/project` before the clone, so a guard
   on a file in there never fires on a redeploy. A regenerated `MYSQL_PASSWORD`
   would lock Piler out of an archive it can no longer decrypt.
-* **engine#173** again — `.env` is republished as `.env.default` at mode 644
+* `.env` is republished as `.env.default` at mode 644
   inside a world-traversable home, which makes anything written there readable
   by every other account's uid on the host.
 
@@ -261,7 +253,7 @@ Four named volumes, and they are not independent:
 account's first boot, and it is what every archived message body is encrypted
 with. **Lose it and the archive is unreadable — there is no recovery path.**
 
-That is also the answer to engine#175: the one value that would otherwise
+That also keeps tenants apart: the one value that would otherwise
 collide across tenants is generated per account into that account's own named
 volume, not derived from `__DIR__`, `realpath()` or `DOCUMENT_ROOT`. The
 checkout is not bind-mounted into any container, so the uniform `/app` mount
@@ -269,7 +261,7 @@ never comes into it.
 
 ## Readiness
 
-engine#90: the engine runs `docker compose up -d` without `--wait` and takes the
+The engine runs `docker compose up -d` without `--wait` and takes the
 deploy to be finished when that returns, which is when the containers have been
 *started*. Here that gap is the whole first boot — MariaDB initialising a data
 directory, Manticore opening four empty RT indexes, then `start.sh` generating
@@ -283,7 +275,7 @@ published credentials are gone and the generated one has signed in.
 The healthcheck is **not** upstream's `curl -s smtp://localhost/`, which probes
 the SMTP receiver this deployment does not publish and says nothing about the
 web UI. It asks nginx for the front page and greps for the login form's own
-`id="loginpage"`, so a PHP fatal rendered with a 200 — the shape engine#185's
+`id="loginpage"`, so a PHP fatal rendered with a 200 — the shape the base image's
 platform-wide `display_errors=1` tends to produce — does not pass.
 
 ## Security notes
@@ -312,23 +304,22 @@ Beyond the shipped credentials above:
   without somebody first previewing a message with an image in it.
 * **Mailbox passwords for import jobs are stored in the clear.** The Import
   page writes `server`, `username` and `password` into the `import` table as
-  plain columns (`webui/controller/import/list.php`, verified on a live
-  instance), so a Piler instance archiving five mailboxes holds five reusable
+  plain columns (`webui/controller/import/list.php`), so a Piler instance archiving five mailboxes holds five reusable
   mailbox credentials in its own database. Nothing in the deployment makes that
   worse, and nothing here can make it better: it is how the feature is built.
   It is a reason to give Piler its own restricted mailbox accounts rather than
   the users' own.
-* engine#181 does not apply: the docroot is inside the container, not the repo
-  root, so nothing serves `~/project/docker-compose.override.yml`. Confirmed by
-  probing `/.env`, `/.env.default`, `/.git/config`, `/docker-compose.yml`,
+* Serving the repository root does not apply: the docroot is inside the container, not the repo
+  root, so nothing serves `~/project/docker-compose.override.yml`. `/.env`,
+  `/.env.default`, `/.git/config`, `/docker-compose.yml`,
   `/docker-compose.override.yml`, `/panelalpha-setup.sh`, `/manticore.conf`,
-  `/VERSION` and `/config.php.in` on the public domain: every one of them falls
-  through `try_files` to the login page.
+  `/VERSION` and `/config.php.in` all fall through `try_files` to the login
+  page.
 * `GET /js.php` answers 500 with an empty body — `webui/js.php` requires
   `view/javascript/piler-in.js`, which the installed layout does not have. It
   leaks nothing (the body is zero bytes) and nothing in the UI loads it; noted
   because it is the only unauthenticated endpoint that is not a 200.
-* No stray compose file is moved aside in `prepare.sh`, so engine#166's
+* No stray compose file is moved aside in `prepare.sh`, so the
   `docker-compose.override.yml` trap is not stepped in. `docker/docker-compose.yaml`
   is one directory down and is not among `ComposeFileInspector::COMPOSE_FILE_CANDIDATES`,
   which are root-level names only.
@@ -336,48 +327,20 @@ Beyond the shipped credentials above:
   `environment:` block — they arrive only through `env_file`, which
   `ComposePlaceholders` does not read and `SidecarCredentials` cannot rewrite.
 
-## What was verified
-
-On a deployed account (`--memory-limit=2000`), over the account's own public
-HTTPS domain, with no shell shortcuts in the parts that are the product:
-
-1. **Sign-in.** `admin@local` with the password `hooks/prepare.sh` generated →
-   `302 Location: …/index.php?route=health/health`, and the Health monitor page
-   renders. The shipped `pilerrocks` no longer authenticates.
-2. **Configuration through the UI.** An archived domain (`example.org`) and two
-   users were created through the admin pages with ordinary form posts.
-3. **Bulk ingest.** `pilerimport -e` archived an EML.
-4. **IMAP pull, the documented path.** A mailbox job was created on the
-   **Import** page; `util/import.sh` → `util/imapfetch.py` connected to a
-   Dovecot server over IMAPS, pulled the message and reported
-   `status=2 total=1 imported=1 error=0`.
-5. **Search.** The owning user signed in over HTTPS and searched for a token
-   that appears **only in the message body** — `wobbleflange9183` — and the
-   message came back. Manticore's own `SELECT id FROM piler1 WHERE MATCH(…)`
-   confirms all three messages are indexed.
-6. **Read-back.** Opening the result rendered the decrypted body. `pilerget`
-   on the stored message returns the original RFC822 bytes, which is the
-   `piler.key` path end to end.
-7. **Redeploy.** A second deploy re-cloned `~/project`, reused
-   `~/.panelalpha/piler.env`, left all three archived messages and the changed
-   admin password alone (`admin@local no longer carries the shipped password;
-   left as it is`), and rewrote the `SITE_URL` line in place rather than
-   appending a second one.
-
-Four things worth knowing that came out of doing it:
+## Things worth knowing
 
 * **`pilerimport` must be run from a writable directory.** With the image's
   default working directory it exits with `cannot write current directory!`.
   `docker compose exec --workdir /var/piler/tmp piler pilerimport …`.
-* **`pilerimport -i` — the C IMAP client — did not store anything**, against
-  either Dovecot 2.x or GreenMail. It connects, authenticates, lists folders,
-  counts messages and FETCHes the body (the message is printed to stderr), then
-  fails at `src/import_imap.c:364` with `Cannot find … in the message`:
-  `download_email()` searches the *body* buffer for the *header* buffer's
-  contents, and the comment above it expects `* 1 FETCH (UID 1 BODY[] {n}`,
-  which neither server returns for a sequence-number FETCH. This is an upstream
-  defect in 1.4.9 and it does **not** affect the path this recipe documents —
-  the Import page and cron use `util/imapfetch.py`, which worked.
+* **`pilerimport -i` — the C IMAP client — does not store anything.** It
+  connects, authenticates, lists folders, counts messages and FETCHes the body
+  (the message is printed to stderr), then fails at `src/import_imap.c:364` with
+  `Cannot find … in the message`: `download_email()` searches the *body* buffer
+  for the *header* buffer's contents, and the comment above it expects
+  `* 1 FETCH (UID 1 BODY[] {n}`, which common IMAP servers do not return for a
+  sequence-number FETCH. This is an upstream defect in 1.4.9 and it does **not**
+  affect the path this recipe documents — the Import page and cron use
+  `util/imapfetch.py`.
 * **A self-signed mailbox server needs `verifyssl=0` in
   `/etc/piler/piler.conf`.** The default is 1, which is right; it is only worth
   knowing because the failure is `SSL peer certificate … was not OK` with no

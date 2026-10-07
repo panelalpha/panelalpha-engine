@@ -1,6 +1,6 @@
 # Persist Galette's config/ (config.inc.php, holding the DB password) and data/
 # (member photos, attachments, exports, logs) across the redeploy that empties
-# ~/project (engine#173). The account home survives, so mount
+# ~/project. The account home survives, so mount
 # ~/.panelalpha/galette (../.panelalpha relative to this file, which sits in
 # ~/project; hooks/prepare.sh creates it) into the app container at
 # /pa-data/galette; galette-setup.sh seeds it and symlinks /app/config +

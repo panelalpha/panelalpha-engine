@@ -13,10 +13,11 @@ description: >-
   /books. Login, the default account and the setup flow are left as upstream
   ships them.
 
-  NGINX FRONT (engine#323). The engine's account vhost sends `Connection:
+  NGINX FRONT. The engine's account vhost sends `Connection:
   upgrade` on every request; Calibre-Web is served by gevent's pywsgi, which
   then reads a POST body until EOF, so every form POST, the login included,
   hangs until the proxy gives up. A small nginx:1-alpine `web` service
   (files/panelalpha/front.conf) sends `upgrade` only when the client sent an
   Upgrade header and is the only service publishing a port (8083). It can be
-  dropped once engine#323 is fixed.
+  dropped once the engine's vhost stops sending `Connection: upgrade` on every
+  request.

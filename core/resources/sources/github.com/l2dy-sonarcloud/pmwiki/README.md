@@ -9,12 +9,9 @@ PmWiki's canonical source is **SVN only** — `svn://pmwiki.org/pmwiki` (plus a
 tarball) — with **no official git remote**; the `github.com/pmwiki` org has zero
 repositories. The engine clones over git, so the canonical source is
 uncloneable. `github.com/l2dy-sonarcloud/pmwiki` is a git mirror of the 2.3.x
-tree; its HEAD is **pmwiki-2.3.27** (`scripts/version.php`). This is the
-**mirror-row** case (Dotclear #1522 / Roundup #1523 precedent):
-supported-apps#1294 (canonical) is **Rejected — uncloneable canonical**, and the
-mirror gets its own Supported row keyed to this path.
+tree (`scripts/version.php`), and the recipe is keyed to this path.
 
-The tree lints clean on PHP 8.3 (what the `php` runtime hands a repo with no
+The tree runs on PHP 8.3 (what the `php` runtime hands a repo with no
 `composer.json`); its only pre-8 functions (`create_function`) are guarded shims
 for legacy add-ons and are never reached by core. So there is no PHP-8 gate
 failure — no repair, only configuration.
@@ -32,8 +29,7 @@ failure — no repair, only configuration.
   login. Contains no secret.
 - **`files/panelalpha/pmwiki-setup.sh`** (start stage, `before: true`) — moves
   `wiki.d/` (pages) and `uploads/` (attachments) onto `~/.panelalpha/pmwiki/`
-  and symlinks them back so they survive the redeploy that empties `~/project`
-  (engine#173); writes the bcrypt hash of the admin password the engine
+  and symlinks them back so they survive the redeploy that empties `~/project`; writes the bcrypt hash of the admin password the engine
   generates (`credentials:` in `panelalpha.yaml`) into
   `~/.panelalpha/pmwiki/admin.hash` (0600) whenever it does not match; drops a PHP-disabling `.htaccess` in uploads;
   removes the clone's `.git`.
@@ -45,7 +41,7 @@ failure — no repair, only configuration.
   ini dir over HTTP; `local/.htaccess` (shipped by PmWiki) denies `config.php`;
   `uploads/.htaccess` disables PHP execution.
 - **`files/.pa-php/zz-pmwiki.ini`** — `display_errors Off`, upload/memory limits
-  (the base image loads no `php.ini`, engine#185).
+  (the base image loads no `php.ini`).
 
 ## Using it
 

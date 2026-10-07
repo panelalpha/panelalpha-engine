@@ -49,10 +49,9 @@ class SystemPackagesTest extends TestCase
      * so bundler resolves and compiles it. Everything that pulls in rdoc does,
      * which is railties, which is every Rails app.
      *
-     * Measured on a dev host with digitalocean/sample-rails: without
-     * libyaml-dev the deploy stops at `An error occurred while installing
-     * psych (5.2.6), and Bundler cannot continue`, four dependency levels away
-     * from anything the Gemfile names.
+     * Without libyaml-dev, digitalocean/sample-rails stops at `An error
+     * occurred while installing psych (5.2.6), and Bundler cannot continue`,
+     * four dependency levels away from anything the Gemfile names.
      */
     public function test_libyaml_is_always_installed(): void
     {
@@ -95,7 +94,7 @@ class SystemPackagesTest extends TestCase
     }
 
     /**
-     * Diaspora (#147): twitter-text pulls in idn-ruby, whose extconf needs the
+     * Diaspora: twitter-text pulls in idn-ruby, whose extconf needs the
      * libidn headers. The Gemfile never names it; only the lock does.
      */
     public function test_a_native_gem_resolved_only_by_the_lock_gets_its_library(): void

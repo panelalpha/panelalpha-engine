@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs on the account after the clone, before the build.
 #
-# ~/project is wiped and re-cloned on every redeploy (engine#173), so every
+# ~/project is wiped and re-cloned on every redeploy, so every
 # secret this app needs is generated once into ~/.panelalpha/airtrail -- the one
 # account-owned directory that survives a rebuild -- and never regenerated, so a
 # redeploy cannot invalidate a database that survived it. The values are handed

@@ -289,7 +289,7 @@ class ToolPolicyTest extends TestCase
 
     /**
      * A GET that returns a password is a read by verb, but readonly means the
-     * assistant may look, not log in (#48 item 20).
+     * assistant may look, not log in.
      */
     public function test_readonly_withholds_the_reads_that_return_a_credential(): void
     {

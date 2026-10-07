@@ -195,10 +195,9 @@ services:
       - ./config/sftp/ssh_host_ed25519_key:/etc/ssh/ssh_host_ed25519_key
       - ./config/sftp/ssh_host_rsa_key:/etc/ssh/ssh_host_rsa_key
       # The directory, not the two files inside it. A single-file bind binds an
-      # inode: once anything replaces logins.conf on the host -- and something in
-      # the install/update path does -- the container keeps reading the file it
-      # was started with, and no SFTP account ever reaches it again. Measured on
-      # a live host with the container on a 0-byte copy from days earlier. The
+      # inode: once anything replaces logins.conf on the host -- and something
+      # in the install/update path does -- the container keeps reading the file
+      # it was started with, and no SFTP account ever reaches it again. The
       # image ships nothing under /etc/sftp, so nothing is shadowed.
       - ./config/sftp:/etc/sftp
       - ./config/sftp/entrypoint.sh:/entrypoint.sh
@@ -232,7 +231,7 @@ services:
     mem_limit: ${MEM_LIMIT_SITES_DB:-${MEM_LIMIT_DATABASE_USERS:-3G}}
     memswap_limit: ${MEMSWAP_LIMIT_SITES_DB:-${MEMSWAP_LIMIT_DATABASE_USERS:-0}}
     # Accounts reach it on pash-tenants at this address only, through the
-    # host's allow rule (engine#519); recreating it must not move it.
+    # host's allow rule; recreating it must not move it.
     # tenant-network-firewall.sh and TenantNetwork assume .0.2.
     networks:
       default:
@@ -263,7 +262,7 @@ services:
   # Required. The only way images reach account daemons besides their own
   # registries: the host pushes what it built or holds, the account pulls,
   # fetching only the layers it is missing. There is no `docker save | load`
-  # fallback any more (#156), so this is not behind a profile.
+  # fallback any more, so this is not behind a profile.
   #
   # The container name is load-bearing: every account daemon is created with
   # `panelalpha-cache-registry:5000` in its `insecure-registries`, and the
@@ -339,7 +338,7 @@ services:
   # A broken mirror is an outage, not a slowdown. dockerd falls back to Hub
   # only when the mirror errors; a mirror that answers 200 with a truncated
   # blob fails the pull with `unexpected commit digest` (containerd image
-  # store), and the build dies. That is what a full 512m tmpfs did (#285).
+  # store), and the build dies. That is what a full 512m tmpfs did.
   #
   # Nothing is kept for long. `proxy.ttl` expires an entry this long after it
   # is fetched, and `storage.delete.enabled` is what makes that expiry free the
@@ -348,7 +347,7 @@ services:
   # repository survive; `system:registry-proxy:trim` clears them by hand.
   #
   # Blobs are shared across repositories but expire per repository, so one
-  # repository's expiry deletes a layer others still link to (#299). With the
+  # repository's expiry deletes a layer others still link to. With the
   # descriptor cache off, their next pull finds it missing and fetches it again;
   # with it on, they are served 200 with 0 bytes until a restart.
   #
@@ -411,7 +410,7 @@ networks:
   default:
     name: pash-default-network
     external: true
-  # DinD accounts (engine#519). Made by scripts/tenant-network-firewall.sh --create.
+  # DinD accounts. Made by scripts/tenant-network-firewall.sh --create.
   tenants:
     name: pash-tenants
     external: true

@@ -12,4 +12,4 @@ description: >-
   NAGIOSADMIN_USER / NAGIOSADMIN_PASS in the project's env vars, otherwise the
   upstream default applies.
   Known gap: ICMP checks run as the nagios user report CRITICAL until the
-  engine restores unprivileged ping in tenant containers (engine#442).
+  engine restores unprivileged ping in tenant containers.

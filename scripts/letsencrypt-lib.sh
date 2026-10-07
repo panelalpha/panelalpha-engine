@@ -235,9 +235,9 @@ le_install_lineage() {
     # control plane down: no GET /system/info, no MCP, no deploys, and it reads
     # as a network fault.
     #
-    # Observed on 2.29.1.58, where a rotation left crt/server.cert holding one
-    # certificate and crt/server.key holding another's key. The API answered
-    # nothing on :2011 until the .bak pair was put back.
+    # A rotation can leave crt/server.cert holding one certificate and
+    # crt/server.key holding another's key; the API then answers nothing on
+    # :2011 until the .bak pair is put back.
     #
     # Checked *before* the reload, so a bad lineage leaves the previous pair
     # in place and the engine still serving, rather than replacing it with one
@@ -272,7 +272,7 @@ le_install_lineage() {
 #   le_cert_key_match CERT KEY
 #
 # Same reasoning as {@see \App\Lib\Ssl\KeyPair}, which is the PHP side of this
-# and carries the measurements. Kept here as openssl rather than shelling into
+# and explains it in full. Kept here as openssl rather than shelling into
 # artisan because renewal runs from cron on the host, with no guarantee the
 # engine container is up -- and it is called at exactly the moment it may not
 # be.

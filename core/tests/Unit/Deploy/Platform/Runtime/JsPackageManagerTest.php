@@ -421,7 +421,7 @@ class JsPackageManagerTest extends TestCase
 
     public function test_resolve_lifecycle_command_runs_a_framework_default_inside_the_workspace(): void
     {
-        // engine#160: `npx next build` at a pnpm workspace root finds no next.
+        // `npx next build` at a pnpm workspace root finds no next.
         $partial = [
             'default_build' => 'npx next build',
             'default_start' => 'npx next start -H 0.0.0.0 -p 3000',

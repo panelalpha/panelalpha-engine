@@ -6,7 +6,7 @@ Self-hosted photo management (Laravel on FrankenPHP).
 
 - The repository's `docker-compose.yaml` leaves `APP_KEY` empty, pulls the
   optional AI face-recognition image, and relies on `cap_add`, which the engine
-  strips while keeping `cap_drop: [ALL]` (engine#349). As a result, MariaDB
+  strips while keeping `cap_drop: [ALL]`. As a result, MariaDB
   cannot switch to its own user.
 - `overrides/docker-compose.yml` runs upstream's shape on
   `ghcr.io/lycheeorg/lychee:v7.10.0`:

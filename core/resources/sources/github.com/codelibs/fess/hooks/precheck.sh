@@ -1,6 +1,6 @@
 #!/bin/bash
-# OpenSearch ~1.4 GB (1 GB heap) + Fess ~0.75 GB idle, ~1.1 GB while a crawl
-# job's JVM runs: ~2.5 GB measured, so the 2500 MB default is too tight.
+# OpenSearch (1 GB heap) plus Fess, which grows while a crawl job's JVM runs,
+# need about 2.5 GB, so the 2500 MB default is too tight.
 REQUIRED_MB=3072
 limit=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null)
 case "$limit" in ''|max|*[!0-9]*) exit 0 ;; esac

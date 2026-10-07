@@ -30,6 +30,6 @@ description: >-
   dir that survives a rebuild) and reused on every later deploy, so the DB
   password keeps matching the persisted MariaDB volume. `APP_URL` is left as
   `http://localhost` in the compose environment on purpose: the platform
-  rewrites it to the project's public https URL before the stack starts
-  (engine#221 avoided), so Meetable builds its links against the address a
+  rewrites it to the project's public https URL before the stack starts,
+  so Meetable builds its links against the address a
   visitor actually typed. `APP_DEBUG` is false.

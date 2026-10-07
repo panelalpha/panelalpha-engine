@@ -20,12 +20,12 @@ fi
 # each dump a line at a time, so the 23.6 MB language pack never lands in
 # memory. It is Installer::install_gacl(), which builds the whole ACL tree
 # through the GaclApi in one process, and insert_globals(), which requires
-# library/globals.inc.php -- the full globals metadata table. The stock CLI
-# limit has been enough in testing; this is headroom, not a measured need.
+# library/globals.inc.php -- the full globals metadata table. This is
+# headroom, not a hard requirement.
 #
-# No `timeout` on the command in panelalpha.yaml. The measured install is about
-# 30s here, but the language pack is 237,511 separate INSERT round trips and a
-# host under load could stretch that a long way; AppLauncher already gives the
+# No `timeout` on the command in panelalpha.yaml. The language pack is 237,511
+# separate INSERT round trips and a host under load could stretch that a long
+# way; AppLauncher already gives the
 # whole `docker compose up -d` 3600s (COMPOSE_TIMEOUT_SECONDS), which is the
 # budget that should decide it.
 php -d memory_limit=512M panelalpha-install.php

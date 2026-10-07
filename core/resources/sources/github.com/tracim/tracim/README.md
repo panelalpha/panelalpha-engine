@@ -4,14 +4,14 @@ Shared workspaces, documents, threads, files and a kanban for a team. A Python
 (Pyramid) backend served by uwsgi behind Apache on :80, a React frontend, redis
 and pushpin for live messages, and SQLite or PostgreSQL underneath.
 
-Detection: `railpack` — and it was reading the right file for the wrong half of
-the application. The repository root *is* an 18-package yarn workspace
-(`frontend/`, `frontend_lib/`, `frontend_app_*`), so Railpack found Node 16 and
-yarn 3.2.0, installed them, and then said what it always says about a tree with
-no entry point: *"No start command detected."* The server it never saw is in
-`backend/`, in Python. With no start command and no compose file at the root the
-engine generated a basic compose, started `nginx:alpine` on :8080 and served its
-own page: HTTP 200, `serving-placeholder`.
+Without this recipe detection picks `railpack` — reading the right file for the
+wrong half of the application. The repository root *is* an 18-package yarn
+workspace (`frontend/`, `frontend_lib/`, `frontend_app_*`), so Railpack finds
+Node 16 and yarn 3.2.0, installs them, and then says what it always says about
+a tree with no entry point: *"No start command detected."* The server it never
+sees is in `backend/`, in Python. With no start command and no compose file at
+the root the engine generates a basic compose, starts `nginx:alpine` on :8080
+and serves its own placeholder page.
 
 Building the checkout is not the alternative, and the repository says so itself.
 Its only production image recipe, `tools_docker/Debian_Uwsgi/Dockerfile`, opens
@@ -26,8 +26,7 @@ account. Upstream's compose files all live one directory down — `tools_docker/
 and `backend/` — where neither Docker nor the engine's compose probe looks
 (`ComposeFileInspector::COMPOSE_FILE_CANDIDATES` is root-only, and
 `RuntimeSidecars`'s `docker-compose.*.yml` glob is a root-only `glob()`), so
-nothing was stashed and no sidecar was mined from them. The deploy log confirms
-it: no *"Keeping runtime services from compose:"* line.
+nothing is stashed and no sidecar is mined from them.
 
 - **tracim** — `algoo/tracim:latest`, published on 8080 → container :80.
 - **setup** — runs once, changes the admin password, exits. See *The admin*.
@@ -151,22 +150,22 @@ Apache error page is a perfectly valid HTTP response too.
 
 ## Memory
 
-Measured on the host, idle, nobody logged in: **1.16 GiB of a 1.375 GiB limit
-(84%)** with the image's stock four uwsgi workers — five uwsgi processes at
-~160–185 MB RSS each, plus an rq worker, the mail notifier, the connection-state
-monitor, Xvfb, redis, pushpin's five processes and Apache. That is not headroom;
-a file preview forking unoconv would have found the OOM killer.
+With the image's stock four uwsgi workers an idle Tracim, nobody logged in, uses
+most of its 1.375 GiB limit — five uwsgi processes, plus an rq worker, the mail
+notifier, the connection-state monitor, Xvfb, redis, pushpin's five processes
+and Apache. That is not headroom; a file preview forking unoconv would find the
+OOM killer.
 
 `files/panelalpha-uwsgi-web.ini` is mounted over `/etc/tracim/tracim_web.ini`
-with `workers = 2`, which brings it to **691 MiB (49%)** for the same 8
-concurrent requests (2 × 4 threads). It works because `common.sh` only writes
+with `workers = 2`, which roughly halves that for the same 8 concurrent
+requests (2 × 4 threads). It works because `common.sh` only writes
 that file `if [ ! -f ]`, and because Docker applies the deeper mount after the
 `/etc/tracim` volume. The file is byte-identical to the image's own
 `uwsgi.ini.sample` apart from the three lines `common.sh` fills in; if a future
 image needs an option it does not carry, that file is where to add it.
 
-`pids_limit: 512` because 124 processes and threads at idle is close enough to
-`ServiceHardener`'s stock 256 to matter. `mem_limit` 1408 m + 128 m + 64 m =
+`pids_limit: 512` because the processes and threads at idle come close enough
+to `ServiceHardener`'s stock 256 to matter. `mem_limit` 1408 m + 128 m + 64 m =
 1600 m of a 2000 m account.
 
 ## Not configured

@@ -23,8 +23,8 @@ use PHPUnit\Framework\TestCase;
  * system store rather than a bundled list is subject to the same failure.
  *
  * The fix is two things that are worthless apart, which is the point of
- * asserting them together. Measured on the engine host against
- * `node:20-bookworm-slim` with `--use-openssl-ca`, fetching npm's registry:
+ * asserting them together. Against `node:20-bookworm-slim` with
+ * `--use-openssl-ca`, fetching npm's registry:
  *
  *     mount only            UNABLE_TO_GET_ISSUER_CERT_LOCALLY
  *     SSL_CERT_FILE only    UNABLE_TO_GET_ISSUER_CERT_LOCALLY

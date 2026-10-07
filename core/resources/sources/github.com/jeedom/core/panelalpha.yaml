@@ -11,7 +11,7 @@ description: >-
   image jeedom/jeedom:4.6-http-bookworm. The "http-" tags are the variant WITH
   the internal MariaDB (DATABASE=1; plain 4.6-bookworm has none and opens a
   first-visitor database setup page). On first boot the image's own
-  /root/init.sh downloads Jeedom (4.6.1 when verified), creates the database
+  /root/init.sh downloads Jeedom, creates the database
   with a random password, runs composer and install/install.php. That last
   step creates admin/admin (install/install.php:57-62). Code, config, plugins
   and backups live in the named volume jeedom-html, and the database in
@@ -36,31 +36,13 @@ description: >-
      X-Forwarded-For / CF-Connecting-IP (core/php/utils.inc.php getClientIp,
      network::getClientIp). Those addresses drive login bans, the "internal"
      network that skips 2FA, and localOnly users. The proxy therefore resolves
-     the address the engine appended (real_ip_recursive over private ranges,
-     engine#319), sends that single value in X-Forwarded-For and X-Real-IP,
+     the address the engine appended (real_ip_recursive over private ranges),
+     sends that single value in X-Forwarded-For and X-Real-IP,
      and clears CF-Connecting-IP and Client-IP.
 
   Hardware plugins (Z-Wave, Zigbee, USB/serial dongles, Bluetooth) are
   runtime configuration that the customer does in the plugin market. An
   account has no USB devices, so only network-reachable integrations work.
-
-  == Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 2500 ==
-
-  First deploy 132s (install included), rebuild 93s. `/` returns <title>Jeedom
-  (19803 B). admin/admin is refused by the web login ("Mot de passe ou nom
-  d'utilisateur incorrect") and by the JSON-RPC user::getHash ("Echec lors de
-  l'authentification"). The generated login works: "Dashboard - Jeedom" as
-  admin. An object saved through core/ajax/object.ajax.php was read back
-  (id 1). After the rebuild the login and the object are intact, and seed
-  logs "admin/admin is refused". Anonymous object listing returns "401 - Accès
-  non autorisé". /.env, /.git/config and /.env.default return 404;
-  /core/config/common.config.php, /install/*, /backup/, /log/, /data/ and
-  /.ssh/ return 403. Forged X-Forwarded-For / X-Real-IP / CF-Connecting-IP
-  are ignored: a failed login is recorded against the real client address.
-  On the *.panelalpha.online test edge that address is the edge's own, so
-  six failed logins there ban every visitor using the edge for 10 minutes;
-  a real domain is not affected. Memory: jeedom 96 MiB, proxy 13 MiB; the
-  image is 4.8 GB.
 
   The login is returned by GET /projects/{name}/app-credentials (MCP
   app_credentials_get).

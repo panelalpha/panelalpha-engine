@@ -29,10 +29,9 @@ if [ ! -f Dockerfile ] || [ ! -f nginx.conf ] || [ ! -f pnpm-workspace.yaml ]; t
 fi
 
 # ~ is chown root:root on every rebuild (Project.php:813) and ~/project is
-# deleted and re-cloned (engine#173). ~/.panelalpha is the one directory under
-# the home that belongs to the account -- measured on this platform: drwxr-xr-x
-# <account> <account> -- so it is the only place a generated file both survives
-# a deploy and stays readable by the customer.
+# deleted and re-cloned. ~/.panelalpha is the one directory under
+# the home that belongs to the account, so it is the only place a generated
+# file both survives a deploy and stays readable by the customer.
 mkdir -p "${APPDATA}" "${SECRETS}"
 chmod 700 "${DATA_HOME}" "${SECRETS}"
 
@@ -81,10 +80,9 @@ chmod 600 "${PW_FILE}"
 # The image
 # ---------------------------------------------------------------------------
 # This recipe does not build the checkout. Upstream's Dockerfile is a
-# pnpm/turbo monorepo build that took 427s of a 486s deploy on the batch host
-# and dies with "ResourceExhausted: cannot allocate memory" on an 8-core
-# account capped at 7.5 GB -- and, because the engine's generated compose file
-# sits in the build context and changes every redeploy (engine#208), it would
+# pnpm/turbo monorepo build that dies with "ResourceExhausted: cannot allocate
+# memory" within an ordinary account's memory limit -- and, because the engine's generated compose file
+# sits in the build context and changes every redeploy, it would
 # be paid again on every rebuild.
 #
 # The one thing taken from the checkout is the version, so that a customer who

@@ -3,7 +3,7 @@
 services:
   # One-shot: the API cannot start without a Firebase service account (it
   # pushes SMS jobs to the phone over FCM), so the deploy fails here naming
-  # each missing variable. Read from .env, not interpolated (engine#336).
+  # each missing variable. Read from .env, not interpolated.
   check:
     image: redis:7-alpine
     restart: "no"

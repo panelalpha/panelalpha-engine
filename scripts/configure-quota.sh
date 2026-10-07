@@ -2,7 +2,7 @@
 #
 # Turn on user quota for the filesystem that holds /home, so the `setquota` in
 # Project::configureQuota() is enforced. Without this the engine records
-# disk_space_limit / inodes_limit and nothing on the host applies them (#244).
+# disk_space_limit / inodes_limit and nothing on the host applies them.
 #
 # Idempotent, and never fails an install: where quota cannot be turned on it
 # says why and exits 0. Called by installer.sh, bootstrap-from-source.sh and

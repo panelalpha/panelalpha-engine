@@ -2,9 +2,9 @@
 # image razvanilin/chartbrew (pinned to the current release 5.3.2), a mysql:8.4
 # and a redis:7-alpine sidecar on named volumes, and an nginx that folds the
 # app's two ports (SPA :4018 + API :4019) onto one published origin. Seeding a
-# Hub image sidesteps engine#229 (the GHCR/quay docker-save seed stub); Docker
+# Hub image sidesteps the GHCR/quay docker-save seed stub; Docker
 # Hub is pulled normally. Only nginx publishes a host port, so the engine's port
-# scan takes it as the primary app (engine#231/#234); no other service declares
+# scan takes it as the primary app; no other service declares
 # ports or expose. Secrets come from env_files hooks/prepare.sh writes into
 # ~/.panelalpha/chartbrew (../.panelalpha resolves from ~/project).
 services:
@@ -121,8 +121,8 @@ services:
     mem_limit: 128m
 
   # Starts nothing, exits 0, gates the deploy on nginx being healthy AND the
-  # owner being seeded. The engine runs `docker compose up -d` without --wait
-  # (engine#204), so without this the deploy is "done" before the site answers.
+  # owner being seeded. The engine runs `docker compose up -d` without --wait,
+  # so without this the deploy is "done" before the site answers.
   ready:
     image: docker.io/library/alpine:3
     entrypoint: ["/bin/sh", "-c", "exit 0"]

@@ -11,11 +11,10 @@ use PHPUnit\Framework\TestCase;
 /**
  * What a Python image needs installed before pip can build anything.
  *
- * The case that made this necessary, measured on 10.10.10.25: a Django
- * project with `psycopg2-binary` in requirements.txt died on
- * `Error: pg_config executable not found` — pip had no wheel for that
- * interpreter, fell back to the C source, and python:3.12-slim has neither a
- * compiler nor libpq headers.
+ * The case that made this necessary: a Django project with `psycopg2-binary` in
+ * requirements.txt died on `Error: pg_config executable not found` — pip had no
+ * wheel for that interpreter, fell back to the C source, and python:3.12-slim
+ * has neither a compiler nor libpq headers.
  */
 class SystemPackagesTest extends TestCase
 {
@@ -156,10 +155,9 @@ class SystemPackagesTest extends TestCase
     /**
      * The bug this fixes: a Flask quickstart's app.py ends in a bare
      * `app.run()`, which binds 127.0.0.1:5000. Started that way the container
-     * comes up, stays up, and answers nothing on the port the recipe
-     * published -- reported `partial`, with an application that looks healthy
-     * in `docker ps`. Measured on 10.10.10.25 with Azure's Flask quickstart,
-     * which ships gunicorn for exactly this reason.
+     * comes up, stays up, and answers nothing on the port the recipe published
+     * -- reported `partial`, with an application that looks healthy in `docker
+     * ps`. Azure's Flask quickstart ships gunicorn for exactly this reason.
      */
     public function test_a_declared_gunicorn_is_preferred_over_running_the_module(): void
     {

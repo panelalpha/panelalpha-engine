@@ -9,7 +9,7 @@
  *    It is generated once per account by the prepare hook into
  *    ~/.panelalpha/xbackbone/app.key and is deliberately not written into the
  *    checkout's .env there: the engine copies whatever .env the prepare hook
- *    leaves into a world-readable .env.default (engine#173), and an
+ *    leaves into a world-readable .env.default, and an
  *    application key has no business in that file. It is put here instead,
  *    after that copy has been taken.
  *

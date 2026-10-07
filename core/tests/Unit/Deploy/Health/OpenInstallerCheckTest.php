@@ -12,7 +12,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
- * `_baseline/not-an-open-installer` against real pages (#200).
+ * `_baseline/not-an-open-installer` against real pages.
  *
  * Every fixture is the first ProbedResponse::SAMPLE_BYTES of a page captured
  * on 2026-09-24 from the application's own image: dolibarr/dolibarr 24.0.0,

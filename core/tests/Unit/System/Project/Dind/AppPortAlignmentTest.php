@@ -191,7 +191,7 @@ class AppPortAlignmentTest extends TestCase
     }
 
     /**
-     * Engine #88: sockets over time, one list per poll; the last repeats.
+     * Sockets over time, one list per poll; the last repeats.
      *
      * @param list<list<int>> $timeline
      * @param list<int> $declared
@@ -260,7 +260,7 @@ class AppPortAlignmentTest extends TestCase
     }
 
     /**
-     * SignServer CE / #88: the only other socket in the window does not speak
+     * SignServer CE: the only other socket in the window does not speak
      * HTTP (epmd, php-fpm, a loopback-only observer). Forwarding there leaves
      * the site dead for good, so the published port stays.
      */
@@ -286,7 +286,7 @@ class AppPortAlignmentTest extends TestCase
         $this->assertNull(AppPortAlignment::answersHttp('curl: not found'));
     }
 
-    /** epmd and unprivileged SSH are never front doors (#259). */
+    /** epmd and unprivileged SSH are never front doors. */
     public function test_non_web_ports_are_never_chosen(): void
     {
         [$port] = $this->awaitOver(4000, [[4369, 2222]]);
@@ -302,7 +302,7 @@ class AppPortAlignmentTest extends TestCase
         $this->assertSame(5000, $port);
     }
 
-    /** engine#88: php-fpm on 9000 outranks the real server on 8081, and is never HTTP. */
+    /** php-fpm on 9000 outranks the real server on 8081, and is never HTTP. */
     public function test_the_next_candidate_is_tried_when_the_first_does_not_answer_http(): void
     {
         $probed = [];

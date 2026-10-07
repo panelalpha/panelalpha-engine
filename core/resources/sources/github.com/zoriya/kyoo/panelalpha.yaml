@@ -6,7 +6,7 @@ description: >-
   token" forward auth. The repository's docker-compose.yml builds every
   service from source under `:edge` tags, reads host paths from .env and runs
   that router as Traefik on the Docker socket; the engine drops any traefik
-  service (engine#334), which leaves the stack with no entry point.
+  service, which leaves the stack with no entry point.
 
   This recipe runs the published images of the current release, v5.2.1
   (pinned by digest), as upstream's release compose does, with upstream's

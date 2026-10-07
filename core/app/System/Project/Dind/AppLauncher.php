@@ -453,12 +453,11 @@ final class AppLauncher
      * post-condition does not hold -- can run, print its refusal, exit 1, and
      * the deploy is still reported successful.
      *
-     * Measured on Manticore (supported-apps#297) with authentication
-     * deliberately switched off: `ready` exited 1, `up -d` exited 0, the
-     * rebuild endpoint returned success, and the account was published with
-     * an unauthenticated writable search engine on it. The thing the gate
-     * existed to prevent is exactly what shipped. Baikal (#274), Mattermost
-     * (#47) and Dolibarr (#307) all rely on a gate to close a
+     * Manticore with authentication switched off shows it: `ready` exits 1,
+     * `up -d` exits 0, the rebuild endpoint returns success, and the account
+     * is published with an unauthenticated writable search engine on it. The
+     * thing the gate exists to prevent is exactly what ships. Baikal,
+     * Mattermost and Dolibarr all rely on a gate to close a
      * first-visitor-wins installer before the port opens.
      *
      * Reading exit codes after the fact rather than passing `--wait`: `--wait`
@@ -745,7 +744,7 @@ final class AppLauncher
 
     /**
      * What the containers compose gave up on printed, to lead the failure
-     * instead of `dependency failed to start` (engine#97). Empty when compose
+     * instead of `dependency failed to start`. Empty when compose
      * named none, or their output could not be read.
      */
     private function failedDependencyCause(string $composeOutput): string
@@ -860,7 +859,7 @@ final class AppLauncher
     {
         $details = $this->project->userModel()->getDetails();
         foreach ((array) ($details[AppHealth::DETAIL_CHECKS] ?? []) as $check) {
-            // A container that is up and silent printed why, too (engine#90).
+            // A container that is up and silent printed why, too.
             if (is_array($check) && in_array($check['id'] ?? null, [AppHealth::CHECK_RESTART_LOOPING, SilentPortCheck::ID], true)) {
                 return true;
             }

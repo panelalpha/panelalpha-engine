@@ -7,7 +7,7 @@
 # the local-dev heuristic in ComposeFileInspector). The dedicated `build`
 # service builds the image with no mounts; web/worker/cron/init reference the
 # tag. Only the web service publishes a host port, so the engine's port scan
-# takes 3000 as the primary (engine#231).
+# takes 3000 as the primary.
 services:
   # Builds the app image from the repo Dockerfile and exits. No bind mount, so
   # the file is not read as a workstation compose. imageRefs recognises a
@@ -98,7 +98,7 @@ services:
     image: foodsoft-local:latest
     restart: unless-stopped
     # Puma binds :3000 (Procfile `web`, PORT=3000 in the image). Publish it on
-    # 3000 so the engine's port scan takes 3000 as the primary (engine#231).
+    # 3000 so the engine's port scan takes 3000 as the primary.
     ports:
       - "3000:3000"
     depends_on:
@@ -178,8 +178,7 @@ services:
 
   # Starts nothing, exits 0, waits on web's healthcheck. `docker compose up -d`
   # blocks on a depends_on health condition, so this makes `up` return only once
-  # the site actually answers, rather than the moment containers start
-  # (engine#204).
+  # the site actually answers, rather than the moment containers start.
   ready:
     image: docker.io/library/alpine:3
     entrypoint: ["/bin/sh", "-c", "exit 0"]

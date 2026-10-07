@@ -8,8 +8,8 @@ cd ~/project
 
 say() { echo "[habitat] $*" >&2; }
 
-# ~/.panelalpha/habitat/ survives; ~/project is emptied on every deploy
-# (engine#173), so a secret written there would be regenerated on every rebuild
+# ~/.panelalpha/habitat/ survives; ~/project is emptied on every deploy,
+# so a secret written there would be regenerated on every rebuild
 # -- a new APP_SECRET/ENCRYPTION_KEY logs everyone out and strands encrypted
 # Settings values, and a new DB password locks the app out of the pgdata volume
 # that still holds the old one. db.env holds only what postgres needs on its

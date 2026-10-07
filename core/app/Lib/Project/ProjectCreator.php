@@ -385,7 +385,7 @@ class ProjectCreator
     /**
      * Two creates of one name can both pass the checks in provision(); the
      * unique index picks the winner, and the loser gets the 422 a sequential
-     * duplicate gets instead of a 500 (engine#8). One transaction, so the
+     * duplicate gets instead of a 500. One transaction, so the
      * loser leaves no user row without its main domain.
      *
      * @param \Closure(User): Domain $mainDomain

@@ -6,7 +6,7 @@
 # that already exists. The one at .github/docker/docker-compose.yml is the CI
 # harness and pulls docker.centreon.com/centreon/centreon-web-alma9, a registry
 # that answers "authorization failed: no basic auth credentials" to an
-# anonymous pull -- measured. So the Central has to be built, and it is, from
+# anonymous pull. So the Central has to be built, and it is, from
 # the repository's own Dockerfile; see files/Dockerfile.panelalpha.
 #
 # Two services and a gate. Centreon's Central is a single container by design:
@@ -21,7 +21,7 @@ services:
     # (foreign_key_checks, innodb_flush_log_at_trx_commit) that only a server
     # it owns will let it change. `database: mysql` in the manifest would have
     # been the way to ask the engine for one and is silently inert outside
-    # `runtime: php` (panelalpha/engine#210), so it is declared here in full.
+    # `runtime: php`, so it is declared here in full.
     image: ${CENTREON_DB_IMAGE:-mariadb:11.4}
     restart: unless-stopped
     command:
@@ -71,8 +71,7 @@ services:
       # service for a datastore: InternalPorts::isDatastore() asks
       # SidecarEngine::resolve(), and a MYSQL_HOST makes
       # CredentialNames::isClientPrefix() true -- "a client of a MySQL, not a
-      # MySQL". That cost the Zabbix recipe a 502 before it was understood
-      # (panelalpha/engine#214). Here the image name carries no datastore word,
+      # MySQL". Here the image name carries no datastore word,
       # so this is belt and braces -- and true either way.
       MYSQL_HOST: db
       MYSQL_ROOT_PASSWORD: ${CENTREON_DB_ROOT_PASSWORD}
@@ -85,7 +84,7 @@ services:
       # Upstream's starter configuration: one host, "Centreon-Server", with
       # Ping, CPU, Memory, Load and Disk-/ services against 127.0.0.1. It is
       # what makes a fresh account open on a working monitor instead of an
-      # empty one, and it is how this recipe was verified. Set to 0 for an
+      # empty one. Set to 0 for an
       # empty Centreon. Read the CPU/Memory/Load values with the caveat in
       # panelalpha.yaml: /proc is not namespaced.
       CENTREON_DATASET: ${CENTREON_DATASET:-1}
@@ -100,9 +99,7 @@ services:
     # ComposeFileInspector::isLocalDevCompose() calls a workstation file: the
     # compose probe then declines the file, `dockerfile` wins on priority 970,
     # and the stack deploys as a single container with the db and the gate
-    # bolted on. Measured, with `./panelalpha:/panelalpha:ro` present:
-    # "Detected project type: Dockerfile", "Using strategy: dockerfile",
-    # "Keeping runtime services from compose: db, ready", port 8080.
+    # bolted on.
     volumes:
       # centreon.conf.php -- which holds the database password -- plus the
       # engine and broker configuration. Its presence is also what tells
@@ -114,13 +111,12 @@ services:
       # Not optional, and the reason is only visible on the second deploy.
       # 40-gorgoned.yaml is *not* in the image: the installer writes it, in the
       # block that step 15 skips once /etc/centreon/centreon.conf.php exists.
-      # Without this volume a rebuild came up with no gorgone config at all --
-      # measured: "sed: can't read
-      # /etc/centreon-gorgone/config.d/40-gorgoned.yaml: No such file or
-      # directory" in the container log, gorgoned `inactive (dead)`, and with
-      # it the only path the UI has for applying a configuration change.
-      # Centreon still monitored what it already knew about, which is exactly
-      # how this would reach a customer unnoticed.
+      # Without this volume a rebuild comes up with no gorgone config at all
+      # ("sed: can't read /etc/centreon-gorgone/config.d/40-gorgoned.yaml: No
+      # such file or directory"), gorgoned stays dead, and with it the only
+      # path the UI has for applying a configuration change. Centreon still
+      # monitors what it already knows about, which is exactly how this would
+      # reach a customer unnoticed.
       - centreon_gorgone_etc:/etc/centreon-gorgone
       - centreon_gorgone_varlib:/var/lib/centreon-gorgone
       # The RRD files. Graphs are here, not in the database: lose this and the
@@ -148,19 +144,19 @@ services:
     # workers; a Centreon Central is six daemons in a trench coat -- httpd
     # (6), php-fpm (3), cbd and cbwd (3), centengine, snmpd, crond, and
     # gorgone, which forks roughly fifteen Perl workers of its own -- and
-    # centengine forks a plugin process per check on top. Measured at 256: a
-    # single `systemctl restart gorgoned`, which briefly doubles the gorgone
-    # workers, took the container over and centengine's checks started
-    # returning "(Execute command failed) ... fail to start
+    # centengine forks a plugin process per check on top. At 256 a single
+    # `systemctl restart gorgoned`, which briefly doubles the gorgone workers,
+    # exhausts the limit and centengine's checks start returning
+    # "(Execute command failed) ... fail to start
     # /usr/lib64/nagios/plugins/check_icmp: Resource temporarily
     # unavailable". A monitoring system that reports UNKNOWN because it could
     # not fork is worse than one that is down.
     pids_limit: 1024
 
-  # Does nothing and exits 0. `docker compose up -d` runs without --wait
-  # (panelalpha/engine#204), so without this the deploy is "finished" when the
-  # containers have been created -- which here is a good two minutes before
-  # Centreon answers, and before the admin password has been rotated. Compose
+  # Does nothing and exits 0. `docker compose up -d` runs without --wait,
+  # so without this the deploy is "finished" when the
+  # containers have been created -- which here is long before Centreon
+  # answers, and before the admin password has been rotated. Compose
   # does block on a depends_on health condition, so waiting here makes `up -d`
   # return only once the Central is up. A clean exit 0 is explicitly not a
   # crash loop to AppHealth::isCrashing().

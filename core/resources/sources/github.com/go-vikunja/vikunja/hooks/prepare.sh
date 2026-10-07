@@ -42,8 +42,8 @@ cp "${STORE}/secret.env" .env
 chmod 600 .env
 
 # The version mage stamps into the binary. Without RELEASE_VERSION it runs
-# `git describe`, and the engine leaves .git out of the build context
-# (engine#413), so the build dies with "not a git repository". Read here,
+# `git describe`, and the engine leaves .git out of the build context,
+# so the build dies with "not a git repository". Read here,
 # where .git is still present; the override passes it as a build arg.
 RELEASE_VERSION=$(git -c safe.directory="$PWD" describe --tags --always --abbrev=10 2>/dev/null || true)
 printf 'RELEASE_VERSION=%s\n' "${RELEASE_VERSION:-dev}" >> .env

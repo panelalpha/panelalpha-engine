@@ -32,8 +32,8 @@ kernel OOM-kills it (`Killed process … (webpack) anon-rss:5080820kB` against a
 Chamilo's own web installer. Database step: host `db`, port 3306, user
 `chamilo`, database `chamilo`, password = `MARIADB_PASSWORD` from
 `~/.panelalpha/chamilo/db.env`. The install step takes about a minute; on a
-`*.panelalpha.online` address the front cuts the request after ~10s
-(engine#170), but the install carries on in the app: reload after a minute.
+`*.panelalpha.online` address the front cuts the request after ~10s,
+but the install carries on in the app: reload after a minute.
 
 Bumping: change `CHAMILO_VERSION` and `CHAMILO_SHA256` together. The new
 release is unpacked over the old tree, which keeps `.env`,

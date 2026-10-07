@@ -5,7 +5,7 @@
 # (HTTP_USER/HTTP_PASS empty) — a public deploy with no auth is world-
 # controllable. This hook writes config.ini with BASIC auth turned on, into the
 # account's persistent ~/.panelalpha (the only rebuild-surviving writable dir;
-# ~/project is wiped every redeploy, engine#173). The login is the engine's
+# ~/project is wiped every redeploy). The login is the engine's
 # (`credentials:` in panelalpha.yaml, ~/.panelalpha/app-credentials.env, written
 # before this hook runs); the API key is generated ONCE here. Neither is ever
 # placed in ~/project.

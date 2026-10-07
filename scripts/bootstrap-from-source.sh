@@ -104,7 +104,7 @@ command -v ssh-keygen >/dev/null || MISSING+=(openssh-client)
 command -v curl >/dev/null || MISSING+=(curl)
 command -v rsync >/dev/null || MISSING+=(rsync)
 command -v ipcalc >/dev/null || MISSING+=(ipcalc)
-# engine#529, as in installer.sh: its nftables.service stays disabled.
+# As in installer.sh: its nftables.service stays disabled.
 command -v nft >/dev/null || MISSING+=(nftables)
 # As in installer.sh: the engine queues its background webserver reloads with `at`.
 command -v at >/dev/null || MISSING+=(at)
@@ -281,7 +281,7 @@ docker network inspect pash-default-network >/dev/null 2>&1 || {
     step "Creating pash-default-network"
     bash scripts/ensure-docker-network.sh "${DOCKER_NETWORK_MTU}"
 }
-# engine#519: the accounts' network; sites-db and the registries join it.
+# The accounts' network; sites-db and the registries join it.
 DOCKER_NETWORK_MTU="${DOCKER_NETWORK_MTU}" bash scripts/tenant-network-firewall.sh --create --restart-docker \
     || warn "Could not create the tenant network"
 # Closed from boot until core binds it, not only from when core starts.
@@ -457,12 +457,12 @@ if [ "$HARDEN" = 1 ]; then
     bash scripts/configure-monit.sh || warn "monit configuration failed"
     bash scripts/firewall.sh --install || warn "Firewall setup failed"
     service docker restart || warn "Could not restart Docker"
-    # engine#246, as in installer.sh: the build network, while Docker's chains are fresh.
+    # As in installer.sh: the build network, while Docker's chains are fresh.
     bash scripts/build-network-firewall.sh --create panelalpha-build || warn "Could not create the build network"
     bash scripts/tenant-network-firewall.sh --create --restart-docker || warn "Could not apply the tenant network firewall"
 fi
 
-# Same as installer.sh: without it no project disk limit is enforced (#244).
+# Same as installer.sh: without it no project disk limit is enforced.
 if [ "$QUOTA" = 1 ]; then
     step "Turning on filesystem quota for /home"
     bash scripts/configure-quota.sh || warn "Could not turn on filesystem quota; project disk limits will not be enforced"
@@ -479,7 +479,7 @@ step "Disabling the host's path-attached AppArmor profiles"
 bash scripts/configure-apparmor.sh || warn "Could not disable the host's path-attached AppArmor profiles; tenant binaries at those paths stay confined"
 
 step "Starting the stack"
-# As in installer.sh: sites-db and the registries join pash-tenants (engine#519).
+# As in installer.sh: sites-db and the registries join pash-tenants.
 docker network inspect pash-tenants >/dev/null 2>&1 || {
     echo "The accounts' network pash-tenants could not be created; the tenant-network-firewall messages above say why." >&2
     exit 1
@@ -499,7 +499,7 @@ step "Running migrations"
 docker compose exec -T core php artisan migrate --force
 
 step "Moving accounts onto the tenant network"
-# engine#519, as in installer.sh: live, and never fails the bootstrap.
+# As in installer.sh: live, and never fails the bootstrap.
 docker compose exec -T core php artisan project:network:move --all || warn "Some accounts could not be moved onto the tenant network"
 
 step "Pointing Exim at this host's Docker addresses"

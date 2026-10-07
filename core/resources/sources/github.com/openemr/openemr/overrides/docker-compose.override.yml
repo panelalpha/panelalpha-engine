@@ -14,8 +14,8 @@
 #
 # There is no database service here on purpose. `database: mysql` in
 # panelalpha.yaml gets one on the account's own MySQL server: visible in the
-# panel, openable in phpMyAdmin, inside the account's backup, and costing this
-# 3.7 GB host neither a container nor a volume. OpenEMR's own compose files --
+# panel, openable in phpMyAdmin, inside the account's backup, and costing the
+# host neither a container nor a volume. OpenEMR's own compose files --
 # docker/development-easy/docker-compose.yml and the seven others under
 # docker/ -- are development stacks that build their own image from
 # docker/release/Dockerfile and are not used by any of this.
@@ -28,9 +28,9 @@ services:
       # declared" and runs detect() -- which probes `public web public_html
       # webroot` before the root and stops at OpenEMR's public/index.php. So
       # `docroot: .` in panelalpha.yaml is a no-op that reads like a decision,
-      # and the recipe would silently get /app/public anyway. (Measured: with
-      # `docroot: .` set, the generated compose file still said
-      # `PA_DOCROOT: /app/public`.) Leaving PA_DOCROOT unset is no better --
+      # and the recipe would silently get /app/public anyway: with
+      # `docroot: .` set, the generated compose file still says
+      # `PA_DOCROOT: /app/public`. Leaving PA_DOCROOT unset is no better --
       # panelalpha-serve.sh's own fallback is `[ -d /app/public ] &&
       # PA_DOCROOT=/app/public`, the same wrong answer from the other side.
       #
@@ -56,8 +56,8 @@ services:
 
     # The install stage does all of OpenEMR's setup before Apache binds --
     # sites/default/sqlconf.php, the 700-table schema, the globals, the ACL
-    # tree, the language pack and the first administrator -- which on this host
-    # is about 30 seconds on top of a boot. The engine runs `docker compose up
+    # tree, the language pack and the first administrator -- on top of a boot.
+    # The engine runs `docker compose up
     # -d` without --wait and probes as soon as it returns, which is while that
     # is still going: nothing is listening and the probe reads `Failed to
     # connect to 127.0.0.1 port 8000`.
@@ -95,21 +95,17 @@ services:
       interval: 20s
       timeout: 90s
       retries: 20
-      # The install, before Apache binds. Measured on mariusz2 (2 cores,
-      # 3.7 GB, --memory-limit=1800): quick_install() returns in about 30s,
-      # of which the dump files -- 6,408 schema statements plus the 23.6 MB
-      # language pack's 237,511 single-row INSERTs, one mysqli_query each --
-      # are roughly 20s. That is much faster than the shape of the code
-      # suggests, because `database-users.shared-hosting.palocal` is one
-      # bridge away rather than a real network hop and the whole load runs in
-      # one transaction with autocommit off.
+      # The install, before Apache binds. The dump files -- 6,408 schema
+      # statements plus the 23.6 MB language pack's 237,511 single-row
+      # INSERTs, one mysqli_query each -- load much faster than the shape of
+      # the code suggests, because `database-users.shared-hosting.palocal` is
+      # one bridge away rather than a real network hop and the whole load runs
+      # in one transaction with autocommit off.
       #
-      # 600s is therefore ~20x the measured figure, and it costs nothing: a
-      # check that passes inside the start period marks the container healthy
-      # immediately, and a check that fails inside it neither counts against
-      # retries nor marks the container unhealthy. The margin is for a host
-      # running someone else's webpack build at the same time, which is the
-      # normal state of this one.
+      # 600s is a wide margin, and it costs nothing: a check that passes inside
+      # the start period marks the container healthy immediately, and a check
+      # that fails inside it neither counts against retries nor marks the
+      # container unhealthy. The margin is for a busy host.
       start_period: 600s
 
   # Does nothing and exits 0. Compose does not wait for a healthcheck on its

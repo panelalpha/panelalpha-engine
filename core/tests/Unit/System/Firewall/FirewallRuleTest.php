@@ -136,7 +136,7 @@ class FirewallRuleTest extends TestCase
 
     public function test_a_comment_ufw_would_read_as_part_of_the_rule_is_refused(): void
     {
-        // Measured with `ufw --dry-run` on ufw 0.36.2, as the engine writes a host rule and a route rule.
+        // Per `ufw --dry-run` (ufw 0.36.2), for a host rule and a route rule as the engine writes them.
         $host = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '25392', 'source' => '192.0.2.150']);
         $published = $host->with(['scope' => 'published']);
         $deny = FirewallRule::fromArray(['action' => 'deny', 'source' => '192.0.2.150']);

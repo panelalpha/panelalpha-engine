@@ -103,7 +103,7 @@ class SharedBaseImages
     /**
      * A variant carrying system packages is never deferred and never swapped
      * for the plain base: the plain base has no ffmpeg, so a green deploy on it
-     * accepts uploads it can never convert (ClipBucket, engine#193). The first
+     * accepts uploads it can never convert (ClipBucket). The first
      * deploy of a set waits for the build; one that cannot get it fails.
      *
      * @param list<string> $extras

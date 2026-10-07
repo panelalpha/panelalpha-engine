@@ -141,7 +141,7 @@ class UserComposeStrategy
             );
         }
         // The run file sits at the root, so a file kept under docker/ has its
-        // relative paths rewritten to mean the same from there (engine#91).
+        // relative paths rewritten to mean the same from there.
         $nested = NestedCompose::relativeDir($composePath, $projectDir);
         if ($nested !== null) {
             $parsed = NestedCompose::rebase($parsed, $nested);
@@ -390,7 +390,7 @@ class UserComposeStrategy
      * over the run file, copied with its escapes removed to a name the engine
      * owns ({@see Paths::composeFiles()} layers the copy). It used to be
      * layered as written, bringing back `privileged:` and host mounts the run
-     * file had just been cleared of (engine#48, item 9).
+     * file had just been cleared of.
      *
      * @param array<string, list<?string>> $env
      * @param list<string> $droppedServices services the run file no longer has

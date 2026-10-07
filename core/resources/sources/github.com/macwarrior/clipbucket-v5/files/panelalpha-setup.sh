@@ -51,14 +51,14 @@ if ! mountpoint -q /app/upload/files 2>/dev/null; then
     # only the mount can have.
     if [ ! -d /data/files ]; then
         log "/app/upload/files is not the bind mount and /data/files does not exist;" >&2
-        log "check the volumes in overrides/docker-compose.override.yml (engine#173)." >&2
+        log "check the volumes in overrides/docker-compose.override.yml." >&2
         exit 1
     fi
 fi
 
 # 1. upload/includes/config.php -- the database the engine provisioned. Written
 #    every time rather than only when missing: every deploy re-clones over
-#    ~/project (engine#173), so there is never a file here to preserve, and the
+#    ~/project, so there is never a file here to preserve, and the
 #    values the container was handed are by definition the ones that work.
 php /app/panelalpha-install.php config
 

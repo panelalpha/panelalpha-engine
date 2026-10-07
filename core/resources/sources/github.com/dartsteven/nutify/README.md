@@ -4,7 +4,7 @@ UPS monitoring dashboard on top of NUT (Flask + Socket.IO, SQLite, :5050).
 
 Plain deploy: the repository's `docker-compose.yaml` runs with
 `cap_drop: ALL` plus a `cap_add` list. The engine keeps the drop and strips the
-add (engine#349), so the entrypoint fails with `chown: changing ownership of
+add, so the entrypoint fails with `chown: changing ownership of
 '/etc/nut': Operation not permitted` and `settings.txt: Permission denied`,
 and the container loops on `Restarting (1)`.
 
@@ -35,4 +35,4 @@ Upstream quirks found while testing (not caused by the recipe):
   wizard instead.
 - The wizard's `ups.conf` template adds `pollfreq`, which `dummy-ups` rejects.
 - `/internal/ws_event` treats the first `X-Forwarded-For` entry as loopback
-  proof (see engine#319).
+  proof.

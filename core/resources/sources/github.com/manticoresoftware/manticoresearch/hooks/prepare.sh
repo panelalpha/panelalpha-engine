@@ -29,7 +29,7 @@ fi
 #
 # In ~/.panelalpha/manticore/, 0600 in a 0700 directory, which survives the
 # clone: ProjectEnvironment::apply() republishes ~/project/.env as .env.default
-# at mode 644 (engine#173).
+# at mode 644.
 STORE_DIR="${HOME}/.panelalpha/manticore"
 ENV_STORE="${STORE_DIR}/manticore.env"
 
@@ -80,8 +80,8 @@ fi
 # credential reaches the containers through the second env_file instead.
 cat > .env <<EOF
 # Written by PanelAlpha. Compose reads this for \${...} substitution. Nothing
-# secret belongs here: the engine copies this file to .env.default at mode 644
-# (engine#173). This account's Manticore login is in
+# secret belongs here: the engine copies this file to .env.default at mode 644.
+# This account's Manticore login is in
 # ~/.panelalpha/app-credentials.env at 0600.
 MANTICORE_IMAGE=manticoresearch/manticore:29.9.0
 EOF

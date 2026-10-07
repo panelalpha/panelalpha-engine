@@ -5,10 +5,10 @@ namespace App\System\Project\Dind;
 use App\System\ComposeProject;
 
 /**
- * Egress rules inside a DinD account, for the code the tenant runs (engine#217).
+ * Egress rules inside a DinD account, for the code the tenant runs.
  *
  * A second layer. The boundary is the host's firewall on pash-tenants
- * ({@see \App\Lib\Deploy\Dind\TenantNetwork}, engine#519): the tenant holds
+ * ({@see \App\Lib\Deploy\Dind\TenantNetwork}): the tenant holds
  * the inner Docker socket, and a privileged `--net=host` container of their
  * own edits these rules. Accounts not yet moved off pash-default-network,
  * which they share with core, SFTP, FTP and phpMyAdmin, have only this one.
@@ -96,7 +96,7 @@ final class TenantEgressGuard
 
     private const TEMPLATE = <<<'SH'
 #!/bin/sh
-# engine#217: what the tenant's code may reach on the account's network and on
+# What the tenant's code may reach on the account's network and on
 # the host. Rendered by the engine (TenantEgressGuard); do not edit here.
 # Always exits 0 -- entrypoint.sh runs this at boot under set -e.
 

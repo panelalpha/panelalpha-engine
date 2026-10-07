@@ -26,17 +26,6 @@ description: >-
   are only reachable through the logged-in API. users.json, sessions and logs
   live on the `private` volume, so logins and users survive redeploys. A
   `ready` service gates on the app answering.
-
-  Measured on mariusz2.panelalpha.tools (2026-09-28, engine 705f250a,
-  memory_limit 1200): deploy 63s, rebuild 26-28s, app 21 MiB. admin/admin123,
-  guest and a wrong password: 422 "Login failed"; the generated admin logs in
-  as role admin. Uploaded a .txt and a .php, listed and downloaded both
-  byte-for-byte; anonymous download 404; /pa-shell.php, /repository/...,
-  /private/users.json, /configuration.php, /.env, /.git/config, /vendor/... 404.
-  After rebuild the files and the password were intact, and a password changed
-  through the app survived a further rebuild. Uploads must be tested against
-  the engine host: the *.panelalpha.online test edge stalls multipart POSTs
-  (panelalpha/engine#170).
 credentials:
   adopt_from: .panelalpha/filegator/admin.env
   fields:

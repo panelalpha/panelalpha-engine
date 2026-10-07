@@ -177,7 +177,7 @@ class DeployStrategy
 
     /**
      * Once `.env` is final: keep the engine's files out of a repository
-     * Dockerfile's build context (engine#162).
+     * Dockerfile's build context.
      *
      * @param array<string, mixed> $decision
      */

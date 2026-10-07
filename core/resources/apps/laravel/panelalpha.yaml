@@ -41,7 +41,7 @@ commands:
     optional: true
   - id: key-generate
     stage: install
-    description: 'Only on first deploy — regenerating APP_KEY later would invalidate every existing session and encrypted column. Skipped when the container already has a key: the engine writes one into .env, the env_file, and key:generate would only rewrite that file under the running app, so the next restart would run on a different key (#178).'
+    description: 'Only on first deploy — regenerating APP_KEY later would invalidate every existing session and encrypted column. Skipped when the container already has a key: the engine writes one into .env, the env_file, and key:generate would only rewrite that file under the running app, so the next restart would run on a different key.'
     # key:generate exits 0 when .env has no APP_KEY line to fill (or, before
     # Laravel 10, without a word), and migrate then ran with no key; stop here instead.
     run: 'case "${APP_KEY:-}" in base64:?*) echo "APP_KEY is already set; not generating one" ;; *) php artisan key:generate --force --no-interaction && grep -qs "^APP_KEY=base64:" .env ".env.${APP_ENV:-production}" || { echo "key:generate did not write an APP_KEY into .env; stopping before migrate" >&2; exit 1; } ;; esac'

@@ -39,7 +39,7 @@ class NewProjectDetailsTest extends TestCase
     /**
      * The asymmetry that already exists on disk: an unset disk limit is stored
      * as -1, every other unset limit as null -- except memory, which every
-     * project has and which falls back to the host default (#294).
+     * project has and which falls back to the host default.
      */
     public function test_an_unset_disk_limit_is_minus_one_and_the_rest_are_null(): void
     {

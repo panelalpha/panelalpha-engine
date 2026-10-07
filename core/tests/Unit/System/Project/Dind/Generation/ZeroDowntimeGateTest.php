@@ -20,7 +20,7 @@ use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
 /**
- * engine#700: the zero-downtime gate deciding on an empty page, run through
+ * The zero-downtime gate deciding on an empty page, run through
  * plan() and begin() against a scripted account, on a fake clock.
  */
 class ZeroDowntimeGateTest extends TestCase

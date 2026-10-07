@@ -405,7 +405,7 @@ final class DeploymentWorkflow
             : $logger?->finish(DeployLogger::STATUS_PARTIAL, implode(' | ', $warnings));
     }
 
-    /** A fallback domain that still works: said in the log, not a warning (#79). */
+    /** A fallback domain that still works: said in the log, not a warning. */
     private static function logDomainNotices(?DeployLogger $logger, $user): void
     {
         foreach (PublicUrl::notices((string) $user->domain, $user->getDetails()) as $notice) {

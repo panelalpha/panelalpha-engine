@@ -29,14 +29,6 @@ description: >-
   add a media volume yourself. The login is returned by GET
   /projects/{name}/app-credentials; accounts deployed before this kept it in
   ~/.panelalpha/lingarr/admin.env, which `adopt_from` carries over.
-
-  Measured on mariusz.panelalpha.tools (2026-09-28): deploy 40s, rebuild 24s;
-  app 70 MiB, proxy 8 MiB. Anonymous POST signup/onboarding (also as
-  /api/Auth/SignUp, //api//auth//signup, /api/auth/%73ignup) and /signalr
-  negotiate or websocket -> 401 at the proxy; the same signup sent straight to
-  app:9876 -> 200, which is what the proxy exists to stop. Websockets pass
-  through the engine's webserver (101 authed); the *.panelalpha.online test
-  edge strips Upgrade (engine#170) and SignalR falls back to long polling.
 credentials:
   adopt_from: .panelalpha/lingarr/admin.env
   fields:

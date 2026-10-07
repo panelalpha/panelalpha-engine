@@ -34,7 +34,7 @@ final class ComposeEnvironment
     /**
      * A stable secret per account, for an app that would otherwise derive one
      * from its install path: every account's app is at `/app`, so a salt or
-     * session name taken from `__DIR__` is the same on every tenant (engine#175).
+     * session name taken from `__DIR__` is the same on every tenant.
      */
     public const INSTANCE_SECRET = 'PA_INSTANCE_SECRET';
 

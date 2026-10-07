@@ -15,7 +15,7 @@ use Symfony\Component\Process\Process;
 
 /**
  * After a Rust host compile, the binary is checked in the image it will run
- * in (#92). Only a gap costs the build-image copy and the second check; a
+ * in. Only a gap costs the build-image copy and the second check; a
  * binary slim can run gets one container and nothing else.
  */
 class HostCompileRustLibrariesTest extends TestCase

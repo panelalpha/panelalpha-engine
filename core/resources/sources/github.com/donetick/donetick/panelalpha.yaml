@@ -18,7 +18,7 @@ description: >-
   Docker Hub and tags every release. This recipe runs the official image with a
   compose-replace, pinned to the current stable release v0.1.79 (which is also
   what Docker Hub's `latest` points at). Seeding a Hub image also sidesteps
-  engine#229 (image-seed NotFound on a from-registry seed).
+  the image-seed NotFound on a from-registry seed.
 
   WHY COMPOSE-REPLACE. There is no datastore sidecar to add -- SQLite is
   embedded -- but the app still needs two things the bare detection cannot give
@@ -45,7 +45,7 @@ description: >-
   must be a real random value and must stay stable across redeploys or every
   session token is invalidated. hooks/prepare.sh generates it once into
   ~/.panelalpha/donetick/donetick.env (0600 in 0700) -- the only writable,
-  rebuild-surviving place, since ~/project is wiped on every deploy (engine#173)
+  rebuild-surviving place, since ~/project is wiped on every deploy
   -- and never regenerates it.
 
   REGISTRATION POSTURE. is_user_creation_disabled is left false: Donetick has no
@@ -61,4 +61,4 @@ description: >-
   A curl healthcheck on the unauthenticated /health endpoint plus a no-op
   `ready` service gated on service_healthy make `compose up` block until
   Donetick actually answers, so the engine's "deploy finished" is honest
-  (engine#204: up -d returns before the app is up).
+  (up -d returns before the app is up).

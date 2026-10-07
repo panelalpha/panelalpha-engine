@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 /**
- * engine#633: what the six-hourly sweep counts as not serving, and what it
+ * What the six-hourly sweep counts as not serving, and what it
  * leaves alone.
  */
 class HealthReportSweepTest extends TestCase

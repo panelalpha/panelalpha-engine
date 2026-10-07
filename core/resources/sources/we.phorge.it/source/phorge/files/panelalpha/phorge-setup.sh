@@ -3,15 +3,15 @@
 # healthcheck can pass. Everything here is idempotent: the upgrade stage
 # replays it on every redeploy, over an account that already has data.
 #
-# `stage: build` is not an option -- those commands are inert (engine defect
-# #171) -- and would be wrong anyway: there is no image build for a bind-mounted
+# `stage: build` is not an option -- those commands are inert --
+# and would be wrong anyway: there is no image build for a bind-mounted
 # PHP app, and none of this is knowable before the database container is up.
 set -e
 cd /app
 
 # The secrets directory, bind-mounted read-only from ~/.panelalpha/phorge by
 # overrides/docker-compose.override.yml. Outside ~/project because ~/project is
-# wiped and re-cloned on every deploy (engine defect #173) while the database
+# wiped and re-cloned on every deploy while the database
 # volume is not.
 if [ ! -r /panelalpha/db.env ]; then
     echo "[phorge] /panelalpha/db.env is not readable; is the bind mount in" >&2
@@ -49,7 +49,7 @@ php panelalpha/phorge-db-secure.php
 # 2. Configuration, into conf/local/local.json.
 #
 #    Rewritten on every deploy rather than only the first, because the clone
-#    wipes conf/local/ along with the rest of ~/project (engine defect #173).
+#    wipes conf/local/ along with the rest of ~/project.
 #    An account whose database is full of work would otherwise come back with
 #    no idea where its database is.
 #
@@ -80,7 +80,7 @@ fi
 ./bin/config set phabricator.base-uri "$APP_URL"
 
 # The engine's health probe, and the reason a deploy that works is otherwise
-# reported as `serving-error_page`.
+# reported as `serving: error_page`.
 #
 # Phorge picks a "site" by matching the request's Host against
 # `phabricator.base-uri`, `phabricator.production-uri` and this list
@@ -88,9 +88,9 @@ fi
 # answered with a 500 "Site Not Found" page
 # (AphrontApplicationConfiguration::buildSiteForRequest, line 545). AppHealth
 # probes `http://127.0.0.1:8000/`, whose Host is `127.0.0.1:8000` and matches
-# nothing -- so a completely healthy install scored `serving-error_page` with
-# an HTTP 500 on port 8000 while the public domain served the login page.
-# (Measured: that was this recipe's verdict before this line.)
+# nothing -- so without this line a completely healthy install scores
+# `serving: error_page` with an HTTP 500 on port 8000 while the public domain
+# serves the login page.
 #
 # Only the Host is compared -- AphrontSite::isHostMatch takes getDomain() of
 # each URI and AphrontRequest::getHost() strips the port -- so the port and
@@ -123,7 +123,7 @@ fi
 # `cluster.mailers`, not `metamta.mail-adapter`. The latter is what every older
 # Phabricator guide says and Phorge no longer has it: `bin/config set` answers
 # `Configuration key "metamta.mail-adapter" is unknown` and, with `set -e`,
-# takes the deploy down with it. (Measured.) It was replaced by a list of
+# takes the deploy down with it. It was replaced by a list of
 # keyed mailers -- PhabricatorMetaMTAMail::newMailers(), line 572 -- and the
 # adapter's own type key is `test`
 # (PhabricatorMailTestAdapter::ADAPTERTYPE).
@@ -158,8 +158,8 @@ php panelalpha/phorge-bootstrap.php "$ADMIN_PASSWORD_FILE"
 # 5. Caches that are keyed on the code, not the data.
 #
 #    The Celerity resource map and the remarkup render cache are derived from
-#    the checkout, and the checkout is replaced wholesale on every deploy
-#    (engine defect #173). The workflow takes only --all or --caches
+#    the checkout, and the checkout is replaced wholesale on every deploy.
+#    The workflow takes only --all or --caches
 #    (PhabricatorCacheManagementPurgeWorkflow, lines 13-17), so --all it is; on
 #    a fresh install there is nothing in them to lose and on a redeploy the
 #    cost is one cold page.

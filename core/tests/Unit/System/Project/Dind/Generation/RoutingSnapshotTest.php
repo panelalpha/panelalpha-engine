@@ -43,7 +43,7 @@ class RoutingSnapshotTest extends TestCase
         parent::tearDown();
     }
 
-    /** engine#692: a sweep after a dead redeploy keeps a new version only if it passed its health check. */
+    /** A sweep after a dead redeploy keeps a new version only if it passed its health check. */
     public function test_only_the_redeploying_process_marks_its_new_version_healthy(): void
     {
         $state = new GenerationState($this->username);
@@ -57,7 +57,7 @@ class RoutingSnapshotTest extends TestCase
         $this->assertTrue($state->get(GenerationState::ROUTES)['gated']);
     }
 
-    /** engine#691: the operator's rule to the old port goes where the new version answers. */
+    /** The operator's rule to the old port goes where the new version answers. */
     public function test_taking_traffic_on_a_new_port_moves_the_operators_rules_with_the_site(): void
     {
         $this->proxyRules();

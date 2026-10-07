@@ -14,7 +14,7 @@ use RuntimeException;
 use Tests\TestCase;
 
 /**
- * engine#8: two creates of one name both pass provision()'s checks, and the
+ * Two creates of one name both pass provision()'s checks, and the
  * loser's insert hit the unique index as an unhandled 500.
  */
 class ConcurrentProjectCreateTest extends TestCase

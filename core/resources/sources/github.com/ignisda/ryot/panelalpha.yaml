@@ -17,7 +17,7 @@ description: >-
   Dockerfile assembles a prebuilt backend artifact plus a yarn/turbo frontend
   build that a bare `docker build` of the clone does not reproduce, and the
   published image already carries all three processes wired together. Seeding a
-  Docker Hub image also sidesteps engine#229 (image-seed NotFound is the GHCR
+  Docker Hub image also sidesteps the image-seed NotFound (the GHCR
   case, not Hub).
 
   WHY COMPOSE-REPLACE. Ryot needs a PostgreSQL sidecar (>= 15; upstream pins
@@ -52,18 +52,17 @@ description: >-
 
   PERSISTENCE. The whole application (the owner, every user and all tracked
   data) lives in the PostgreSQL database on a named volume, so it survives
-  project_rebuild and storage reclaim; ~/project is wiped every deploy
-  (engine#173) and the recipe writes nothing there. Uploaded artwork is proxied
+  project_rebuild and storage reclaim; ~/project is wiped every deploy and the recipe writes nothing there. Uploaded artwork is proxied
   from the metadata providers or an optional external S3 bucket, so a default
   deploy has no local upload store to persist.
 
   PORT + READINESS. Caddy listens on 8000 and only the app publishes a port
-  (8000:8000), so the engine's port scan takes it as the primary (engine#231/
-  #234). The app healthcheck polls /backend/config (200 only once the Rust
+  (8000:8000), so the engine's port scan takes it as the primary.
+  The app healthcheck polls /backend/config (200 only once the Rust
   backend is up), and the init one-shot additionally confirms the frontend
   serves before it registers the owner; the ready gate waits on the init, so
   `docker compose up` returns only once Ryot actually answers and its owner
-  exists (engine#204).
+  exists.
 credentials:
   adopt_from: .panelalpha/ryot/ryot.env
   fields:

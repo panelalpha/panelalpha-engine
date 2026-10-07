@@ -19,8 +19,8 @@ replaces the repository's compose file, which:
   named volumes, as is `/data/usenet` (downloads), which upstream maps to a
   host path;
 - adds a Watchtower service that needs `/var/run/docker.sock`;
-- pairs `cap_drop: [ALL]` with `cap_add`, and the engine keeps only the drop
-  (engine#349), so the entrypoint stops at
+- pairs `cap_drop: [ALL]` with `cap_add`, and the engine keeps only the drop,
+  so the entrypoint stops at
   `failed switching to "1000:1000": operation not permitted`. The recipe
   leaves the default capability set.
 

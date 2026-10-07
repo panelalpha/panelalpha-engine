@@ -1,5 +1,5 @@
 # Compose-replace: the repo has no compose file and its Dockerfile cannot build
-# without .git (engine#413). Runs upstream's published release image with
+# without .git. Runs upstream's published release image with
 # PostgreSQL, as in the upstream quickstart; library and data on named volumes.
 services:
   drop:
@@ -29,7 +29,7 @@ services:
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
-    # POSTGRES_* in an env_file (engine#419).
+    # POSTGRES_* in an env_file.
     env_file:
       - ../.panelalpha/drop/db.env
     environment:

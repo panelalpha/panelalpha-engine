@@ -5,7 +5,7 @@ cd ~/project
 # Receipt Wrangler's secrets must be stable across redeploys: SECRET_KEY signs
 # every JWT (a new one logs everyone out) and ENCRYPTION_KEY decrypts at-rest
 # columns (a new one makes existing encrypted data unreadable). ~/project
-# is wiped on every deploy (engine#173), so these are generated once and kept in
+# is wiped on every deploy, so these are generated once and kept in
 # ~/.panelalpha/receipt-wrangler — the only account-writable dir that survives a
 # rebuild — and reused on every later deploy.
 STORE="${HOME}/.panelalpha/receipt-wrangler"

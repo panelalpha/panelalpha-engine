@@ -16,11 +16,11 @@
 # panel, openable in phpMyAdmin, inside the account's backup, and costing the
 # host neither a container nor a volume. It is also what keeps this file from
 # being mined for sidecars -- RuntimeSidecars globs every `docker-compose.*` in
-# the checkout, including this one (#166), and PhpStrategy skips that step when
+# the checkout, including this one, and PhpStrategy skips that step when
 # the manifest declares a database. Nothing in hooks/prepare.sh moves compose
-# files aside, so the trap in #166 -- globbing away the engine's own
+# files aside, so the trap of globbing away the engine's own
 # docker-compose.override.yml and silently losing this healthcheck while the
-# deploy still reports success -- is not one this recipe can spring.
+# deploy still reports success is not one this recipe can spring.
 services:
   app:
     # The install stage does all of ZenTao's setup before Apache binds: the 645
@@ -63,7 +63,7 @@ services:
   # built its schema and answered, and what the health probe then meets. A clean
   # exit 0 is not a crash loop as far as AppHealth is concerned.
   #
-  # alpine:3 and not a datastore image (#90): this pulls in a few megabytes and
+  # alpine:3 and not a datastore image: this pulls in a few megabytes and
   # exits, where a mysql or postgres image would be a hundred megabytes of
   # something that tries to initialise itself.
   ready:

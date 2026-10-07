@@ -44,8 +44,8 @@ class QueueWorkersTest extends TestCase
     /** Each worker holds 45-90 MB, so a small host starts with one. */
     public function test_the_default_is_one_worker_below_4_gb_and_two_above(): void
     {
-        $this->assertSame(1, QueueWorkers::defaultFor("MemTotal:        3900696 kB\n"), 'mariusz2, 3.8 GB');
-        $this->assertSame(2, QueueWorkers::defaultFor("MemTotal:       15982592 kB\n"), 'mariusz, 15 GB');
+        $this->assertSame(1, QueueWorkers::defaultFor("MemTotal:        3900696 kB\n"), 'a 3.8 GB host');
+        $this->assertSame(2, QueueWorkers::defaultFor("MemTotal:       15982592 kB\n"), 'a 15 GB host');
         $this->assertSame(2, QueueWorkers::defaultFor(''), 'unreadable');
     }
 

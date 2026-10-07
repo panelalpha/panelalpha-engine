@@ -7,8 +7,8 @@ services:
     ports:
       - "12421:12421"
     # The project's env vars live in .env; this is how the optional
-    # HOARD_ADMIN_USERNAME / HOARD_ADMIN_PASSWORD reach the server (engine#336
-    # rules out interpolating a *_PASSWORD in environment:).
+    # HOARD_ADMIN_USERNAME / HOARD_ADMIN_PASSWORD reach the server (interpolating
+    # a *_PASSWORD in environment: is ruled out).
     env_file:
       - .env
     environment:

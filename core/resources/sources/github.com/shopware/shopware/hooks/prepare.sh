@@ -9,18 +9,18 @@ cd ~/project
 # ---------------------------------------------------------------------------
 # 1. compose.yaml, which is a developer workstation and not a deployment.
 #
-# This is the file that produced the `serving-error_page` verdict: it is the
+# This is the file that breaks a plain deploy: it is the
 # only compose file in the tree, the compose-usable probe claims it at
 # priority 980 against php's 930, and what it describes is the Shopware core
 # team's laptop -- `ghcr.io/shopware/docker-dev:php8.4-node24-caddy` with the
 # checkout bind-mounted at /var/www/html, a MariaDB whose root password is
 # `root`, an Adminer on 9080, a Mailpit, a Valkey and an OpenSearch. Nothing
-# in it installs Shopware, so Caddy served public/index.php against an empty
-# vendor/ and every request was an error page.
+# in it installs Shopware, so Caddy serves public/index.php against an empty
+# vendor/ and every request is an error page.
 #
 # Moving it is not only about which strategy wins -- this recipe pins `php`
 # through panelalpha.yaml, which PlatformSelector::fromSource() resolves ahead
-# of the detection walk either way. It is about engine defect #166: a compose
+# of the detection walk either way. It is about an engine defect: a compose
 # file left in the project root has its services mined as runtime sidecars
 # even when the app itself is served another way, and the sidecars here are a
 # root/root database and a public database administration UI.
@@ -29,13 +29,13 @@ cd ~/project
 # whoever wants to read what upstream's dev environment looked like.
 #
 # The list is upstream's own filenames and nothing else. `docker-compose.*.yml`
-# is the glob #166 suggests and it is WRONG here, because by the time this hook
+# is the glob that defect suggests and it is WRONG here, because by the time this hook
 # runs the engine has already written overrides/docker-compose.override.yml
 # into the project root under exactly that name -- the order is clone, copy
 # `files/` and `overrides/`, run this hook, then detect. A glob that catches it
 # moves this recipe's own override out of the way, and the symptom is a deploy
 # that looks fine and quietly has no PHP_INI_SCAN_DIR, no healthcheck and no
-# `ready` gate. (Measured: it lands in .panelalpha/upstream-docker-compose.override.yml
+# `ready` gate. (It lands in .panelalpha/upstream-docker-compose.override.yml
 # and the generated compose has none of it.) This repository ships no
 # `docker-compose.*` file of its own, so naming upstream's four spellings costs
 # nothing and cannot collide.
@@ -43,7 +43,7 @@ mkdir -p .panelalpha
 for f in compose.yaml compose.yml compose.override.yaml compose.override.yml; do
     [ -e "$f" ] || continue
     mv -f "$f" ".panelalpha/upstream-$f"
-    echo "[shopware] moved $f out of the project root (engine defect #166)"
+    echo "[shopware] moved $f out of the project root"
 done
 
 # ---------------------------------------------------------------------------

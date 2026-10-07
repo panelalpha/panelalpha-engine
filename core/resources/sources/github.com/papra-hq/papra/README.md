@@ -7,11 +7,11 @@ is embedded SQLite (libsql) and documents are stored on the local filesystem.
 ## Why a compose-replace from the official image
 
 The repository is a pnpm monorepo with no compose file. Bare detection picks
-Railpack, which built for ~220s in the batch test and then served nothing.
+Railpack, which builds for minutes and then serves nothing.
 Upstream's release workflow publishes the same image to Docker Hub
 (`corentinth/papra`) and GHCR (`ghcr.io/papra-hq/papra`). The recipe runs
 `docker.io/corentinth/papra:26.6.2-rootless`, the current release (Docker Hub
-rather than GHCR because of engine#229).
+rather than GHCR, whose image seed fails with NotFound).
 
 ## Services
 
@@ -42,30 +42,10 @@ To let more people in, invite them from an organization or set
 | `~/.panelalpha/app-credentials.env` | `PAPRA_ADMIN_EMAIL`, `PAPRA_ADMIN_PASSWORD` (the engine's), read only by `seed` |
 | `papra-data` volume | `db/db.sqlite` and `documents/` |
 
-## Verified on mariusz.panelalpha.tools (engine 705f250a), 2026-09-28
-
-- Deploy `success` in 87s cold, strategy `compose`. `/` returned
-  `<title>Papra - Document archiving and sharing platform</title>` (5007 B).
-- `/api/config` returned `isRegistrationEnabled:false`. An anonymous sign-up
-  returned 400 `EMAIL_PASSWORD_SIGN_UP_DISABLED`. A wrong password returned 401.
-- The owner logged in and holds the admin permissions (`bo:access`,
-  `users:view`, ...). It created an organization and uploaded a text document,
-  then downloaded it byte-identical.
-- After a rebuild (`success`, 37s) the `~/.panelalpha/papra` files kept
-  the same sha256, `seed` logged `owner already seeded`, and the owner logged
-  in and downloaded the same document.
-- `/.env`, `/.git/config`, `/db.sqlite`, `/app-data/db/db.sqlite`,
-  `/package.json` and `/docker-compose.yml` return only the SPA shell, with no
-  secrets or SQLite bytes. Anonymous `GET /api/organizations/<id>/documents`
-  returned 401.
-- Idle memory: app 301 MiB of 768.
-
 ## Known rough edges
 
-- The `*.panelalpha.online` test edge stalls every `multipart/form-data` POST
-  (engine#170), so uploads through a test name fail with a 302 to
-  withoutdns.com. The upload above was run against the engine host directly
-  (`--resolve <domain>:443:178.104.84.45`), where it answered 200. A real
-  domain is not affected.
+- The `*.panelalpha.online` test edge stalls every `multipart/form-data` POST,
+  so uploads through a test name fail with a 302 to
+  withoutdns.com. A real domain is not affected.
 - Emails (password reset, invitations) are dry-run until the operator
   sets `EMAILS_DRY_RUN=false`, `EMAILS_DRIVER` and the `SMTP_*` settings in the project env.

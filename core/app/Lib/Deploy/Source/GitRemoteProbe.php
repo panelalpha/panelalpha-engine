@@ -68,7 +68,7 @@ class GitRemoteProbe
         $branch = $branch === null || trim($branch) === '' ? null : trim($branch);
 
         // With a branch, the same ls-remote also says whether the remote has
-        // it, so a typo is a 422 instead of a deploy that fails at clone (#83).
+        // it, so a typo is a 422 instead of a deploy that fails at clone.
         return $branch === null
             ? $this->check($repoField, $repoUrl, $token, $tokenField)->problem
             : $this->probe($repoField, $repoUrl, $token, $tokenField, $branch, $branchField)->problem;

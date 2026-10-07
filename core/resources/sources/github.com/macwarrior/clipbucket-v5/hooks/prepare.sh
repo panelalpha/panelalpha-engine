@@ -6,7 +6,7 @@
 #   1. the web installer has to be shut, and it is open in a fresh clone;
 #   2. the admin password has to outlive the checkout;
 #   3. the uploaded media has to live outside ~/project, which every deploy
-#      re-clones (engine#173);
+#      re-clones;
 #   4. the directories .gitignore keeps out of the repository have to exist.
 # ffmpeg, ffprobe and mediainfo come from `system_packages` in panelalpha.yaml.
 set -e
@@ -16,7 +16,7 @@ log() { echo "[clipbucket] $*"; }
 
 # Everything this account accumulates that must outlive a redeploy. ~ itself is
 # root-owned 0755 and nothing can be created directly in it; ~/.panelalpha is
-# created with the account and belongs to it. engine#173 also writes
+# created with the account and belongs to it. The engine also writes
 # .env.default and the generated docker-compose.yml into the checkout 0644 and
 # readable by every other tenant, which is the other reason nothing secret
 # belongs in ~/project.
@@ -121,11 +121,8 @@ mkdir -p "${DATA_HOME}/files/conversion_queue" "${DATA_HOME}/files/temp" \
 chmod -R u+rwX,go+rX "${DATA_HOME}/files"
 
 # The per-video conversion logs are on the mount, inside the document root, and
-# upstream protects only files/temp/. Measured before this file existed:
-#
-#   GET /files/logs/2026/09/20/<file_name>.log   200, 5,991 bytes
-#
-# and <file_name> is in the page HTML of every video, so the logs are
+# upstream protects only files/temp/: /files/logs/<date>/<file_name>.log is
+# served, and <file_name> is in the page HTML of every video, so the logs are
 # enumerable rather than merely reachable. They carry absolute container paths,
 # the ffmpeg command line, every source and output stream's codec and bitrate,
 # and whatever ffmpeg had to say about a file the account uploaded privately.
@@ -169,7 +166,7 @@ fi
 
 # ------------------------------------------------- 5. display_errors, off --
 #
-# engine#185 leaves the platform with display_errors=1 and no php.ini. The ini
+# The shared PHP base image leaves the platform with display_errors=1 and no php.ini. The ini
 # in files/panelalpha/php turns it off for both SAPIs, but that file is only
 # read because the compose override sets PHP_INI_SCAN_DIR; this is here to say
 # the .htaccess route was considered and is not used -- upload/.htaccess is

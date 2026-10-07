@@ -269,13 +269,11 @@ class AppHealth
      * The deploy even says so out loud: "a worker or queue-only app can
      * ignore this".
      *
-     * Two applications in the supported-apps series were not workers.
-     * PocketBase's entrypoint runs the binary with no subcommand, so it
-     * printed its help and exited 0 seven times in ninety seconds; Miniflux
-     * exited on `dial tcp [::1]:5432: connect: connection refused` because
-     * nothing had provisioned the PostgreSQL it requires. Both were reported
-     * with an empty check list and a message inviting the reader to dismiss
-     * it.
+     * Not every such account is a worker. PocketBase's entrypoint runs the
+     * binary with no subcommand, so it prints its help and exits 0 in a loop;
+     * Miniflux exits on `dial tcp [::1]:5432: connect: connection refused` because
+     * nothing provisioned the PostgreSQL it requires. Both were reported with
+     * an empty check list and a message inviting the reader to dismiss it.
      *
      * Docker knows the difference and was never asked. A worker sits in
      * `running`; these sit in `restarting`.
@@ -624,8 +622,8 @@ class AppHealth
     /**
      * The checks for this account: its runtime's group, what the platform's
      * manifest added, and the checks its source recipe ships in `checks/`
-     * (frozen onto the account as `deploy_checks_dir`). engine#182: the
-     * recipe's list and directory were both unreachable from here.
+     * (frozen onto the account as `deploy_checks_dir`). The recipe's list
+     * and directory used to be unreachable from here.
      *
      * @param array<string, mixed> $details
      */
@@ -1707,7 +1705,7 @@ SH;
         $list = implode(' ', array_map('intval', $ports));
         // Ask as a visitor does: an app that validates Host (Django's
         // ALLOWED_HOSTS, Laravel TrustHosts, Phorge's site URIs) refuses
-        // `Host: 127.0.0.1` while serving its domain fine (#165, #190).
+        // `Host: 127.0.0.1` while serving its domain fine.
         $domain = $domain !== null && trim($domain) !== '' ? strtolower(trim($domain)) : null;
         $hostHeader = self::visitorHeaders($domain);
         $ownName = $domain !== null ? ' || [ "$host" = ' . escapeshellarg($domain) . ' ]' : '';

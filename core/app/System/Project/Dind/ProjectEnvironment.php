@@ -167,7 +167,7 @@ class ProjectEnvironment
         }
 
         // 0600: a copy of .env after the prepare hook ran, so it can hold
-        // generated secrets, and ~/project is traversable by every uid (#173).
+        // generated secrets, and ~/project is traversable by every uid.
         if ($baseContents !== null) {
             $fs->filePutContents($defaultPath, $baseContents, $chown, '600');
         }
@@ -600,7 +600,7 @@ class ProjectEnvironment
      * A project that set its own key is untouched, because a project that set
      * its own key has a `.env`, and this is not reached.
      *
-     * Derived from the account seed, not random (#178): every deploy re-clones
+     * Derived from the account seed, not random: every deploy re-clones
      * ~/project and lands here again, so a random key rotated on each one and
      * logged every session out. Same value as a compose APP_KEY placeholder.
      * A null seed keeps the old random key, for a caller that has none.
@@ -731,7 +731,7 @@ class ProjectEnvironment
     /**
      * A public-URL key `.env.example` leaves blank, set to the account's
      * address. Set-but-empty is worse than unset: wishlist's `ORIGIN=` made
-     * adapter-node exit on "Invalid ORIGIN: ''" (engine#192). Only the keys
+     * adapter-node exit on "Invalid ORIGIN: ''". Only the keys
      * that always mean the site's own URL are filled.
      *
      * @param array<string, string> $overrides

@@ -14,7 +14,7 @@ services:
     # ~/.panelalpha/tube (relative to the compose dir ~/project) -> /data. Holds
     # every uploaded/transcoded video, thumbnails, the tube.db index and the
     # rendered config.json — all of tube's state, surviving the
-    # per-deploy ~/project wipe (engine#173).
+    # per-deploy ~/project wipe.
     volumes:
       - "../.panelalpha/tube:/data"
       # The upload login, generated and kept by the engine; read by pa-run.sh.

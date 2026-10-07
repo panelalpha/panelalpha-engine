@@ -69,7 +69,7 @@ function fail(string $line): never
 
 // PROJECT_PATH_CONFIG and PROJECT_PATH_SPECIFIC come out of BAIKAL_PATH_CONFIG
 // and BAIKAL_PATH_SPECIFIC, which the compose override points at /data -- the
-// bind mount from ~/.panelalpha that survives the clone (engine #173). Both
+// bind mount from ~/.panelalpha that survives the clone. Both
 // have to exist and be writable before bootstrap(): Model\Config\Database's
 // default sqlite_file is a property initializer built from
 // PROJECT_PATH_SPECIFIC, so the constant has to be right, and

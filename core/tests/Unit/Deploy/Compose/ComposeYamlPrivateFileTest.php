@@ -9,7 +9,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * The run file holds env_vars and database passwords, so it is 0600 and the
- * account's (engine#173). The core runs as www-data and cannot open it; port
+ * account's. The core runs as www-data and cannot open it; port
  * detection must still read it, or every app falls back to 8080.
  */
 class ComposeYamlPrivateFileTest extends TestCase

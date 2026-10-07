@@ -18,9 +18,9 @@ services:
     # strategy wrote rather than replacing it.
     environment:
       # The one way to give this container a php.ini. The base image loads
-      # none at all — `php --ini` answers "Loaded Configuration File: (none)",
-      # measured on a deployed account — and scans a directory inside the
-      # image that the account uid cannot write to (engine #185). PHP reads
+      # none at all — `php --ini` answers "Loaded Configuration File: (none)"
+      # — and scans a directory inside the
+      # image that the account uid cannot write to. PHP reads
       # PHP_INI_SCAN_DIR from its own environment at startup whatever the
       # SAPI, so this reaches the Apache module and the CLI both, and both
       # need it: the CLI runs Dolibarr's installer on the install stage, the
@@ -34,10 +34,10 @@ services:
 
     # The administrator login (DOLI_ADMIN_LOGIN / DOLI_ADMIN_PASS), generated
     # and kept by the engine, by a path that climbs out of the checkout.
-    # ~/.panelalpha survives the clone; ~/project does not (engine #173). `env_file` rather
+    # ~/.panelalpha survives the clone; ~/project does not. `env_file` rather
     # than `environment:` because compose then lets the generated file's own
     # `env_file: .env` and this one sit side by side, and because .env is
-    # copied to .env.default at mode 644 (engine #173) — which is no place for
+    # copied to .env.default at mode 644 — which is no place for
     # the password to an ERP.
     env_file:
       - ../.panelalpha/app-credentials.env
@@ -58,7 +58,6 @@ services:
     # peak is TCPDF rendering an invoice or PhpSpreadsheet building an export.
     # ServiceLimits would cap an app-role service it did not write at 384m,
     # which is below the 256M php.ini memory_limit a single request may take.
-    # Measured at rest on a deployed account: ~120 MiB.
     mem_limit: 768m
 
     # Two requests, because the two things that can be wrong here fail

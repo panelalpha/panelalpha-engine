@@ -250,7 +250,7 @@ final class PhpHostBuild
     /**
      * Whether a lockless build should leave its lock as composer.lock too.
      *
-     * Before #168 a lockless project with nothing to drop resolved from
+     * Previously a lockless project with nothing to drop resolved from
      * composer.json itself, so Composer wrote composer.lock, and container
      * steps rely on it: contao's `composer install` installs from the lock the
      * host wrote instead of resolving again. Now that such a project resolves
@@ -436,7 +436,7 @@ final class PhpHostBuild
 
     /**
      * Put the project's own allow-plugins back into the runtime manifest for
-     * the asset half, which is how it read before #168.
+     * the asset half, which is how it used to read.
      *
      * The allowlist is for the install. php.yaml's `run-script
      * post-autoload-dump` loads whatever the project trusts, as it always

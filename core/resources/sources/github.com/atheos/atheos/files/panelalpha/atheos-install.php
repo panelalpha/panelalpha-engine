@@ -10,7 +10,7 @@
  *    require_once's BASE_PATH . "/config.php" and falls back to
  *    Common::$configDefaults for anything it does not define. Upstream's
  *    installer writes that file once, at the end of setup, and a redeploy
- *    re-clones ~/project and deletes it (engine#173) -- so it is written here,
+ *    re-clones ~/project and deletes it -- so it is written here,
  *    every deploy, rather than once.
  *
  *    Three things in it are not upstream's defaults:
@@ -121,7 +121,7 @@ error_reporting(E_ALL);
 // authentication.
 //
 // The cookie is named md5(BASE_PATH), and BASE_PATH is /app on every account
-// on the engine (engine#175) -- so every Atheos on the platform names its
+// on the engine -- so every Atheos on the platform names its
 // cookie the same thing. Host-only cookies keep that harmless between
 // accounts, but use_strict_mode is what stops a neighbour under a shared
 // parent domain from planting a session id of its choosing.
@@ -143,7 +143,7 @@ define("BASE_URL", "");
 // to common.php's own __DIR__, which is right wherever the project is mounted.
 
 // Outside the checkout. /data is ~/.panelalpha/atheos, bind-mounted by the
-// compose override, and survives the re-clone a redeploy does (engine#173).
+// compose override, and survives the re-clone a redeploy does.
 // DATA holds users.json.php -- the password hashes -- the project list, every
 // per-user setting and the access log. WORKSPACE holds the customer's code.
 define("DATA", "{$data}");

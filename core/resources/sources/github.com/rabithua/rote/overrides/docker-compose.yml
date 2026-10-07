@@ -59,7 +59,7 @@ services:
       retries: 60
     mem_limit: 64m
 
-  # No-op gate: `up` returns only once the site and the API answer (engine#204).
+  # No-op gate: `up` returns only once the site and the API answer.
   ready:
     image: nginx:1-alpine
     restart: "no"

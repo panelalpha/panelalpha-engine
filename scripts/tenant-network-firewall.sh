@@ -1,5 +1,5 @@
 #!/bin/sh
-# The network hosting accounts sit on, and what they may reach (engine#519).
+# The network hosting accounts sit on, and what they may reach.
 #
 # Accounts used to share pash-default-network with core, SFTP and phpMyAdmin,
 # and the only filter was inside each account, where the tenant can remove it
@@ -279,7 +279,7 @@ iptables -C OUTPUT -o "$BRIDGE" -j ACCEPT 2>/dev/null ||
 iptables -t nat -C POSTROUTING -s "$SUBNET" ! -o "$BRIDGE" -j MASQUERADE 2>/dev/null ||
     iptables -t nat -A POSTROUTING -s "$SUBNET" ! -o "$BRIDGE" -j MASQUERADE
 
-# engine#529: each port of the bridge speaks only as the container Docker put
+# Each port of the bridge speaks only as the container Docker put
 # on it. The rules above judge IP headers, and an account holding its own
 # network namespace (any --privileged container of its own) can announce
 # another member's address: ARP for sites-db's took other accounts' MySQL

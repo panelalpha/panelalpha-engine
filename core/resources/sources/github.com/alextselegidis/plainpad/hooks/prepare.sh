@@ -82,7 +82,7 @@ fi
 # re-clones ~/project, so the second deploy gets a fresh server/.env with
 # `{KEY}` in it again and nothing to replace it: from then on the application
 # runs with a key that is not a key, one resolve of the encrypter away from a
-# 500. Measured on a redeploy of this recipe before this existed.
+# 500.
 #
 # So the key is generated once, here, kept where the checkout cannot destroy
 # it, and handed to the install stage the same way the password hash is.

@@ -27,7 +27,7 @@ description: >-
 
   `file_get_contents()` returns `false`, `json_decode(false, true)` returns
   `null`, and `array_merge($default_config, null)` is fatal on PHP 8. The
-  request still answers **HTTP 200**, and that is engine#185 rather than
+  request still answers **HTTP 200**, and that is the engine's base image rather than
   anything upstream did: the shared PHP base image loads no php.ini at all
   (`php -i` says `Loaded Configuration File => (none)`), so `display_errors`
   is on, the warning is written into the response body, and printing a body
@@ -52,7 +52,7 @@ description: >-
   **Nothing the customer configures survives a redeploy without this.** Both
   of the application's mutable things are inside the checkout and both are
   gitignored -- `src/config.json` and `src/hp_assets/img/*` -- and a redeploy
-  clears and re-clones ~/project (engine#173), so the account's entire
+  clears and re-clones ~/project, so the account's entire
   configuration is deleted by the next deploy. overrides/docker-compose.override.yml
   bind-mounts `~/.panelalpha/homepage` at /data and
   `~/.panelalpha/homepage/img` over `/app/src/hp_assets/img`, and prepare.sh
@@ -89,7 +89,7 @@ description: >-
   https, because with no php.ini loaded `variables_order` keeps its compiled
   default of `EGPCS`, which merges the process environment into `$_SERVER`,
   and the generated compose file sets `HTTPS: 'on'`. So the correct scheme
-  here is a side effect of engine#185: the day a php.ini appears,
+  here is a side effect of the missing php.ini: the day a php.ini appears,
   php.ini-production's `variables_order = "GPCS"` would silently turn every
   `{{cur}}` link on every hosted Homepage into `http://`. prepare.sh
   adds `SetEnvIf X-Forwarded-Proto "^https$" HTTPS=on` to the .htaccess so the
@@ -99,13 +99,11 @@ description: >-
 
   No stage commands, on purpose. Everything this recipe does is host-side
   work on the checkout and on ~/.panelalpha, which is exactly what the
-  after-clone hook is for, and a hook runs unconditionally -- so engine#169,
-  which drops every stage command while the log still says the recipe was
-  named, has nothing here to drop. No readiness gate either (engine#90):
-  measured on this host over three cycles, `docker compose up -d` returned in
-  0.9-1.0s and Apache answered HTTP 200 between 68ms and 84ms later, once
-  with no retry at all. There is nothing to wait for -- no database, no
-  migration, no build at boot.
+  after-clone hook is for, and a hook runs unconditionally -- so the engine defect
+  that drops every stage command while the log still says the recipe was
+  named has nothing here to drop. No readiness gate either:
+  there is nothing to wait for -- no database, no migration, no build at
+  boot.
 
   Two things this recipe deliberately does not do. It does not patch
   index.php to guard the missing file, because the file not being missing is
@@ -122,5 +120,5 @@ extends: php-plain
 # index.php lives in src/, and there is no index at the repository root.
 # PhpDocroot's late `src` candidate would find it anyway; said here so the
 # answer does not depend on a probe. Not `.`: PlatformManifest::readDocroot() (PlatformManifest.php:305)
-# folds '.' to '' and it would mean "undeclared" (engine#172).
+# folds '.' to '' and it would mean "undeclared".
 docroot: src

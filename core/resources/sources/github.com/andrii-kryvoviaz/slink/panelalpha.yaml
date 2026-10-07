@@ -14,8 +14,8 @@ description: >-
   supervises FrankenPHP/Symfony, the SvelteKit server, Redis and a scheduler
   with s6-overlay, so there is no front/API split to fold together and no
   datastore sidecar to add. Building from source would compile PHP + a SvelteKit
-  bundle on the host for no gain. A Docker Hub seed also sidesteps engine#229
-  (the image-seed NotFound is the GHCR/registry-save case, not Hub).
+  bundle on the host for no gain. A Docker Hub seed also sidesteps the
+  image-seed NotFound (it is the GHCR/registry-save case, not Hub).
 
   WHY COMPOSE-REPLACE. The repo ships only a bare eight-line example compose; a
   hosted deploy needs three things bare detection cannot give: the SQLite
@@ -37,13 +37,13 @@ description: >-
   the email.
 
   ONE ORIGIN. The browser only ever talks to :3000 (the SvelteKit server, the one
-  published port, so the port scan takes it as primary, engine#234); the client
+  published port, so the port scan takes it as primary); the client
   reaches the Symfony API in-container. ORIGIN is the single public-facing value
   SvelteKit needs -- its origin check on POST and every absolute/share link -- and
   is left http://localhost:3000, which the engine rewrites to the account's public
   https address (ComposePlaceholders: a key ending in ORIGIN with a localhost
   value on an allowed port). A `curl` health sidecar plus a `ready` gate make
-  `docker compose up` block until Slink actually answers (engine#204).
+  `docker compose up` block until Slink actually answers.
 
   SECURITY POSTURE. Registration is closed (USER_ALLOW_REGISTRATION=false) with
   approval-required left on as defence in depth; anonymous uploads are off

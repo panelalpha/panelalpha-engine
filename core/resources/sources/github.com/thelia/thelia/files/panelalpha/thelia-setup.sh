@@ -27,7 +27,7 @@ CONSOLE="${PHP} Thelia"
 COMPOSER_HOME="${COMPOSER_HOME:-/tmp/composer}"
 export COMPOSER_HOME
 
-# Where the host build left the thelia packages. Since engine #168 it runs
+# Where the host build left the thelia packages. It now runs
 # composer/installers, so flexy is at templates/frontOffice/flexy and the
 # modules under vendor/thelia/modules, and a `--no-plugins` dump would point the
 # map back at vendor/thelia/<package> and drop them. A build that still ran
@@ -88,8 +88,7 @@ ${PHP} panelalpha/thelia-place-modules.php
 #      at templates/frontOffice/flexy and the back-office templates at
 #      templates/backOffice/<name> -- where nothing is yet, because the copy
 #      is bin/install's job -- and drops them together with everything
-#      reachable only through them. Measured: 130 psr-4 prefixes instead of
-#      157, missing FlexyBundle, the whole Symfony UX set, twig/extra-* and
+#      reachable only through them: the map loses FlexyBundle, the whole Symfony UX set, twig/extra-* and
 #      liip/imagine-bundle, which is exactly the
 #      `Class "Liip\ImagineBundle\LiipImagineBundle" not found` the kernel
 #      dies on while registering config/bundles.php.
@@ -242,10 +241,10 @@ set -e
 # because only the selected themes are copied out of vendor/.
 #
 # config/bundles.php registers its bundle all the same -- the file is committed
-# and lists all three template bundles -- so every request answered
+# and lists all three template bundles -- so every request answers
 # `Class "BackOfficeDefaultBundle\BackOfficeDefaultBundle" not found`, with the
-# shop fully installed behind it. Measured: 154 psr-4 prefixes instead of 157,
-# the three missing ones all that package's. Only for that layout: when the host
+# shop fully installed behind it; the three missing psr-4 prefixes are all that
+# package's. Only for that layout: when the host
 # ran composer/installers the package is at templates/backOffice/default and
 # the map bin/install wrote is already right.
 if [ -n "${PLUGINS_SKIPPED_ON_HOST}" ]; then
@@ -267,7 +266,7 @@ chmod 600 .env.local
 # bad minute on someone else's CDN, not a failed install: the schema, the
 # modules, the templates, the JWT keys and the administrator are all already
 # there, and failing the stage over it would put the container in a crash loop
-# and roll the whole account back. Measured on the first end-to-end run:
+# and roll the whole account back. For example:
 # `Idle timeout reached for "https://cdn.jsdelivr.net/npm/@formatjs/
 # icu-skeleton-parser@1.8.16/+esm"`, with everything else done.
 #

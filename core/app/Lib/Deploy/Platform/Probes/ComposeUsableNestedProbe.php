@@ -13,7 +13,7 @@ use Symfony\Component\Yaml\Yaml;
 /**
  * A usable compose file in one of {@see NestedCompose::DIRECTORIES}, for a
  * repository that has nothing else to deploy: zoraxy and WikiDocs keep theirs
- * under docker/ and used to land on the placeholder page (engine#91).
+ * under docker/ and used to land on the placeholder page.
  *
  * Only a project no platform and no Railpack runtime claims: its manifest sits
  * below every other one, and a runtime Railpack recognises vetoes it. So it

@@ -12,7 +12,7 @@ use App\Lib\Deploy\Platform\StageResolver;
 use PHPUnit\Framework\TestCase;
 
 /**
- * engine#171: an app config's `stage: build` commands never ran.
+ * An app config's `stage: build` commands never ran.
  *
  * AppConfig strips `commands` from the manifest it describes, and the host
  * build reads only the decision's `install_command` / `build_command`, which

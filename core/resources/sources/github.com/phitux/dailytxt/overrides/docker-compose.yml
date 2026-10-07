@@ -46,7 +46,7 @@ services:
       start_period: 5s
     mem_limit: 384m
 
-  # `up -d` runs without --wait (engine#204); this blocks it until DailyTxT answers.
+  # `up -d` runs without --wait; this blocks it until DailyTxT answers.
   ready:
     image: docker.io/phitux/dailytxt:2.6.3
     restart: "no"

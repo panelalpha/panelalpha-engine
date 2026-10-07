@@ -5,7 +5,7 @@ cd ~/project
 # Homepage is a start page rendered by one index.php out of one JSON file.
 # Three things have to be settled before the first request, and all three are
 # host-side work on the checkout, which is why this hook does all of it and
-# the recipe carries no stage commands at all (engine#169 drops those; it
+# the recipe carries no stage commands at all (the engine drops those; it
 # cannot drop a hook).
 #
 # 1. config.json has to exist. src/.gitignore lists it, so a clone never has
@@ -13,14 +13,14 @@ cd ~/project
 #      file_get_contents("config.json") -> false
 #      json_decode(false, true)         -> null
 #      array_merge($default_config, null) -> uncaught TypeError
-#    That fatal is the `serving-php_error` verdict. It answers HTTP 200
+#    That fatal is what a plain deploy serves. It answers HTTP 200
 #    because the warning above it is printed into the body first and printing
 #    a body sends the headers -- display_errors is on because the base image
-#    loads no php.ini at all (engine#185).
+#    loads no php.ini at all.
 #
 # 2. It has to live outside the checkout. config.json and hp_assets/img/* are
 #    both gitignored and both inside ~/project, which a redeploy clears and
-#    re-clones (engine#173). Everything persistent goes under
+#    re-clones. Everything persistent goes under
 #    ~/.panelalpha/homepage; the compose override bind-mounts it at /data and
 #    mounts its img/ over the checkout's.
 #
@@ -224,7 +224,7 @@ if ! grep -q 'Written by PanelAlpha' src/.htaccess 2>/dev/null; then
 # background URL needs, so it is the one file here that must never be served.
 # Upstream denies it a few lines above this, in Apache 2.2 syntax
 # (`Order allow,deny`), which works on this image only because
-# mod_access_compat is loaded -- verified, but not something to depend on. The
+# mod_access_compat is loaded -- not something to depend on. The
 # 2.4 spelling is stated here as well, and extended to config.sample.json:
 # upstream serves that one, and it is both the file an operator is told to
 # copy their configuration from and the documentation of the `protected` key

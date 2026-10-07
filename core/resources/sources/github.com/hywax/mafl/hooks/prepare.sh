@@ -12,7 +12,7 @@
 # there is no operator, only a Git URL, so it is written below.
 #
 # And it is written outside the checkout. A redeploy clears and re-clones
-# ~/project (engine#173) -- and unlike a database or an upload directory, this
+# ~/project -- and unlike a database or an upload directory, this
 # file is the only thing the customer ever authors, so losing it loses the
 # whole product. ~ is root-owned 0755 and the account can create nothing in it;
 # ~/.panelalpha is created with the account and belongs to it.
@@ -42,8 +42,7 @@ chmod 700 "${DATA_HOME}"
 #
 # 0600 in a 0700 directory. A service entry may carry `secrets:` (the
 # OpenWeatherMap widget takes an API key), and the generated compose file in
-# ~/project beside it is 0644 and readable by every other tenant on the host
-# (engine#173).
+# ~/project beside it is 0644 and readable by every other tenant on the host.
 if [ ! -f "${CONFIG}" ]; then
     umask 077
     cat > "${CONFIG}" <<'MAFLCONFIG'
@@ -104,11 +103,10 @@ chmod 600 "${CONFIG}"
 #
 # Upstream's .dockerignore is node_modules, .output, .nuxt and README.md -- it
 # does not exclude .git, and the build context is the checkout. Two clones of
-# the same commit are byte-identical except for .git (measured: `diff -r
-# --exclude=.git` on two fresh clones is empty, while the index, the reflogs
+# the same commit are byte-identical except for .git (the index, the reflogs
 # and the pack names differ every time), so `COPY . /app` hashes differently on
 # every deploy and invalidates the `RUN yarn run build` layer under it. That is
-# eight minutes of vite, per redeploy, to produce the bundle already in the
+# a full vite build, per redeploy, to produce the bundle already in the
 # cache. Nothing in the build reads git history -- changelogen is in the
 # `release` script, which the image build never runs.
 if ! grep -qx '\.git' .dockerignore 2>/dev/null; then

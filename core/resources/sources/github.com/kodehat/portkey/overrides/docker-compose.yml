@@ -3,7 +3,7 @@
 # publishes that build as codehat/portkey on Docker Hub, so this runs the
 # published image and the checkout contributes nothing to the container. A
 # Docker Hub image `docker save`s as a real manifest and the engine's DinD
-# seeding delivers it intact — this is not engine#229.
+# seeding delivers it intact — the image-seed manifest-stub bug does not apply.
 services:
   app:
     # Pinned, not `latest`, so a redeploy is reproducible. amd64 + arm64.
@@ -38,7 +38,7 @@ services:
     # generous headroom on a 3.7 GB host.
     mem_limit: 128m
 
-  # `docker compose up -d` runs without --wait (engine#204) and the deploy is
+  # `docker compose up -d` runs without --wait and the deploy is
   # declared finished the moment it returns (DeploymentWorkflow.php:73), so
   # without a gate the deploy could end while portkey was still binding. Compose
   # does block on a depends_on health condition, so this one-shot makes `up -d`

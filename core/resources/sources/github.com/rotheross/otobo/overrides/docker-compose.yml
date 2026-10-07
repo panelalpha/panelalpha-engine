@@ -1,7 +1,7 @@
 # Upstream's otobo-docker (rel-11_0: otobo-base.yml + otobo-override-http.yml)
 # on the images of the current stable release, 11.0.18. The source repo has
 # no compose file. cap_drop/cap_add removed: the engine strips cap_add but
-# keeps cap_drop (engine#349), which would leave MariaDB without SYS_CHROOT.
+# keeps cap_drop, which would leave MariaDB without SYS_CHROOT.
 services:
   db:
     image: mariadb:11.8

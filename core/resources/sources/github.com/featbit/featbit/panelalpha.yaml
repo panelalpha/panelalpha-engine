@@ -19,8 +19,8 @@ description: >-
   (websocket) to the evaluation server, /api and /mcp to the API, and the
   rest to the UI. SDKs use https://<domain> as both the streaming and event
   URL. It is the only service that publishes a port (8080). On the
-  *.panelalpha.online test names the front edge strips `Upgrade`
-  (engine#170), so SDK websocket streaming needs a real domain there; the
+  *.panelalpha.online test names the front edge strips `Upgrade`,
+  so SDK websocket streaming needs a real domain there; the
   REST polling endpoints work either way.
 
   FIRST RUN AS UPSTREAM SHIPS IT. The init SQL seeds the login

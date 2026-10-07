@@ -2,7 +2,7 @@
 # htpasswd, :edge tag) with a real single-tenant stack. readflow (one official
 # Docker Hub image) serves the React UI and the GraphQL/REST API on one port;
 # Postgres runs as a sidecar on a named volume. Only readflow publishes a host
-# port, so the engine's port scan takes it as the primary app (engine#231).
+# port, so the engine's port scan takes it as the primary app.
 # ComposePortScan reads only compose-level `ports:`/`expose:`, so the image's
 # baked EXPOSE 9090 (disabled Prometheus endpoint) is invisible and never
 # competes with 8080. No service both `build:`s and bind-mounts a `./` path, so
@@ -86,7 +86,7 @@ services:
     mem_limit: 64m
 
   # Starts nothing, exits 0, waits on the probe's healthcheck. The engine runs
-  # `docker compose up -d` without --wait (engine#204), but it still honours
+  # `docker compose up -d` without --wait, but it still honours
   # depends_on conditions, so this gate holds the deploy "done" until readflow
   # actually answers HTTP. A clean exit 0 is not a crash loop to AppHealth.
   ready:

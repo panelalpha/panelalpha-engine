@@ -143,7 +143,7 @@ class ListeningSocketsTest extends TestCase
         $this->assertSame(5000, ListeningSockets::chooseAppPort($sockets, 6881, [6881, 5000]));
     }
 
-    /** engine#88: php-fpm on 9000 beside the real server on 8081; both stay candidates. */
+    /** php-fpm on 9000 beside the real server on 8081; both stay candidates. */
     public function test_every_candidate_is_ranked_so_a_non_http_first_choice_can_be_passed_over(): void
     {
         $sockets = [

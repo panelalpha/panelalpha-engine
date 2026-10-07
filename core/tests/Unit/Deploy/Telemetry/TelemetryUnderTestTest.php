@@ -8,7 +8,7 @@ use App\Models\Setting;
 use Tests\TestCase;
 
 /**
- * engine#276: run on an installed host, the suite reads the live database, so
+ * Run on an installed host, the suite reads the live database, so
  * the operator's `telemetry:enable` switched telemetry on for the tests too,
  * and their fixture deploys landed in the host's telemetry log.
  */

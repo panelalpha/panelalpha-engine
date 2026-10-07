@@ -3,15 +3,14 @@ description: >-
   Bolt 5/6 is a Symfony content management system: Doctrine ORM over SQLite by
   default, Twig templates, an Encore-built Vue control panel at /bolt. The
   repository is not the installable product -- SETUP.md says twice, in a
-  deliberately hard-to-miss `echo`, that a site should start from
-  `bolt/project` -- but it is the repository the tracker names, it holds all of
-  Bolt, and it does deploy. Detection read it correctly: composer.json and no
-  artisan, so the `php` strategy, PHP 8.2 against `"php": ">=8.2"`, the shared
-  Apache base image with ~/project bind-mounted, `composer install` on the
-  host, and `npm run build` after it because package.json declares a `build`
-  script. All of that worked on the first deploy, and the site still answered
-  HTTP 500 on every request, which is the `serving-error_page` verdict this
-  recipe exists to fix.
+  deliberately hard-to-miss `echo`, that a site should start from `bolt/project`
+  -- but it holds all of Bolt, and it does deploy. Detection read it correctly:
+  composer.json and no artisan, so the `php` strategy, PHP 8.2 against `"php":
+  ">=8.2"`, the shared Apache base image with ~/project bind-mounted, `composer
+  install` on the host, and `npm run build` after it because package.json
+  declares a `build` script. All of that works, and without this recipe the site
+  still answers HTTP 500 on every request, which is the `serving-error_page`
+  verdict this recipe exists to fix.
 
   Six things were wrong, and four of them are the same shape: bolt/core
   commits no composer.lock, so what `composer install --no-dev` produces on a
@@ -66,8 +65,7 @@ description: >-
   committed .env becomes a real process environment variable -- and
   `Dotenv::populate()` never overwrites one of those. A secret written to
   .env.local, which is the file Symfony documents and .env's own header points
-  at, is read, found to be shadowed, and discarded: measured on a deploy that
-  had one, `printenv APP_SECRET` in the container still printed `!ChangeMe!`.
+  at, is read, found to be shadowed, and discarded.
   So hooks/prepare.sh replaces the placeholder in .env itself, matching only
   the exact published value so an operator's own secret is never overwritten.
 

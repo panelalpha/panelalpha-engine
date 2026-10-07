@@ -84,7 +84,7 @@ if ($link->connect_errno) {
 // fourth task therefore leaves exactly the state upstream reads as
 // "installed", and the next deploy would take the migrate branch and replay
 // fifteen years of migrations against a schema that is already current
-// (measured: `Duplicate column name 'added'` from
+// (`Duplicate column name 'added'` from
 // 20100810120000_detachCollectorsFromEntities).
 //
 // The marker used instead is the last thing a successful install writes. The
@@ -279,9 +279,9 @@ function omeka_panelalpha_install($baseDir)
     // `resources.layout`, Zend's Layout resource bootstraps FrontController,
     // and `pluginPaths.Omeka_Application_Resource` makes that resolve to
     // Omeka_Application_Resource_Frontcontroller -- which bootstraps `Helpers`,
-    // a resource the install application does not have. Measured without these
-    // two lines: `Zend_Application_Bootstrap_Exception: Resource matching
-    // "Helpers" not found`, thrown before the installer was reached.
+    // a resource the install application does not have. Without these two
+    // lines: `Zend_Application_Bootstrap_Exception: Resource matching
+    // "Helpers" not found`, thrown before the installer is reached.
     // install/install.php registers Zend's own FrontController for exactly
     // this reason; its comment calls the Omeka one "too heavily coupled for
     // use".
@@ -306,9 +306,9 @@ function omeka_panelalpha_install($baseDir)
     // of Omeka_Navigation_Page_Mvc pages whose getHref() assembles a URL
     // through Zend's router. That router only grows its `default` route when
     // Zend_Controller_Front::dispatch() routes a request -- which never happens
-    // in a process that does not call run(). Measured without this line:
+    // in a process that does not call run(). Without this line:
     // `[omeka] installation failed: Route default is not defined`, after
-    // _createSchema() had already committed its CREATE TABLEs.
+    // _createSchema() has already committed its CREATE TABLEs.
     Zend_Controller_Front::getInstance()->getRouter()->addDefaultRoutes();
 
     $db = $application->getBootstrap()->getResource('db');

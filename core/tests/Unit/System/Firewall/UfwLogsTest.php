@@ -6,7 +6,7 @@ use App\System\Firewall\FirewallLogEntry;
 use App\System\Firewall\Ufw\UfwLogs;
 use PHPUnit\Framework\TestCase;
 
-/** Lines as ufw and fail2ban wrote them on an engine host (a dev host, Ubuntu 24.04). */
+/** Lines as ufw and fail2ban wrote them on an engine host (Ubuntu 24.04). */
 class UfwLogsTest extends TestCase
 {
     private const JOURNAL = <<<'LOG'

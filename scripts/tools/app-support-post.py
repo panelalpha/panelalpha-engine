@@ -8,7 +8,7 @@ and, for every issue not already carrying a verdict label, posts the evidence
 and adds Supported or Unsupported. An issue still labelled Awaiting Fixes is
 exactly what this is meant to act on, so it is not skipped.
 
-Label rules (approved by user, 2026-09-12):
+Label rules:
   supported    -> Supported
   unsupported  -> Unsupported
   rejected     -> Rejected   (proven unfixable from the engine's side; terminal)
@@ -45,7 +45,7 @@ MCP_URL = os.environ.get("MCP_URL", "")
 # be readable by anyone who clones the branch. Unset is a hard stop, not a
 # fallback -- a silent 401 halfway through a batch is worse than not starting.
 MCP_AUTH = os.environ.get("MCP_AUTH", "")
-PROJECT = "panelalpha/playground/supported-apps"
+PROJECT = os.environ.get("GITLAB_PROJECT", "")
 
 OUT = os.environ.get("APP_SUPPORT_OUT", "/tmp/app-support")
 CLASSIFICATION = os.environ.get(
@@ -65,11 +65,11 @@ LABEL_UNSUPPORTED = "Unsupported"
 LABEL_REJECTED = "Rejected"
 # Workflow labels a verdict note supersedes. An issue that was labelled
 # Awaiting Fixes while a defect was open keeps that label forever unless it is
-# removed when the fix lands -- #8, #246 and #10 all ended up claiming both
+# removed when the fix lands -- several issues ended up claiming both
 # "Awaiting Fixes" and the verdict, which reads as work that is still waiting.
 SUPERSEDED_LABELS = {"Awaiting Fixes": 46810, "Support In Progress": 46868}
 # The two verdicts are mutually exclusive, and adding one must remove the
-# other. A relabelled issue otherwise keeps claiming both -- #528 came back
+# other. A relabelled issue otherwise keeps claiming both -- one came back
 # from a retest as Supported and still carried the Unsupported its first
 # (pre-fix) run posted, which reads as a contradiction to anyone filtering by
 # label. Only ever removed in favour of the opposite verdict, never on its own.
@@ -112,8 +112,8 @@ def auth_config():
     long as the process lives, so every call would show the token to any local
     user. `-K -` keeps it on a pipe instead.
     """
-    if not MCP_URL:
-        sys.exit("MCP_URL is not set. Export the GitLab MCP endpoint first.")
+    if not MCP_URL or not PROJECT:
+        sys.exit("MCP_URL and GITLAB_PROJECT must be set. Export them first.")
     if not MCP_AUTH:
         sys.exit("MCP_AUTH is not set. Export it first, e.g.\n"
                  "  export MCP_AUTH='Bearer <token>'")
@@ -360,9 +360,8 @@ def note_body(rec, lines, fail_line, extra=None):
     if extra:
         body += ["", extra]
     body += ["", "---",
-             "Tested by the automated app-support batch "
-             "on a test engine, 2026-09-11/12.",
-             f"Full per-app artifacts: `{OUT}/{rec['slug']}/` on the test box "
+             "Tested by the automated app-support batch.",
+             f"Full per-app artifacts: `{OUT}/{rec['slug']}/` "
              "(REPORT.md, deploy.log, deploy-log.json, result.json)."]
     return "\n".join(body)
 

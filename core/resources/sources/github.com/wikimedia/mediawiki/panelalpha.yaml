@@ -8,11 +8,11 @@ description: >-
 
   That compose file is the whole of the original failure. Detection reads the
   repository root, `compose.yaml` outranks `php.yaml` on priority, and the
-  engine deployed three `docker-registry.wikimedia.org/dev/*` images: a
+  engine deploys three `docker-registry.wikimedia.org/dev/*` images: a
   php85-fpm container, an apache2 container on 8080 and a jobrunner, all
   bind-mounting the checkout at /var/www/html/w, all pointed at SQLite in
-  `cache/`, all with XDebug and XHProf enabled by default. It came up in 62
-  seconds and answered HTTP 500 on every path -- not from the database, not
+  `cache/`, all with XDebug and XHProf enabled by default. It answers HTTP
+  500 on every path -- not from the database, not
   from a missing config file, but from
   `includes/PHPVersionCheck.php:150`:
 
@@ -24,8 +24,7 @@ description: >-
   (PHPVersionCheck.php:237) and a page that says "Installing some dependencies
   is required." Nothing in the MediaWiki-Docker stack ever runs `composer
   install` -- upstream expects a developer to type it -- so that 500 is
-  permanent, and it is what the `serving-error_page` verdict on
-  panelalpha/playground/supported-apps#363 recorded.
+  permanent.
 
   So the first thing this recipe does is refuse the compose file.
   `extends: php` puts the repository on the shared PHP base image with
@@ -81,7 +80,7 @@ description: >-
   every edit token) and `$wgUpgradeKey`, and a redeploy empties and re-clones
   `~/project` before it does anything else
   (System/Project/Dind/Source/GitRepository.php:89 calls
-  `tree()->clearContents($gitProjectDir)`, engine#173), so a settings file
+  `tree()->clearContents($gitProjectDir)`), so a settings file
   written beside index.php would be a *different* `$wgSecretKey` on every
   deploy -- every logged-in session invalidated, every open edit form
   rejected. It lives on the bind mount at `/data/LocalSettings.php`
@@ -104,7 +103,7 @@ description: >-
   PHP engine and sets the sandboxing CSP for anything a wiki user uploaded.
 
   **A wiki with no php.ini cannot take an upload worth having.** `php --ini`
-  in the base image answers "Loaded Configuration File: (none)" (engine#185),
+  in the base image answers "Loaded Configuration File: (none)",
   so the compiled-in `upload_max_filesize = 2M` is what is in force, and a
   POST over `post_max_size` is discarded before PHP is entered -- the upload
   form would report a request that carried a file as one that did not. The
@@ -140,7 +139,7 @@ database: mysql
 # from its own root -- index.php, api.php, rest.php, load.php, thumb.php and
 # img_auth.php are all at the top of the checkout -- but the manifest reader
 # folds '.' to '' (Platform/PlatformManifest.php:305-307), which means
-# "undeclared", so the key cannot say it (engine#172). PhpDocroot::detect()
+# "undeclared", so the key cannot say it. PhpDocroot::detect()
 # reaches the root on its own here (none of public/, web/, public_html/ or
 # webroot/ exists and index.php does), and the compose override pins
 # PA_DOCROOT=/app anyway, because the document root decides which files are a
@@ -157,7 +156,7 @@ commands:
       on a public address and a schema change is never paid for by whichever
       visitor arrives first. Idempotent: it branches on whether
       /data/LocalSettings.php is there. On the build stage it would not run at
-      all (engine#171).
+      all.
     run: 'sh panelalpha-setup.sh'
 credentials:
   login_path: /index.php/Special:UserLogin

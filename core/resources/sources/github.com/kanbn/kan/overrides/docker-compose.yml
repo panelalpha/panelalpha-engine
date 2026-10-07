@@ -5,12 +5,12 @@
 # before it is allowed to answer.
 #
 # WHY PULL, NOT BUILD. Kan's images are on GHCR (ghcr.io/kanbn/kan and
-# .../kan-migrate). engine#229 corrupts SOME registry images when the host
+# .../kan-migrate). The image-seed bug corrupts SOME registry images when the host
 # seeds them into the account's nested Docker by `docker save | docker load`
 # (multi-arch OCI images whose save exports a manifest-only stub on the
-# containerd image store). Measured on the target host: `docker save` of both
-# Kan images returns the full ~80 MB / ~64 MB with real layer blobs, not the
-# ~9 KB stub, so they seed cleanly and are pulled here rather than rebuilt.
+# containerd image store). `docker save` of both Kan images returns the full
+# images with real layer blobs, not the manifest-only stub, so they seed
+# cleanly and are pulled here rather than rebuilt.
 #
 # NEXT_PUBLIC_* AT RUNTIME. Kan is Next.js, which normally bakes NEXT_PUBLIC_*
 # at build time, but this image ships apps/web/bootstrap.cjs (next-runtime-env):
@@ -93,7 +93,7 @@ services:
     image: ghcr.io/kanbn/kan:latest
     restart: unless-stopped
     # Only service to publish a port, so the engine's scan takes 3000 as the
-    # primary (engine#231/#234).
+    # primary.
     ports:
       - "3000:3000"
     depends_on:
@@ -142,7 +142,7 @@ services:
 
   # Starts nothing, exits 0, waits on web's healthcheck. `docker compose up -d`
   # blocks on a depends_on health condition, so `up` returns only once the site
-  # actually answers, not the moment containers start (engine#204).
+  # actually answers, not the moment containers start.
   ready:
     image: docker.io/library/alpine:3
     entrypoint: ["/bin/sh", "-c", "exit 0"]

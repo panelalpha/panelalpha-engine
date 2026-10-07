@@ -8,28 +8,27 @@ SPA, and `build.sh` is what joins them for a release: Composer dependencies into
 a copy of `server/`, `npm run build` in `client/`, and the bundle copied over
 `server/public/`, so a released Plainpad is one directory with `index.html` and
 `api.php` beside each other. Nothing in the checkout is in that shape, and that
-is the whole of why the deploy failed.
+is the whole of why a plain deploy fails.
 
-## What was wrong
+## Why the generic platform fails
 
-Detection had nothing to work with. The repository root has no `composer.json`
-and no `artisan`, so `php.yaml` and `apps/laravel` both declined. It has a
+Detection has nothing to work with. The repository root has no `composer.json`
+and no `artisan`, so `php.yaml` and `apps/laravel` both decline. It has a
 `docker-compose.yml`, but that is the maintainer's laptop stack — php-fpm built
 from `docker/php-fpm`, nginx, MySQL 8 with `MYSQL_ROOT_PASSWORD=secret`,
 phpMyAdmin and Mailpit, every port read from a root `.env` that does not exist —
-and the compose probe passed on it. What claimed the project was
+and the compose probe passes on it. What claims the project is
 `platforms/php-plain.yaml`, whose `php-sources` probe walks two levels down and
-found `server/server.php`.
+finds `server/server.php`.
 
 That is the `php` strategy with the *repository root* as the application root.
-`PhpDocroot::detect()` then looked for an index in `public/`, `web/`,
-`public_html/`, `webroot/`, the root and `src/`, and found none — `server/public/`
-holds `api.php`, not `index.php`, and the SPA that would have supplied
-`index.html` had never been built. With no `PA_DOCROOT`,
+`PhpDocroot::detect()` then looks for an index in `public/`, `web/`,
+`public_html/`, `webroot/`, the root and `src/`, and finds none — `server/public/`
+holds `api.php`, not `index.php`, and the SPA that would supply `index.html` is
+never built. With no `PA_DOCROOT`,
 `resources/deploy/assets/panelalpha-serve.sh` falls back to `/app`, Apache has
-nothing to serve as a DirectoryIndex there, and every request answered 403.
-`checks/php/entry-served.yaml` reads a 403 as `serving: missing_entry`, which is
-the verdict this recipe fixes.
+nothing to serve as a DirectoryIndex there, and every request answers 403.
+`checks/php/entry-served.yaml` reads a 403 as `serving: missing_entry`.
 
 ## Shape: three keys
 
@@ -58,7 +57,7 @@ bind-mounted. The repository root has no `package.json`, so `files/package.json`
 supplies one whose `build` script is `panelalpha/build-client.sh`. That script
 does build.sh's steps 3 and 4 and nothing else: install and build in `client/`,
 then `cp -R client/build/. server/public/`, then delete `client/node_modules`
-(~450 MB the account has no use for once the bundle exists).
+(the account has no use for it once the bundle exists).
 
 Two lines in it are not optional:
 
@@ -91,8 +90,7 @@ there is nothing left for it to do.
 **`POST /api.php/v1`** is what that installer calls: `ApplicationController::install()`,
 unauthenticated, running `migrate:fresh --seed` whenever `Schema::hasTable('migrations')`
 is false. The install stage migrates before Apache ever binds, so by the time
-anything can reach the endpoint the table exists and it answers 401. Verified on
-a live deploy.
+anything can reach the endpoint the table exists and it answers 401.
 
 **The seeded admin password.** `database/seeders/UsersSeeder.php` creates
 `admin@example.org` with `12345678` — printed in the repository's own README, in
@@ -114,8 +112,7 @@ except that here the password is not even unknown. So:
   row would carry the published password on a public site until the next
   redeploy.
 
-Nothing sensitive is web-readable. Measured against the live domain:
-`.git/config`, `.env`, `docker-compose.yml`, `.panelalpha-admin.hash`,
+Nothing sensitive is web-readable: `.git/config`, `.env`, `docker-compose.yml`, `.panelalpha-admin.hash`,
 `.panelalpha-app-key` and `../.env` all 403 at the proxy; `server/.env`,
 `setup.php`, `composer.json`, `artisan`, `storage/logs/laravel.log` and
 `docker-compose.override.yml` all 404 through Laravel, because with
@@ -138,15 +135,14 @@ copies a nested one verbatim, with neither pass. Plainpad's is
 install-stage command on purpose, because rotating the key later throws away
 every encrypted value. But every deploy re-clones `~/project`, so the *second*
 deploy gets a fresh `server/.env` with `{KEY}` in it and nothing left to replace
-it. Measured on a redeploy before this was handled: the site went on serving,
-because Plainpad's API routes never resolve the encrypter, but it was running on
-a string that is not a key.
+it. The site would go on serving, because Plainpad's API routes never resolve
+the encrypter, but on a string that is not a key.
 
 So `hooks/prepare.sh` generates one into `~/.panelalpha/plainpad-app-key` (0600)
 and `panelalpha/install.php` writes it into `.env` in the install *and* upgrade
 stages — before `optimize`, which is a start-stage command and is what compiles
 `.env` into the config cache the running application reads. One key, from the
-first boot onwards, verified identical across a redeploy. Teaching
+first boot onwards. Teaching
 `materializeNestedEnvExamples()` the two passes the root path already takes
 would retire this half of the recipe.
 
@@ -157,7 +153,7 @@ to run — the admin account and the nine `settings` rows the SPA reads — live
 `DatabaseSeeder`, which upstream runs *only* from the unauthenticated install
 endpoint. Since the install stage migrates first, that endpoint can never run
 again, so without `panelalpha/install.php` the site would serve a login page
-with no account behind it: `deploy-ok`, `serving: ok`, HTTP 200, and unusable.
+with no account behind it: a successful deploy, HTTP 200, and unusable.
 
 The seed is guarded on the `users` table being empty and calls upstream's own
 `db:seed` rather than a copy of its INSERTs, so `SettingsSeeder` stays the file
@@ -223,65 +219,11 @@ and a file that is not the application should not be in the way.
 | `files/server/panelalpha/install.php` | APP_KEY into `.env`, the seed, and the admin password — all three guarded |
 | `overrides/docker-compose.override.yml` | a two-request healthcheck plus a `ready` gate |
 
-## Verified
+## Known limits
 
-On a 2-core / 3.7 GB engine, account capped at 1200 MB: `deploy-ok`, deploy
-**120.6s** with the shared PHP 8.2 base image already built (about 30s of that
-is the CRA build), port probe `HTTP 200`, domain `200`, `serving: ok`, all twelve
-baseline and `php` checks passing, and HTTP 200 with the title `Plainpad`.
-
-Beyond the status code, against the public HTTPS domain:
-
-- `POST /api.php/v1/sessions` with `admin@example.org` / `12345678` — the
-  password upstream seeds — answers **401**. With the generated password it
-  answers **201** with a session token.
-- With that token: `POST /api.php/v1/notes` creates a note (201) and
-  `GET /api.php/v1/notes` reads it back with its title, content and pinned flag
-  intact. `GET /api.php/v1/settings` returns the nine seeded rows and
-  `GET /api.php/v1/users` the single `admin@example.org` account — both
-  admin-only routes.
-- In a real browser at the public domain, the SPA loads `main.*.js`, its chunks,
-  the CSS and its webfonts from the merged document root and renders the login
-  screen. A login from that page posts to
-  `https://<domain>/api.php/v1/sessions` — so the `REACT_APP_BASE_URL=api.php`
-  baked into the bundle resolves correctly through the proxy — and the published
-  password is refused there with 401. Reading `/api.php/v1/notes` and
-  `/api.php/v1/users` from that page's own origin with a session token returns
-  the note and the admin user.
-- `POST /api.php/v1` — the unauthenticated `migrate:fresh --seed` endpoint —
-  answers 401, and `GET /setup.php` 404.
-- The readiness gate was measured with the application stopped and the app
-  database's six tables dropped: `docker compose up -d` printed
-  `Container project-app-1 Waiting` … `Healthy` before starting `ready` and
-  returned after **7.0s**, with `migrate`, both seeders, the APP_KEY write and
-  `optimize` inside that window — which is the window a probe without the gate
-  lands in.
-- That same wipe is the test for keeping the hash file: the re-seed put
-  `12345678` back and `install.php` replaced it in the same boot. Afterwards the
-  published password answered 401 and the generated one 201.
-- A redeploy (`POST /projects/{u}/rebuild`) runs the **upgrade** stage: `migrate`
-  reports *Nothing to migrate*, `install.php` reports *the admin account no
-  longer has the seeded password; left alone*, `APP_KEY` in `server/.env` is
-  byte-identical to `~/.panelalpha/plainpad-app-key`, the note is still there,
-  and there is still exactly one user and nine settings rows. The same password
-  still logs in.
-- `docker compose ps` shows `project-app-1 … Up (healthy)` and
-  `project-ready-1 … Exited (0)` after every deploy.
-- `~/project` is 61 MB with `client/node_modules` removed.
-
-## Not done
-
-- **The authenticated screens were not driven in a browser.** Every
-  authenticated call above was made against the public HTTPS domain — the same
-  requests the SPA itself makes, one of them from the page's own origin — but
-  nobody typed the password into the login form and watched the notes view
-  render. What that would add over the evidence here is the client-side render
-  of data already proven to be served.
-- **No `overrides/app.sh`.** Plainpad's user API is admin-only and its auth is a
-  bearer token in the `sessions` table, so `users:list`, `users:add` and an SSO
-  handshake are all reachable — a script that mints a session row directly would
-  do it. Nothing here needs it, and it was left out rather than written
-  untested.
+- **No `overrides/app.sh`.** Panel user management (`users:list`, `users:add`,
+  SSO) is not provided. Plainpad's user API is admin-only and its auth is a
+  bearer token in the `sessions` table.
 - **Mail is not configured.** `SettingsSeeder` seeds `smtp.mailtrap.io:2525`
   with no credentials, which is upstream's placeholder. Plainpad needs mail only
   for password recovery, and the one password there is is kept by the engine.

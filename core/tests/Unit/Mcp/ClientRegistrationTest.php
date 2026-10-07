@@ -9,7 +9,7 @@ use Tests\TestCase;
 /**
  * The printed line is the whole point: an operator pastes it verbatim, so a
  * missing token, a wrong URL or a client's own header spelling breaks setup
- * silently (#53).
+ * silently.
  */
 class ClientRegistrationTest extends TestCase
 {
@@ -97,7 +97,7 @@ class ClientRegistrationTest extends TestCase
 
     /**
      * Clients without a pasteable CLI get a sentence to paste into chat, not a
-     * command line (#61). It still has to carry the endpoint and the token: the
+     * command line. It still has to carry the endpoint and the token: the
      * assistant does the typing.
      */
     public function test_the_desktop_apps_get_a_verified_prompt(): void

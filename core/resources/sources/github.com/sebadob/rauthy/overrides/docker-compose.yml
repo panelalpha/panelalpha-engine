@@ -20,7 +20,7 @@ services:
       PROXY_MODE: "true"
       # Rauthy bans an IP for a day on scanner paths (/.env, ...): key it on the
       # X-Real-IP the engine proxy sets, not the client-supplied first
-      # X-Forwarded-For entry (engine#319). Peer is the account's Docker gateway.
+      # X-Forwarded-For entry. Peer is the account's Docker gateway.
       PEER_IP_HEADER_NAME: X-Real-IP
       TRUSTED_PROXIES: "172.16.0.0/12"
     volumes:

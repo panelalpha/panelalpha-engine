@@ -9,7 +9,7 @@ use RuntimeException;
 
 /**
  * Moves a running account from pash-default-network to pash-tenants
- * (engine#519) without restarting it.
+ * without restarting it.
  *
  * The app goes with it: its compose file pins the database name to sites-db's
  * address on the old network, which the account cannot reach from the new one.
@@ -48,7 +48,7 @@ final class TenantNetworkMove
         $system->exec(TenantNetwork::firewallArgv(), [], 60);
         if (!array_key_exists(TenantNetwork::NAME, $networks)) {
             $system->exec(['sudo', 'docker', 'network', 'connect', TenantNetwork::NAME, $account], [], 60);
-            // The new port carries nothing until it is bound (engine#529).
+            // The new port carries nothing until it is bound.
             $system->exec(TenantNetwork::firewallArgv(), [], 60);
         }
 

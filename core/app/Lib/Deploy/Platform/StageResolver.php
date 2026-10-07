@@ -50,7 +50,7 @@ final class StageResolver
      * The manifest's commands, then the app config's. An app config command
      * with a manifest command's id replaces it rather than running beside it:
      * a recipe restating `composer-install` means "instead of", and running
-     * both paid for the dependency tree twice (engine#171).
+     * both paid for the dependency tree twice.
      *
      * @param list<PlatformCommand> $manifest
      * @param list<PlatformCommand> $own

@@ -359,7 +359,7 @@ class DeploymentWorkflowTest extends TestCase
 
     public function test_a_working_fallback_domain_is_said_in_the_deploy_log_without_a_partial(): void
     {
-        // #79: Online refused, panelalpha_direct resolves, and the deploy used
+        // Online refused, panelalpha_direct resolves, and the deploy used
         // to finish clean with the refusal written nowhere a person looks.
         $model = $this->dindModel([
             'deploy_strategy' => 'static',
@@ -577,7 +577,7 @@ class DeploymentWorkflowTest extends TestCase
     }
 
     /**
-     * engine#33: a new version that never became healthy did not replace the
+     * A new version that never became healthy did not replace the
      * old one, so tearing the app down would stop the version still serving.
      */
     public function test_a_redeploy_that_kept_the_previous_version_does_not_tear_it_down(): void

@@ -201,7 +201,7 @@ class EnvFileTest extends TestCase
     /**
      * Servas's prepare hook writes a 0600 `.env` choosing SQLite. Read as the
      * engine's user it was invisible and `.env.example`'s mysql won, which
-     * added a MariaDB sidecar the app never used (engine#186).
+     * added a MariaDB sidecar the app never used.
      */
     public function test_database_settings_read_env_through_the_given_reader(): void
     {
@@ -369,7 +369,7 @@ class EnvFileTest extends TestCase
 
     public function test_shell_lines_compose_refuses_are_commented_out(): void
     {
-        // saltcorn's .env.example, lines 20-22 and 26 (engine#135).
+        // saltcorn's .env.example, lines 20-22 and 26.
         $example = "# stale values\n"
             . "unset DATABASE_URL SQLITE_FILEPATH SALTCORN_DB_DRIVER SALTCORN_DEFAULT_SCHEMA\n"
             . "unset PGHOST PGPORT PGUSER PGPASSWORD PGDATABASE\n"

@@ -9,8 +9,8 @@
 # this a compose project: an app config is applied before detection, the
 # compose platform outranks any other walk match, and UserComposeStrategy runs
 # this file as written -- so ComposePlaceholders rewrites app__BASE_URL below
-# from localhost to the account's public URL, and engine#221 (the fromSource
-# platform trap) never applies because no platform is declared.
+# from localhost to the account's public URL, and the fromSource platform trap
+# never applies because no platform is declared.
 services:
   db:
     image: mariadb:10.5
@@ -189,8 +189,8 @@ services:
       start_period: 60s
     mem_limit: 768m
 
-  # Does nothing and exits 0. `docker compose up -d` runs without --wait
-  # (engine#204), so without a service that waits on the webapp's healthcheck
+  # Does nothing and exits 0. `docker compose up -d` runs without --wait,
+  # so without a service that waits on the webapp's healthcheck
   # the deploy is called done while Geeftlist is still starting. A clean exit 0
   # is not a crash loop to AppHealth. alpine so nothing large is pulled.
   ready:

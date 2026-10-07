@@ -16,13 +16,3 @@ description: >-
   volumes. Login rate limiting reads the proxy-added X-Forwarded-For hop,
   since every visitor reaches the app through the engine's proxy. A `ready`
   gate waits for /health.
-
-  == Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 3072 ==
-
-  Without LANGFLOW_SUPERUSER_PASSWORD the deploy fails naming it. With it:
-  create success in 137 s; / is <title>Langflow</title>, /api/v1/version
-  1.12.3, /api/v1/auto_login 403 "Auto login is disabled"; POST /api/v1/login
-  as langflow 200, whoami is_superuser true; a flow was created. /.env and
-  /.git/config return the SPA shell (no secrets). Rebuild: success in 87 s,
-  login 200 and the flow is still there. Directly to the host (no front proxy),
-  7 bad logins from one client gave 429 while another client still logged in.

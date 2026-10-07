@@ -64,7 +64,7 @@ final class DindEngine implements ContainerEngine
 
     /**
      * 8 GB, or `DEPLOY_BUILD_MEMORY` when it parses; never more than
-     * {@see buildCeilingMb()} (engine#295).
+     * {@see buildCeilingMb()}.
      */
     public static function buildMemory(string $configured, HostMemory $host): BuildMemory
     {

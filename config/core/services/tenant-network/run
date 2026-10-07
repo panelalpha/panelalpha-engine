@@ -1,5 +1,5 @@
 #!/bin/sh
-# engine#529: each port of pash-tenants is bound to the container Docker put on
+# Each port of pash-tenants is bound to the container Docker put on
 # it, and a port not bound yet carries nothing. Docker attaches containers on
 # its own too (restart policies, a daemon restart), so this re-applies the
 # host's tenant firewall whenever a container joins or leaves the network, and

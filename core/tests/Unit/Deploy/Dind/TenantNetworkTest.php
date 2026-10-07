@@ -6,7 +6,7 @@ use App\Lib\Deploy\Dind\TenantNetwork;
 use Tests\TestCase;
 
 /**
- * engine#519: accounts left pash-default-network for a network whose policy the
+ * Accounts left pash-default-network for a network whose policy the
  * host enforces. The compose file, the firewall script and the address the
  * engine hands an app for sites-db must agree on the pinned addresses.
  */
@@ -136,7 +136,7 @@ class TenantNetworkTest extends TestCase
     }
 
     /**
-     * engine#529: a port of the bridge may speak only as its own container,
+     * A port of the bridge may speak only as its own container,
      * and the binding follows containers Docker attaches on its own.
      */
     public function test_ports_are_bound_to_their_containers_and_kept_bound(): void
@@ -168,7 +168,7 @@ class TenantNetworkTest extends TestCase
         $this->assertStringContainsString('tenant-network-firewall.sh --create', $this->repo('scripts/installer.sh'));
         $this->assertStringContainsString('tenant-network-firewall.sh --create', $this->repo('scripts/bootstrap-from-source.sh'));
         $this->assertStringContainsString('tenant-network-firewall.sh', $this->repo('dockerfiles/entrypoint-core.sh'));
-        // engine#541: closed from boot, not only from when core starts.
+        // Closed from boot, not only from when core starts.
         $this->assertStringContainsString('tenant-network-firewall.sh --install-units', $this->repo('scripts/installer.sh'));
         $this->assertStringContainsString('tenant-network-firewall.sh --install-units', $this->repo('scripts/bootstrap-from-source.sh'));
         $this->assertStringContainsString('panelalpha-tenant-guard.service', $this->repo('scripts/uninstall.sh'));
@@ -194,7 +194,7 @@ class TenantNetworkTest extends TestCase
         $this->assertStringNotContainsString('name: ' . TenantNetwork::LEGACY_NAME, $template);
     }
 
-    /** engine#217: PHP-hosting accounts sat on core's network after DinD ones left it. */
+    /** PHP-hosting accounts sat on core's network after DinD ones left it. */
     public function test_php_hosting_accounts_are_created_on_the_tenant_network(): void
     {
         $templates = glob(dirname(__DIR__, 5) . '/templates/user/default/project/docker-compose.yml*.blade.php') ?: [];

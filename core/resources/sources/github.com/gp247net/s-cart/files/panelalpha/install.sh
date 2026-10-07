@@ -82,7 +82,7 @@ echo "[s-cart] installing GP247 (core -> front -> shop)"
 #     SQLSTATE[42S02]: Base table or view not found: 1146
 #     Table 'scart.gp247_admin_menu' doesn't exist
 #
-# Measured, on the first deploy of this recipe. The seeders themselves pass
+# The seeders themselves pass
 # `--force => true`, so the omission is only on the migrate calls; there is no
 # flag or environment variable that supplies it from outside, and nothing in
 # the platform can replace a command inside a vendor package. Telling the
@@ -92,7 +92,5 @@ echo "[s-cart] installing GP247 (core -> front -> shop)"
 # is what the compose file's `environment:` says.
 #
 # Nothing in the install depends on the environment name otherwise -- the store
-# domain the seeders record comes from APP_URL, not from APP_ENV. Verified on
-# a full run: with this line the whole chain completes and `/gp247_admin`
-# renders; without it, it does not.
+# domain the seeders record comes from APP_URL, not from APP_ENV.
 APP_ENV=local php artisan gp247:install --force=1

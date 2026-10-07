@@ -19,7 +19,7 @@ description: >-
 
   A source recipe cannot replace php.yaml's build command -- `commands:` is an
   AppConfig key, not a manifest key, so a recipe's build-stage commands are
-  appended to the manifest's and never reach `install_command` (engine#171).
+  appended to the manifest's and never reach `install_command`.
   So the host build stays as it is, resolving and locking the tree with plugins
   off, and the install stage throws that vendor/ away and installs it again
   inside the container with the plugins on. It resolves nothing -- the host
@@ -29,7 +29,7 @@ description: >-
   reinstall "*/*"` fires them but reinstalls each package into the path already
   recorded in installed.json, which leaves the theme under vendor/ where
   nothing looks for it. The cost is that the dependency tree is downloaded
-  twice per deploy, once into each cache; that is a consequence of engine#171,
+  twice per deploy, once into each cache; that is an engine limitation,
   not a choice.
 
   `docroot: public` is declared rather than detected, so the document root is

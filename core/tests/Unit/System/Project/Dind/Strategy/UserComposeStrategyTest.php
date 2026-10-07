@@ -520,7 +520,7 @@ class UserComposeStrategyTest extends TestCase
 
     /**
      * The run file sits at the root, so a stack kept under docker/ is rebased
-     * onto it (engine#91): a `./data` bind is `./docker/data` from there.
+     * onto it: a `./data` bind is `./docker/data` from there.
      */
     public function test_a_nested_compose_keeps_its_paths_from_the_root(): void
     {
@@ -631,7 +631,7 @@ class UserComposeStrategyTest extends TestCase
         $this->assertSame(['9494:9494'], $run['services']['web']['ports']);
     }
 
-    /** engine#173: the run file inlines env_vars and generated passwords. */
+    /** The run file inlines env_vars and generated passwords. */
     public function test_the_run_file_is_written_owner_only(): void
     {
         $clientPath = self::PROJECT_DIR . '/docker-compose.yml';

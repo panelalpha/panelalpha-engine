@@ -14,8 +14,8 @@ use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
 /**
- * `system:image:prune` against a host double and real deploy log files
- * (engine#87): what it removes, what it keeps, and that it keeps out of the
+ * `system:image:prune` against a host double and real deploy log files:
+ * what it removes, what it keeps, and that it keeps out of the
  * way of a deploy in flight.
  */
 class PruneHostImagesCommandTest extends TestCase

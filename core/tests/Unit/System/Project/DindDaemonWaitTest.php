@@ -12,7 +12,7 @@ use Symfony\Component\Process\Process;
 /**
  * A DinD account has two things to wait for, and only one of them was named.
  *
- * Issue #58: every staging copy of a DinD project failed with `failed to
+ * Every staging copy of a DinD project failed with `failed to
  * connect to the docker API at unix:///var/run/docker.sock ... no such file or
  * directory`, the `CreateStaging` job then deleted the destination account,
  * and `GET /projects/{dest}` answered 404. The account container starts in
@@ -25,10 +25,10 @@ use Symfony\Component\Process\Process;
  * race by being slow. The test is not about the sleep: it is that the no-op
  * cannot come back unnoticed.
  *
- * Measured on 10.10.10.25, hands-off: the socket appears 5-6s after the
- * container starts. With the wait in place a staging copy of a DinD project
- * completed (`async_status.staging = completed`), the copied stack came up in
- * the new account, and the staging vhost answered 200 through the proxy.
+ * The socket appears 5-6s after the container starts. With the wait in place a
+ * staging copy of a DinD project completes (`async_status.staging =
+ * completed`), the copied stack comes up in the new account, and the staging
+ * vhost answers 200 through the proxy.
  */
 class DindDaemonWaitTest extends TestCase
 {

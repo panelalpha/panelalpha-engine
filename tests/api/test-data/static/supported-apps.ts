@@ -1,5 +1,5 @@
 /**
- * A slice of the Supported column on the supported-apps board.
+ * A slice of the applications the tracker marks Supported.
  * Set SUPPORTED_APPS_TRACKER_URL to link entries to the tracker.
  *
  * Not the whole board — about forty applications, a few from each stack the

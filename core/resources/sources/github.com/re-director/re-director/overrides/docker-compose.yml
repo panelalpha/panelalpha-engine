@@ -14,7 +14,7 @@ services:
     restart: unless-stopped
     # Host port 8080 so the engine's port scan takes it as the primary (host 80
     # is the proxy's own); container port 80 is where the live profile listens.
-    # For a Spring app the published port must equal the primary (engine#231).
+    # For a Spring app the published port must equal the primary.
     ports:
       - "8080:80"
     env_file:
@@ -62,7 +62,7 @@ services:
 
   # Starts nothing, exits 0, waits on the seeder. `docker compose up -d` blocks
   # on a depends_on completion condition, so `up` returns -- and the engine
-  # publishes the site -- only after the admin has been seeded (engine#204).
+  # publishes the site -- only after the admin has been seeded.
   ready:
     image: docker.io/library/alpine:3
     entrypoint: ["/bin/sh", "-c", "exit 0"]

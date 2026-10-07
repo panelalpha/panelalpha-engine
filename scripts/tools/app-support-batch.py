@@ -140,10 +140,8 @@ UNFINISHED_VERDICTS = frozenset({
     # cancel. Recording it as `deploy-failed` reads as "this app does not work"
     # and hides it from every later run.
     #
-    # Measured on a dev host: a queue container restart interrupted six deploys
-    # mid-clone, and all six were recorded `deploy-failed` with
-    # `deploy=cancelled` -- depay, mafl, pigallery2, servas, bittorrenttracker,
-    # zenkocloudserver. None of them is a fact about its app.
+    # A queue container restart interrupts deploys mid-clone and leaves them
+    # `deploy=cancelled`, which is not a fact about the app.
     "deploy-cancelled",
     "inspect-failed",
     "create-failed",
@@ -201,7 +199,7 @@ def write_report_md(rec, logtext, path):
         f"# {rec['title']} — app support test",
         "",
         f"- **Issue:** [#{rec['iid']} — {rec['title']}]({rec.get('issue_url', '')})"
-        if rec.get("issue_url") else f"- **Issue:** #{rec['iid']} (panelalpha/playground/supported-apps)",
+        if rec.get("issue_url") else f"- **Issue:** #{rec['iid']}",
         f"- **Repo:** <{rec['repo']}>",
         f"- **Verdict:** `{rec.get('verdict')}`",
         f"- **Tested:** {time.strftime('%Y-%m-%d %H:%M:%S')}",
@@ -459,11 +457,10 @@ def test_app(app, outdir, timeout_s, keep, email=DEFAULT_EMAIL, memory_limit=Non
         tdata = tbody.get("data", tbody) if isinstance(tbody, dict) else {}
         status = tdata.get("status", "unknown")
     # Our poll window closing is not a verdict about the app. Ask the engine
-    # once more whether the job is really over: a deploy with a 20-minute
-    # build legitimately needs longer than --timeout, and recording that as
+    # once more whether the job is really over: a deploy with a 20-minute build
+    # legitimately needs longer than --timeout, and recording that as
     # `deploy-timeout` -- which resume then treats as a finished test -- both
-    # misreports a working app and hides it from every later run. On
-    # a dev host a host reboot left three apps recorded that way and skipped.
+    # misreports a working app and hides it from every later run.
     if status in ("running", "queued", "unknown"):
         for _ in range(3):
             time.sleep(20)

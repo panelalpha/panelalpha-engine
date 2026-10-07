@@ -3,12 +3,13 @@
 Publishing platform. The server is `ghost/core`, a Node app that serves both
 the public site and the admin SPA on :2368, backed by MySQL.
 
-Detection: `railpack` — and that is the failure. The repository root is the
-Ghost monorepo: a pnpm 12 / nx workspace with no `start` script, and the only
-compose files are `compose.dev.yaml` and its `compose.dev.*.yaml` companions,
-names Docker never auto-loads. Railpack built all 38 nx targets in ten minutes,
-then logged `No start command detected`; the container exited 0 on every boot
-and restart-looped, so nothing ever answered.
+Without this recipe detection picks `railpack` — and that is the failure. The
+repository root is the Ghost monorepo: a pnpm 12 / nx workspace with no `start`
+script, and the only compose files are `compose.dev.yaml` and its
+`compose.dev.*.yaml` companions, names Docker never auto-loads. Railpack builds
+every nx target, which takes many minutes, then logs `No start command
+detected`; the container exits 0 on every boot and restart-loops, so nothing
+ever answers.
 
 There is no production image to build in its place either.
 `Dockerfile.production` ships two shippable targets: `core` (server and
@@ -86,10 +87,9 @@ health probe sees a 301 and the request through the proxy — which forwards
 `AppLauncher` runs `docker compose up -d` without `--wait`, and the deploy is
 finished when that returns. Compose returns once every service has been
 *started*, which for Ghost is well before it answers: its first boot runs
-knex-migrator against an empty database. The first run of this recipe deployed
-successfully and the health probe, which runs immediately afterwards, still got
-`serving: error_page` on a 503 — the containers were up and Ghost was still
-migrating.
+knex-migrator against an empty database. Without a gate the deploy succeeds and
+the health probe, which runs immediately afterwards, gets `serving: error_page`
+on a 503 — the containers are up and Ghost is still migrating.
 
 Compose does honour `depends_on: condition: service_healthy` during startup, so
 the fix is a service that depends on Ghost being healthy and does nothing else.
@@ -100,17 +100,14 @@ finished container does not show up as a failing service.
 
 Ghost's healthcheck is its own dev one from `compose.dev.yaml`: a
 `redirect: 'manual'` fetch that passes on any status under 500, which is what
-makes the 301 to the canonical https origin count as answering. Observed: mysql
-healthy ~15s after start, Ghost healthy ~25s after that, whole deploy 135s
-including a 38s image pull.
+makes the 301 to the canonical https origin count as answering.
 
 ## Owner setup
 
 Ghost's owner setup is an unauthenticated page at `/ghost/`
 (`POST /ghost/api/admin/authentication/setup/`): until it has been submitted,
-whoever submits it first owns the site. Measured on a stock deploy of this
-recipe: `authentication/setup` answered `{"setup":[{"status":false}]}` on the
-public URL (#263).
+whoever submits it first owns the site: on a fresh deploy
+`authentication/setup` answers `{"setup":[{"status":false}]}` on the public URL.
 
 `init` closes it before anything publishes a port. It runs the Ghost image with
 the same environment and content volume as `ghost`, and `ghost` depends on it
@@ -134,9 +131,9 @@ The owner signs in at `/ghost/` with the email and password
 
 **Staff device verification is off.** Ghost 6 mails a code to every staff
 sign-in from a new browser (`security.staffDeviceVerification`, on in its
-production config), and this recipe configures no mail. Measured with it on:
-the owner's sign-in answered 500 `Failed to send email`, so the owner could
-never get in. With mail configured, set `GHOST_STAFF_DEVICE_VERIFICATION=true`
+production config), and this recipe configures no mail. With it on, the
+owner's sign-in answers 500 `Failed to send email`, so the owner can never get
+in. With mail configured, set `GHOST_STAFF_DEVICE_VERIFICATION=true`
 in the account's env vars.
 
 ## Not configured

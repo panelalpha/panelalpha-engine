@@ -1,7 +1,7 @@
 # Compose-replace: upstream's docker-compose.yml with the release image, data on
 # named volumes (upstream keeps ./data in ~/project, which every deploy wipes),
 # generated secrets from ~/.panelalpha, and a health gate. cap_drop/cap_add and
-# read_only are left out: the engine keeps cap_drop but strips cap_add (engine#349),
+# read_only are left out: the engine keeps cap_drop but strips cap_add,
 # and the entrypoint needs CHOWN/SETUID/SETGID to hand /data to the app user.
 services:
   app:

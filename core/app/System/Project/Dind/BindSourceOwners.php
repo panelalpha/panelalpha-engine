@@ -13,7 +13,7 @@ use App\System\Project\Dind as DindProject;
  * uid it runs as, before `compose up` ({@see WritableProjectBinds}).
  *
  * Owner becomes that uid, the group stays the account's with group write, so
- * the account keeps writing them too; nothing is widened to other uids (#173).
+ * the account keeps writing them too; nothing is widened to other uids.
  */
 final class BindSourceOwners
 {

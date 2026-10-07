@@ -90,7 +90,7 @@ final class GitRepoInput
     /**
      * Supply the scheme a caller left off `github.com/owner/repo`. A bare
      * `owner/repo` is left alone: `https://owner/repo` would send the probe
-     * to a host called `owner` (#83), and problem() suggests the URL instead.
+     * to a host called `owner`, and problem() suggests the URL instead.
      */
     public static function normalise(string $raw): string
     {

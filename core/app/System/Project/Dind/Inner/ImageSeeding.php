@@ -448,8 +448,8 @@ class ImageSeeding
      *
      * An account created after the mount shipped reads that file directly:
      * {@see \App\System\Project\Dind::rewriteDaemonJsonInPlace()} keeps the
-     * same inode the bind mount already serves (refusing a symlink there,
-     * engine#524), so HUPing the account's own dockerd from the host (never a
+     * same inode the bind mount already serves (refusing a symlink
+     * there), so HUPing the account's own dockerd from the host (never a
      * shell inside the account) is enough to pick it up, no restart needed.
      *
      * An account that predates the mount has no mount to tell apart from one

@@ -22,9 +22,7 @@ description: >-
   **The schema is never created.** `.docker/partdb-entrypoint.sh` runs
   `doctrine:migrations:migrate` only inside `if [ "$DB_AUTOMIGRATE" = "true" ]`.
   Nothing sets it, so a fresh account boots with an empty database and
-  `ErrorRenderer` answers `Invalid or not existing database schema.` -- the
-  `serving-error_page` verdict, measured on the control deploy at
-  https://pdbctl-d930.panelalpha.online/ before this recipe existed. Upstream
+  `ErrorRenderer` answers `Invalid or not existing database schema.`. Upstream
   expect the variable to come from the compose file the operator writes; the
   engine writes that compose file, so the engine is the operator here.
   `DB_AUTOMIGRATE: 'true'` below is the whole fix for the 500, and it is
@@ -39,11 +37,10 @@ description: >-
   Dockerfile sets `ENV DATABASE_URL="sqlite:///%kernel.project_dir%/uploads/app.db"`,
   which is upstream putting the database inside the volume they declared;
   .env sets `DATABASE_URL="sqlite:///%kernel.project_dir%/var/app.db"`, which
-  is where a developer's checkout keeps it. Measured in the control
-  container: `printenv DATABASE_URL` printed the `var/app.db` one, and
-  `/var/www/html/var/app.db` existed, zero bytes, in the container's own
-  writable layer. Every redeploy rebuilds that layer. So the value is restated
-  here, in the manifest's `env:`, which
+  is where a developer's checkout keeps it. The `var/app.db` one wins, so
+  `/var/www/html/var/app.db` lands in the container's own writable layer.
+  Every redeploy rebuilds that layer. So the value is restated here, in the
+  manifest's `env:`, which
   `ComposeEnvironment::layer()` puts in the compose `environment:` block --
   the only one of the three that outranks env_file.
 
@@ -77,21 +74,18 @@ description: >-
   it is not obvious: the generated compose sets `HTTPS: 'on'`, and the
   Dockerfile's php-fpm pool is configured `clear_env = no`, so that variable
   reaches `$_SERVER['HTTPS']` in every worker and `Request::isSecure()` is
-  true whatever the connection was. Measured inside the container:
-  `curl http://127.0.0.1/` -- no X-Forwarded-Proto anywhere -- answers
-  `302 https://127.0.0.1/en/`. That is what already made
+  true whatever the connection was: `http://127.0.0.1/` -- no
+  X-Forwarded-Proto anywhere -- answers `302 https://127.0.0.1/en/`. That is what already made
   `framework.session.cookie_secure: auto` mark the session cookie Secure, and
   it is why the healthcheck below asks for `/en/` rather than following `/`.
 
   **And a stock Part-DB is not private.** There is no installer and no
-  sign-up page, so nothing is left open in the sense engine#200 means -- but
+  sign-up page, so nothing is left open in that sense -- but
   migration Version1 creates `anonymous` (id 1) in the `readonly` group
   beside `admin`, and that row is the identity of every visitor who has not
-  logged in. Measured against this recipe's own deploy with no cookie: `GET
-  /en/part/1` answers 200 with the part, its stock and its storage location;
-  `/en/statistics` and `/en/category/1/edit` answer 200; and `POST
-  /en/category/new` answers 302 to `/en/category/2/edit`, having inserted a
-  row. The compose override closes it once, on the first boot, by taking that
+  logged in. With no cookie, `GET /en/part/1` answers 200 with the part, its
+  stock and its storage location; `/en/statistics` and `/en/category/1/edit`
+  answer 200; and `POST /en/category/new` inserts a row. The compose override closes it once, on the first boot, by taking that
   account's group away -- see the comment there for why it is done in the
   data rather than in config, and how an operator turns it back on.
 
@@ -100,9 +94,9 @@ description: >-
   exactly one place -- PhpStrategy.php:67 and :73 -- and is silently ignored
   by every other strategy, DockerfileStrategy included. Taking it would mean
   taking the `php` strategy too, which means giving up the image above and
-  rebuilding all of it worse: PHP 8.3, no php.ini at all (engine#185), so
+  rebuilding all of it worse: PHP 8.3, no php.ini at all, so
   `upload_max_filesize=2M` on an attachment manager, and `composer install
-  --no-plugins` with no way to lift it (engine#199), so symfony/runtime never
+  --no-plugins` with no way to lift it, so symfony/runtime never
   writes vendor/autoload_runtime.php and public/index.php dies on its second
   line. SQLite in the `uploads` volume is upstream's own default for this
   image, the volume is named and `docker compose down` -- which is what the

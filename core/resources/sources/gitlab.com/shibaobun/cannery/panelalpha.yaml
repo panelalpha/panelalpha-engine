@@ -3,11 +3,11 @@ description: >-
   Cannery is a self-hosted firearm/ammunition inventory tracker: an
   Elixir/Phoenix (LiveView) app backed by PostgreSQL, delivered as one official
   image. This recipe is the compose-REPLACE pattern (calcom/n8n/Typebot): no
-  platform block is declared, so detection runs via fromWalk and engine#221
-  does not bite; ComposePlaceholders rewrites the one *_URL value below to the
+  platform block is declared, so detection runs via fromWalk and the
+  platform-block caveat does not bite; ComposePlaceholders rewrites the one *_URL value below to the
   account's public https address.
 
-  IMAGE, MATCHES HEAD. The tracker Repository URL resolves to the repo's
+  IMAGE, MATCHES HEAD. The repository URL resolves to the repo's
   default branch `dev` (HEAD 6281bdc7, 2026-08-30). Upstream publishes an
   official prebuilt image and the recipe pulls it rather than building the
   clone. It pins `shibaobun/cannery:dev`, which Docker Hub rebuilt 2026-08-30
@@ -69,17 +69,14 @@ description: >-
   the container log (`docker compose logs cannery | grep users/confirm`) and
   opens it. After confirming, login and the whole app work; password reset is
   the same story (needs SMTP to deliver). Inbound mail is not configured and is
-  out of scope. VERIFIED end to end on this engine: deploy, register-as-admin,
-  confirm, log in, create a container and an ammo type, read them back, and
-  survive a rebuild -- all over the real public HTTPS domain.
+  out of scope.
 
   ENGINE CAVEAT (NOT A RECIPE FAULT). Cannery's UI is Phoenix LiveView, which
-  needs a WebSocket. Verified: the app upgrades /live/websocket to 101 directly
-  and through the engine's own openresty (178.104.84.45:443 -> 101), so
-  check_origin and HOST are correct; but the shared panelalpha.online
+  needs a WebSocket. The app upgrades /live/websocket to 101 directly and
+  through the engine's own openresty, so check_origin and HOST are correct; but the shared panelalpha.online
   (WithoutDNS) tunnel does not carry the upgrade and the socket loops. Reads
   (login, dead-render pages) work through the tunnel; live create/edit does not,
   purely through that tunnel. On an account with its own domain pointed straight
   at the engine, or any non-tunnel address, the LiveView UI works. This is the
-  WebSocket analogue of the engine#170 tunnel-multipart caveat, an engine/tunnel
+  WebSocket analogue of the tunnel-multipart caveat, an engine/tunnel
   limitation to report, not a recipe or app failure.

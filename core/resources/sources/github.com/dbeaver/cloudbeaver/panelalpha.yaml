@@ -16,8 +16,8 @@ description: >-
   release 26.2.1. Building from the clone would compile a Java/Eclipse product
   plus a TypeScript/React frontend on the host for no gain -- the published image
   already bundles the compiled frontend, the server and the JDBC drivers.
-  Seeding a Docker Hub image also sidesteps engine#229 (image-seed NotFound on a
-  from-registry seed, which is the GHCR case, not Hub).
+  Seeding a Docker Hub image also sidesteps the image-seed NotFound on a
+  from-registry seed (the GHCR case, not Hub).
 
   WHY COMPOSE-REPLACE. There is no datastore sidecar to add -- H2 is embedded
   and managed by the server under the workspace -- but a hosted deploy needs two
@@ -50,19 +50,17 @@ description: >-
   PERSISTENCE. /opt/cloudbeaver/workspace (the embedded H2 metadata database
   with the admin user, teams, saved connections and settings, plus the runtime
   config that marks the server configured) is a named volume, so it survives
-  project_rebuild and storage reclaim; ~/project is wiped every deploy
-  (engine#173). The admin login is kept by the engine and delivered to
+  project_rebuild and storage reclaim; ~/project is wiped every deploy. The admin login is kept by the engine and delivered to
   ~/.panelalpha on every deploy, never written into ~/project.
 
   PORT + READINESS. The server listens on 8978 and only the app publishes a port
-  (8978:8978), so the engine's port scan takes it as the primary (engine#231/
-  #234). The Ubuntu-based image has no curl/wget but does have bash, so the
+  (8978:8978), so the engine's port scan takes it as the primary.
+  The Ubuntu-based image has no curl/wget but does have bash, so the
   internal healthcheck is a raw HTTP GET over bash's /dev/tcp; a `ready` one-shot
   (its own curl image, on the internal network) then waits until the GraphQL
   serverConfig reports configurationMode=false, so `docker compose up` returns --
   and the deploy reports finished -- only once CloudBeaver answers AND its admin
-  is claimed and the wizard is closed, not the moment the container starts
-  (engine#204). JVM boot is slow, hence the long start_period.
+  is claimed and the wizard is closed, not the moment the container starts. JVM boot is slow, hence the long start_period.
 credentials:
   adopt_from: .panelalpha/cloudbeaver/admin.env
   fields:

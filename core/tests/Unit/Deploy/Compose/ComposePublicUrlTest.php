@@ -6,8 +6,8 @@ use App\Lib\Deploy\Compose\ComposePlaceholders;
 use PHPUnit\Framework\TestCase;
 
 /**
- * How a compose stack the engine did not write learns the account's address
- * (engine#192): under the engine's own names, by substitution, and in the
+ * How a compose stack the engine did not write learns the account's address:
+ * under the engine's own names, by substitution, and in the
  * keys the author left blank for whoever deploys it.
  */
 class ComposePublicUrlTest extends TestCase

@@ -88,7 +88,7 @@ class StepWatchdogTest extends TestCase
     }
 
     /**
-     * Warpgate (#153): its last crate compiled silently past the limit and the
+     * Warpgate: its last crate compiled silently past the limit and the
      * build was killed a step from the end. Silent but busy is not stalled.
      */
     public function test_a_silent_step_that_is_still_busy_is_not_killed(): void
@@ -115,7 +115,7 @@ class StepWatchdogTest extends TestCase
         $this->assertGreaterThanOrEqual(1, $asked);
     }
 
-    /** engine#244: one pull took a host from 34 GB free to 0 inside a single step. */
+    /** One pull took a host from 34 GB free to 0 inside a single step. */
     public function test_a_step_is_stopped_when_the_disk_runs_out_while_it_runs(): void
     {
         $readings = [null, 'the engine host has 2.9G free on /home, under DEPLOY_HOST_MIN_FREE (3G)'];
@@ -212,7 +212,8 @@ class StepWatchdogTest extends TestCase
 
     /**
      * killTree() polls the process, which delivers what it printed while dying.
-     * Measured on a live DinD exec: "printed nothing for 0s" after 21s of silence.
+     * Otherwise a stalled exec is reported as "printed nothing for 0s" after
+     * 21s of silence.
      */
     public function test_what_the_step_prints_while_being_killed_does_not_reset_the_report(): void
     {

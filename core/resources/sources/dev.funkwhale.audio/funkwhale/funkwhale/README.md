@@ -2,7 +2,7 @@
 
 Multi-user music/audio server: a Django/DRF API (gunicorn), a Celery worker and
 beat, a compiled Vue frontend served by nginx, and PostgreSQL + Redis behind
-them. Upstream tracker: `panelalpha/playground/supported-apps#1282`.
+them.
 
 ## Strategy: compose-REPLACE, official images
 
@@ -20,7 +20,7 @@ the account a full yarn+poetry compile on every redeploy.
 - **Secrets** (`hooks/prepare.sh` → `~/.panelalpha/funkwhale/funkwhale.env`,
   0600): `DJANGO_SECRET_KEY` and the PostgreSQL password, generated once and
   reused — a new secret key logs everyone out, a new DB password locks the app
-  out of its volume (engine#173). The administrator login is the engine's
+  out of its volume. The administrator login is the engine's
   (`credentials:` in `panelalpha.yaml`), returned by
   `GET /projects/{name}/app-credentials` (MCP `app_credentials_get`).
 - **Public name**: `PA_PUBLIC_URL=http://localhost` in the compose is rewritten
@@ -36,7 +36,7 @@ the account a full yarn+poetry compile on every redeploy.
   whitelisted `/media/` subtrees and the `/_protected/media` internal redirect
   Django streams authorised tracks through (`REVERSE_PROXY_TYPE=nginx`).
 - **Gates**: a one-shot `init` (migrate + collectstatic + superuser); a `ready`
-  gate that holds `up -d` until the API answers through the front (engine#204).
+  gate that holds `up -d` until the API answers through the front.
 
 ## Files
 

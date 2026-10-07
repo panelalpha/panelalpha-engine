@@ -32,7 +32,7 @@ patched.
   to the deploy log.
 - **Persistence.** `config/`, `servers/`, `backups/`, `logs/` and `import/` are
   bind-mounted from `~/.panelalpha/crafty`, which survives the per-deploy
-  `~/project` wipe (engine#173). Admin login and created server definitions
+  `~/project` wipe. Admin login and created server definitions
   persist across a rebuild.
 
 ## Files

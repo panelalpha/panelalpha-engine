@@ -125,7 +125,7 @@ class DindProjectEnvironmentTest extends TestCase
 
     public function test_apply_comments_out_example_lines_compose_would_refuse(): void
     {
-        // saltcorn: a .env.example meant to be `source`d (engine#135).
+        // saltcorn: a .env.example meant to be `source`d.
         file_put_contents(
             $this->projectDir . '/.env.example',
             "unset DATABASE_URL SQLITE_FILEPATH\nexport SALTCORN_SESSION_SECRET='hrh64b45b3'\n"
@@ -194,7 +194,7 @@ class DindProjectEnvironmentTest extends TestCase
     }
 
     /**
-     * #178: every deploy re-clones ~/project, so the key written from
+     * Every deploy re-clones ~/project, so the key written from
      * .env.example has to be the same one each time or every session dies.
      */
     public function test_a_redeploy_from_env_example_keeps_the_same_app_key(): void
@@ -290,7 +290,7 @@ class DindProjectEnvironmentTest extends TestCase
     }
 
     /**
-     * #179: a nested .env.example gets the root copy's secrets rule. Plainpad's
+     * A nested .env.example gets the root copy's secrets rule. Plainpad's
      * Laravel API is server/ (its app_root) and its template ships
      * APP_KEY={KEY}; a well-known signing key is replaced the same way.
      */
@@ -308,7 +308,7 @@ class DindProjectEnvironmentTest extends TestCase
         $env = $this->vars((string) file_get_contents($this->projectDir . '/server/.env'));
         $this->assertStringStartsWith('base64:', $env['APP_KEY']);
         $this->assertSame(32, strlen((string) base64_decode(substr($env['APP_KEY'], 7), true)));
-        // Seeded like the root copy (#178), so a redeploy keeps the key.
+        // Seeded like the root copy, so a redeploy keeps the key.
         $this->assertSame(
             ComposePlaceholders::publishedSecret('APP_KEY', $dind->strategy()->secrets()->for('compose-placeholders')),
             $env['APP_KEY']
@@ -426,7 +426,7 @@ class DindProjectEnvironmentTest extends TestCase
     }
 
     /**
-     * kaneo (#144): postgres reads its password from `.env` through
+     * kaneo: postgres reads its password from `.env` through
      * `env_file:`, the repo ships no `.env.example`, and an empty `.env`
      * left the database refusing its first start. The generated value goes
      * to `.env.panelalpha`, attached after `.env` wherever `.env` is loaded,
@@ -526,7 +526,7 @@ class DindProjectEnvironmentTest extends TestCase
         $this->assertSame('./config', $env['CONFIG_PATH']);
     }
 
-    /** onetimesecret (#140): `${VAR:?}` in an included file's `command:`. */
+    /** onetimesecret: `${VAR:?}` in an included file's `command:`. */
     public function test_compose_required_variables_in_an_included_file_are_generated_beside_an_existing_env(): void
     {
         mkdir($this->projectDir . '/docker/compose', 0777, true);
@@ -648,7 +648,7 @@ class DindProjectEnvironmentTest extends TestCase
     }
 
     /**
-     * #173: `.env.default` copies `.env` after the prepare hook wrote its
+     * `.env.default` copies `.env` after the prepare hook wrote its
      * secrets, and ~/project is traversable by every uid on the host. An
      * earlier deploy's 0644 copy is tightened on the next apply().
      */

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Generate the session key and the /metrics credentials once, where a redeploy
-# will not wipe them (~/project is emptied, engine#173). The admin login is the
+# will not wipe them (~/project is emptied). The admin login is the
 # engine's (`credentials:` in panelalpha.yaml), in ~/.panelalpha/app-credentials.env.
 set -e
 cd ~/project

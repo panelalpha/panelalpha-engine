@@ -189,9 +189,10 @@ class ModsecCustomRulesTest extends TestCase
     public function test_a_skip_that_can_land_outside_these_rules_is_refused(): void
     {
         $rule = 'SecRule REQUEST_URI "@beginsWith /qa" "id:1100002,phase:1,deny,status:403"';
-        // Measured on libmodsecurity 3.0.15: a skipAfter whose marker is missing, written in
-        // another case or before it skips every rule after it, in CRS too and in later phases,
-        // for every request it matches; skip:N counts on into the rules loaded after these.
+        // In libmodsecurity 3.0.15 a skipAfter whose marker is missing, written
+        // in another case or before it skips every rule after it, in CRS too
+        // and in later phases, for every request it matches; skip:N counts on
+        // into the rules loaded after these.
         foreach ([
             "SecRule REQUEST_URI \"@beginsWith /qa2\" \"id:1100001,phase:1,pass,nolog,skipAfter:END_QA2X\"\n{$rule}\nSecMarker END_QA2",
             "SecRule REQUEST_URI \"@beginsWith /qa2\" \"id:1100001,phase:1,pass,nolog,skipAfter:end_qa2\"\n{$rule}\nSecMarker END_QA2",
@@ -791,8 +792,9 @@ class ModsecCustomRulesTest extends TestCase
         // A candidate that denies a check request itself still blocks it.
         $this->assertNull(Modsec::checkProblem($answers(['phase1' => '403', 'phase2' => '403', 'phase3' => '403', 'body' => '403'])));
 
-        // Unless it denies every request: custom before CRS with a phase 1 allow:phase
-        // skips CRS's setup, and CRS then denies everything (measured on 3.0.15).
+        // Unless it denies every request: custom before CRS with a phase 1
+        // allow:phase skips CRS's setup, and CRS then denies everything
+        // (libmodsecurity 3.0.15).
         $denyAll = ['phase1' => '403', 'phase2' => '403', 'phase3' => '403', 'body' => '403', 'plain' => '403'];
         $this->assertSame(
             'with these rules in place, an ordinary request with nothing in it to block is answered 403 instead of reaching the site. '

@@ -80,7 +80,7 @@ done
 # Reload sshd to apply new users/keys, if running. Only the listener: every
 # open connection is an sshd too -- on a host with 2222 open to the internet
 # there always are some -- and `kill -HUP "$(pidof sshd)"` passed all of them as
-# one argument, failed, and left new keys unread until a restart (engine#243).
+# one argument, failed, and left new keys unread until a restart.
 listener=""
 for pid in $(pidof sshd 2>/dev/null); do
     ppid=$(awk '{print $4}' "/proc/$pid/stat" 2>/dev/null) || continue

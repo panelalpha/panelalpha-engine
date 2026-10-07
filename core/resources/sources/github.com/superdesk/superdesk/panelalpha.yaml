@@ -35,4 +35,4 @@ description: >-
   FIRST RUN AS UPSTREAM SHIPS IT. The server image's start script creates
   admin / admin on every start (README). The recipe leaves it, so change it
   after the first login. On the *.panelalpha.online test names the front edge
-  strips `Upgrade` (engine#170), so live notifications need a real domain there.
+  strips `Upgrade`, so live notifications need a real domain there.

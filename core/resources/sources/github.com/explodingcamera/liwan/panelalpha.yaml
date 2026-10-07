@@ -33,7 +33,7 @@ description: >-
   upstream source is touched -- this is configuration in a Dockerfile, the same
   shape as the Authelia recipe. Building locally also means the image is never
   delivered through the engine's host `docker save` image-seeding, so
-  engine#229 (the containerd-store manifest-only-stub bug that blocked Flink)
+  the containerd-store manifest-only-stub bug (the one that blocked Flink)
   cannot apply to it.
 
   == What the entrypoint sets ==

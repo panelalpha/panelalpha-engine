@@ -16,7 +16,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Sleep;
 
 /**
- * A redeploy with the site always served (engine#33): the new version starts
+ * A redeploy with the site always served: the new version starts
  * beside the running one, traffic moves to it once it answers, the app's own
  * services are replaced behind it, and traffic moves back before the second
  * copy goes. The rest of the engine only ever sees the one project it had.

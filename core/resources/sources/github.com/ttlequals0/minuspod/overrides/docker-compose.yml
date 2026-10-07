@@ -1,5 +1,5 @@
 # Compose-replace: upstream's compose reserves an NVIDIA GPU and runs with
-# cap_drop: ALL + cap_add, which the engine turns into cap_drop only (engine#349),
+# cap_drop: ALL + cap_add, which the engine turns into cap_drop only,
 # so the entrypoint cannot chown /app/data or drop to uid 1000 and crash-loops.
 # Runs the published CPU image of the current release with default caps.
 services:

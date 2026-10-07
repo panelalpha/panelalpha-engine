@@ -44,20 +44,3 @@ address.
 Log in at the site with the password `GET /projects/{name}/app-credentials`
 (MCP `app_credentials_get`) returns; the API key for the *arr apps is shown on
 the dashboard.
-
-## Verified (10.10.10.25, engine 705f250a, memory_limit 2000)
-
-- Deploy 62s, rebuild 45s; app at ~100 MB.
-- Anonymous `/` ends on `/UI/Login?cookiesChecked=1` (`<title>Jackett</title>`,
-  a password field); `/UI/Dashboard`, `/api/v2.0/server/config`,
-  `/api/v2.0/indexers` all 302 to the login page.
-- `/api/v2.0/indexers/all/results?apikey=wrong` 401; the seeded key 200.
-- Wrong password: still 302 to login. Seeded password: dashboard 200 (44 KB),
-  config API 200 with the seeded API key.
-- Round trip: `POST /api/v2.0/server/config` (cache_ttl 1500, blackholedir
-  `/config`) read back; indexer `nyaasi` configured, Torznab search returned
-  a real release through the public URL.
-- After `rebuild`: init printed `ServerConfig.json exists; left alone`,
-  `jackett.env` checksum unchanged, the pre-rebuild session cookie still
-  valid, the new password login works, config values and the indexer kept.
-- `/.env`, `/.git/config`, `/ServerConfig.json` all 404.

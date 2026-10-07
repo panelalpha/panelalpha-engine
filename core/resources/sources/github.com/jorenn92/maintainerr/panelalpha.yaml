@@ -25,15 +25,4 @@ description: >-
   htpasswd), and writes a docker-compose.override.yml running the proxy as the
   account uid so it can read that file. The proxy waits for the image's own
   healthcheck (/api/health/ready), so a finished deploy means migrations ran.
-
-  Measured on mariusz.panelalpha.tools (2026-09-28, engine 705f250a): deploy
-  54s, rebuild 32s; app 160 MiB, proxy 10 MiB. Anonymous /, /api/settings,
-  /api/settings/radarr, /api/settings/database/download, /api/events/stream,
-  POST /api/settings/radarr and a wrong password -> 401; the app port 6246 is
-  not published. Authenticated: <title>Maintainerr, version 3.29.0, a Radarr
-  server (with API key) and the application title saved and read back, both
-  intact after rebuild with the same password. The engine's health check reads
-  the 401 as healthy (serving ok). Server-Sent Events stream through the
-  engine's webserver; the *.panelalpha.online test edge answers them with a
-  302 to its error page after ~11s (engine#170), so live updates need a real
-  domain.
+  The engine's health check reads the proxy's 401 as healthy.

@@ -8,7 +8,7 @@ use App\System\Project\PhpHosting;
 
 /**
  * Moves a running PHP-hosting account from pash-default-network to
- * pash-tenants (engine#217) without restarting it, as
+ * pash-tenants without restarting it, as
  * {@see DindTenantNetworkMove} does for DinD accounts.
  *
  * Nothing in the account pins an address: the database is reached by
@@ -36,7 +36,7 @@ final class TenantNetworkMove
         $system->exec(TenantNetwork::firewallArgv(), [], 60);
         if (!array_key_exists(TenantNetwork::NAME, $networks)) {
             $system->exec(['sudo', 'docker', 'network', 'connect', TenantNetwork::NAME, $account], [], 60);
-            // The new port carries nothing until it is bound (engine#529).
+            // The new port carries nothing until it is bound.
             $system->exec(TenantNetwork::firewallArgv(), [], 60);
         }
 

@@ -5,7 +5,7 @@ namespace App\Lib\Deploy\Dind;
 use Symfony\Component\HttpFoundation\IpUtils;
 
 /**
- * The Docker network DinD accounts run on (engine#519).
+ * The Docker network DinD accounts run on.
  *
  * Accounts used to share pash-default-network with core, SFTP and phpMyAdmin,
  * filtered only from inside the account, where the tenant holds the inner

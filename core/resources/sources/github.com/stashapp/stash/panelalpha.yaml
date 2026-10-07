@@ -4,8 +4,8 @@ description: >-
   collection: one Go binary serving a React web UI and a GraphQL API on :9999,
   SQLite and settings under /root/.stash, ffmpeg for previews and transcodes.
 
-  The repository root holds no main package (the binary is cmd/stash, engine
-  #328) and the UI is a separate pnpm build, so this recipe runs upstream's
+  The repository root holds no main package (the binary is
+  cmd/stash) and the UI is a separate pnpm build, so this recipe runs upstream's
   published v0.31.1 release image (pinned by digest) laid out like upstream's
   docker/production compose, with config, library, metadata, cache, blobs and
   generated files on named volumes that survive redeploys.

@@ -17,7 +17,7 @@ project's domain and its admin with upstream's defaults: login name
 - `files/zitadel-caddy.Caddyfile` routes `/` and `/ui/v2/login` to the login UI,
   `/api/*` (prefix stripped) and everything else to the API over h2c, as
   upstream's Traefik labels do. Caddy instead of Traefik because the engine
-  drops a traefik service from a compose file (engine#334).
+  drops a traefik service from a compose file.
 - `hooks/prepare.sh` generates the masterkey, the login cookie secret and the
   Postgres password once into `~/.panelalpha/zitadel/` (0600 files, 0700 dir).
   Keep them: a new masterkey cannot decrypt the existing data.

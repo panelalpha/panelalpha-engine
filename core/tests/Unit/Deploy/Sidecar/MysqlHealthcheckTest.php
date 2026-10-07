@@ -18,13 +18,13 @@ use Symfony\Component\Yaml\Yaml;
  *    substituted away before the container saw it, leaving
  *    `mysqladmin ping -p""` and a `variable is not set` warning on every
  *    compose command in the project.
- *  - `mysqladmin` is gone from MariaDB 11+ images. Measured on mariadb:lts
- *    (12.3.3) it exits 127; `mariadb-admin` exits 0. On mysql:8 it is the
- *    other way round. Trying both covers either.
+ *  - `mysqladmin` is gone from MariaDB 11+ images. On mariadb:lts (12.3.3)
+ *    it exits 127; `mariadb-admin` exits 0. On mysql:8 it is the other way
+ *    round. Trying both covers either.
  *
- * Verified end to end on the engine host with the emitted YAML: no compose
- * warning, the container reaches `Healthy`, and a dependent service gated on
- * `condition: service_healthy` actually starts.
+ * With the emitted YAML there is no compose warning, the container reaches
+ * `Healthy`, and a dependent service gated on `condition: service_healthy`
+ * actually starts.
  */
 class MysqlHealthcheckTest extends TestCase
 {

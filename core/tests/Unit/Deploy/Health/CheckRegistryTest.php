@@ -86,7 +86,7 @@ class CheckRegistryTest extends TestCase
     /**
      * A Django app shipping its own compose file or Dockerfile is deployed
      * under the compose/dockerfile runtime, which has no group of its own, so
-     * `django-allowed-hosts` never ran for it (#209: Tandoor, Shynet).
+     * `django-allowed-hosts` never ran for it (Tandoor, Shynet).
      */
     public function test_compose_and_dockerfile_are_asked_the_framework_checks(): void
     {

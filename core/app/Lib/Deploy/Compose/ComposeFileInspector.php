@@ -350,7 +350,7 @@ class ComposeFileInspector
     /**
      * A Compose v1 file: services at the top level, no `services:` mapping.
      * Compose v2 refuses the whole file (`additional properties 'rapidbay'
-     * not allowed`, #122), so running it can only fail.
+     * not allowed`), so running it can only fail.
      */
     public static function isLegacyV1Compose(string $composePath): bool
     {

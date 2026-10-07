@@ -67,5 +67,5 @@ about 100 MB.
 ## Known limitation
 
 On a `*.panelalpha.online` test domain, file uploads (multipart POSTs) fail at
-the shared test edge (engine#170). Uploads work through the engine host itself
+the shared test edge. Uploads work through the engine host itself
 or through a real domain.

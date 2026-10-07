@@ -181,7 +181,7 @@ class YamlAppConfigTest extends TestCase
         AppConfig::fromYaml("git:\n  history: deep\n");
     }
 
-    /** engine#569: an app that installs itself at first start needs longer than the deploy probe. */
+    /** An app that installs itself at first start needs longer than the deploy probe. */
     public function test_health_start_period_is_read(): void
     {
         $this->assertSame(900, AppConfig::fromYaml("health:\n  start_period: 900\n")?->startPeriod());

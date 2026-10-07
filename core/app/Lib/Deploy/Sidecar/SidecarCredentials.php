@@ -36,7 +36,7 @@ class SidecarCredentials
         // A database started with unresolved ${VAR} credentials comes up with
         // values the application cannot guess; settle them once so both sides
         // are configured from the same text. A password nobody set is the
-        // account's own, not `app` (engine#189).
+        // account's own, not `app`.
         $env = self::environmentMap($service['environment'] ?? null);
         $prefix = strtoupper($engine);
         foreach ($env as $key => $value) {

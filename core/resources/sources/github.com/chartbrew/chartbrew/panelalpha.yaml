@@ -10,7 +10,7 @@ description: >-
   Building from the clone would compile the React client and install both
   workspaces on every deploy; the published image already contains the source
   and node_modules and rebuilds only the client bundle at start. Pulling from
-  Docker Hub also sidesteps engine#229 (the GHCR/quay image-seed stub).
+  Docker Hub also sidesteps the GHCR/quay image-seed stub.
 
   WHY COMPOSE-REPLACE. Chartbrew is a split front+API app -- the React SPA
   (served by `serve` on :4018) and the Express API (:4019) are two processes on

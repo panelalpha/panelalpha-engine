@@ -161,7 +161,7 @@ class ServiceHardenerTest extends TestCase
     /**
      * A relative `../.panelalpha/...` source is kept even when the engine's own
      * process cannot read into ~/.panelalpha to rule out a symlink (private,
-     * 0700, same as a real account since engine#494): it is trusted exactly
+     * 0700, same as a real account): it is trusted exactly
      * like the absolute form above, not run past LinkedSource at all.
      */
     public function test_a_relative_panelalpha_bind_is_kept_even_when_panelalpha_is_unreadable(): void
@@ -732,7 +732,7 @@ class ServiceHardenerTest extends TestCase
     public function test_every_service_gets_a_process_limit(): void
     {
         // The fork-bomb cap. Nothing else in the account bounds process count.
-        // 1024, not 256: the lower cap starved multi-daemon images (engine#220).
+        // 1024, not 256: the lower cap starved multi-daemon images.
         $this->assertSame(1024, ServiceHardener::harden('app', ['image' => 'acme/app'])['pids_limit']);
     }
 
@@ -935,7 +935,7 @@ class ServiceHardenerTest extends TestCase
     }
 
     /**
-     * limbas (#97): `image: postgres` resolves to 18, whose entrypoint refuses
+     * limbas: `image: postgres` resolves to 18, whose entrypoint refuses
      * to start while /var/lib/postgresql/data is a mount point.
      */
     public function test_a_postgres_volume_at_the_legacy_path_is_named_as_pgdata(): void

@@ -183,7 +183,7 @@ final class PlatformValues
      * `install_command` / `build_command` with an app config's own build
      * commands folded in. The app config's commands are stripped from the
      * manifest it describes, and the host build reads only these two strings,
-     * so a recipe's `stage: build` never ran (engine#171). Unchanged when the
+     * so a recipe's `stage: build` never ran. Unchanged when the
      * app config declares no build command.
      *
      * @param array<string, mixed> $decision

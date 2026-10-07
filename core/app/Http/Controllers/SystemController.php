@@ -75,7 +75,7 @@ class SystemController extends Controller
             'latest_webserver_change' => $system->getLatestChangeWebserverInfo(),
             'latest_update' => $system->getLatestUpdateInfo(),
             // Why new projects stopped getting panelalpha.online names, e.g. a
-            // used-up site quota; null once a label is sold again (#79).
+            // used-up site quota; null once a label is sold again.
             'panelalpha_online' => [
                 'last_error' => DomainAllocator::lastOnlineError(),
             ],

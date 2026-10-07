@@ -53,7 +53,7 @@ class ShellStepTagTest extends TestCase
         $this->assertSame('host build: npm ci', ShellOperations::stepLabel(['sudo', 'docker', 'run', '--rm', 'node:22', 'sh', '-c', 'npm ci']));
     }
 
-    /** #153: under sysbox `docker stats` misses BuildKit's CPU, so the account's cgroup is read. */
+    /** Under sysbox `docker stats` misses BuildKit's CPU, so the account's cgroup is read. */
     public function test_a_silent_dind_step_is_busy_by_its_whole_cgroup(): void
     {
         $system = Mockery::mock(System::class);

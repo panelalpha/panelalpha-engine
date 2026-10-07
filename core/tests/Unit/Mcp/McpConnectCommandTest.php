@@ -12,7 +12,7 @@ use Tests\TestCase;
 
 /**
  * `pae mcp:connect` with no argument turns the printed list into an arrow-key
- * choice (#53) - but only where a prompt can be answered. Everywhere else it
+ * choice - but only where a prompt can be answered. Everywhere else it
  * has to stay what it was: a list, and nothing minted.
  */
 class McpConnectCommandTest extends TestCase

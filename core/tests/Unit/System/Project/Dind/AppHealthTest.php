@@ -296,7 +296,7 @@ class AppHealthTest extends TestCase
     }
 
     /**
-     * engine#81: the app answers 200 inside the account, and visitors get the
+     * The app answers 200 inside the account, and visitors get the
      * webserver's 502. That deploy used to end green with one warn line.
      */
     public function test_an_edge_gateway_error_over_an_answering_app_is_a_warning(): void

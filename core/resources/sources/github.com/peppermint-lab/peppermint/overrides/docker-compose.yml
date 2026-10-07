@@ -51,7 +51,7 @@ services:
       start_period: 30s
     mem_limit: 1024m
 
-  # `up -d` returns only once both processes answer (engine#204).
+  # `up -d` returns only once both processes answer.
   ready:
     image: docker.io/library/alpine:3
     restart: "no"

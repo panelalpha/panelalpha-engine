@@ -30,7 +30,7 @@ RedirectMatch 403 ^/vendor(/|$)
 # The generated vhost already denies `^(?:docker-compose\.ya?ml|panelalpha[-.])`
 # by file name, which covers docker-compose.yml and panelalpha-setup.sh. It
 # does not cover `docker-compose.override.yml`: the pattern wants `yml` where
-# that name has `override` (engine#181). This recipe's override file carries no
+# that name has `override`. This recipe's override file carries no
 # secret, but it does name the base image, the bind mounts and the account's
 # uid, and the next thing written to that name might.
 <FilesMatch "^docker-compose\.">

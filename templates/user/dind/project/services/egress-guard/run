@@ -1,5 +1,5 @@
 #!/bin/sh
-# engine#217: keeps /entrypoint.d/egress-guard.sh applied -- it has to hook the
+# Keeps /entrypoint.d/egress-guard.sh applied -- it has to hook the
 # inner daemon's DOCKER-USER (every second until it does, then every 15s) and
 # follow the MySQL and registry addresses. The engine writes `down` while
 # DIND_EGRESS_GUARD is off.

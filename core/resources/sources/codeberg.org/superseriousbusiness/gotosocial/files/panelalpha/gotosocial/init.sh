@@ -10,8 +10,8 @@
 # container publishes no ports, so nothing is reachable from outside -- waits for
 # it to bootstrap and answer /readyz, stops it, and only then creates the
 # administrator. The public port opens only when `app` starts, which is after
-# this service has completed, so the instance is never reachable adminless
-# (engine#200). Idempotent: on a redeploy the administrator already exists and
+# this service has completed, so the instance is never reachable adminless.
+# Idempotent: on a redeploy the administrator already exists and
 # nothing is created or reset.
 set -e
 

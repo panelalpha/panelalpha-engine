@@ -13,7 +13,7 @@ final class PublicUrlEnvironment
 {
     /**
      * `ORIGIN` is SvelteKit adapter-node's, which refuses to start on an
-     * invalid one (engine#192).
+     * invalid one.
      *
      * @var list<string>
      */
@@ -44,7 +44,7 @@ final class PublicUrlEnvironment
     /**
      * `$httpsFlags` is false for an image the engine did not write: MeTube
      * reads `HTTPS=on` as "terminate TLS here" and dies looking for a
-     * certificate (engine#289). TLS ends at the proxy; the URL keys say https.
+     * certificate. TLS ends at the proxy; the URL keys say https.
      *
      * @return array<string, string>
      */

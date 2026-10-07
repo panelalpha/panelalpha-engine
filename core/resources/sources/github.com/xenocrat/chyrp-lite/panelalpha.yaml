@@ -35,7 +35,7 @@ description: >-
   otherwise be served as plain text from the document root and none of the four
   means anything here. It names them one at a time -- a `docker-compose.*` glob
   would catch the engine's own overrides file, which is already in the project
-  root by the time the hook runs (engine#166).
+  root by the time the hook runs.
 
   **Two unauthenticated endpoints, not one.** install.php is first-visitor-wins
   in the usual way: it creates every table and the first administrator from
@@ -57,8 +57,8 @@ description: >-
   both files. They come back with every clone, so that happens every deploy.
   Measured afterwards: /install.php and /upgrade.php are 404.
 
-  **Where the data lives.** A redeploy clears and re-clones ~/project
-  (engine#173) and two things Chyrp keeps are inside it. config.json.php holds
+  **Where the data lives.** A redeploy clears and re-clones ~/project,
+  and two things Chyrp keeps are inside it. config.json.php holds
   the database password, the site URL and the secure_hashkey that signs
   sessions; STORAGE_DIR comes from $_SERVER['CHYRP_STORAGE_DIR'] falling back
   to includes/ (common.php:101), and files/.htaccess points it at /data --
@@ -77,7 +77,7 @@ description: >-
   a redeploy and opens in phpMyAdmin -- verified by redeploying an account with
   a published post and two uploads and finding all of it still there.
 
-  **engine#185 shows through this application more than most.** The shared base
+  **The missing php.ini shows through this application more than most.** The shared base
   image loads no php.ini, so display_errors is on, and Chyrp's own
   `ini_set("display_errors", false)` in includes/error.php only covers a request
   that reached a file which includes it. `GET /includes/class/SQL.php` answered
@@ -88,7 +88,7 @@ description: >-
   includes/download.php and includes/thumbnail.php, which are the two paths the
   themes actually link.
 
-  **The readiness gate is measured, not assumed** (engine#90). `docker compose
+  **The readiness gate is measured, not assumed**. `docker compose
   up -d` returns before the ~20 CREATE TABLEs finish and the engine probes
   immediately; the deploy log shows `Container project-app-1 Waiting` and
   `Healthy` five seconds later on both a first install and a redeploy. GET / is
@@ -109,7 +109,7 @@ extends: php-plain
 database: mysql
 # `docroot` is deliberately absent rather than `docroot: .`: the manifest
 # reader folds '.' to '' (PlatformManifest.php:305), which means "undeclared",
-# so it cannot say "the repository root" at all (engine#172). index.php is at
+# so it cannot say "the repository root" at all. index.php is at
 # the root and there is no public/, so the probe reaches /app on its own; the
 # compose override pins PA_DOCROOT=/app so the answer does not depend on that.
 commands:
@@ -123,8 +123,7 @@ commands:
       arrives first, points the site at the account's current domain, and
       removes install.php and upgrade.php from the document root afterwards.
       Idempotent: the upgrade stage replays it on every redeploy over a
-      database that survived. On the build stage it would not run at all
-      (engine#171).
+      database that survived. On the build stage it would not run at all.
     run: 'php /app/panelalpha-install.php'
     timeout: 300
 credentials:

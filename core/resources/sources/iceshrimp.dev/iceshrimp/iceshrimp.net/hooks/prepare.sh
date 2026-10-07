@@ -8,7 +8,7 @@ cd ~/project
 #
 # The secrets are generated once and live in ~/.panelalpha, which is the only
 # account-owned directory that survives a rebuild (~/project is wiped and
-# re-cloned every deploy, engine#173). Regenerating it would be fatal: a new
+# re-cloned every deploy). Regenerating it would be fatal: a new
 # Postgres password locks the app out of its own data volume. The admin login is
 # the engine's (`credentials:` in panelalpha.yaml), read by the init service from
 # ~/.panelalpha/app-credentials.env.

@@ -3,15 +3,14 @@
 An Airtable alternative. A NestJS server that serves the REST API and a Vue
 dashboard on :8080 over a metadata database, with SQLite as its default.
 
-Detection: `railpack` — and that is the failure. The repository root is a
+Without this recipe detection picks `railpack` — and that is the failure. The repository root is a
 10-package pnpm workspace (`nc-gui`, `nocodb`, `nocodb-sdk`, …) whose
 `package.json` has no `start` script, and its only compose files live under
 `docker-compose/` (an installer's golden test fixtures and `examples/` for
 external Postgres, Redis and Traefik) plus `.github/uffizzi`, names Docker
-never auto-loads. Railpack installed the workspace, printed `No start command
-detected`, generated a basic compose around `nginx:alpine`, and the deploy
-"finished successfully" with the account serving PanelAlpha's placeholder page
-on 8080.
+never auto-loads. Railpack installs the workspace, finds `No start command
+detected`, and the deploy "finishes successfully" with the account serving
+PanelAlpha's placeholder page.
 
 Building the checkout is not the alternative, and unusually this is not a
 judgement call: **the repository contains no Dockerfile at all** — not at the
@@ -87,7 +86,7 @@ deploy log says so: *"Pointed the application address at its public URL:
 NC_SITE_URL"*.
 
 NocoDB does not validate `Host`, so the loopback probe's `Host: 127.0.0.1:8080`
-is not the engine#165 problem. `main.ts` enables `trust proxy`; the only
+is not a problem. `main.ts` enables `trust proxy`; the only
 host-based gate in the tree is `run/cloud.ts`, which self-hosted never loads.
 
 ## The admin, and registration
@@ -149,36 +148,6 @@ The healthcheck is upstream's own from `docker-compose/examples/`, on
 127.0.0.1: `wget --spider /api/v1/health`. That route has no guard in
 `controllers/utils.controller.ts`, and the image has busybox `wget` but no
 `curl`.
-
-Observed on `mariusz`: preparing 14s, cloning 11s, running 51s (image pull,
-boot, `setup`, `ready`) — 76s by the engine's own timings, 90.6s as the test
-harness measures it end to end; 60.3s on a second account once the image was in
-the host cache. NocoDB reached healthy **11 seconds** after its container
-started, and `setup` and `ready` had both exited 0 five seconds after that.
-Verdict `deploy-ok`, `serving: ok`, every baseline check passing,
-`https://<domain>/` → 200; the health report's own fetch of the bare path
-records a 302, which is NocoDB redirecting `/` to `/dashboard`.
-
-## Verified beyond the status code
-
-All of the following against the account's real HTTPS domain, not the loopback
-probe:
-
-- `GET /` 302s to `/dashboard`, which 301s to `/dashboard/` and serves 19 KB of
-  the real SPA with a 200.
-- `POST /api/v1/auth/user/signin` with the credentials from
-  `app-credentials` returns a JWT. A wrong password returns 400, so
-  the 200 is not a page that would greet anyone.
-- `GET /api/v1/app-settings` with that token returns
-  `{"invite_only_signup":true,…}`, and `POST /api/v1/auth/user/signup` for a
-  fresh address is refused with *"Not allowed to signup, contact super
-  admin."* — the open-registration hole is closed, not merely reported.
-- `POST /api/v2/meta/bases` as the admin creates a base and returns its id, so
-  the SQLite meta database is written to, not just read.
-- `GET /api/v1/meta/nocodb/info` reports
-  `ncSiteUrl: https://<account>.panelalpha.online` — the placeholder rewrite
-  reached the running app, not only the compose file.
-- `docker stats` with the site up: 295 MiB of the 1.5 GiB limit.
 
 ## Not configured
 
