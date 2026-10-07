@@ -128,12 +128,13 @@ le_restore_stack() {
 }
 
 # certbot [args...] inside the official image, with the host's account and
-# lineage directories. Stdout/stderr pass through.
+# lineage directories. Stdout/stderr pass through. Host network, not -p 80:80:
+# a published port is forwarded traffic, which ufw drops without a route rule.
 le_certbot() {
     docker run --rm --name certbot-engine \
         -v /etc/letsencrypt:/etc/letsencrypt \
         -v /var/lib/letsencrypt:/var/lib/letsencrypt \
-        -p 80:80 \
+        --network host \
         "$LE_CERTBOT_IMAGE" "$@"
 }
 
