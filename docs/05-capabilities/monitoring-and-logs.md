@@ -97,7 +97,15 @@ The webserver's access and error logs for a hostname. Not the deploy log - these
 Show me the error log for shop.example.com.
 ```
 
-Use these for 404s and 500s that only some visitors hit. For how many people came, and how much data they transferred, ask for the counts: [Visitor statistics](visitor-statistics.md). If the assistant cannot read the logs, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
+On a project that runs in its own container, what the application itself printed, such as a stack trace or a worker's errors, is in its container output. Ask for a time window when you know roughly when it went wrong:
+
+```text
+Show me what the app container of shop printed between 14:00 and 14:30 today.
+```
+
+The assistant reads up to 5000 lines at a time, and can limit them to a period such as the last two hours.
+
+Use the webserver logs for 404s and 500s that only some visitors hit. For how many people came, and how much data they transferred, ask for the counts: [Visitor statistics](visitor-statistics.md). If the assistant cannot read the logs, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
 ## 4. Usage - "is it running out of something?"
 

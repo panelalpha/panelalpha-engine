@@ -2,8 +2,6 @@
 
 The engine host is a privileged machine by design. The engine controls every container on it, and the installer replaces the firewall and the domain-name resolver. Treat your VPS as single-purpose and do not run anything else on it.
 
-This page covers an optional password on a project, the firewall, the web application firewall, and extra IP addresses you can assign to a project.
-
 ## Password protection
 
 A project stays open until you set a password on it. Nothing asks for one on its own. Once you do, that password covers every address on that project. It does not cover the engine's own address, the one your assistant connects to.
@@ -44,6 +42,12 @@ pae mcp:token:revoke <id>
 ```
 
 Revoking stops it working immediately while keeping it in the list, so you keep a record of what existed.
+
+## Projects kept apart
+
+Projects can reach the internet, the server's MySQL databases and image caches, and the server's mail and web services. They cannot connect directly to another project, the engine's API, FTP, SFTP or phpMyAdmin, or private addresses on your network. Visitors still reach the sites through the engine's webserver.
+
+The update attempts to move running projects created on an earlier version onto the isolated network. An application using the server's MySQL may restart during the move, and its site is unavailable until it answers again. A stopped project is left where it was. If a project was stopped or the update reports that its move failed, start it and retry the move from the server: [CLI commands](../06-commands/pae-cli.md#projects-and-deploys).
 
 ## The firewall
 

@@ -35,7 +35,7 @@ Choosing assistant tokens, then **Global scope**, opens:
 
 ```text
  Groups      37 of 37 groups on
- Commands    199 of 199 commands on
+ Commands    204 of 204 commands on
  Ceiling     full — they may do anything, including delete
  Review and save
  Back
@@ -74,7 +74,7 @@ The settings themselves are ordinary lines in `.env-core` and you can still edit
 | `pae project:push {project} {target}` | Pushes state between a staging pair. |
 | `pae project:limit:get --project={project}` | Shows disk, memory and CPU limits. |
 | `pae project:limit:set --project={project} --memory-limit=512` | Changes a limit. Memory is in megabytes and may not exceed what projects may have on this server. Every project has a memory limit, so it can be changed but not removed. |
-| `pae project:network:move --all` | Moves projects created before this version onto the network that keeps projects apart from each other and from the engine. Each project stays up, and its application restarts once. A stopped project is left alone; start it and run the command again. `--project={project}` moves one. |
+| `pae project:network:move --all` | Moves running projects created before this version onto the isolated network. The project container stays up. An application using the server's MySQL may restart, and its site is unavailable until it answers again. A stopped project is left alone; start it and run the command again. `--project={project}` moves one. |
 | `pae project:ssh {project} '{command}'` | Runs one command inside the project. |
 | `pae project:delete {project}` | Deletes the project and everything in it. Asks you to confirm. Work still queued for the project is cancelled first. While a deploy or rebuild, staging copy, push, backup or restore is running on it, the delete is refused and changes nothing; cancel that task or wait for it, then delete again. |
 
@@ -116,7 +116,7 @@ These are the values your application reads when it starts. Change one, then reb
 | `pae project:settings:set {name} {value} --project={project}` | Sets one setting. |
 | `pae project:settings:unset {name} --project={project}` | Removes one setting. |
 | `pae project:settings:set persist-paths /app/storage,/app/public/uploads --project={project}` | Keeps what the application writes under these container paths across redeploys and rebuilds, on volumes of the project's own. Takes effect from the next deploy. A project that brings its own `docker-compose.yml` declares its volumes there instead. |
-| `pae project:settings:set registry-auth "ghcr.io {user} {token}" --project={project}` | Logs the project in to private image registries, one `host username token` line per registry. The deploy uses it to pull images and build from them; it is present in the project only while a deploy runs, and an image it covers never goes through the server's shared registries. |
+| `pae project:settings:set registry-auth "ghcr.io {user} {token}" --project={project}` | Logs the project in to private image registries, one `host username token` line per registry. The deploy uses it to pull images and build from them; the Docker login file is present in the project only while a deploy runs, and an image it covers never goes through the server's shared registries. |
 
 Context: [Environment variables](../05-capabilities/projects.md#environment-variables).
 
