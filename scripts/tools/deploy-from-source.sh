@@ -51,6 +51,9 @@ EXCLUDES=(
     pureftpd data awstats-config awstats-data litespeed-config build
     scripts/monit.conf scripts/monit-script.sh
     docker-compose.yml-webserver
+    # An operator's own Compose override: bootstrap and pae run bare `docker compose`
+    # so that it applies.
+    docker-compose.override.yml
     config/logrotate config/exim config/modsecurity config/sftp config/pure-ftpd
     # The same five names exist under core/ on an installed host -- a stale
     # duplicate of the directory above, which nothing mounts today (the sftp and

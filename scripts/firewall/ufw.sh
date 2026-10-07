@@ -38,6 +38,11 @@ F2B_DIR=${PA_FAIL2BAN_DIR:-/etc/fail2ban}
 CSF_DIR=${PA_CSF_DIR:-/etc/csf}
 # Where CSF's installer unpacked itself; its uninstaller is there too.
 CSF_SRC=${PA_CSF_SRC:-/usr/src/csf}
+# What CSF's uninstaller leaves: the archive CSF was unpacked from, and its
+# daily version check, which recreates /var/lib/configserver every day. The
+# check also serves ConfigServer's other products, which all need cPanel or
+# DirectAdmin, so none runs on an engine host.
+CSF_LEFTOVERS=("$CSF_SRC.tgz" "${PA_CSF_CRON:-/etc/cron.daily/csget}" "${PA_CSF_VAR:-/var/lib/configserver}")
 BACKUP_DIR=${PA_BACKUP_DIR:-/var/backups}
 SELF="$ENGINE_DIR/scripts/firewall/ufw.sh"
 CHAIN=PA-PUBLISHED
@@ -343,18 +348,60 @@ import_csf_file() { # <allow|deny> <file>
     say "moved $moved rule(s) from $(basename "$file")"
 }
 
+# Each address on its own line, as core compares them (FirewallRule::normalizeAddress):
+# one spelling per address, a /32 or /128 the bare address, a network by its
+# masked base. ufw is python3, so python3 is there; without it, as written.
+canonical_addresses() {
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -c '
+import ipaddress, sys
+for a in sys.stdin.read().splitlines():
+    try:
+        n = ipaddress.ip_network(a, strict=False)
+        print(n.network_address if n.prefixlen == n.max_prefixlen else n)
+    except ValueError:
+        print(a)'
+    else
+        cat
+    fi
+}
+
 # Addresses CSF trusted (csf.ignore, and every bare address in csf.allow) are
-# kept out of fail2ban's bans, as lfd kept them.
+# kept out of fail2ban's bans, as lfd kept them. Added to the trusted list only
+# when it does not hold that address yet, so a second migration adds nothing;
+# what is there, comments and order included, stays as it is.
 import_csf_ignores() {
-    local file line addr
+    local file line addr i list="$F2B_DIR/panelalpha-ignoreip" add
+    local -a held=() found=() canon=()
+    local -A have=()
+    if [ -f "$list" ]; then
+        while IFS= read -r line || [ -n "$line" ]; do
+            addr=$(trim "${line%%#*}")
+            [ -n "$addr" ] && held+=("$addr")
+        done <"$list"
+    fi
     for file in "$CSF_DIR/csf.ignore" "$CSF_DIR/csf.allow"; do
         [ -f "$file" ] || continue
         while IFS= read -r line || [ -n "$line" ]; do
             case "$line" in *'docker internal network'*) continue ;; esac
             addr=$(trim "${line%%#*}")
-            [ -n "$addr" ] && is_address "$addr" && echo "$addr"
+            [ -n "$addr" ] && is_address "$addr" && found+=("$addr")
         done <"$file"
-    done | sort -u >>"$F2B_DIR/panelalpha-ignoreip"
+    done
+    [ ${#found[@]} = 0 ] && return 0
+    mapfile -t canon < <(printf '%s\n' "${held[@]}" "${found[@]}" | canonical_addresses)
+    [ ${#canon[@]} = $((${#held[@]} + ${#found[@]})) ] || canon=("${held[@]}" "${found[@]}")
+    for ((i = 0; i < ${#held[@]}; i++)); do have[${canon[i]}]=1; done
+    add=$(for ((i = 0; i < ${#found[@]}; i++)); do
+        addr=${canon[${#held[@]} + i]}
+        [ -z "${have[$addr]+x}" ] || continue
+        have[$addr]=1
+        echo "${found[i]}"
+    done | sort -u)
+    [ -n "$add" ] || return 0
+    # Or the first address added would join the last line.
+    [ ! -s "$list" ] || [ -z "$(tail -c1 "$list")" ] || echo >>"$list"
+    printf '%s\n' "$add" >>"$list"
 }
 
 # An old core container still bind-mounting /etc/csf recreates it when Docker
@@ -363,21 +410,31 @@ import_csf_ignores() {
 # included, goes once the migration has finished (its backup is there) and
 # nothing of CSF is installed or running: a csf.conf left then would only make
 # every later install migrate again. Otherwise it is kept and the reason said.
+# CSF's other leftovers go on the same terms, and only after the move: before
+# it they are a working CSF's.
 clear_csf_leftover() {
-    [ -d "$CSF_DIR" ] || return 0
-    if rmdir "$CSF_DIR" 2>/dev/null; then
-        say "removed the empty $CSF_DIR CSF left behind"
-        return 0
+    local left=() path why
+    if [ -d "$CSF_DIR" ]; then
+        if rmdir "$CSF_DIR" 2>/dev/null; then
+            say "removed the empty $CSF_DIR CSF left behind"
+        else
+            left+=("$CSF_DIR")
+        fi
     fi
-    local why
-    if ! compgen -G "$BACKUP_DIR/panelalpha-csf-*.tgz" >/dev/null; then
+    if compgen -G "$BACKUP_DIR/panelalpha-csf-*.tgz" >/dev/null; then
+        for path in "${CSF_LEFTOVERS[@]}"; do
+            [ -e "$path" ] || [ -L "$path" ] && left+=("$path")
+        done
+        [ ${#left[@]} = 0 ] && return 0
+        if ! why=$(csf_present); then
+            rm -rf "${left[@]}"
+            say "removed ${left[*]}, left behind after the move from CSF"
+            return 0
+        fi
+    else
         why="no $BACKUP_DIR/panelalpha-csf-*.tgz, so the move from CSF never finished"
-    elif ! why=$(csf_present); then
-        rm -rf "$CSF_DIR"
-        say "removed $CSF_DIR, left behind after the move from CSF"
-        return 0
     fi
-    say "kept $CSF_DIR: $why"
+    [ ${#left[@]} = 0 ] || say "kept ${left[*]}: $why"
 }
 
 # Says what of CSF is still on the host; fails when nothing is.
@@ -426,7 +483,7 @@ migrate_from_csf() {
     fi
     systemctl disable --now lfd csf >/dev/null 2>&1 || true
     systemctl reset-failed lfd csf >/dev/null 2>&1 || true
-    rm -rf "$CSF_SRC" "$CSF_DIR"
+    rm -rf "$CSF_SRC" "$CSF_DIR" "${CSF_LEFTOVERS[@]}"
     if [ -f "$ENGINE_DIR/.env" ]; then
         sed -i '/^CSF_UI=/d; /^CSF_UI_PASSWORD=/d' "$ENGINE_DIR/.env"
     fi
@@ -625,7 +682,8 @@ configure_fail2ban() { # [trusted]: only the trusted list changed
     mkdir -p "$F2B_DIR/jail.d" "$F2B_DIR/filter.d" "$F2B_DIR/action.d" "$(dirname "$api_log")"
     actions=$(ban_actions)
     touch "$F2B_DIR/panelalpha-ignoreip" "$api_log"
-    ignore="$ignore $(awk '!/^[[:space:]]*(#|$)/ { print $1 }' "$F2B_DIR/panelalpha-ignoreip" | sort -u | tr '\n' ' ')"
+    # The address alone, also on a line written "address#comment".
+    ignore="$ignore $(awk '{ sub(/#.*/, "") } $1 != "" { print $1 }' "$F2B_DIR/panelalpha-ignoreip" | sort -u | tr '\n' ' ')"
 
     cat >"$F2B_DIR/filter.d/panelalpha-sshd.conf" <<'EOF'
 # Written by the PanelAlpha engine: the host's own sshd only.

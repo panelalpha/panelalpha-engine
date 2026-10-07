@@ -101,6 +101,7 @@ expect() { # expect <label> <expected> <actual>
 }
 reset() {
     rm -rf "$W/calls" "$W/unlocked" "$W/locked" "$W/chains" "$W/etc" "$W/engine" "$W/backups" "$W/src-csf" \
+        "$W/src-csf.tgz" "$W/csget" "$W/configserver" \
         "$W/ufw-refuses" "$W/dpkg-missing" "$W/apt-fails" "$W"/restore-* "$W"/iptables-* "$W"/ip6tables-* \
         "$W/docker-ports" "$W/f2b-down" "$W/no-wait" "$W"/running-* "$W"/loaded-* "$W/bin/csf"
     mkdir -p "$W/etc/ufw" "$W/etc/fail2ban" "$W/engine/scripts/firewall" "$W/engine/data" "$W/backups"
@@ -118,7 +119,19 @@ csf() { # a CSF install with the given csf.allow / csf.deny / csf.ignore bodies
 env_run() {
     PATH="$W/bin:$PATH" PA_ENGINE_DIR="$W/engine" PA_UFW_DIR="$W/etc/ufw" \
         PA_UFW_DEFAULTS="$W/etc/default-ufw" PA_FAIL2BAN_DIR="$W/etc/fail2ban" \
-        PA_CSF_DIR="$W/etc/csf" PA_CSF_SRC="$W/src-csf" PA_BACKUP_DIR="$W/backups" SSH_CONNECTION="" "$@"
+        PA_CSF_DIR="$W/etc/csf" PA_CSF_SRC="$W/src-csf" PA_CSF_CRON="$W/csget" PA_CSF_VAR="$W/configserver" \
+        PA_BACKUP_DIR="$W/backups" SSH_CONNECTION="" "$@"
+}
+# What CSF's installer leaves that its uninstaller does not remove.
+csf_leftovers() {
+    echo archive >"$W/src-csf.tgz"
+    printf '#!/usr/bin/perl\n' >"$W/csget"
+    mkdir -p "$W/configserver" && echo error >"$W/configserver/csf.txt.error"
+}
+csf_leftovers_state() {
+    local f s=''
+    for f in src-csf.tgz csget configserver; do [ -e "$W/$f" ] && s+="kept " || s+="gone "; done
+    echo "${s% }"
 }
 run() { env_run bash "$DIR/ufw.sh" "$@" >"$W/out" 2>&1; echo $?; }
 calls() { grep -c -- "$1" "$W/calls" 2>/dev/null; }
@@ -231,7 +244,9 @@ done
 # A host on CSF moves to ufw.
 reset
 csf '1.2.3.4 # office\n172.25.0.0/24 # docker internal network\n' '5.6.7.8 # Manually denied\n9.9.9.9 # lfd: (sshd) Failed SSH login\n' '203.0.113.5\n'
+csf_leftovers
 expect "a CSF host: installed" "0" "$(run install)"
+expect "CSF's archive, daily version check and its folder go with it" "gone gone gone" "$(csf_leftovers_state)"
 expect "deny moved on top" "1" "$(calls 'ufw prepend deny in from 5.6.7.8 to any comment Manually denied')"
 expect "both ways" "1" "$(calls 'ufw prepend deny out from any to 5.6.7.8 comment Manually denied')"
 expect "allow moved on top, after the denies" "1" "$([ "$(line_of 'ufw prepend allow in from 1.2.3.4')" -gt "$(line_of 'ufw prepend deny')" ] && echo 1)"
@@ -446,11 +461,83 @@ touch "$W/backups/panelalpha-csf-20261005101409.tgz"
 printf '#!/bin/sh\nexit 0\n' >"$W/bin/csf" && chmod +x "$W/bin/csf"
 run apply >/dev/null
 expect "csf.conf with a csf binary: kept" "kept|1" "$(gone)|$(grep -c "kept $W/etc/csf: csf is still installed" "$W/out")"
+# A host moved before the rest of CSF went with it: only those files are left.
+reset
+csf_leftovers
+touch "$W/backups/panelalpha-csf-20261005101409.tgz"
+expect "CSF's other leftovers after the move: applied" "0" "$(run apply)"
+expect "are removed" "gone gone gone" "$(csf_leftovers_state)"
+expect "and says so" "1" "$(grep -cxF "firewall: removed $W/src-csf.tgz $W/csget $W/configserver, left behind after the move from CSF" "$W/out")"
+reset
+csf_leftovers
+touch "$W/backups/panelalpha-csf-20261005101409.tgz"
+run install >/dev/null
+expect "install removes them too, without a migration" "gone gone gone|0" "$(csf_leftovers_state)|$(calls csf-uninstall)"
+reset
+csf_leftovers
+expect "no CSF backup: applied" "0" "$(run apply)"
+expect "they are kept, not ours to judge" "kept kept kept|0" "$(csf_leftovers_state)|$(grep -c kept "$W/out")"
+reset
+csf_leftovers
+touch "$W/backups/panelalpha-csf-20261005101409.tgz"
+printf '#!/bin/sh\nexit 0\n' >"$W/bin/csf" && chmod +x "$W/bin/csf"
+run apply >/dev/null
+expect "a csf binary still there: they are kept" "kept kept kept" "$(csf_leftovers_state)"
+expect "and says why" "1" "$(grep -cxF "firewall: kept $W/src-csf.tgz $W/csget $W/configserver: csf is still installed" "$W/out")"
+leftover
+csf_leftovers
+touch "$W/backups/panelalpha-csf-20261005101409.tgz"
+run apply >/dev/null
+expect "with what is left of /etc/csf, all go at once" "removed|gone gone gone" "$(gone)|$(csf_leftovers_state)"
+expect "said once" "1" "$(grep -cxF "firewall: removed $W/etc/csf $W/src-csf.tgz $W/csget $W/configserver, left behind after the move from CSF" "$W/out")"
 # A host still on CSF is not touched by apply.
 reset
 csf '' ''
+csf_leftovers
 run apply >/dev/null
 expect "apply leaves a live CSF alone" "yes" "$([ -f "$W/etc/csf/csf.conf" ] && echo yes || echo no)"
+expect "and its other files" "kept kept kept" "$(csf_leftovers_state)"
+
+# CSF installed and moved again: its trusted addresses are not added twice.
+reset
+csf '1.2.3.4 # office\n' '' '203.0.113.5\n127.0.0.1\n'
+run install >/dev/null
+csf '1.2.3.4 # office\n198.51.100.9\n' '' '203.0.113.5\n127.0.0.1\n'
+rm -f "$W/backups/"*
+expect "a second move: installed" "0" "$(run install)"
+expect "and migrated again" "1" "$(grep -c 'replacing CSF with ufw' "$W/out")"
+expect "the trusted list gains only the new address" "1.2.3.4 127.0.0.1 198.51.100.9 203.0.113.5" \
+    "$(LC_ALL=C sort "$W/etc/fail2ban/panelalpha-ignoreip" | tr '\n' ' ' | sed 's/ $//')"
+# What the list holds stays first and as it was: comments, order, a last line without its newline.
+reset
+csf '' '' '127.0.0.1\n203.0.113.5\n198.51.100.7\n2001:db8::/32\n'
+printf '# trusted by the operator\n198.51.100.7 # office\n\n2001:db8::/32 # vpn' >"$W/etc/fail2ban/panelalpha-ignoreip"
+before=$(cat "$W/etc/fail2ban/panelalpha-ignoreip")
+env_run bash -c 'source "$1"; import_csf_ignores; import_csf_ignores' _ "$DIR/ufw.sh"
+expect "the list as it was, unchanged" "$before" "$(head -n 4 "$W/etc/fail2ban/panelalpha-ignoreip")"
+expect "then each new address once" "127.0.0.1|203.0.113.5" "$(tail -n +5 "$W/etc/fail2ban/panelalpha-ignoreip" | tr '\n' '|' | sed 's/|$//')"
+# Nothing new: the list stays byte for byte, a last line without its newline included.
+reset
+csf '' '' '198.51.100.7\n'
+printf '198.51.100.7 # office' >"$W/etc/fail2ban/panelalpha-ignoreip"
+env_run bash -c 'source "$1"; import_csf_ignores' _ "$DIR/ufw.sh"
+expect "nothing to add: not even a newline" "198.51.100.7 # office|21" \
+    "$(cat "$W/etc/fail2ban/panelalpha-ignoreip")|$(wc -c <"$W/etc/fail2ban/panelalpha-ignoreip" | tr -d ' ')"
+# Another spelling of an address the list holds is that address, as core reads it.
+reset
+csf '' '' '1.2.3.4/32\n2001:DB8::1\n2001:db8:0:0::1\n10.1.2.3/8\n192.0.2.5\n'
+printf '1.2.3.4\n2001:db8::1\n10.0.0.0/8\n' >"$W/etc/fail2ban/panelalpha-ignoreip"
+env_run bash -c 'source "$1"; import_csf_ignores' _ "$DIR/ufw.sh"
+expect "only a new address is added, not a new spelling" "1.2.3.4|2001:db8::1|10.0.0.0/8|192.0.2.5" \
+    "$(tr '\n' '|' <"$W/etc/fail2ban/panelalpha-ignoreip" | sed 's/|$//')"
+# A line written "address#comment": fail2ban ignores the address, and the import sees it there.
+reset
+csf '' '' '9.9.9.9\n'
+printf '9.9.9.9#office\n' >"$W/etc/fail2ban/panelalpha-ignoreip"
+env_run bash -c 'source "$1"; import_csf_ignores' _ "$DIR/ufw.sh"
+expect "address#comment: not added again" "9.9.9.9#office" "$(cat "$W/etc/fail2ban/panelalpha-ignoreip")"
+run fail2ban >/dev/null
+expect "and fail2ban ignores the address, without its comment" "ignoreip = 127.0.0.1/8 ::1 9.9.9.9" "$(grep '^ignoreip' "$W/etc/fail2ban/jail.d/panelalpha.local")"
 
 # A rule ufw refuses is reported and the move goes on.
 reset

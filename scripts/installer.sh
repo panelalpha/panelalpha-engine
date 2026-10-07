@@ -869,7 +869,8 @@ download_engine_from_repository() {
     command -v git >/dev/null 2>&1 || apt-get -o DPkg::Lock::Timeout=300 install git -y
 
     export GIT_TERMINAL_PROMPT=0
-    if ! git clone --depth 1 --branch "$PANELALPHA_ENGINE_VERSION" \
+    # The whole history, without old file contents: list_dropped_engine_files reads it.
+    if ! git clone --filter=blob:none --single-branch --branch "$PANELALPHA_ENGINE_VERSION" \
         "$ENGINE_REPO" "$INSTALL_DIR/src" >/dev/null 2>&1; then
         echo_error "Could not clone ${safe} (ref ${PANELALPHA_ENGINE_VERSION})"
     fi
@@ -877,6 +878,7 @@ download_engine_from_repository() {
     # file; git installs must recreate it before .git is removed).
     local tip_sha
     tip_sha=$(git -C "$INSTALL_DIR/src" rev-parse HEAD 2>/dev/null | tr -d '\r\n' || true)
+    list_dropped_engine_files "$INSTALL_DIR/src" "$INSTALL_DIR/dropped-files"
     rm -rf "$INSTALL_DIR/src/.git"
     if [ -n "$tip_sha" ]; then
         printf '%s\n' "$tip_sha" >"$INSTALL_DIR/src/version"
@@ -898,12 +900,144 @@ download_panelalpha_engine() {
     download_engine_from_repository
 }
 
+# Host state: never deleted by an update, whatever an older release shipped at
+# that path. The same paths deploy-from-source.sh keeps out of its upload.
+ENGINE_HOST_STATE=(
+    .git .idea .aider-desk .aider.input.history .github .claude
+    .env .env-core version crt
+    core/.env core/.env.backup core/.env.pae-backup
+    users logs webserver-logs webserver-config
+    nginx-proxy-conf.d nginx-proxy-logs
+    pureftpd data awstats-config awstats-data litespeed-config build
+    scripts/monit.conf scripts/monit-script.sh
+    docker-compose.yml-webserver docker-compose.override.yml
+    config/logrotate config/exim config/modsecurity config/sftp config/pure-ftpd
+    core/config/logrotate core/config/exim core/config/modsecurity
+    core/config/sftp core/config/pure-ftpd
+    core/vendor core/storage core/bootstrap/cache
+    tests/api/node_modules tests/api/.playwright tests/api/test-results tests/api/playwright-report
+    tests/api/env/.env 'tests/api/env/.env.*'
+    scripts/tools/dind-test/vendor
+)
+
+engine_host_state() { # <path relative to the engine dir>
+    local s
+    for s in "${ENGINE_HOST_STATE[@]}"; do
+        # shellcheck disable=SC2053 # a pattern, as rsync reads it
+        [[ $1 == $s || $1 == $s/* ]] && return 0
+    done
+    return 1
+}
+
+# Every path this release's history tracked that the release itself does not,
+# with each version of it the history holds ("<mode> <blob id> <path>", NUL
+# ended): what an earlier release can have left on the host, and what its copy
+# looks like. Needs the clone's .git, but only commits and trees, no contents.
+list_dropped_engine_files() { # <clone> <list to write>
+    local meta path side
+    local -a f
+    local -A current=() seen=()
+    rm -f "$2"
+    # -m: a merge can drop a file only its second parent had.
+    if [ "$(git -C "$1" rev-parse --is-shallow-repository 2>/dev/null)" != false ] ||
+        ! git -C "$1" ls-tree -r -z --name-only HEAD >"$2.current" 2>/dev/null ||
+        ! git -C "$1" rev-list HEAD >"$2.revs" 2>/dev/null ||
+        ! git -C "$1" diff-tree --stdin -r -m --root -z --raw --no-abbrev --no-commit-id \
+            <"$2.revs" >"$2.raw" 2>/dev/null; then
+        rm -f "$2.current" "$2.revs" "$2.raw"
+        echo_warning "Could not read the engine's history; files earlier releases shipped and this one does not stay in place"
+        return 0
+    fi
+    while IFS= read -r -d '' path; do current[$path]=1; done <"$2.current"
+    # Each change is ":<old mode> <new mode> <old id> <new id> <status>", then the path.
+    while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
+        [ -n "$path" ] && [ -z "${current[$path]+x}" ] || continue
+        f=(${meta#:})
+        for side in "${f[0]} ${f[2]}" "${f[1]} ${f[3]}"; do
+            case "$side" in 000000* | 160000* | *" 0000000000000000000000000000000000000000") continue ;; esac
+            [ -z "${seen[$side $path]+x}" ] || continue
+            seen[$side $path]=1
+            printf '%s\0' "$side $path"
+        done
+    done <"$2.raw" >"$2"
+    rm -f "$2.current" "$2.revs" "$2.raw"
+}
+
+# Copying a release over the old tree keeps every file the release dropped, and
+# dropped code keeps running (api:call did). Removes those files, and folders
+# they leave empty, but only a file that is still a copy some release shipped:
+# one an operator wrote or changed at that path stays, and so does host state
+# and anything whose folder is reached through a link.
+remove_dropped_engine_files() { # <list> <engine dir>
+    local root rec mode oid path dir real have removed=0 kept=0
+    local -a order=()
+    local -A shipped=()
+    [ -s "$1" ] && [ -d "$2" ] || return 0
+    root=$(cd "$2" && pwd -P)
+    while IFS= read -r -d '' rec; do
+        mode=${rec%% *} rec=${rec#* }
+        oid=${rec%% *} path=${rec#* }
+        [ -n "${shipped[$path]+x}" ] || order+=("$path")
+        shipped[$path]+=" $mode:$oid"
+    done <"$1"
+    for path in "${order[@]}"; do
+        case "/$path/" in */../* | */./* | *//*) continue ;; esac
+        engine_host_state "$path" && continue
+        [ -f "$root/$path" ] || [ -L "$root/$path" ] || continue
+        # ${path%/*}, not $(dirname): a command substitution drops a name's last newline.
+        dir=.
+        [ "${path#*/}" = "$path" ] || dir=${path%/*}
+        real=$(cd "$root/$dir" 2>/dev/null && pwd -P && echo x) || continue
+        real=${real%$'\n'x}
+        [ "$dir" = . ] && have=$root || have=$root/$dir
+        if [ "$real" != "$have" ]; then
+            echo "Kept $path: its folder is reached through a link"
+            kept=$((kept + 1))
+            continue
+        fi
+        # GIT_DIR: never the repository of the directory the installer runs from;
+        # a broken worktree or a sha256 one there would fail or miss every hash.
+        if [ -L "$root/$path" ]; then
+            have=$(printf '%s' "$(readlink "$root/$path")" | GIT_DIR=/nonexistent git hash-object --stdin 2>/dev/null) &&
+                have="120000:$have" || have=''
+        else
+            have=$(GIT_DIR=/nonexistent git hash-object --no-filters "$root/$path" 2>/dev/null) || have=''
+            case "${shipped[$path]} " in *" 100755:$have "*) have="100755:$have" ;; *) have="100644:$have" ;; esac
+            [ "$have" != 100644: ] || have=''
+        fi
+        if [ -z "$have" ]; then
+            echo "Kept $path: could not hash it"
+            kept=$((kept + 1))
+            continue
+        fi
+        case "${shipped[$path]} " in
+        *" $have "*) ;;
+        *)
+            echo "Kept $path: not a copy any release shipped"
+            kept=$((kept + 1))
+            continue
+            ;;
+        esac
+        rm -f -- "$root/$path" || continue
+        echo "Removed $path"
+        removed=$((removed + 1))
+        while [ "$dir" != . ] && rmdir -- "$root/$dir" 2>/dev/null; do
+            [ "${dir#*/}" = "$dir" ] && dir=. || dir=${dir%/*}
+        done
+    done
+    [ "$removed" = 0 ] || echo_info "Removed ${removed} file(s) that earlier releases shipped and this one does not"
+    [ "$kept" = 0 ] || echo_info "Kept ${kept} file(s) at paths earlier releases used, for the reasons above"
+}
+
 unzip_panelalpha_engine() {
-    # --preserve=mode also repairs files an earlier run left with the wrong mode;
-    # a plain cp keeps the existing file's mode.
     if [ ! -d "$INSTALL_DIR/src" ]; then
         echo_error "Engine tree missing under ${INSTALL_DIR}/src (expected a git clone)"
     fi
+    # Before the copy: a file that became a folder, or the other way round,
+    # would stop cp.
+    remove_dropped_engine_files "$INSTALL_DIR/dropped-files" "$PANELALPHA_DIR/shared-hosting"
+    # --preserve=mode also repairs files an earlier run left with the wrong mode;
+    # a plain cp keeps the existing file's mode.
     cp -Rf --preserve=mode "$INSTALL_DIR/src/." "$PANELALPHA_DIR/shared-hosting/"
 }
 
