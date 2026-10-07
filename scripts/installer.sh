@@ -1036,6 +1036,10 @@ unzip_panelalpha_engine() {
     # Before the copy: a file that became a folder, or the other way round,
     # would stop cp.
     remove_dropped_engine_files "$INSTALL_DIR/dropped-files" "$PANELALPHA_DIR/shared-hosting"
+    # The repository's agent setup is for people working on the engine, not for
+    # a host, and a .claude/skills folder an older release left cannot take the
+    # link this one has. The host's own .claude is host state and stays.
+    rm -rf "$INSTALL_DIR/src/.claude"
     # --preserve=mode also repairs files an earlier run left with the wrong mode;
     # a plain cp keeps the existing file's mode.
     cp -Rf --preserve=mode "$INSTALL_DIR/src/." "$PANELALPHA_DIR/shared-hosting/"

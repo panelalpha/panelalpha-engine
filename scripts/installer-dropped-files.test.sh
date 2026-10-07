@@ -79,6 +79,8 @@ put tools/x/report.log
 mkdir -p "$REPO/nl$NL" && echo f >"$REPO/nl$NL/f.txt"
 # Tracked once in a host-state folder; the host's copy is its own.
 put config/sftp/entrypoint.sh
+# The repository's agent skills, a folder until a release made it a link.
+put .claude/skills/deploy/SKILL.md
 mkdir -p "$REPO/core/resources" && ln -s "$W/outside/target.txt" "$REPO/core/resources/link"
 g add -A && g commit -m 'release 1'
 g checkout -b side && put core/app/Side.php && g add -A && g commit -m side && g checkout main
@@ -90,6 +92,7 @@ put core/app/Versioned.php 'version 2'
 put scripts/became-dir/run.sh && put scripts/became-file && put core/app/New.php && put docs/other.md
 g add -A && g commit -m 'release 2'
 g merge --no-ff --no-commit side && g rm -f core/app/Side.php && g commit -m 'merge side without Side.php'
+g rm -r .claude/skills && mkdir -p "$REPO/.claude" && ln -s agent-skills/engine/skills "$REPO/.claude/skills"
 put scripts/old.sh 'back in release 3' && g rm core/app/Versioned.php && g add -A && g commit -m 'release 3'
 TIP=$(git -C "$REPO" rev-parse HEAD)
 
@@ -101,7 +104,7 @@ PANELALPHA_ENGINE_VERSION=main
 ROOT="$PANELALPHA_DIR/shared-hosting"
 mkdir -p "$ROOT" "$PANELALPHA_DIR/other"
 git -C "$REPO" archive side | tar -x -C "$ROOT"
-HOST_FILES=(.env .env-core crt/server.key core/.env core/vendor/autoload.php core/storage/logs/laravel.log
+HOST_FILES=(.env .env-core .claude/settings.local.json crt/server.key core/.env core/vendor/autoload.php core/storage/logs/laravel.log
     core/bootstrap/cache/config.php users/acct/home.txt logs/update.log webserver-config/nginx/site.conf
     config/sftp/ssh_host_ed25519_key config/sftp/entrypoint.sh tests/api/env/.env data/ufw.lock
     scripts/monit.conf docker-compose.yml-webserver core/app/Custom/Mine.php notes.txt
@@ -164,6 +167,8 @@ check "each removal is listed" "9" "$(grep -c '^Removed ' <<<"$out")"
 check "and counted" "1" "$(grep -cxF 'info:Removed 9 file(s) that earlier releases shipped and this one does not' <<<"$out")"
 check "so is what stays" "1" "$(grep -cxF 'info:Kept 5 file(s) at paths earlier releases used, for the reasons above' <<<"$out")"
 check "the clone's .git is not copied" "no" "$(there "$ROOT/.git")"
+check "nor its .claude: the skills folder an older release left is not replaced by a link" "yes|no" \
+    "$([ -d "$ROOT/.claude/skills" ] && echo yes || echo no)|$([ -L "$ROOT/.claude/skills" ] && echo yes || echo no)"
 
 out=$(download_engine_from_repository && unzip_panelalpha_engine)
 check "a second update removes nothing" "0|0" "$?|$(grep -c 'Removed' <<<"$out")"
@@ -175,7 +180,8 @@ git clone -q --filter=blob:none --no-checkout "file://$REPO" "$W/blobless" 2>/de
 git -C "$W/blobless" remote set-url origin "$W/gone"
 out=$(list_dropped_engine_files "$W/blobless" "$W/list")
 # Records are "<mode> <blob id> <path>"; the "nl<newline>/f.txt" one spans two lines here.
-check "a blobless clone lists every dropped path" "config/sftp/entrypoint.sh
+check "a blobless clone lists every dropped path" ".claude/skills/deploy/SKILL.md
+config/sftp/entrypoint.sh
 core/app/Console/Commands/Api/Call.php
 core/app/Console/Commands/Concerns/DispatchesApiRoute.php
 core/app/Modified.php
