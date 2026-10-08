@@ -1,5 +1,6 @@
 import { expect, test } from '@/fixtures/test-options';
 import { rand } from '@/helpers/random';
+import { expectStatus } from '@/helpers/expect-status';
 
 test.describe('HTTP ACME challenges', () => {
   test('the challenge list for the setup domain starts as an array', async ({ api, setupUser }) => {
@@ -47,7 +48,7 @@ test.describe('HTTP ACME challenges', () => {
         token,
         content: 'second',
       });
-      expect(duplicate.status).toBe(409);
+      await expectStatus(duplicate, 409);
     } finally {
       await api.deleteAllHttpAcmeChallengesSafe(setupUser.domain);
     }
@@ -55,7 +56,7 @@ test.describe('HTTP ACME challenges', () => {
 
   test('an unknown domain returns 404', async ({ api }) => {
     const response = await api.listHttpAcmeChallengesRaw('no-such-domain.example.test');
-    expect(response.status).toBe(404);
+    await expectStatus(response, 404);
   });
 
   test('delete-all is idempotent', async ({ api, setupUser }) => {

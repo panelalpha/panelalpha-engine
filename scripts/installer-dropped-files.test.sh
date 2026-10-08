@@ -224,7 +224,7 @@ check "so nothing is removed" "" "$(remove_dropped_engine_files "$W/list" "$ROOT
 check "a first install has nothing to remove" "" "$(list_dropped_engine_files "$W/blobless" "$W/list" && remove_dropped_engine_files "$W/list" "$W/none")"
 
 for p in .env .env-core version crt/server.key core/.env core/storage/logs/x.log config/sftp/entrypoint.sh docker-compose.override.yml \
-    tests/api/env/.env.local users/a/b webserver-config; do
+    tests/api/env/.env.local tests/coverage/123/dumps/request.rawcov users/a/b webserver-config; do
     check "host state: $p" "yes" "$(engine_host_state "$p" && echo yes || echo no)"
 done
 for p in .env.example core/.env.example config/sftpx core/storage-old/x scripts/monit.conf.example core/app/x.php \

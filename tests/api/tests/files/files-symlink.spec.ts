@@ -39,6 +39,7 @@ test(
               });
               return 'connected';
             } catch (error) {
+              // The connection may never have opened, so closing it can fail without meaning anything.
               await sftp.end().catch(() => undefined);
               return error instanceof Error ? error.message : String(error);
             }
@@ -67,6 +68,7 @@ test(
         'the file API followed a symlink out of the home directory'
       );
     } finally {
+      // The connection may never have opened, so closing it can fail without meaning anything.
       await sftp.end().catch(() => undefined);
       await ftpFactory.deleteSftpAccount(setupUser.username, account.username);
       await authedRequest.delete(

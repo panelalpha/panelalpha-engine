@@ -19,6 +19,7 @@ test.describe('pae-artisan wrapper', () => {
 
   test('pae and pae-artisan agree on list output when both exist', async ({ hostExec }) => {
     const artisan = await hostExec!.pae(['list']);
+    // A missing pae alias rejects the run; that is the skip condition below.
     const aliased = await hostExec!.run('pae', ['list']).catch(() => null);
     test.skip(aliased?.exitCode !== 0, 'The pae alias is not installed.');
     expect(aliased!.stdout).toContain('api:token:create');

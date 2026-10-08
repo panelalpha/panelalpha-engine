@@ -5,29 +5,36 @@
   "type": "module",
   "description": "Playwright API test suite for the PanelAlpha Engine REST API.",
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=20.19.0",
+    "bun": ">=1.4.2"
   },
   "scripts": {
-    "test": "tsx scripts/run-tests.ts",
-    "test:smoke": "tsx scripts/run-tests.ts --project=api --grep @smoke",
-    "test:slow": "tsx scripts/run-tests.ts --project=slow",
+    "test": "bun --no-env-file scripts/run-tests.ts",
+    "test:full": "bun --no-env-file scripts/run-tests.ts --full",
+    "test:pr": "bun run typecheck && bun run lint && bun run test:unit && bun --no-env-file scripts/run-tests.ts --pr",
+    "test:pr:plan": "bun --no-env-file scripts/run-tests.ts --pr --plan",
+    "test:nightly": "bun --no-env-file scripts/run-tests.ts --nightly",
+    "test:parallel": "TEST_PARALLEL=auto bun --no-env-file scripts/run-tests.ts --full",
+    "test:smoke": "bun --no-env-file scripts/run-tests.ts --project=api --grep @smoke",
+    "test:slow": "bun --no-env-file scripts/run-tests.ts --project=slow",
     "test:unit": "playwright test --project=unit",
     "test:setup": "playwright test --project=setup",
-    "test:cli": "tsx scripts/run-tests.ts --project=cli",
-    "test:supported-apps": "tsx scripts/run-tests.ts --project=supported-apps",
+    "test:cli": "bun --no-env-file scripts/run-tests.ts --project=cli",
+    "test:supported-apps": "bun --no-env-file scripts/run-tests.ts --project=supported-apps",
     "test:webserver-change": "playwright test --project=webserver-change",
     "test:update": "playwright test --project=update",
     "test:ui": "playwright test --ui",
     "test:debug": "playwright test --debug",
-    "env:setup": "tsx scripts/setup-env.ts",
-    "report": "tsx scripts/show-report.ts",
+    "leak-check": "bun --no-env-file scripts/leak-check.ts",
+    "env:setup": "bun --no-env-file scripts/setup-env.ts",
+    "report": "bun --no-env-file scripts/show-report.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"**/*.{ts,json,md,yml,yaml}\"",
     "format:check": "prettier --check \"**/*.{ts,json,md,yml,yaml}\"",
-    "check": "npm run typecheck && npm run lint && npm run format:check",
-    "fix": "npm run lint:fix && npm run format"
+    "check": "bun run typecheck && bun run lint && bun run format:check",
+    "fix": "bun run lint:fix && bun run format"
   },
   "dependencies": {
     "basic-ftp": "^5.0.5",
@@ -45,9 +52,9 @@
     "eslint-config-prettier": "^10.1.8",
     "jiti": "^2.7.0",
     "prettier": "^3.9.6",
-    "tsx": "^4.23.12",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-eslint": "^8.67.0",
     "zod": "^4.4.3"
-  }
+  },
+  "packageManager": "bun@1.4.2"
 }

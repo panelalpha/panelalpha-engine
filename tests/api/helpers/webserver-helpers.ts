@@ -1,7 +1,9 @@
 import { expect, type APIRequestContext, type APIResponse } from '@playwright/test';
 import { type EngineApi } from '@/clients/engine-api';
 import type { ApiResponse, SystemChangeStatus, SystemInfo } from '@/types';
+import { describeAttempts, errorReason, recordAttempts } from './attempts';
 import { waitForCondition } from './retry';
+import { redactAndTruncate } from './redact';
 
 const SYSTEM_INFO_RETRY_TIMEOUT_MS = 120_000;
 const SYSTEM_INFO_RETRY_INTERVAL_MS = 3_000;
@@ -12,23 +14,32 @@ const SYSTEM_INFO_RETRY_INTERVAL_MS = 3_000;
 export async function waitForSystemInfo(api: EngineApi): Promise<ApiResponse<SystemInfo>> {
   let lastError: Error | undefined;
   let response: ApiResponse<SystemInfo> | undefined;
+  let polls = 0;
+  const reasons: string[] = [];
 
-  await waitForCondition(
-    async () => {
-      try {
-        response = await api.getSystemInfo();
-        return true;
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-        return false;
+  try {
+    await waitForCondition(
+      async () => {
+        polls += 1;
+        try {
+          response = await api.getSystemInfo();
+          return true;
+        } catch (error) {
+          lastError = error instanceof Error ? error : new Error(String(error));
+          reasons.push(errorReason(error));
+          return false;
+        }
+      },
+      {
+        timeout: SYSTEM_INFO_RETRY_TIMEOUT_MS,
+        interval: SYSTEM_INFO_RETRY_INTERVAL_MS,
+        message: 'GET /system/info did not return 200',
+        describeLast: () => describeAttempts(polls, reasons),
       }
-    },
-    {
-      timeout: SYSTEM_INFO_RETRY_TIMEOUT_MS,
-      interval: SYSTEM_INFO_RETRY_INTERVAL_MS,
-      message: 'GET /system/info did not return 200',
-    }
-  );
+    );
+  } finally {
+    recordAttempts('GET system/info', polls, reasons);
+  }
 
   if (!response) {
     throw lastError ?? new Error('GET /system/info failed after retries');
@@ -259,6 +270,8 @@ export async function waitForSiteHttpReady(
   const interval = options.interval ?? 2_000;
   const requireSuccess = options.requireSuccess ?? false;
 
+  let last = 'no response yet';
+
   await waitForCondition(
     async () => {
       try {
@@ -268,17 +281,20 @@ export async function waitForSiteHttpReady(
           maxRedirects: 5,
         });
         const status = response.status();
+        last = `HTTP ${status}`;
         if (requireSuccess) {
           return status >= 200 && status < 400;
         }
         return !isHostingUnavailableStatus(status);
-      } catch {
+      } catch (error) {
+        last = `request failed: ${redactAndTruncate(error instanceof Error ? error.message : String(error), 300)}`;
         return false;
       }
     },
     {
       timeout,
       interval,
+      describeLast: () => last,
       message: `Site did not become HTTP-ready within ${timeout}ms: ${siteUrl}`,
     }
   );

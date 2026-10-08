@@ -1,4 +1,5 @@
 import { expect, test } from '@/fixtures/test-options';
+import { expectStatus } from '@/helpers/expect-status';
 import { randomUsername } from '@/helpers/random';
 
 test.describe('main domain changes', () => {
@@ -17,20 +18,26 @@ test.describe('main domain changes', () => {
       userFactory.createSimpleUser(),
     ]);
 
-    const result = await api.updateUserRaw(mover.username, { domain: occupant.domain });
+    await test.step('try to take the occupied domain', async () => {
+      const result = await api.updateUserRaw(mover.username, { domain: occupant.domain });
 
-    // The same refusal a create with a taken domain gets.
-    expect(result.status, JSON.stringify(result.body)).toBe(422);
-    expect((result.body as { problems?: unknown[] }).problems).toContainEqual(
-      expect.objectContaining({ field: 'domain', code: 'domain_taken' })
-    );
-    expect(
-      (await api.getUser(mover.username)).data.domain,
-      'the rejected change must not have taken effect'
-    ).toBe(mover.domain);
-    // Refused before the rename started: it used to save the new domain row first.
-    const moverDomains = (await api.listUserDomains(mover.username)).data.map((d) => d.domain);
-    expect(moverDomains).toContain(mover.domain);
-    expect(moverDomains).not.toContain(occupant.domain);
+      // The same refusal a create with a taken domain gets.
+      await expectStatus(result, 422, JSON.stringify(result.body));
+      expect(
+        (result.body as { problems?: unknown[] }).problems,
+        'the refusal names the domain field as taken'
+      ).toContainEqual(expect.objectContaining({ field: 'domain', code: 'domain_taken' }));
+    });
+
+    await test.step('check the old domain is kept', async () => {
+      expect(
+        (await api.getUser(mover.username)).data.domain,
+        'the rejected change must not have taken effect'
+      ).toBe(mover.domain);
+      // Refused before the rename started: it used to save the new domain row first.
+      const moverDomains = (await api.listUserDomains(mover.username)).data.map((d) => d.domain);
+      expect(moverDomains, 'the old main domain is still listed').toContain(mover.domain);
+      expect(moverDomains, 'the occupied domain was not added').not.toContain(occupant.domain);
+    });
   });
 });

@@ -1,13 +1,10 @@
 import { expect, test } from '@/fixtures/test-options';
-import { expectOneOf } from '@/helpers/expect-one-of';
 import {
   VALID_SLUGS,
   getWebserverInfo,
   switchingDisabledReason,
 } from '@/helpers/webserver-helpers';
-
-/** Change-webserver is asynchronous, so a queued job and a refusal both count. */
-const CHANGE_HANDLED = [200, 202, 204, 400, 409, 422, 500] as const;
+import { expectStatus } from '@/helpers/expect-status';
 
 function litespeedSerial(webserver: { serial_number?: string } | undefined): string | undefined {
   return (
@@ -66,7 +63,7 @@ test.describe('change-webserver validation', () => {
     const response = await authedRequest.put('system/change-webserver', {
       data: { new_webserver: 'invalid-webserver' },
     });
-    expect(response.status()).toBe(422);
+    await expectStatus(response, 422);
   });
 
   // Some engine builds refuse every switch up front -- nginx-proxy is required
@@ -138,7 +135,27 @@ test.describe('change-webserver validation', () => {
     const response = await authedRequest.put('system/change-webserver', {
       data: { new_webserver: current },
     });
-    expectOneOf(response.status(), CHANGE_HANDLED);
+
+    if (current !== 'nginx-proxy') {
+      // SystemController::changeWebserver :441-446 refuses everything but nginx-proxy.
+      await expectStatus(response, 422);
+      expect(
+        switchingDisabledReason(await response.json()),
+        'the refusal did not say that switching is disabled'
+      ).not.toBeNull();
+      return;
+    }
+
+    // SystemController::changeWebserver :448-476: nginx-proxy passes the checks and
+    // runs the change script, answering 200 with the latest change info. The only
+    // other answer is 422 when a change script is already running (:458-462).
+    if (response.status() === 422) {
+      expect(JSON.stringify(await response.json())).toContain(
+        'Change webserver script is already running'
+      );
+      return;
+    }
+    await expectStatus(response, 200);
   });
 
   test('LiteSpeed accepts a change with no serial when already on LiteSpeed', async ({
@@ -151,20 +168,33 @@ test.describe('change-webserver validation', () => {
     const response = await authedRequest.put('system/change-webserver', {
       data: { new_webserver: 'litespeed' },
     });
-    expectOneOf(response.status(), CHANGE_HANDLED);
+    // Even already on LiteSpeed, a switch to anything but nginx-proxy is refused
+    // up front (SystemController::changeWebserver :441-446).
+    await expectStatus(response, 422);
+    expect(
+      switchingDisabledReason(await response.json()),
+      'the refusal did not say that switching is disabled'
+    ).not.toBeNull();
   });
 });
 
 test.describe('webserver configuration', () => {
   test('an empty config update is refused', async ({ authedRequest }) => {
     const response = await authedRequest.put('system/webserver-config', { data: {} });
-    expect(response.status()).toBe(422);
+    await expectStatus(response, 422);
   });
 
-  test('the panel password reset endpoint answers deterministically', async ({ authedRequest }) => {
+  test('the panel password reset endpoint answers deterministically', async ({
+    api,
+    authedRequest,
+  }) => {
+    const { slug } = await getWebserverInfo(api);
     const response = await authedRequest.put('system/reset-webserver-panel-password');
-    // Only LiteSpeed-family stacks have a panel; the rest answer 404 or 400.
-    expectOneOf(response.status(), [200, 400, 404, 422, 500]);
+    // SystemController::resetWebserverPanelPassword: LiteSpeedTrait (Litespeed,
+    // Openlitespeed) returns 200 with the new password; every other driver
+    // inherits AbstractWebserver::resetWebPanelPassword, which throws, mapped
+    // to 422. A docker failure (502) or any other status is a real fault.
+    await expectStatus(response, slug.includes('litespeed') ? 200 : 422);
   });
 
   test('resetting the panel password returns a new one on LiteSpeed', async ({ api }) => {

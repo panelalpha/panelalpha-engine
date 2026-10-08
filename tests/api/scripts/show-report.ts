@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import dotenv from 'dotenv';
 
+import { preparePlaywright } from './lib/playwright-cli';
 import {
   reportListenUrl,
   resolvePublicReportHost,
@@ -21,7 +22,7 @@ import {
  *
  * Safer alternative if you do not want port 9323 open on the public IP:
  *   ssh -L 9323:127.0.0.1:9323 root@<vps>
- *   npm run report -- --host 127.0.0.1
+ *   bun run report -- --host 127.0.0.1
  * then open http://127.0.0.1:9323 locally.
  */
 
@@ -55,7 +56,7 @@ function flagValue(name: string): string | undefined {
 }
 
 if (!fs.existsSync(reportDir)) {
-  console.error(`No report at ${path.relative(suiteRoot, reportDir)}. Run npm test first.`);
+  console.error(`No report at ${path.relative(suiteRoot, reportDir)}. Run "bun run test" first.`);
   process.exit(1);
 }
 
@@ -89,9 +90,9 @@ if (rewritePlaywrightUrl) {
 }
 console.log('');
 
-const child = spawn('playwright', args, {
+const playwright = preparePlaywright();
+const child = spawn(playwright.command, [...playwright.args, ...args], {
   stdio: rewritePlaywrightUrl ? ['inherit', 'pipe', 'inherit'] : 'inherit',
-  shell: process.platform === 'win32',
   cwd: suiteRoot,
   env: process.env,
 });

@@ -1,4 +1,5 @@
 import { expect, test } from '@/fixtures/test-options';
+import { redactAndTruncate } from '@/helpers/redact';
 import { rand, randomDomain } from '@/helpers/random';
 import { waitForCondition } from '@/helpers/retry';
 
@@ -39,43 +40,70 @@ test.describe('rebuild', () => {
     const sftpUsername = `${user.username}_${rand('sftp')}`;
     const addonDomain = randomDomain(settings.requireDomain());
 
-    await api.createFtpAccount(user.username, {
-      user: ftpUser,
-      domain: user.domain,
-      password: 'FtpRebuild123!',
+    const database = await test.step('create the FTP, SFTP and MySQL resources', async () => {
+      await api.createFtpAccount(user.username, {
+        user: ftpUser,
+        domain: user.domain,
+        password: 'FtpRebuild123!',
+      });
+      await api.createSftpAccount(user.username, {
+        username: sftpUsername,
+        auth_method: 'password',
+        password: 'SftpRebuild123!',
+      });
+      return (await api.createMySqlDatabase(user.username, rand('db'))).data.database;
     });
-    await api.createSftpAccount(user.username, {
-      username: sftpUsername,
-      auth_method: 'password',
-      password: 'SftpRebuild123!',
-    });
-    const database = (await api.createMySqlDatabase(user.username, rand('db'))).data.database;
 
-    // The container needs its webserver up before it will accept an addon domain.
-    await waitForCondition(
-      async () => {
-        try {
-          await api.createDomain(user.username, { domain: addonDomain, type: 'addon' });
-          return true;
-        } catch {
-          return false;
+    await test.step('create the addon domain', async () => {
+      // The container needs its webserver up before it will accept an addon domain.
+      let lastError = 'not attempted yet';
+      await waitForCondition(
+        async () => {
+          try {
+            await api.createDomain(user.username, { domain: addonDomain, type: 'addon' });
+            return true;
+          } catch (error) {
+            lastError = `createDomain failed: ${redactAndTruncate(error instanceof Error ? error.message : String(error), 300)}`;
+            return false;
+          }
+        },
+        {
+          timeout: settings.timing.propagationDelay + 60_000,
+          interval: 3_000,
+          message: `addon domain ${addonDomain} could not be created`,
+          describeLast: () => lastError,
         }
-      },
-      { timeout: settings.timing.propagationDelay + 60_000, interval: 3_000 }
-    );
+      );
+    });
 
-    await api.rebuildUser(user.username);
+    await test.step('rebuild the project', async () => {
+      await api.rebuildUser(user.username);
+    });
 
-    const [ftpAccounts, sftpAccounts, databases, domains] = await Promise.all([
-      api.listFtpAccounts(user.username),
-      api.listSftpAccounts(user.username),
-      api.listMySqlDatabases(user.username),
-      api.listUserDomains(user.username),
-    ]);
+    await test.step('check the resources survived the rebuild', async () => {
+      const [ftpAccounts, sftpAccounts, databases, domains] = await Promise.all([
+        api.listFtpAccounts(user.username),
+        api.listSftpAccounts(user.username),
+        api.listMySqlDatabases(user.username),
+        api.listUserDomains(user.username),
+      ]);
 
-    expect(ftpAccounts.data.map((account) => account.user)).toContain(`${ftpUser}@${user.domain}`);
-    expect(sftpAccounts.data.map((account) => account.username)).toContain(sftpUsername);
-    expect(databases.data.map((db) => db.database)).toContain(database);
-    expect(domains.data.map((domain) => domain.domain)).toContain(addonDomain);
+      expect(
+        ftpAccounts.data.map((account) => account.user),
+        'the FTP account is still listed'
+      ).toContain(`${ftpUser}@${user.domain}`);
+      expect(
+        sftpAccounts.data.map((account) => account.username),
+        'the SFTP account is still listed'
+      ).toContain(sftpUsername);
+      expect(
+        databases.data.map((db) => db.database),
+        'the MySQL database is still listed'
+      ).toContain(database);
+      expect(
+        domains.data.map((domain) => domain.domain),
+        'the addon domain is still listed'
+      ).toContain(addonDomain);
+    });
   });
 });

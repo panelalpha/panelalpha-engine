@@ -7,6 +7,7 @@ import {
   type SslConfig,
   type SystemInfo,
 } from '@/types';
+import { describeAttempts, httpReason, recordAttempts } from '@/helpers/attempts';
 import { ModSecurityApi } from './modsec.api';
 
 export class SystemApi extends ModSecurityApi {
@@ -53,9 +54,12 @@ export class SystemApi extends ModSecurityApi {
     const maxAttempts = 5;
     const retryDelayMs = 2000;
 
+    const reasons: string[] = [];
+
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       const response = await this.api.put('system/network-config', { data: payload });
       if (response.ok()) {
+        recordAttempts('PUT system/network-config', attempt, reasons);
         return response.json();
       }
 
@@ -64,15 +68,19 @@ export class SystemApi extends ModSecurityApi {
       const shouldRetry =
         status === 422 && this.isContainerRestartingError(body) && attempt < maxAttempts;
 
+      reasons.push(httpReason(status, body));
       if (shouldRetry) {
         await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
         continue;
       }
 
+      recordAttempts('PUT system/network-config', attempt, reasons);
       await this.assertStatus(response, 200);
     }
 
-    throw new Error('PUT /system/network-config did not return 200');
+    throw new Error(
+      `PUT /system/network-config did not return 200 (${describeAttempts(maxAttempts, reasons)})`
+    );
   }
 
   async getCurrentMetrics(): Promise<ApiResponse<any>> {

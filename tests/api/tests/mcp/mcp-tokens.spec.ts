@@ -1,5 +1,6 @@
 import { expect, test } from '@/fixtures/test-options';
 import { rand } from '@/helpers/random';
+import { expectStatus } from '@/helpers/expect-status';
 
 test.describe('MCP tokens', () => {
   test('the token list is an array', async ({ api }) => {
@@ -38,6 +39,6 @@ test.describe('MCP tokens', () => {
 
   test('revoking an unknown token returns 404', async ({ api }) => {
     const revoke = await api.put('mcp-tokens/999999999/revoke');
-    expect(revoke.status()).toBe(404);
+    await expectStatus(revoke, 404);
   });
 });

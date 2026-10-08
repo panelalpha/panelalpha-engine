@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { expect, test } from '@/fixtures/test-options';
+import { CleanupSteps } from '@/helpers/cleanup-step';
 import { getDomainBasePath } from '@/helpers/file-path-helpers';
+import { redactAndTruncate } from '@/helpers/redact';
 import { waitForCondition } from '@/helpers/retry';
 import { wpCliUnavailableReason, wpPath } from '@/helpers/wpcli-helpers';
 
@@ -36,31 +38,49 @@ test('an ionCube-encoded plugin runs on PHP 8.1', async ({
   const remoteDir = getDomainBasePath(setupUser.domain);
   const remoteZip = `/home/${setupUser.username}${remoteDir}/${PLUGIN_ZIP}`;
 
+  const cleanup = new CleanupSteps();
   try {
-    if (original !== target) {
-      await api.setDomainPhpVersion(setupUser.domain, target!);
-      await waitForCondition(
-        async () => (await api.getDomainPhpVersion(setupUser.domain)).data === target,
-        {
-          timeout: settings.timing.propagationDelay + settings.timing.phpExecutionDelay + 5_000,
-          interval: 1_000,
-          message: `the domain never switched to PHP ${target}`,
-        }
-      );
-    }
+    await test.step('switch the domain to PHP 8.1', async () => {
+      if (original !== target) {
+        await api.setDomainPhpVersion(setupUser.domain, target!);
+        let lastVersion = 'not read yet';
+        await waitForCondition(
+          async () => {
+            const version = (await api.getDomainPhpVersion(setupUser.domain)).data;
+            lastVersion = String(version ?? '(none)');
+            return version === target;
+          },
+          {
+            timeout: settings.timing.propagationDelay + settings.timing.phpExecutionDelay + 5_000,
+            interval: 1_000,
+            message: `the domain never switched to PHP ${target}`,
+            describeLast: () => `PHP version reported as ${lastVersion}`,
+          }
+        );
+      }
+    });
 
-    await api.uploadFile(setupUser.username, remoteDir, localZip, { mimeType: 'application/zip' });
-    expect((await api.fileExists(setupUser.username, remoteZip)).exists).toBe(true);
+    await test.step('upload the encoded plugin', async () => {
+      await api.uploadFile(setupUser.username, remoteDir, localZip, {
+        mimeType: 'application/zip',
+      });
+      expect(
+        (await api.fileExists(setupUser.username, remoteZip)).exists,
+        'the uploaded plugin archive exists'
+      ).toBe(true);
+    });
 
-    const installed = await api.executeWpCliCommand(setupUser.username, [
-      'plugin',
-      'install',
-      remoteZip,
-      '--force',
-      '--activate',
-      wpPath(setupUser),
-    ]);
-    expect(installed.exit_code, installed.stderr).toBe(0);
+    await test.step('install and activate the plugin', async () => {
+      const installed = await api.executeWpCliCommand(setupUser.username, [
+        'plugin',
+        'install',
+        remoteZip,
+        '--force',
+        '--activate',
+        wpPath(setupUser),
+      ]);
+      expect(installed.exit_code, installed.stderr).toBe(0);
+    });
 
     await test.step('the loader is present in the runtime', async () => {
       const loader = await api.executeWpCliCommand(setupUser.username, [
@@ -76,6 +96,7 @@ test('an ionCube-encoded plugin runs on PHP 8.1', async ({
     await test.step('the site renders with the encoded plugin active', async () => {
       const marker = process.env.IONCUBE_TEST_MARKER;
 
+      let last = 'no response yet';
       await waitForCondition(
         async () => {
           const response = await anonymousRequest.get(
@@ -83,10 +104,12 @@ test('an ionCube-encoded plugin runs on PHP 8.1', async ({
             { ignoreHTTPSErrors: true, maxRedirects: 5 }
           );
           if (response.status() !== 200) {
+            last = `HTTP ${response.status()}`;
             return false;
           }
 
           const body = await response.text();
+          last = `HTTP 200, body ${redactAndTruncate(body, 300)}`;
           if (/ioncube php loader|critical error|fatal error|parse error/i.test(body)) {
             return false;
           }
@@ -96,12 +119,24 @@ test('an ionCube-encoded plugin runs on PHP 8.1', async ({
           timeout: 30_000,
           interval: 2_000,
           message: 'the site never rendered cleanly with the ionCube plugin active',
+          describeLast: () => last,
         }
       );
     });
+  } catch (error) {
+    cleanup.bodyFailed(error);
+    throw error;
   } finally {
-    await api.setDomainPhpVersion(setupUser.domain, original).catch(() => undefined);
+    await cleanup.run(
+      'restore the domain PHP version',
+      () => api.setDomainPhpVersion(setupUser.domain, original),
+      {
+        verify: async () => (await api.getDomainPhpVersion(setupUser.domain)).data === original,
+        describe: () => `the domain is not back on PHP ${original}`,
+      }
+    );
     // The upload can end up root-owned on some stacks, so removal may fail.
     await api.removeFile(setupUser.username, remoteZip).catch(() => undefined);
+    await cleanup.finish();
   }
 });

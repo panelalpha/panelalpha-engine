@@ -14,9 +14,10 @@ import {
 import { rand } from '@/helpers/random';
 import { delay } from '@/helpers/retry';
 import { requireEngineConnectHost } from '@/helpers/engine-host';
+import { expectStatus } from '@/helpers/expect-status';
 
 test.describe('FTP accounts', () => {
-  test('the account list is returned', async ({ api, setupUser }) => {
+  test('the account list is returned', { tag: ['@smoke'] }, async ({ api, setupUser }) => {
     const listing = await api.listFtpAccounts(setupUser.username);
     validateParsedApiResponse(listing, ftpAccountListSchema);
   });
@@ -48,13 +49,17 @@ test.describe('FTP accounts', () => {
     try {
       await expect
         .poll(
-          async () =>
-            (await api.listFtpAccounts(setupUser.username)).data.some(
-              (candidate) => candidate.user === account
-            ),
+          async () => {
+            const listed = (await api.listFtpAccounts(setupUser.username)).data;
+            if (listed.some((candidate) => candidate.user === account)) {
+              return 'met';
+            }
+            const names = listed.map((candidate) => candidate.user);
+            return `not met: listed accounts ${names.join(', ') || '(none)'}`;
+          },
           { timeout: settings.timing.propagationDelay, intervals: [500] }
         )
-        .toBe(true);
+        .toBe('met');
 
       await test.step('the original credentials work', async () => {
         await ftpLoginAndList({
@@ -193,14 +198,14 @@ test.describe('FTP validation', () => {
       `projects/${setupUser.username}/ftp-accounts/nonexistent_xyz`,
       { data: { unlimited_quota: false, quota: 100 } }
     );
-    expect(response.status()).toBe(404);
+    await expectStatus(response, 404);
   });
 
   test('deleting an unknown account returns 404', async ({ authedRequest, setupUser }) => {
     const response = await authedRequest.delete(
       `projects/${setupUser.username}/ftp-accounts/nonexistent_xyz`
     );
-    expect(response.status()).toBe(404);
+    await expectStatus(response, 404);
   });
 
   test('creating an account past the limit is refused', async ({

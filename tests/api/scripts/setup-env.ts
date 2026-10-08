@@ -9,14 +9,14 @@ import {
   type EngineEnvOptions,
 } from './lib/engine-env';
 
-/** Command line for creating an `env/.env`. `npm test` calls the same code path. */
+/** Command line for creating an `env/.env`. `bun run test` calls the same code path. */
 
 const USAGE = `
 Point the API test suite at an engine.
 
-  npm run env:setup                                  interactive
-  npm run env:setup -- --host 203.0.113.10           mint a token over SSH
-  npm run env:setup -- --host engine.example.com --token '3|abc…'
+  bun run env:setup                                  interactive
+  bun run env:setup -- --host 203.0.113.10           mint a token over SSH
+  bun run env:setup -- --host engine.example.com --token '3|abc…'
 
 Options
   --host <host>        Engine host: an IP address or a hostname. Optional on
@@ -32,7 +32,7 @@ Options
   --no-verify          Skip the connection check before writing.
   --help               Show this.
 
-The base domain for generated extra names is not stored: npm test reads the
+The base domain for generated extra names is not stored: bun run test reads the
 engine's panelalpha.direct (or cert_domain) zone at run time. Set DOMAIN in
 the file by hand only to override that.
 `.trim();
@@ -101,8 +101,8 @@ async function main(): Promise<void> {
   console.log(`  API_TOKEN     ${maskToken(result.token)}`);
   console.log(
     options.profile
-      ? `\nRun it with:\n  TEST_ENV=${options.profile} npm test`
-      : '\nRun it with:\n  npm test'
+      ? `\nRun it with:\n  TEST_ENV=${options.profile} bun run test`
+      : '\nRun it with:\n  bun run test'
   );
 }
 

@@ -1,5 +1,9 @@
 import SftpClient from 'ssh2-sftp-client';
 
+import { redactAndTruncate } from './redact';
+import { waitForCondition } from './retry';
+import { registerSecret } from './secret-registry';
+
 export type NormalizedSftpAuth = 'password' | 'key';
 
 interface SftpAuthFields {
@@ -47,6 +51,7 @@ export interface SftpCredentials {
 
 /** Connects, lists `/`, and always closes the session. */
 export async function sftpLoginAndList(credentials: SftpCredentials): Promise<unknown[]> {
+  registerSecret(credentials.password);
   const client = new SftpClient();
   try {
     await client.connect(credentials);
@@ -54,4 +59,35 @@ export async function sftpLoginAndList(credentials: SftpCredentials): Promise<un
   } finally {
     await client.end();
   }
+}
+
+/**
+ * Polls until a login with these credentials succeeds, and returns the listing
+ * of `/`. A refused login (the account or password not applied yet) is retried
+ * until `timeout`; the last refusal is part of the failure.
+ */
+export async function waitForSftpLogin(
+  credentials: SftpCredentials,
+  options: { timeout: number; interval?: number }
+): Promise<unknown[]> {
+  let listing: unknown[] = [];
+  let last = 'no login attempted yet';
+  await waitForCondition(
+    async () => {
+      try {
+        listing = await sftpLoginAndList(credentials);
+        return true;
+      } catch (error) {
+        last = `login failed: ${redactAndTruncate(error instanceof Error ? error.message : String(error), 300)}`;
+        return false;
+      }
+    },
+    {
+      timeout: options.timeout,
+      interval: options.interval ?? 1_000,
+      message: `SFTP login as ${credentials.username} never succeeded`,
+      describeLast: () => last,
+    }
+  );
+  return listing;
 }

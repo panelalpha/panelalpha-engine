@@ -2,6 +2,7 @@ import { expect, test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
 import { uniqueId } from '@/helpers/random';
 import { skipUnless } from '@/helpers/test-helpers';
+import { expectStatus } from '@/helpers/expect-status';
 import { McpHttpClient } from '@/clients/mcp-http';
 
 /**
@@ -54,7 +55,7 @@ test.describe('engine CLI that is already on 2.0.0', () => {
       );
 
       const check = await new McpHttpClient(anonymousRequest, settings.apiBaseUrl).check(token);
-      expect(check.status()).toBe(200);
+      await expectStatus(check, 200);
     } finally {
       if (tokenId !== undefined) {
         await api.deleteMcpTokenSafe(tokenId);

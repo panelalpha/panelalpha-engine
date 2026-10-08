@@ -1,4 +1,5 @@
 import { expect, test } from '@/fixtures/test-options';
+import { CleanupSteps } from '@/helpers/cleanup-step';
 import {
   CACHE_POPULATE_DELAY_MS,
   LSCACHE_HEADER,
@@ -11,9 +12,11 @@ import {
   lscacheUnavailableReason,
   purgeAllLiteSpeedCache,
 } from '@/helpers/lscache-helpers';
+import { redactAndTruncate } from '@/helpers/redact';
 import { delay, waitForCondition } from '@/helpers/retry';
 import { parseWpCliId } from '@/helpers/permalinks-http-helpers';
 import { wpPath } from '@/helpers/wpcli-helpers';
+import { expectStatus } from '@/helpers/expect-status';
 
 /**
  * A cache that never invalidates is worse than no cache: the site owner edits a
@@ -31,14 +34,29 @@ test.describe('LiteSpeed cache purging', () => {
   });
 
   test.afterEach(async ({ api, setupUser }) => {
-    await api
-      .executeWpCliCommand(setupUser.username, [
-        'plugin',
-        wasActive ? 'activate' : 'deactivate',
-        LSCACHE_PLUGIN,
-        wpPath(setupUser),
-      ])
-      .catch(() => undefined);
+    // beforeEach can skip before it reads the plugin state; there is nothing to restore then.
+    if (wasActive === undefined) {
+      return;
+    }
+
+    const path = wpPath(setupUser);
+    const cleanup = new CleanupSteps();
+    await cleanup.run(
+      'restore the LiteSpeed Cache plugin state',
+      () =>
+        api.executeWpCliCommand(setupUser.username, [
+          'plugin',
+          wasActive ? 'activate' : 'deactivate',
+          LSCACHE_PLUGIN,
+          path,
+        ]),
+      {
+        verify: async () =>
+          (await isLscachePluginActive(api, setupUser.username, path)) === wasActive,
+        describe: () => `the plugin is not back to ${wasActive ? 'active' : 'inactive'}`,
+      }
+    );
+    await cleanup.finish();
   });
 
   test('a purge makes the updated page visible', async ({ api, anonymousRequest, setupUser }) => {
@@ -63,6 +81,7 @@ test.describe('LiteSpeed cache purging', () => {
     const postId = parseWpCliId(created.stdout);
     expect(postId, `WP-CLI returned no post id: ${created.stdout}`).toMatch(/^\d+$/);
 
+    const cleanup = new CleanupSteps();
     try {
       const permalink = (await run('eval', `echo get_permalink(${postId!});`)).stdout.trim();
       expect(permalink).toBeTruthy();
@@ -77,11 +96,11 @@ test.describe('LiteSpeed cache purging', () => {
       await purgeAllLiteSpeedCache(api, setupUser.username, path);
 
       await test.step('prime the cache', async () => {
-        expect((await fetchPage()).status()).toBe(200);
+        await expectStatus(await fetchPage(), 200);
         await delay(CACHE_POPULATE_DELAY_MS);
 
         const cached = await fetchPage();
-        expect(cached.status()).toBe(200);
+        await expectStatus(cached, 200);
         expect(await cached.text()).toContain(cachedMarker);
 
         test.info().annotations.push({
@@ -100,18 +119,31 @@ test.describe('LiteSpeed cache purging', () => {
       await purgeAllLiteSpeedCache(api, setupUser.username, path);
 
       await test.step('the purge lets the update through', async () => {
+        let lastPage = 'no response yet';
         await waitForCondition(
-          async () => (await (await fetchPage()).text()).includes(updatedMarker),
+          async () => {
+            const body = await (await fetchPage()).text();
+            lastPage = `body ${redactAndTruncate(body, 300)}`;
+            return body.includes(updatedMarker);
+          },
           {
             timeout: MAX_PURGE_WAIT_MS,
             interval: PURGE_RETRY_DELAY_MS,
             message: `${permalink} still served the pre-update content after a full purge`,
+            describeLast: () => lastPage,
           }
         );
       });
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
-      await run('post', 'delete', postId!, '--force').catch(() => undefined);
+      await cleanup.run('delete the post the test created', () =>
+        run('post', 'delete', postId!, '--force')
+      );
+      // A failed purge only leaves the cache cold for later tests, which purge again.
       await purgeAllLiteSpeedCache(api, setupUser.username, path).catch(() => undefined);
+      await cleanup.finish();
     }
   });
 
@@ -128,12 +160,14 @@ test.describe('LiteSpeed cache purging', () => {
 
     await ensureLscachePluginActive(api, setupUser.username, path, { forceInstall: true });
 
+    const cleanup = new CleanupSteps();
     try {
       const updated = await run('option', 'update', 'blogname', updatedTitle);
       expect(updated.exit_code, updated.stderr).toBe(0);
 
       await purgeAllLiteSpeedCache(api, setupUser.username, path);
 
+      let lastHome = 'no response yet';
       await waitForCondition(
         async () => {
           const response = await getWithRetry(anonymousRequest, `https://${setupUser.domain}/`, {
@@ -141,17 +175,33 @@ test.describe('LiteSpeed cache purging', () => {
             maxRedirects: 5,
             headers: { Cookie: '' },
           });
-          return (await response.text()).includes(updatedTitle);
+          const body = await response.text();
+          lastHome = `HTTP ${response.status()}, body ${redactAndTruncate(body, 300)}`;
+          return body.includes(updatedTitle);
         },
         {
           timeout: MAX_PURGE_WAIT_MS,
           interval: PURGE_RETRY_DELAY_MS,
           message: 'the homepage still showed the old site title after a full purge',
+          describeLast: () => lastHome,
         }
       );
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
-      await run('option', 'update', 'blogname', originalTitle).catch(() => undefined);
+      await cleanup.run(
+        'restore the site title option',
+        () => run('option', 'update', 'blogname', originalTitle),
+        {
+          verify: async () =>
+            (await run('option', 'get', 'blogname')).stdout.trim() === originalTitle,
+          describe: () => 'the site title is not back to its original value',
+        }
+      );
+      // A failed purge only leaves the cache cold for later tests, which purge again.
       await purgeAllLiteSpeedCache(api, setupUser.username, path).catch(() => undefined);
+      await cleanup.finish();
     }
   });
 });

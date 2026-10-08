@@ -2,8 +2,10 @@ import { expect, test } from '@/fixtures/test-options';
 import { Timeouts } from '@/config/timeouts';
 import { DEFAULT_DEPLOY_GIT_REPO } from '@/helpers/deploy-helpers';
 import { expectOneOf } from '@/helpers/expect-one-of';
+import { expectStatus } from '@/helpers/expect-status';
 import { randomDomain, randomEmail, randomUsername } from '@/helpers/random';
 import { rawResponseBody } from '@/helpers/raw-response';
+import { sharedProject } from '@/helpers/shared-project';
 import { PROJECT_CREATE_OK } from '@/helpers/task-helpers';
 
 const REJECTED = [400, 422] as const;
@@ -57,7 +59,7 @@ test.describe('user creation validation', () => {
       // Parsed before provision: a 422 that still created the account would
       // take the name, and a retry under the same username would then 422
       // for the wrong reason.
-      expect((await api.getUserRaw(username)).status).toBe(404);
+      await expectStatus(await api.getUserRaw(username), 404);
     } finally {
       await api.deleteUserSafe(username);
     }
@@ -82,9 +84,10 @@ test.describe('user creation validation', () => {
       }
       expectOneOf(result.status, PROJECT_CREATE_OK);
       const shown = await api.getUserRaw(username);
-      expect(shown.status).toBe(200);
+      await expectStatus(shown, 200);
       expect(
-        (shown.body as { data?: { details?: { template?: string } } }).data?.details?.template
+        (shown.body as { data?: { details?: { template?: string } } }).data?.details?.template,
+        'the stored template is dind'
       ).toBe('dind');
     } finally {
       await api.deleteUserSafe(username);
@@ -101,8 +104,11 @@ test.describe('user creation validation', () => {
     });
     try {
       expectOneOf(result.status, REJECTED);
-      expect(JSON.stringify(result.body)).toContain('template_conflicts_with_git');
-      expect((await api.getUserRaw(username)).status).toBe(404);
+      expect(
+        JSON.stringify(result.body),
+        'the refusal names template_conflicts_with_git'
+      ).toContain('template_conflicts_with_git');
+      await expectStatus(await api.getUserRaw(username), 404);
     } finally {
       await api.deleteUserSafe(username);
     }
@@ -124,8 +130,8 @@ test.describe('user creation validation', () => {
     const body = rawResponseBody<{ data?: { username?: string } }>(result);
     const username = body.data?.username;
     try {
-      expect(result.status).toBe(202);
-      expect(username).toEqual(expect.any(String));
+      await expectStatus(result, 202);
+      expect(username, 'the generated project name is returned').toEqual(expect.any(String));
     } finally {
       if (username) {
         await api.deleteUserSafe(username);
@@ -222,9 +228,10 @@ test.describe('user creation validation', () => {
       expect(created.length, `both requests created "${username}"`).toBeLessThanOrEqual(1);
 
       for (const status of statuses.filter((status) => status !== 201 && status !== 202)) {
-        // The unique index race is not wrapped: the loser is a 500 today, not
-        // 409/422. Still a loss — only one create may succeed.
-        expectOneOf(status, [409, 422, 500]);
+        // ProjectCreator::saveNewProject maps the unique-index loser to a
+        // ProblemException (422 name_taken / domain_taken), the same answer a
+        // sequential duplicate gets. A 500 here is a regression.
+        expectOneOf(status, [422]);
       }
     } finally {
       await api.deleteUserSafe(username);
@@ -233,6 +240,11 @@ test.describe('user creation validation', () => {
 });
 
 test.describe('user update validation', () => {
+  // The refused updates share one project: each sends one field the Engine must not store, and
+  // no test reads another's field. The test that really writes profile fields keeps its own.
+  const shared = sharedProject('simple');
+  test.afterAll(() => shared.dispose());
+
   const invalidEmails = [
     'not-an-email',
     'missing-at.com',
@@ -242,15 +254,15 @@ test.describe('user update validation', () => {
   ];
 
   for (const email of invalidEmails) {
-    test(`does not persist the invalid email ${JSON.stringify(email)}`, async ({
-      api,
-      userFactory,
-    }) => {
-      const user = await userFactory.createSimpleUser();
+    test(`does not persist the invalid email ${JSON.stringify(email)}`, async ({ api }) => {
+      const user = await shared.get();
 
       await api.updateUserRaw(user.username, { email });
 
-      expect((await api.getUser(user.username)).data.email ?? '').not.toBe(email);
+      expect(
+        (await api.getUser(user.username)).data.email ?? '',
+        'the invalid email was not stored'
+      ).not.toBe(email);
     });
   }
 
@@ -263,8 +275,8 @@ test.describe('user update validation', () => {
 
   for (const limit of negativeLimits) {
     const [field] = Object.keys(limit);
-    test(`rejects a negative ${field}`, async ({ api, userFactory }) => {
-      const user = await userFactory.createSimpleUser();
+    test(`rejects a negative ${field}`, async ({ api }) => {
+      const user = await shared.get();
       expectOneOf((await api.updateUserRaw(user.username, limit)).status, REJECTED);
     });
   }
@@ -279,9 +291,9 @@ test.describe('user update validation', () => {
 
     const storedName = (await api.getUser(user.username)).data.name;
     if (storedName) {
-      expect(storedName).not.toContain('<script');
+      expect(storedName, 'the stored name has no script tag').not.toContain('<script');
     } else {
-      expect(storedName).toBeFalsy();
+      expect(storedName, 'the stored name is empty').toBeFalsy();
     }
   });
 });
@@ -295,7 +307,7 @@ test.describe('unknown users', () => {
 
   for (const [label, buildPath] of paths) {
     test(`requesting ${label} of an unknown user returns 404`, async ({ api }) => {
-      expect((await api.get(buildPath(`nonexistent_${Date.now()}`))).status()).toBe(404);
+      await expectStatus(await api.get(buildPath(`nonexistent_${Date.now()}`)), 404);
     });
   }
 });

@@ -15,6 +15,8 @@ import {
   installLocalIpBlockMuPlugin,
   removeLocalIpBlockMuPlugin,
 } from '@/helpers/wp-security-local-ip-helpers';
+import { CleanupSteps } from '@/helpers/cleanup-step';
+import { removeFileIfPresent } from '@/helpers/file-path-helpers';
 import { getWebserverInfo } from '@/helpers/webserver-helpers';
 
 /**
@@ -25,12 +27,14 @@ import { getWebserverInfo } from '@/helpers/webserver-helpers';
  */
 test.describe('real client IP propagation', () => {
   test.afterEach(async ({ api, setupUser }) => {
-    await removeLocalIpBlockMuPlugin(api, setupUser.username, setupUser.wpPath).catch(
-      () => undefined
+    const cleanup = new CleanupSteps();
+    await cleanup.run('remove the local-IP mu-plugin', () =>
+      removeLocalIpBlockMuPlugin(api, setupUser.username, setupUser.wpPath)
     );
-    await api
-      .removeFile(setupUser.username, realIpProbeFilePath(setupUser.domain), false)
-      .catch(() => undefined);
+    await cleanup.run('remove the real-IP probe script', () =>
+      removeFileIfPresent(api, setupUser.username, realIpProbeFilePath(setupUser.domain))
+    );
+    await cleanup.finish();
   });
 
   /** Reads the probe script's view of the request. */
@@ -98,15 +102,18 @@ test.describe('real client IP propagation', () => {
       tag: ['@security'],
     },
     async ({ api, anonymousRequest, setupUser }) => {
-      await installLocalIpBlockMuPlugin(api, setupUser.username, setupUser.wpPath);
+      await test.step('install the local-IP block plugin', async () => {
+        await installLocalIpBlockMuPlugin(api, setupUser.username, setupUser.wpPath);
+      });
 
-      const { status, payload } = await probe(api, anonymousRequest, setupUser);
+      const { status, payload } = await test.step('probe the site as an external client', () =>
+        probe(api, anonymousRequest, setupUser));
 
       expect(
         status,
         'an external request was refused as if it came from a private address'
       ).not.toBe(403);
-      expect(status).toBeLessThan(500);
+      expect(status, 'the probe did not hit a server error').toBeLessThan(500);
 
       test.skip(!payload?.remote_addr, 'The probe returned no REMOTE_ADDR.');
       test.skip(

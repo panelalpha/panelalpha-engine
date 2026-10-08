@@ -1,66 +1,44 @@
 # Engine tests
 
-These tests talk to a real PanelAlpha Engine. They create accounts, sites and projects, check that they work, and remove them again. Run them only on an engine you are allowed to change.
-
-You need Node 20 or newer.
+These tests talk to a real PanelAlpha Engine. They create projects, check that they work, and delete them again. Run them only on an Engine you are allowed to change.
 
 ## Run
 
-From this folder:
-
 ```bash
-npm install
-npm test
+bun install        # Bun 1.4.2; Node 20.19 or newer is still needed, Playwright runs under Node
+bun run test:smoke # about 45 s
 ```
 
-The first run needs the engine's address and a token. On the engine itself that is filled in for you. From your own computer it asks which engine to use, connects over SSH, and saves the details in `env/.env`. Later runs go straight to the tests. Do not commit that file.
+| Command                 | When to use it                                                                                                                     | Time                                                    |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `bun run test:smoke`    | Check that the Engine answers and the critical path works.                                                                         | about 45 s                                              |
+| `bun run test:pr`       | Before a merge request: typecheck, lint, unit tests, smoke, the specs for the changed areas and four sample apps.                  | depends on the changed areas; each app takes 3 to 6 min |
+| `bun run test`          | The everyday run: unit tests and the whole API. Application deploys are not run.                                                   | about 36 min on a 2 vCPU / 3.8 GB Engine                |
+| `bun run test:full`     | Everything in `test` plus every application deploy.                                                                                | about 2 h 12 min on a 2 vCPU / 3.8 GB Engine            |
+| `bun run test:nightly`  | `test:full`, then the slow tests, then the engine-wide tests whose opt-in is set (see [docs/maintainers.md](docs/maintainers.md)). | longer than `test:full`                                 |
+| `bun run test:parallel` | Optional: `test:full` on several workers, sized to the Engine host. On a 4 GB Engine it is the same as the serial run.             | not recommended until its stability has been measured   |
+| `bun run test:pr:plan`  | Show which tests `test:pr` would run, without running any.                                                                         | seconds                                                 |
+| `bun run test:unit`     | Logic only. No Engine needed, works offline.                                                                                       | seconds                                                 |
 
-To choose the engine yourself:
+Times are measurements on one Engine (2026-10-08), not promises. Anything after `--` is passed to Playwright: `bun run test -- tests/users`, `bun run test -- --grep "suspend"`.
 
-```bash
-npm run env:setup -- --host engine.example.com
-```
+## Requirements
 
-Add `--token` if you already have one. `--help` lists the rest.
-
-`npm test` is the everyday run. It checks the engine's API, then deploys each application from the list and waits until it is online. That takes hours.
-
-Anything you put after `--` is passed through. `npm test -- tests/users` runs one folder. `npm test -- --grep "suspend"` runs tests whose name matches.
-
-Some tests skip when the engine does not have what they need, for example no firewall, or no way to run commands on the server. The run prints each skip and why. A run that skipped half the tests is not a full pass.
-
-## Groups
-
-| Command                         | What it does                                                                               |
-| ------------------------------- | ------------------------------------------------------------------------------------------ |
-| `npm test`                      | The everyday run: logic checks, the API, and the application deploys                       |
-| `npm run test:smoke`            | A short check that the engine answers                                                      |
-| `npm run test:unit`             | Logic only. No engine, so it works offline                                                 |
-| `npm run test:supported-apps`   | Only the application deploys. These also run inside `npm test`                             |
-| `npm run test:slow`             | Turns the firewall off and on, and tries every PHP version                                 |
-| `npm run test:cli`              | The engine's own commands. Only works when the tests run on the engine's server            |
-| `npm run test:webserver-change` | Switches the web server, then switches it back. This changes the engine for everyone on it |
-| `npm run test:update`           | The engine's update                                                                        |
-| `npm run test:ui`               | Watch the tests in a window                                                                |
-| `npm run report`                | Open the report from the last run                                                          |
-| `npm run check`                 | Check the test code before you commit it                                                   |
-
-`npm run test:supported-apps` deploys each application from a fixed list, waits until it is online, and opens its address. The same run also checks, once each: a refused create, an archive with no file, a working copy pushed back to the live site, a backup, stopping and starting the containers, a site that lost its front page, a git hook, and WordPress on an ordinary account. `SUPPORTED_APPS=koel,ntfy` runs only those applications from the list. The once-each checks still run.
-
-`npm run test:slow`, `npm run test:cli`, `npm run test:webserver-change` and `npm run test:update` stay out of `npm test` because they change the whole engine, or they only make sense on the engine's own server.
+- Bun and Node, as above.
+- An Engine you may change: the tests create and delete projects on it.
+- The first run creates `env/.env` for you. On the Engine host it asks nothing. From your own computer it asks which Engine to use and mints a token over SSH. Do not commit that file. To choose the Engine yourself: `bun run env:setup -- --host engine.example.com` (`--help` lists the rest).
 
 ## When something fails
 
-```bash
-npm run report
-```
+- **Summary.** Every run writes `.playwright/summary.md`: the cause of each failed test, the skips, and the leak-check result.
+- **Report.** `bun run report` serves the HTML report and prints the address. A failed test keeps a trace you can open from it. Over SSH, tunnel the port instead of opening it; see [docs/maintainers.md](docs/maintainers.md).
+- **Skips.** A test skips when the Engine lacks what it needs, for example no firewall. Each skip is printed with its reason. The reasons we accept are listed in `config/expected-skips.ts`; any other reason is reported as unexpected and means something broke. In CI that is an error, and `MAX_SKIPPED` must be set. A run that skipped half the tests is not a full pass.
+- **Projects of failed tests are deleted**, so the Engine stays clean. To keep them for inspection on your own machine, run with `PRESERVE_ON_FAILURE=1`. It is ignored in CI.
+- **Leak-check.** After the run the Engine is compared with its state before, and the run fails if something was left behind. It is on by default in CI; run with `LEAK_CHECK=1` to use it locally. The result is the last line of `.playwright/summary.md`, and `bun run leak-check` runs it on its own.
+- **Secrets** (the API token and license keys) are replaced with `[REDACTED]` in console output, JUnit, the HTML report and traces, so a published report does not carry them.
 
-This serves the report on port 9323 and prints the address to open. If you are not on that machine, either allow the port or tunnel it:
+## More
 
-```bash
-ssh -L 9323:127.0.0.1:9323 root@engine.example.com
-```
-
-A failed test keeps a trace. Open it from the report. The API token (and `LICENSE_KEY` /
-`SYSTEM_UPDATE_LICENSE_KEY` when set) is replaced with `[REDACTED]` in every trace and report
-archive once the run ends, so a published report does not carry it.
+- Variables and their defaults: [`env/.env.example`](env/.env.example).
+- Run options, nightly opt-ins, test projects, report tunnel: [docs/maintainers.md](docs/maintainers.md).
+- Before pushing changes to the suite: `bun run check`.

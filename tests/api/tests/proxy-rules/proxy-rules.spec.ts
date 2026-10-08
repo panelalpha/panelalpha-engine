@@ -1,6 +1,7 @@
 import { expect, test } from '@/fixtures/test-options';
 import { isProxyRulesAvailable } from '@/helpers/sss-feature-helpers';
 import { rand } from '@/helpers/random';
+import { expectStatus } from '@/helpers/expect-status';
 
 test.describe('Proxy rules', () => {
   test.beforeEach(async ({ api }) => {
@@ -43,14 +44,14 @@ test.describe('Proxy rules', () => {
       expect(updated.data.enabled).toBe(false);
 
       await api.deleteProxyRule(created.data.id);
-      expect((await api.getProxyRuleRaw(created.data.id)).status).toBe(404);
+      await expectStatus(await api.getProxyRuleRaw(created.data.id), 404);
     } finally {
       await api.deleteProxyRuleSafe(created.data.id);
     }
   });
 
   test('a missing rule returns 404', async ({ api }) => {
-    expect((await api.getProxyRuleRaw(999_999_999)).status).toBe(404);
+    await expectStatus(await api.getProxyRuleRaw(999_999_999), 404);
   });
 
   test('an invalid listen port is rejected', async ({ api }) => {

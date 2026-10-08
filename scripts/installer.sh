@@ -915,6 +915,7 @@ ENGINE_HOST_STATE=(
     core/config/logrotate core/config/exim core/config/modsecurity
     core/config/sftp core/config/pure-ftpd
     core/vendor core/storage core/bootstrap/cache
+    tests/coverage
     tests/api/node_modules tests/api/.playwright tests/api/test-results tests/api/playwright-report
     tests/api/env/.env 'tests/api/env/.env.*'
     scripts/tools/dind-test/vendor

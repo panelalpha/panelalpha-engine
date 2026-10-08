@@ -1,4 +1,5 @@
 import type { EngineApi } from '@/clients/engine-api';
+import { expectStatus } from './expect-status';
 
 /**
  * Documentation ranges, so nothing here can collide with a real address the
@@ -13,14 +14,17 @@ export interface SubnetSpec {
   mask: number;
 }
 
-/** Whether the engine exposes IP management at all — it is an optional module. */
+/**
+ * Whether the engine exposes IP management at all. Only 404 (the route is not
+ * registered) is a definite absence; any other answer that is not 200 throws.
+ */
 export async function isIpamAvailable(api: EngineApi): Promise<boolean> {
-  try {
-    await api.listSubnets();
-    return true;
-  } catch {
+  const response = await api.listSubnetsRaw();
+  if (response.status === 404) {
     return false;
   }
+  await expectStatus(response, 200, 'GET /ip/subnets');
+  return true;
 }
 
 /**

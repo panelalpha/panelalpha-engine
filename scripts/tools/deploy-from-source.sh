@@ -64,6 +64,7 @@ EXCLUDES=(
     core/config/logrotate core/config/exim core/config/modsecurity
     core/config/sftp core/config/pure-ftpd
     core/vendor core/storage core/bootstrap/cache
+    tests/coverage
     tests/api/node_modules tests/api/.playwright tests/api/test-results tests/api/playwright-report
     # The API suite's host config and token. Gitignored, so the uploading tree
     # never has it and --delete would remove it from the host on every sync.

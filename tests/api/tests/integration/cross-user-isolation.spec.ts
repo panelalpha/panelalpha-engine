@@ -26,23 +26,31 @@ test.describe('cross-user isolation', () => {
       mysqlFactory,
       userFactory,
     }) => {
-      const [attacker, victim] = await Promise.all([
-        userFactory.createSimpleUser(),
-        userFactory.createSimpleUser(),
-      ]);
+      const [attacker, victim] = await test.step('create the attacker and the victim', () =>
+        Promise.all([userFactory.createSimpleUser(), userFactory.createSimpleUser()]));
 
       // The home root is root-owned; write where a hosting user can, and make sure the
       // file is really there, or every denial below proves nothing.
       const secretPath = `${getDomainBasePath(victim.domain)}/${rand('iso')}.txt`;
-      await api.putFileContents(victim.username, secretPath, `isolation-secret-${Date.now()}`);
-      expect((await api.fileExists(victim.username, secretPath)).exists).toBe(true);
+      await test.step('write a secret file as the victim', async () => {
+        await api.putFileContents(victim.username, secretPath, `isolation-secret-${Date.now()}`);
+        expect(
+          (await api.fileExists(victim.username, secretPath)).exists,
+          'the victim secret file exists'
+        ).toBe(true);
+      });
 
-      const [addonDomain, database, ftpAccount, cronJob] = await Promise.all([
-        domainFactory.createAddonDomain(victim.username, victim.domain),
-        mysqlFactory.createDatabase(victim.username, rand('iso')),
-        ftpFactory.createFtpAccount(victim.username, victim.domain),
-        cronFactory.createMinuteCron(victim.username, `echo isolation-${Date.now()} > /dev/null`),
-      ]);
+      const [addonDomain, database, ftpAccount, cronJob] =
+        await test.step('create the victim resources', () =>
+          Promise.all([
+            domainFactory.createAddonDomain(victim.username, victim.domain),
+            mysqlFactory.createDatabase(victim.username, rand('iso')),
+            ftpFactory.createFtpAccount(victim.username, victim.domain),
+            cronFactory.createMinuteCron(
+              victim.username,
+              `echo isolation-${Date.now()} > /dev/null`
+            ),
+          ]));
 
       /** Requests made under the attacker's namespace, naming the victim's resource. */
       const crossUserRequests = [

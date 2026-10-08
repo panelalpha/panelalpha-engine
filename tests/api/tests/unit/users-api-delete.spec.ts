@@ -83,12 +83,28 @@ test.describe('UsersApi project delete', () => {
     expect(test.info().timeout).toBe(before + Timeouts.projectDelete + 15_000);
   });
 
+  test('a retried delete is noted on the test with its attempts and cancelled task', async () => {
+    const { api } = engine([running, stopping, response(200)]);
+
+    await api.deleteUserSafe('pwtest');
+    const notes = test
+      .info()
+      .annotations.filter((a) => a.type === 'retry')
+      .map((a) => a.description);
+    expect(notes).toContain('DELETE projects/pwtest: running task 507 cancelled');
+    expect(notes).toContain(
+      `DELETE projects/pwtest: test timeout extended by ${Timeouts.projectDelete + 15_000} ms`
+    );
+    expect(notes).toContain('DELETE projects/pwtest: 3 attempts; reasons: HTTP 409 task 507');
+  });
+
   test('a delete that succeeds at once leaves the test timeout alone', async () => {
     const { api } = engine([response(200)]);
     const before = test.info().timeout;
 
     await api.deleteUserSafe('pwtest');
     expect(test.info().timeout).toBe(before);
+    expect(test.info().annotations.filter((a) => a.type === 'retry')).toEqual([]);
   });
 
   test('a project that is already gone is not an error', async () => {

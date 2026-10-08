@@ -1,5 +1,7 @@
 import type { APIRequestContext } from '@playwright/test';
 import type { EngineApi } from '@/clients/engine-api';
+import { CleanupSteps } from './cleanup-step';
+import { removeFileIfPresent } from './file-path-helpers';
 import { getWebserverInfo } from './webserver-helpers';
 
 export type WebserverType = 'nginx' | 'nginx-proxy' | 'apache' | 'litespeed' | 'openlitespeed';
@@ -95,6 +97,7 @@ export async function verifyHtaccessSupport(
   const targetPath = `/${setupData.domain}/public_html/htaccess-preflight.txt`;
   const htaccessPath = `/${setupData.domain}/public_html/.htaccess`;
 
+  const cleanup = new CleanupSteps();
   try {
     await api.putFileContents(setupData.username, targetPath, testContent);
     await api.putFileContents(
@@ -115,11 +118,16 @@ export async function verifyHtaccessSupport(
     });
 
     await api.putFileContents(setupData.username, htaccessPath, '# Empty .htaccess\n');
-    await api.removeFile(setupData.username, targetPath).catch(() => undefined);
 
     return result.success;
   } catch {
     return false;
+  } finally {
+    // Runs after the return value is decided, so a failed removal still reaches the caller.
+    await cleanup.run(`remove ${targetPath}`, () =>
+      removeFileIfPresent(api, setupData.username, targetPath)
+    );
+    await cleanup.finish();
   }
 }
 

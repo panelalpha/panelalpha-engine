@@ -8,6 +8,7 @@ import {
   randomTestNetAddress,
   requireFirewall,
 } from '@/helpers/firewall-helpers';
+import { expectStatus } from '@/helpers/expect-status';
 import { firewallLogsResponseSchema, firewallRuleResponseSchema } from '@/schemas';
 
 /** One TCP attempt at the engine's host on a port nothing allows; the answer does not matter. */
@@ -89,7 +90,7 @@ test.describe('Firewall log', () => {
       { address: 'example.com' },
     ];
     for (const query of invalid) {
-      expect((await api.getFirewallLogsRaw(query)).status, JSON.stringify(query)).toBe(422);
+      await expectStatus(await api.getFirewallLogsRaw(query), 422, JSON.stringify(query));
     }
   });
 });
@@ -151,7 +152,7 @@ test.describe('Firewall rules in both directions', () => {
       if (typeof id === 'string') {
         created.add(id);
       }
-      expect(response.status, JSON.stringify(response.body)).toBe(422);
+      await expectStatus(response, 422, JSON.stringify(response.body));
     }
   });
 });

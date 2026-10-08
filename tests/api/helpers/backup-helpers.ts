@@ -1,6 +1,8 @@
 import type { EngineApi } from '@/clients/engine-api';
 import type { BackupRecord } from '@/types';
 import { Timeouts } from '@/config/timeouts';
+import { collectTaskDiagnostics, formatTaskDiagnostics } from './task-diagnostics';
+import { redactAndTruncate } from './redact';
 import { waitForCondition } from './retry';
 
 export const TERMINAL_BACKUP_STATUSES = ['completed', 'failed'] as const;
@@ -101,5 +103,35 @@ export async function waitForBackupDeleted(
       message: `Backup ${id} for ${username} was not deleted`,
       describeLast: () => last,
     }
+  );
+}
+
+/** What a finished backup phase says went wrong: the record's error and, when known, the task's. */
+export function describeBackupFailure(record: BackupRecord, key: BackupAsyncKey): string {
+  return `${key}=${backupAsyncStatus(record, key) ?? 'missing'} error=${redactAndTruncate(record.error ?? 'none', 600)}`;
+}
+
+/**
+ * Requires a backup phase to have `completed`. A `failed` phase (or one that
+ * never reached a terminal word) throws with the record's error and the task's
+ * log tail, so the failure names the cause rather than the status word.
+ */
+export async function expectBackupPhaseCompleted(
+  api: EngineApi,
+  username: string,
+  record: BackupRecord,
+  key: BackupAsyncKey,
+  taskId?: number
+): Promise<void> {
+  if (backupAsyncStatus(record, key) === 'completed') {
+    return;
+  }
+  const id = taskId ?? backupTaskId(record);
+  const diagnostics =
+    id === undefined
+      ? '(no task id on the backup record)'
+      : formatTaskDiagnostics(await collectTaskDiagnostics(api, id, { username }));
+  throw new Error(
+    `Backup ${record.id} of ${username} did not complete its ${key}: ${describeBackupFailure(record, key)}\n${diagnostics}`
   );
 }

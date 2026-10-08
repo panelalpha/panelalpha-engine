@@ -1,6 +1,8 @@
 import { expect, test } from '@/fixtures/test-options';
+import { CleanupSteps } from '@/helpers/cleanup-step';
 import { LIMITED_PRIVILEGES, TEST_PRIVILEGES, privilegesAsText } from '@/helpers/mysql-helpers';
 import { rand } from '@/helpers/random';
+import { expectStatus } from '@/helpers/expect-status';
 
 /**
  * Privileges only exist for a (user, database) pair, so each test builds both,
@@ -25,10 +27,11 @@ test.describe('MySQL privileges', () => {
         response.status() === 404,
         'GET mysql/privileges is not implemented on this engine.'
       );
-      expect(response.status()).toBe(200);
+      await expectStatus(response, 200);
       return privilegesAsText(await response.json());
     };
 
+    const cleanup = new CleanupSteps();
     try {
       await api.updateMySqlPrivileges(setupUser.username, account, database, [...TEST_PRIVILEGES]);
       const granted = await api.getMySqlPrivileges(setupUser.username, account, database);
@@ -53,10 +56,20 @@ test.describe('MySQL privileges', () => {
       for (const privilege of TEST_PRIVILEGES) {
         expect(revoked, `${privilege} should have been revoked`).not.toContain(privilege);
       }
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
-      await api.deleteMySqlPrivileges(setupUser.username, account, database).catch(() => undefined);
-      await mysqlFactory.deleteMySqlUser(setupUser.username, account);
-      await mysqlFactory.deleteDatabase(setupUser.username, database);
+      await cleanup.run('revoke the privileges the test granted', () =>
+        api.deleteMySqlPrivileges(setupUser.username, account, database)
+      );
+      await cleanup.run('delete the MySQL user the test created', () =>
+        mysqlFactory.deleteMySqlUser(setupUser.username, account)
+      );
+      await cleanup.run('delete the database the test created', () =>
+        mysqlFactory.deleteDatabase(setupUser.username, database)
+      );
+      await cleanup.finish();
     }
   });
 });

@@ -1,6 +1,7 @@
 import { expect, test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
 import { rand } from '@/helpers/random';
+import { expectStatus } from '@/helpers/expect-status';
 
 test.describe('backup stores', () => {
   test('a local store is created, tested, updated and deleted', async ({ api }) => {
@@ -13,35 +14,70 @@ test.describe('backup stores', () => {
     });
 
     try {
-      expect(created.data.name).toBe(name);
-      expect(created.data.driver).toBe('local');
-      expect(created.data.location).toBe(location);
-      expect(created.data.has_credentials).toBe(false);
+      await test.step('check the created store', () => {
+        expect(created.data.name, 'store name').toBe(name);
+        expect(created.data.driver, 'store driver').toBe('local');
+        expect(created.data.location, 'store location').toBe(location);
+        expect(created.data.has_credentials, 'a local store has no credentials').toBe(false);
+      });
 
-      const fetched = await api.getBackupContainer(created.data.id);
-      expect(fetched.data.id).toBe(created.data.id);
+      await test.step('read the store back and list it', async () => {
+        const fetched = await api.getBackupContainer(created.data.id);
+        expect(fetched.data.id, 'fetched store id').toBe(created.data.id);
 
-      const listed = await api.listBackupContainers();
-      expect(listed.data.some((row) => row.id === created.data.id)).toBe(true);
+        const listed = await api.listBackupContainers();
+        expect(
+          listed.data.some((row) => row.id === created.data.id),
+          'the new store is listed'
+        ).toBe(true);
+      });
 
-      const probed = await api.testBackupContainerRaw(created.data.id);
-      expectOneOf(probed.status, [200, 422]);
-      if (probed.status === 200) {
-        expect((probed.body as { data?: { ok?: boolean } }).data?.ok).toBe(true);
-      }
+      await test.step('test the store', async () => {
+        // A writable /var/tmp location has no reason to be refused (Local::test throws only for a
+        // missing or unwritable root, BackupContainerController.php:221-228).
+        const probed = await api.testBackupContainerRaw(created.data.id);
+        await expectStatus(probed, 200);
+        expect(
+          (probed.body as { data?: { ok?: boolean } }).data?.ok,
+          'the store test reports ok'
+        ).toBe(true);
+      });
 
-      const renamed = `${name}-ren`;
-      const updated = await api.updateBackupContainer(created.data.id, { name: renamed });
-      expect(updated.data.name).toBe(renamed);
+      await test.step('rename the store', async () => {
+        const renamed = `${name}-ren`;
+        const updated = await api.updateBackupContainer(created.data.id, { name: renamed });
+        expect(updated.data.name, 'updated store name').toBe(renamed);
+      });
     } finally {
       await api.deleteBackupContainerSafe(created.data.id);
     }
 
-    expect((await api.getBackupContainerRaw(created.data.id)).status).toBe(404);
+    await test.step('check the store is gone', async () => {
+      await expectStatus(await api.getBackupContainerRaw(created.data.id), 404);
+    });
+  });
+
+  test('a store whose location cannot be written fails its test', async ({ api }) => {
+    // /proc takes no new directories, so the probe cannot create the root (Local.php ensureWritableDirectory).
+    const created = await api.createBackupContainer({
+      name: `pa-api-${rand('ro')}`,
+      driver: 'local',
+      location: `/proc/pa-api-${rand('ro')}`,
+    });
+    try {
+      const probed = await api.testBackupContainerRaw(created.data.id);
+      await expectStatus(probed, 422);
+      expect(
+        String((probed.body as { message?: unknown }).message),
+        'the failure names the backup storage directory'
+      ).toMatch(/backup storage (directory|root)/i);
+    } finally {
+      await api.deleteBackupContainerSafe(created.data.id);
+    }
   });
 
   test('a missing store is 404', async ({ api }) => {
-    expect((await api.getBackupContainerRaw(999_999_999)).status).toBe(404);
+    await expectStatus(await api.getBackupContainerRaw(999_999_999), 404);
   });
 
   test('an invalid local location is refused', async ({ api }) => {

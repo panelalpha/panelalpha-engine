@@ -1,5 +1,6 @@
 import { expect, test } from '@/fixtures/test-options';
-import { MODSEC_PROPAGATION_DELAY_MS, modsecUnavailableReason } from '@/helpers/modsec-helpers';
+import { CleanupSteps } from '@/helpers/cleanup-step';
+import { modsecUnavailableReason } from '@/helpers/modsec-helpers';
 import {
   OWASP_RULESET,
   REQUEST_898_CONFIG,
@@ -10,6 +11,7 @@ import {
   configApplyTimeoutMs,
   getOwaspRuleset,
   isOwaspConfigFileEnabled,
+  owaspConfigFilesMatch,
   owaspConfigFileExists,
   setOwaspConfigFiles,
   sqliProbeUrl,
@@ -17,8 +19,12 @@ import {
   waitForWooCommerceBlockState,
   wooCommerceAjaxUrl,
 } from '@/helpers/modsec-config-apply';
-import { delay } from '@/helpers/retry';
-import { getWebserverInfo, getWebserverPropagationDelay } from '@/helpers/webserver-helpers';
+import { waitForCondition } from '@/helpers/retry';
+import {
+  getWebserverInfo,
+  getWebserverRestartReadyMs,
+  waitForSiteHttpReady,
+} from '@/helpers/webserver-helpers';
 import type { ModSecurityMode } from '@/types';
 
 /**
@@ -63,11 +69,27 @@ test.describe('OWASP config files apply to live traffic', () => {
 
     if (!owasp!.enabled) {
       await api.enableModSecurityRuleset(OWASP_RULESET);
-      await delay(getWebserverPropagationDelay(slug));
+      await waitForCondition(async () => (await getOwaspRuleset(api))?.enabled === true, {
+        timeout: 10_000,
+        interval: 500,
+        message: `${OWASP_RULESET} never reported as enabled`,
+      });
+      await waitForSiteHttpReady(anonymousRequest, siteUrl, {
+        timeout: getWebserverRestartReadyMs(slug),
+        interval: 2_000,
+      });
     }
 
     await api.setModSecurityConfig({ mode: 'on' });
-    await delay(getWebserverPropagationDelay(slug));
+    await waitForCondition(async () => (await api.getModSecurityConfig()).data.mode === 'on', {
+      timeout: 10_000,
+      interval: 500,
+      message: 'the ModSecurity mode never reported as "on"',
+    });
+    await waitForSiteHttpReady(anonymousRequest, siteUrl, {
+      timeout: getWebserverRestartReadyMs(slug),
+      interval: 2_000,
+    });
   });
 
   test.afterEach(async ({ api, anonymousRequest }) => {
@@ -78,24 +100,60 @@ test.describe('OWASP config files apply to live traffic', () => {
       return;
     }
 
-    await setOwaspConfigFiles(
-      api,
-      anonymousRequest,
-      siteUrl,
-      Object.entries(initialFileStates).map(([name, enabled]) => ({ name, enabled }))
-    ).catch(() => undefined);
+    const cleanup = new CleanupSteps();
+
+    await cleanup.run(
+      'restore the OWASP config files',
+      () =>
+        setOwaspConfigFiles(
+          api,
+          anonymousRequest,
+          siteUrl,
+          Object.entries(initialFileStates).map(([name, enabled]) => ({ name, enabled }))
+        ),
+      {
+        verify: () => owaspConfigFilesMatch(api, initialFileStates),
+        describe: () => 'a CRS config file is not in the state found before the test',
+      }
+    );
 
     if (!owaspWasEnabled) {
-      await api.disableModSecurityRuleset(OWASP_RULESET).catch(() => undefined);
+      await cleanup.run(
+        'disable the OWASP ruleset again',
+        () => api.disableModSecurityRuleset(OWASP_RULESET),
+        {
+          verify: async () => (await getOwaspRuleset(api))?.enabled === false,
+          describe: () => `${OWASP_RULESET} is still enabled`,
+        }
+      );
     }
-    await api.setModSecurityConfig({ mode: initialMode }).catch(() => undefined);
-    await delay(MODSEC_PROPAGATION_DELAY_MS);
+    await cleanup.run(
+      'restore the ModSecurity mode',
+      () => api.setModSecurityConfig({ mode: initialMode }),
+      {
+        verify: async () => (await api.getModSecurityConfig()).data.mode === initialMode,
+        describe: () => `the mode is not back to "${initialMode}"`,
+      }
+    );
+    // The mode restore above is verified through the API; what is left is the
+    // reload reaching the webserver, which shows as the site serving again.
+    await cleanup.run('wait for the site to serve again', async () => {
+      const { slug } = await getWebserverInfo(api);
+      await waitForSiteHttpReady(anonymousRequest, siteUrl, {
+        timeout: getWebserverRestartReadyMs(slug),
+        interval: 2_000,
+      });
+    });
+    await cleanup.finish();
   });
 
   /**
    * REQUEST-949 is what converts an anomaly score into a 403. With it off, the
    * SQLi rules still match but nothing blocks — so toggling it must visibly
    * change whether an injection attempt gets through.
+   *
+   * The last step checks the site still serves after those toggles; it is the
+   * only place that looks at the state the toggles leave behind.
    */
   test(
     'REQUEST-949 decides whether a SQLi probe is blocked',
@@ -105,22 +163,40 @@ test.describe('OWASP config files apply to live traffic', () => {
     async ({ api, anonymousRequest, setupUser }) => {
       const probeUrl = sqliProbeUrl(setupUser.domain);
 
-      await setOwaspConfigFiles(api, anonymousRequest, siteUrl, [
-        { name: REQUEST_942_CONFIG, enabled: true },
-        { name: REQUEST_949_CONFIG, enabled: true },
-      ]);
-      await waitForSqliBlockState(anonymousRequest, probeUrl, true);
+      try {
+        await setOwaspConfigFiles(api, anonymousRequest, siteUrl, [
+          { name: REQUEST_942_CONFIG, enabled: true },
+          { name: REQUEST_949_CONFIG, enabled: true },
+        ]);
+        await waitForSqliBlockState(anonymousRequest, probeUrl, true);
 
-      await setOwaspConfigFiles(api, anonymousRequest, siteUrl, [
-        { name: REQUEST_949_CONFIG, enabled: false },
-      ]);
-      await waitForSqliBlockState(anonymousRequest, probeUrl, false);
+        await setOwaspConfigFiles(api, anonymousRequest, siteUrl, [
+          { name: REQUEST_949_CONFIG, enabled: false },
+        ]);
+        await waitForSqliBlockState(anonymousRequest, probeUrl, false);
 
-      // Back on again — a toggle that only works in one direction is still broken.
-      await setOwaspConfigFiles(api, anonymousRequest, siteUrl, [
-        { name: REQUEST_949_CONFIG, enabled: true },
-      ]);
-      await waitForSqliBlockState(anonymousRequest, probeUrl, true);
+        // Back on again — a toggle that only works in one direction is still broken.
+        await setOwaspConfigFiles(api, anonymousRequest, siteUrl, [
+          { name: REQUEST_949_CONFIG, enabled: true },
+        ]);
+        await waitForSqliBlockState(anonymousRequest, probeUrl, true);
+      } finally {
+        await test.step('the site keeps serving through every toggle', async () => {
+          // Runs even when a toggle failed; a failed request is recorded rather
+          // than thrown so it cannot replace that earlier error.
+          try {
+            const response = await anonymousRequest.get(siteUrl, { ignoreHTTPSErrors: true });
+            expect.soft(response.status(), 'the site stopped serving').toBeLessThan(500);
+          } catch (error) {
+            expect
+              .soft(
+                false,
+                `the site did not answer: ${error instanceof Error ? error.message : String(error)}`
+              )
+              .toBe(true);
+          }
+        });
+      }
     }
   );
 
@@ -160,10 +236,5 @@ test.describe('OWASP config files apply to live traffic', () => {
       ]);
       await waitForWooCommerceBlockState(anonymousRequest, ajaxUrl, false);
     });
-  });
-
-  test('the site keeps serving through every toggle', async ({ anonymousRequest }) => {
-    const response = await anonymousRequest.get(siteUrl, { ignoreHTTPSErrors: true });
-    expect(response.status(), 'the site stopped serving').toBeLessThan(500);
   });
 });

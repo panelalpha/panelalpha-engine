@@ -22,6 +22,10 @@ if [ -d /opt/panelalpha/shared-hosting ]; then
         chown -R www-data:www-data "$d"
     done
 fi
+# Coverage recordings: bind-mounted from the host's tests/coverage, which Docker
+# creates root-owned when it is missing; php-fpm and the workers write to it as www-data.
+mkdir -p /var/www/tests/coverage
+chown www-data:www-data /var/www/tests/coverage
 mkdir -p /var/tmp/panelalpha-backup
 chown www-data:www-data /var/tmp/panelalpha-backup
 chmod 1777 /var/tmp/panelalpha-backup

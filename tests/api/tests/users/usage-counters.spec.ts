@@ -3,6 +3,7 @@ import type { EngineApi } from '@/clients/engine-api';
 import type { UserUsage } from '@/types/system.types';
 import { rand, randomDomain } from '@/helpers/random';
 import { waitForCondition } from '@/helpers/retry';
+import { sharedProject } from '@/helpers/shared-project';
 
 /**
  * Every countable resource follows the same contract: creating one raises the
@@ -69,47 +70,71 @@ const RESOURCES: Record<string, CountableResource> = {
 };
 
 test.describe('usage counters', () => {
-  for (const [label, resource] of Object.entries(RESOURCES)) {
-    test(`creating ${label} raises ${resource.counter}.usage`, async ({
-      api,
-      settings,
-      userFactory,
-    }) => {
-      const user = await userFactory.createSimpleUser();
+  // One project for the file: each test creates its resource, reads its own counter and removes
+  // the resource again, and no two tests read the same counter.
+  const shared = sharedProject('simple');
+  test.afterAll(() => shared.dispose());
 
-      const before = (await api.getUserUsage(user.username))[resource.counter].usage;
-      const id = await resource.create(api, user, settings.requireDomain());
+  for (const [label, resource] of Object.entries(RESOURCES)) {
+    test(`creating ${label} raises ${resource.counter}.usage`, async ({ api, settings }) => {
+      const user = await shared.get();
+
+      const before = await test.step('read the counter before', async () => {
+        return (await api.getUserUsage(user.username))[resource.counter].usage;
+      });
+      const id = await test.step('create the resource', () =>
+        resource.create(api, user, settings.requireDomain()));
 
       try {
-        await waitForCondition(
-          async () => (await api.getUserUsage(user.username))[resource.counter].usage > before,
-          {
-            timeout: 30_000,
-            interval: 2_000,
-            message: `${resource.counter}.usage stayed at ${before} after creating ${label}`,
-          }
-        );
+        await test.step('wait for the counter to rise', async () => {
+          let observed: number | undefined;
+          await waitForCondition(
+            async () => {
+              observed = (await api.getUserUsage(user.username))[resource.counter].usage;
+              return observed > before;
+            },
+            {
+              timeout: 30_000,
+              interval: 2_000,
+              message: `${resource.counter}.usage stayed at ${before} after creating ${label}`,
+              describeLast: () => `${resource.counter}.usage read ${observed ?? '(none)'}`,
+            }
+          );
+        });
       } finally {
-        await resource.remove(api, user.username, id);
+        await test.step('remove the resource', async () => {
+          await resource.remove(api, user.username, id);
+        });
       }
     });
   }
 
-  test('storage usage is a non-negative number before and after a write', async ({
-    api,
-    userFactory,
-  }) => {
-    const user = await userFactory.createSimpleUser();
+  test('storage usage is a non-negative number before and after a write', async ({ api }) => {
+    const user = await shared.get();
     const path = `/${user.domain}/public_html/usage_test_${rand()}.bin`;
 
-    expect((await api.getUserUsage(user.username)).storage.usage).toBeGreaterThanOrEqual(0);
+    await test.step('read storage usage before the write', async () => {
+      expect(
+        (await api.getUserUsage(user.username)).storage.usage,
+        'storage usage before the write'
+      ).toBeGreaterThanOrEqual(0);
+    });
 
-    await api.putFileContents(user.username, path, 'X'.repeat(1024 * 1024));
+    await test.step('write a 1 MiB file', async () => {
+      await api.putFileContents(user.username, path, 'X'.repeat(1024 * 1024));
+    });
 
     try {
-      expect((await api.getUserUsage(user.username)).storage.usage).toBeGreaterThanOrEqual(0);
+      await test.step('read storage usage after the write', async () => {
+        expect(
+          (await api.getUserUsage(user.username)).storage.usage,
+          'storage usage after the write'
+        ).toBeGreaterThanOrEqual(0);
+      });
     } finally {
-      await api.removeFile(user.username, path);
+      await test.step('remove the file', async () => {
+        await api.removeFile(user.username, path);
+      });
     }
   });
 });

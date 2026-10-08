@@ -100,35 +100,35 @@ test.describe('MCP tool catalogue', () => {
     }
   });
 
-  test('every exposed tool declares a description and an input schema', async ({
-    api,
-    anonymousRequest,
-    settings,
-  }) => {
-    const created = await api.createMcpToken(uniqueId('mcp-catalogue-shape-'));
-    const token = created.data.plain_text_token;
-    skipUnless(token, 'createMcpToken did not return a plaintext token.');
+  test(
+    'every exposed tool declares a description and an input schema',
+    { tag: ['@smoke'] },
+    async ({ api, anonymousRequest, settings }) => {
+      const created = await api.createMcpToken(uniqueId('mcp-catalogue-shape-'));
+      const token = created.data.plain_text_token;
+      skipUnless(token, 'createMcpToken did not return a plaintext token.');
 
-    try {
-      const session = await McpSession.open(anonymousRequest, settings.apiBaseUrl, token);
-      const tools = await session.listTools();
+      try {
+        const session = await McpSession.open(anonymousRequest, settings.apiBaseUrl, token);
+        const tools = await session.listTools();
 
-      // An assistant picks a tool from this metadata alone. A tool with no
-      // description, or no schema for its arguments, is unusable in practice
-      // even though it lists and calls fine.
-      const undescribed = tools
-        .filter((tool) => (tool.description ?? '').trim().length === 0)
-        .map((tool) => tool.name)
-        .sort();
-      expect(undescribed, 'tools served without a description').toEqual([]);
+        // An assistant picks a tool from this metadata alone. A tool with no
+        // description, or no schema for its arguments, is unusable in practice
+        // even though it lists and calls fine.
+        const undescribed = tools
+          .filter((tool) => (tool.description ?? '').trim().length === 0)
+          .map((tool) => tool.name)
+          .sort();
+        expect(undescribed, 'tools served without a description').toEqual([]);
 
-      const schemaless = tools
-        .filter((tool) => tool.inputSchema === undefined || tool.inputSchema === null)
-        .map((tool) => tool.name)
-        .sort();
-      expect(schemaless, 'tools served without an input schema').toEqual([]);
-    } finally {
-      await api.deleteMcpTokenSafe(created.data.id);
+        const schemaless = tools
+          .filter((tool) => tool.inputSchema === undefined || tool.inputSchema === null)
+          .map((tool) => tool.name)
+          .sort();
+        expect(schemaless, 'tools served without an input schema').toEqual([]);
+      } finally {
+        await api.deleteMcpTokenSafe(created.data.id);
+      }
     }
-  });
+  );
 });

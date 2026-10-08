@@ -1,4 +1,5 @@
 import { expect, test } from '@/fixtures/test-options';
+import { expectStatus } from '@/helpers/expect-status';
 
 /**
  * /users is a legacy alias of /projects. The rest of the suite hits /projects;
@@ -12,8 +13,8 @@ test.describe('projects alias', () => {
   }) => {
     const users = await authedRequest.get('users/');
     const projects = await authedRequest.get('projects/');
-    expect(users.status()).toBe(200);
-    expect(projects.status()).toBe(200);
+    await expectStatus(users, 200);
+    await expectStatus(projects, 200);
 
     const userBody = (await users.json()) as { data?: { username?: string }[] };
     const projectBody = (await projects.json()) as { data?: { username?: string }[] };
@@ -22,7 +23,7 @@ test.describe('projects alias', () => {
     expect(projectNames).toEqual(userNames);
 
     const shown = await authedRequest.get(`projects/${setupUser.username}`);
-    expect(shown.status()).toBe(200);
+    await expectStatus(shown, 200);
   });
 
   test('GET /projects/{u}/domains matches the legacy /users path', async ({
@@ -32,8 +33,8 @@ test.describe('projects alias', () => {
     const username = setupUser.username;
     const viaProjects = await authedRequest.get(`projects/${username}/domains`);
     const viaUsers = await authedRequest.get(`users/${username}/domains`);
-    expect(viaProjects.status()).toBe(200);
-    expect(viaUsers.status()).toBe(200);
+    await expectStatus(viaProjects, 200);
+    await expectStatus(viaUsers, 200);
 
     const projectBody = (await viaProjects.json()) as { data?: { domain?: string }[] };
     const userBody = (await viaUsers.json()) as { data?: { domain?: string }[] };
@@ -46,8 +47,8 @@ test.describe('projects alias', () => {
       `projects/${username}/domains/${setupUser.domain}`
     );
     const shownUsers = await authedRequest.get(`users/${username}/domains/${setupUser.domain}`);
-    expect(shownProjects.status()).toBe(200);
-    expect(shownUsers.status()).toBe(200);
+    await expectStatus(shownProjects, 200);
+    await expectStatus(shownUsers, 200);
   });
 
   test('POST /projects rejects X-Deploy-Stream (sync create stays on /users)', async ({
@@ -62,7 +63,7 @@ test.describe('projects alias', () => {
       data: { username, domain },
     });
     try {
-      expect(response.status()).toBe(400);
+      await expectStatus(response, 400);
     } finally {
       // There only if the engine wrongly created it.
       await api.deleteUserSafe(username);

@@ -19,9 +19,19 @@ test.describe('user lifecycle', () => {
     // The chain deletes this user in its last step, so opt out of per-test cleanup.
     user = await userFactory.createUser({ autoCleanup: false });
 
+    let seen: string | undefined;
+
     await waitForCondition(
-      async () => (await api.getUser(user.username)).data?.username === user.username,
-      { timeout: settings.timing.propagationDelay, interval: 500 }
+      async () => {
+        seen = (await api.getUser(user.username)).data?.username;
+        return seen === user.username;
+      },
+      {
+        timeout: settings.timing.propagationDelay,
+        interval: 500,
+        message: `User ${user.username} did not become readable`,
+        describeLast: () => `GET user returned username: ${seen ?? '(none)'}`,
+      }
     );
   });
 

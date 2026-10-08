@@ -107,7 +107,7 @@ function runAndParseToken(file: string, args: string[]): string | undefined {
 }
 
 /**
- * Mints a token with artisan on this machine. Used when `npm test` runs on
+ * Mints a token with artisan on this machine. Used when `bun run test` runs on
  * the engine itself — SSH to root@localhost is the common way that "automatic"
  * setup used to fail.
  */
@@ -211,7 +211,7 @@ function renderEnvFile(values: { apiBaseUrl: string; token: string; profile?: st
     ? `# Profile "${values.profile}" — run it with TEST_ENV=${values.profile}.\n`
     : '';
 
-  return `# Written by \`npm run env:setup\`. Safe to edit by hand.
+  return `# Written by \`bun run env:setup\`. Safe to edit by hand.
 # Every option is documented in env/.env.example.
 ${profileNote}
 API_BASE_URL=${values.apiBaseUrl}
@@ -345,7 +345,7 @@ export async function ensureEngineEnv(profile?: string): Promise<void> {
     throw new Error(
       `${relative} is missing and there is no terminal to ask on.\n` +
         'Either set API_BASE_URL and API_TOKEN in the environment, or create the file:\n' +
-        `  npm run env:setup -- --host <engine-host>${profile ? ` --profile ${profile}` : ''}`
+        `  bun run env:setup -- --host <engine-host>${profile ? ` --profile ${profile}` : ''}`
     );
   }
 

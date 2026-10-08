@@ -1,6 +1,7 @@
 import { expect, test } from '@/fixtures/test-options';
 import type { EximConfig } from '@/types';
 import { expectOneOf } from '@/helpers/expect-one-of';
+import { expectStatus } from '@/helpers/expect-status';
 import { randomEmail } from '@/helpers/random';
 import { eximConfigResponseSchema } from '@/schemas';
 
@@ -144,7 +145,7 @@ test.describe('Exim configuration', () => {
           smtp_port: '587',
         });
 
-        expect(response.status, JSON.stringify(response.body)).toBe(422);
+        await expectStatus(response, 422, JSON.stringify(response.body));
         expect((response.body as { errors?: object }).errors).toHaveProperty('smtp_host');
         expect((await api.getEximConfig()).data, 'nothing was saved').toEqual(original);
       }
@@ -194,7 +195,7 @@ test.describe('Exim test email', () => {
   for (const [label, email] of oversizedRecipients) {
     test(`${label} is refused`, async ({ api }) => {
       const response = await api.sendEximTestEmailRaw({ email });
-      expect(response.status, JSON.stringify(response.body)).toBe(422);
+      await expectStatus(response, 422, JSON.stringify(response.body));
     });
   }
 

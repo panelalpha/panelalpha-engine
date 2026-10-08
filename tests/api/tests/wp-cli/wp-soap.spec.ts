@@ -1,8 +1,10 @@
 import { expect, test } from '@/fixtures/test-options';
+import { CleanupSteps } from '@/helpers/cleanup-step';
 import { expectOneOf } from '@/helpers/expect-one-of';
 import { waitForWpCliReady } from '@/helpers/wp-cli-helpers';
 import { wpCliUnavailableReason, wpPath } from '@/helpers/wpcli-helpers';
 import { fetchSite } from '@/helpers/webserver-helpers';
+import { expectStatus } from '@/helpers/expect-status';
 
 const SOAP_PLUGIN_SLUG = 'revolut-gateway-for-woocommerce';
 
@@ -47,6 +49,7 @@ test('SoapClient is available to WP-CLI and over HTTP', async ({
       wpPath(setupUser),
     ]);
 
+  const cleanup = new CleanupSteps();
   try {
     let cli = await runCliCheck();
 
@@ -68,9 +71,15 @@ test('SoapClient is available to WP-CLI and over HTTP', async ({
     );
     const body = await response.text();
 
-    expect(response.status(), `the HTTP SOAP check answered: ${body}`).toBe(200);
+    await expectStatus(response, 200, `the HTTP SOAP check answered: ${body}`);
     expect(body).toContain('SOAP_OK');
+  } catch (error) {
+    cleanup.bodyFailed(error);
+    throw error;
   } finally {
-    await api.removeFile(setupUser.username, checkPath).catch(() => undefined);
+    await cleanup.run('remove the SOAP check script', () =>
+      api.removeFile(setupUser.username, checkPath)
+    );
+    await cleanup.finish();
   }
 });

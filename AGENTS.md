@@ -34,6 +34,8 @@ cd core
 ./vendor/bin/phpunit --testsuite Unit
 ```
 
+The PHPUnit tests (Unit and Feature) live in [`tests/unit/`](tests/unit/README.md); `core/phpunit.xml` points at them.
+
 Report a failure as pre-existing **only after proving it** — `git stash`, re-run,
 confirm the same tests fail on the baseline, `git stash pop`. Never wave a failure
 away as "probably pre-existing".
@@ -54,10 +56,11 @@ How to run the suite, and which group does what, is in
 
 ```bash
 cd tests/api
-npm install
-npm test                  # unit, the API, and the supported-app deploys
-npm run test:unit         # pure logic, no engine
-npm run check             # typecheck + lint + format — run before pushing
+bun install
+bun run test              # unit tests and the API; application deploys are not run
+bun run test:full         # everything in test, plus every application deploy
+bun run test:unit         # pure logic, no engine
+bun run check             # typecheck + lint + format — run before pushing
 ```
 
 Three things an agent gets wrong here:
@@ -77,9 +80,9 @@ running `tests/mcp/`.**
 
 **Only the engine host runs the whole thing.** The `cli`,
 `webserver-change`, `update`, `engine-cert` and `network-mutation` projects
-reconfigure the host, and are excluded from `npm test`. Naming them in a
+reconfigure the host, and are excluded from `bun run test`. Naming them in a
 result means having run them explicitly. The supported-app deploys are part
-of `npm test`.
+of `bun run test:full`.
 
 ---
 
@@ -501,7 +504,7 @@ cache regression look identical from the outside.
 it correlates `#N [x/y] <cmd>` with `#N DONE <s>` / `#N CACHED`, drops BuildKit's
 own `internal` bookkeeping steps, keeps the largest of a step's repeated `DONE`
 reports, and scores a `CACHED` step as costing zero. Unit tests in
-`core/tests/Unit/Deploy/DeployLog/DeployTimingsTest.php` use real Matomo output.
+`tests/unit/Unit/Deploy/DeployLog/DeployTimingsTest.php` use real Matomo output.
 
 ---
 

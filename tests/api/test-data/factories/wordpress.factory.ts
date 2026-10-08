@@ -2,6 +2,7 @@ import { faker } from '@faker-js/faker';
 import { type EngineApi } from '@/clients/engine-api';
 import { type UserCredentials, type WordPressInstallation } from '@/types';
 import { randomEmail } from '@/helpers/random';
+import { registerSecret } from '@/helpers/secret-registry';
 
 export class WordPressFactory {
   constructor(private api: EngineApi) {}
@@ -78,6 +79,7 @@ export class WordPressFactory {
     role = 'subscriber'
   ): Promise<void> {
     const password = faker.internet.password({ length: 12 });
+    registerSecret(password);
     await this.runWpCliCommand(username, [
       'user',
       'create',
@@ -95,10 +97,12 @@ export class WordPressFactory {
   }
 
   private generateConfig(user: UserCredentials) {
+    const adminPassword = faker.internet.password({ length: 16 });
+    registerSecret(adminPassword);
     return {
       siteName: faker.company.name(),
       adminUsername: 'admin',
-      adminPassword: faker.internet.password({ length: 16 }),
+      adminPassword,
       adminEmail: randomEmail(),
       url: `https://${user.domain}`,
       path: `/home/${user.username}/${user.domain}/public_html`,
@@ -113,6 +117,7 @@ export class WordPressFactory {
   }
 
   private async createConfig(user: UserCredentials, path: string): Promise<void> {
+    registerSecret(user.mysqlPassword);
     const result = await this.runWpCliCommand(user.username, [
       'config',
       'create',

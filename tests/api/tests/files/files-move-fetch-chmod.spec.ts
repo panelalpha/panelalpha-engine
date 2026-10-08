@@ -1,6 +1,8 @@
 import { expect, test } from '@/fixtures/test-options';
+import { CleanupSteps } from '@/helpers/cleanup-step';
 import { getDomainBasePath } from '@/helpers/file-path-helpers';
 import { uniqueId } from '@/helpers/random';
+import { expectStatus } from '@/helpers/expect-status';
 
 test.describe('move contents, fetch and chmod', () => {
   test('move-contents moves children and leaves the source directory', async ({
@@ -12,6 +14,7 @@ test.describe('move contents, fetch and chmod', () => {
     const source = `${root}/source`;
     const dest = `${root}/dest`;
 
+    const cleanup = new CleanupSteps();
     try {
       await api.createDirectory(user.username, source, true);
       await api.createDirectory(user.username, dest, true);
@@ -24,7 +27,7 @@ test.describe('move contents, fetch and chmod', () => {
         dest_path: dest,
         override: false,
       });
-      expect(kept.status).toBe(200);
+      await expectStatus(kept, 200);
       expect(await api.getFileContent(user.username, `${dest}/a.txt`)).toBe('old');
       expect(await api.getFileContent(user.username, `${source}/a.txt`)).toBe('new');
       expect(await api.getFileContent(user.username, `${dest}/b.txt`)).toBe('b');
@@ -38,9 +41,13 @@ test.describe('move contents, fetch and chmod', () => {
         source_path: source,
         dest_path: `${root}/missing`,
       });
-      expect(missing.status).toBe(400);
+      await expectStatus(missing, 400);
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
-      await api.removeFile(user.username, root, true).catch(() => undefined);
+      await cleanup.run(`remove ${root}`, () => api.removeFile(user.username, root, true));
+      await cleanup.finish();
     }
   });
 
@@ -51,25 +58,30 @@ test.describe('move contents, fetch and chmod', () => {
     const user = await userFactory.createSimpleUser();
     const path = `${getDomainBasePath(user.domain)}/${uniqueId('mode')}.sh`;
 
+    const cleanup = new CleanupSteps();
     try {
       await api.putFileContents(user.username, path, '#!/bin/sh\n');
       await api.chmodFile(user.username, path, '755');
       expect(await api.getFileContent(user.username, path)).toContain('#!/bin/sh');
 
       const badMode = await api.chmodFileRaw(user.username, { path, mode: '999' });
-      expect(badMode.status).toBe(422);
+      await expectStatus(badMode, 422);
 
       const fetched = await api.fetchFileRaw(user.username, {
         url: 'file:///etc/passwd',
         path: getDomainBasePath(user.domain),
         filename: 'stolen.txt',
       });
-      expect(fetched.status).toBe(422);
+      await expectStatus(fetched, 422);
       expect(
         (await api.fileExists(user.username, `${getDomainBasePath(user.domain)}/stolen.txt`)).exists
       ).toBe(false);
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
-      await api.removeFile(user.username, path).catch(() => undefined);
+      await cleanup.run(`remove ${path}`, () => api.removeFile(user.username, path));
+      await cleanup.finish();
     }
   });
 });

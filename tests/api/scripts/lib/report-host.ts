@@ -102,7 +102,7 @@ function publicIpv4s(): string[] {
 }
 
 /**
- * Hostname or public IPv4 of this box — used when `npm test` runs on the
+ * Hostname or public IPv4 of this box — used when `bun run test` runs on the
  * engine itself and has to invent `API_BASE_URL` without being asked.
  */
 export function guessThisMachineHost(): string {

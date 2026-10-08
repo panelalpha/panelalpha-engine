@@ -1,14 +1,19 @@
 import { expect, test } from '@/fixtures/test-options';
+import { CleanupSteps } from '@/helpers/cleanup-step';
 import { expectOneOf } from '@/helpers/expect-one-of';
+import { isPrivateOrLocalIp } from '@/helpers/real-ip-helpers';
 import { delay } from '@/helpers/retry';
 import { fetchSite, httpScheme } from '@/helpers/webserver-helpers';
 import {
+  REMOTE_ADDR_HEADER,
+  describeChain,
+  followViaEngineIp,
   installLocalIpBlockMuPlugin,
   installWpHttpProbeScript,
   removeLocalIpBlockMuPlugin,
   removeWpHttpProbeScript,
   resolveEngineIpv4,
-  wpRemoteGetStatusCode,
+  wpRemoteGetChain,
 } from '@/helpers/wp-security-local-ip-helpers';
 import { wpCliUnavailableReason, wpPath } from '@/helpers/wpcli-helpers';
 
@@ -34,10 +39,14 @@ test.describe('private-IP blocking plugins', () => {
   });
 
   test.afterEach(async ({ api, setupUser }) => {
-    await removeLocalIpBlockMuPlugin(api, setupUser.username, setupUser.wpPath).catch(
-      () => undefined
+    const cleanup = new CleanupSteps();
+    await cleanup.run('remove the private-IP block mu-plugin', () =>
+      removeLocalIpBlockMuPlugin(api, setupUser.username, setupUser.wpPath)
     );
-    await removeWpHttpProbeScript(api, setupUser.username, setupUser.wpPath).catch(() => undefined);
+    await cleanup.run('remove the HTTP probe script', () =>
+      removeWpHttpProbeScript(api, setupUser.username, setupUser.wpPath)
+    );
+    await cleanup.finish();
   });
 
   test('the homepage serves before anything is blocked', async ({
@@ -61,24 +70,24 @@ test.describe('private-IP blocking plugins', () => {
     await installLocalIpBlockMuPlugin(api, setupUser.username, setupUser.wpPath);
     await delay(MU_PLUGIN_PROPAGATION_MS);
 
-    const result = await wpRemoteGetStatusCode(
-      api,
-      setupUser.username,
-      setupUser.wpPath,
-      setupUser.url
+    // A probe or setup failure throws here and fails the test: it is not a skip.
+    const chain = await wpRemoteGetChain(api, setupUser.username, setupUser.wpPath, setupUser.url);
+    const path = describeChain(chain.hops);
+
+    expect(
+      chain.remoteAddr,
+      `the block mu-plugin never answered, so the request did not reach PHP with it active: ${path}`
+    ).not.toBeNull();
+
+    // The only environmental condition: the container's source address on this stack.
+    test.skip(
+      !isPrivateOrLocalIp(chain.remoteAddr),
+      `The in-container request reached the site as REMOTE_ADDR ${chain.remoteAddr}, which is not ` +
+        'a private address on this stack, so the block cannot apply.'
     );
 
-    test.skip(
-      result.exit_code !== 0 || result.status === null,
-      `The in-container probe did not run (exit ${result.exit_code}): ${result.stderr}`
-    );
-    test.skip(
-      result.status !== 403,
-      `The container reached the site with status ${result.status}, so its source address ` +
-        'is not private on this stack and the block cannot apply.'
-    );
-
-    expect(result.status).toBe(403);
+    // eslint-disable-next-line local/no-bare-status-assertion -- status parsed from an in-container probe, not an API response
+    expect(chain.final.status, `a private REMOTE_ADDR was not blocked: ${path}`).toBe(403);
   });
 
   test('removing the block restores in-container HTTP', async ({ api, setupUser }) => {
@@ -87,17 +96,12 @@ test.describe('private-IP blocking plugins', () => {
     await removeLocalIpBlockMuPlugin(api, setupUser.username, setupUser.wpPath);
     await delay(MU_PLUGIN_PROPAGATION_MS);
 
-    const result = await wpRemoteGetStatusCode(
-      api,
-      setupUser.username,
-      setupUser.wpPath,
-      setupUser.url
-    );
+    const chain = await wpRemoteGetChain(api, setupUser.username, setupUser.wpPath, setupUser.url);
+    const path = describeChain(chain.hops);
 
-    expect(result.exit_code, result.stderr).toBe(0);
-    expect(result.status, 'the site is still refusing its own container').not.toBe(403);
-    expect(result.status).toBeGreaterThanOrEqual(200);
-    expect(result.status).toBeLessThan(400);
+    expect(chain.remoteAddr, `the removed mu-plugin is still answering: ${path}`).toBeNull();
+    // eslint-disable-next-line local/no-bare-status-assertion -- status parsed from an in-container probe, not an API response
+    expect(chain.final.status, `the site is still refusing its own container: ${path}`).toBe(200);
   });
 
   test('a request to the engine IP with the site Host header is refused too', async ({
@@ -113,23 +117,42 @@ test.describe('private-IP blocking plugins', () => {
     await delay(MU_PLUGIN_PROPAGATION_MS);
 
     const host = engineIp!.includes(':') ? `[${engineIp!}]` : engineIp!;
-    const response = await fetchSite(
-      anonymousRequest,
-      `${httpScheme(settings.apiBaseUrl)}://${host}/`,
-      {
-        headers: { Host: setupUser.domain },
-        maxRedirects: 0,
-        timeout: 30_000,
-      }
+    const chain = await followViaEngineIp(
+      async (url) => {
+        const response = await fetchSite(anonymousRequest, url, {
+          headers: { Host: setupUser.domain },
+          maxRedirects: 0,
+          timeout: 30_000,
+        });
+        return {
+          status: response.status(),
+          location: response.headers().location ?? null,
+          remoteAddr: response.headers()[REMOTE_ADDR_HEADER] ?? null,
+          body: await response.text(),
+        };
+      },
+      httpScheme(settings.apiBaseUrl),
+      host,
+      setupUser.domain
     );
+    const path = describeChain(chain.hops);
+
+    // A 301 is the webserver's force-HTTPS redirect, answered before PHP: it says
+    // nothing about the source address, so the chain is followed until PHP answers.
+    expect(
+      chain.remoteAddr,
+      `the engine address never reached PHP with the block mu-plugin active: ${path}`
+    ).not.toBeNull();
 
     test.skip(
-      response.status() !== 403,
-      `The engine IP answered ${response.status()}, so its source address is not private ` +
-        'on this stack — the in-container test remains the authoritative one.'
+      !isPrivateOrLocalIp(chain.remoteAddr),
+      `The engine IP answered ${chain.final.status}, so its source address is not private ` +
+        `on this stack (REMOTE_ADDR ${chain.remoteAddr}) - the in-container test remains the authoritative one.`
     );
 
-    expect(await response.text()).toMatch(/forbidden|private\/local ip blocked/i);
+    // eslint-disable-next-line local/no-bare-status-assertion -- chain of raw requests to the engine address, described in the message
+    expect(chain.final.status, `a private REMOTE_ADDR was not blocked: ${path}`).toBe(403);
+    expect(chain.final.body).toMatch(/forbidden|private\/local ip blocked/i);
   });
 
   /**
@@ -161,27 +184,47 @@ test.describe('private-IP blocking plugins', () => {
       test.skip(true, `Wordfence could not be downloaded on this host: ${install.stderr}`);
     }
 
+    const cleanup = new CleanupSteps();
     try {
       await delay(WORDFENCE_ACTIVATE_DELAY_MS);
 
-      const result = await wpRemoteGetStatusCode(
+      const chain = await wpRemoteGetChain(
         api,
         setupUser.username,
         setupUser.wpPath,
         setupUser.url
       );
 
-      expect(result.exit_code, result.stderr).toBe(0);
-      expectOneOf(result.status ?? 0, [200, 301, 302, 403]);
+      // Redirects are followed, so the homepage itself must answer 200: a 403 is
+      // exactly the lock-out this test exists to catch.
+      expectOneOf(chain.final.status, [200], describeChain(chain.hops));
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
-      await api
-        .executeWpCliCommand(setupUser.username, [
-          'plugin',
-          'deactivate',
-          WORDFENCE_SLUG,
-          wpPath(setupUser),
-        ])
-        .catch(() => undefined);
+      await cleanup.run(
+        'deactivate Wordfence',
+        () =>
+          api.executeWpCliCommand(setupUser.username, [
+            'plugin',
+            'deactivate',
+            WORDFENCE_SLUG,
+            wpPath(setupUser),
+          ]),
+        {
+          verify: async () =>
+            (
+              await api.executeWpCliCommand(setupUser.username, [
+                'plugin',
+                'is-active',
+                WORDFENCE_SLUG,
+                wpPath(setupUser),
+              ])
+            ).exit_code !== 0,
+          describe: () => 'Wordfence is still active',
+        }
+      );
+      await cleanup.finish();
     }
   });
 });

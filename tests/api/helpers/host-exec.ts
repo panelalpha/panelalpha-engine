@@ -67,6 +67,7 @@ async function commandExists(bin: string): Promise<boolean> {
       await access(bin);
       return true;
     } catch {
+      // A path that cannot be accessed means the binary is not installed.
       return false;
     }
   }
@@ -168,6 +169,7 @@ async function resolveHostExecUncached(): Promise<HostExec | null> {
     },
   };
 
+  // A failing pae list means the remote engine is not installed or not reachable, so there is no remote to use.
   const probe = await remote.pae(['list']).catch(() => null);
   if (probe?.exitCode !== 0) {
     return null;

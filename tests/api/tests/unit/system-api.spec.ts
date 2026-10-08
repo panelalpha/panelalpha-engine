@@ -70,3 +70,25 @@ test.describe('SystemApi.changeWebserver', () => {
     await expect(capturePayload('litespeed')).resolves.toEqual({ new_webserver: 'litespeed' });
   });
 });
+
+test.describe('SystemApi.updateSystemNetworkConfig', () => {
+  test('notes the attempts and reasons when the engine is restarting a container', async () => {
+    const answers = [
+      response(422, '{"message":"Wait until the container is running"}'),
+      response(200, '{"data":{}}'),
+    ];
+    const api = new SystemApi({
+      ...stubTransport(),
+      put: () => Promise.resolve(answers.shift()!),
+    });
+
+    await api.updateSystemNetworkConfig({ default_ipv4: '10.0.0.1' });
+    const notes = test
+      .info()
+      .annotations.filter((a) => a.type === 'retry')
+      .map((a) => a.description);
+    expect(notes).toEqual([
+      'PUT system/network-config: 2 attempts; reasons: HTTP 422 Wait until the container is running',
+    ]);
+  });
+});

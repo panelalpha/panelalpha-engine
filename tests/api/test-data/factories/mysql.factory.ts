@@ -2,6 +2,7 @@ import { faker } from '@faker-js/faker';
 import { type EngineApi } from '@/clients/engine-api';
 import { type MySqlDatabase, type MySqlUser } from '@/types';
 import { getSettings } from '@/config/settings';
+import { registerSecret } from '@/helpers/secret-registry';
 
 export interface MySqlCredentials {
   database: string;
@@ -93,10 +94,12 @@ export class MySqlFactory {
   }
 
   private generatePassword(): string {
-    return faker.internet.password({
+    const password = faker.internet.password({
       length: 16,
       memorable: false,
       pattern: /[A-Za-z0-9!@#$%^&*]/,
     });
+    registerSecret(password);
+    return password;
   }
 }
