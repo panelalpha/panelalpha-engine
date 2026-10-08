@@ -122,27 +122,24 @@ class ClientRegistration
             ],
             'cursor' => [
                 'label' => 'Cursor',
-                // Cursor has no `mcp add` (and `cursor --add-mcp` is ignored).
-                // Three pasteable blocks: a prompt that does plugin + MCP, or
-                // JSON for MCP plus the plugin UI (skills only; mcp-none.json).
-                'note' => 'a prompt to paste into a Cursor Agent chat, or JSON for MCP plus the engine plugin from ' . self::SKILLS_REPO,
+                // The deeplink installs MCP locally; only the skills plugin
+                // is installed through chat, without the engine credentials.
+                'note' => 'open the MCP install link on your computer, then install the engine plugin from ' . self::SKILLS_REPO,
                 'lines' => array_merge(
                     [
-                        'Paste into a Cursor Agent chat (plugin and MCP):',
-                        sprintf(
-                            'Add the GitHub marketplace %s and install engine. Then add an MCP server named panelalpha-engine to ~/.cursor/mcp.json (all projects, not a project file) with url=%s and header Authorization: Bearer %s. If that file already has other servers, add panelalpha-engine alongside them. Confirm panelalpha-engine is connected, then list the projects on this engine.',
-                            self::SKILLS_REPO,
-                            $url,
-                            $token
-                        ),
+                        'Open this link on your computer and confirm adding panelalpha-engine in Cursor:',
+                        self::cursorInstallLink($url, $token),
+                        'Keep this link private: it contains your MCP token. Do not paste it into chat.',
                         '',
                         'Or add MCP yourself in Settings -> Tools & MCP -> New MCP Server (or ~/.cursor/mcp.json):',
+                        'Add panelalpha-engine alongside existing servers; do not replace the whole file.',
                     ],
                     self::httpMcpJsonLines($url, $token),
                     [
                         '',
-                        'Then install the engine plugin (create and debug skills):',
-                        'Customize -> Plugins -> import https://github.com/' . self::SKILLS_REPO . ' and install engine',
+                        'Then install the engine plugin (create and debug skills). Paste into a Cursor Agent chat (plugin only):',
+                        sprintf('Add the GitHub marketplace %s and install engine.', self::SKILLS_REPO),
+                        'Or use Customize -> Plugins -> import https://github.com/' . self::SKILLS_REPO . ' and install engine',
                     ],
                 ),
             ],
@@ -232,6 +229,20 @@ class ClientRegistration
         }
 
         return $all[$key];
+    }
+
+    private static function cursorInstallLink(string $url, string $token): string
+    {
+        // Cursor expects one server's transport config, not an mcpServers file.
+        $config = json_encode([
+            'url' => $url,
+            'headers' => ['Authorization' => 'Bearer ' . $token],
+        ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+
+        return 'cursor://anysphere.cursor-deeplink/mcp/install?' . http_build_query([
+            'name' => self::SERVER_NAME,
+            'config' => base64_encode($config),
+        ], '', '&', PHP_QUERY_RFC3986);
     }
 
     /**

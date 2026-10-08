@@ -4,7 +4,7 @@ namespace Tests\Unit\Mcp;
 
 use App\Mcp\ClientRegistration;
 use InvalidArgumentException;
-use Tests\TestCase;
+use PHPUnit\Framework\TestCase;
 
 /**
  * The printed line is the whole point: an operator pastes it verbatim, so a
@@ -130,23 +130,58 @@ class ClientRegistrationTest extends TestCase
         $this->assertStringNotContainsString("PANELALPHA_MCP_TOKEN='" . self::TOKEN . "' codex", $chatgpt);
     }
 
-    /**
-     * Cursor has no `mcp add`, so the operator chooses: a prompt like Claude
-     * Desktop, or the JSON they would type into Settings themselves.
-     */
-    public function test_cursor_prints_a_prompt_and_a_json_block(): void
+    public function test_cursor_prints_an_install_link_for_one_server(): void
+    {
+        $lines = ClientRegistration::for('cursor', self::URL, self::TOKEN)['lines'];
+        $links = array_values(array_filter($lines, fn (string $line): bool => str_starts_with($line, 'cursor://')));
+        $this->assertCount(1, $links);
+
+        $this->assertSame(
+            ['url' => self::URL, 'headers' => ['Authorization' => 'Bearer ' . self::TOKEN]],
+            $this->cursorLinkConfig($links[0])
+        );
+        $this->assertLessThan(array_search('{', $lines, true), array_search($links[0], $lines, true));
+    }
+
+    public function test_cursor_install_link_round_trips_url_and_token_characters(): void
+    {
+        // These inputs produce +, / and = in base64: unescaped query values
+        // would turn + into a space before Cursor decodes the configuration.
+        $url = 'https://example.test:2011/mcp?tenant=żółć&path="quoted"';
+        foreach (['12|token+/?=&"\\', '12|>>>???', '12|żółć'] as $token) {
+            $lines = ClientRegistration::for('cursor', $url, $token)['lines'];
+            $links = array_values(array_filter($lines, fn (string $line): bool => str_starts_with($line, 'cursor://')));
+            $this->assertCount(1, $links);
+            $this->assertStringNotContainsString('+', $links[0]);
+            $this->assertSame(
+                ['url' => $url, 'headers' => ['Authorization' => 'Bearer ' . $token]],
+                $this->cursorLinkConfig($links[0])
+            );
+        }
+    }
+
+    public function test_cursor_chat_prompt_installs_only_the_plugin_without_credentials(): void
+    {
+        $lines = ClientRegistration::for('cursor', self::URL, self::TOKEN)['lines'];
+        $prompts = array_values(array_filter($lines, fn (string $line): bool => str_starts_with($line, 'Add the GitHub marketplace')));
+        $this->assertCount(1, $prompts);
+        $this->assertSame(
+            'Add the GitHub marketplace ' . ClientRegistration::SKILLS_REPO . ' and install engine.',
+            $prompts[0]
+        );
+        $this->assertStringNotContainsString(self::URL, $prompts[0]);
+        $this->assertStringNotContainsString(self::TOKEN, $prompts[0]);
+        $this->assertStringNotContainsString('mcp.json', $prompts[0]);
+    }
+
+    public function test_cursor_keeps_manual_json_and_plugin_installation(): void
     {
         $lines = ClientRegistration::for('cursor', self::URL, self::TOKEN)['lines'];
         $text = implode("\n", $lines);
 
-        $this->assertStringContainsString('Paste into a Cursor Agent chat (plugin and MCP):', $text);
-        $this->assertStringContainsString('Add the GitHub marketplace ' . ClientRegistration::SKILLS_REPO, $text);
-        $this->assertStringContainsString('install engine', $text);
-        $this->assertStringContainsString('url=' . self::URL, $text);
-        $this->assertStringContainsString('Authorization: Bearer ' . self::TOKEN, $text);
-        $this->assertStringContainsString('then list the projects on this engine', $text);
         $this->assertStringContainsString('Settings -> Tools & MCP', $text);
         $this->assertStringContainsString('~/.cursor/mcp.json', $text);
+        $this->assertStringContainsString('alongside existing servers', $text);
         $this->assertStringContainsString('Then install the engine plugin', $text);
         $this->assertStringContainsString('Customize -> Plugins -> import https://github.com/' . ClientRegistration::SKILLS_REPO, $text);
         $this->assertStringNotContainsString('cursor --add-mcp', $text);
@@ -160,9 +195,24 @@ class ClientRegistrationTest extends TestCase
                 break;
             }
         }
-        $config = json_decode(implode("\n", array_slice($lines, $start, $end - $start + 1)), true);
+        $config = json_decode(implode("\n", array_slice($lines, $start, $end - $start + 1)), true, 512, JSON_THROW_ON_ERROR);
         $this->assertSame(self::URL, $config['mcpServers'][ClientRegistration::SERVER_NAME]['url']);
         $this->assertSame('Bearer ' . self::TOKEN, $config['mcpServers'][ClientRegistration::SERVER_NAME]['headers']['Authorization']);
+    }
+
+    /** @return array{url: string, headers: array{Authorization: string}} */
+    private function cursorLinkConfig(string $link): array
+    {
+        $this->assertSame('cursor', parse_url($link, PHP_URL_SCHEME));
+        $this->assertSame('anysphere.cursor-deeplink', parse_url($link, PHP_URL_HOST));
+        $this->assertSame('/mcp/install', parse_url($link, PHP_URL_PATH));
+        parse_str(parse_url($link, PHP_URL_QUERY), $query);
+        $this->assertSame(['name', 'config'], array_keys($query));
+        $this->assertSame(ClientRegistration::SERVER_NAME, $query['name']);
+        $json = base64_decode($query['config'], true);
+        $this->assertNotFalse($json);
+
+        return json_decode($json, true, 512, JSON_THROW_ON_ERROR);
     }
 
     public function test_an_unknown_client_names_the_ones_that_exist(): void
