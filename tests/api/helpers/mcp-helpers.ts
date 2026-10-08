@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { McpHttpClient, parseMcpJsonRpc, type McpJsonRpcRequest } from '@/clients/mcp-http';
 import type { APIRequestContext } from '@playwright/test';
+import { registerSecret } from './secret-registry';
 
 const suiteRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -91,6 +92,7 @@ export class McpSession {
     apiBaseUrl: string,
     token: string
   ): Promise<McpSession> {
+    registerSecret(token);
     const session = new McpSession(new McpHttpClient(request, apiBaseUrl), token);
     const handshake = await session.send('initialize', {
       protocolVersion: '2025-06-18',

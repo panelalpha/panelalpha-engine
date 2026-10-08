@@ -6,6 +6,7 @@ import {
   resolveTemplates,
   resolveVirtualHostTemplates,
 } from '@/helpers/webserver-helpers';
+import { expectStatus } from '@/helpers/expect-status';
 
 const ERROR_CODES = [403, 500, 502, 503] as const;
 const ERROR_PAGES_ROOT = '/opt/panelalpha/shared-hosting/webserver-config/error-pages';
@@ -24,7 +25,7 @@ test.describe('shipped webserver templates', () => {
       test.skip(!templateExists(name), `Template ${name} is not shipped.`);
 
       const contents = readTemplate(name);
-      expect(contents.length).toBeGreaterThan(0);
+      expect(contents.length, `${name} is empty`).toBeGreaterThan(0);
 
       // LiteSpeed reads the client IP from its own listener configuration
       // instead of an included snippet.
@@ -71,8 +72,12 @@ test.describe('shipped webserver templates', () => {
       );
 
       const acmeBlock = httpBlock.slice(acmeAt, acmeAt + 400);
-      expect(acmeBlock).toContain('alias {{ $http_acme_challenges_dir }}');
-      expect(acmeBlock).toContain('default_type text/plain;');
+      expect(acmeBlock, `${name} ACME location has no alias to the challenges dir`).toContain(
+        'alias {{ $http_acme_challenges_dir }}'
+      );
+      expect(acmeBlock, `${name} ACME location is not served as text/plain`).toContain(
+        'default_type text/plain;'
+      );
     }
   });
 
@@ -85,7 +90,9 @@ test.describe('shipped webserver templates', () => {
       test.skip(!templateExists(name), `Template ${name} is not shipped.`);
 
       const contents = readTemplate(name);
-      expect(contents).toContain(ERROR_PAGES_ROOT);
+      expect(contents, `${name} does not reference the error pages root`).toContain(
+        ERROR_PAGES_ROOT
+      );
 
       for (const code of ERROR_CODES) {
         expect(contents, `${name} maps no custom page for ${code}`).toContain(
@@ -125,8 +132,8 @@ test.describe('custom error pages over HTTP', () => {
         await test.info().attach(`error-page-${code}.html`, { body, contentType: 'text/html' });
       }
 
-      expect(response.status(), `${url} answered ${response.status()}`).toBe(200);
-      expect(body).toContain(EXPECTED_TEXT[code]);
+      await expectStatus(response, 200, `${url} answered ${response.status()}`);
+      expect(body, `the ${code} page has its expected text`).toContain(EXPECTED_TEXT[code]);
 
       // Recorded for the report; OpenLiteSpeed needs longer to publish these.
       test.info().annotations.push({

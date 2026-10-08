@@ -1,6 +1,7 @@
 import { expect, test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
 import { auditLogFiles, modsecUnavailableReason } from '@/helpers/modsec-helpers';
+import { expectStatus } from '@/helpers/expect-status';
 
 test.describe('ModSecurity audit log', () => {
   test.beforeEach(async ({ api, anonymousRequest, setupUser }) => {
@@ -25,7 +26,7 @@ test.describe('ModSecurity audit log', () => {
       'The engine lists no audit log files even after a request the WAF should flag.'
     );
 
-    expect((await api.downloadModSecurityAuditLog(data[0].file)).status).toBe(200);
+    await expectStatus(await api.downloadModSecurityAuditLog(data[0].file), 200);
   });
 
   test('a listed file can be tailed', async ({ api, anonymousRequest, setupUser }) => {
@@ -36,20 +37,19 @@ test.describe('ModSecurity audit log', () => {
     );
 
     const tail = await api.tailModSecurityAuditLog(data[0].file);
-    expect(tail.status).toBe(200);
+    await expectStatus(tail, 200);
     expect(Array.isArray(tail.data)).toBe(true);
   });
 
   test('downloading an unknown file returns 404', async ({ api }) => {
-    expect((await api.downloadModSecurityAuditLog('non-existent-audit-log-12345.log')).status).toBe(
+    await expectStatus(
+      await api.downloadModSecurityAuditLog('non-existent-audit-log-12345.log'),
       404
     );
   });
 
   test('tailing an unknown file returns 404', async ({ api }) => {
-    expect((await api.tailModSecurityAuditLog('non-existent-audit-log-12345.log')).status).toBe(
-      404
-    );
+    await expectStatus(await api.tailModSecurityAuditLog('non-existent-audit-log-12345.log'), 404);
   });
 
   /**

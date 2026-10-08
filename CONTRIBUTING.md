@@ -90,6 +90,7 @@ This repository is the engine. A few landmarks:
 | [`core/`](core/) | The Laravel application, the engine's brains (PHP 8.4). |
 | [`docs/`](docs/README.md) | Operator documentation (install → deploy → run). |
 | [`scripts/`](scripts/) | Host scripts, benchmarks, and the DinD deploy tester. |
+| [`tests/unit/`](tests/unit/README.md) | PHPUnit tests (Unit and Feature) for `core/`. |
 | [`tests/api/`](tests/api/README.md) | Playwright tests against a live engine. |
 | [`AGENTS.md`](AGENTS.md) | Instructions for coding agents. People use this file. |
 
@@ -119,6 +120,8 @@ cd core
 ./vendor/bin/phpunit --testsuite Unit
 ```
 
+The tests themselves are in [`tests/unit/`](tests/unit/README.md); `core/phpunit.xml` and `core/vendor` stay in `core/`.
+
 If a failure looks unrelated to your change, prove it: `git stash`, re-run, compare, `git stash pop`. Coding agents: the current baseline is in [`AGENTS.md` §1](AGENTS.md).
 
 Changing detection, a recipe, or onboarding an application? Coding agents follow [`AGENTS.md`](AGENTS.md) — §2–§6 for the deploy tester, §11 for a new application.
@@ -127,26 +130,27 @@ Changing detection, a recipe, or onboarding an application? Coding agents follow
 
 The unit suite above covers the engine's logic in isolation. [`tests/api/`](tests/api/README.md) is a separate **Playwright** suite (TypeScript, Node ≥ 20) that drives a **live engine** over its REST API and MCP endpoint, creating real projects, domains, databases and deploys and asserting on the responses.
 
-It needs an engine to point at. On the engine host itself `npm test` invents the host and mints a token with `pae-artisan` and writes `env/.env` — no prompt. From a laptop it asks which engine, then mints over SSH:
+It needs an engine to point at. On the engine host itself `bun run test` invents the host and mints a token with `pae-artisan` and writes `env/.env` — no prompt. From a laptop it asks which engine, then mints over SSH:
 
 ```bash
 cd tests/api
-npm install
-npm test          # first run sets up env, then runs unit, API, and supported-app deploys
+bun install
+bun run test      # first run sets up env, then runs unit tests and the API; application deploys are not run
 ```
 
 Handy variants (anything after `--` is passed straight to `playwright test`):
 
 | Command | What it runs |
 |---|---|
-| `npm run test:unit` | Pure logic against stub transports: **no engine required, runs offline** |
-| `npm run test:smoke` | Only `@smoke` specs: the critical path |
-| `npm test -- --grep "suspend"` | A single test by name |
-| `npm run test:supported-apps` | Real application deploys, plus the once-each deploy checks |
-| `npm run test:cli` | `pae-artisan` operator commands on the host |
-| `npm run report` | Serve the HTML report (a failing run keeps a trace) |
+| `bun run test:unit` | Pure logic against stub transports: **no engine required, runs offline** |
+| `bun run test:smoke` | Only `@smoke` specs: the critical path |
+| `bun run test -- --grep "suspend"` | A single test by name |
+| `bun run test:full` | Everything in `test`, plus every application deploy |
+| `bun run test:supported-apps` | Real application deploys, plus the once-each deploy checks |
+| `bun run test:cli` | `pae-artisan` operator commands on the host |
+| `bun run report` | Serve the HTML report (a failing run keeps a trace) |
 
-Before pushing changes to this suite, run `npm run check` (typecheck + lint + format). How to run the suite, and which group does what, is in [`tests/api/README.md`](tests/api/README.md).
+Before pushing changes to this suite, run `bun run check` (typecheck + lint + format). How to run the suite, and which group does what, is in [`tests/api/README.md`](tests/api/README.md).
 
 ---
 

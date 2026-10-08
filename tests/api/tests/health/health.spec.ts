@@ -9,7 +9,7 @@ test.describe('health endpoints', () => {
     expect(((await raw.json()) as { success?: boolean }).success).toBe(true);
   });
 
-  test('root health check answers 204', async ({ api }) => {
+  test('root health check answers 204', { tag: ['@smoke'] }, async ({ api }) => {
     const { status } = await api.healthCheck();
     expect(status).toBe(204);
   });

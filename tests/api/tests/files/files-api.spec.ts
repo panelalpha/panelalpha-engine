@@ -1,4 +1,5 @@
 import { expect, test } from '@/fixtures/test-options';
+import { CleanupSteps } from '@/helpers/cleanup-step';
 import { expectOneOf } from '@/helpers/expect-one-of';
 import { expectFileContentEquals, getDomainBasePath } from '@/helpers/file-path-helpers';
 import { uniqueId } from '@/helpers/random';
@@ -6,6 +7,7 @@ import { skipUnless } from '@/helpers/test-helpers';
 import { McpSession } from '@/helpers/mcp-helpers';
 import { fileExistsResponseSchema, fileStatSchema } from '@/schemas';
 import { validateParsedApiResponse } from '@/helpers/validate-parsed-response';
+import { expectStatus } from '@/helpers/expect-status';
 
 /**
  * The file manager the API actually exposes: write, read, stat, copy, move,
@@ -26,6 +28,7 @@ test.describe('file manager API', () => {
     const extracted = `${root}/extracted`;
     const marker = `file-manager-${Date.now()}`;
 
+    const cleanup = new CleanupSteps();
     try {
       expect(
         validateParsedApiResponse(
@@ -79,8 +82,12 @@ test.describe('file manager API', () => {
         await api.getFileContent(setupUser.username, `${root}/${uploadedName}`),
         uploadedBody
       );
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
-      await api.removeFile(setupUser.username, root, true).catch(() => undefined);
+      await cleanup.run(`remove ${root}`, () => api.removeFile(setupUser.username, root, true));
+      await cleanup.finish();
     }
   });
 
@@ -101,7 +108,7 @@ test.describe('file manager API', () => {
     const stat = await authedRequest.get(
       `projects/${setupUser.username}/files/stat?path=${encodeURIComponent(missing)}`
     );
-    expect(stat.status(), 'stat of a missing file should be 404').toBe(404);
+    await expectStatus(stat, 404, 'stat of a missing file should be 404');
   });
 
   test('a path that climbs out of the home directory is refused', async ({
@@ -132,6 +139,7 @@ test.describe('file manager API', () => {
     const path = `${getDomainBasePath(setupUser.domain)}/${uniqueId('mcp-file-')}.txt`;
     const marker = `mcp-${Date.now()}`;
 
+    const cleanup = new CleanupSteps();
     try {
       const session = await McpSession.open(anonymousRequest, settings.apiBaseUrl, token);
       skipUnless(
@@ -146,9 +154,13 @@ test.describe('file manager API', () => {
       });
       await session.callOk('file_stat', { name: setupUser.username, path });
       expectFileContentEquals(await api.getFileContent(setupUser.username, path), marker);
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
-      await api.removeFile(setupUser.username, path).catch(() => undefined);
-      await api.deleteMcpTokenSafe(created.data.id);
+      await cleanup.run(`remove ${path}`, () => api.removeFile(setupUser.username, path));
+      await cleanup.run('delete the MCP token', () => api.deleteMcpTokenSafe(created.data.id));
+      await cleanup.finish();
     }
   });
 });

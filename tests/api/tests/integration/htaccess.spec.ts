@@ -1,12 +1,15 @@
 import { expect, test } from '@/fixtures/test-options';
+import { CleanupSteps } from '@/helpers/cleanup-step';
 import {
   getHtaccessPollOptions,
   getHtaccessPropagationDelay,
   pollForHtaccessResult,
   skipIfHtaccessUnsupported,
 } from '@/helpers/htaccess-helpers';
+import { removeFileIfPresent } from '@/helpers/file-path-helpers';
 import { delay } from '@/helpers/retry';
 import { httpScheme } from '@/helpers/webserver-helpers';
+import { expectStatus } from '@/helpers/expect-status';
 
 /**
  * A `.htaccess` dropped into the document root has to take effect without any
@@ -26,10 +29,19 @@ test.describe('.htaccess', () => {
   });
 
   test.afterEach(async ({ api, setupUser }) => {
-    for (const file of createdFiles) {
-      await api.removeFile(setupUser.username, file).catch(() => undefined);
+    // beforeEach can skip before it sets the path, and Playwright still runs this hook.
+    if (!htaccessPath) {
+      return;
     }
-    await api.removeFile(setupUser.username, htaccessPath).catch(() => undefined);
+
+    const cleanup = new CleanupSteps();
+    for (const file of createdFiles) {
+      await cleanup.run(`remove ${file}`, () => removeFileIfPresent(api, setupUser.username, file));
+    }
+    await cleanup.run(`remove ${htaccessPath}`, () =>
+      removeFileIfPresent(api, setupUser.username, htaccessPath)
+    );
+    await cleanup.finish();
   });
 
   /** Writes `.htaccess`, then waits out the reload this webserver needs. */
@@ -49,25 +61,31 @@ test.describe('.htaccess', () => {
     const targetPath = `/${setupUser.domain}/public_html/${targetFile}`;
     createdFiles.push(targetPath);
 
-    await api.putFileContents(setupUser.username, targetPath, contents);
-    await applyHtaccess(
-      api,
-      setupUser.username,
-      `<IfModule mod_rewrite.c>\n  RewriteEngine On\n  RewriteRule ^htaccess-test$ ${targetFile} [L]\n</IfModule>\n`,
-      settings.timing.propagationDelay
-    );
+    await test.step('write the target file', async () => {
+      await api.putFileContents(setupUser.username, targetPath, contents);
+    });
+    await test.step('apply the rewrite rule', async () => {
+      await applyHtaccess(
+        api,
+        setupUser.username,
+        `<IfModule mod_rewrite.c>\n  RewriteEngine On\n  RewriteRule ^htaccess-test$ ${targetFile} [L]\n</IfModule>\n`,
+        settings.timing.propagationDelay
+      );
+    });
 
     const url = `${httpScheme(settings.apiBaseUrl)}://${setupUser.domain}/htaccess-test`;
     const { timeoutMs, intervalMs } = getHtaccessPollOptions(webserver);
 
-    const result = await pollForHtaccessResult(anonymousRequest, url, {
-      expectStatus: 200,
-      expectBodyContent: contents,
-      timeoutMs,
-      intervalMs,
-    });
+    await test.step('wait for the rewritten target to be served', async () => {
+      const result = await pollForHtaccessResult(anonymousRequest, url, {
+        expectStatus: 200,
+        expectBodyContent: contents,
+        timeoutMs,
+        intervalMs,
+      });
 
-    expect(result.success, `${url} never served the rewritten target on ${webserver}`).toBe(true);
+      expect(result.success, `${url} never served the rewritten target on ${webserver}`).toBe(true);
+    });
   });
 
   test('a rewrite rule can be changed and the change takes effect', async ({
@@ -81,8 +99,10 @@ test.describe('.htaccess', () => {
     const base = `/${setupUser.domain}/public_html`;
 
     createdFiles.push(`${base}/target1.txt`, `${base}/target2.txt`);
-    await api.putFileContents(setupUser.username, `${base}/target1.txt`, first);
-    await api.putFileContents(setupUser.username, `${base}/target2.txt`, second);
+    await test.step('write both target files', async () => {
+      await api.putFileContents(setupUser.username, `${base}/target1.txt`, first);
+      await api.putFileContents(setupUser.username, `${base}/target2.txt`, second);
+    });
 
     const url = `${httpScheme(settings.apiBaseUrl)}://${setupUser.domain}/htaccess-mod`;
     const { timeoutMs, intervalMs } = getHtaccessPollOptions(webserver);
@@ -104,8 +124,8 @@ test.describe('.htaccess', () => {
       expect(result.success, `${url} did not route to ${file} on ${webserver}`).toBe(true);
     };
 
-    await routeTo('target1.txt', first);
-    await routeTo('target2.txt', second);
+    await test.step('route to the first target', () => routeTo('target1.txt', first));
+    await test.step('change the rule to the second target', () => routeTo('target2.txt', second));
   });
 
   test('a custom response header is applied', async ({
@@ -120,22 +140,28 @@ test.describe('.htaccess', () => {
     const targetPath = `/${setupUser.domain}/public_html/${testFile}`;
     createdFiles.push(targetPath);
 
-    await api.putFileContents(setupUser.username, targetPath, contents);
-    await applyHtaccess(
-      api,
-      setupUser.username,
-      `<IfModule mod_headers.c>\n  <Files "${testFile}">\n    Header set X-Test-Custom "${headerValue}"\n  </Files>\n</IfModule>\n`,
-      settings.timing.propagationDelay
-    );
+    await test.step('write the target file', async () => {
+      await api.putFileContents(setupUser.username, targetPath, contents);
+    });
+    await test.step('apply the header rule', async () => {
+      await applyHtaccess(
+        api,
+        setupUser.username,
+        `<IfModule mod_headers.c>\n  <Files "${testFile}">\n    Header set X-Test-Custom "${headerValue}"\n  </Files>\n</IfModule>\n`,
+        settings.timing.propagationDelay
+      );
+    });
 
     const url = `${httpScheme(settings.apiBaseUrl)}://${setupUser.domain}/${testFile}`;
-    const response = await anonymousRequest.get(url, { ignoreHTTPSErrors: true });
+    await test.step('check the response header', async () => {
+      const response = await anonymousRequest.get(url, { ignoreHTTPSErrors: true });
 
-    expect(response.status()).toBe(200);
-    expect(
-      response.headers()['x-test-custom'],
-      `${webserver} did not apply the Header directive`
-    ).toBe(headerValue);
+      await expectStatus(response, 200);
+      expect(
+        response.headers()['x-test-custom'],
+        `${webserver} did not apply the Header directive`
+      ).toBe(headerValue);
+    });
   });
 
   test('a 301 redirect is honoured', async ({ api, anonymousRequest, settings, setupUser }) => {
@@ -144,25 +170,40 @@ test.describe('.htaccess', () => {
     const targetPath = `/${setupUser.domain}/public_html/${targetFile}`;
     createdFiles.push(targetPath);
 
-    await api.putFileContents(setupUser.username, targetPath, contents);
-    await applyHtaccess(
-      api,
-      setupUser.username,
-      `<IfModule mod_rewrite.c>\n  RewriteEngine On\n  RewriteRule ^old-path$ /${targetFile} [R=301,L]\n</IfModule>\n`,
-      settings.timing.propagationDelay
-    );
+    await test.step('write the target file', async () => {
+      await api.putFileContents(setupUser.username, targetPath, contents);
+    });
+    await test.step('apply the redirect rule', async () => {
+      await applyHtaccess(
+        api,
+        setupUser.username,
+        `<IfModule mod_rewrite.c>\n  RewriteEngine On\n  RewriteRule ^old-path$ /${targetFile} [R=301,L]\n</IfModule>\n`,
+        settings.timing.propagationDelay
+      );
+    });
 
     const url = `${httpScheme(settings.apiBaseUrl)}://${setupUser.domain}/old-path`;
 
-    const redirect = await anonymousRequest.get(url, {
-      ignoreHTTPSErrors: true,
-      maxRedirects: 0,
+    await test.step('check the 301 response', async () => {
+      const redirect = await anonymousRequest.get(url, {
+        ignoreHTTPSErrors: true,
+        maxRedirects: 0,
+      });
+      await expectStatus(redirect, 301, `${url} did not redirect on ${webserver}`);
+      expect(redirect.headers().location, 'the Location header points at the target').toContain(
+        targetFile
+      );
     });
-    expect(redirect.status(), `${url} did not redirect on ${webserver}`).toBe(301);
-    expect(redirect.headers().location).toContain(targetFile);
 
-    const followed = await anonymousRequest.get(url, { ignoreHTTPSErrors: true, maxRedirects: 5 });
-    expect(followed.status()).toBe(200);
-    expect(await followed.text()).toContain(contents);
+    await test.step('follow the redirect', async () => {
+      const followed = await anonymousRequest.get(url, {
+        ignoreHTTPSErrors: true,
+        maxRedirects: 5,
+      });
+      await expectStatus(followed, 200);
+      expect(await followed.text(), 'the redirect target serves the file content').toContain(
+        contents
+      );
+    });
   });
 });

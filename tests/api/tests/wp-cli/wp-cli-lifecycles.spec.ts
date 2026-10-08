@@ -1,4 +1,5 @@
 import { expect, test } from '@/fixtures/test-options';
+import { CleanupSteps } from '@/helpers/cleanup-step';
 import { expectOneOf } from '@/helpers/expect-one-of';
 import { rand } from '@/helpers/random';
 import { wpCliUnavailableReason, wpPath } from '@/helpers/wpcli-helpers';
@@ -29,6 +30,7 @@ test.describe('WP-CLI lifecycles', () => {
     const userId = Number.parseInt(created.stdout.trim(), 10);
     expect(userId).toBeGreaterThan(0);
 
+    const cleanup = new CleanupSteps();
     try {
       const initial = await run('user', 'get', String(userId), '--format=json');
       expect(initial.exit_code, initial.stderr).toBe(0);
@@ -48,8 +50,14 @@ test.describe('WP-CLI lifecycles', () => {
 
       const gone = await run('user', 'get', String(userId), '--format=json');
       expect(gone.exit_code, 'the deleted user is still readable').not.toBe(0);
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
-      await run('user', 'delete', String(userId), '--yes').catch(() => undefined);
+      await cleanup.run('delete the user the test created', () =>
+        run('user', 'delete', String(userId), '--yes')
+      );
+      await cleanup.finish();
     }
   });
 
@@ -70,6 +78,7 @@ test.describe('WP-CLI lifecycles', () => {
     const installed = await run('plugin', 'install', slug);
     expectOneOf(installed.exit_code, [0, 1]);
 
+    const cleanup = new CleanupSteps();
     try {
       expect(await isInstalled(), `${slug} is not in the plugin list after install`).toBeTruthy();
 
@@ -84,8 +93,14 @@ test.describe('WP-CLI lifecycles', () => {
       const deleted = await run('plugin', 'delete', slug);
       expect(deleted.exit_code, deleted.stderr).toBe(0);
       expect(await isInstalled(), `${slug} survived deletion`).toBeUndefined();
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
-      await run('plugin', 'delete', slug).catch(() => undefined);
+      await cleanup.run('delete the plugin the test installed', () =>
+        run('plugin', 'delete', slug)
+      );
+      await cleanup.finish();
     }
   });
 
@@ -105,6 +120,7 @@ test.describe('WP-CLI lifecycles', () => {
 
     const original = (await themes()).find((theme) => theme.status === 'active')?.name;
 
+    const cleanup = new CleanupSteps();
     try {
       expect((await themes()).some((theme) => theme.name === slug)).toBe(true);
 
@@ -120,11 +136,23 @@ test.describe('WP-CLI lifecycles', () => {
       const deleted = await run('theme', 'delete', slug);
       expect(deleted.exit_code, deleted.stderr).toBe(0);
       expect((await themes()).some((theme) => theme.name === slug)).toBe(false);
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
       if (original) {
-        await run('theme', 'activate', original).catch(() => undefined);
+        await cleanup.run(
+          'activate the original theme again',
+          () => run('theme', 'activate', original),
+          {
+            verify: async () =>
+              (await themes()).find((theme) => theme.status === 'active')?.name === original,
+            describe: () => `the active theme is not back to "${original}"`,
+          }
+        );
       }
-      await run('theme', 'delete', slug).catch(() => undefined);
+      await cleanup.run('delete the theme the test installed', () => run('theme', 'delete', slug));
+      await cleanup.finish();
     }
   });
 
@@ -145,6 +173,7 @@ test.describe('WP-CLI lifecycles', () => {
     const postId = Number.parseInt(created.stdout.trim(), 10);
     expect(postId).toBeGreaterThan(0);
 
+    const cleanup = new CleanupSteps();
     try {
       const updatedTitle = `${title}-updated`;
       const updated = await run('post', 'update', String(postId), `--post_title=${updatedTitle}`);
@@ -159,8 +188,14 @@ test.describe('WP-CLI lifecycles', () => {
 
       const gone = await run('post', 'get', String(postId), '--field=post_title');
       expect(gone.exit_code, 'the deleted post is still readable').not.toBe(0);
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
-      await run('post', 'delete', String(postId), '--force').catch(() => undefined);
+      await cleanup.run('delete the post the test created', () =>
+        run('post', 'delete', String(postId), '--force')
+      );
+      await cleanup.finish();
     }
   });
 });

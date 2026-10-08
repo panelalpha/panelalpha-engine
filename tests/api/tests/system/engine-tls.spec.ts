@@ -48,7 +48,11 @@ test.describe('engine TLS', () => {
       // LE issues IP SANs; Node forbids IP literals in TLS servername, so omit SNI for IPs.
       const servername = isIpLiteral(hostname) ? '' : hostname;
 
-      const { cert, authorized, authorizationError } = await getTlsHandshake(host, servername, port);
+      const { cert, authorized, authorizationError } = await getTlsHandshake(
+        host,
+        servername,
+        port
+      );
 
       expect(
         authorized,

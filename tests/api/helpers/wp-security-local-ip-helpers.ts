@@ -1,4 +1,12 @@
 import type { EngineApi } from '@/clients/engine-api';
+import { redactAndTruncate } from './redact';
+
+/**
+ * Response header the block mu-plugin adds to every request it sees, carrying the
+ * REMOTE_ADDR it judged. It is how a test learns the address PHP really got,
+ * instead of guessing it from the status.
+ */
+export const REMOTE_ADDR_HEADER = 'x-panelalpha-test-remote-addr';
 
 /** Must-use plugin filename — removed after each test. */
 export const LOCAL_IP_BLOCK_MU_PLUGIN = 'panelalpha-test-block-local-ips.php';
@@ -21,6 +29,9 @@ if (!defined('ABSPATH')) {
 
 add_action('plugins_loaded', static function (): void {
     $remote = $_SERVER['REMOTE_ADDR'] ?? '';
+    if ($remote !== '') {
+        header('X-PanelAlpha-Test-Remote-Addr: ' . $remote);
+    }
     if ($remote !== '' && panelalpha_test_is_private_or_local_ip($remote)) {
         status_header(403);
         header('Content-Type: text/plain; charset=utf-8');
@@ -62,16 +73,38 @@ function panelalpha_test_is_private_or_local_ip(string $ip): bool
 
 export const WP_HTTP_PROBE_SCRIPT_PHP = `<?php
 /**
- * Prints HTTP status code for a URL via wp_remote_get (in-container / WP-cron style).
- * Usage: wp eval-file panelalpha-wp-http-probe.php -- 'https://example.test/'
+ * Fetches one URL via wp_remote_get (in-container / WP-cron style) WITHOUT following
+ * redirects and prints a single JSON line: status, Location and the REMOTE_ADDR the
+ * block mu-plugin reported. The caller follows redirects, so each hop is visible.
+ * Usage: wp eval-file panelalpha-wp-http-probe.php 'https://example.test/'
  */
-$url = $argv[1] ?? home_url('/');
-$response = wp_remote_get($url, ['timeout' => 30, 'sslverify' => false]);
+$url = '';
+if (isset($args[0]) && is_string($args[0])) {
+    $url = $args[0];
+} elseif (isset($GLOBALS['argv']) && is_array($GLOBALS['argv'])) {
+    foreach (array_reverse($GLOBALS['argv']) as $candidate) {
+        if (is_string($candidate) && preg_match('#^https?://#', $candidate)) {
+            $url = $candidate;
+            break;
+        }
+    }
+}
+if ($url === '') {
+    fwrite(STDERR, 'no URL was passed to the probe');
+    exit(3);
+}
+$response = wp_remote_get($url, ['timeout' => 30, 'sslverify' => false, 'redirection' => 0]);
 if (is_wp_error($response)) {
     fwrite(STDERR, $response->get_error_message());
     exit(2);
 }
-echo (string) wp_remote_retrieve_response_code($response);
+echo wp_json_encode([
+    'probe' => 'panelalpha-wp-http-probe',
+    'url' => $url,
+    'status' => (int) wp_remote_retrieve_response_code($response),
+    'location' => (string) wp_remote_retrieve_header($response, 'location'),
+    'remote_addr' => (string) wp_remote_retrieve_header($response, '${REMOTE_ADDR_HEADER}'),
+]);
 `;
 
 export function muPluginPath(wpPath: string): string {
@@ -106,13 +139,9 @@ export async function removeLocalIpBlockMuPlugin(
   wpPath: string
 ): Promise<void> {
   const path = muPluginPath(wpPath);
-  try {
-    const exists = await api.fileExists(username, path);
-    if (exists.exists) {
-      await api.removeFile(username, path, false);
-    }
-  } catch {
-    // Best-effort cleanup.
+  const exists = await api.fileExists(username, path);
+  if (exists.exists) {
+    await api.removeFile(username, path, false);
   }
 }
 
@@ -130,44 +159,210 @@ export async function removeWpHttpProbeScript(
   wpPath: string
 ): Promise<void> {
   const path = wpHttpProbePath(wpPath);
-  try {
-    const exists = await api.fileExists(username, path);
-    if (exists.exists) {
-      await api.removeFile(username, path, false);
-    }
-  } catch {
-    // Best-effort cleanup.
+  const exists = await api.fileExists(username, path);
+  if (exists.exists) {
+    await api.removeFile(username, path, false);
   }
 }
 
+/** One response of a redirect chain, as the probe saw it. */
+export interface ProbeHop {
+  url: string;
+  status: number;
+  /** The Location header, absolute; null when the response had none. */
+  location: string | null;
+  /** The REMOTE_ADDR the block mu-plugin judged; null when PHP never answered. */
+  remoteAddr: string | null;
+}
+
+export interface ProbeChain {
+  hops: ProbeHop[];
+  final: ProbeHop;
+  /** REMOTE_ADDR reported by the last hop that reached the mu-plugin. */
+  remoteAddr: string | null;
+}
+
+/** What `wp eval-file` returned for one probe. */
+export interface ProbeRun {
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+}
+
+/** The probe or its setup failed: not a verdict on the block. */
+export class ProbeDidNotRunError extends Error {
+  constructor(reason: string, run?: ProbeRun) {
+    const output = run
+      ? ` (exit ${run.exit_code}): stdout=${JSON.stringify(redactAndTruncate(run.stdout, 600))} ` +
+        `stderr=${JSON.stringify(redactAndTruncate(run.stderr, 600))}`
+      : '';
+    super(`The in-container probe did not run${output || ''} - ${reason}`);
+    this.name = 'ProbeDidNotRunError';
+  }
+}
+
+/** Parses the probe's JSON line; null when stdout holds none. */
+export function parseProbeOutput(stdout: string):
+  | (Omit<ProbeHop, 'location'> & {
+      location: string;
+    })
+  | null {
+  const line = stdout
+    .split('\n')
+    .map((candidate) => candidate.trim())
+    .reverse()
+    .find((candidate) => candidate.startsWith('{') && candidate.endsWith('}'));
+  if (!line) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(line) as Record<string, unknown>;
+    if (parsed.probe !== 'panelalpha-wp-http-probe' || !Number.isInteger(parsed.status)) {
+      return null;
+    }
+    return {
+      url: typeof parsed.url === 'string' ? parsed.url : '',
+      status: Number(parsed.status),
+      location: typeof parsed.location === 'string' ? parsed.location : '',
+      remoteAddr:
+        typeof parsed.remote_addr === 'string' && parsed.remote_addr ? parsed.remote_addr : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** The absolute URL a Location header points at, relative to the URL that sent it. */
+export function resolveLocation(from: string, location: string): string {
+  return new URL(location, from).toString();
+}
+
+export function isRedirectStatus(status: number): boolean {
+  return [301, 302, 303, 307, 308].includes(status);
+}
+
+const MAX_PROBE_HOPS = 5;
+
 /**
- * Fetches an HTTPS URL from inside the WordPress install (wp_remote_get), as Engine/cron would.
+ * Probes `startUrl` and follows its redirects one hop at a time, so the chain that
+ * reaches PHP (for example http -> https from force-HTTPS) is part of the result.
+ * Throws ProbeDidNotRunError when a probe exits non-zero or prints no parsable status.
  */
-export async function wpRemoteGetStatusCode(
+export async function followProbe(
+  run: (url: string) => Promise<ProbeRun>,
+  startUrl: string,
+  maxHops = MAX_PROBE_HOPS
+): Promise<ProbeChain> {
+  const hops: ProbeHop[] = [];
+  let url = startUrl;
+
+  for (let attempt = 0; attempt <= maxHops; attempt += 1) {
+    const result = await run(url);
+    if (result.exit_code !== 0) {
+      throw new ProbeDidNotRunError('wp eval-file exited non-zero', result);
+    }
+    const parsed = parseProbeOutput(result.stdout);
+    if (!parsed) {
+      throw new ProbeDidNotRunError('no parsable status in its output', result);
+    }
+
+    const location = parsed.location ? resolveLocation(url, parsed.location) : null;
+    const hop: ProbeHop = { url, status: parsed.status, location, remoteAddr: parsed.remoteAddr };
+    hops.push(hop);
+
+    if (!isRedirectStatus(hop.status) || !location) {
+      return finishChain(hops);
+    }
+    url = location;
+  }
+
+  throw new ProbeDidNotRunError(
+    `the redirect chain did not settle in ${maxHops} hops: ${describeChain(hops)}`
+  );
+}
+
+function finishChain(hops: ProbeHop[]): ProbeChain {
+  const withAddr = [...hops].reverse().find((hop) => hop.remoteAddr);
+  return { hops, final: hops[hops.length - 1], remoteAddr: withAddr?.remoteAddr ?? null };
+}
+
+/** `url -> status [Location] (REMOTE_ADDR x)` per hop, for failure messages. */
+export function describeChain(hops: readonly ProbeHop[]): string {
+  return hops
+    .map(
+      (hop) =>
+        `${hop.url} -> ${hop.status}` +
+        (hop.location ? ` [Location ${hop.location}]` : '') +
+        (hop.remoteAddr ? ` (REMOTE_ADDR ${hop.remoteAddr})` : ' (no mu-plugin header)')
+    )
+    .join(' ; ');
+}
+
+/**
+ * Fetches a URL from inside the WordPress install (wp_remote_get), as Engine/cron would,
+ * following redirects hop by hop. A probe that does not run throws ProbeDidNotRunError.
+ */
+export async function wpRemoteGetChain(
   api: EngineApi,
   username: string,
   wpPath: string,
   targetUrl: string
-): Promise<{ exit_code: number; status: number | null; stderr: string }> {
+): Promise<ProbeChain> {
   const probePath = wpHttpProbePath(wpPath);
-  const response = await api.executeWpCliCommand(username, [
-    'eval-file',
-    probePath,
-    `--path=${wpPath}`,
-    '--',
-    targetUrl,
-  ]);
+  return followProbe(
+    (url) => api.executeWpCliCommand(username, ['eval-file', probePath, `--path=${wpPath}`, url]),
+    targetUrl
+  );
+}
 
-  if (response.exit_code !== 0) {
-    return { exit_code: response.exit_code, status: null, stderr: response.stderr };
+/** One request to the engine address, as the caller's HTTP client reports it. */
+export interface EngineIpResponse {
+  status: number;
+  location: string | null;
+  remoteAddr: string | null;
+  body: string;
+}
+
+export interface EngineIpChain {
+  hops: ProbeHop[];
+  final: EngineIpResponse;
+  remoteAddr: string | null;
+}
+
+/**
+ * Requests `scheme://engineHost/` with the site's Host header and follows redirects
+ * to the same engine address, keeping the Host and taking scheme and path from each
+ * Location (so a force-HTTPS 301 continues over https, not at the site's public name).
+ */
+export async function followViaEngineIp(
+  fetchOnce: (url: string) => Promise<EngineIpResponse>,
+  scheme: string,
+  engineHost: string,
+  siteDomain: string,
+  maxHops = MAX_PROBE_HOPS
+): Promise<EngineIpChain> {
+  const hops: ProbeHop[] = [];
+  let url = `${scheme}://${engineHost}/`;
+  let sentAs = `${scheme}://${siteDomain}/`;
+
+  for (let attempt = 0; attempt <= maxHops; attempt += 1) {
+    const response = await fetchOnce(url);
+    const location = response.location ? resolveLocation(sentAs, response.location) : null;
+    hops.push({ url, status: response.status, location, remoteAddr: response.remoteAddr });
+
+    if (!isRedirectStatus(response.status) || !location) {
+      const chain = finishChain(hops);
+      return { hops, final: response, remoteAddr: chain.remoteAddr };
+    }
+
+    const next = new URL(location);
+    sentAs = location;
+    url = `${next.protocol}//${engineHost}${next.pathname}${next.search}`;
   }
 
-  const parsed = Number.parseInt(response.stdout.trim(), 10);
-  return {
-    exit_code: 0,
-    status: Number.isFinite(parsed) ? parsed : null,
-    stderr: response.stderr,
-  };
+  throw new Error(
+    `The engine address redirect chain did not settle in ${maxHops} hops: ${describeChain(hops)}`
+  );
 }
 
 export { resolveEngineIpv4 } from './engine-host';

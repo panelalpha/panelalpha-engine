@@ -8,7 +8,8 @@ use Throwable;
 
 /**
  * Shared Xdebug coverage session used by HTTP CoverageMiddleware and job
- * RecordCoverage middleware. Dumps land in tests/coverage/{tokenId}/dumps/.
+ * RecordCoverage middleware. Dumps land in
+ * {config testing.coverage_dir}/{tokenId}/dumps/ (the engine's tests/coverage).
  */
 final class CoverageRecorder
 {
@@ -26,12 +27,12 @@ final class CoverageRecorder
 
     public static function recordingPath(int $tokenId): string
     {
-        return base_path("tests/coverage/{$tokenId}/recording");
+        return config('testing.coverage_dir') . "/{$tokenId}/recording";
     }
 
     public static function dumpsDir(int $tokenId): string
     {
-        return base_path("tests/coverage/{$tokenId}/dumps");
+        return config('testing.coverage_dir') . "/{$tokenId}/dumps";
     }
 
     public static function isRecording(int $tokenId): bool

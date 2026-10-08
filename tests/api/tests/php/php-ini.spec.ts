@@ -1,4 +1,5 @@
 import { expect, test } from '@/fixtures/test-options';
+import { CleanupSteps } from '@/helpers/cleanup-step';
 import { expectOneOf } from '@/helpers/expect-one-of';
 import { getDomainBasePath } from '@/helpers/file-path-helpers';
 import { uniqueId } from '@/helpers/random';
@@ -46,6 +47,7 @@ test.describe('PHP custom INI settings', () => {
     const script = `ini-probe-${uniqueId()}.php`;
     const scriptPath = `${getDomainBasePath(setupUser.domain)}/${script}`;
 
+    const cleanup = new CleanupSteps();
     try {
       await api.setCustomIniSettings(setupUser.username, version, {
         ...original,
@@ -84,9 +86,29 @@ test.describe('PHP custom INI settings', () => {
           }
         )
         .toBe('served');
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
-      await api.setCustomIniSettings(setupUser.username, version, original).catch(() => undefined);
-      await api.removeFile(setupUser.username, scriptPath).catch(() => undefined);
+      await cleanup.run(
+        'restore the custom INI settings',
+        () => api.setCustomIniSettings(setupUser.username, version, original),
+        {
+          verify: async () => {
+            const current = asIniMap(
+              (await api.getCustomIniSettings(setupUser.username, version)).data
+            );
+            return Object.keys({ ...original, ...current }).every(
+              (key) => (key in original ? original[key] : undefined) === current[key]
+            );
+          },
+          describe: () => 'the INI settings differ from the ones found before the test',
+        }
+      );
+      await cleanup.run('remove the INI probe script', () =>
+        api.removeFile(setupUser.username, scriptPath)
+      );
+      await cleanup.finish();
     }
   });
 
@@ -120,6 +142,7 @@ test.describe('PHP custom INI settings', () => {
     const token = created.data.plain_text_token;
     skipUnless(token, 'createMcpToken did not return a plaintext token.');
 
+    const cleanup = new CleanupSteps();
     try {
       const session = await McpSession.open(anonymousRequest, settings.apiBaseUrl, token);
       skipUnless(
@@ -140,9 +163,27 @@ test.describe('PHP custom INI settings', () => {
       expect(mcpResultText(got), 'php_ini_get did not mention the value just set').toContain(
         wanted
       );
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
-      await api.setCustomIniSettings(setupUser.username, version, original).catch(() => undefined);
-      await api.deleteMcpTokenSafe(created.data.id);
+      await cleanup.run(
+        'restore the custom INI settings',
+        () => api.setCustomIniSettings(setupUser.username, version, original),
+        {
+          verify: async () => {
+            const current = asIniMap(
+              (await api.getCustomIniSettings(setupUser.username, version)).data
+            );
+            return Object.keys({ ...original, ...current }).every(
+              (key) => (key in original ? original[key] : undefined) === current[key]
+            );
+          },
+          describe: () => 'the INI settings differ from the ones found before the test',
+        }
+      );
+      await cleanup.run('delete the MCP token', () => api.deleteMcpTokenSafe(created.data.id));
+      await cleanup.finish();
     }
   });
 });

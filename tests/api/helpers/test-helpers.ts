@@ -25,10 +25,9 @@ export function skipUnlessOnline(domain: string): void {
 }
 
 /**
- * Creates a throwaway user, runs `body` against it, and deletes it afterwards.
- *
- * On failure the user is left on the engine so its container and configuration
- * can be inspected; the `userFactory` fixture annotates the test with its name.
+ * Creates a throwaway user, runs `body` against it, and deletes it afterwards, also when
+ * the body fails. Only PRESERVE_ON_FAILURE=1 outside CI keeps it; the `userFactory`
+ * fixture then annotates the test with its name.
  */
 export async function withTestUser<T>(
   userFactory: UserFactory,
@@ -42,14 +41,20 @@ export async function withTestUser<T>(
   }
 }
 
-/** Deletes a user unless the current test failed (then it is preserved for debugging). */
+/**
+ * Deletes a user, also after a failure (its state is attached first). A failed test keeps
+ * it only under PRESERVE_ON_FAILURE=1 outside CI; the fixture then annotates it.
+ */
 export async function deleteUserUnlessTestFailed(
   userFactory: UserFactory,
   username: string
 ): Promise<void> {
   const info = test.info();
   if (info.status !== info.expectedStatus) {
-    return;
+    await userFactory.attachFailureDiagnostics(username);
+    if (userFactory.shouldKeepAfterFailure(username)) {
+      return;
+    }
   }
   await userFactory.deleteUser(username);
 }

@@ -1,0 +1,7 @@
+# Install policy for bun install / bun ci.
+# No dependency lifecycle scripts run. The only packages that have them are ssh2 (node-gyp build of an
+# optional crypto binding) and cpu-features (optional native helper); ssh2 falls back to its pure
+# JavaScript implementation. Bun's built-in trusted list would otherwise run both implicitly, and the
+# result would depend on whether the machine has a compiler toolchain.
+[install]
+ignoreScripts = true

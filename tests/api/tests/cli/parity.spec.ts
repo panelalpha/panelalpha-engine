@@ -4,8 +4,13 @@ import { skipUnless } from '@/helpers/test-helpers';
 import { stageFileForArtisan, unstageFileForArtisan } from '@/helpers/host-exec';
 import { Timeouts } from '@/config/timeouts';
 import { healthFromRaw } from '@/helpers/app-health';
+import { sharedProject } from '@/helpers/shared-project';
 
 test.describe('pae-artisan command parity', () => {
+  // The two DinD tests only read; the file round-trip and the git deploy keep their own projects.
+  const dind = sharedProject('dind');
+  test.afterAll(() => dind.dispose());
+
   test.beforeEach(({ hostExec }) => {
     test.skip(!hostExec, 'pae-artisan is not reachable from this runner.');
   });
@@ -49,12 +54,8 @@ test.describe('pae-artisan command parity', () => {
     }
   });
 
-  test('project:ssh, domain:list and limit:get agree with REST', async ({
-    hostExec,
-    api,
-    userFactory,
-  }) => {
-    const user = await userFactory.createDindUser();
+  test('project:ssh, domain:list and limit:get agree with REST', async ({ hostExec, api }) => {
+    const user = await dind.get();
     skipUnless(user, 'DinD is not available on this engine.');
 
     const ssh = await hostExec!.pae(['project:ssh', user.username, 'echo pae', '--json']);
@@ -139,8 +140,8 @@ test.describe('pae-artisan command parity', () => {
     }
   });
 
-  test('project:deploy:log is readable for a DinD user', async ({ hostExec, userFactory }) => {
-    const user = await userFactory.createDindUser();
+  test('project:deploy:log is readable for a DinD user', async ({ hostExec }) => {
+    const user = await dind.get();
     skipUnless(user, 'DinD is not available on this engine.');
     const log = await hostExec!.pae(['project:deploy:log', user.username]);
     expect([0, 1]).toContain(log.exitCode);

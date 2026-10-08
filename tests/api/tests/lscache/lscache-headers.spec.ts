@@ -1,4 +1,5 @@
 import { expect, test } from '@/fixtures/test-options';
+import { CleanupSteps } from '@/helpers/cleanup-step';
 import {
   CACHE_EXPIRY_DELAY_MS,
   CACHE_POPULATE_DELAY_MS,
@@ -13,6 +14,7 @@ import {
 } from '@/helpers/lscache-helpers';
 import { delay } from '@/helpers/retry';
 import { wpPath } from '@/helpers/wpcli-helpers';
+import { expectStatus } from '@/helpers/expect-status';
 
 test.describe('LiteSpeed cache headers', () => {
   let wasActive: boolean;
@@ -25,15 +27,29 @@ test.describe('LiteSpeed cache headers', () => {
   });
 
   test.afterEach(async ({ api, setupUser }) => {
+    // beforeEach can skip before it reads the plugin state; there is nothing to restore then.
+    if (wasActive === undefined) {
+      return;
+    }
+
     const path = wpPath(setupUser);
-    await api
-      .executeWpCliCommand(setupUser.username, [
-        'plugin',
-        wasActive ? 'activate' : 'deactivate',
-        LSCACHE_PLUGIN,
-        path,
-      ])
-      .catch(() => undefined);
+    const cleanup = new CleanupSteps();
+    await cleanup.run(
+      'restore the LiteSpeed Cache plugin state',
+      () =>
+        api.executeWpCliCommand(setupUser.username, [
+          'plugin',
+          wasActive ? 'activate' : 'deactivate',
+          LSCACHE_PLUGIN,
+          path,
+        ]),
+      {
+        verify: async () =>
+          (await isLscachePluginActive(api, setupUser.username, path)) === wasActive,
+        describe: () => `the plugin is not back to ${wasActive ? 'active' : 'inactive'}`,
+      }
+    );
+    await cleanup.finish();
   });
 
   test('a second request is served from cache when the plugin is active', async ({
@@ -51,7 +67,7 @@ test.describe('LiteSpeed cache headers', () => {
       ignoreHTTPSErrors: true,
       maxRedirects: 5,
     });
-    expect(first.status()).toBe(200);
+    await expectStatus(first, 200);
 
     await delay(CACHE_POPULATE_DELAY_MS);
 
@@ -59,7 +75,7 @@ test.describe('LiteSpeed cache headers', () => {
       ignoreHTTPSErrors: true,
       maxRedirects: 5,
     });
-    expect(second.status()).toBe(200);
+    await expectStatus(second, 200);
     expect(
       second.headers()[LSCACHE_HEADER]?.toLowerCase(),
       `the second request was not served from cache (${LSCACHE_HEADER}: ${
@@ -106,7 +122,7 @@ test.describe('LiteSpeed cache headers', () => {
       maxRedirects: 5,
     });
 
-    expect(response.status()).toBe(200);
+    await expectStatus(response, 200);
     test.info().annotations.push({
       type: LSCACHE_HEADER,
       description: response.headers()[LSCACHE_HEADER] ?? 'absent',

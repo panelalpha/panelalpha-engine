@@ -27,6 +27,7 @@ services:
       - "2011:2011"
     volumes:
       - ./core:/var/www/html
+      - ./tests/coverage:/var/www/tests/coverage
       - ./.env-core:/var/www/html/.env
       - ./config/core/nginx.conf:/etc/nginx/nginx.conf
       - ./crt:/root/crt

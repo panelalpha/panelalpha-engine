@@ -1,6 +1,7 @@
 import { expect, test } from '@/fixtures/test-options';
 import { wwwAliasWouldAnswer } from '@/config/site-domain';
 import { expectOneOf } from '@/helpers/expect-one-of';
+import { expectStatus } from '@/helpers/expect-status';
 
 test.describe('user domains', () => {
   test('the main domain is listed', { tag: ['@smoke'] }, async ({ api, setupUser }) => {
@@ -24,7 +25,7 @@ test.describe('user domains', () => {
       data: { domain: `www.${setupUser.domain}`, type: 'addon' },
     });
 
-    expect(response.status()).toBe(422);
+    await expectStatus(response, 422);
     expect(((await response.json()) as { message?: string }).message).toBe(
       'Domain already exists.'
     );
@@ -34,7 +35,7 @@ test.describe('user domains', () => {
     const response = await authedRequest.get(
       `projects/${setupUser.username}/domains/nonexistent-${Date.now()}.${setupUser.domain}`
     );
-    expect(response.status()).toBe(404);
+    await expectStatus(response, 404);
   });
 });
 

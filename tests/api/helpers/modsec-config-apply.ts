@@ -84,6 +84,20 @@ export async function getOwaspRuleset(api: EngineApi) {
   );
 }
 
+/** Whether the OWASP ruleset's config files are currently in the given states. */
+export async function owaspConfigFilesMatch(
+  api: EngineApi,
+  expected: Record<string, boolean>
+): Promise<boolean> {
+  const owasp = await getOwaspRuleset(api);
+  if (!owasp) {
+    return false;
+  }
+  return Object.entries(expected).every(
+    ([name, enabled]) => isOwaspConfigFileEnabled(owasp.config_files, name) === enabled
+  );
+}
+
 /**
  * Brings the named CRS config files to the requested states and waits until the
  * webserver is serving again.

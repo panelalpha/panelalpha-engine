@@ -1,4 +1,14 @@
 import type { EngineApi } from '@/clients/engine-api';
+import { registerSecret } from './secret-registry';
+
+/** Registers the credentials and salts that a wp-config.php defines, and returns its content. */
+export function registerWpConfigSecrets(content: string): string {
+  const defines = /define\s*\(\s*['"](\w*(?:PASSWORD|KEY|SALT)\w*)['"]\s*,\s*(['"])(.*?)\2\s*\)/g;
+  for (const match of content.matchAll(defines)) {
+    registerSecret(match[3]);
+  }
+  return content;
+}
 
 /**
  * Points WP_HOME and WP_SITEURL at the www hostname, adding the constants when
@@ -20,7 +30,7 @@ export async function ensureWwwConfigInWpConfig(
   const scheme = 'https';
 
   try {
-    const content = await api.getFileContent(username, wpConfigPath);
+    const content = registerWpConfigSecrets(await api.getFileContent(username, wpConfigPath));
 
     const wwwUrl = `${scheme}://${wwwDomain}`;
     const homeRegex = /define\s*\(\s*['"]WP_HOME['"]\s*,\s*['"][^'"]*['"]\s*\)/;

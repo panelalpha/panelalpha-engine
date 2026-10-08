@@ -1,5 +1,6 @@
 import { expect, test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
+import { expectStatus } from '@/helpers/expect-status';
 import { stagingUserPayload } from '@/helpers/staging-helpers';
 
 test.describe('user staging', () => {
@@ -25,7 +26,7 @@ test.describe('user staging', () => {
 
   test('staging unknown user returns 404', async ({ api }) => {
     const response = await api.createStagingRaw('nosuchuser999', {});
-    expect(response.status).toBe(404);
+    await expectStatus(response, 404);
   });
 
   test('push without target is 422', async ({ api, userFactory }) => {

@@ -1,4 +1,5 @@
 import { expect, test } from '@/fixtures/test-options';
+import { CleanupSteps } from '@/helpers/cleanup-step';
 import type { EngineApi } from '@/clients/engine-api';
 import {
   PERMALINK_STRUCTURES,
@@ -12,6 +13,7 @@ import {
   slugPattern,
 } from '@/helpers/permalinks-http-helpers';
 import { wpCliUnavailableReason, wpPath } from '@/helpers/wpcli-helpers';
+import { expectStatus } from '@/helpers/expect-status';
 
 /**
  * Setting a permalink structure has to change the URL WordPress hands out *and*
@@ -74,12 +76,29 @@ test.describe('permalinks are served over HTTP', () => {
   });
 
   test.afterEach(async ({ api, setupUser }) => {
-    await applyPermalinkStructure(
-      api,
-      setupUser.username,
-      originalStructure,
-      wpPath(setupUser)
-    ).catch(() => undefined);
+    // beforeEach can skip before it reads the structure; there is nothing to restore then.
+    if (originalStructure === undefined) {
+      return;
+    }
+
+    const cleanup = new CleanupSteps();
+    await cleanup.run(
+      'restore the permalink structure',
+      () => applyPermalinkStructure(api, setupUser.username, originalStructure, wpPath(setupUser)),
+      {
+        verify: async () =>
+          (
+            await api.executeWpCliCommand(setupUser.username, [
+              'option',
+              'get',
+              'permalink_structure',
+              wpPath(setupUser),
+            ])
+          ).stdout.trim() === originalStructure,
+        describe: () => `the permalink structure is not back to "${originalStructure}"`,
+      }
+    );
+    await cleanup.finish();
   });
 
   for (const [label, permalinkCase] of Object.entries(CASES)) {
@@ -99,6 +118,21 @@ test.describe('permalinks are served over HTTP', () => {
       await applyPermalinkStructure(api, setupUser.username, permalinkCase.structure, path);
       await assertPermalinkStructureSet(api, setupUser.username, permalinkCase.structure, path);
 
+      if (permalinkCase.structure === PERMALINK_STRUCTURES.postName) {
+        await test.step('rewrite rules are generated for a pretty structure', async () => {
+          const listed = await run('rewrite', 'list', '--format=json');
+
+          expect.soft(listed.exit_code, listed.stderr).toBe(0);
+          if (listed.exit_code === 0) {
+            const rules = JSON.parse(listed.stdout) as unknown[];
+            expect.soft(Array.isArray(rules)).toBe(true);
+            expect
+              .soft(rules.length, 'a pretty permalink structure produced no rewrite rules')
+              .toBeGreaterThan(0);
+          }
+        });
+      }
+
       const categoryId = permalinkCase.needsCategory
         ? await ensureCategory(run, categorySlug)
         : undefined;
@@ -116,6 +150,7 @@ test.describe('permalinks are served over HTTP', () => {
       const postId = parseWpCliId(created.stdout);
       expect(postId, `WP-CLI returned no post id: ${created.stdout}`).toMatch(/^\d+$/);
 
+      const cleanup = new CleanupSteps();
       try {
         const permalink = await getPermalinkUrl(
           api,
@@ -128,13 +163,21 @@ test.describe('permalinks are served over HTTP', () => {
         assertPrettyPermalink(permalink, permalinkCase.expectedPath({ postSlug, categorySlug }));
 
         const response = await fetchWithRetry(anonymousRequest, permalink, api);
-        expect(response.status(), `${permalink} did not serve`).toBe(200);
+        await expectStatus(response, 200, `${permalink} did not serve`);
         expect(await response.text()).toContain(postTitle);
+      } catch (error) {
+        cleanup.bodyFailed(error);
+        throw error;
       } finally {
-        await run('post', 'delete', postId!, '--force').catch(() => undefined);
+        await cleanup.run('delete the post the test created', () =>
+          run('post', 'delete', postId!, '--force')
+        );
         if (categoryId) {
-          await run('term', 'delete', 'category', categoryId).catch(() => undefined);
+          await cleanup.run('delete the category the test created', () =>
+            run('term', 'delete', 'category', categoryId)
+          );
         }
+        await cleanup.finish();
       }
     });
   }
@@ -153,6 +196,7 @@ test.describe('permalinks are served over HTTP', () => {
     const postTitle = 'plain permalink test';
 
     await applyPermalinkStructure(api, setupUser.username, PERMALINK_STRUCTURES.plain, path);
+    await assertPermalinkStructureSet(api, setupUser.username, PERMALINK_STRUCTURES.plain, path);
 
     const created = await run(
       'post',
@@ -165,14 +209,21 @@ test.describe('permalinks are served over HTTP', () => {
     const postId = parseWpCliId(created.stdout);
     expect(postId, `WP-CLI returned no post id: ${created.stdout}`).toMatch(/^\d+$/);
 
+    const cleanup = new CleanupSteps();
     try {
       const url = `https://${setupUser.domain}/?p=${postId!}`;
       const response = await fetchWithRetry(anonymousRequest, url, api);
 
-      expect(response.status(), `${url} did not serve`).toBe(200);
+      await expectStatus(response, 200, `${url} did not serve`);
       expect(await response.text()).toContain(postTitle);
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
-      await run('post', 'delete', postId!, '--force').catch(() => undefined);
+      await cleanup.run('delete the post the test created', () =>
+        run('post', 'delete', postId!, '--force')
+      );
+      await cleanup.finish();
     }
   });
 });

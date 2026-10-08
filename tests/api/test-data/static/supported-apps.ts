@@ -25,7 +25,8 @@ export function supportedAppSlug(title: string): string {
   return slug.length > 0 ? slug : 'app';
 }
 
-const TRACKER_URL = process.env.SUPPORTED_APPS_TRACKER_URL ?? 'https://tracker.example.com/supported-apps';
+const TRACKER_URL =
+  process.env.SUPPORTED_APPS_TRACKER_URL ?? 'https://tracker.example.com/supported-apps';
 
 function app(iid: number, title: string, repo: string, stack: SupportedAppStack): SupportedApp {
   return {

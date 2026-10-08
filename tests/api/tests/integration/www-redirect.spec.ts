@@ -1,4 +1,5 @@
 import { expect, test } from '@/fixtures/test-options';
+import { CleanupSteps } from '@/helpers/cleanup-step';
 import { wwwAliasWouldAnswer } from '@/config/site-domain';
 import { expectOneOf } from '@/helpers/expect-one-of';
 import { delay, waitForCondition } from '@/helpers/retry';
@@ -7,7 +8,8 @@ import {
   getWebserverPropagationDelay,
   httpScheme,
 } from '@/helpers/webserver-helpers';
-import { ensureWwwConfigInWpConfig } from '@/helpers/wp-config-helpers';
+import { ensureWwwConfigInWpConfig, registerWpConfigSecrets } from '@/helpers/wp-config-helpers';
+import { expectStatus } from '@/helpers/expect-status';
 
 const WP_CONFIG_PROPAGATION_MS = 3_000;
 
@@ -29,11 +31,16 @@ test.describe('www hostname', () => {
   test('the www alias exists for the main domain', async ({ api, setupUser }) => {
     const wwwDomain = `www.${setupUser.domain}`;
 
+    let lastAliases = 'domain not listed yet';
     await waitForCondition(
       async () => {
         const domain = (await api.listUserDomains(setupUser.username)).data.find(
           (entry) => entry.domain === setupUser.domain
         );
+        const aliases = domain?.details?.aliases ?? [];
+        lastAliases = domain
+          ? `aliases ${aliases.length > 0 ? aliases.join(', ') : '(none)'}`
+          : `${setupUser.domain} not in the domain list`;
         // Engines that do not expose an aliases field cannot be checked here;
         // the domains suite covers the alias contract itself.
         return !domain?.details?.aliases || domain.details.aliases.includes(wwwDomain);
@@ -42,6 +49,7 @@ test.describe('www hostname', () => {
         timeout: 30_000,
         interval: 2_000,
         message: `${wwwDomain} never appeared as an alias of ${setupUser.domain}`,
+        describeLast: () => lastAliases,
       }
     );
   });
@@ -58,7 +66,7 @@ test.describe('www hostname', () => {
       await test.info().attach('www-response.html', { body, contentType: 'text/html' });
     }
 
-    expect(response.status(), `${url} answered ${response.status()}`).toBe(200);
+    await expectStatus(response, 200, `${url} answered ${response.status()}`);
     expect(body.length, `${url} returned an empty body`).toBeGreaterThan(0);
   });
 });
@@ -83,37 +91,41 @@ test.describe('apex to www redirect', () => {
     const scheme = httpScheme(settings.apiBaseUrl);
     const wwwDomain = `www.${setupUser.domain}`;
 
-    const changed = await ensureWwwConfigInWpConfig(
-      api,
-      setupUser.username,
-      setupUser.wpPath,
-      wwwDomain
-    );
-    if (changed) {
-      await delay(WP_CONFIG_PROPAGATION_MS);
-    }
+    await test.step('point wp-config at the www host', async () => {
+      const changed = await ensureWwwConfigInWpConfig(
+        api,
+        setupUser.username,
+        setupUser.wpPath,
+        wwwDomain
+      );
+      if (changed) {
+        await delay(WP_CONFIG_PROPAGATION_MS);
+      }
 
-    const wpConfig = await api.getFileContent(
-      setupUser.username,
-      `${setupUser.wpPath}/wp-config.php`
-    );
-    expect(wpConfig, 'WP_HOME does not point at the www host').toMatch(
-      /define\s*\(\s*['"]WP_HOME['"]\s*,\s*['"][^'"]*www\.[^'"]*['"]/
-    );
-    expect(wpConfig, 'WP_SITEURL does not point at the www host').toMatch(
-      /define\s*\(\s*['"]WP_SITEURL['"]\s*,\s*['"][^'"]*www\.[^'"]*['"]/
-    );
+      const wpConfig = registerWpConfigSecrets(
+        await api.getFileContent(setupUser.username, `${setupUser.wpPath}/wp-config.php`)
+      );
+      expect(wpConfig, 'WP_HOME does not point at the www host').toMatch(
+        /define\s*\(\s*['"]WP_HOME['"]\s*,\s*['"][^'"]*www\.[^'"]*['"]/
+      );
+      expect(wpConfig, 'WP_SITEURL does not point at the www host').toMatch(
+        /define\s*\(\s*['"]WP_SITEURL['"]\s*,\s*['"][^'"]*www\.[^'"]*['"]/
+      );
+    });
 
     const originalDocumentRoot = `/${setupUser.domain}/public_html`;
 
-    await api.updateDomain(setupUser.username, setupUser.domain, {
-      document_root: originalDocumentRoot,
-      redirect_enabled: true,
-      redirect_url: `${scheme}://${wwwDomain}/`,
-      force_https_redirect: false,
+    await test.step('turn the apex redirect on', async () => {
+      await api.updateDomain(setupUser.username, setupUser.domain, {
+        document_root: originalDocumentRoot,
+        redirect_enabled: true,
+        redirect_url: `${scheme}://${wwwDomain}/`,
+        force_https_redirect: false,
+      });
+      await delay(getWebserverPropagationDelay(slug));
     });
-    await delay(getWebserverPropagationDelay(slug));
 
+    const cleanup = new CleanupSteps();
     try {
       const paths = [
         ['the home page', '/'],
@@ -133,17 +145,23 @@ test.describe('apex to www redirect', () => {
           expectOneOf(response.status(), [301, 302, 307, 308], `${url} did not redirect`);
           expect(location, `${url} redirected without a Location header`).toBeTruthy();
           expect(location, `${url} redirected to ${location}`).toContain('www.');
-          expect(location).toContain(setupUser.domain);
+          expect(location, `${url} redirected away from ${setupUser.domain}`).toContain(
+            setupUser.domain
+          );
         });
       }
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
-      await api
-        .updateDomain(setupUser.username, setupUser.domain, {
+      await cleanup.run('turn the apex redirect off', () =>
+        api.updateDomain(setupUser.username, setupUser.domain, {
           document_root: originalDocumentRoot,
           redirect_enabled: false,
           force_https_redirect: false,
         })
-        .catch(() => undefined);
+      );
+      await cleanup.finish();
     }
   });
 });

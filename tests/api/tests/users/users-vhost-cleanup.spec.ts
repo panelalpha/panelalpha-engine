@@ -26,50 +26,58 @@ test.describe('vhost cleanup on user deletion', () => {
     const marker = randomFileContent();
     const url = `https://${user.domain}/${fileName}`;
 
-    await api.putFileContents(
-      user.username,
-      `${getDomainBasePath(user.domain)}/${fileName}`,
-      marker
-    );
+    await test.step('write a marker file into the document root', async () => {
+      await api.putFileContents(
+        user.username,
+        `${getDomainBasePath(user.domain)}/${fileName}`,
+        marker
+      );
+    });
 
-    // While the account exists its vhost routes the domain at its own docroot.
-    // A vhost that has just been written is not serving yet, so a connection
-    // error here is a reason to try again rather than to stop — but the last
-    // one is carried into the timeout message, because "never served the
-    // marker file" and "nothing was ever listening" want different fixes.
-    await expect
-      .poll(
-        async () => {
-          try {
-            const response = await fetchSite(anonymousRequest, url);
-            const body = (await response.text()).trim();
-            if (response.status() === 200 && body === marker) {
-              return 'served';
+    await test.step('wait until the vhost serves the marker', async () => {
+      // While the account exists its vhost routes the domain at its own docroot.
+      // A vhost that has just been written is not serving yet, so a connection
+      // error here is a reason to try again rather than to stop — but the last
+      // one is carried into the timeout message, because "never served the
+      // marker file" and "nothing was ever listening" want different fixes.
+      await expect
+        .poll(
+          async () => {
+            try {
+              const response = await fetchSite(anonymousRequest, url);
+              const body = (await response.text()).trim();
+              if (response.status() === 200 && body === marker) {
+                return 'served';
+              }
+              return `HTTP ${response.status()}, body ${JSON.stringify(body.slice(0, 80))}`;
+            } catch (error) {
+              return error instanceof Error ? error.message : String(error);
             }
-            return `HTTP ${response.status()}, body ${JSON.stringify(body.slice(0, 80))}`;
-          } catch (error) {
-            return error instanceof Error ? error.message : String(error);
+          },
+          {
+            timeout: 60_000,
+            intervals: [2_000],
+            message: `${url} never served the marker file`,
           }
-        },
-        {
-          timeout: 60_000,
-          intervals: [2_000],
-          message: `${url} never served the marker file`,
-        }
-      )
-      .toBe('served');
+        )
+        .toBe('served');
+    });
 
-    await userFactory.deleteUser(user.username);
+    await test.step('delete the account', async () => {
+      await userFactory.deleteUser(user.username);
+    });
 
-    // Without a vhost nothing may serve that account's document root. The
-    // request itself can still land somewhere - an unmatched Host falls
-    // through to whichever vhost nginx loaded first - so the marker, not the
-    // status code, is what proves the configuration is gone.
-    const afterDelete = await fetchSite(anonymousRequest, url);
-    expect(
-      (await afterDelete.text()).trim(),
-      `${url} still serves the deleted account's document root`
-    ).not.toBe(marker);
+    await test.step('check the marker is no longer served', async () => {
+      // Without a vhost nothing may serve that account's document root. The
+      // request itself can still land somewhere - an unmatched Host falls
+      // through to whichever vhost nginx loaded first - so the marker, not the
+      // status code, is what proves the configuration is gone.
+      const afterDelete = await fetchSite(anonymousRequest, url);
+      expect(
+        (await afterDelete.text()).trim(),
+        `${url} still serves the deleted account's document root`
+      ).not.toBe(marker);
+    });
   });
 
   test('deleting a user leaves the webserver serving everyone else', async ({
@@ -77,19 +85,23 @@ test.describe('vhost cleanup on user deletion', () => {
     userFactory,
     setupUser,
   }) => {
-    const doomed = await userFactory.createSimpleUser();
-    await userFactory.deleteUser(doomed.username);
-
-    // The failure this guards against is a dangling vhost that references a
-    // certificate the deletion removed: nginx then refuses to reload and every
-    // other account goes down with it.
-    const response = await fetchSite(anonymousRequest, `https://${setupUser.domain}/`, {
-      maxRedirects: 5,
+    const doomed = await test.step('create a user', () => userFactory.createSimpleUser());
+    await test.step('delete the user', async () => {
+      await userFactory.deleteUser(doomed.username);
     });
-    expect(
-      response.status(),
-      `${setupUser.domain} stopped serving after an unrelated user was deleted`
-    ).toBeLessThan(500);
+
+    await test.step('check another account is still served', async () => {
+      // The failure this guards against is a dangling vhost that references a
+      // certificate the deletion removed: nginx then refuses to reload and every
+      // other account goes down with it.
+      const response = await fetchSite(anonymousRequest, `https://${setupUser.domain}/`, {
+        maxRedirects: 5,
+      });
+      expect(
+        response.status(),
+        `${setupUser.domain} stopped serving after an unrelated user was deleted`
+      ).toBeLessThan(500);
+    });
   });
 });
 
@@ -126,20 +138,28 @@ test.describe('home directory cleanup on user deletion', () => {
 
     // `home_dir` is the path inside the container (`/home/<name>`); on the host
     // the same directory is `users/<name>` under the engine root.
-    const details = (await api.getUser(user.username)).data;
-    const containerHome = details.details?.home_dir ?? details.config?.home_dir;
-    expect(containerHome, 'the engine reports no home_dir for the project').toBeTruthy();
-    const hostHome = path.posix.join(root!, 'users', path.posix.basename(String(containerHome)));
+    const hostHome = await test.step('resolve the home directory on the host', async () => {
+      const details = (await api.getUser(user.username)).data;
+      const containerHome = details.details?.home_dir ?? details.config?.home_dir;
+      expect(containerHome, 'the engine reports no home_dir for the project').toBeTruthy();
+      return path.posix.join(root!, 'users', path.posix.basename(String(containerHome)));
+    });
 
     const exists = async () => (await hostExec!.run('test', ['-d', hostHome])).exitCode === 0;
-    expect(await exists(), `${hostHome} was never created`).toBe(true);
+    await test.step('check the directory exists', async () => {
+      expect(await exists(), `${hostHome} was never created`).toBe(true);
+    });
 
-    await api.deleteUser(user.username);
+    await test.step('delete the project', async () => {
+      await api.deleteUser(user.username);
+    });
 
-    // `project:delete` documents itself as removing "database rows, server
-    // config files and home directory". A directory that outlives its account
-    // keeps that customer's files — and their disk usage — on the host, with
-    // nothing left in the API to show it is there.
-    expect(await exists(), `${hostHome} outlived the project it belonged to`).toBe(false);
+    await test.step('check the directory is gone', async () => {
+      // `project:delete` documents itself as removing "database rows, server
+      // config files and home directory". A directory that outlives its account
+      // keeps that customer's files — and their disk usage — on the host, with
+      // nothing left in the API to show it is there.
+      expect(await exists(), `${hostHome} outlived the project it belonged to`).toBe(false);
+    });
   });
 });

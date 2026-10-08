@@ -1,5 +1,6 @@
 import { expect, test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
+import { expectStatus } from '@/helpers/expect-status';
 import { lighthouseReportResponseSchema } from '@/schemas';
 
 /**
@@ -8,6 +9,16 @@ import { lighthouseReportResponseSchema } from '@/schemas';
  * "the endpoint behaved"; only a 200 is checked for an actual report.
  */
 const SERVICE_STATUSES = [200, 400, 422, 500, 502, 503] as const;
+
+/**
+ * The one answer that means "not configured": the `disable-lighthouse` setting
+ * makes LighthouseController::generateReport throw a 422 whose message is this.
+ */
+const DISABLED_MESSAGE = 'lighthouse service is disabled';
+
+function isDisabled(response: { status: number; body: unknown }): boolean {
+  return response.status === 422 && JSON.stringify(response.body ?? '').includes(DISABLED_MESSAGE);
+}
 
 test.describe('Lighthouse', () => {
   const presets = [
@@ -38,7 +49,8 @@ test.describe('Lighthouse', () => {
     const url = `https://${setupUser.domain}/`;
 
     const probe = await api.generateLighthouseReportRaw({ url });
-    test.skip(probe.status !== 200, `Lighthouse answered ${probe.status} — service unavailable.`);
+    test.skip(isDisabled(probe), 'The Lighthouse service is disabled on this engine.');
+    await expectStatus(probe, 200, 'POST /lighthouse/generate-report');
 
     const report = await api.generateLighthouseReport({ url });
     const parsed = lighthouseReportResponseSchema.safeParse(report);

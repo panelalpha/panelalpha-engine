@@ -1,5 +1,6 @@
 import { expect, test } from '@/fixtures/test-options';
 import { delay } from '@/helpers/retry';
+import { expectStatus } from '@/helpers/expect-status';
 
 const LOG_FLUSH_DELAY_MS = 1_000;
 
@@ -71,7 +72,7 @@ test.describe('domain log listing', () => {
       `projects/${setupUser.username}/domains/${setupUser.domain}/log-files/` +
         `${encodeURIComponent(filename)}?all_webservers=1`
     );
-    expect(response.status()).toBe(200);
+    await expectStatus(response, 200);
     expect(response.headers()['content-disposition']).toBeTruthy();
   });
 });

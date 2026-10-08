@@ -1,15 +1,17 @@
 import { expect, test } from '@/fixtures/test-options';
+import { CleanupSteps } from '@/helpers/cleanup-step';
 import { isOwaspConfigFileEnabled } from '@/helpers/modsec-config-apply';
 import {
-  MODSEC_PROPAGATION_DELAY_MS,
   NON_EXISTENT_RULESET,
+  modSecMatchesSnapshot,
   modsecUnavailableReason,
   restoreModSec,
   snapshotModSec,
   type ModSecSnapshot,
 } from '@/helpers/modsec-helpers';
 import { rawResponseMessage } from '@/helpers/raw-response';
-import { delay } from '@/helpers/retry';
+import { waitForCondition } from '@/helpers/retry';
+import { expectStatus } from '@/helpers/expect-status';
 import type { ModSecurityConfigFileEntry } from '@/types';
 
 /** Toggle API wants the basename without the `.disabled` suffix. */
@@ -30,7 +32,17 @@ test.describe('ModSecurity rulesets', () => {
   });
 
   test.afterEach(async ({ api }) => {
-    await restoreModSec(api, snapshot).catch(() => undefined);
+    // beforeEach can skip before it takes the snapshot, and Playwright still runs this hook.
+    if (!snapshot) {
+      return;
+    }
+
+    const cleanup = new CleanupSteps();
+    await cleanup.run('restore ModSecurity', () => restoreModSec(api, snapshot), {
+      verify: () => modSecMatchesSnapshot(api, snapshot),
+      describe: () => 'mode or a ruleset is not back to the snapshot',
+    });
+    await cleanup.finish();
   });
 
   test('every ruleset has a name and an enabled flag', async ({ api }) => {
@@ -46,16 +58,31 @@ test.describe('ModSecurity rulesets', () => {
   test('a ruleset can be enabled and disabled', async ({ api }) => {
     const name = snapshot.rulesets[0].name;
 
-    const stateOf = async () => {
-      await delay(MODSEC_PROPAGATION_DELAY_MS);
-      return (await api.listModSecurityRulesets()).data.find((entry) => entry.name === name)
-        ?.enabled;
+    const stateOf = async () =>
+      (await api.listModSecurityRulesets()).data.find((entry) => entry.name === name)?.enabled;
+
+    const waitForState = async (expected: boolean) => {
+      let last: boolean | undefined;
+      await waitForCondition(
+        async () => {
+          last = await stateOf();
+          return last === expected;
+        },
+        {
+          timeout: 10_000,
+          interval: 500,
+          message: `${name} never reported as ${expected ? 'enabled' : 'disabled'}`,
+          describeLast: () => `enabled=${String(last)}`,
+        }
+      );
     };
 
     await api.enableModSecurityRuleset(name);
+    await waitForState(true);
     expect(await stateOf(), `${name} did not report as enabled`).toBe(true);
 
     await api.disableModSecurityRuleset(name);
+    await waitForState(false);
     expect(await stateOf(), `${name} did not report as disabled`).toBe(false);
   });
 
@@ -97,7 +124,7 @@ test.describe('ModSecurity rulesets', () => {
   for (const [label, payload] of emptyToggles) {
     test(`a config-file toggle with ${label} is accepted as a no-op`, async ({ api }) => {
       const name = snapshot.rulesets[0].name;
-      expect((await api.toggleModSecurityConfigFilesRaw(name, payload)).status).toBe(200);
+      await expectStatus(await api.toggleModSecurityConfigFilesRaw(name, payload), 200);
     });
   }
 
@@ -131,11 +158,11 @@ test.describe('ModSecurity ruleset validation', () => {
   for (const name of unknownRulesets) {
     test(`enabling and disabling "${name}" both return 404`, async ({ api }) => {
       const enabled = await api.enableModSecurityRulesetRaw(name);
-      expect(enabled.status).toBe(404);
+      await expectStatus(enabled, 404);
       expect(rawResponseMessage(enabled) ?? '').toContain('not found');
 
       const disabled = await api.disableModSecurityRulesetRaw(name);
-      expect(disabled.status).toBe(404);
+      await expectStatus(disabled, 404);
       expect(rawResponseMessage(disabled) ?? '').toContain('not found');
     });
   }
@@ -144,6 +171,6 @@ test.describe('ModSecurity ruleset validation', () => {
     const response = await api.toggleModSecurityConfigFilesRaw(NON_EXISTENT_RULESET, {
       enable: ['test.conf'],
     });
-    expect(response.status).toBe(404);
+    await expectStatus(response, 404);
   });
 });

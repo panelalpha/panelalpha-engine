@@ -11,6 +11,7 @@ import {
 } from '@/types';
 import { type APIResponse, type TestInfo, test } from '@playwright/test';
 import { Timeouts } from '@/config/timeouts';
+import { httpReason, recordAttempts, recordRetryNote } from '@/helpers/attempts';
 import { delay } from '@/helpers/retry';
 import { taskIdFromBody, waitForTask } from '@/helpers/task-helpers';
 import { type ApiTransport } from '../api-transport';
@@ -326,21 +327,36 @@ export class UsersApi extends EngineApiBase {
  */
 async function deleteProject(api: ApiTransport, username: string): Promise<APIResponse> {
   let deadline: number | undefined;
+  let attempts = 0;
+  const reasons: string[] = [];
   const cancelled = new Set<string>();
+  const operation = `DELETE projects/${username}`;
   for (;;) {
     const response = await api.delete(`projects/${username}`);
+    attempts += 1;
     if (response.status() !== 409 || (deadline !== undefined && Date.now() >= deadline)) {
+      if (response.status() === 409) {
+        reasons.push(`gave up after ${Math.round(Timeouts.projectDelete / 1000)}s`);
+      }
+      recordAttempts(operation, attempts, reasons);
       return response;
     }
     if (deadline === undefined) {
       deadline = Date.now() + Timeouts.projectDelete;
-      makeRoomInTheTest(Timeouts.projectDelete + 15_000);
+      const extended = Timeouts.projectDelete + 15_000;
+      if (makeRoomInTheTest(extended)) {
+        recordRetryNote(operation, `test timeout extended by ${extended} ms`);
+      }
     }
-    const { message } = (await response.json().catch(() => ({}))) as { message?: unknown };
+    const body = (await response.json().catch(() => ({}))) as { message?: unknown };
+    const { message } = body;
     const task =
       typeof message === 'string' ? /\/tasks\/(\d+)\/cancel/.exec(message)?.[1] : undefined;
+    const named = typeof message === 'string' ? /\btask (\d+)\b/.exec(message)?.[1] : undefined;
+    reasons.push(named ? `HTTP 409 task ${named}` : httpReason(409, body));
     if (task !== undefined && !cancelled.has(task)) {
       cancelled.add(task);
+      recordRetryNote(operation, `running task ${task} cancelled`);
       await api.post(`tasks/${task}/cancel`);
     } else {
       await delay(2_000);
@@ -353,14 +369,16 @@ async function deleteProject(api: ApiTransport, username: string): Promise<APIRe
  * up fails with its own message, not as the test's timeout. Outside a test
  * there is nothing to lengthen.
  */
-function makeRoomInTheTest(ms: number): void {
+function makeRoomInTheTest(ms: number): boolean {
   let info: TestInfo;
   try {
     info = test.info();
   } catch {
-    return;
+    return false;
   }
   if (info.timeout > 0) {
     info.setTimeout(info.timeout + ms);
+    return true;
   }
+  return false;
 }

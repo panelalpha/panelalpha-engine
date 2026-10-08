@@ -1,5 +1,6 @@
 import { test } from '@playwright/test';
 import type { EngineApi } from '@/clients/engine-api';
+import { CleanupSteps } from '@/helpers/cleanup-step';
 import { firewallRulesResponseSchema, firewallStatusResponseSchema } from '@/schemas';
 import type { FirewallRule, FirewallStatus } from '@/types';
 
@@ -48,14 +49,16 @@ export function randomTestPort(): string {
   return String(40_000 + Math.floor(Math.random() * 9_000));
 }
 
-/** Deletes rules a test created, ignoring the ones already gone. */
+/** Deletes rules a test created. Every rule is attempted; failures are reported together at the end. */
 export async function deleteFirewallRulesQuietly(
   api: EngineApi,
   ids: Iterable<string>
 ): Promise<void> {
+  const cleanup = new CleanupSteps();
   for (const id of ids) {
-    await api.deleteFirewallRuleRaw(id).catch(() => undefined);
+    await cleanup.run(`delete firewall rule ${id}`, () => api.deleteFirewallRuleRaw(id));
   }
+  await cleanup.finish();
 }
 
 /** Puts the firewall back the way a test found it. */

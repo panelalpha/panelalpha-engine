@@ -22,7 +22,9 @@ export function getTlsHandshake(
   return new Promise((resolve, reject) => {
     let settled = false;
     const fail = (error: Error) => {
-      if (settled) return;
+      if (settled) {
+        return;
+      }
       settled = true;
       reject(error);
       socket.destroy();
@@ -37,24 +39,23 @@ export function getTlsHandshake(
     if (servername && !isIpLiteral(servername)) {
       connectOpts.servername = servername;
     }
-    const socket = tls.connect(
-      connectOpts,
-      () => {
-        if (settled) return;
-        const cert = socket.getPeerCertificate();
-        const authorized = socket.authorized;
-        // Node can return a string error code despite the Error type in @types/node.
-        const error: Error | string | undefined = socket.authorizationError;
-        const authorizationError = error instanceof Error ? error.message : error;
-        if (!cert?.raw?.length) {
-          fail(new Error(`TLS peer presented no certificate for ${host}:${port}`));
-          return;
-        }
-        settled = true;
-        resolve({ cert, authorized, authorizationError });
-        socket.destroy();
+    const socket = tls.connect(connectOpts, () => {
+      if (settled) {
+        return;
       }
-    );
+      const cert = socket.getPeerCertificate();
+      const authorized = socket.authorized;
+      // Node can return a string error code despite the Error type in @types/node.
+      const error: Error | string | undefined = socket.authorizationError;
+      const authorizationError = error instanceof Error ? error.message : error;
+      if (!cert?.raw?.length) {
+        fail(new Error(`TLS peer presented no certificate for ${host}:${port}`));
+        return;
+      }
+      settled = true;
+      resolve({ cert, authorized, authorizationError });
+      socket.destroy();
+    });
     socket.on('error', fail);
     socket.once('close', () => {
       fail(new Error(`TLS connection closed before handshake completed for ${host}:${port}`));

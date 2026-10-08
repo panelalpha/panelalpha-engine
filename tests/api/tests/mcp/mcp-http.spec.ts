@@ -2,6 +2,7 @@ import { expect, test } from '@/fixtures/test-options';
 import { McpHttpClient, parseMcpJsonRpc } from '@/clients/mcp-http';
 import { uniqueId } from '@/helpers/random';
 import { expectOneOf } from '@/helpers/expect-one-of';
+import { expectStatus } from '@/helpers/expect-status';
 import { skipUnless } from '@/helpers/test-helpers';
 import { McpSession, expectMcpToolError } from '@/helpers/mcp-helpers';
 
@@ -21,7 +22,7 @@ test.describe('MCP streamable HTTP', () => {
       expectOneOf(invalid.status(), [401, 403]);
 
       const ok = await client.check(token);
-      expect(ok.status()).toBe(200);
+      await expectStatus(ok, 200);
       expect(((await ok.json()) as { valid?: boolean }).valid).toBe(true);
     } finally {
       await api.deleteMcpTokenSafe(created.data.id);
@@ -60,9 +61,9 @@ test.describe('MCP streamable HTTP', () => {
       expect(typeof name).toBe('string');
 
       const get = await client.methodNotAllowed('get', token);
-      expect(get.status()).toBe(405);
+      await expectStatus(get, 405);
       const del = await client.methodNotAllowed('delete', token);
-      expect(del.status()).toBe(405);
+      await expectStatus(del, 405);
 
       const tools = await client.send(
         { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} },
@@ -92,7 +93,7 @@ test.describe('MCP streamable HTTP', () => {
         },
         token
       );
-      test.skip(!called.ok(), `tools/call project_list_summary returned HTTP ${called.status()}`);
+      await expectStatus(called, 200, 'tools/call project_list_summary');
       const invocation = parseMcpJsonRpc(await called.text());
       expect(invocation).toBeTruthy();
       expect(invocation?.error).toBeUndefined();

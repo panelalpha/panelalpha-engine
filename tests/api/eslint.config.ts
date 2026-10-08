@@ -1,6 +1,7 @@
 import eslint from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import prettierConfig from 'eslint-config-prettier';
+import { noBareStatusAssertion } from './eslint-rules/no-bare-status-assertion';
 
 export default tseslint.config(
   eslint.configs.recommended,
@@ -62,6 +63,15 @@ export default tseslint.config(
         },
       ],
       '@typescript-eslint/no-non-null-assertion': 'off',
+    },
+  },
+  {
+    files: ['tests/**/*.ts'],
+    ignores: ['tests/unit/**'],
+    plugins: { local: { rules: { 'no-bare-status-assertion': noBareStatusAssertion } } },
+    rules: {
+      // Bare status assertions hide the request and body; use expectStatus.
+      'local/no-bare-status-assertion': 'error',
     },
   },
   {

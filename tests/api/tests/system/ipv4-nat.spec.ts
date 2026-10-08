@@ -1,4 +1,5 @@
 import { expect, test } from '@/fixtures/test-options';
+import { CleanupSteps } from '@/helpers/cleanup-step';
 import { expectOneOf } from '@/helpers/expect-one-of';
 import { randomIpv4 } from '@/helpers/random';
 
@@ -23,6 +24,7 @@ test.describe('IPv4 NAT maps', () => {
     const id = created.data.id;
     expect(id, 'the engine returned no id for the new NAT map').toBeDefined();
 
+    const cleanup = new CleanupSteps();
     try {
       const listed = (await api.getIpv4NatMaps()).data;
       expect(
@@ -33,8 +35,12 @@ test.describe('IPv4 NAT maps', () => {
       await api.deleteIpv4NatMap(id!);
 
       expect((await api.getIpv4NatMaps()).data.some((map) => map.id === id)).toBe(false);
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
-      await api.deleteIpv4NatMap(id!).catch(() => undefined);
+      await cleanup.run('delete the NAT map the test created', () => api.deleteIpv4NatMap(id!));
+      await cleanup.finish();
     }
   });
 
@@ -104,6 +110,7 @@ test.describe('provisioning behind NAT', () => {
       const username = `nattest${Date.now().toString().slice(-6)}`;
       let natMapId: number | undefined;
 
+      const cleanup = new CleanupSteps();
       try {
         await api.updateSystemNetworkConfig({ default_ipv4: NON_LOCAL_IPV4 });
 
@@ -127,13 +134,26 @@ test.describe('provisioning behind NAT', () => {
           [200, 201, 202],
           `provisioning ${label} failed while default_ipv4 was non-local`
         );
+      } catch (error) {
+        cleanup.bodyFailed(error);
+        throw error;
       } finally {
-        await api.deleteUserSafe(username);
+        await cleanup.run('delete the user the test created', () => api.deleteUserSafe(username));
         if (natMapId !== undefined) {
-          await api.deleteIpv4NatMap(natMapId).catch(() => undefined);
+          await cleanup.run('delete the NAT map the test created', () =>
+            api.deleteIpv4NatMap(natMapId!)
+          );
         }
         // Engine-wide state: restoring this matters more than the assertions above.
-        await api.updateSystemNetworkConfig({ default_ipv4: original });
+        await cleanup.run(
+          'restore the default IPv4 address',
+          () => api.updateSystemNetworkConfig({ default_ipv4: original }),
+          {
+            verify: async () => ((await api.getSystemInfo()).data.default_ipv4 ?? '') === original,
+            describe: () => `default_ipv4 is not back to "${original}"`,
+          }
+        );
+        await cleanup.finish();
       }
     });
   }
