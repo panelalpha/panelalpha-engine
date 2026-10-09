@@ -10,6 +10,7 @@ use App\System\Filesystem;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AppCertificate;
+use App\System\Project\Dind\Generation\GenerationState;
 use Tests\TestCase;
 
 class DindApplicationOperationsTest extends TestCase
@@ -64,6 +65,36 @@ class DindApplicationOperationsTest extends TestCase
         $this->executed = [];
         $aggregate->abortRunningDeploy(removeVolumes: true);
         $this->assertSame([['down', '-v', '--remove-orphans']], $this->composeDowns());
+    }
+
+    public function test_cancelling_a_redeploy_leaves_the_live_version_up(): void
+    {
+        $this->app->useStoragePath($this->tmpRoot . '/storage');
+        $model = $this->dindModel(['deploy_strategy' => 'compose']);
+        file_put_contents($this->tmpRoot . '/users/alice/docker-compose.yml', "services:\n  dind:\n    image: test\n");
+        file_put_contents($this->homeRoot . '/alice/project/docker-compose.yml', "services:\n  app:\n    image: test\n");
+        // What a redeploy notes before it prepares anything, when it finds the app running.
+        (new GenerationState('alice'))->put(GenerationState::ROUTES, ['containers' => ['project-app-1']]);
+
+        (new ProjectAggregate($this->recordingSystem(), $model))->cancelRunningDeploy();
+
+        $this->assertSame([], $this->composeDowns());
+        $flat = $this->flattenExecuted();
+        $this->assertStringNotContainsString('prune', $flat);
+        $this->assertStringNotContainsString('service docker stop', $flat);
+    }
+
+    public function test_cancelling_a_first_deploy_still_takes_its_stack_down(): void
+    {
+        $this->app->useStoragePath($this->tmpRoot . '/storage');
+        $model = $this->dindModel(['deploy_strategy' => 'compose']);
+        file_put_contents($this->tmpRoot . '/users/alice/docker-compose.yml', "services:\n  dind:\n    image: test\n");
+        file_put_contents($this->homeRoot . '/alice/project/docker-compose.yml', "services:\n  app:\n    image: test\n");
+
+        (new ProjectAggregate($this->recordingSystem(), $model))->cancelRunningDeploy();
+
+        $this->assertSame([['down', '--remove-orphans']], $this->composeDowns());
+        $this->assertStringNotContainsString('service docker stop', $this->flattenExecuted(), 'the account\'s dockerd stays up');
     }
 
     public function test_start_application_does_not_delete_project(): void

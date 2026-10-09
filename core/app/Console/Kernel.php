@@ -113,6 +113,10 @@ class Kernel extends ConsoleKernel
         // here: QUEUE_CONNECTION is `sync`, so a dispatched job would put a
         // network round trip inside the customer's deploy request.
         $schedule->command('telemetry:ship')->everyFiveMinutes()->withoutOverlapping();
+        // An account started again after a sysbox restart or a host crash runs
+        // with its image unmapped and every inner compose failing; this also
+        // catches it within five minutes of a boot.
+        $schedule->command('project:mapping:check')->everyFiveMinutes()->withoutOverlapping();
         // A deploy report says an install worked. Nothing said the site
         // stopped working afterwards -- a database that went away, files
         // deleted over SFTP -- so an application could serve the engine's own

@@ -58,7 +58,7 @@ class ShellStepTagTest extends TestCase
     {
         $system = Mockery::mock(System::class);
         $system->shouldReceive('exec')
-            ->with(Mockery::on(static fn (array $argv): bool => array_slice($argv, 0, 8) === ['sudo', 'docker', 'compose', '-f', self::COMPOSE, 'exec', '-T', 'dind']
+            ->with(Mockery::on(static fn (array $argv): bool => array_slice($argv, 0, 10) === ['sudo', 'docker', 'compose', '-f', self::COMPOSE, 'exec', '-e', 'DOCKER_CONFIG=/home/acme/.panelalpha-docker', '-T', 'dind']
                 && str_contains(end($argv), '/sys/fs/cgroup/cpu.stat')), [], 30)
             ->once()
             ->andReturn("1680.10 1000000000\n1682.11 1002492000\n");
@@ -89,6 +89,7 @@ class ShellStepTagTest extends TestCase
     {
         $dind = Mockery::mock(Dind::class);
         $dind->shouldReceive('composeFilePath')->andReturn(self::COMPOSE);
+        $dind->shouldReceive('homeDirPath')->andReturn('/home/acme');
         if ($system !== null) {
             $dind->shouldReceive('system')->andReturn($system);
         }

@@ -284,6 +284,11 @@ class Dind implements DeployableDindProject, Runtime
         $this->accountTeardown()->abortRunningDeploy($stopInnerDocker, $removeVolumes);
     }
 
+    public function cancelRunningDeploy(): void
+    {
+        $this->accountTeardown()->cancelRunningDeploy();
+    }
+
     public function preCheckFromSources(): void
     {
         $this->assertHostHasRoomToDeploy();

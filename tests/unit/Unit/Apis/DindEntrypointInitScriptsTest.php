@@ -67,6 +67,12 @@ class DindEntrypointInitScriptsTest extends TestCase
         $this->assertStringNotContainsString('cgroup.subtree_control', $this->script());
     }
 
+    /** Root's docker config lives in the home, a bind mount sysbox maps even when it forgot the image. */
+    public function test_roots_docker_config_directory_is_made_on_every_boot(): void
+    {
+        $this->assertStringContainsString('mkdir -p -m 700 "/home/acme/.panelalpha-docker"', $this->script());
+    }
+
     public function test_run_is_repopulated_before_the_daemon_starts(): void
     {
         $this->assertStringContainsString('systemd-tmpfiles --create', $this->script());

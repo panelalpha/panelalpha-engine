@@ -62,6 +62,7 @@ class DataRootWipeTest extends TestCase
         $dind = Mockery::mock(Dind::class);
         $dind->shouldReceive('username')->andReturn($username);
         $dind->shouldReceive('composeFilePath')->andReturn("/opt/panelalpha/shared-hosting/users/{$username}/docker-compose.yml");
+        $dind->shouldReceive('homeDirPath')->andReturn("/home/{$username}");
         $dind->shouldReceive('system')->andReturn($system);
         $dind->shouldReceive('services')->andReturn($services);
         $dind->shouldReceive('engine')->andReturn($engine);

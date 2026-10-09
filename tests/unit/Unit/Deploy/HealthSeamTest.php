@@ -66,6 +66,7 @@ class HealthSeamTest extends TestCase
         $record->details = [AppHealth::DETAIL_RUNTIME => 'php'];
         $dind->shouldReceive('userModel')->andReturn($record);
         $dind->shouldReceive('composeFilePath')->andReturn('/home/acme/docker-compose.yml');
+        $dind->shouldReceive('homeDirPath')->andReturn('/home/acme');
         $dind->shouldReceive('username')->andReturn('acme');
 
         $system = Mockery::mock(System::class);

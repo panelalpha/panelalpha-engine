@@ -60,6 +60,7 @@ final class AccountTemplate
         $userModel = $this->project->userModel();
         $username = $userModel->username;
         $uid = $userModel->getUid() ?? 33;
+        $dockerConfig = ShellOperations::DOCKER_CONFIG_DIR;
         $script = <<<BASH
 # /run is a tmpfs (see the account's compose), so it starts empty on every
 # boot. Debian expects the directories its packages declare to be there —
@@ -80,6 +81,7 @@ mkdir -p "/home/\$(hostname)/docker"
 mkdir -p "/home/{$username}/.docker"
 chown {$uid}:{$uid} "/home/{$username}/.docker"
 echo "[init] created /home/{$username}/.docker"
+mkdir -p -m 700 "/home/{$username}/{$dockerConfig}"
 BASH;
 
         $script .= $this->cgroupNestingScript();

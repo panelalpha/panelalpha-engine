@@ -651,6 +651,13 @@ class Project
         }
     }
 
+    public function cancelRunningDeploy(): void
+    {
+        if ($this->runtime instanceof Dind) {
+            $this->runtime->cancelRunningDeploy();
+        }
+    }
+
     public function copyVolumeDataFrom(self $source): int
     {
         $volumes = $this->copyVolumesForClone();

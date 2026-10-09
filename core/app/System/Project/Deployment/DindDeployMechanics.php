@@ -7,6 +7,7 @@ use App\Models\Domain as DomainModel;
 use App\Models\User as ModelsUser;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AccountMapping;
 use App\System\Project\Dind\AppHealth;
 use App\System\Project\Dind\Generation\CheckoutAside;
 use App\System\Project\Dind\Generation\GenerationSweep;
@@ -221,6 +222,8 @@ final class DindDeployMechanics implements DeployMechanics
     /** Its images and routing, before the redeploy prepares anything. */
     private function noteTheRunningVersion(): void
     {
+        // Every redeploy passes here first; an account sysbox stopped mapping fails all of it.
+        (new AccountMapping($this->dind))->ensureMapped();
         (new ServingImages($this->dind))->remember();
         (new RoutingSnapshot($this->dind))->take();
     }

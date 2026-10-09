@@ -114,6 +114,9 @@ final class ContainerOperations
         }
 
         try {
+            if (in_array($action, ['up', 'start', 'restart', 'pull'], true)) {
+                (new AccountMapping($this->project))->ensureMapped();
+            }
             $this->refreshRunFileBefore($action);
 
             if ($action === 'pull') {

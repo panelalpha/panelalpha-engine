@@ -22,6 +22,9 @@ final class ShellOperations
 
     public const STEP_LABEL = 'panelalpha.step';
 
+    /** Root's Docker client config in the account, in the home; see {@see wrap()}. */
+    public const DOCKER_CONFIG_DIR = '.panelalpha-docker';
+
     /**
      * CPU, in `docker stats` percent (100 = one core), above which a silent
      * step counts as working. An idle DinD reads 0-2%; one rustc reads ~100.
@@ -87,11 +90,21 @@ final class ShellOperations
         if ($asUser) {
             $args[] = '-u';
             $args[] = $this->project->userModel()->getChownString();
+        } elseif (($cmd[0] ?? null) !== 'su') {
+            // Not /root: in an account sysbox started unmapped root cannot enter it, and the
+            // docker CLI then finds no compose plugin. The account user reads its own home.
+            $args[] = '-e';
+            $args[] = 'DOCKER_CONFIG=' . $this->dockerConfigDir();
         }
         $args[] = '-T';
         $args[] = 'dind';
 
         return [...$args, ...$cmd];
+    }
+
+    public function dockerConfigDir(): string
+    {
+        return rtrim($this->project->homeDirPath(), '/') . '/' . self::DOCKER_CONFIG_DIR;
     }
 
     /**

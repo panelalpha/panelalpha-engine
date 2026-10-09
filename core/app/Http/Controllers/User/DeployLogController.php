@@ -142,10 +142,10 @@ class DeployLogController extends Controller
 
         // Best-effort teardown of the half-started app stack. Cancelling a
         // deploy must never destroy the account itself — the same endpoint is
-        // used to cancel a rebuild of a live application. Rolling a *failed
-        // account creation* back is UserController's job, not this one's.
+        // used to cancel a rebuild of a live application, which keeps serving.
+        // Rolling a *failed account creation* back is UserController's job.
         try {
-            $user->project()->abortRunningDeploy();
+            $user->project()->cancelRunningDeploy();
         } catch (\Exception $e) {
             Log::warning("Deploy cancel cleanup failed for {$username}: {$e->getMessage()}");
         }

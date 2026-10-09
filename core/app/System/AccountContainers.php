@@ -31,6 +31,49 @@ final class AccountContainers
     }
 
     /**
+     * Running account containers, each with the runtime it runs under; only
+     * those Compose started from <projects dir>/<name>. Null when Docker could not be asked.
+     *
+     * @return ?array<string, string> container name => runtime
+     */
+    public function runningRuntimes(): ?array
+    {
+        $ps = $this->system->runProcess([
+            'sudo', 'docker', 'ps', '--filter', 'label=' . self::WORKING_DIR_LABEL, '--format', '{{.ID}}',
+        ], [], 30);
+        if (!$ps->isSuccessful()) {
+            return null;
+        }
+        $ids = array_values(array_filter(preg_split('/\s+/', trim($ps->getOutput())) ?: []));
+        if ($ids === []) {
+            return [];
+        }
+        $inspect = $this->system->runProcess([
+            'sudo', 'docker', 'inspect', '--format',
+            '{{.Name}}{{"\t"}}{{.HostConfig.Runtime}}{{"\t"}}{{index .Config.Labels "' . self::WORKING_DIR_LABEL . '"}}',
+            ...$ids,
+        ], [], 30);
+        // A container gone between the two calls fails inspect but still prints the others.
+        if (!$inspect->isSuccessful() && trim($inspect->getOutput()) === '') {
+            return null;
+        }
+
+        $running = [];
+        foreach (preg_split('/\R/', trim($inspect->getOutput())) ?: [] as $line) {
+            $fields = explode("\t", $line);
+            if (count($fields) !== 3) {
+                continue;
+            }
+            $name = ltrim($fields[0], '/');
+            if ($name !== '' && $fields[2] === $this->system->projectDirPath($name)) {
+                $running[$name] = $fields[1];
+            }
+        }
+
+        return $running;
+    }
+
+    /**
      * Account containers no project owns, left by a create or delete that did
      * not finish. Reported for the operator; never removed here.
      *

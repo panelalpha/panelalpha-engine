@@ -18,6 +18,19 @@ final class OuterLifecycle
 
     public function up(): void
     {
+        $this->composeUp();
+        // Starting a container sysbox forgot (it was restarted meanwhile) leaves its image unmapped.
+        (new AccountMapping($this->project))->ensureMapped();
+    }
+
+    /** A new account container in place of the old one; {@see AccountMapping}. */
+    public function recreate(): void
+    {
+        $this->composeUp('--force-recreate');
+    }
+
+    private function composeUp(string ...$flags): void
+    {
         $this->prepareTenantNetwork();
         $path = $this->project->composeFilePath();
         $this->project->system()->exec([
@@ -29,6 +42,7 @@ final class OuterLifecycle
             'up',
             '-d',
             '--remove-orphans',
+            ...$flags,
         ]);
         // A port is bound to its container's address only once the
         // container exists, and until then the bridge drops its frames.

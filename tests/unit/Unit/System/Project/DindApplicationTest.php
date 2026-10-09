@@ -98,6 +98,8 @@ class DindApplicationTest extends TestCase
                 '-f',
                 $outerCompose,
                 'exec',
+                '-e',
+                'DOCKER_CONFIG=' . $this->homeRoot . '/alice/.panelalpha-docker',
                 '-T',
                 'dind',
                 'echo',

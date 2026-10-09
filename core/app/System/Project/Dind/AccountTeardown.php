@@ -5,6 +5,7 @@ namespace App\System\Project\Dind;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Dind\DindAccountCleanup;
 use App\System\Project\Dind as DindProject;
+use App\System\Project\Dind\Generation\RoutingSnapshot;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -46,6 +47,21 @@ final class AccountTeardown
         }
 
         $this->purgeHostDockerCache($sidecarRefs);
+    }
+
+    /**
+     * A cancelled deploy. A redeploy that found its app running (it noted it,
+     * {@see RoutingSnapshot}) leaves it serving: the deploy's own settle puts
+     * back what it moved and drops the second generation. Only a deploy with
+     * nothing live behind it has its half-started stack taken down.
+     */
+    public function cancelRunningDeploy(): void
+    {
+        if ((new RoutingSnapshot($this->project))->entry() !== null) {
+            return;
+        }
+        // The account's dockerd stays: stopping it took every app down with it.
+        $this->abortRunningDeploy(stopInnerDocker: false);
     }
 
     /**

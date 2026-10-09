@@ -94,6 +94,11 @@ class DindDaemonWaitTest extends TestCase
                 return 'test';
             }
 
+            public function homeDirPath(): string
+            {
+                return '/home/test';
+            }
+
             public function userModel(): ModelsUser
             {
                 throw new \LogicException('the probe must not run as a user');
