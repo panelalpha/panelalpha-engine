@@ -27,7 +27,7 @@ The installer checks the operating system and refuses anything else. It does not
 ## 1. Run the installer
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 A few minutes later the engine is running. It prints its addresses and a command to connect your assistant. Want a name of your own, or a VPS the internet cannot reach by IP? Read [Troubleshooting](#troubleshooting) before you install.
@@ -39,7 +39,7 @@ You can install the engine and put an application from a git repository online i
 Pass flags after `sh -s --` so they reach the installer:
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh -s -- \
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- \
   --repo https://github.com/n8n-io/n8n
 ```
 
@@ -157,14 +157,14 @@ On a VPS with a public IPv4 address, the engine gets a trusted certificate by it
 Install with it and you skip the self-signed step entirely. Set the DNS record up before you install, or the certificate request will fail.
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh -s -- --domain panel.example.com
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --domain panel.example.com
 ```
 
 **My VPS has no public IPv4 address.**
 This covers offices, home connections, some cloud providers, and a VPS with only an IPv6 address. Point a name at the VPS, then tell the installer that the address on its network card is not how the world reaches it. The `--domain` part is what gets you a real certificate.
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh -s -- --domain panel.example.com --no-local-ip --enable-nat
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --domain panel.example.com --no-local-ip --enable-nat
 ```
 
 **I want a real certificate on an engine that is already self-signed.**

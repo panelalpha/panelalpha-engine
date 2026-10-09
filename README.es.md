@@ -96,7 +96,7 @@ Necesitas un servidor **nuevo** con Debian 12/13 o Ubuntu 22.04/24.04/26.04, con
 Por ejemplo, si quieres instalar Engine y desplegar n8n a la vez, esto es todo lo que necesitas:
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
 ```
 
 Al terminar, muestra la dirección de tu nuevo sitio y, si no pasas `--no-password`, la contraseña que lo abre. Para repositorios privados, una contraseña propia o una aplicación en un servidor que ya tiene Engine, consulta: [One-line app installation command](docs/02-getting-started/install.md#one-line-app-installation-command).
@@ -104,7 +104,7 @@ Al terminar, muestra la dirección de tu nuevo sitio y, si no pasas `--no-passwo
 ¿Prefieres hacer los dos pasos por separado? Usa el comando de abajo para instalar solo Engine y despliega tu aplicación más tarde desde tu asistente (mira el paso 2):
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 Ya está. Tu servidor está listo. Para un nombre propio, tu propio certificado TLS o un servidor detrás de NAT, consulta: [opciones de instalación](docs/02-getting-started/install.md).
@@ -319,7 +319,7 @@ Envía un informe de error y él reúne las pruebas solo. Pídeselo a tu asisten
 ## Tu servidor está a un comando
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 ## Seguridad

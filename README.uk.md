@@ -96,7 +96,7 @@ PanelAlpha Engine - це програмне забезпечення, яке в�
 Наприклад, щоб встановити Engine і водночас розгорнути n8n, потрібно лише це:
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
 ```
 
 Наприкінці він виведе адресу вашого нового сайту і, якщо ви не вказали `--no-password`, пароль, який його відкриває. Про приватні репозиторії, власний пароль або запуск застосунку на сервері, де Engine вже є, див.: [One-line app installation command](docs/02-getting-started/install.md#one-line-app-installation-command).
@@ -104,7 +104,7 @@ curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.co
 Хочете виконати ці два кроки окремо? Скористайтеся командою нижче, щоб встановити лише Engine, а застосунок розгорніть пізніше через свого асистента (див. крок 2):
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 Це все. Сервер готовий. Про власну назву, власний сертифікат TLS чи сервер за NAT див.: [опції встановлення](docs/02-getting-started/install.md).
@@ -319,7 +319,7 @@ PanelAlpha Engine безкоштовний і з відкритим кодом �
 ## Ваш сервер на відстані однієї команди
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 ## Безпека

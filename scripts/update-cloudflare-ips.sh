@@ -18,9 +18,9 @@ cleanup() {
 trap cleanup EXIT
 
 {
-    curl -fsSL https://www.cloudflare.com/ips-v4
+    curl --proto '=https' -fsSL https://www.cloudflare.com/ips-v4
     echo
-    curl -fsSL https://www.cloudflare.com/ips-v6
+    curl --proto '=https' -fsSL https://www.cloudflare.com/ips-v6
 } > "$TMP_IPS"
 
 {

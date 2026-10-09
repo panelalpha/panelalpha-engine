@@ -96,7 +96,7 @@ Il vous faut un serveur **neuf** sous Debian 12/13 ou Ubuntu 22.04/24.04/26.04, 
 Par exemple, pour installer Engine et déployer n8n en même temps, c'est tout ce qu'il vous faut :
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
 ```
 
 À la fin, il affiche l'adresse de votre nouveau site et, si vous n'avez pas passé `--no-password`, le mot de passe qui l'ouvre. Pour les dépôts privés, un mot de passe de votre choix ou une application sur un serveur où Engine est déjà installé, voir : [One-line app installation command](docs/02-getting-started/install.md#one-line-app-installation-command).
@@ -104,7 +104,7 @@ curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.co
 Vous préférez faire les deux étapes séparément ? Utilisez la commande ci-dessous pour installer seulement Engine, puis déployez votre application plus tard depuis votre assistant (voir l'étape 2) :
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 C'est tout. Votre serveur est prêt. Pour un nom à vous, votre propre certificat TLS ou un serveur derrière du NAT, voir : [options d'installation](docs/02-getting-started/install.md).
@@ -319,7 +319,7 @@ Pas vraiment Discord ? [Notre forum](https://community.panelalpha.com/) est tout
 ## Votre serveur est à une commande
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 ## Sécurité

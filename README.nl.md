@@ -96,7 +96,7 @@ Je hebt een **verse** server nodig met Debian 12/13 of Ubuntu 22.04/24.04/26.04,
 Wil je bijvoorbeeld Engine installeren en tegelijk n8n deployen, dan is dit alles wat je nodig hebt:
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
 ```
 
 Aan het einde toont hij het adres van je nieuwe site en, als je `--no-password` niet meegeeft, het wachtwoord waarmee je die opent. Voor privérepository's, een eigen wachtwoord of een applicatie op een server waar Engine al op staat, zie: [One-line app installation command](docs/02-getting-started/install.md#one-line-app-installation-command).
@@ -104,7 +104,7 @@ Aan het einde toont hij het adres van je nieuwe site en, als je `--no-password` 
 Liever de twee stappen los? Gebruik het commando hieronder om alleen Engine te installeren en deploy je applicatie later via je assistent (zie stap 2):
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 Dat is alles. Je server is klaar. Voor een eigen naam, je eigen TLS-certificaat of een server achter NAT, zie: [installatie-opties](docs/02-getting-started/install.md).
@@ -319,7 +319,7 @@ Niet zo van Discord? [Ons forum](https://community.panelalpha.com/) is net zo op
 ## Je server is één commando verwijderd
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 ## Beveiliging

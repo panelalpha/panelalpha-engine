@@ -121,7 +121,7 @@ if ! command -v docker >/dev/null; then
     export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
     apt-get install -y ca-certificates curl gnupg
     mkdir -m 0755 -p /etc/apt/keyrings
-    curl --http1.1 -fsSL "https://download.docker.com/linux/${ID}/gpg" |
+    curl --proto '=https' --http1.1 -fsSL "https://download.docker.com/linux/${ID}/gpg" |
         gpg --dearmor -o /etc/apt/keyrings/docker.gpg --yes
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/${ID} ${VERSION_CODENAME:-} stable" \
         >/etc/apt/sources.list.d/docker.list

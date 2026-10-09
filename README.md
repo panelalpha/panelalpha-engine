@@ -96,7 +96,7 @@ You need a **fresh** server running Debian 12/13 or Ubuntu 22.04/24.04/26.04, wi
 For example, if you want to install the engine and deploy n8n at the same time, this is all you need:
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
 ```
 
 When it finishes, it prints the address of your new site and, unless you pass `--no-password`, the password that opens it. For private repositories, your own password, or running an app on a server that already has the engine, see: [One-line app installation command](docs/02-getting-started/install.md#one-line-app-installation-command).
@@ -104,7 +104,7 @@ When it finishes, it prints the address of your new site and, unless you pass `-
 Prefer to do the two steps separately? Use the command below to install only the engine, and deploy your application later from your assistant (see Step 2):
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 That is it. Your server is ready. For custom name, your own TLS certificate, or a server behind NAT, see: [Install options](docs/02-getting-started/install.md).
@@ -319,7 +319,7 @@ Not really into Discord? [Our forum](https://community.panelalpha.com/) is just 
 ## Your server is one command away
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 ## Security

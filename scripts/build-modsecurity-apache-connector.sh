@@ -29,7 +29,7 @@ docker run --rm \
         apt-get -y install wget git build-essential libapr1-dev libaprutil1-dev libpcre3-dev libtool
 
         cd /tmp
-        wget "https://dlcdn.apache.org/httpd/httpd-${APACHE_VERSION}.tar.gz"
+        wget --https-only --max-redirect=0 "https://dlcdn.apache.org/httpd/httpd-${APACHE_VERSION}.tar.gz"
         tar xzf httpd-${APACHE_VERSION}.tar.gz
         cd httpd-${APACHE_VERSION}
         ./configure

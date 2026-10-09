@@ -96,7 +96,7 @@ AI 已经把软件创造从旧的限制里解放出来。更多人能把想法�
 例如，想同时安装 Engine 并部署 n8n，只需这一条：
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
 ```
 
 完成后，它会显示新网站的地址；如果你没有传 `--no-password`，还会显示打开网站用的密码。私有仓库、自定义密码，或在已经装有 Engine 的服务器上运行应用，请参阅：[One-line app installation command](docs/02-getting-started/install.md#one-line-app-installation-command)。
@@ -104,7 +104,7 @@ curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.co
 想把这两步分开做？用下面的命令只安装 Engine，稍后再通过你的助手部署应用（见第 2 步）：
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 就这样，服务器已经就绪。如需自定义名称、自备 TLS 证书，或服务器在 NAT 后面，请参阅：[安装选项](docs/02-getting-started/install.md)。
@@ -319,7 +319,7 @@ PanelAlpha Engine 是免费开源的，采用 Apache 2.0 许可证。你付的�
 ## 你的服务器只差一条命令
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 ## 安全

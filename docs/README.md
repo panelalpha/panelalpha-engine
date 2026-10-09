@@ -43,7 +43,7 @@ You need a **fresh** VPS and `root` access over SSH. Full requirements and optio
 For example, if you want to install the engine and deploy n8n at the same time, this is all you need:
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
 ```
 
 When it finishes, it prints the address of your new site and, unless you pass `--no-password`, the password that opens it. For private repositories, your own password, or running an app on a server that already has the engine, see: [One-line app installation command](02-getting-started/install.md#one-line-app-installation-command).
@@ -53,7 +53,7 @@ When it finishes, it prints the address of your new site and, unless you pass `-
 Prefer to do the two steps separately? Use the command below to install only the engine, and deploy your application later from your assistant (see step 3):
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 A few minutes later the engine is running and prints its addresses and a command to connect your assistant. Want a custom name, your own TLS, or a VPS behind NAT? Read [Install](02-getting-started/install.md) first.

@@ -98,7 +98,7 @@ PanelAlpha Engine برنامج تثبّته على خادم VPS لاستضافة
 مثلاً، لتثبيت Engine ونشر n8n في الوقت نفسه، هذا كل ما تحتاجه:
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
 ```
 
 في النهاية يعرض عنوان موقعك الجديد، وإذا لم تمرّر `--no-password` فيعرض أيضاً كلمة المرور التي تفتحه. للمستودعات الخاصة، أو كلمة مرور من اختيارك، أو تشغيل تطبيق على خادم عليه Engine أصلاً، راجع: [One-line app installation command](docs/02-getting-started/install.md#one-line-app-installation-command).
@@ -106,7 +106,7 @@ curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.co
 تفضّل تنفيذ الخطوتين منفصلتين؟ استخدم الأمر أدناه لتثبيت Engine فقط، وانشر تطبيقك لاحقاً من خلال مساعدك (انظر الخطوة 2):
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 هذا كل شيء. خادمك جاهز. لاسم خاص، أو شهادة TLS خاصة بك، أو خادم خلف NAT، راجع: [خيارات التثبيت](docs/02-getting-started/install.md).
@@ -321,7 +321,7 @@ PanelAlpha Engine مجاني ومفتوح المصدر برخصة Apache 2.0. أ
 ## خادمك على بعد أمر واحد
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 ## الأمان
