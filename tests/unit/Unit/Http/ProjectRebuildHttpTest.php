@@ -14,6 +14,7 @@ use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Lib\Project\ProjectRebuild;
 use App\Models\Setting;
+use App\Models\SecretVaultEntry;
 use App\Models\Task;
 use App\Models\User;
 use Illuminate\Contracts\Debug\ExceptionHandler;
@@ -118,6 +119,32 @@ class ProjectRebuildHttpTest extends TestCase
             && $job->zipPath === '/project/app.zip');
         // The archive stays where the client put it, for the worker to read.
         $this->assertFileExists($this->home . '/project/app.zip');
+    }
+
+    /**
+     * The archive deploy resolves a `vault:<id>` env value the way a rebuild
+     * does, storing the secret rather than the reference.
+     */
+    public function test_an_archive_deploy_resolves_a_vault_env_var(): void
+    {
+        $user = $this->dindUser();
+        /** @var SecretVaultEntry $entry */
+        $entry = SecretVaultEntry::create([
+            'ref_hash' => SecretVaultEntry::hashRef('ref' . bin2hex(random_bytes(6))),
+            'type' => SecretVaultEntry::TYPE_ENV_VARS,
+            'scope' => SecretVaultEntry::SCOPE_PROJECT,
+            'project' => $user->username,
+        ]);
+        $entry->setSecret('s3cret');
+        $entry->save();
+
+        $response = $this->postJson("/api/projects/{$user->username}/deploy-archive", [
+            'zip_path' => '/project/app.zip',
+            'env_vars' => ['TOKEN' => SecretVaultEntry::PREFIX . $entry->id],
+        ]);
+
+        $this->assertSame(202, $response->getStatusCode(), (string) $response->getContent());
+        $this->assertSame(['KEEP' => 'yes', 'TOKEN' => 's3cret'], $user->refresh()->getEnvVars());
     }
 
     public function test_an_archive_that_is_not_there_is_a_422_and_queues_nothing(): void

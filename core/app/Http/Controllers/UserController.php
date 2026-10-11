@@ -936,7 +936,10 @@ class UserController extends Controller
         $rebuild->assertArchive($user, $params['zip_path']);
         $stream = $this->wantsDeployStream($request);
         $envVars = array_key_exists('env_vars', $params)
-            ? static fn (): array => EnvVarOverrides::applyIncoming($params['env_vars'] ?? null, $user->getEnvVars())
+            ? static fn (): array => EnvVarOverrides::applyIncoming(
+                is_array($params['env_vars'] ?? null) ? RequestVault::get('env_vars', $user->username) : null,
+                $user->getEnvVars()
+            )
             : null;
 
         return $rebuild->whileIdle($user, fn () => $this->startRedeploy(
