@@ -190,6 +190,8 @@ $projectRoutes = function (): void {
 
     Route::get('/{username}/sftp-accounts', [SftpAccountController::class, 'index']);
     Route::post('/{username}/sftp-accounts', [SftpAccountController::class, 'store']);
+    Route::post('/{username}/sftp-accounts/kill-sessions', [SftpAccountController::class, 'killSessionsAll']);
+    Route::post('/{username}/sftp-accounts/{sftpUser}/kill-sessions', [SftpAccountController::class, 'killSessions']);
     Route::put('/{username}/sftp-accounts/{sftpUser}', [SftpAccountController::class, 'update']);
     Route::delete('/{username}/sftp-accounts/{sftpUser}', [SftpAccountController::class, 'destroy']);
 

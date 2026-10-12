@@ -11,6 +11,7 @@ use App\System;
 use App\Models\SftpAccount;
 use App\Models\User;
 use Symfony\Component\HttpFoundation\JsonResponse;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
@@ -199,17 +200,96 @@ class SftpAccountController extends Controller
             new OA\Response(response: 404, description: 'Not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
-    public function destroy(string $username, string $sftpUsername): SftpAccountResource
+    public function destroy(string $username, string $sftpUsername, System $system): SftpAccountResource
     {
         $user = $this->projectOr404($username);
 
         $sftpAccount = $this->accountOr404($user, $sftpUsername);
 
+        $this->endSessions($system, $sftpAccount->username);
+
         $sftpAccount->delete();
 
-        (new System())->sftp()->rebuildSftpAccounts();
+        $system->sftp()->rebuildSftpAccounts();
 
         return new SftpAccountResource($sftpAccount);
+    }
+
+    #[OA\Post(
+        path: '/projects/{username}/sftp-accounts/{sftpUser}/kill-sessions',
+        summary: 'End the open SFTP sessions of one account',
+        description: 'Works for any project that has SFTP accounts, classic or container. Only the named account is '
+            . 'affected: the project\'s other accounts share its Linux uid, so killing by uid would end their '
+            . 'sessions too. A project or account that does not exist is a 404; an account with no open session '
+            . 'answers 0, so the call is safe to repeat.',
+        security: [['bearerAuth' => []]],
+        tags: ['SFTP Accounts'],
+        parameters: [
+            new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'sftpUser', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Sessions ended', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', type: 'object', properties: [
+                    new OA\Property(property: 'killed', type: 'integer', example: 2, description: 'How many sessions were open when the call arrived.'),
+                ])],
+            )),
+            new OA\Response(response: 404, description: 'Project or account not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+        ],
+    )]
+    public function killSessions(string $username, string $sftpUsername, System $system): JsonResponse
+    {
+        $user = $this->projectOr404($username);
+
+        $sftpAccount = $this->accountOr404($user, $sftpUsername);
+
+        return new JsonResponse([
+            'data' => ['killed' => $system->sftp()->killSessions([$sftpAccount->username])],
+        ]);
+    }
+
+    #[OA\Post(
+        path: '/projects/{username}/sftp-accounts/kill-sessions',
+        summary: 'End every open SFTP session of a project',
+        description: 'Works for any project that has SFTP accounts, classic or container. Ends the sessions of '
+            . 'every account of the project and answers how many were open; a project with no SFTP account or no '
+            . 'open session answers 0.',
+        security: [['bearerAuth' => []]],
+        tags: ['SFTP Accounts'],
+        parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
+        responses: [
+            new OA\Response(response: 200, description: 'Sessions ended', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', type: 'object', properties: [
+                    new OA\Property(property: 'killed', type: 'integer', example: 3, description: 'How many sessions were open when the call arrived.'),
+                ])],
+            )),
+            new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+        ],
+    )]
+    public function killSessionsAll(string $username, System $system): JsonResponse
+    {
+        $user = $this->projectOr404($username);
+
+        $logins = array_map(
+            static fn (SftpAccount $account): string => $account->username,
+            $user->getSftpAccounts(),
+        );
+
+        return new JsonResponse([
+            'data' => ['killed' => $system->sftp()->killSessions($logins)],
+        ]);
+    }
+
+    /**
+     * Best-effort: a host whose sftp container is down must still delete the account.
+     */
+    private function endSessions(System $system, string $login): void
+    {
+        try {
+            $system->sftp()->killSessions([$login]);
+        } catch (\Throwable $e) {
+            Log::warning("SFTP session kill failed for {$login}: " . $e->getMessage());
+        }
     }
 
     private function accountOr404(User $user, string $sftpUsername): SftpAccount

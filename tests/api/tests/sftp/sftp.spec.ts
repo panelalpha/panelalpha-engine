@@ -1,7 +1,16 @@
 import { expect, test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
-import { formatSftpAuthState, normalizeSftpAuth, waitForSftpLogin } from '@/helpers/sftp-helpers';
+import {
+  formatSftpAuthState,
+  normalizeSftpAuth,
+  type SftpCredentials,
+  type SftpSession,
+  waitForOpenSftpSession,
+  waitForSftpLogin,
+  waitForSftpSessionClosed,
+} from '@/helpers/sftp-helpers';
 import { requireEngineConnectHost } from '@/helpers/engine-host';
+import type { HostExec } from '@/helpers/host-exec';
 import { rand } from '@/helpers/random';
 import { waitForCondition } from '@/helpers/retry';
 import { expectStatus } from '@/helpers/expect-status';
@@ -300,5 +309,162 @@ test.describe('SFTP validation', () => {
     } finally {
       await api.updateUser(setupUser.username, { sftp_accounts_limit: null });
     }
+  });
+});
+
+/** The credentials the SFTP daemon accepts for one account. */
+function sftpCredentials(
+  host: string,
+  port: number,
+  account: { username: string; password: string }
+): SftpCredentials {
+  return { host, port, username: account.username, password: account.password };
+}
+
+/** The running sftp container, as the host's compose labels name it. */
+async function sftpContainer(hostExec: HostExec): Promise<string | null> {
+  const { exitCode, stdout } = await hostExec.run('docker', [
+    'ps',
+    '--filter',
+    'label=com.docker.compose.service=sftp',
+    '--format',
+    '{{.Names}}',
+  ]);
+  const name = stdout.trim().split('\n')[0]?.trim();
+  return exitCode === 0 && name ? name : null;
+}
+
+test.describe('SFTP session kill', () => {
+  test('kill-sessions ends only the named account sessions', async ({
+    api,
+    ftpFactory,
+    settings,
+    userFactory,
+  }) => {
+    const timeout = pollTimeout(settings);
+    const user = await userFactory.createSimpleUser();
+    const host = await requireEngineConnectHost(api);
+    const port = settings.ports.sftp;
+    const accountA = await ftpFactory.createSftpAccountWithPassword(user.username);
+    const accountB = await ftpFactory.createSftpAccountWithPassword(user.username);
+    const sessions: SftpSession[] = [];
+
+    try {
+      sessions.push(
+        await waitForOpenSftpSession(sftpCredentials(host, port, accountA), { timeout })
+      );
+      sessions.push(
+        await waitForOpenSftpSession(sftpCredentials(host, port, accountA), { timeout })
+      );
+      sessions.push(
+        await waitForOpenSftpSession(sftpCredentials(host, port, accountB), { timeout })
+      );
+
+      const ended = await api.killSftpSessions(user.username, accountA.username);
+      expect(ended.data.killed, 'both sessions of the named account were open').toBe(2);
+
+      await waitForSftpSessionClosed(sessions[0], { timeout });
+      await waitForSftpSessionClosed(sessions[1], { timeout });
+      expect(
+        Array.isArray(await sessions[2].list()),
+        "the other account's session is still open"
+      ).toBe(true);
+
+      const repeated = await api.killSftpSessions(user.username, accountA.username);
+      expect(repeated.data.killed, 'a session already ended is not counted again').toBe(0);
+    } finally {
+      await Promise.all(sessions.map((session) => session.close()));
+    }
+  });
+
+  test('the project-wide call ends every session of the project', async ({
+    api,
+    ftpFactory,
+    settings,
+    userFactory,
+  }) => {
+    const timeout = pollTimeout(settings);
+    const user = await userFactory.createSimpleUser();
+    const host = await requireEngineConnectHost(api);
+    const port = settings.ports.sftp;
+    const accountA = await ftpFactory.createSftpAccountWithPassword(user.username);
+    const accountB = await ftpFactory.createSftpAccountWithPassword(user.username);
+    const sessions: SftpSession[] = [];
+
+    try {
+      sessions.push(
+        await waitForOpenSftpSession(sftpCredentials(host, port, accountA), { timeout })
+      );
+      sessions.push(
+        await waitForOpenSftpSession(sftpCredentials(host, port, accountA), { timeout })
+      );
+      sessions.push(
+        await waitForOpenSftpSession(sftpCredentials(host, port, accountB), { timeout })
+      );
+
+      const ended = await api.killAllSftpSessions(user.username);
+      expect(ended.data.killed, 'every open session of the project is counted').toBe(3);
+
+      await Promise.all(sessions.map((session) => waitForSftpSessionClosed(session, { timeout })));
+    } finally {
+      await Promise.all(sessions.map((session) => session.close()));
+    }
+  });
+
+  test('deleting an account ends its session and removes the login', async ({
+    api,
+    ftpFactory,
+    settings,
+    userFactory,
+    hostExec,
+  }) => {
+    test.skip(!hostExec, 'pae-artisan is not reachable from this runner.');
+    const exec = hostExec!;
+    const container = await sftpContainer(exec);
+    test.skip(!container, 'the sftp container was not found on the engine host.');
+    const containerName = container!;
+
+    const timeout = pollTimeout(settings);
+    const user = await userFactory.createSimpleUser();
+    const host = await requireEngineConnectHost(api);
+    const account = await ftpFactory.createSftpAccountWithPassword(user.username);
+    const session = await waitForOpenSftpSession(
+      sftpCredentials(host, settings.ports.sftp, account),
+      { timeout }
+    );
+
+    try {
+      await api.deleteSftpAccount(user.username, account.username);
+
+      await waitForSftpSessionClosed(session, { timeout });
+      await waitForCondition(
+        async () =>
+          (await exec.run('docker', ['exec', containerName, 'id', account.username])).exitCode !==
+          0,
+        {
+          timeout,
+          interval: 500,
+          message: `${account.username} still exists in the sftp container`,
+        }
+      );
+    } finally {
+      await session.close();
+    }
+  });
+
+  test('kill-sessions on an unknown account or project is a 404', async ({
+    authedRequest,
+    setupUser,
+  }) => {
+    await expectStatus(
+      await authedRequest.post(
+        `projects/${setupUser.username}/sftp-accounts/nonexistent_xyz/kill-sessions`
+      ),
+      404
+    );
+    await expectStatus(
+      await authedRequest.post('projects/nonexistent_xyz/sftp-accounts/kill-sessions'),
+      404
+    );
   });
 });

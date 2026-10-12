@@ -127,6 +127,8 @@ return [
     'POST /projects/{username}/sftp-accounts' => 'sftp_account_create',
     'PUT /projects/{username}/sftp-accounts/{sftpUser}' => 'sftp_account_update',
     'DELETE /projects/{username}/sftp-accounts/{sftpUser}' => 'sftp_account_delete',
+    'POST /projects/{username}/sftp-accounts/{sftpUser}/kill-sessions' => 'sftp_session_kill',
+    'POST /projects/{username}/sftp-accounts/kill-sessions' => 'sftp_session_kill_all',
 
     // MySQL. These "users" are MySQL accounts, not projects.
     'GET /projects/{username}/mysql/databases' => 'mysql_database_list',
