@@ -21,7 +21,7 @@ class UnprivilegedFileStreamWrapper extends FileStreamWrapper
     public static function uninstall(): void
     {
         stream_wrapper_unregister('sudophp');
-        FileStreamWrapper::confineTo(null);
+        FileStreamWrapper::confineTo(null, ['sudo']);
     }
 
     /** @return list<string> */

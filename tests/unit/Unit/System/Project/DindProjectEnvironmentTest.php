@@ -632,6 +632,37 @@ class DindProjectEnvironmentTest extends TestCase
         $this->assertSame('1', $env['ONLY_NESTED']);
     }
 
+    /**
+     * A new nested .env copy is 0644: an image that COPYs it and runs as a
+     * non-root user reads it there. One a hook made 0600 is never widened, and
+     * neither is the root .env a nested file adds to.
+     */
+    public function test_nested_env_copies_and_a_carried_root_env_are_never_widened(): void
+    {
+        mkdir($this->projectDir . '/server');
+        file_put_contents($this->projectDir . '/server/.env.example', "APP_NAME=Plainpad\nAPP_KEY={KEY}\n");
+
+        $this->dind($this->dindModel())->applyProjectEnvVars();
+        $this->assertSame('0644', $this->mode('server/.env'));
+
+        chmod($this->projectDir . '/server/.env', 0600);
+        $this->dind($this->dindModel())->applyProjectEnvVars();
+        $this->assertSame('0600', $this->mode('server/.env'));
+
+        // A root .env a hook made 0600 keeps it while a nested compose .env is carried in.
+        mkdir($this->projectDir . '/docker');
+        $compose = $this->projectDir . '/docker/docker-compose.yml';
+        file_put_contents($compose, "services:\n  api:\n    image: acme/api\n");
+        file_put_contents($this->projectDir . '/docker/.env', "ONLY_NESTED=1\n");
+        file_put_contents($this->projectDir . '/.env', "APP_NAME=Demo\n");
+        chmod($this->projectDir . '/.env', 0600);
+
+        $this->forcedEnvironment($this->dindModel(['deploy_strategy' => 'compose']), tracked: false)->apply($compose);
+
+        $this->assertSame('1', $this->vars((string) file_get_contents($this->projectDir . '/.env'))['ONLY_NESTED']);
+        $this->assertSame('0600', $this->mode('.env'));
+    }
+
     public function test_a_tracked_env_is_not_given_generated_values(): void
     {
         file_put_contents($this->projectDir . '/docker-compose.yml', "services:\n  db:\n    image: postgres:16\n    env_file: .env\n");

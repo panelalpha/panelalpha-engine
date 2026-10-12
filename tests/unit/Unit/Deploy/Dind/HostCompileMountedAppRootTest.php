@@ -55,6 +55,21 @@ class HostCompileMountedAppRootTest extends TestCase
         $this->appDir('escape');
     }
 
+    /** Swapped by another process, as the account would: PHP's own rmdir would clear the cache. */
+    public function test_a_subtree_swapped_for_a_link_out_is_refused_in_the_same_process(): void
+    {
+        $this->assertSame($this->dir . '/project/web', $this->appDir('web'));
+
+        exec('rmdir ' . escapeshellarg($this->dir . '/project/web') . ' && ln -s ' . escapeshellarg($this->dir . '/outside') . ' ' . escapeshellarg($this->dir . '/project/web'));
+
+        try {
+            $this->expectExceptionMessage("app_root 'web' is not a directory inside the project");
+            $this->appDir('web');
+        } finally {
+            @unlink($this->dir . '/project/web');
+        }
+    }
+
     public function test_a_missing_subtree_is_refused(): void
     {
         $this->expectExceptionMessage('is not a directory inside the project');

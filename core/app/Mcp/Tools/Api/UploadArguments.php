@@ -2,8 +2,10 @@
 
 namespace App\Mcp\Tools\Api;
 
+use App\Lib\Http\BoundedDownload;
+use App\Lib\Http\OutboundUrl;
+use Illuminate\Http\Client\Response;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Http;
 use InvalidArgumentException;
 use RuntimeException;
 
@@ -21,7 +23,7 @@ use RuntimeException;
 final class UploadArguments
 {
     /** Largest download accepted from a URL, in bytes. */
-    public const MAX_URL_BYTES = 2147483648;
+    public const MAX_URL_BYTES = OutboundUrl::MAX_DOWNLOAD_BYTES;
 
     /**
      * The tool arguments that stand in for one binary property.
@@ -80,38 +82,53 @@ final class UploadArguments
                 throw new InvalidArgumentException("Pass exactly one of {$param}_contents or {$param}_url.");
             }
 
-            $tmp = tempnam(sys_get_temp_dir(), 'pa-mcp-upload-');
-            if ($tmp === false) {
-                throw new RuntimeException('Could not create a temporary file for the upload.');
-            }
-
-            try {
-                if ($url !== null) {
-                    self::assertFetchable($url);
-                    $name ??= self::nameFromUrl($url);
-                    ($fetch ?? self::download(...))($url, $tmp);
-                } else {
-                    $bytes = match ($encoding) {
-                        'text' => $contents,
-                        'base64' => base64_decode($contents, true),
-                        default => throw new InvalidArgumentException("{$param}_encoding must be base64 or text."),
-                    };
-                    if ($bytes === false) {
-                        throw new InvalidArgumentException("{$param}_contents is not valid base64; pass {$param}_encoding: text for plain text.");
-                    }
-                    if (file_put_contents($tmp, $bytes) === false) {
-                        throw new RuntimeException('Could not write the upload to a temporary file.');
-                    }
-                }
-
-                $files[$param] = new UploadedFile($tmp, self::validName($param, $name), null, null, true);
-            } catch (\Throwable $e) {
-                @unlink($tmp);
-                throw $e;
-            }
+            $files[$param] = self::uploadedFile($param, $name, $contents, $encoding, $url, $fetch);
         }
 
         return [$input, $files];
+    }
+
+    /**
+     * The upload in a temporary file, removed again when anything about it fails.
+     *
+     * @param null|callable(string, string): void $fetch
+     */
+    private static function uploadedFile(string $param, ?string $name, ?string $contents, string $encoding, ?string $url, ?callable $fetch): UploadedFile
+    {
+        $tmp = tempnam(sys_get_temp_dir(), 'pa-mcp-upload-');
+        if ($tmp === false) {
+            throw new RuntimeException('Could not create a temporary file for the upload.');
+        }
+
+        try {
+            if ($url !== null) {
+                OutboundUrl::assertAllowed($url);
+                $name ??= self::nameFromUrl($url);
+                ($fetch ?? self::download(...))($url, $tmp);
+            } else {
+                self::writeContents($param, (string) $contents, $encoding, $tmp);
+            }
+
+            return new UploadedFile($tmp, self::validName($param, $name), null, null, true);
+        } catch (\Throwable $e) {
+            @unlink($tmp);
+            throw $e;
+        }
+    }
+
+    private static function writeContents(string $param, string $contents, string $encoding, string $into): void
+    {
+        $bytes = match ($encoding) {
+            'text' => $contents,
+            'base64' => base64_decode($contents, true),
+            default => throw new InvalidArgumentException("{$param}_encoding must be base64 or text."),
+        };
+        if ($bytes === false) {
+            throw new InvalidArgumentException("{$param}_contents is not valid base64; pass {$param}_encoding: text for plain text.");
+        }
+        if (file_put_contents($into, $bytes) === false) {
+            throw new RuntimeException('Could not write the upload to a temporary file.');
+        }
     }
 
     /**
@@ -127,28 +144,50 @@ final class UploadArguments
         }
     }
 
+    /** Redirects are followed by hand so every hop passes the outbound guard. */
     private static function download(string $url, string $into): void
     {
-        $response = Http::timeout(600)
-            ->withOptions(['sink' => $into, 'allow_redirects' => ['max' => 5]])
-            ->get($url);
+        $current = $url;
+        $bounded = new BoundedDownload(self::MAX_URL_BYTES);
 
+        for ($hop = 0; $hop <= OutboundUrl::MAX_REDIRECTS; $hop++) {
+            OutboundUrl::assertAllowed($current);
+
+            $response = $bounded->fetch($current, $into, OutboundUrl::pin($current));
+
+            if ($response->redirect()) {
+                $current = self::redirectTarget($current, $response);
+
+                continue;
+            }
+
+            self::assertDownloaded($response, $current, $into);
+
+            return;
+        }
+
+        throw new RuntimeException("Downloading {$url} followed more than " . OutboundUrl::MAX_REDIRECTS . ' redirects.');
+    }
+
+    private static function redirectTarget(string $current, Response $response): string
+    {
+        $location = (string) $response->header('Location');
+        if ($location === '') {
+            throw new RuntimeException("Downloading {$current} answered HTTP {$response->status()} with no Location.");
+        }
+
+        return OutboundUrl::absoluteUrl($current, $location);
+    }
+
+    private static function assertDownloaded(Response $response, string $current, string $into): void
+    {
         if (!$response->successful()) {
-            throw new RuntimeException("Downloading {$url} answered HTTP {$response->status()}.");
+            throw new RuntimeException("Downloading {$current} answered HTTP {$response->status()}.");
         }
 
         clearstatcache(true, $into);
         if ((int) filesize($into) > self::MAX_URL_BYTES) {
-            throw new InvalidArgumentException("The file at {$url} is larger than the " . (self::MAX_URL_BYTES / 1048576) . " MB limit.");
-        }
-    }
-
-    private static function assertFetchable(string $url): void
-    {
-        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
-        $host = (string) parse_url($url, PHP_URL_HOST);
-        if (!in_array($scheme, ['http', 'https'], true) || $host === '') {
-            throw new InvalidArgumentException('The URL must be http:// or https:// with a host.');
+            throw new InvalidArgumentException("The file at {$current} is larger than the " . (self::MAX_URL_BYTES / 1048576) . " MB limit.");
         }
     }
 

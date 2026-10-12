@@ -74,13 +74,36 @@ class CoreNginxClientAddressTest extends TestCase
         $api = $this->server($this->directives($this->file('config/core/nginx.conf')), 'listen 2011 ssl;');
 
         $this->assertMatchesRegularExpression(
-            '#location ~\* \^/api/mysql/phpmyadmin-sso-token \{\s*default_type application/json;\s*return 404 #',
+            '#location ~\* \^\(/index\\\\\.php\)\?/api/mysql/phpmyadmin-sso-token \{\s*default_type application/json;\s*return 404 #',
             $api
         );
         $this->assertTrue(
             (bool) preg_match('#^/api/mysql/phpmyadmin-sso-token#i', '/API/mysql/phpmyadmin-sso-token/'),
             'the refusal must not be dodged by case or a trailing slash'
         );
+        // Laravel routes /index.php/api/... as /api/...
+        $this->assertTrue((bool) preg_match('#^(/index\.php)?/api/mysql/phpmyadmin-sso-token#i', '/index.php/api/mysql/phpmyadmin-sso-token'));
+    }
+
+    /**
+     * engine#850: the internal site-password endpoints are unauthenticated by
+     * design (nginx-proxy calls them on core's internal :80). On :2011 they
+     * would be reachable from the internet, where `check` is an unthrottled
+     * bcrypt password oracle. The whole internal surface is refused there.
+     */
+    public function test_the_api_port_refuses_the_internal_site_password_routes(): void
+    {
+        $api = $this->server($this->directives($this->file('config/core/nginx.conf')), 'listen 2011 ssl;');
+
+        $this->assertMatchesRegularExpression(
+            '#location ~ \^\(/index\\\\\.php\)\?/api/internal/ \{\s*default_type application/json;\s*return 404 #',
+            $api
+        );
+        // Laravel routes /index.php/api/internal/... to the same endpoint, so
+        // the refusal has to cover that prefix as well as the bare path.
+        foreach (['/api/internal/site-password/x/check', '/index.php/api/internal/site-password/x/check'] as $uri) {
+            $this->assertTrue((bool) preg_match('#^(/index\.php)?/api/internal/#', $uri), $uri);
+        }
     }
 
     public function test_the_entrypoint_writes_the_gateway_both_realip_and_the_map_read(): void

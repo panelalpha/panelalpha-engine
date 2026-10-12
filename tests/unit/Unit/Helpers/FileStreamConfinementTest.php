@@ -78,6 +78,14 @@ class FileStreamConfinementTest extends TestCase
         $this->assertSame(1, $code);
     }
 
+    /** Leaving out who reads must not mean root. */
+    public function test_confining_names_who_the_helper_runs_as(): void
+    {
+        $runAs = (new \ReflectionMethod(FileStreamWrapper::class, 'confineTo'))->getParameters()[1];
+
+        $this->assertFalse($runAs->isOptional());
+    }
+
     public function test_is_unconfined_without_a_root(): void
     {
         [$code, $out] = $this->open($this->dir . '/home/acme/shadow-link', root: null);
@@ -91,7 +99,7 @@ class FileStreamConfinementTest extends TestCase
     {
         $root = $this->dir . '/home/acme';
         UnprivilegedFileStreamWrapper::install();
-        FileStreamWrapper::confineTo($root);
+        FileStreamWrapper::confineTo($root, []);
         clearstatcache();
 
         try {

@@ -287,7 +287,8 @@ class FileAndSshCommandsTest extends TestCase
     {
         $this->setEnv('SHIM_EXIT', '1');
         $this->assertFails(NotFoundException::class, "File 'a.txt' not found in project 'clidemo'.\n", 'project:file:download', ['project' => self::USER, '--path' => 'a.txt']);
-        $this->assertSame([['test', '-f', $this->home() . '/a.txt']], $this->calls());
+        // The home check runs first; failing here, it is "no file" as well.
+        $this->assertSame([$this->confined('F:' . $this->home() . '/a.txt')], $this->calls());
     }
 
     public function test_download_rejects_a_path_that_climbs_out_of_the_home(): void
@@ -418,12 +419,10 @@ class FileAndSshCommandsTest extends TestCase
         ]);
     }
 
-    public function test_domain_log_list_without_a_log_dir_is_left_to_artisan_to_report(): void
+    public function test_domain_log_list_without_a_log_dir_is_empty(): void
     {
         $this->needsMissingLogDir();
-        $this->expectException(\ErrorException::class);
-        $this->expectExceptionMessage('scandir(' . EnginePaths::ENGINE_DIR . '/webserver-logs/nginx/' . self::DOMAIN . ')');
-        $this->run_('project:domain:log', ['project' => self::USER, 'domain' => self::DOMAIN]);
+        $this->assertRun(0, json_encode(['data' => []]), 'project:domain:log', ['project' => self::USER, 'domain' => self::DOMAIN]);
     }
 
     public function test_domain_log_lists_and_downloads(): void

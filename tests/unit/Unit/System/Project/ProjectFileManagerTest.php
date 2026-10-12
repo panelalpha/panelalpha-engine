@@ -15,6 +15,9 @@ class ProjectFileManagerTest extends TestCase
 {
     private string $homeDir;
 
+    /** @var list<list<string>> every command the project ran */
+    private array $commands = [];
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -25,6 +28,7 @@ class ProjectFileManagerTest extends TestCase
     protected function tearDown(): void
     {
         $this->removeTree($this->homeDir);
+        $this->removeTree($this->homeDir . '.outside');
         parent::tearDown();
     }
 
@@ -221,6 +225,77 @@ class ProjectFileManagerTest extends TestCase
         $this->assertSame([], glob($this->homeDir . '/.unzip-stage/*') ?: [], 'the staged copy is removed');
     }
 
+    /** Root read what the home check, run as the account, could not see: an archive in ~/docker. */
+    public function test_unzip_reads_the_archive_as_the_account(): void
+    {
+        $this->requireCommand('zip');
+        $this->requireCommand('unzip');
+        $files = $this->fileManager();
+        mkdir($this->homeDir . '/src');
+        file_put_contents($this->homeDir . '/src/note.txt', 'restored');
+        $files->zip('bundle.zip', 'src', true);
+        mkdir($this->homeDir . '/out');
+        $this->commands = [];
+
+        $files->unzip('bundle.zip', 'out');
+
+        $this->assertSame('restored', file_get_contents($this->homeDir . '/out/src/note.txt'));
+        $reads = array_filter($this->commands, fn (array $argv): bool => in_array($this->homeDir . '/bundle.zip', $argv, true));
+        $this->assertNotSame([], $reads);
+        foreach ($reads as $argv) {
+            $this->assertSame(['sudo', 'setpriv'], array_slice($argv, 0, 2), 'read as root: ' . implode(' ', $argv));
+        }
+    }
+
+    /** A link already in the destination took a member outside the home: unzip and tar write through it. */
+    public function test_unzip_refuses_a_member_below_a_link_out_of_the_destination(): void
+    {
+        $this->requireCommand('zip');
+        $this->requireCommand('unzip');
+        $this->requireCommand('tar');
+        $files = $this->fileManager();
+        $outside = $this->homeDir . '.outside';
+        mkdir($outside);
+        mkdir($this->homeDir . '/src/evil', 0777, true);
+        file_put_contents($this->homeDir . '/src/evil/x.txt', 'escaped');
+        file_put_contents($this->homeDir . '/note', 'escaped');
+        $files->zip('bundle.zip', 'src/evil', true);
+        exec('tar -czf ' . escapeshellarg($this->homeDir . '/bundle.tar.gz') . ' -C ' . escapeshellarg($this->homeDir . '/src') . ' evil');
+        exec('gzip -k ' . escapeshellarg($this->homeDir . '/note'));
+        mkdir($this->homeDir . '/out');
+        symlink($outside, $this->homeDir . '/out/evil');
+        symlink($outside . '/note', $this->homeDir . '/out/note');
+
+        foreach (['bundle.zip', 'bundle.tar.gz', 'note.gz'] as $archive) {
+            try {
+                $files->unzip($archive, 'out');
+                $this->fail("{$archive} was extracted through the link");
+            } catch (\Exception $e) {
+                $this->assertStringContainsString('resolves outside the project home', $e->getMessage(), $archive);
+            }
+        }
+        $this->assertSame([], array_values(array_diff(scandir($outside), ['.', '..'])));
+    }
+
+    /** The deploy's archive rules, here too: a link member pointing out of the archive. */
+    public function test_unzip_refuses_an_archive_a_deploy_would_refuse(): void
+    {
+        $this->requireCommand('tar');
+        $files = $this->fileManager();
+        mkdir($this->homeDir . '/src');
+        symlink('/etc', $this->homeDir . '/src/etc');
+        exec('tar -czf ' . escapeshellarg($this->homeDir . '/links.tar.gz') . ' -C ' . escapeshellarg($this->homeDir . '/src') . ' etc');
+        mkdir($this->homeDir . '/out');
+
+        try {
+            $files->unzip('links.tar.gz', 'out');
+            $this->fail('an archive with a link out of it was extracted');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('zip_path', $e->errors());
+        }
+        $this->assertFalse(is_link($this->homeDir . '/out/etc'));
+    }
+
     public function test_move_directory_contents_moves_children_only(): void
     {
         $files = $this->fileManager();
@@ -254,7 +329,7 @@ class ProjectFileManagerTest extends TestCase
 
     public function test_fetch_stores_an_http_url_and_rejects_other_schemes(): void
     {
-        $files = $this->fileManager();
+        $files = $this->fileManager(allowLocalFixtureServer: true);
         $web = $this->homeDir . '/web';
         mkdir($web);
         mkdir($this->homeDir . '/inbox');
@@ -283,6 +358,47 @@ class ProjectFileManagerTest extends TestCase
             $this->fail('A URL with no file name must be rejected');
         } catch (\Exception $e) {
             $this->assertStringContainsString('filename', $e->getMessage());
+        }
+    }
+
+    /** With or without a Content-Length, past the limit is refused, and an existing file is left as it was. */
+    public function test_fetch_refuses_a_file_past_the_limit_and_leaves_nothing_behind(): void
+    {
+        $files = $this->fileManager(allowLocalFixtureServer: true, fetchMaxBytes: 1024);
+        $web = $this->homeDir . '/web';
+        mkdir($web);
+        mkdir($this->homeDir . '/inbox');
+        file_put_contents($web . '/big.bin', str_repeat('x', 64 * 1024));
+        file_put_contents($web . '/stream.php', '<?php for ($i = 0; $i < 64; $i++) { echo str_repeat("x", 1024); flush(); }');
+        file_put_contents($this->homeDir . '/inbox/big.bin', 'kept');
+        [$server, $port] = $this->serve($web);
+
+        try {
+            foreach (['big.bin', 'stream.php'] as $name) {
+                try {
+                    $files->fetch('http://127.0.0.1:' . $port . '/' . $name, 'inbox');
+                    $this->fail("{$name} past the limit was stored");
+                } catch (\Exception $e) {
+                    $this->assertStringContainsString('MB limit', $e->getMessage(), $name);
+                }
+            }
+        } finally {
+            $server->stop();
+        }
+
+        $this->assertSame(['big.bin'], array_values(array_diff(scandir($this->homeDir . '/inbox'), ['.', '..'])));
+        $this->assertSame('kept', file_get_contents($this->homeDir . '/inbox/big.bin'));
+    }
+
+    public function test_a_path_that_escapes_the_home_is_refused_under_path(): void
+    {
+        $files = $this->fileManager();
+
+        try {
+            $files->resolvePath('../escape');
+            $this->fail('a path that escapes the home must be refused');
+        } catch (ValidationException $e) {
+            $this->assertSame(['Invalid path'], $e->errors()['path']);
         }
     }
 
@@ -347,23 +463,46 @@ class ProjectFileManagerTest extends TestCase
     {
         $model = new ModelsUser();
         $model->username = $username;
-        $model->setDetails(['template' => 'dind', 'deploy_strategy' => 'php']);
+        $model->setDetails(['template' => 'dind', 'deploy_strategy' => 'php', 'UID' => 1001, 'GID' => 1001]);
 
         return $model;
     }
 
-    private function fileManager(): FileManager
+    private function fileManager(bool $allowLocalFixtureServer = false, int $fetchMaxBytes = FileManager::MAX_FETCH_BYTES): FileManager
     {
-        return new FileManager(
+        if (!$allowLocalFixtureServer) {
+            return new FileManager(
+                new Project($this->systemWithDirectFilesystem(), $this->userModel('alice')),
+                $this->homeDir . '/.unzip-stage'
+            );
+        }
+
+        // The fixture server binds 127.0.0.1, which the outbound guard refuses
+        // in production (engine#785). Bypass it only for tests that exercise
+        // the fetch *mechanics* (destinations, names, redirects).
+        return new class (
             new Project($this->systemWithDirectFilesystem(), $this->userModel('alice')),
-            $this->homeDir . '/.unzip-stage'
-        );
+            $this->homeDir . '/.unzip-stage',
+            fetchMaxBytes: $fetchMaxBytes,
+        ) extends FileManager {
+            protected function assertOutboundAllowed(string $url): void
+            {
+            }
+
+            protected function outboundPin(string $url): ?string
+            {
+                return null;
+            }
+        };
     }
 
     private function systemWithDirectFilesystem(): System
     {
-        return new class ($this->homeDir) extends System {
-            public function __construct(private string $homeRoot)
+        $commands = &$this->commands;
+
+        return new class ($this->homeDir, $commands) extends System {
+            /** @param list<list<string>> $commands */
+            public function __construct(private string $homeRoot, private array &$commands)
             {
             }
 
@@ -408,11 +547,16 @@ class ProjectFileManagerTest extends TestCase
                     throw new \RuntimeException('Project file operations must not enter the project service container');
                 }
 
+                $this->commands[] = $cmd;
                 $argv = $cmd;
                 if (($argv[0] ?? '') === 'sudo' && ($argv[1] ?? '') === 'setpriv') {
                     $argv = array_slice($argv, 7);
                 } elseif (($argv[0] ?? '') === 'sudo') {
                     $argv = array_slice($argv, 1);
+                }
+                if (($argv[0] ?? '') === 'chown') {
+                    // Root's handover of the stage: the test need not run as root.
+                    $argv = ['true'];
                 }
                 $cwd = null;
                 if (($argv[0] ?? '') === 'env' && is_string($argv[1] ?? null) && str_starts_with($argv[1], '--chdir=')) {
@@ -486,16 +630,7 @@ class ProjectFileManagerTest extends TestCase
 
     private function removeTree(string $path): void
     {
-        if (!is_dir($path)) {
-            return;
-        }
-        $items = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
-        );
-        foreach ($items as $item) {
-            $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());
-        }
-        rmdir($path);
+        // rm, not a PHP walk: that follows a link to a directory, and these tests plant links to /etc.
+        exec('rm -rf ' . escapeshellarg($path));
     }
 }

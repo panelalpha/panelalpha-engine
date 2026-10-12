@@ -2,11 +2,14 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\ResolvesVaultFields;
 use App\Rules\SshPublicKey;
 use Illuminate\Foundation\Http\FormRequest;
 
 class SftpAccountStoreRequest extends FormRequest
 {
+    use ResolvesVaultFields;
+
     /**
      * Accept `sftp_username` as an alias for `username`.
      *
@@ -22,12 +25,13 @@ class SftpAccountStoreRequest extends FormRequest
         if (!$this->has('username') && $this->has('sftp_username')) {
             $this->merge(['username' => $this->input('sftp_username')]);
         }
+        $this->resolveVaultFields(['password']);
     }
 
     public function rules(): array
     {
         return [
-            'username' => 'string|required|max:32|regex:/^[a-zA-Z0-9_]+$/',
+            'username' => 'string|required|max:32|regex:/^[a-zA-Z0-9_]+$/D',
             'auth_method' => 'string|required',
             'password' => 'string|nullable|min:8|max:255',
             'public_key' => ['string', 'nullable', 'max:4096', new SshPublicKey()],

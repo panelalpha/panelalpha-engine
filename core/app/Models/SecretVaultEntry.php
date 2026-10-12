@@ -112,9 +112,9 @@ class SecretVaultEntry extends Model
         'verification'    => 'array',
     ];
 
+    /** `use_count` mirrors the column default, so a freshly created entry does not serialise null. */
     protected $attributes = [
         'scope' => self::SCOPE_PROJECT,
-        // The column default, so a freshly created entry does not serialise null.
         'use_count' => 0,
     ];
 
@@ -128,18 +128,10 @@ class SecretVaultEntry extends Model
     }
 
     /**
-     * Markdown help rendered on the paste form, for this entry's type.
+     * Markdown help for the paste form: `resources/vault/<type>.md`, or
+     * `resources/vault/default.md` for a type without one.
      *
-     * The type is whatever field the caller passed at create time -- it is
-     * not a closed list, and the help is found by convention: a file named
-     * `resources/vault/<type>.md` describes that type; anything without one
-     * gets `resources/vault/default.md`. A typo'd or unknown type therefore
-     * renders the generic page rather than breaking, and adding help for a
-     * new type is dropping a file in -- no code, no allowlist.
-     *
-     * @return string rendered HTML. From a file on this server, rendered by
-     *         CommonMark with raw HTML disabled, so nothing here can script
-     *         the paste page.
+     * @return string rendered HTML, with raw HTML disabled so nothing here can script the paste page
      */
     public static function help(string $type): string
     {
@@ -190,14 +182,8 @@ class SecretVaultEntry extends Model
     }
 
     /**
-     * A secret has been pasted, and is therefore final.
-     *
-     * Nothing overwrites a stored secret -- not a second visit to the form,
-     * not a re-mint. Replacing one means deleting the entry and creating
-     * another, which is a decision somebody has to take deliberately rather
-     * than something a re-opened link can do quietly. It also keeps
-     * `use_count` and `last_used_at` meaning one secret instead of however
-     * many happened to pass through this row.
+     * A secret has been pasted, and is therefore final: replacing one means
+     * deleting the entry and creating another, never a re-opened link.
      */
     public function isSealed(): bool
     {
@@ -239,6 +225,27 @@ class SecretVaultEntry extends Model
     {
         $this->secret_encrypted = Crypt::encryptString($secret);
         $this->filled_at = Carbon::now();
+    }
+
+    /**
+     * The form's write: false when the row was sealed meanwhile. Two posts of
+     * one link can both pass isSealed(), so only the first update may land.
+     *
+     * @param ?array<string, string> $verification
+     */
+    public function seal(string $secret, ?array $verification): bool
+    {
+        $this->setSecret($secret);
+        $this->verification = $verification;
+
+        $claimed = self::query()->whereKey($this->getKey())->whereNull('filled_at')->update($this->getDirty());
+        if ($claimed !== 1) {
+            $this->discardChanges();
+            return false;
+        }
+
+        $this->syncOriginal();
+        return true;
     }
 
     /**

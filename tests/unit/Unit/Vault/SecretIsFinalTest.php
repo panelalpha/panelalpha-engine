@@ -3,6 +3,9 @@
 namespace Tests\Unit\Vault;
 
 use App\Http\Controllers\SecretVaultController;
+use App\Lib\Deploy\Source\GitProbeResult;
+use App\Lib\Deploy\Source\GitRemoteProbe;
+use App\Lib\Vault\PasteCheck;
 use App\Models\SecretVaultEntry;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -71,6 +74,37 @@ class SecretIsFinalTest extends VaultTestCase
         $this->post('/vault/' . $ref, ['secret' => 'the-only-value'])->assertOk();
 
         $this->assertSame('the-only-value', $entry->refresh()->revealSecret());
+    }
+
+    public function test_a_paste_that_lost_the_race_does_not_overwrite_the_winner(): void
+    {
+        [$entry, $ref] = $this->entry(['verify_with' => ['repo_url' => 'https://github.com/acme/shop.git']]);
+
+        // The other post of the same link lands while this one is being checked.
+        $this->app->instance(PasteCheck::class, new PasteCheck(new class ($entry->id) extends GitRemoteProbe {
+            public function __construct(private int $id)
+            {
+                parent::__construct();
+            }
+
+            public function check(string $repoField, string $repoUrl, ?string $token, string $tokenField = 'git_token'): GitProbeResult
+            {
+                if ($token === null) {
+                    return GitProbeResult::refused(['field' => $repoField, 'code' => 'x', 'message' => 'private']);
+                }
+                $winner = SecretVaultEntry::query()->findOrFail($this->id);
+                $winner->setSecret('ghp_' . str_repeat('w', 36));
+                $winner->save();
+
+                return GitProbeResult::verified();
+            }
+        }));
+
+        $response = $this->post('/vault/' . $ref, ['secret' => 'ghp_' . str_repeat('l', 36)]);
+
+        $response->assertSee('This secret is already set');
+        $this->assertSame('ghp_' . str_repeat('w', 36), $entry->refresh()->revealSecret());
+        $this->assertNull($entry->verification);
     }
 
     public function test_minting_another_global_of_a_type_leaves_the_stored_one_alone(): void

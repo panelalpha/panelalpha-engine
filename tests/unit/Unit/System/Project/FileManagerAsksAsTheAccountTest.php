@@ -150,6 +150,21 @@ class FileManagerAsksAsTheAccountTest extends TestCase
         $this->assertSame(array_fill(0, 8, 'confine'), $this->ran(), 'nothing was asked past the home check');
     }
 
+    /** isFile() is public: a link out of the home is "no file", and nothing is asked past the home check. */
+    public function test_is_file_does_not_answer_for_a_link_out_of_the_home(): void
+    {
+        $outside = $this->homeDir . '.outside';
+        mkdir($outside);
+        file_put_contents($outside . '/theirs.txt', 'x');
+        symlink($outside . '/theirs.txt', $this->homeDir . '/theirs');
+        file_put_contents($this->homeDir . '/own.txt', 'x');
+        $files = $this->files();
+
+        $this->assertFalse($files->isFile('theirs'));
+        $this->assertTrue($files->isFile('own.txt'));
+        $this->assertSame(['confine', 'confine', 'test'], $this->ran());
+    }
+
     public function test_stat_and_exists_inside_the_home_are_unchanged(): void
     {
         mkdir($this->homeDir . '/real');

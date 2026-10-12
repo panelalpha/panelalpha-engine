@@ -2,10 +2,20 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\ResolvesVaultFields;
+use App\Http\Requests\Concerns\ValidatesMysqlName;
 use Illuminate\Foundation\Http\FormRequest;
 
 class MysqlUserStoreRequest extends FormRequest
 {
+    use ResolvesVaultFields;
+    use ValidatesMysqlName;
+
+    protected function prepareForValidation(): void
+    {
+        $this->resolveVaultFields(['password']);
+    }
+
     /**
      * Determine if the user is authorized to make this request.
      *
@@ -24,7 +34,7 @@ class MysqlUserStoreRequest extends FormRequest
     public function rules()
     {
         return [
-            'name' => 'string|required|regex:/^[A-Za-z_-][A-Za-z0-9_-]*$/|min:1|max:32',
+            'name' => $this->mysqlNameRule(32),
             'password' => [
                 'string',
                 'required',
@@ -42,8 +52,7 @@ class MysqlUserStoreRequest extends FormRequest
     public function messages()
     {
         return [
-            'name.max' => 'MySQL user name cannot exceed 32 characters (MySQL limit).',
-            'name.regex' => 'MySQL user name must start with a letter or underscore and can only contain letters, numbers, and underscores.',
+            ...$this->mysqlNameMessages('MySQL user name', 32),
             'password.min' => 'Password must be at least 8 characters long.',
         ];
     }

@@ -48,6 +48,89 @@ class FilesystemSafeWriteTest extends TestCase
         $this->assertSame('echo hi', file_get_contents($path));
     }
 
+    /**
+     * engine#844: a failing sudo step (`cp`, `chown`, `chmod`) left the staged
+     * temporary file in core's /tmp, holding a copy of the content -- often a
+     * secret (.env, exim credentials, a certificate).
+     */
+    public function test_a_failed_file_put_contents_removes_the_staged_temp_file(): void
+    {
+        $staged = null;
+        $filesystem = new class (new LocalHostSystem($this->dir, $this->dir), $staged) extends Filesystem {
+            public function __construct(ProcessRunner $system, private mixed &$staged)
+            {
+                parent::__construct($system);
+            }
+
+            public function copyFile(string $source, string $target, ?string $chown = null, ?string $chmod = null): void
+            {
+                // As a failing `sudo cp`/`chown` does after the temp file is staged.
+                $this->staged = $source;
+
+                throw new \RuntimeException('sudo step failed');
+            }
+        };
+
+        try {
+            $filesystem->filePutContents($this->dir . '/secret.env', 'SECRET=1', 'someone:someone');
+            $this->fail('copyFile should have thrown');
+        } catch (\Throwable) {
+        }
+
+        $this->assertNotNull($staged, 'the content was never staged');
+        $this->assertFileDoesNotExist($staged, 'the staged temp file holding the secret was left behind');
+    }
+
+    /** The same for the staged copy of an in-place overwrite, when its `sudo cp` fails. */
+    public function test_a_failed_overwrite_removes_the_staged_temp_file(): void
+    {
+        $runner = new class implements ProcessRunner {
+            public ?string $staged = null;
+
+            public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
+            {
+                $this->staged = is_array($cmd) ? (string) ($cmd[2] ?? '') : null;
+
+                throw new \RuntimeException('sudo cp failed');
+            }
+
+            public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
+            {
+                return '';
+            }
+
+            public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                return new Process(['false']);
+            }
+
+            public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                return new Process(['true']);
+            }
+
+            public function runProcessWithCallbacks(
+                string|array $cmd,
+                array $env = [],
+                int $timeout = 600,
+                ?callable $onStart = null,
+                ?callable $onOutput = null,
+                ?StepWatchdog $watchdog = null
+            ): Process {
+                return new Process(['true']);
+            }
+        };
+
+        try {
+            (new Filesystem($runner))->overwriteFileUnlessSymlink($this->dir . '/secret.env', 'SECRET=1');
+            $this->fail('the failed sudo cp should have thrown');
+        } catch (\RuntimeException) {
+        }
+
+        $this->assertNotEmpty($runner->staged, 'the content was never staged');
+        $this->assertFileDoesNotExist($runner->staged, 'the staged temp file holding the secret was left behind');
+    }
+
     public function test_a_symlink_at_the_target_is_replaced_not_followed(): void
     {
         $outside = $this->dir . '/../outside-' . bin2hex(random_bytes(4));
@@ -126,7 +209,7 @@ class FilesystemSafeWriteTest extends TestCase
                 return '';
             }
 
-            public function execOnHost(string|array $cmd, array $env = []): string
+            public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 return '';
             }

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\User;
 
 use App\Http\Controllers\Controller;
 use App\Lib\Helpers\SafeRedirect;
+use App\Lib\Vault\RequestVault;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AppManager;
 use App\Models\AppSsoToken;
@@ -25,26 +26,39 @@ class AppUserController extends Controller
     {
         $user = $this->projectOr404($username);
         if ($user->getTemplate() !== 'dind') {
-            abort(new JsonResponse(['message' => 'App user management is only available for dind users'], 403));
+            $this->refuseNonContainerProject();
         }
 
         $runtime = $user->project()->runtime();
         if (!$runtime instanceof Dind) {
-            abort(new JsonResponse(['message' => 'App user management is only available for dind users'], 403));
+            $this->refuseNonContainerProject();
         }
 
         return $runtime->apps();
     }
 
+    private function refuseNonContainerProject(): never
+    {
+        abort(new JsonResponse(['message' => 'App user management works only on container projects (template dind).'], 403));
+    }
+
     /**
-     * appManager() aborts with its own status and message (e.g. "only
-     * available for dind users") via Laravel's abort(Response) helper, which
-     * throws HttpResponseException -- a plain \Exception whose own
-     * getMessage() is empty, since the real message lives in the wrapped
-     * response, not the exception. Catching it as a generic \Exception and
-     * re-wrapping it in withMessages([$e->getMessage()]) silently replaced
-     * that deliberate response with an empty-message 422. Let it through
-     * unchanged; only a genuine app-layer failure becomes a validation error.
+     * Runs an app call, turning a genuine app-layer failure into a 422 on `app`.
+     *
+     * @param callable(): JsonResponse $call
+     */
+    private function callApp(callable $call): JsonResponse
+    {
+        try {
+            return $call();
+        } catch (\Exception $e) {
+            $this->rethrowAppException($e);
+        }
+    }
+
+    /**
+     * abort()'s HttpResponseException passes through with its own status and message, since
+     * its getMessage() is empty; any other failure becomes a validation error.
      *
      * @throws HttpResponseException
      * @throws ValidationException
@@ -75,12 +89,7 @@ class AppUserController extends Controller
     )]
     public function index(string $username): JsonResponse
     {
-        try {
-            $users = $this->appManager($username)->listUsers();
-            return new JsonResponse(['data' => $users]);
-        } catch (\Exception $e) {
-            $this->rethrowAppException($e);
-        }
+        return $this->callApp(fn () => new JsonResponse(['data' => $this->appManager($username)->listUsers()]));
     }
 
     #[OA\Post(
@@ -99,32 +108,39 @@ class AppUserController extends Controller
             ],
         )),
         responses: [
-            new OA\Response(response: 201, description: 'App user created', content: new OA\JsonContent(ref: '#/components/schemas/AppUser')),
+            new OA\Response(response: 201, description: 'App user created; the app assigns the id, returned as a string', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', ref: '#/components/schemas/AppUser')],
+            )),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function store(string $username, Request $request): JsonResponse
     {
-        // TODO email address may be not supported (e.g. umami app)
+        self::resolveVaultField($request, 'password', $username);
         /** @var array{login: string, email: string, password: string, role: string} $validated */
-        $validated = $request->validate([
+        $validated = $request->validate(self::newUserRules());
+
+        return $this->callApp(fn () => new JsonResponse(['data' => $this->appManager($username)->addUser(
+            $validated['login'],
+            $validated['email'],
+            $validated['password'],
+            $validated['role'],
+        )], 201));
+    }
+
+    /**
+     * TODO: an email address may not be supported by every app (e.g. umami).
+     *
+     * @return array<string, list<string>>
+     */
+    private static function newUserRules(): array
+    {
+        return [
             'login'    => ['required', 'string'],
             'email'    => ['required', 'email'],
             'password' => ['required', 'string', 'min:8'],
             'role'     => ['required', 'string'],
-        ]);
-
-        try {
-            $result = $this->appManager($username)->addUser(
-                $validated['login'],
-                $validated['email'],
-                $validated['password'],
-                $validated['role'],
-            );
-            return new JsonResponse(['data' => $result], 201);
-        } catch (\Exception $e) {
-            $this->rethrowAppException($e);
-        }
+        ];
     }
 
     #[OA\Delete(
@@ -143,12 +159,11 @@ class AppUserController extends Controller
     )]
     public function destroy(string $username, string $userId): JsonResponse
     {
-        try {
+        return $this->callApp(function () use ($username, $userId) {
             $this->appManager($username)->deleteUser($userId);
+
             return new JsonResponse(null, 204);
-        } catch (\Exception $e) {
-            $this->rethrowAppException($e);
-        }
+        });
     }
 
     #[OA\Put(
@@ -171,17 +186,17 @@ class AppUserController extends Controller
     )]
     public function resetPassword(string $username, string $userId, Request $request): JsonResponse
     {
+        self::resolveVaultField($request, 'password', $username);
         /** @var array{password: string} $validated */
         $validated = $request->validate([
             'password' => ['required', 'string', 'min:8'],
         ]);
 
-        try {
+        return $this->callApp(function () use ($username, $userId, $validated) {
             $this->appManager($username)->resetUserPassword($userId, $validated['password']);
+
             return new JsonResponse(null, 204);
-        } catch (\Exception $e) {
-            $this->rethrowAppException($e);
-        }
+        });
     }
 
     #[OA\Post(
@@ -202,59 +217,60 @@ class AppUserController extends Controller
     )]
     public function createSsoToken(string $username, string $userId): JsonResponse
     {
-        try {
-            $result = $this->appManager($username)->ssoCredentials($userId);
+        return $this->callApp(fn () => $this->ssoResponse($username, $this->appManager($username)->ssoCredentials($userId)));
+    }
 
-            // Pattern A – app handles SSO itself and returns a ready-to-use URL
-            // (e.g. WordPress: ?panelalpha_sso=<token> handled by the mu-plugin).
-            if (!empty($result['url'])) {
-                return new JsonResponse(['url' => $result['url']]);
-            }
-
-            // Pattern C – app returns a path (including query string) and the engine
-            // prepends the user's primary domain to form the full URL.
-            if (!empty($result['path'])) {
-                $userModel = User::findByUsername($username);
-                $domain    = $userModel?->getMainDomain();
-                if (!$domain) {
-                    throw new \Exception('No primary domain configured for this user');
-                }
-                $scheme = $domain->sslEnabled() ? 'https' : 'http';
-                $url    = "{$scheme}://{$domain->domain}{$result['path']}";
-                return new JsonResponse(['url' => $url]);
-            }
-
-            // Pattern B – app returns cookie credentials; the engine sets the
-            // cookie via /panelalpha-sso and redirects the browser into the app.
-            if (empty($result['cookie']) || empty($result['value'])) {
-                throw new \Exception('Invalid SSO response returned by app');
-            }
-
-            $userModel = User::findByUsername($username);
-            $domain    = $userModel?->getMainDomain();
-
-            if (!$domain) {
-                throw new \Exception('No primary domain configured for this user');
-            }
-
-            $scheme   = $domain->sslEnabled() ? 'https' : 'http';
-            $redirect = $result['redirect'] ?? '/';
-
-            $token = AppSsoToken::create([
-                'token'        => Str::random(48),
-                'username'     => $username,
-                'cookie_name'  => $result['cookie'],
-                'cookie_value' => $result['value'],
-                'redirect'     => $redirect,
-                'expires_at'   => now()->addSeconds(60),
-            ]);
-
-            $url = "{$scheme}://{$domain->domain}/panelalpha-sso?token={$token->token}";
-
-            return new JsonResponse(['url' => $url]);
-        } catch (\Exception $e) {
-            $this->rethrowAppException($e);
+    /**
+     * The sign-in URL for one of the three answers an app's SSO gives: a ready URL (the app handles
+     * SSO itself, e.g. WordPress's mu-plugin), a path on the project's primary domain, or cookie
+     * credentials the engine sets through /panelalpha-sso before redirecting into the app.
+     *
+     * @param array<string, mixed> $result
+     */
+    private function ssoResponse(string $username, array $result): JsonResponse
+    {
+        if (!empty($result['url'])) {
+            return new JsonResponse(['url' => $result['url']]);
         }
+
+        if (!empty($result['path'])) {
+            return new JsonResponse(['url' => $this->primaryDomainOrigin($username) . $result['path']]);
+        }
+
+        if (empty($result['cookie']) || empty($result['value'])) {
+            throw new \Exception('Invalid SSO response returned by app');
+        }
+
+        return new JsonResponse(['url' => $this->cookieHandoffUrl($username, $result)]);
+    }
+
+    /** @param array<string, mixed> $result */
+    private function cookieHandoffUrl(string $username, array $result): string
+    {
+        $origin = $this->primaryDomainOrigin($username);
+
+        $token = AppSsoToken::create([
+            'token'        => Str::random(48),
+            'username'     => $username,
+            'cookie_name'  => $result['cookie'],
+            'cookie_value' => $result['value'],
+            'redirect'     => $result['redirect'] ?? '/',
+            'expires_at'   => now()->addSeconds(60),
+        ]);
+
+        return "{$origin}/panelalpha-sso?token={$token->token}";
+    }
+
+    /** @throws \Exception when the project has no primary domain */
+    private function primaryDomainOrigin(string $username): string
+    {
+        $domain = User::findByUsername($username)?->getMainDomain();
+        if (!$domain) {
+            throw new \Exception('No primary domain configured for this user');
+        }
+        $scheme = $domain->sslEnabled() ? 'https' : 'http';
+
+        return "{$scheme}://{$domain->domain}";
     }
 
     #[OA\Get(
@@ -277,7 +293,6 @@ class AppUserController extends Controller
     {
         $tokenStr = (string) request()->query('token', '');
 
-        // Claimed atomically, so a replayed or concurrent request gets a 404.
         $record = AppSsoToken::redeem($tokenStr, $username);
 
         if (!$record) {
@@ -313,12 +328,7 @@ class AppUserController extends Controller
     )]
     public function info(string $username): JsonResponse
     {
-        try {
-            $caps = $this->appManager($username)->info();
-            return new JsonResponse(['data' => $caps]);
-        } catch (\Exception $e) {
-            $this->rethrowAppException($e);
-        }
+        return $this->callApp(fn () => new JsonResponse(['data' => $this->appManager($username)->info()]));
     }
 
     #[OA\Get(
@@ -335,12 +345,7 @@ class AppUserController extends Controller
     )]
     public function roles(string $username): JsonResponse
     {
-        try {
-            $roles = $this->appManager($username)->listRoles();
-            return new JsonResponse(['data' => $roles]);
-        } catch (\Exception $e) {
-            $this->rethrowAppException($e);
-        }
+        return $this->callApp(fn () => new JsonResponse(['data' => $this->appManager($username)->listRoles()]));
     }
 
     #[OA\Post(
@@ -366,6 +371,7 @@ class AppUserController extends Controller
     )]
     public function install(string $username, Request $request): JsonResponse
     {
+        self::resolveVaultField($request, 'admin_password', $username);
         /** @var array{url: string, title: string, admin_user: string, admin_email: string, admin_password: string} $validated */
         $validated = $request->validate([
             'url'            => ['required', 'url'],
@@ -375,7 +381,7 @@ class AppUserController extends Controller
             'admin_password' => ['required', 'string', 'min:8'],
         ]);
 
-        try {
+        return $this->callApp(function () use ($username, $validated) {
             $this->appManager($username)->install(
                 $validated['url'],
                 $validated['title'],
@@ -383,9 +389,16 @@ class AppUserController extends Controller
                 $validated['admin_email'],
                 $validated['admin_password'],
             );
+
             return new JsonResponse(null, 204);
-        } catch (\Exception $e) {
-            $this->rethrowAppException($e);
+        });
+    }
+
+    /** A `vault:<id>` read before validation, so the rules (min:8) see the secret. */
+    private static function resolveVaultField(Request $request, string $field, string $username): void
+    {
+        if ($request->has($field)) {
+            $request->merge([$field => RequestVault::resolve($field, $request->input($field), $username)]);
         }
     }
 }

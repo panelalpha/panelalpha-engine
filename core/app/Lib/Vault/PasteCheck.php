@@ -8,6 +8,7 @@ use App\Lib\Deploy\Source\GitProbeResult;
 use App\Lib\Deploy\Source\GitRemoteProbe;
 use App\Lib\Deploy\Source\GitRepoInput;
 use App\Lib\Deploy\Source\GitTokenInput;
+use App\Lib\Deploy\Source\RepositoryAddress;
 use App\Models\SecretVaultEntry;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
@@ -77,6 +78,8 @@ final class PasteCheck
     }
 
     /**
+     * The repository is held to the rule project_create applies to git_repo when a token comes with it.
+     *
      * @param array<string, mixed> $verifyWith
      * @return array<string, string>
      */
@@ -89,7 +92,6 @@ final class PasteCheck
             ]);
         }
 
-        // The rule project_create applies to git_repo when a token comes with it.
         $problem = GitRepoInput::problem('verify_with.repo_url', $repo, true);
         if ($problem !== null) {
             throw ValidationException::withMessages([$problem['field'] => $problem['message']]);
@@ -132,13 +134,17 @@ final class PasteCheck
         };
     }
 
-    /** @return array{rejected: ?string, verification: ?array<string, string>} */
+    /**
+     * The shape check is project_create's GitAccessToken rule; the address check matters
+     * because the probe runs from core, whose network reaches the metadata service.
+     *
+     * @return array{rejected: ?string, verification: ?array<string, string>}
+     */
     private function runGit(SecretVaultEntry $entry, string $secret): array
     {
-        // What project_create's GitAccessToken rule checks on a token sent inline.
         $shape = GitTokenInput::problem('secret', $secret);
         if ($shape !== null) {
-            return ['rejected' => $shape['message'], 'verification' => null];
+            return self::rejected($shape['message']);
         }
 
         $repo = $entry->verify_with['repo_url'] ?? null;
@@ -146,21 +152,36 @@ final class PasteCheck
             return ['rejected' => null, 'verification' => null];
         }
 
-        $result = $this->probe->check('repo_url', $repo, GitTokenInput::normalise($secret), 'secret');
-
-        if ($result->outcome === GitProbeResult::REFUSED) {
-            return ['rejected' => (string) ($result->problem['message'] ?? 'The repository refused this token.'),
-                'verification' => null];
+        $address = RepositoryAddress::problem($repo, 'verify_with.repo_url');
+        if ($address !== null) {
+            return self::rejected((string) $address['message']);
         }
 
-        // A public repository answers without asking for credentials, so its
-        // answer says nothing about the token.
+        $result = $this->probe->check('repo_url', $repo, GitTokenInput::normalise($secret), 'secret');
+        if ($result->outcome === GitProbeResult::REFUSED) {
+            return self::rejected((string) ($result->problem['message'] ?? 'The repository refused this token.'));
+        }
+
+        return ['rejected' => null, 'verification' => self::gitVerification($this->tokenProof($result, $repo), $repo)];
+    }
+
+    /**
+     * A public repository answers without asking for credentials, so its answer says nothing about the token.
+     */
+    private function tokenProof(GitProbeResult $result, string $repo): GitProbeResult
+    {
         if ($result->outcome === GitProbeResult::VERIFIED
             && $this->probe->check('repo_url', $repo, null)->outcome === GitProbeResult::VERIFIED) {
-            $result = GitProbeResult::unchecked(['message' => 'This repository is public, so the token was not needed '
+            return GitProbeResult::unchecked(['message' => 'This repository is public, so the token was not needed '
                 . 'to read it and could not be tested.']);
         }
 
+        return $result;
+    }
+
+    /** @return array<string, string> */
+    private static function gitVerification(GitProbeResult $result, string $repo): array
+    {
         $verification = [
             'result' => $result->outcome,
             'target' => self::target($repo),
@@ -170,43 +191,22 @@ final class PasteCheck
             $verification['reason'] = (string) ($result->problem['message'] ?? 'The engine could not run the check.');
         }
 
-        return ['rejected' => null, 'verification' => $verification];
+        return $verification;
     }
 
-    /**
-     * The calls the tunnel setup makes, read-only: resolveAccount() is what
-     * setting a project's token runs, the tunnel list proves Cloudflare Tunnel
-     * access, and the zone lookup proves the hostname's zone is in reach.
-     *
-     * @return array{rejected: ?string, verification: ?array<string, string>}
-     */
+    /** @return array{rejected: ?string, verification: ?array<string, string>} */
     private function runCloudflare(SecretVaultEntry $entry, string $secret): array
     {
-        $secret = trim($secret);
         $host = $entry->verify_with['hostname'] ?? null;
-        $client = ($this->cloudflare)($secret);
+        $client = ($this->cloudflare)(trim($secret));
         $step = 'account';
 
         try {
-            $account = $client->resolveAccount();
-            $step = 'tunnels';
-            $client->findTunnelByName($account['id'], 'panelalpha-vault-check');
-            if (is_string($host)) {
-                $step = 'zone';
-                $zone = $client->findZoneForHostname($host);
-            }
+            [$account, $zone] = $this->walkTunnelSetup($client, $host, $step);
         } catch (ConnectionException $e) {
             return $this->cloudflareUnchecked($host, 'Cloudflare could not be reached from this engine.');
         } catch (CloudflareException $e) {
-            if (self::serverError($e)) {
-                return $this->cloudflareUnchecked($host, 'Cloudflare answered with a server error; try again later.');
-            }
-
-            return ['rejected' => match ($step) {
-                'tunnels' => 'This token cannot manage Cloudflare Tunnels. Give it Account > Cloudflare Tunnel > Edit. '
-                    . '(' . $e->getMessage() . ')',
-                default => $e->getMessage(),
-            }, 'verification' => null];
+            return $this->cloudflareFailure($e, $host, $step);
         }
 
         $target = 'Cloudflare account ' . ($account['name'] !== '' ? $account['name'] : $account['id']);
@@ -219,6 +219,46 @@ final class PasteCheck
             'target' => $target,
             'checked_at' => Carbon::now()->toIso8601String(),
         ]];
+    }
+
+    /**
+     * The tunnel setup's calls, read-only: the account a project's token resolves to, the tunnel
+     * list (Tunnel access) and the hostname's zone. $step names the call in flight when one throws.
+     *
+     * @return array{0: array<string, mixed>, 1: ?array<string, mixed>}
+     */
+    private function walkTunnelSetup(Cloudflare $client, mixed $host, string &$step): array
+    {
+        $account = $client->resolveAccount();
+        $step = 'tunnels';
+        $client->findTunnelByName($account['id'], 'panelalpha-vault-check');
+        if (!is_string($host)) {
+            return [$account, null];
+        }
+
+        $step = 'zone';
+
+        return [$account, $client->findZoneForHostname($host)];
+    }
+
+    /** @return array{rejected: ?string, verification: ?array<string, string>} */
+    private function cloudflareFailure(CloudflareException $e, mixed $host, string $step): array
+    {
+        if (self::serverError($e)) {
+            return $this->cloudflareUnchecked($host, 'Cloudflare answered with a server error; try again later.');
+        }
+
+        return self::rejected(match ($step) {
+            'tunnels' => 'This token cannot manage Cloudflare Tunnels. Give it Account > Cloudflare Tunnel > Edit. '
+                . '(' . $e->getMessage() . ')',
+            default => $e->getMessage(),
+        });
+    }
+
+    /** @return array{rejected: string, verification: null} */
+    private static function rejected(string $message): array
+    {
+        return ['rejected' => $message, 'verification' => null];
     }
 
     /** Cloudflare's own failure somewhere down the chain, not a verdict on the token. */

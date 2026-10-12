@@ -130,6 +130,54 @@ class UploadArgumentsTest extends TestCase
     }
 
     /**
+     * engine#785: a narrowed token must not read the metadata service or an
+     * internal endpoint. The refusal happens before any request is made.
+     *
+     * A resolver is substituted so the check does not depend on the test
+     * host's DNS: the container-internal names below resolve on a real
+     * install, not here.
+     *
+     * @return array<string, array{string, list<string>}>
+     */
+    public static function internalUrls(): array
+    {
+        return [
+            'cloud metadata' => ['http://169.254.169.254/latest/meta-data/iam/security-credentials/', []],
+            'cache registry' => ['http://panelalpha-cache-registry:5000/v2/_catalog', ['172.18.0.5']],
+            'loopback' => ['http://127.0.0.1/admin', []],
+            'private host' => ['http://10.0.0.7/', []],
+            'host docker internal' => ['http://host.docker.internal:2011/', ['172.17.0.1']],
+            'rebinding mix' => ['http://public.example.com/x', ['93.184.216.34', '127.0.0.1']],
+        ];
+    }
+
+    /**
+     * @param list<string> $addresses
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('internalUrls')]
+    public function test_an_internal_url_is_refused_before_any_request(string $url, array $addresses): void
+    {
+        \App\Lib\Http\OutboundUrl::setResolverForTests(
+            static fn (string $host): array => $addresses,
+        );
+
+        $called = false;
+
+        try {
+            UploadArguments::resolve(['file_url' => $url], ['file'], function () use (&$called): void {
+                $called = true;
+            });
+            $this->fail('the internal URL was not refused');
+        } catch (InvalidArgumentException $e) {
+            $this->assertStringContainsString('private, loopback, link-local or reserved', $e->getMessage());
+        } finally {
+            \App\Lib\Http\OutboundUrl::setResolverForTests(null);
+        }
+
+        $this->assertFalse($called, 'the fetch ran before the address was checked');
+    }
+
+    /**
      * The name becomes part of a path inside the account; a directory
      * component would let an upload land somewhere the caller did not name.
      */

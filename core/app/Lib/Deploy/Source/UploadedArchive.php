@@ -37,22 +37,84 @@ final class UploadedArchive
     public static function inHome(string $zipPath, string $homeDir): self
     {
         $home = rtrim($homeDir, '/');
-        if (!str_starts_with($zipPath, $home . '/') && $zipPath !== $home) {
-            $zipPath = $home . '/' . ltrim($zipPath, '/');
-        }
+        $zipPath = self::anchoredInHome($zipPath, $home);
         if (!is_file($zipPath)) {
             throw new InvalidArgumentException("Archive not found: {$zipPath}");
         }
 
-        // realpath() after the is_file() check, so a symlink pointing out of
-        // the home is caught by where it lands rather than by how it is
-        // spelled.
+        $real = self::realPathInHome($zipPath, $home);
+
+        return new self($real, self::formatOf($real));
+    }
+
+    private static function anchoredInHome(string $zipPath, string $home): string
+    {
+        if (!str_starts_with($zipPath, $home . '/') && $zipPath !== $home) {
+            return $home . '/' . ltrim($zipPath, '/');
+        }
+
+        return $zipPath;
+    }
+
+    /**
+     * Resolved after the is_file() check, so a symlink pointing out of the home
+     * is caught by where it lands rather than by how it is spelled.
+     */
+    private static function realPathInHome(string $zipPath, string $home): string
+    {
         $real = realpath($zipPath);
         if ($real === false || !str_starts_with($real, $home . '/')) {
             throw new InvalidArgumentException('Archive path is outside the user home directory.');
         }
 
-        return new self($real, self::formatOf($real));
+        return $real;
+    }
+
+    /** A path the caller has already confined to the home, as the account. */
+    public static function confined(string $path, bool $isZip): self
+    {
+        return new self($path, $isZip);
+    }
+
+    /**
+     * Every {@see ArchiveSafety} check on the staged copy, each listing run through $run.
+     * The mode listing serves three checks: member types, symlink targets and the claimed size.
+     *
+     * @param callable(list<string>): string $run
+     * @return list<string> the members
+     */
+    public function assertSafeContents(string $staged, callable $run): array
+    {
+        $names = $run($this->listNamesArgv($staged));
+        ArchiveSafety::assertSafeListing($names);
+        $modes = $run($this->listModesArgv($staged));
+        ArchiveSafety::assertRegularMembersOnly($modes);
+        $members = ArchiveSafety::names($names);
+        ArchiveSafety::assertLinksStayInside($this->linkTargets($staged, $modes, $members, $run), $members);
+        ArchiveSafety::assertUncompressedSizeWithin($modes);
+
+        return $members;
+    }
+
+    /**
+     * Each symlink member's target: tar prints it in the listing, zip stores
+     * it as the member's contents.
+     *
+     * @param list<string> $names
+     * @param callable(list<string>): string $run
+     * @return array<string, string>
+     */
+    private function linkTargets(string $staged, string $modes, array $names, callable $run): array
+    {
+        if (!$this->isZip) {
+            return ArchiveSafety::tarLinks($modes, $names);
+        }
+        $links = [];
+        foreach (ArchiveSafety::zipLinkNames($modes, $names) as $name) {
+            $links[$name] = $run($this->readMemberArgv($staged, $name));
+        }
+
+        return $links;
     }
 
     /** The name the staged root-owned copy is given. */
@@ -102,15 +164,8 @@ final class UploadedArchive
     }
 
     /**
-     * Extraction runs as the account user, and never restores an owner the
-     * archive asked for: an upload does not get to choose who owns what it
-     * unpacks to. Modes are evened out afterwards by {@see normaliseModesArgv()}.
-     *
-     * The account is named by uid and gid, not by username, because this
-     * runs in the core container and the account's passwd entry exists only
-     * on the host — `sudo -u <name>` and even `sudo -u '#<uid>'` fail there
-     * with "unknown user". `setpriv` drops to the ids directly and needs no
-     * passwd lookup; `--clear-groups` leaves nothing of root's group set.
+     * Extracts as the account, never restoring an owner the archive asked for. By uid/gid via
+     * `setpriv`: the account's passwd entry exists only on the host, so `sudo -u` fails in core.
      *
      * @return list<string>
      */
@@ -128,10 +183,8 @@ final class UploadedArchive
     }
 
     /**
-     * Run after {@see extractArgv()}: files 0644, or 0755 when any execute bit
-     * is set, directories 0755, as a git checkout would give them. unzip and
-     * tar keep a member's own mode, and Python's zipfile.writestr() writes
-     * 0600; detection runs as another user and could not read such files.
+     * Run after {@see extractArgv()}: modes as a git checkout gives them (0644/0755), since a
+     * member's own mode (zipfile.writestr() writes 0600) would hide it from detection.
      *
      * @return list<string>
      */

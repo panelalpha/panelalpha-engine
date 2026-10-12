@@ -35,4 +35,15 @@ class FtpDirectoryConfinementTest extends TestCase
         $this->assertFalse($check('victim-link'));
         $this->assertFalse($check('missing'));
     }
+
+    /** Swapped by another process, as the account would: PHP's own unlink would clear the cache. */
+    public function test_a_directory_swapped_for_a_link_out_is_refused_in_the_same_process(): void
+    {
+        $home = $this->dir . '/acme';
+        $this->assertTrue(Ftp::staysInside($home, 'public_html', $home . '/public_html'));
+
+        exec('rm -rf ' . escapeshellarg($home . '/public_html') . ' && ln -s ' . escapeshellarg($this->dir . '/victim') . ' ' . escapeshellarg($home . '/public_html'));
+
+        $this->assertFalse(Ftp::staysInside($home, 'public_html', $home . '/public_html'));
+    }
 }

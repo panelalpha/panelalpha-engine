@@ -94,7 +94,7 @@ class FileDownloadAsTheAccountTest extends TestCase
 
             return;
         }
-        FileStreamWrapper::confineTo(null);
+        FileStreamWrapper::confineTo(null, ['sudo']);
         foreach ($this->savedEnv as $key => $value) {
             if ($value === false) {
                 putenv($key);
