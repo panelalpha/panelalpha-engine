@@ -81,6 +81,11 @@ final class TemplateDeployMechanics implements DeployMechanics
         return $this->project->isRunning();
     }
 
+    /** The template path has no generations to note. */
+    public function recordRunningVersion(): void
+    {
+    }
+
     public function syncHostingForCheckoutRebuild(bool $reuseRunning): void
     {
         throw new RuntimeException('Checkout rebuild requires a DinD project.');

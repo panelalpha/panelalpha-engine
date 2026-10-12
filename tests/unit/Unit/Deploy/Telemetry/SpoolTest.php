@@ -171,6 +171,36 @@ class SpoolTest extends TestCase
         $this->assertFileDoesNotExist($this->dir . '/01JGXR0000000000000000000B.json');
     }
 
+    /** A dropped report takes its source bundle with it (engine#799). */
+    public function test_a_corrupt_report_takes_its_bundle_with_it(): void
+    {
+        $spool = $this->spool();
+        $spool->ensureDirectory();
+        file_put_contents($this->dir . '/01JGXR0000000000000000000B.json', 'not json');
+        $bundle = (string) $spool->bundlePathFor('01JGXR0000000000000000000B');
+        file_put_contents($bundle, 'PK zip bytes');
+
+        $spool->pending();
+
+        $this->assertFileDoesNotExist($this->dir . '/01JGXR0000000000000000000B.json');
+        $this->assertFileDoesNotExist($bundle);
+    }
+
+    public function test_a_report_with_invalid_utf8_is_stored_with_the_bytes_substituted(): void
+    {
+        $spool = $this->spool();
+        $report = $this->report('01JGXR0000000000000000000A');
+        $report['deploy']['error'] = "binary \xC3\x28 tail";
+
+        $path = $spool->put($report);
+
+        $this->assertNotNull($path, 'put() must not report a report it could not encode');
+        $this->assertFileExists($path);
+        $this->assertGreaterThan(0, (int) filesize($path));
+        $this->assertNotNull($spool->read($path));
+        $this->assertCount(1, $spool->pending());
+    }
+
     /**
      * An install that has been offline for a month must not fill its own disk
      * with reports about deploys nobody will ever read.

@@ -6,7 +6,10 @@ use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\DeployBusyException;
 use App\Exceptions\DeployCancelledException;
 use App\Exceptions\ProblemException;
+use App\Exceptions\ProjectBusyException;
+use App\Jobs\CreateBackup;
 use App\Jobs\RebuildProject;
+use App\Jobs\RestoreBackup;
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\DeployLogPaths;
@@ -68,7 +71,7 @@ class ProjectRebuild
                 ...$git,
             ], static fn (mixed $v): bool => $v !== null),
         );
-        RebuildProject::dispatch($user->username, $action, $zipPath, $plan?->toArray(), $recipe, $git !== [] ? $git : null)->attachTask($task);
+        RebuildProject::dispatch($user->username, $action, $zipPath, $plan?->toArray(), $recipe, $git !== [] ? $git : null, (int) $user->getKey())->attachTask($task);
 
         return $task;
     }
@@ -88,12 +91,27 @@ class ProjectRebuild
     }
 
     /**
+     * A backup or restore of this project that is queued or running. It stops
+     * the stack and swaps `~/project` under the deploy lock.
+     */
+    public static function pendingBackupTask(string $username): ?Task
+    {
+        return Task::query()
+            ->where('username', $username)
+            ->whereIn('job_type', [CreateBackup::class, RestoreBackup::class])
+            ->whereNotIn('status', Task::TERMINAL_STATUSES)
+            ->orderByDesc('id')
+            ->first();
+    }
+
+    /**
      * Refuse while a deploy of the project is queued or running, otherwise run
      * $start -- which queues the deploy or opens its log -- before another
      * request can look. Two calls racing each other cannot both get past the
      * check. The worker still takes the deploy lock, so one started some other
      * way in between (the CLI, a push) fails the queued task instead of running
-     * beside it.
+     * beside it. Without the queue lock it refuses rather than go on unlocked,
+     * which could queue a second deploy beside a racing one.
      *
      * @template T
      * @param callable(): T $start
@@ -104,7 +122,6 @@ class ProjectRebuild
     {
         $handle = $this->lockQueue(new DeployLogPaths($user->username));
         if ($handle === null) {
-            // Going on unlocked could queue a second deploy beside a racing one.
             throw new ServiceUnavailableHttpException(null, 'Could not lock the project to start its deploy; try again.');
         }
         try {
@@ -119,12 +136,18 @@ class ProjectRebuild
 
     /**
      * The 409 whileIdle() answers, without its lock: for a check that must
-     * not run beside a deploy, made before whileIdle() checks again.
+     * not run beside a deploy, made before whileIdle() checks again. A pending
+     * backup or restore counts too: a deploy queued beside it would fail inside its window.
      *
      * @throws DeployBusyException
      */
     public function assertIdle(User $user): void
     {
+        $backup = self::pendingBackupTask($user->username);
+        if ($backup !== null) {
+            throw ProjectBusyException::taskRunning($user->username, $backup);
+        }
+
         $task = self::pendingTask($user->username);
         if ($task !== null || DeployLogger::isLockedFor($user->username)) {
             throw new DeployBusyException($user->username, $task);
@@ -183,6 +206,8 @@ class ProjectRebuild
      * The deploy log this run writes; null for a rebuild of a project on a
      * plain template, which has none. Opened before the run so a failure knows
      * its stage, and so a stream can send its first frame before the work.
+     * A git action always starts a new deploy, as a push does: a `running` log
+     * then is a dead process's, never a create waiting for files (that has no git).
      *
      * @throws DeployAlreadyRunningException
      */
@@ -191,8 +216,6 @@ class ProjectRebuild
         if ($action === self::REBUILD && $user->getTemplate() !== 'dind') {
             return null;
         }
-        // Always a new deploy, as a push starts one: a `running` log here is a
-        // dead process's, never a create waiting for files (that has no git).
         if (in_array($action, self::GIT_ACTIONS, true)) {
             return DeployLogger::startSafely($user->username);
         }
@@ -243,13 +266,9 @@ class ProjectRebuild
         try {
             return $this->gitActions()->redeploy($user, $action, $git, $logger);
         } catch (\Exception $e) {
-            $answered = $e instanceof ProblemException && ($e->problems[0]['code'] ?? null) === 'deploy_cancelled';
-            // A cancel during the git step reaches here as git's own failure.
-            if (!$answered && ($e instanceof DeployCancelledException || $logger?->isCancelled() === true)) {
+            if (self::isUnansweredCancel($e, $logger)) {
                 $message = $e instanceof DeployCancelledException ? $e->getMessage() : 'Deployment cancelled by user';
-                $stage = $logger?->currentStage();
-                self::finishRebuildLog($logger, DeployLogger::STATUS_CANCELLED, $message);
-                throw ProblemException::deploy('deploy_cancelled', $message, $stage);
+                throw self::cancellation($logger, $message);
             }
             if ($e instanceof ValidationException) {
                 throw $e;
@@ -258,49 +277,62 @@ class ProjectRebuild
         }
     }
 
+    /**
+     * A cancel not yet answered as `deploy_cancelled`. A cancel during the git step reaches
+     * here as git's own failure, so the log's cancelled status counts too.
+     */
+    private static function isUnansweredCancel(\Exception $e, ?DeployLogger $logger): bool
+    {
+        $answered = $e instanceof ProblemException && ($e->problems[0]['code'] ?? null) === 'deploy_cancelled';
+
+        return !$answered && ($e instanceof DeployCancelledException || $logger?->isCancelled() === true);
+    }
+
+    /** Finishes the log as cancelled and answers it, naming the stage it was cancelled in. */
+    private static function cancellation(?DeployLogger $logger, string $message): ProblemException
+    {
+        $stage = $logger?->currentStage();
+        self::finishRebuildLog($logger, DeployLogger::STATUS_CANCELLED, $message);
+
+        return ProblemException::deploy('deploy_cancelled', $message, $stage);
+    }
+
     protected function gitActions(): GitActions
     {
         return app(GitActions::class);
     }
 
     /**
-     * A rebuild whose compose dependency failed used to answer
-     * `500 {"message":"Server Error"}`: no code, no stage, no offset, while
-     * the deploy log for the same run had the real error in it.
+     * A DinD rebuild wipes and rebuilds through DeploymentWorkflow; PhpHosting only recreates
+     * the outer hosting. A failure answers with a code and stage like every other deploy endpoint;
+     * a ValidationException (ProblemException is one) is already in that shape and passes through,
+     * and so does the lock conflict a template rebuild takes in here rather than in openLog().
      */
     private function rebuild(User $user, ?DeployLogger $logger, ?string $zipPath): void
     {
         try {
-            // DinD wipe-rebuild goes through DeploymentWorkflow; PhpHosting only recreates outer hosting.
             $this->project($user)->rebuildFromSource($logger, $zipPath);
             $this->project($user)->system()->webserver()->rebuildDomains();
             self::recordSucceeded($user);
         } catch (DeployCancelledException $e) {
-            $stage = $logger?->currentStage();
-            self::finishRebuildLog($logger, DeployLogger::STATUS_CANCELLED, $e->getMessage());
-            throw ProblemException::deploy('deploy_cancelled', $e->getMessage(), $stage);
-        } catch (ValidationException $e) {
-            // ProblemException is one of these, so anything already in the
-            // documented shape passes through rather than being re-wrapped.
-            throw $e;
-        } catch (DeployAlreadyRunningException $e) {
-            // A template rebuild takes the account's lock in here, not in openLog(): still a lock conflict.
+            throw self::cancellation($logger, $e->getMessage());
+        } catch (ValidationException|DeployAlreadyRunningException $e) {
             throw $e;
         } catch (\Exception $e) {
             throw self::rebuildFailure($e, $logger);
         }
     }
 
+    /**
+     * The vhosts were rendered at account creation against the welcome app's port, and detection
+     * has just re-pointed app_port at what the archive serves on, so the proxy is re-rendered as a
+     * rebuild does it, or every non-8080 app answers 502 behind a green deploy. A ProblemException
+     * from the start already carries its rule; finish() is a no-op once the log is finished.
+     */
     private function deployArchive(User $user, ?DeployLogger $logger, string $zipPath): void
     {
         try {
             $this->project($user)->deployment()->deployFromArchive($logger, $zipPath);
-            // The vhosts were rendered when the account was created, against
-            // the welcome app's port. Detection has just re-pointed app_port
-            // at what the archive really serves on (8000 for PHP, 3000 for
-            // Express, ...), so the proxy must be re-rendered the same way a
-            // rebuild does it -- or every non-8080 app answers 502 behind a
-            // green deploy.
             $this->project($user)->system()->webserver()->rebuildDomains();
             self::recordSucceeded($user);
         } catch (DeployCancelledException $e) {
@@ -313,31 +345,31 @@ class ProjectRebuild
                 'zip_path' => $e->getMessage(),
             ]);
         } catch (ProblemException $e) {
-            // A start failure already carries its rule; finish() is a no-op once finished.
             $logger?->finish(DeployLogger::STATUS_FAILED, $e->getMessage());
             throw $e;
         } catch (\Exception $e) {
-            $logger?->recordFailureOutput($e->getMessage());
-            $match = DeployFailureExplainer::match($e->getMessage());
-            $message = $match['message'] ?? FailureOutput::withoutNoise($e->getMessage());
-            $stage = $logger?->currentStage();
-            $logger?->finish(DeployLogger::STATUS_FAILED, $message);
-            throw ProblemException::deploy($match['rule'] ?? 'deploy_failed', $message, $stage);
+            throw self::archiveFailure($e, $logger);
         }
     }
 
+    private static function archiveFailure(\Exception $e, ?DeployLogger $logger): ProblemException
+    {
+        $logger?->recordFailureOutput($e->getMessage());
+        $match = DeployFailureExplainer::match($e->getMessage());
+        $message = $match['message'] ?? FailureOutput::withoutNoise($e->getMessage());
+        $stage = $logger?->currentStage();
+        $logger?->finish(DeployLogger::STATUS_FAILED, $message);
+
+        return ProblemException::deploy($match['rule'] ?? 'deploy_failed', $message, $stage);
+    }
+
     /**
-     * A failed rebuild, in the shape every other deploy endpoint answers in.
-     *
-     * Its own method so it can be exercised without a request: the defect was
-     * that this translation did not exist at all, and a test that has to stand
-     * up a controller to see it would not have caught that either.
+     * A failed rebuild, in the shape every other deploy endpoint answers in, named
+     * with the same slug deploy telemetry reports so a client and a dashboard agree.
      */
     private static function rebuildFailure(\Exception $e, ?DeployLogger $logger): ProblemException
     {
         $logger?->recordFailureOutput($e->getMessage());
-        // The same slug deploy telemetry reports, so a client and a dashboard
-        // name one failure the same way.
         $match = DeployFailureExplainer::match($e->getMessage());
         $message = $match['message'] ?? FailureOutput::withoutNoise($e->getMessage());
         $stage = $logger?->currentStage();
@@ -347,9 +379,8 @@ class ProjectRebuild
     }
 
     /**
-     * The workflow finishes the log itself when a rebuild fails or is cancelled.
-     * Finishing it again wrote a second "Deploy failed" line and filed a second
-     * telemetry report for the same rebuild. A cancel request alone sets the
+     * The workflow finishes the log itself when a rebuild fails or is cancelled, and a second
+     * finish would log and report the same failure twice. A cancel request alone sets the
      * status without finishing, so `finished_at` is what says it was done.
      */
     private static function finishRebuildLog(?DeployLogger $logger, string $status, string $error): void
@@ -366,55 +397,51 @@ class ProjectRebuild
     }
 
     /**
-     * A rebuild that worked is a deploy that worked, and the next one needs to
-     * know that.
-     *
-     * The deployment status is what the entrypoint's install/upgrade phase is
-     * derived from ({@see PlatformStage::phaseFor()}), and rebuild used to
-     * leave it untouched. An account that had only ever been rebuilt was
-     * therefore stuck reporting a first install for the rest of its life:
-     * every rebuild re-ran `php artisan key:generate --force`, throwing away
-     * the APP_KEY that every session cookie and encrypted column depends on,
-     * and re-ran the seeders behind it. The whole point of splitting install
-     * from upgrade is that install runs once.
+     * A rebuild that worked is a deploy that worked: the deployment status decides the
+     * entrypoint's install/upgrade phase ({@see PlatformStage::phaseFor()}), so an account
+     * that was only ever rebuilt must not keep running its first install.
      */
     public static function recordSucceeded(User $user): void
     {
-        // A rebuild does not run the deploy pipeline, so the verdict the
-        // health checks reached has to be applied here as well -- and it is
-        // applied first, because "the site is serving our placeholder" is
-        // true whether this account had ever deployed successfully before or
-        // not.
-        //
-        // The account record only. The deploy log -- and telemetry with it --
-        // is finished by the pipeline itself, which reaches the same verdict
-        // through the same helper ({@see \App\System\Project\Deployment\DeploymentWorkflow::rebuildFromSource()}).
-        // Doing it here as well would file a second terminal status for one
-        // rebuild and report it twice.
-        //
-        // Both lists the pipeline finishes the log with: with the health one
-        // alone, a rebuild logged `partial` for its public URL and recorded `success`.
-        $warnings = array_merge(
-            AppHealth::servingWarnings($user->getDetails()),
-            PublicUrl::warnings((string) $user->domain, $user->getDetails()),
-        );
+        $warnings = self::servingWarnings($user);
         if ($warnings !== []) {
             $user->setDetails([
                 'deployment_status' => 'partial',
                 'deployment_warnings' => $warnings,
                 'error' => null,
+                'app_stopped_by_request' => null,
             ]);
             $user->save();
 
             return;
         }
 
-        // A clean rebuild clears a previous run's warnings: leaving them would
-        // report a fault that has since been fixed.
-        if ($user->getDeploymentStatus() === 'success' && ($user->getDetails()['deployment_warnings'] ?? []) === []) {
+        if (self::alreadyCleanSuccess($user)) {
             return;
         }
         $user->markDeploySucceeded();
         $user->save();
+    }
+
+    /**
+     * The health and public-URL verdicts the pipeline finishes its log with, applied to the
+     * account record only: a rebuild does not run the pipeline, and the log is finished by
+     * {@see \App\System\Project\Deployment\DeploymentWorkflow::rebuildFromSource()}.
+     *
+     * @return list<string>
+     */
+    private static function servingWarnings(User $user): array
+    {
+        return array_merge(
+            AppHealth::servingWarnings($user->getDetails()),
+            PublicUrl::warnings((string) $user->domain, $user->getDetails()),
+        );
+    }
+
+    /** A clean rebuild still clears a previous run's warnings, which would report a fault since fixed. */
+    private static function alreadyCleanSuccess(User $user): bool
+    {
+        return $user->getDeploymentStatus() === 'success' && ($user->getDetails()['deployment_warnings'] ?? []) === []
+            && !$user->isAppStoppedByRequest();
     }
 }

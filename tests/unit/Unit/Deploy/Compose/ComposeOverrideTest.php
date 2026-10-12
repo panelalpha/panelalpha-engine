@@ -84,6 +84,15 @@ class ComposeOverrideTest extends TestCase
         $this->assertStringContainsString('./x:/x', $result['yaml']);
     }
 
+    public function test_a_secret_file_inside_the_checkout_named_by_its_absolute_path_is_kept(): void
+    {
+        $raw = "services:\n  app:\n    secrets: [pw]\nsecrets:\n  pw:\n    file: /home/acct/project/secrets/pw.txt\n";
+
+        $result = ComposeOverride::harden($raw, accountUser: 'acct', projectDir: '/nonexistent-core-view/acct/project');
+
+        $this->assertSame(['yaml' => $raw, 'removed' => []], $result);
+    }
+
     /** An override can redefine a volume the base file's service already mounts. */
     public function test_a_volume_redefined_to_bind_a_path_is_cleared_even_without_services(): void
     {

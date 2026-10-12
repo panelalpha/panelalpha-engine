@@ -469,7 +469,7 @@ class ServiceHardenerTest extends TestCase
      */
     public function test_top_level_volumes_lose_driver_options_that_mount_a_path(): void
     {
-        [$compose, $removed] = ServiceHardener::withoutHostPathEntries([
+        [$compose, $removed] = ServiceHardener::withoutVolumeDriverOptions([
             'services' => ['app' => ['image' => 'alpine', 'volumes' => ['sock:/host-run', 'cache:/cache', 'data:/data']]],
             'volumes' => [
                 'sock' => ['driver' => 'local', 'driver_opts' => ['type' => 'none', 'o' => 'bind', 'device' => '/var/run']],
@@ -493,7 +493,7 @@ class ServiceHardenerTest extends TestCase
     /** Compose bind-mounts a file-backed secret or config into the service. */
     public function test_secrets_and_configs_from_a_forbidden_file_are_removed(): void
     {
-        [$compose, $removed] = ServiceHardener::withoutHostPathEntries([
+        [$compose, $removed] = ServiceHardener::withoutUnsafeFileSources([
             'services' => ['app' => ['image' => 'alpine', 'secrets' => ['s', 'ok']]],
             'secrets' => [
                 's' => ['file' => '/var/run/docker.sock'],

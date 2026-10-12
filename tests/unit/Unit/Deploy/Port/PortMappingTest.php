@@ -51,9 +51,24 @@ class PortMappingTest extends TestCase
     {
         // Reachable only from inside the container's host. Pointing the proxy
         // at it produces a connection refused on every request.
-        foreach (['127.0.0.1:8080:80', 'localhost:8080:80', '::1:8080:80'] as $entry) {
+        foreach (['127.0.0.1:8080:80', 'localhost:8080:80', '::1:8080:80', '[::1]:8080:80'] as $entry) {
             $this->assertNull(PortMapping::parse($entry), $entry);
         }
+    }
+
+    /**
+     * A bracketed IPv6 host is one field, whatever its inner colons: `[::]:8080:80`
+     * publishes on all IPv6 addresses and was parsed as no mapping at all,
+     * because the colon split read the host as `[`.
+     */
+    public function test_a_bracketed_ipv6_host_is_parsed_as_a_mapping(): void
+    {
+        $mapping = PortMapping::parse('[::]:8080:80');
+        $this->assertNotNull($mapping);
+        $this->assertSame(8080, $mapping->hostPort);
+        $this->assertSame(80, $mapping->containerPort);
+
+        $this->assertSame(['[::]', '8080', '80'], PortMapping::splitFields('[::]:8080:80'));
     }
 
     public function test_an_env_var_default_is_resolved_first(): void

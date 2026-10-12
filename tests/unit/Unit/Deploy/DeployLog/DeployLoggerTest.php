@@ -150,6 +150,22 @@ class DeployLoggerTest extends TestCase
         $this->assertSame($first, $logger->readLatest());
     }
 
+    /** A cancel that lands while the app is being checked wins over the partial or failed verdict that follows. */
+    public function test_a_cancel_is_not_overwritten_by_a_partial_or_failed_verdict(): void
+    {
+        foreach ([DeployLogger::STATUS_PARTIAL, DeployLogger::STATUS_FAILED] as $status) {
+            $username = $this->username();
+            $logger = DeployLogger::start($username);
+            DeployLogger::requestCancel($username);
+
+            $logger->finish($status, 'whatever');
+
+            $latest = $logger->readLatest();
+            $this->assertSame(DeployLogger::STATUS_CANCELLED, $latest['status'], $status);
+            $this->assertNull($latest['error'], $status);
+        }
+    }
+
     public function test_log_level_wrappers_write_the_expected_level(): void
     {
         $logger = DeployLogger::start($this->username());

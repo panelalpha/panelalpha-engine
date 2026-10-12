@@ -3,12 +3,14 @@
 namespace App\System\Project\Dind;
 
 use App\System\Project\Dind\AppHealth;
+use App\System\Project\Dind\Generation\RouteSwitch;
 use App\System\Project\Dind\Generation\RoutingSnapshot;
 use App\System\Project\Dind\Generation\ZeroDowntimeRedeploy;
 use App\System\Project\Dind as DindProject;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Lib\Deploy\DetectAppPort;
 use App\Lib\Deploy\Platform\Strategies;
+use App\Models\Domain;
 use App\Models\ProxyRule;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
@@ -48,10 +50,12 @@ class Networking
         return $scheme . '://' . $name;
     }
 
+    /**
+     * Route the site to the app's primary port: the recipe's own `port:`, else the one scanned from
+     * the inner compose file through the resolver every other reader of it uses.
+     */
     public function detectAndCreateProxyRules(User $user): void
     {
-        // Detect all public ports from the user's compose file, via the same
-        // resolver every other reader of the inner compose file goes through.
         $composePath = $this->project->userAppComposeFileForPorts();
         $portDetection = DetectAppPort::detectAllPorts($composePath, $this->project->environment()->forPortDetection());
         $recipePort = self::recipeComposePort($user);
@@ -66,37 +70,52 @@ class Networking
 
     /**
      * Points the site at $port: the stored app port, the domain's :80/:443
-     * rules, its tunnel ingress and the vhost.
+     * rules, its tunnel ingress and the vhost. Hand-made rules to the previous port follow the app.
      */
     public function routeTo(User $user, int $primaryPort): void
     {
-        // Store primary port in user details (fallback for legacy vhost / bridge)
+        $previousPort = $user->getAppPort();
+
         $user->setAppPort($primaryPort);
         $user->save();
 
-        // A redeploy of a running app: the site stays where the running
-        // version answers until the new version takes traffic.
-        $served = RoutingSnapshot::servedPort($user->username);
-        if (RoutingSnapshot::defers($user->username)) {
-            if (ZeroDowntimeRedeploy::copyHeld($user->username)) {
-                $this->project->shell()->logger()?->info(
-                    'The site stays on the second copy an earlier redeploy left, until a version answers on its own port'
-                );
-            } elseif ($served !== null && $served !== $primaryPort) {
-                $this->project->shell()->logger()?->info(
-                    "The site stays on port {$served}, where the running version answers, until the new version takes traffic"
-                );
-            }
-
+        if ($this->staysOnRunningVersion($user, $primaryPort)) {
             return;
         }
 
-        $this->applyRoutes($user, $primaryPort);
+        $this->applyRoutes($user, $primaryPort, $previousPort);
+    }
+
+    /**
+     * A redeploy of a running app keeps the site where the running version answers
+     * until the new one takes traffic.
+     */
+    private function staysOnRunningVersion(User $user, int $primaryPort): bool
+    {
+        $served = RoutingSnapshot::servedPort($user->username);
+        if (!RoutingSnapshot::defers($user->username)) {
+            return false;
+        }
+        if (ZeroDowntimeRedeploy::copyHeld($user->username)) {
+            $this->project->shell()->logger()?->info(
+                'The site stays on the second copy an earlier redeploy left, until a version answers on its own port'
+            );
+        } elseif ($served !== null && $served !== $primaryPort) {
+            $this->project->shell()->logger()?->info(
+                "The site stays on port {$served}, where the running version answers, until the new version takes traffic"
+            );
+        }
+
+        return true;
     }
 
     /** The domain's generated rules on $primaryPort, then the vhost rebuilt and the webserver reloaded. */
-    public function applyRoutes(User $user, int $primaryPort): void
+    public function applyRoutes(User $user, int $primaryPort, ?int $fromPort = null): void
     {
+        if ($fromPort !== null && $fromPort !== $primaryPort) {
+            $this->moveHandMadeRules($user, $fromPort, $primaryPort);
+        }
+
         $domain = $user->getMainDomain();
         $fqdn = $domain !== null ? trim((string) $domain->domain) : '';
         if ($fqdn === '') {
@@ -104,8 +123,29 @@ class Networking
             return;
         }
 
-        // Update the domain's :80/:443 rules in place, replacing legacy generated rows
-        // (*:appPort → localhost); a delete-and-recreate would drop an operator's edits.
+        $this->syncGeneratedHttpRules($user, $fqdn, $primaryPort);
+        if ($domain !== null && $domain->hasTunnels()) {
+            $this->syncTunnelIngress($user, $domain);
+        }
+        $this->rebuildVhost($user, $domain);
+    }
+
+    /**
+     * An app that was not running took no routing snapshot, so its hand-made rules move here
+     * ({@see RoutingSnapshot::apply()} otherwise).
+     */
+    private function moveHandMadeRules(User $user, int $fromPort, int $primaryPort): void
+    {
+        try {
+            (new RouteSwitch($this->project->system(), $user->username))->follow($fromPort, $primaryPort);
+        } catch (\Throwable $e) {
+            Log::warning("Failed to move the proxy rules of {$user->username} to port {$primaryPort}: " . $e->getMessage());
+        }
+    }
+
+    /** The domain's :80/:443 rules updated in place: a delete-and-recreate would drop an operator's edits. */
+    private function syncGeneratedHttpRules(User $user, string $fqdn, int $primaryPort): void
+    {
         try {
             ProxyRule::syncGeneratedHttpPair($user->username, $fqdn, $primaryPort, $user->getAppPortScheme());
         } catch (\Exception $e) {
@@ -113,21 +153,28 @@ class Networking
                 'error' => $e->getMessage(),
             ]);
         }
+    }
 
-        if ($domain !== null && $domain->hasTunnels()) {
-            try {
-                \App\Integrations\Tunnels\TunnelManager::syncFromProxyRules($user, $domain);
-            } catch (\Throwable $e) {
-                Log::warning("Failed to sync tunnel ingress after port detect for {$user->username}", [
-                    'error' => $e->getMessage(),
-                ]);
-                // In the deploy log too, in full for our own refusals: an
-                // unreadable tunnel token is refused here and needs the operator.
-                $this->project->shell()->logger()?->warn('Tunnel ingress was not synced: '
-                    . ($e instanceof CloudflareException ? $e->getMessage() : AppHealth::trimReason($e->getMessage())));
-            }
+    /**
+     * A failure goes to the deploy log too, in full for our own refusals: an unreadable
+     * tunnel token is refused here and needs the operator.
+     */
+    private function syncTunnelIngress(User $user, Domain $domain): void
+    {
+        try {
+            \App\Integrations\Tunnels\TunnelManager::syncFromProxyRules($user, $domain);
+        } catch (\Throwable $e) {
+            Log::warning("Failed to sync tunnel ingress after port detect for {$user->username}", [
+                'error' => $e->getMessage(),
+            ]);
+            $this->project->shell()->logger()?->warn('Tunnel ingress was not synced: '
+                . ($e instanceof CloudflareException ? $e->getMessage() : AppHealth::trimReason($e->getMessage())));
         }
+    }
 
+    /** A failure goes to the deploy log too, so a later "no vhost is loaded" traces back here. */
+    private function rebuildVhost(User $user, ?Domain $domain): void
+    {
         try {
             $this->project->system()->webserver()->rebuildDomainConfig($domain);
             $this->project->system()->webserver()->reload(false);
@@ -135,7 +182,6 @@ class Networking
             Log::warning("Failed to rebuild domain vhost after proxy rules for {$user->username}", [
                 'error' => $e->getMessage(),
             ]);
-            // In the deploy log too, so a later "no vhost is loaded" traces back here.
             $this->project->shell()->logger()?->warn(
                 'Webserver reload after proxy rules failed: ' . AppHealth::trimReason($e->getMessage())
             );
@@ -156,38 +202,5 @@ class Networking
         }
 
         return $port >= 1 && $port <= 65535 ? $port : null;
-    }
-
-    /**
-     * Public HTTP listen on the domain (80/443 or an extra port) → account container.
-     */
-    public function createDomainProxyRule(
-        string $username,
-        string $fqdn,
-        int $listenPort,
-        int $upstreamPort,
-        bool $isPrimary = false
-    ): void {
-        try {
-            ProxyRule::upsertGeneratedHttpRule($username, $fqdn, $listenPort, $upstreamPort, $isPrimary);
-        } catch (\Exception $e) {
-            Log::warning("Failed to create proxy rule for {$username} {$fqdn}:{$listenPort}", [
-                'error' => $e->getMessage(),
-            ]);
-        }
-    }
-
-    /**
-     * @deprecated Use createDomainProxyRule(); kept for callers that still pass an app listen port.
-     */
-    public function createProxyRuleForPort(string $username, int $port, bool $isPrimary = false): void
-    {
-        $domain = $this->project->userModel()->getMainDomain();
-        $fqdn = $domain !== null ? trim((string) $domain->domain) : '';
-        if ($fqdn === '') {
-            return;
-        }
-        $this->createDomainProxyRule($username, $fqdn, 80, $port, $isPrimary);
-        $this->createDomainProxyRule($username, $fqdn, 443, $port, $isPrimary);
     }
 }

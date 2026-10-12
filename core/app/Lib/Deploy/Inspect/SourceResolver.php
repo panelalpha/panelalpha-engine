@@ -4,6 +4,7 @@ namespace App\Lib\Deploy\Inspect;
 
 use App\Lib\Deploy\Source\GitRepoInput;
 use App\Lib\Deploy\Source\GitUrl;
+use App\Lib\Deploy\Source\RepositoryAddress;
 use Symfony\Component\Process\Process;
 
 /**
@@ -14,11 +15,17 @@ use Symfony\Component\Process\Process;
 final class SourceResolver
 {
     public const TYPE_GIT = 'git';
+
+    /**
+     * A directory already on this server. classify() still recognises one, but
+     * it is not in {@see TYPES}: it would read anything core can, /etc included.
+     */
     public const TYPE_PATH = 'path';
+
     public const TYPE_PROJECT = 'project';
 
-    /** @var list<string> */
-    public const TYPES = [self::TYPE_GIT, self::TYPE_PATH, self::TYPE_PROJECT];
+    /** The kinds the API and MCP accept. */
+    public const TYPES = [self::TYPE_GIT, self::TYPE_PROJECT];
 
     /** How a git source was read: its GitHub file list, or a clone. */
     public const METHOD_TREE = 'tree';
@@ -30,6 +37,34 @@ final class SourceResolver
      * to a request that died. Every clone deletes its own.
      */
     private const STALE_WORKSPACE_SECONDS = 6 * 3600;
+
+    /** How many levels of nested submodules inspect follows. */
+    private const SUBMODULE_LEVELS = 3;
+
+    /**
+     * No credential helper or askpass, since a locked keyring is a program that waits and a
+     * token is the only credential; no redirects, which could lead a checked host to an internal one.
+     */
+    private const UNATTENDED_GIT_CONFIG = [
+        '-c', 'safe.directory=*',
+        '-c', 'credential.helper=',
+        '-c', 'core.askpass=',
+        '-c', 'http.followRedirects=false',
+    ];
+
+    /**
+     * GIT_TERMINAL_PROMPT only closes the terminal: an askpass program would still open a
+     * dialog nobody answers (the token path overrides GIT_ASKPASS). LFS media never decides
+     * a stack; the C locale keeps git's message stable for the API response it ends up in.
+     */
+    private const UNATTENDED_GIT_ENV = [
+        'GIT_TERMINAL_PROMPT' => '0',
+        'GIT_ASKPASS' => '/bin/false',
+        'SSH_ASKPASS' => '/bin/false',
+        'GIT_LFS_SKIP_SMUDGE' => '1',
+        'LC_ALL' => 'C',
+        'LANG' => 'C',
+    ];
 
     /**
      * @param ?GitHubTree $tree reads a public GitHub repository from its file
@@ -60,17 +95,7 @@ final class SourceResolver
             return self::TYPE_PATH;
         }
 
-        if (str_starts_with($source, 'git@') || preg_match('#^[a-z][a-z0-9+.-]*://#i', $source) === 1) {
-            return self::TYPE_GIT;
-        }
-
-        // github.com/owner/repo — a URL somebody pasted without the scheme.
-        if (preg_match('#^[a-z0-9.-]+\.[a-z]{2,}/#i', $source) === 1) {
-            return self::TYPE_GIT;
-        }
-
-        // owner/repo: a repository, refused with the URL it probably means.
-        if (GitRepoInput::isShorthand($source)) {
+        if (self::namesRepository($source)) {
             return self::TYPE_GIT;
         }
 
@@ -81,6 +106,18 @@ final class SourceResolver
         return null;
     }
 
+    /**
+     * A URL with a scheme or scp-style, one pasted without the scheme
+     * (github.com/owner/repo), or `owner/repo`, later refused with the URL it probably means.
+     */
+    private static function namesRepository(string $source): bool
+    {
+        return str_starts_with($source, 'git@')
+            || preg_match('#^[a-z][a-z0-9+.-]*://#i', $source) === 1
+            || preg_match('#^[a-z0-9.-]+\.[a-z]{2,}/#i', $source) === 1
+            || GitRepoInput::isShorthand($source);
+    }
+
     /** The repository URL a caller meant, with the scheme they left out. */
     public static function normaliseGitUrl(string $source): string
     {
@@ -89,8 +126,8 @@ final class SourceResolver
 
     /**
      * The same question POST /projects asks of `git_repo`, from the same
-     * place. Carried whole rather than flattened to a sentence, so the
-     * suggestion survives.
+     * place, carried whole so the suggestion survives. The address is checked
+     * too: the inspection clone runs in core, whose network reaches the metadata service.
      *
      * @throws InspectException when the URL is not one this may clone
      */
@@ -99,6 +136,11 @@ final class SourceResolver
         $problem = GitRepoInput::problem('source', $repoUrl);
         if ($problem !== null) {
             throw InspectException::ofProblem($problem);
+        }
+
+        $address = RepositoryAddress::problem($repoUrl);
+        if ($address !== null) {
+            throw InspectException::ofProblem($address);
         }
     }
 
@@ -120,44 +162,35 @@ final class SourceResolver
     ): ResolvedSource {
         $repoUrl = self::normaliseGitUrl($repoUrl);
         self::assertCloneable($repoUrl);
-        if ($token !== null && $token !== '') {
+        $hasToken = $token !== null && $token !== '';
+        if ($hasToken) {
             GitUrl::assertSafeForToken($repoUrl);
-        } elseif ($this->tree !== null && GitHubTree::repository($repoUrl) !== null) {
-            $resolved = $this->fromTree($this->tree, $repoUrl, $branch, $subdirectory);
+        } else {
+            $resolved = $this->fromTree($repoUrl, $branch, $subdirectory);
             if ($resolved !== null) {
                 return $resolved;
             }
         }
 
+        return $this->cloneRepository($repoUrl, $branch, $hasToken ? $token : null);
+    }
+
+    /**
+     * A shallow clone of $repoUrl with its submodules, the workspace released on failure.
+     *
+     * @throws InspectException
+     */
+    private function cloneRepository(string $repoUrl, ?string $branch, ?string $token): ResolvedSource
+    {
         $root = $this->makeTempDir();
         $target = $root . '/repo';
-
-        $command = [
-            'git',
-            '-c', 'safe.directory=*',
-            // A locked keyring or desktop agent is a program that waits, and this
-            // request is not allowed to wait on one: a token is the only credential.
-            '-c', 'credential.helper=',
-            '-c', 'core.askpass=',
-            'clone', '--depth=1', '--single-branch', '--no-tags',
-        ];
-        if ($branch !== null && $branch !== '') {
-            $command[] = '--branch';
-            $command[] = $branch;
-        }
-        $command[] = '--';
-        $command[] = $repoUrl;
-        $command[] = $target;
+        $command = self::cloneCommand($repoUrl, $branch, $target);
 
         $askPass = null;
         try {
-            if ($token !== null && $token !== '') {
+            if ($token !== null) {
                 $askPass = $root . '/askpass.sh';
-                if (file_put_contents($askPass, GitUrl::askPassScript($token), LOCK_EX) === false
-                    || !chmod($askPass, 0700)
-                ) {
-                    throw new InspectException('Could not prepare the Git credential helper.');
-                }
+                self::writeAskPass($askPass, $token);
                 $command = GitUrl::withAskPass($command, $askPass);
             }
 
@@ -172,6 +205,40 @@ final class SourceResolver
             }
         }
 
+        return $this->clonedSource($repoUrl, $branch, $target, $root);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function cloneCommand(string $repoUrl, ?string $branch, string $target): array
+    {
+        $command = ['git', ...self::UNATTENDED_GIT_CONFIG, 'clone', '--depth=1', '--single-branch', '--no-tags'];
+        if ($branch !== null && $branch !== '') {
+            $command[] = '--branch';
+            $command[] = $branch;
+        }
+        $command[] = '--';
+        $command[] = $repoUrl;
+        $command[] = $target;
+
+        return $command;
+    }
+
+    /**
+     * @throws InspectException
+     */
+    private static function writeAskPass(string $askPass, string $token): void
+    {
+        if (file_put_contents($askPass, GitUrl::askPassScript($token), LOCK_EX) === false
+            || !chmod($askPass, 0700)
+        ) {
+            throw new InspectException('Could not prepare the Git credential helper.');
+        }
+    }
+
+    private function clonedSource(string $repoUrl, ?string $branch, string $target, string $root): ResolvedSource
+    {
         return new ResolvedSource(
             self::TYPE_GIT,
             GitUrl::sanitize($repoUrl),
@@ -187,19 +254,19 @@ final class SourceResolver
     }
 
     /**
-     * The repository from its file list, or null to clone it instead. A token
-     * never gets here: a repository needing one is not readable this way.
+     * The repository from its file list when it is a GitHub one, or null to clone
+     * it instead. A token never gets here: a repository needing one is not readable this way.
      *
      * @throws InspectException
      */
-    private function fromTree(
-        GitHubTree $tree,
-        string $repoUrl,
-        ?string $branch,
-        ?string $subdirectory
-    ): ?ResolvedSource {
+    private function fromTree(string $repoUrl, ?string $branch, ?string $subdirectory): ?ResolvedSource
+    {
+        if ($this->tree === null || GitHubTree::repository($repoUrl) === null) {
+            return null;
+        }
+
         try {
-            return $this->readTree($tree, $repoUrl, $branch, $subdirectory);
+            return $this->readTree($this->tree, $repoUrl, $branch, $subdirectory);
         } catch (TreeUnavailable) {
             return null;
         }
@@ -278,7 +345,8 @@ final class SourceResolver
      * container project, else the main domain's document root for the classic
      * PHP templates, which have no `~/project`. `$relative` overrides the guess.
      * Each is held to the home like a caller's subdirectory: a `~/project` that
-     * leaves it is refused, a document root that does is skipped.
+     * leaves it is refused, a document root that does (or is missing) is skipped,
+     * and the read then reports ~/project missing.
      *
      * @throws InspectException
      */
@@ -295,14 +363,22 @@ final class SourceResolver
         }
 
         if ($documentRoot !== null) {
-            try {
-                return self::descend($home, $documentRoot);
-            } catch (InspectException) {
-                // Not there, or not inside the home: the read reports ~/project missing.
+            $documentRootDir = self::descendOrNull($home, $documentRoot);
+            if ($documentRootDir !== null) {
+                return $documentRootDir;
             }
         }
 
         return $appDir;
+    }
+
+    private static function descendOrNull(string $base, string $subdirectory): ?string
+    {
+        try {
+            return self::descend($base, $subdirectory);
+        } catch (InspectException) {
+            return null;
+        }
     }
 
     /**
@@ -321,6 +397,20 @@ final class SourceResolver
             throw new InspectException('Invalid directory.');
         }
 
+        $parts = self::pathParts($subdirectory);
+        if ($parts === []) {
+            return $base;
+        }
+
+        return self::existingDirectoryInside($base, $parts);
+    }
+
+    /**
+     * @return list<string>
+     * @throws InspectException when a part climbs out with `..`
+     */
+    private static function pathParts(string $subdirectory): array
+    {
         $parts = [];
         foreach (explode('/', $subdirectory) as $part) {
             if ($part === '' || $part === '.') {
@@ -331,12 +421,19 @@ final class SourceResolver
             }
             $parts[] = $part;
         }
-        if ($parts === []) {
-            return $base;
-        }
 
-        // realpath() answers from a cache that outlives the request; a link
-        // swapped in since then would be taken for the directory it replaced.
+        return $parts;
+    }
+
+    /**
+     * The resolved directory $parts names under $base. The stat cache is cleared first:
+     * it outlives the request, and a link swapped in since would pass for the directory it replaced.
+     *
+     * @param list<string> $parts
+     * @throws InspectException
+     */
+    private static function existingDirectoryInside(string $base, array $parts): string
+    {
         clearstatcache(true);
         $candidate = realpath($base . '/' . implode('/', $parts));
         $root = realpath($base);
@@ -443,70 +540,122 @@ final class SourceResolver
     }
 
     /**
+     * Fetch submodules level by level, the way the deploy path does, after checking every
+     * URL git resolved. Best effort: a failure leaves the parent checkout as it was.
+     */
+    private function initSubmodules(string $target, ?string $askPass, int $level = 0): void
+    {
+        if ($level > self::SUBMODULE_LEVELS || !is_file($target . '/.gitmodules')) {
+            return;
+        }
+
+        $git = ['git', ...self::UNATTENDED_GIT_CONFIG, '-C', $target];
+
+        try {
+            if (!$this->submoduleUrlsAllowed($git, $target)) {
+                return;
+            }
+            $this->fetchSubmodules($git, $target, $askPass);
+            $this->initNestedSubmodules($target, $askPass, $level);
+        } catch (InspectException) {
+            return;
+        }
+    }
+
+    /**
+     * `submodule init` fetches nothing: it writes each URL into .git/config as the fetch
+     * will use it, a relative `../` resolved, so those are what gets checked.
+     *
+     * @param list<string> $git
+     * @throws InspectException
+     */
+    private function submoduleUrlsAllowed(array $git, string $target): bool
+    {
+        $this->run([...$git, 'submodule', 'init'], 'Could not read submodules', $target);
+        foreach ($this->gitConfigValues($target, '^submodule\..*\.url$') as $url) {
+            if (RepositoryAddress::refused($url)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Shallow, to match the --depth=1 clone; not --recursive, so each nested level is checked first.
+     *
+     * @param list<string> $git
+     * @throws InspectException
+     */
+    private function fetchSubmodules(array $git, string $target, ?string $askPass): void
+    {
+        $command = [...$git, 'submodule', 'update', '--depth=1'];
+        if ($askPass !== null) {
+            $command = GitUrl::withAskPass($command, $askPass);
+        }
+        $this->run($command, 'Could not fetch submodules', $target);
+    }
+
+    private function initNestedSubmodules(string $target, ?string $askPass, int $level): void
+    {
+        $root = realpath($target);
+        foreach ($this->gitConfigValues($target, '^submodule\..*\.path$', '.gitmodules') as $path) {
+            $dir = realpath($target . '/' . $path);
+            if ($root !== false && $dir !== false && str_starts_with($dir, $root . '/')) {
+                $this->initSubmodules($dir, $askPass, $level + 1);
+            }
+        }
+    }
+
+    /**
+     * Values of the config keys matching $pattern, read by git itself, from
+     * the checkout's own config or from $file.
+     *
+     * @return list<string>
+     * @throws InspectException when git does not answer in time
+     */
+    private function gitConfigValues(string $target, string $pattern, ?string $file = null): array
+    {
+        $command = ['git', '-c', 'safe.directory=*', '-C', $target, 'config', '-z'];
+        array_push($command, ...($file === null ? ['--local'] : ['--file', $file]));
+        array_push($command, '--get-regexp', $pattern);
+
+        $values = [];
+        foreach (explode("\0", $this->configOutput($command)) as $entry) {
+            $newline = strpos($entry, "\n");
+            if ($newline !== false) {
+                $values[] = substr($entry, $newline + 1);
+            }
+        }
+
+        return $values;
+    }
+
+    /**
+     * @param list<string> $command
+     * @throws InspectException
+     */
+    private function configOutput(array $command): string
+    {
+        $process = new Process($command, null, ['LC_ALL' => 'C', 'LANG' => 'C'], null, $this->timeout);
+
+        try {
+            $process->run();
+        } catch (\Throwable $e) {
+            throw new InspectException('Could not read the submodule configuration.', 0, $e);
+        }
+
+        return $process->getOutput();
+    }
+
+    /**
      * @param list<string> $command
      * @param ?string $redact a path that must not appear in the error message
      * @throws InspectException
      */
-    /**
-     * Fetch submodules, the way the deploy path already does.
-     *
-     * The two clones disagreed about this, and the disagreement was visible to
-     * an operator: for a meta repository whose application lives in a
-     * submodule, inspect saw empty directories, found no composer.json and no
-     * .php anywhere, and answered `deployable: false` with
-     * "Runtime 'php' is required but could not be resolved" — while the very
-     * next deploy of the same URL with the same recipe came up.
-     *
-     * Guarded on `.gitmodules`, so a repository without submodules — nearly
-     * all of them — pays one stat. Best effort: a submodule that needs a
-     * credential this request does not have leaves the parent checkout as it
-     * was, which is strictly better than the empty directories, and never
-     * turns a readable repository into a failed inspect.
-     */
-    private function initSubmodules(string $target, ?string $askPass): void
-    {
-        if (!is_file($target . '/.gitmodules')) {
-            return;
-        }
-
-        $command = [
-            'git',
-            '-c', 'safe.directory=*',
-            '-c', 'credential.helper=',
-            '-c', 'core.askpass=',
-            '-C', $target,
-            // Shallow, to match the --depth=1 clone: inspect reads a tree, not
-            // a history.
-            'submodule', 'update', '--init', '--recursive', '--depth=1',
-        ];
-        if ($askPass !== null) {
-            $command = GitUrl::withAskPass($command, $askPass);
-        }
-
-        try {
-            $this->run($command, 'Could not fetch submodules', $target);
-        } catch (InspectException) {
-            // Deliberately swallowed -- see the docblock.
-        }
-    }
-
     private function run(array $command, string $failure, ?string $redact = null): void
     {
-        $process = new Process($command, null, [
-            'GIT_TERMINAL_PROMPT' => '0',
-            // GIT_TERMINAL_PROMPT only closes the terminal; an askpass program still
-            // launches, and on a desktop session that is a GUI dialog nobody answers —
-            // the clone then hangs until the timeout. The token path overrides GIT_ASKPASS.
-            'GIT_ASKPASS' => '/bin/false',
-            'SSH_ASKPASS' => '/bin/false',
-            // A repository's LFS media is never what decides its stack, and pulling it
-            // would download gigabytes to read a package.json.
-            'GIT_LFS_SKIP_SMUDGE' => '1',
-            // git speaks the server's language otherwise, and this message is going into
-            // an API response that a program may match on.
-            'LC_ALL' => 'C',
-            'LANG' => 'C',
-        ], null, $this->timeout);
+        $process = new Process($command, null, self::UNATTENDED_GIT_ENV, null, $this->timeout);
 
         try {
             $process->run();
@@ -522,11 +671,33 @@ final class SourceResolver
 
     /**
      * The one line of git's output worth returning: the `fatal:` one, else the last thing
-     * said — not the first, which only announces the clone. Authentication is rewritten
-     * rather than quoted, because git's "unable to read askpass response" describes this
-     * class's plumbing; on GitHub it is also the answer for a missing repository.
+     * said — not the first, which only announces the clone. $redact, the workspace that is
+     * already deleted by the time the caller reads this, is replaced by `<workspace>`.
      */
     private static function reason(string $output, ?string $redact): string
+    {
+        $lines = self::nonEmptyLines($output);
+        if ($lines === []) {
+            return '';
+        }
+
+        if (self::mentionsAuthentication($lines)) {
+            return 'the repository is private or does not exist. '
+                . 'Pass git_token to read a private HTTPS repository.';
+        }
+
+        $chosen = self::fatalOrLastLine($lines);
+        if ($redact !== null && $redact !== '') {
+            $chosen = str_replace($redact, '<workspace>', $chosen);
+        }
+
+        return mb_substr($chosen, 0, 500);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function nonEmptyLines(string $output): array
     {
         $lines = [];
         foreach (preg_split("/\r\n|\n|\r/", $output) ?: [] as $line) {
@@ -535,32 +706,39 @@ final class SourceResolver
                 $lines[] = $line;
             }
         }
-        if ($lines === []) {
-            return '';
-        }
 
+        return $lines;
+    }
+
+    /**
+     * Authentication is rewritten rather than quoted: git's "unable to read askpass response"
+     * describes this class's plumbing, and on GitHub it is also the answer for a missing repository.
+     *
+     * @param list<string> $lines
+     */
+    private static function mentionsAuthentication(array $lines): bool
+    {
         foreach ($lines as $line) {
             if (preg_match('/askpass|could not read (Username|Password)|Authentication failed|terminal prompts disabled/i', $line) === 1) {
-                return 'the repository is private or does not exist. '
-                    . 'Pass git_token to read a private HTTPS repository.';
+                return true;
             }
         }
 
-        $chosen = $lines[count($lines) - 1];
+        return false;
+    }
+
+    /**
+     * @param non-empty-list<string> $lines
+     */
+    private static function fatalOrLastLine(array $lines): string
+    {
         foreach ($lines as $line) {
             if (preg_match('/^fatal:/i', $line) === 1) {
-                $chosen = $line;
-                break;
+                return $line;
             }
         }
 
-        // The workspace is this class's business, not the caller's, and it has
-        // already been deleted by the time they read this.
-        if ($redact !== null && $redact !== '') {
-            $chosen = str_replace($redact, '<workspace>', $chosen);
-        }
-
-        return mb_substr($chosen, 0, 500);
+        return $lines[count($lines) - 1];
     }
 
     /**

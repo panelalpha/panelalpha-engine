@@ -7,6 +7,7 @@ use App\Exceptions\DeployBusyException;
 use App\Http\Middleware\Authenticate;
 use App\Jobs\DeployProject;
 use App\Jobs\RebuildProject;
+use App\Lib\Deploy\DeployLog\DeployLock;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\DeployLogPaths;
 use App\Lib\Deploy\Platform\DeployPlanContext;
@@ -205,6 +206,26 @@ class ProjectRebuildHttpTest extends TestCase
         $this->assertSame(409, $response->getStatusCode());
         $this->assertSame([
             'message' => "A deploy of this project is already running. Follow it with GET /projects/{$user->username}/deploy-log.",
+            'task_id' => null,
+        ], $response->json());
+        Queue::assertNothingPushed();
+    }
+
+    /** A CLI backup queued no task, so the 409 has only the lock's holder to say what is running. */
+    public function test_a_cli_backup_holding_the_lock_gets_409_named(): void
+    {
+        $user = $this->dindUser();
+        $lock = DeployLock::acquireFor($user->username, DeployLock::HOLDER_BACKUP);
+
+        try {
+            $response = $this->postJson("/api/projects/{$user->username}/rebuild");
+        } finally {
+            $lock->release();
+        }
+
+        $this->assertSame(409, $response->getStatusCode());
+        $this->assertSame([
+            'message' => "Project '{$user->username}' is busy: a backup is running.",
             'task_id' => null,
         ], $response->json());
         Queue::assertNothingPushed();

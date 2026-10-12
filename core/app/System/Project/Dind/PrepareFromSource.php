@@ -23,20 +23,17 @@ use App\Lib\Deploy\Source\GitUrl;
 use App\Lib\Deploy\Telemetry\DetectionSignal;
 use App\Lib\Deploy\Telemetry\Telemetry;
 use App\System\Project\Dind\Strategy\ManifestDatabase;
+use App\Models\User as ModelsUser;
 
 /**
- * Turning a checkout into something the account can run: bootstrap it from
- * its app config, work out what it is, record that, then apply the matching
- * strategy.
- *
- * The order is deliberate and has been wrong before. The app config runs *first*
- * and edits the checkout — file snippets, its own compose file, its
- * after-clone script — so that by the time detection looks, a compose file
- * the page wrote and one the repository shipped are the same file. Detecting
- * first would decide against a tree that is about to change underneath it.
+ * Turning a checkout into something the account can run. The app config bootstraps it first
+ * and may edit the checkout, so detection sees the tree as it will be deployed.
  */
 class PrepareFromSource
 {
+    /** Hooks explain a refusal on stdout, and the failure message is built from stderr. */
+    private const RUN_WITH_STDOUT_ON_STDERR = 'exec bash "$0" 1>&2';
+
     private DindProject $dind;
 
     public function __construct(DindProject $dind)
@@ -45,8 +42,9 @@ class PrepareFromSource
     }
 
     /**
-     * Shared by git clone and zip import — which is the point: a project
-     * deployed from an upload gets the same treatment as a cloned one.
+     * Shared by git clone and zip import, so an upload gets the same treatment as a clone.
+     * Credentials are delivered before the app config's prepare hook, which may read them,
+     * and finally from the manifest detection chose.
      */
     public function prepare(): void
     {
@@ -56,27 +54,40 @@ class PrepareFromSource
         $logger = $this->dind->shell()->logger();
         $gitRepo = $user->getGitRepo();
 
-        // Clone/import already finished; detect + host compile + image
-        // build belong to "running", not "cloning".
         $logger?->stage(DeployLogger::STAGE_RUNNING);
 
         $appConfig = $this->dind->appConfig($gitRepo);
-        // Before the app config's prepare hook, which may read the file.
         $this->dind->appCredentials()->deliver($appConfig?->credentials(), final: false);
         $this->dind->strategy()->bootstrap($appConfig, $projectDir, $chown);
 
         $this->dropSupersededPlaceholder($projectDir, $logger);
 
+        $decision = $this->detectDecision($projectDir, $gitRepo, $logger);
+        $this->assertDeployable($decision, $projectDir, $gitRepo, $logger);
+        $this->freezeSnapshot($decision, $appConfig, $projectDir, $gitRepo);
+        $this->logDecision($decision, $logger);
+        $this->explainIgnoredComposeFile($decision, $projectDir, $logger);
+        $this->warnInertDatabase($decision, $logger);
+        $this->reportUnreciped($user->username, $decision, $projectDir);
+        $this->deliverManifestCredentials($decision, $appConfig);
+
+        $this->applyDecision($user, $decision, $appConfig, $projectDir, $gitRepo);
+    }
+
+    /**
+     * Detect the project, then let the deploy request's plan replace stages. The Dockerfile
+     * writers read the `build` stage off the decision, so the plan is applied before anything reads it.
+     *
+     * @return array<string, mixed>
+     */
+    private function detectDecision(string $projectDir, ?string $gitRepo, ?DeployLogger $logger): array
+    {
         $recipe = app(RecipeChoiceContext::class)->get();
         $decision = DetectProjectStrategy::detect($projectDir, $gitRepo, $recipe);
         if ($recipe !== null) {
             $logger?->info("Deploy request pinned the recipe: {$recipe}");
         }
 
-        // The build stage becomes RUN layers in the generated Dockerfile
-        // rather than lines in the entrypoint, and the Dockerfile writers read
-        // those off the decision. A plan that spoke for `build` therefore has
-        // to be applied here, before anything reads the decision.
         $plan = app(DeployPlanContext::class)->get();
         if ($plan !== null) {
             $decision = $plan->applyToDecision($decision);
@@ -85,6 +96,14 @@ class PrepareFromSource
             );
         }
 
+        return $decision;
+    }
+
+    /**
+     * @param array<string, mixed> $decision
+     */
+    private function assertDeployable(array $decision, string $projectDir, ?string $gitRepo, ?DeployLogger $logger): void
+    {
         try {
             DeployabilityCheck::assert($decision, $projectDir);
             if ($gitRepo !== null) {
@@ -94,49 +113,66 @@ class PrepareFromSource
             $logger?->info($e->getMessage());
             throw $e;
         }
+    }
 
+    /**
+     * Record what was detected. `deploy_platform` is the manifest that claimed it (`html` and
+     * `static` share a strategy); the recipe's checks dir and the resolved image are frozen, not re-derived.
+     *
+     * @param array<string, mixed> $decision
+     */
+    private function freezeSnapshot(array $decision, ?AppConfig $appConfig, string $projectDir, ?string $gitRepo): void
+    {
         $this->dind->freezeDeploySnapshot([
             'deploy_source' => $gitRepo !== null ? 'git' : 'archive',
             'deploy_strategy' => $decision['strategy'],
             'deploy_label' => $decision['label'],
             'deploy_port' => $decision['port_hint'],
             'deploy_runtime' => $decision['runtime'] ?? null,
-            // Which manifest claimed the project, as opposed to which
-            // strategy it shares: `html` and `static` are both the static
-            // strategy, and only the manifest knows what to check.
             'deploy_platform' => is_string($decision['platform'] ?? null) ? $decision['platform'] : null,
-            // Where the recipe that claimed it keeps its own health checks, so
-            // they can still be found at health-check time. Frozen rather than
-            // re-derived from the URL: the account keeps its repository, and a
-            // directory renamed between the deploy and the check would
-            // otherwise take the checks with it -- silently, again.
-            //
-            // The `checks/` subdirectory, not the recipe directory: that is the
-            // shape `CheckRegistry::allWithDirectory()` reads, and it is null
-            // for every recipe that ships none, which is most of them.
-            'deploy_checks_dir' => ($dir = SourceRecipes::directoryFor($gitRepo)) === null
-                ? null
-                : SourceRecipes::checksDirectory($dir),
-            // The resolved image, not the strategy's default one. What gets
-            // seeded has to be what the project asked for.
+            'deploy_checks_dir' => $this->recipeChecksDirectory($gitRepo),
             'deploy_image' => is_string($decision['image'] ?? null) ? $decision['image'] : null,
-            // The app config's `health: {start_period}`, read by AppHealth after `compose up`.
             AppHealth::DETAIL_START_PERIOD => $appConfig?->startPeriod(),
             'git_commit' => $gitRepo !== null ? $this->readGitCommit($projectDir) : null,
         ]);
+    }
 
+    /**
+     * The `checks/` directory of the recipe written for this repository, null when it ships none.
+     */
+    private function recipeChecksDirectory(?string $gitRepo): ?string
+    {
+        $dir = SourceRecipes::directoryFor($gitRepo);
+
+        return $dir === null ? null : SourceRecipes::checksDirectory($dir);
+    }
+
+    /**
+     * @param array<string, mixed> $decision
+     */
+    private function logDecision(array $decision, ?DeployLogger $logger): void
+    {
         $sourceRecipe = $decision['source_recipe'] ?? null;
         if (is_string($sourceRecipe)) {
             $logger?->info("Recipe named by {$sourceRecipe}");
         }
         $logger?->info("Detected project type: {$decision['label']}");
         $logger?->info("Using strategy: {$decision['strategy']}");
+    }
 
-        // A compose file the repo ships but ComposeUsableProbe skipped as a
-        // workstation dev compose is otherwise invisible: name the mount that
-        // demoted it so a wrong strategy is one log line, not a silent hunt.
-        if ($decision['strategy'] !== Strategies::COMPOSE
-            && ($composePath = ComposeFileInspector::firstIn($projectDir)) !== null
+    /**
+     * Why a compose file the repository ships was not used (a workstation dev compose, or the
+     * v1 layout), so a wrong strategy is one log line rather than a silent hunt.
+     *
+     * @param array<string, mixed> $decision
+     */
+    private function explainIgnoredComposeFile(array $decision, string $projectDir, ?DeployLogger $logger): void
+    {
+        if ($decision['strategy'] === Strategies::COMPOSE) {
+            return;
+        }
+
+        if (($composePath = ComposeFileInspector::firstIn($projectDir)) !== null
             && ($reason = ComposeFileInspector::localDevComposeReason($composePath)) !== null
         ) {
             $logger?->info(sprintf(
@@ -146,8 +182,7 @@ class PrepareFromSource
                 $decision['strategy']
             ));
         }
-        if ($decision['strategy'] !== Strategies::COMPOSE
-            && ($composePath = ComposeFileInspector::firstIn($projectDir)) !== null
+        if (($composePath = ComposeFileInspector::firstIn($projectDir)) !== null
             && ComposeFileInspector::isLegacyV1Compose($composePath)
         ) {
             $logger?->info(sprintf(
@@ -156,110 +191,127 @@ class PrepareFromSource
                 $decision['strategy']
             ));
         }
+    }
 
-        // `database:` is provisioned only by the writers that generate the app
-        // service; anywhere else it used to do nothing, silently.
+    /**
+     * `database:` is provisioned only by the writers that generate the app service.
+     *
+     * @param array<string, mixed> $decision
+     */
+    private function warnInertDatabase(array $decision, ?DeployLogger $logger): void
+    {
         $inertDatabase = ManifestDatabase::inertWarning($decision);
         if ($inertDatabase !== null) {
             $logger?->warn($inertDatabase);
         }
+    }
 
-        // Detection reaching past the manifests is not a failure — Railpack
-        // usually builds the project, and where even it has nothing to go on
-        // the fallback compose still serves something. Either way nobody has
-        // written a recipe for whatever this project is, and left unreported
-        // that is invisible: the deploy goes green and the gap is only ever
-        // found by a support ticket.
+    /**
+     * Detection that reached past the manifests still deploys, but nobody has written a recipe
+     * for this project; reported, or the gap is only ever found by a support ticket.
+     *
+     * @param array<string, mixed> $decision
+     */
+    private function reportUnreciped(string $username, array $decision, string $projectDir): void
+    {
         $unreciped = DetectionSignal::forDecision($decision, $projectDir);
         if ($unreciped !== null) {
-            Telemetry::signal($user->username, $unreciped['signal'], $unreciped['detail']);
+            Telemetry::signal($username, $unreciped['signal'], $unreciped['detail']);
         }
+    }
 
-        // The manifest detection chose has the last word, before its own prepare commands run.
+    /**
+     * The manifest detection chose has the last word, before its own prepare commands run.
+     *
+     * @param array<string, mixed> $decision
+     */
+    private function deliverManifestCredentials(array $decision, ?AppConfig $appConfig): void
+    {
         $this->dind->appCredentials()->deliver(
             CredentialSpec::fromArray(is_array($decision['credentials'] ?? null) ? $decision['credentials'] : null)
                 ?? $appConfig?->credentials(),
             final: true
         );
+    }
 
+    /**
+     * Apply the strategy, then the project's env vars and proxy rules. The port scheme is kept on
+     * the project for every later rule sync; ports are detected after `.env` exists, since compose
+     * publishes a host port taken from it.
+     *
+     * @param array<string, mixed> $decision
+     */
+    private function applyDecision(ModelsUser $user, array $decision, ?AppConfig $appConfig, string $projectDir, ?string $gitRepo): void
+    {
+        $chown = $user->getChownString();
         $sourceLabel = $gitRepo !== null ? GitUrl::sanitize($gitRepo) : 'uploaded archive';
         $this->dind->strategy()->apply($decision, $appConfig, $projectDir, $chown, $sourceLabel);
         $this->dind->strategy()->dropUndefinedOverrideServices($chown);
         $this->dind->strategy()->installRailsHostInitializer($projectDir, $chown);
 
-        if ($gitRepo !== null || is_dir($projectDir . '/.git')) {
-            $this->gitForProjectDir($projectDir)->allowUntrustedGitDirectory();
-        }
-
-        // Kept on the project so every later rule sync (a rename, a port re-detect) proxies with it.
         $user->setAppPortScheme($decision['port_scheme'] ?? $appConfig?->portScheme());
         $this->dind->applyProjectEnvVars(is_string($decision['compose_path'] ?? null) ? $decision['compose_path'] : null);
-        // After .env exists: compose publishes a host port taken from it.
         $this->dind->networking()->detectAndCreateProxyRules($user);
         $this->dind->strategy()->keepEngineFilesOutOfBuildContext($decision, $projectDir, $chown);
     }
 
     /**
-     * Run the precheck stage: validation that should stop a deploy before it
-     * costs a clone.
-     *
-     * The app config contributes here, and so does a recipe written for this
-     * repository — the one kind of manifest that can be chosen before the
-     * source exists, since it is found by the clone URL rather than by
-     * reading the checkout. Everything else still cannot: detection reads
-     * files, and there are none yet. {@see PlatformStage::PRECHECK}
+     * Run the precheck stage: validation that should stop a deploy before it costs a clone.
+     * Nothing is cloned yet, so the app config is the engine's, no `when` guard can be evaluated,
+     * and a refusal is marked so telemetry does not report it as a broken deploy.
+     * {@see PlatformStage::PRECHECK}
      */
     public function preCheck(): void
     {
         $gitRepo = $this->dind->userModel()->getGitRepoOrFail();
         $appConfig = $this->dind->appConfig($gitRepo);
-        // The app config is loaded already, and at this point it is the engine's:
-        // the repository has not been cloned, so it cannot have shipped one.
-        // With the recipe's own checks/, or a check_skip or check: naming one is refused.
-        $recipeDir = SourceRecipes::directoryFor($gitRepo);
         $recipe = SourceRecipes::fromAppConfig(
             $appConfig,
             AppConfig::YAML_FILENAME,
-            $recipeDir === null ? null : SourceRecipes::checksDirectory($recipeDir)
+            $this->recipeChecksDirectory($gitRepo)
         );
         $plan = app(DeployPlanContext::class)->get();
-
-        // Staged commands keep `before`, `optional`, `timeout` and `when`.
-        // The hook script has none of that to keep, so it stays a raw body and
-        // runs last, which is where it has always run.
         $staged = $appConfig?->commands(PlatformStage::PRECHECK) ?? [];
-        $extra = [];
-        $commands = $appConfig?->preCheckCommands();
-        if (is_string($commands) && $commands !== '') {
-            $extra[AppConfig::PRE_CHECK_SCRIPT] = $commands;
-        }
-        // A deploy request can put commands here for a project that ships
-        // neither an app config nor a source recipe.
+        $extra = self::preCheckHookScript($appConfig);
         if (HostScript::isEmpty($recipe, PlatformStage::PRECHECK, null, $extra, $staged, $plan)) {
             return;
         }
 
-        // No project on disk yet — this runs before the clone — so there is no
-        // context to evaluate a `when` guard against, and every command stands.
-        $script = HostScript::render($recipe, PlatformStage::PRECHECK, null, [], $extra, $staged, $plan);
-
-        $path = $this->dind->homeDirPath() . '/' . AppConfig::PRE_CHECK_SCRIPT;
-        $chown = $this->dind->userModel()->getChownString();
-        $this->dind->system()->filesystem()->filePutContents($path, $script, $chown, '644');
+        $path = $this->writePreCheckScript(
+            HostScript::render($recipe, PlatformStage::PRECHECK, null, [], $extra, $staged, $plan)
+        );
         try {
-            // Hooks explain a refusal on stdout; the failure message is built
-            // from stderr, so without this it only names the script.
-            $this->dind->shell()->execAsUserWithProjectEnv(['bash', '-c', 'exec bash "$0" 1>&2', $path]);
+            $this->dind->shell()->execAsUserWithProjectEnv(['bash', '-c', self::RUN_WITH_STDOUT_ON_STDERR, $path]);
         } catch (DeployCancelledException $e) {
             throw $e;
         } catch (\Exception $e) {
-            // A precheck refusing the host is not a deploy that broke, so
-            // telemetry must not report it as one.
             $this->dind->shell()->logger()?->markPreCheckRejected();
             throw $e;
         } finally {
             $this->dind->shell()->exec(['rm', '-f', $path]);
         }
+    }
+
+    /**
+     * The app config's raw precheck hook, which runs after the staged commands: it has no
+     * `before`, `optional`, `timeout` or `when` to keep.
+     *
+     * @return array<string, string>
+     */
+    private static function preCheckHookScript(?AppConfig $appConfig): array
+    {
+        $commands = $appConfig?->preCheckCommands();
+
+        return is_string($commands) && $commands !== '' ? [AppConfig::PRE_CHECK_SCRIPT => $commands] : [];
+    }
+
+    private function writePreCheckScript(string $script): string
+    {
+        $path = $this->dind->homeDirPath() . '/' . AppConfig::PRE_CHECK_SCRIPT;
+        $chown = $this->dind->userModel()->getChownString();
+        $this->dind->system()->filesystem()->filePutContents($path, $script, $chown, '644');
+
+        return $path;
     }
 
     private function assertGitHeadReadable(string $projectDir): void
@@ -268,7 +320,9 @@ class PrepareFromSource
             $this->gitForProjectDir($projectDir)->assertHeadReadable();
         } catch (GitException $e) {
             throw new \InvalidArgumentException(
-                'Git HEAD is not readable after clone; repository may be empty or corrupt.'
+                'Git HEAD is not readable after clone; repository may be empty or corrupt.',
+                0,
+                $e,
             );
         }
     }
@@ -284,14 +338,8 @@ class PrepareFromSource
     }
 
     /**
-     * Drop the welcome page once the account has an application of its own.
-     *
-     * Loading a source removes it already -- a clone empties ~/project first,
-     * an archive is rsynced with --delete -- but files written in one at a
-     * time are never "loaded" at all, so nothing else ever decides the
-     * placeholder has been superseded. Leaving it means the engine's own page
-     * competes with the user's index for the document root, and detection
-     * reads it as the site's own document.
+     * Drop the welcome page once the account has an application of its own: files written one
+     * at a time are never "loaded", and the page would compete with the user's index.
      */
     private function dropSupersededPlaceholder(string $projectDir, ?DeployLogger $logger): void
     {

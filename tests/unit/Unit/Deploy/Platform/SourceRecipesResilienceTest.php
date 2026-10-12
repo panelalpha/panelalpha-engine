@@ -118,4 +118,29 @@ class SourceRecipesResilienceTest extends TestCase
     {
         $this->assertNull(SourceRecipes::at($this->root . '/github.com/acme/nothing-here'));
     }
+
+    /**
+     * A manifest naming a strategy the deploy does not dispatch deployed green
+     * and served the placeholder page: the pipeline falls back on anything it
+     * does not recognise. A typo (`compse`) has to be refused when the manifest
+     * is read, not discovered as a blank site.
+     */
+    public function test_a_manifest_naming_an_unknown_strategy_is_refused(): void
+    {
+        $dir = $this->recipe('github.com/acme/typo', "id: acme-typo\nlabel: Typo\nstrategy: compse\n");
+
+        $this->expectException(ManifestException::class);
+        $this->expectExceptionMessageMatches("/strategy 'compse' is not one this engine deploys/");
+        SourceRecipes::at($dir, 'github.com/acme/typo');
+    }
+
+    /** A manifest that extends a recipe and states an unknown strategy over it is refused too. */
+    public function test_a_manifest_overriding_a_known_strategy_with_an_unknown_one_is_refused(): void
+    {
+        $dir = $this->recipe('github.com/acme/override', "id: acme-override\nextends: laravel\nstrategy: larvel\n");
+
+        $this->expectException(ManifestException::class);
+        $this->expectExceptionMessageMatches("/strategy 'larvel' is not one this engine deploys/");
+        SourceRecipes::at($dir, 'github.com/acme/override');
+    }
 }

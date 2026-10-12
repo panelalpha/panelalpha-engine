@@ -7,6 +7,7 @@ use App\Http\Requests\SourceInspectRequest;
 use App\Http\Requests\UserStoreRequest;
 use App\Lib\Deploy\Inspect\InspectException;
 use App\Lib\Deploy\Inspect\SourceResolver;
+use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
@@ -83,17 +84,34 @@ class SourceInspectRequestTest extends TestCase
         $this->assertSame('source_unrecognised', $problem['code']);
     }
 
-    /** An explicit `type` wins, so a path that looks like a host stays a path. */
-    public function test_a_declared_type_overrides_classification(): void
+    /** `path` mapped any readable server directory, so the API no longer accepts it. */
+    public function test_type_path_is_refused(): void
     {
         $request = SourceInspectRequest::create('/api/source/inspect', 'POST', [
             'source' => 'example.com/not/a/repo',
             'type' => 'path',
         ]);
         $request->setContainer($this->app);
+
+        try {
+            $request->validateResolved();
+            $this->fail('type: path must be refused');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('type', $e->errors());
+        }
+    }
+
+    /** An explicit `type` still wins over classification: a host-looking string declared git is a repo. */
+    public function test_a_declared_type_overrides_classification(): void
+    {
+        $request = SourceInspectRequest::create('/api/source/inspect', 'POST', [
+            'source' => 'example.com/not/a/repo',
+            'type' => 'git',
+        ]);
+        $request->setContainer($this->app);
         $request->validateResolved();
 
-        $this->assertSame('example.com/not/a/repo', $request->validated()['source']);
+        $this->assertSame('https://example.com/not/a/repo', $request->validated()['source']);
     }
 
     // ---- the token rules travel too -------------------------------------

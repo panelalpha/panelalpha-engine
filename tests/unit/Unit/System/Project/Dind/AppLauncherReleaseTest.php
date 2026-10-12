@@ -2,8 +2,11 @@
 
 namespace Tests\Unit\System\Project\Dind;
 
+use App\Exceptions\DeployCancelledException;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Compose\GeneratedCompose;
+use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Deploy\DeployLog\StepWatchdog;
 use App\Models\User;
 use App\System;
 use App\System\Filesystem;
@@ -34,6 +37,15 @@ class AppLauncherReleaseTest extends TestCase
 
     /** The app's compose file; the release is added to it. */
     private ?string $compose = null;
+
+    /** Whether the inner Docker reports it can reclaim; the ENOSPC retry needs it. */
+    private bool $canReclaim = false;
+
+    /** @var list<string> the inner Docker calls the retry made */
+    private array $reclaimed = [];
+
+    /** Runs when the launcher asks what is running, the last step before the release. */
+    private ?\Closure $onPs = null;
 
     public function test_a_failed_release_stops_before_up_and_is_flagged(): void
     {
@@ -95,6 +107,37 @@ class AppLauncherReleaseTest extends TestCase
         $this->assertArrayNotHasKey(AppLauncher::RELEASE_FAILED, $result);
     }
 
+    /**
+     * A release-line app builds in `runRelease()`; a build that fills the
+     * inner Docker store must be reclaimed and retried like the `up` and
+     * beginSwap() builds, not failed as the release's.
+     */
+    public function test_a_release_build_that_hits_enospc_is_reclaimed_and_retried(): void
+    {
+        $this->build = 'echo "write /var/lib/docker/x: no space left on device" >&2; exit 1';
+        $this->canReclaim = true;
+        $result = $this->launcher('echo migrate ran')->start();
+
+        $this->assertSame(
+            ['build release', 'build release', 'run --rm -T release'],
+            array_slice($this->ran, 0, 3),
+            'the failed build is retried once before the release runs'
+        );
+        $this->assertSame(['reclaimStorage'], $this->reclaimed);
+        $this->assertArrayNotHasKey(AppLauncher::RELEASE_FAILED, $result, 'the retry succeeded: not a failed release');
+    }
+
+    /** A release build that cannot reclaim fails as it did before, once. */
+    public function test_a_release_build_that_cannot_reclaim_is_not_retried(): void
+    {
+        $this->build = 'echo "write /var/lib/docker/x: no space left on device" >&2; exit 1';
+        $this->canReclaim = false;
+        $this->launcher('echo never ran')->start();
+
+        $this->assertSame(['build release'], $this->ran);
+        $this->assertSame([], $this->reclaimed);
+    }
+
     /** What the release starts and builds is built with it; image-only services are not. */
     public function test_the_build_covers_the_release_and_the_services_it_starts(): void
     {
@@ -120,16 +163,42 @@ class AppLauncherReleaseTest extends TestCase
         $this->assertSame(['run --rm -T release'], $this->ran);
     }
 
-    private function launcher(string $release): AppLauncher
+    public function test_a_deploy_cancelled_before_the_release_does_not_start_it(): void
+    {
+        $this->compose = DeployCompose::railpack('project-app', 3000);
+        $username = 'release-' . bin2hex(random_bytes(4));
+        $this->beforeApplicationDestroyed(static fn () => DeployLogger::deleteUserLogs($username));
+        $deploy = DeployLogger::start($username);
+        $deploy->stage(DeployLogger::STAGE_RUNNING);
+        $this->onPs = static fn () => DeployLogger::requestCancel($username);
+
+        try {
+            $this->launcher('echo migrate ran', $username)->start();
+            $this->fail('the cancelled deploy went on');
+        } catch (DeployCancelledException) {
+        }
+
+        $this->assertSame([], $this->ran, 'the release never started');
+        $deploy->finish(DeployLogger::STATUS_CANCELLED);
+    }
+
+    private function launcher(string $release, ?string $username = null): AppLauncher
     {
         $ran = &$this->ran;
+        $reclaimed = &$this->reclaimed;
         $ps = $this->ps;
+        // The ENOSPC scripts fail on their first build and succeed on the retry,
+        // so a reclaimed-once build reaches the release.
+        $enospc = str_contains($this->build, 'no space left on device');
+        $build = $this->build;
         $filesystem = $this->createStub(Filesystem::class);
         $filesystem->method('fileGetContents')->willReturn(GeneratedCompose::withProcesses(
             $this->compose ?? DeployCompose::dockerfile('Dockerfile', 3000),
             ['release' => 'node migrate.js']
         ));
-        $system = new class ($ran, $release, $this->build, $filesystem, $ps) extends System {
+        $system = new class ($ran, $release, $build, $filesystem, $ps, $enospc, $this->onPs) extends System {
+            private int $builds = 0;
+
             /** @param list<string> $ran */
             public function __construct(
                 private array &$ran,
@@ -137,6 +206,8 @@ class AppLauncherReleaseTest extends TestCase
                 private string $build,
                 private Filesystem $files,
                 private ?string $ps,
+                private bool $enospc,
+                private ?\Closure $onPs,
             ) {
             }
 
@@ -144,6 +215,9 @@ class AppLauncherReleaseTest extends TestCase
             {
                 if (!str_contains(implode(' ', (array) $cmd), "'ps' '--quiet' '--status' 'running'")) {
                     throw new \RuntimeException('unexpected command');
+                }
+                if ($this->onPs !== null) {
+                    ($this->onPs)();
                 }
 
                 return $this->ps ?? throw new \RuntimeException('docker daemon not reachable');
@@ -163,7 +237,9 @@ class AppLauncherReleaseTest extends TestCase
                     $this->ran[] = implode(' ', $sub);
                 }
                 $script = match ($sub[0] ?? null) {
-                    'build' => $this->build,
+                    // An ENOSPC script fills the store on the first build and is
+                    // reclaimed before the retry, which then succeeds.
+                    'build' => $this->enospc && $this->builds++ > 0 ? 'exit 0' : $this->build,
                     'run' => $this->release,
                     default => 'echo "up stopped here" >&2; exit 1',
                 };
@@ -172,14 +248,31 @@ class AppLauncherReleaseTest extends TestCase
 
                 return $process;
             }
+
+            public function runProcessWithCallbacks(
+                string|array $cmd,
+                array $env = [],
+                int $timeout = 600,
+                ?callable $onStart = null,
+                ?callable $onOutput = null,
+                ?StepWatchdog $watchdog = null,
+            ): Process {
+                return $this->runProcess($cmd, $env, $timeout);
+            }
         };
 
+        $inner = $this->createStub(InnerDocker::class);
+        $inner->method('canAggressivelyReclaim')->willReturn($this->canReclaim);
+        $inner->method('reclaimStorage')->willReturnCallback(function () use (&$reclaimed): void {
+            $reclaimed[] = 'reclaimStorage';
+        });
+
         $user = new User();
-        $user->username = 'release-' . bin2hex(random_bytes(4));
+        $user->username = $username ?? 'release-' . bin2hex(random_bytes(4));
         $user->setDetails(['deploy_strategy' => 'dockerfile']);
 
         $project = $this->createStub(Dind::class);
-        $project->method('innerDocker')->willReturn($this->createStub(InnerDocker::class));
+        $project->method('innerDocker')->willReturn($inner);
         $project->method('system')->willReturn($system);
         $project->method('username')->willReturn($user->username);
         $project->method('userModel')->willReturn($user);

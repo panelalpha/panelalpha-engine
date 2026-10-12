@@ -149,7 +149,7 @@ A few other known apps worth knowing:
 
 ## Troubleshooting
 
-**"App management is only available for this kind of project."**
+**"App user management works only on container projects (template dind)."**
 The WordPress user, install and one-click-login actions work on a WordPress site in its own container. A WordPress site on traditional PHP hosting can still be managed with WP-CLI, and you can still change its PHP version.
 
 **The install was refused.**

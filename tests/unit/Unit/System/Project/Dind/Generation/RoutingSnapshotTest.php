@@ -57,6 +57,27 @@ class RoutingSnapshotTest extends TestCase
         $this->assertTrue($state->get(GenerationState::ROUTES)['gated']);
     }
 
+    /** A redeploy of a stopped app notes it, so a cancel leaves the app stopped again. */
+    public function test_taking_a_snapshot_with_nothing_running_records_that_the_app_was_stopped(): void
+    {
+        $routed = [];
+        (new RoutingSnapshot($this->project(3000, $routed)))->take();
+
+        $state = new GenerationState($this->username);
+        $this->assertNotNull($state->get(GenerationState::STOPPED));
+        $this->assertNull($state->get(GenerationState::ROUTES));
+    }
+
+    /** Settling a redeploy forgets it, so a later cancel of another deploy does not stop a running app. */
+    public function test_settling_a_redeploy_forgets_the_stopped_mark(): void
+    {
+        (new GenerationState($this->username))->put(GenerationState::STOPPED, ['owner' => GenerationState::owner()]);
+        $routed = [];
+        (new RoutingSnapshot($this->project(3000, $routed)))->settle(true);
+
+        $this->assertNull((new GenerationState($this->username))->get(GenerationState::STOPPED));
+    }
+
     /** The operator's rule to the old port goes where the new version answers. */
     public function test_taking_traffic_on_a_new_port_moves_the_operators_rules_with_the_site(): void
     {
@@ -208,6 +229,8 @@ class RoutingSnapshotTest extends TestCase
         $project->method('userModel')->willReturn($user);
         $project->method('system')->willReturn($system);
         $project->method('networking')->willReturn($networking);
+        $project->method('shell')->willReturn(new ShellOperations($project));
+        $system->method('exec')->willReturn('');
 
         return $project;
     }

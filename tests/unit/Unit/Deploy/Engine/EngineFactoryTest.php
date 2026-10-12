@@ -170,6 +170,11 @@ final class FakeEngine implements ContainerEngine
             {
                 return ['podman', 'image', 'inspect', $image];
             }
+
+            public function hostEnsureImageArgv(string $image): array
+            {
+                return ['true'];
+            }
         };
     }
 

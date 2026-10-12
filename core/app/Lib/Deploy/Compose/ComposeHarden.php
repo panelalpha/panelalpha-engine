@@ -103,7 +103,7 @@ class ComposeHarden
                 $compose['services'][$name] = ServiceHardener::harden((string) $name, $service, $accountMemoryMb, $keepLoopback, $env, $accountUser, $projectDir, $imageEnvironment);
             }
         }
-        [$compose, $entries] = ServiceHardener::withoutHostPathEntries($compose);
+        [$compose, $entries] = ServiceHardener::withoutVolumeDriverOptions($compose);
 
         return ['compose' => self::withProcMounts($compose, $procFiles), 'removed' => [...$removed, ...$entries]];
     }

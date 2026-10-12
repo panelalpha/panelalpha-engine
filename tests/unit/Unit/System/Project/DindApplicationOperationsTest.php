@@ -3,6 +3,7 @@
 namespace Tests\Unit\System\Project;
 
 use Tests\Support\FakeProcess;
+use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Models\Domain as DomainModel;
 use App\Models\User as ModelsUser;
 use App\System;
@@ -11,6 +12,7 @@ use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AppCertificate;
 use App\System\Project\Dind\Generation\GenerationState;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class DindApplicationOperationsTest extends TestCase
@@ -95,6 +97,66 @@ class DindApplicationOperationsTest extends TestCase
 
         $this->assertSame([['down', '--remove-orphans']], $this->composeDowns());
         $this->assertStringNotContainsString('service docker stop', $this->flattenExecuted(), 'the account\'s dockerd stays up');
+    }
+
+    /**
+     * Cancelled right after "Deploy started", before the redeploy noted the
+     * running app: nothing is recorded yet, and the live version stays up.
+     *
+     * @param array<string, mixed> $details
+     */
+    #[DataProvider('deployedBefore')]
+    public function test_cancelling_a_redeploy_before_it_noted_the_running_app_leaves_it_up(array $details): void
+    {
+        $this->app->useStoragePath($this->tmpRoot . '/storage');
+        $model = $this->dindModel(['deploy_strategy' => 'compose'] + $details);
+        file_put_contents($this->tmpRoot . '/users/alice/docker-compose.yml', "services:\n  dind:\n    image: test\n");
+        file_put_contents($this->homeRoot . '/alice/project/docker-compose.yml', "services:\n  app:\n    image: test\n");
+
+        (new ProjectAggregate($this->recordingSystem(), $model))->cancelRunningDeploy();
+
+        $this->assertSame([], $this->composeDowns());
+        $this->assertStringNotContainsString('prune', $this->flattenExecuted());
+    }
+
+    /** @return array<string, array{array<string, mixed>}> */
+    public static function deployedBefore(): array
+    {
+        return [
+            'after a success' => [['deployment_status' => 'success']],
+            'after a partial deploy' => [['deployment_status' => 'partial']],
+            'after a failed redeploy' => [['deployment_status' => 'failed', 'deployed_before' => true]],
+        ];
+    }
+
+    /** The app was stopped, so nothing was noted as running: what the redeploy created is looked for, not the stack taken down. */
+    public function test_cancelling_a_redeploy_of_a_stopped_app_looks_for_what_it_created(): void
+    {
+        $this->app->useStoragePath($this->tmpRoot . '/storage');
+        $model = $this->dindModel(['deploy_strategy' => 'compose', 'deployment_status' => 'success']);
+        file_put_contents($this->tmpRoot . '/users/alice/docker-compose.yml', "services:\n  dind:\n    image: test\n");
+        file_put_contents($this->homeRoot . '/alice/project/docker-compose.yml', "services:\n  app:\n    image: test\n");
+        $deploy = DeployLogger::start('alice');
+
+        (new ProjectAggregate($this->recordingSystem(), $model))->cancelRunningDeploy();
+
+        $this->assertSame([], $this->composeDowns());
+        $this->assertStringContainsString('--all', $this->flattenExecuted());
+        $this->assertStringNotContainsString('prune', $this->flattenExecuted());
+        $deploy->finish(DeployLogger::STATUS_CANCELLED);
+    }
+
+    /** A first deploy that failed never served: a retry cancelled still has its stack taken down. */
+    public function test_cancelling_a_retry_of_a_failed_first_deploy_takes_its_stack_down(): void
+    {
+        $this->app->useStoragePath($this->tmpRoot . '/storage');
+        $model = $this->dindModel(['deploy_strategy' => 'compose', 'deployment_status' => 'failed']);
+        file_put_contents($this->tmpRoot . '/users/alice/docker-compose.yml', "services:\n  dind:\n    image: test\n");
+        file_put_contents($this->homeRoot . '/alice/project/docker-compose.yml', "services:\n  app:\n    image: test\n");
+
+        (new ProjectAggregate($this->recordingSystem(), $model))->cancelRunningDeploy();
+
+        $this->assertSame([['down', '--remove-orphans']], $this->composeDowns());
     }
 
     public function test_start_application_does_not_delete_project(): void

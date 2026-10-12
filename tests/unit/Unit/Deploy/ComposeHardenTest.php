@@ -79,6 +79,23 @@ class ComposeHardenTest extends TestCase
         $this->assertSame($result['compose'], ComposeHarden::apply($compose));
     }
 
+    /** A file inside the checkout or ~/.panelalpha may be named by its absolute path, as a bind mount may. */
+    public function test_a_secret_or_config_file_the_account_owns_is_kept_with_its_references(): void
+    {
+        $compose = [
+            'services' => ['app' => ['image' => 'acme/app', 'secrets' => ['pw'], 'configs' => ['cfg']]],
+            'secrets' => ['pw' => ['file' => '/home/acct/project/secrets/pw.txt']],
+            'configs' => ['cfg' => ['file' => '/home/acct/.panelalpha/app.conf']],
+        ];
+
+        $result = ComposeHarden::applyReporting($compose, accountUser: 'acct', projectDir: '/nonexistent-core-view/acct/project');
+
+        $this->assertSame([], $result['removed']);
+        $this->assertSame(['pw'], array_keys($result['compose']['secrets']));
+        $this->assertSame(['cfg'], array_keys($result['compose']['configs']));
+        $this->assertSame(['pw'], $result['compose']['services']['app']['secrets']);
+    }
+
     public function test_apply_reporting_reports_nothing_for_a_clean_file(): void
     {
         $result = ComposeHarden::applyReporting(['services' => ['app' => ['image' => 'acme/app', 'volumes' => ['./data:/data']]]]);

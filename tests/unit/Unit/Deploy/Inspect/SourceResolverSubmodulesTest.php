@@ -178,6 +178,127 @@ class SourceResolverSubmodulesTest extends TestCase
     }
 
     /**
+     * Best effort covers a slow git too: a config read that runs out of time
+     * skips the submodules instead of failing the whole inspect.
+     */
+    public function test_a_config_read_that_times_out_is_not_an_error(): void
+    {
+        foreach (['url read' => '*--local*--get-regexp*', 'nested path read' => '*--file*--get-regexp*'] as $case => $hanging) {
+            $meta = $this->metaRepository();
+            $checkout = $this->tmpDir . '/checkout';
+            $this->git($this->tmpDir, 'clone -q ' . escapeshellarg($meta) . ' ' . escapeshellarg($checkout));
+
+            $this->withConfigReadsHanging($hanging, function () use ($checkout): void {
+                $method = new \ReflectionMethod(SourceResolver::class, 'initSubmodules');
+                $method->invoke(new SourceResolver($this->tmpDir . '/workspace', 2), $checkout, null);
+            });
+
+            $this->assertFileExists($checkout . '/README.md', $case);
+            foreach (['checkout', 'sub', 'meta', 'bin'] as $dir) {
+                $this->removeDir($this->tmpDir . '/' . $dir);
+            }
+        }
+    }
+
+    /** Runs $run with a `git` first on PATH that hangs when its arguments match $hanging and is git otherwise. */
+    private function withConfigReadsHanging(string $hanging, callable $run): void
+    {
+        $realGit = trim((string) shell_exec('command -v git'));
+        $bin = $this->tmpDir . '/bin';
+        mkdir($bin, 0700, true);
+        file_put_contents($bin . '/git', "#!/bin/sh\ncase \"\$*\" in {$hanging}) exec sleep 10;; esac\nexec "
+            . escapeshellarg($realGit) . " \"\$@\"\n");
+        chmod($bin . '/git', 0755);
+
+        $path = (string) getenv('PATH');
+        putenv('PATH=' . $bin . ':' . $path);
+        $_SERVER['PATH'] = $_ENV['PATH'] = $bin . ':' . $path;
+        try {
+            $run();
+        } finally {
+            putenv('PATH=' . $path);
+            $_SERVER['PATH'] = $_ENV['PATH'] = $path;
+        }
+    }
+
+    /** A gitlink plus its .gitmodules entry, written as given; the commit is never fetched. */
+    private function addGitlink(string $repo, string $name, string $gitmodulesEntry): void
+    {
+        file_put_contents($repo . '/.gitmodules', "[submodule \"{$name}\"]\n\tpath = {$name}\n{$gitmodulesEntry}\n", FILE_APPEND);
+        $this->git($repo, 'update-index --add --cacheinfo 160000,' . str_repeat('1', 40) . ',' . $name);
+        $this->git($repo, 'add .gitmodules && git -c user.name=t -c user.email=t@example.com commit -qm ' . $name);
+    }
+
+    /**
+     * Every host git opens an ssh connection to, recorded by a stand-in ssh
+     * that never connects.
+     *
+     * @return list<string>
+     */
+    private function sshContacts(callable $run): array
+    {
+        $log = $this->tmpDir . '/ssh.log';
+        $ssh = $this->tmpDir . '/ssh.sh';
+        file_put_contents($ssh, "#!/bin/sh\necho \"\$*\" >> " . escapeshellarg($log) . "\nexit 1\n");
+        chmod($ssh, 0755);
+        putenv('GIT_SSH_COMMAND=' . $ssh);
+        $_SERVER['GIT_SSH_COMMAND'] = $_ENV['GIT_SSH_COMMAND'] = $ssh;
+        try {
+            $run();
+        } finally {
+            putenv('GIT_SSH_COMMAND');
+            unset($_SERVER['GIT_SSH_COMMAND'], $_ENV['GIT_SSH_COMMAND']);
+        }
+
+        return is_file($log) ? (array) file($log, FILE_IGNORE_NEW_LINES) : [];
+    }
+
+    /**
+     * What .gitmodules says is not what git fetches: a quoted URL is
+     * unquoted, and a relative one is resolved against the parent remote and
+     * can climb past its host. Both are checked as git resolves them.
+     */
+    public function test_a_quoted_or_relative_internal_url_is_not_contacted(): void
+    {
+        $cases = [
+            'quoted' => ["\turl = \"ssh://git@127.0.0.1/x.git\"", 'https://example.com/owner/repo.git'],
+            'relative' => ["\turl = ../../../127.0.0.1/x.git", 'ssh://git@example.com/owner/repo.git'],
+        ];
+        foreach ($cases as $case => [$entry, $origin]) {
+            $meta = $this->metaRepository();
+            $this->addGitlink($meta, 'evil', $entry);
+            $checkout = $this->tmpDir . '/checkout-' . $case;
+            $this->git($this->tmpDir, 'clone -q ' . escapeshellarg($meta) . ' ' . escapeshellarg($checkout));
+            $this->git($checkout, 'remote set-url origin ' . escapeshellarg($origin));
+
+            $contacts = $this->sshContacts(fn () => $this->initSubmodules($checkout));
+
+            $this->assertSame([], preg_grep('/127\.0\.0\.1/', $contacts), "{$case}: git connected to an internal host");
+            @unlink($this->tmpDir . '/ssh.log');
+            $this->removeDir($this->tmpDir . '/sub');
+            $this->removeDir($this->tmpDir . '/meta');
+        }
+    }
+
+    /** A nested .gitmodules is checked before its level is fetched, not left to --recursive. */
+    public function test_a_nested_internal_submodule_is_not_contacted(): void
+    {
+        $meta = $this->metaRepository();
+        $sub = $this->tmpDir . '/sub';
+        $this->addGitlink($sub, 'evil', "\turl = ssh://git@127.0.0.1/x.git");
+        $this->git($meta . '/web', 'pull -q origin main');
+        $this->git($meta, 'add web && git -c user.name=t -c user.email=t@example.com commit -qm bump');
+
+        $checkout = $this->tmpDir . '/checkout';
+        $this->git($this->tmpDir, 'clone -q ' . escapeshellarg($meta) . ' ' . escapeshellarg($checkout));
+
+        $contacts = $this->sshContacts(fn () => $this->initSubmodules($checkout));
+
+        $this->assertFileExists($checkout . '/web/composer.json', 'the first level was not fetched');
+        $this->assertSame([], preg_grep('/127\.0\.0\.1/', $contacts), 'a nested internal submodule was contacted');
+    }
+
+    /**
      * The defect itself: the deploy path fetched submodules and the inspect
      * path did not, so the two disagreed about the same URL. This pins the
      * call into the clone, which is the line that was missing.
@@ -189,9 +310,16 @@ class SourceResolverSubmodulesTest extends TestCase
         );
         $this->assertIsString($source);
 
-        $fromGit = substr($source, (int) strpos($source, 'public function fromGit'));
-        $fromGit = substr($fromGit, 0, (int) strpos($fromGit, 'return new ResolvedSource'));
+        $this->assertStringContainsString('$this->cloneRepository(', $this->methodBody($source, 'public function fromGit'));
+        $this->assertStringContainsString('$this->initSubmodules(', $this->methodBody($source, 'private function cloneRepository'));
+    }
 
-        $this->assertStringContainsString('$this->initSubmodules(', $fromGit);
+    private function methodBody(string $source, string $signature): string
+    {
+        $start = strpos($source, $signature);
+        $this->assertNotFalse($start, $signature);
+        $method = substr($source, $start);
+
+        return substr($method, 0, (int) strpos($method, "\n    }\n"));
     }
 }

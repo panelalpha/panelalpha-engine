@@ -24,6 +24,9 @@ interface DeployMechanics
 
     public function isApplicationEnvironmentRunning(): bool;
 
+    /** Before anything a redeploy does: note what serves, so a cancel cannot read it as a first deploy. */
+    public function recordRunningVersion(): void;
+
     public function syncHostingForCheckoutRebuild(bool $reuseRunning): void;
 
     /**

@@ -40,9 +40,11 @@ final class RoutingSnapshot
         $read = (new ProjectBindMounts($this->project))->read();
         if ($read === null || $read['running'] === []) {
             $state->forget(GenerationState::ROUTES);
+            $this->noteStoppedWhenNothingRuns($state, $read);
 
             return;
         }
+        $state->forget(GenerationState::STOPPED);
         $details = $this->project->userModel()->getDetails();
         $served = $details['app_port'] ?? null;
         $state->put(GenerationState::ROUTES, [
@@ -155,6 +157,20 @@ final class RoutingSnapshot
     }
 
     /**
+     * Nothing running when the redeploy started: remember it, so a cancel can stop what the redeploy
+     * started instead of leaving it up. Not recorded when the containers could not be read.
+     *
+     * @param ?array{mounts: list<string>, containers: list<string>, running: list<string>} $read
+     */
+    private function noteStoppedWhenNothingRuns(GenerationState $state, ?array $read): void
+    {
+        if ($read === null) {
+            return;
+        }
+        $state->put(GenerationState::STOPPED, ['owner' => GenerationState::owner()]);
+    }
+
+    /**
      * After the deploy: the details back when it failed and its containers
      * still run, otherwise the routes on the new version's port. Null when
      * nothing was taken, or the containers could not be asked about.
@@ -162,6 +178,7 @@ final class RoutingSnapshot
     public function settle(?bool $succeeded): ?string
     {
         $state = new GenerationState($this->project->username());
+        $state->forget(GenerationState::STOPPED);
         $entry = $state->get(GenerationState::ROUTES);
         if ($entry === null) {
             return null;

@@ -35,7 +35,7 @@ class RecipeDateBumpTest extends TestCase
      */
     private const EXTENSIONS_FINGERPRINT = '989f11d9c144bca048cbe76b0430bc9317779289';
 
-    private const RECIPE_DATE        = '20260924';
+    private const RECIPE_DATE        = '20261007';
 
     public function test_the_recipe_date_was_bumped_with_the_extension_list(): void
     {
@@ -66,7 +66,7 @@ class RecipeDateBumpTest extends TestCase
      * sha1 of the Apache configuration baked into the same image, as of the
      * same recipe date.
      */
-    private const APACHE_FINGERPRINT = '593c9c615cda479e2fa3a349bab4733224507c1a';
+    private const APACHE_FINGERPRINT = 'f81501c08d7d61ecac74ba86b854006efd329212';
 
     /**
      * The extension list is not the only thing baked into that image.

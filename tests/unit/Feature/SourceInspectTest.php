@@ -34,17 +34,18 @@ class SourceInspectTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_it_inspects_a_local_path(): void
+    /**
+     * `type: path` mapped any directory the core PHP user can read through a
+     * tool marked read-only, so it is no longer exposed.
+     */
+    public function test_it_refuses_to_inspect_an_arbitrary_server_directory(): void
     {
         file_put_contents($this->tmpDir . '/index.html', '<h1>hello</h1>');
 
         $this->authenticate();
-        $response = $this->postJson('/api/source/inspect', ['source' => $this->tmpDir]);
-
-        $response->assertStatus(200);
-        $this->assertSame('path', $response->json('data.source.type'));
-        $this->assertSame('static', $response->json('data.application.strategy'));
-        $this->assertTrue($response->json('data.application.deployable'));
+        $this->postJson('/api/source/inspect', ['source' => $this->tmpDir])
+            ->assertStatus(422)
+            ->assertJsonPath('problems.0.code', 'source_type_unsupported');
     }
 
     public function test_it_requires_a_source(): void
@@ -66,7 +67,8 @@ class SourceInspectTest extends TestCase
         $this->authenticate();
 
         $this->postJson('/api/source/inspect', ['source' => '/no/such/directory'])
-            ->assertStatus(422);
+            ->assertStatus(422)
+            ->assertJsonPath('problems.0.code', 'source_type_unsupported');
     }
 
     public function test_it_needs_authentication(): void

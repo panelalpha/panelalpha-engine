@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Exceptions\MissingLinuxUserException;
 use App\Exceptions\NotFoundException;
 use App\Lib\Host\ProjectMemory;
 use App\Lib\Limits\ResourceLimit;
@@ -63,16 +64,32 @@ class User extends Authenticatable
     /** Details stored as one encrypted JSON document each. */
     private const ENCRYPTED_JSON_DETAILS = ['env_vars', 'app_credentials', 'git_deploy_key'];
 
-    /** Top-level details encrypted at rest; site_git tokens are per entry. */
-    private const SECRET_DETAILS = [
+    /** Top-level details stored as one encrypted string each. */
+    private const SECRET_STRING_DETAILS = [
         'git_token',
         'cloudflare_api_token',
         'cloudflare_tunnel_token',
         'registry_auth',
         'site_password_hash',
         AppDatabase::PASSWORD_DETAIL,
-        'env_vars',
-        'app_credentials',
+    ];
+
+    /** Top-level details encrypted at rest; site_git tokens are per entry. */
+    private const SECRET_DETAILS = [...self::SECRET_STRING_DETAILS, 'env_vars', 'app_credentials'];
+
+    /** The frozen deploy fields a copied project starts from. */
+    private const COPIED_DEPLOY_KEYS = [
+        'deploy_source',
+        'deploy_strategy',
+        'deploy_label',
+        'deploy_port',
+        'deploy_runtime',
+        'deploy_platform',
+        'deploy_checks_dir',
+        'deploy_image',
+        'deploy_start_period',
+        'git_commit',
+        'git_branch',
     ];
 
     /** What a project can do about its own unreadable secrets; the APP_KEY is a server matter. */
@@ -161,19 +178,7 @@ class User extends Authenticatable
     public static function copiedDeploySnapshot(array $sourceDetails): array
     {
         $out = [];
-        foreach ([
-            'deploy_source',
-            'deploy_strategy',
-            'deploy_label',
-            'deploy_port',
-            'deploy_runtime',
-            'deploy_platform',
-            'deploy_checks_dir',
-            'deploy_image',
-            'deploy_start_period',
-            'git_commit',
-            'git_branch',
-        ] as $key) {
+        foreach (self::COPIED_DEPLOY_KEYS as $key) {
             if (array_key_exists($key, $sourceDetails)) {
                 $out[$key] = $sourceDetails[$key];
             }
@@ -227,7 +232,14 @@ class User extends Authenticatable
         ]);
 
         $dest->save();
+        self::createMainDomain($dest, $destDomain);
 
+        return $dest;
+    }
+
+    /** The staging copy's main domain, with a www alias when no project holds that name yet. */
+    private static function createMainDomain(self $dest, string $destDomain): void
+    {
         $wwwAliasAvailable = !Domain::domainOrAliasExists('www.' . $destDomain);
         $domainAliases = $wwwAliasAvailable ? ['www.' . $destDomain] : [];
 
@@ -243,8 +255,6 @@ class User extends Authenticatable
             ],
         ]);
         $domainModel->save();
-
-        return $dest;
     }
 
     public static function findByUsernameOrFail(string $username): User
@@ -280,44 +290,9 @@ class User extends Authenticatable
             return [];
         }
 
-        if (isset($details['git_token']) && is_string($details['git_token'])) {
-            $details['git_token'] = $this->decryptSecretString($details['git_token']);
-        }
-        if (isset($details['cloudflare_api_token']) && is_string($details['cloudflare_api_token'])) {
-            $details['cloudflare_api_token'] = $this->decryptSecretString($details['cloudflare_api_token']);
-        }
-        if (isset($details['cloudflare_tunnel_token']) && is_string($details['cloudflare_tunnel_token'])) {
-            $details['cloudflare_tunnel_token'] = $this->decryptSecretString($details['cloudflare_tunnel_token']);
-        }
-        if (isset($details['registry_auth']) && is_string($details['registry_auth'])) {
-            $details['registry_auth'] = $this->decryptSecretString($details['registry_auth']);
-        }
-        if (isset($details['site_password_hash']) && is_string($details['site_password_hash'])) {
-            $details['site_password_hash'] = $this->decryptSecretString($details['site_password_hash']);
-        }
-        if (isset($details[AppDatabase::PASSWORD_DETAIL]) && is_string($details[AppDatabase::PASSWORD_DETAIL])) {
-            $details[AppDatabase::PASSWORD_DETAIL] = $this->decryptSecretString($details[AppDatabase::PASSWORD_DETAIL]);
-        }
-        if (isset($details['site_git']) && is_array($details['site_git'])) {
-            foreach ($details['site_git'] as $key => $entry) {
-                if (!is_array($entry)) {
-                    continue;
-                }
-                if (isset($entry['token']) && is_string($entry['token'])) {
-                    $entry['token'] = $this->decryptSecretString($entry['token']);
-                    $details['site_git'][$key] = $entry;
-                }
-            }
-        }
-        foreach (self::ENCRYPTED_JSON_DETAILS as $key) {
-            if (isset($details[$key]) && is_string($details[$key])) {
-                $decoded = $this->decryptSecretString($details[$key]);
-                $decoded = $decoded !== null ? json_decode($decoded, true) : null;
-                $details[$key] = is_array($decoded) ? $decoded : [];
-            }
-        }
+        $details = $this->transformSecretStrings($details, $this->decryptSecretString(...));
 
-        return $details;
+        return $this->decryptJsonDetails($details);
     }
 
     /**
@@ -331,43 +306,83 @@ class User extends Authenticatable
         }
         $details = is_array($value) ? $value : [];
 
-        if (isset($details['git_token']) && is_string($details['git_token']) && $details['git_token'] !== '') {
-            $details['git_token'] = $this->encryptSecretString($details['git_token']);
-        }
-        if (isset($details['cloudflare_api_token']) && is_string($details['cloudflare_api_token']) && $details['cloudflare_api_token'] !== '') {
-            $details['cloudflare_api_token'] = $this->encryptSecretString($details['cloudflare_api_token']);
-        }
-        if (isset($details['cloudflare_tunnel_token']) && is_string($details['cloudflare_tunnel_token']) && $details['cloudflare_tunnel_token'] !== '') {
-            $details['cloudflare_tunnel_token'] = $this->encryptSecretString($details['cloudflare_tunnel_token']);
-        }
-        if (isset($details['registry_auth']) && is_string($details['registry_auth']) && $details['registry_auth'] !== '') {
-            $details['registry_auth'] = $this->encryptSecretString($details['registry_auth']);
-        }
-        if (isset($details['site_password_hash']) && is_string($details['site_password_hash']) && $details['site_password_hash'] !== '') {
-            $details['site_password_hash'] = $this->encryptSecretString($details['site_password_hash']);
-        }
-        $dbPassword = $details[AppDatabase::PASSWORD_DETAIL] ?? null;
-        if ($dbPassword === null && array_key_exists(AppDatabase::PASSWORD_DETAIL, $details)
-            && $this->hasUnreadableSecret(AppDatabase::PASSWORD_DETAIL)) {
-            // Null here is an undecryptable read written back; keep the ciphertext,
-            // the app's own config still holds that password.
-            $dbPassword = $this->storedEncryptedDetail(AppDatabase::PASSWORD_DETAIL);
-            $details[AppDatabase::PASSWORD_DETAIL] = $dbPassword;
-        }
-        if (is_string($dbPassword) && $dbPassword !== '') {
-            $details[AppDatabase::PASSWORD_DETAIL] = $this->encryptSecretString($dbPassword);
-        }
-        if (isset($details['site_git']) && is_array($details['site_git'])) {
-            foreach ($details['site_git'] as $key => $entry) {
-                if (!is_array($entry)) {
-                    continue;
-                }
-                if (isset($entry['token']) && is_string($entry['token']) && $entry['token'] !== '') {
-                    $entry['token'] = $this->encryptSecretString($entry['token']);
-                    $details['site_git'][$key] = $entry;
-                }
+        $details = $this->keepUnreadableAppDatabasePassword($details);
+        $details = $this->transformSecretStrings($details, $this->encryptSecretString(...));
+
+        $this->attributes['details'] = json_encode($this->encryptJsonDetails($details));
+    }
+
+    /**
+     * Apply $transform to every non-empty secret string: the top-level ones, then each site_git token.
+     *
+     * @param array<string, mixed> $details
+     * @param callable(string): ?string $transform
+     * @return array<string, mixed>
+     */
+    private function transformSecretStrings(array $details, callable $transform): array
+    {
+        foreach (self::SECRET_STRING_DETAILS as $key) {
+            if (self::isNonEmptyString($details[$key] ?? null)) {
+                $details[$key] = $transform($details[$key]);
             }
         }
+        if (!isset($details['site_git']) || !is_array($details['site_git'])) {
+            return $details;
+        }
+        foreach ($details['site_git'] as $path => $entry) {
+            if (is_array($entry) && self::isNonEmptyString($entry['token'] ?? null)) {
+                $details['site_git'][$path]['token'] = $transform($entry['token']);
+            }
+        }
+
+        return $details;
+    }
+
+    private static function isNonEmptyString(mixed $value): bool
+    {
+        return is_string($value) && $value !== '';
+    }
+
+    /**
+     * An app database password read back as null because it could not be decrypted
+     * keeps its ciphertext: the app's own config still holds that password.
+     *
+     * @param array<string, mixed> $details
+     * @return array<string, mixed>
+     */
+    private function keepUnreadableAppDatabasePassword(array $details): array
+    {
+        $key = AppDatabase::PASSWORD_DETAIL;
+        if (array_key_exists($key, $details) && $details[$key] === null && $this->hasUnreadableSecret($key)) {
+            $details[$key] = $this->storedEncryptedDetail($key);
+        }
+
+        return $details;
+    }
+
+    /**
+     * @param array<string, mixed> $details
+     * @return array<string, mixed>
+     */
+    private function decryptJsonDetails(array $details): array
+    {
+        foreach (self::ENCRYPTED_JSON_DETAILS as $key) {
+            if (isset($details[$key]) && is_string($details[$key])) {
+                $decoded = $this->decryptSecretString($details[$key]);
+                $decoded = $decoded !== null ? json_decode($decoded, true) : null;
+                $details[$key] = is_array($decoded) ? $decoded : [];
+            }
+        }
+
+        return $details;
+    }
+
+    /**
+     * @param array<string, mixed> $details
+     * @return array<string, mixed>
+     */
+    private function encryptJsonDetails(array $details): array
+    {
         foreach (self::ENCRYPTED_JSON_DETAILS as $key) {
             if (isset($details[$key]) && is_array($details[$key])) {
                 $details[$key] = $this->encryptSecretString(
@@ -376,7 +391,7 @@ class User extends Authenticatable
             }
         }
 
-        $this->attributes['details'] = json_encode($details);
+        return $details;
     }
 
     /**
@@ -426,8 +441,7 @@ class User extends Authenticatable
     public function unreadableSecrets(): array
     {
         $names = array_values(array_filter(self::SECRET_DETAILS, fn (string $key): bool => $this->hasUnreadableSecret($key)));
-        $raw = $this->attributes['details'] ?? null;
-        $siteGit = (is_string($raw) ? json_decode($raw, true) : null)['site_git'] ?? null;
+        $siteGit = $this->storedDetails()['site_git'] ?? null;
         foreach (is_array($siteGit) ? array_keys($siteGit) : [] as $path) {
             if ($this->hasUnreadableSecret('site_git', (string) $path, 'token')) {
                 $names[] = "site_git.{$path}.token";
@@ -437,7 +451,10 @@ class User extends Authenticatable
         return $names;
     }
 
-    /** Names what cannot be decoded and what saving does to it, or null. Says nothing of the APP_KEY. */
+    /**
+     * Names what cannot be decoded and what saving does to it, or null. Says nothing of the APP_KEY.
+     * The app database password is the exception: AppDatabase keeps it and refuses to deploy without it.
+     */
     public function unreadableSecretsWarning(): ?string
     {
         $names = $this->unreadableSecrets();
@@ -449,7 +466,6 @@ class User extends Authenticatable
             . 'the next save of this project, a redeploy included, stores them empty. '
             . self::UNREADABLE_SECRETS_REMEDY;
         if (in_array(AppDatabase::PASSWORD_DETAIL, $names, true)) {
-            // AppDatabase keeps that one and refuses to deploy without it.
             $warning .= ' The app database password is kept, and a deploy refuses while it cannot be decoded: '
                 . 'a new one would lock the app out of its database.';
         }
@@ -460,13 +476,20 @@ class User extends Authenticatable
     /** The raw, still-encrypted value of a detail, if it is one. */
     private function storedEncryptedDetail(string ...$path): ?string
     {
-        $raw = $this->attributes['details'] ?? null;
-        $value = is_string($raw) ? json_decode($raw, true) : null;
+        $value = $this->storedDetails();
         foreach ($path as $segment) {
             $value = is_array($value) ? ($value[$segment] ?? null) : null;
         }
 
         return is_string($value) && str_starts_with($value, self::ENCRYPTED_SECRET_PREFIX) ? $value : null;
+    }
+
+    /** The details document as stored, secrets still encrypted, or null when there is none. */
+    private function storedDetails(): mixed
+    {
+        $raw = $this->attributes['details'] ?? null;
+
+        return is_string($raw) ? json_decode($raw, true) : null;
     }
 
     /**
@@ -505,12 +528,15 @@ class User extends Authenticatable
      */
     public function qualifyMysqlUser(string $name): string
     {
-        $prefix = $this->getMysqlPrefix();
-
-        return Str::startsWith($name, $prefix) ? $name : $prefix . $name;
+        return $this->withMysqlPrefix($name);
     }
 
     public function qualifyMysqlDatabase(string $name): string
+    {
+        return $this->withMysqlPrefix($name);
+    }
+
+    private function withMysqlPrefix(string $name): string
     {
         $prefix = $this->getMysqlPrefix();
 
@@ -748,7 +774,6 @@ class User extends Authenticatable
         $this->setLimit(ResourceLimit::byKey('addon_domains_limit'), $value);
     }
 
-    // 'subdomains_limit' => 'integer|nullable',
     public function getSubdomainsLimit(): ?int
     {
         return $this->limit(ResourceLimit::byKey('subdomains_limit'));
@@ -809,12 +834,12 @@ class User extends Authenticatable
         return $ftpAccountQuota;
     }
 
+    /** A legacy `/var/www` home resolves to the project's own home path. */
     public function getHomeDir(): string
     {
         /** @var mixed */
         $homeDir = $this->getDetails()['home_dir'] ?? null;
         if ($homeDir === "/var/www") {
-            //backwards compatibility
             return $this->project()->homeDirPath();
         }
         if (!empty($homeDir) && is_string($homeDir)) {
@@ -825,20 +850,29 @@ class User extends Authenticatable
 
     public function getUid(): ?int
     {
-        $details = $this->getDetails();
-        if (empty($details['UID']) || !is_int($details['UID'])) {
-            return null;
-        }
-        return $details['UID'];
+        return $this->intDetail('UID');
     }
 
     public function getGid(): ?int
     {
-        $details = $this->getDetails();
-        if (empty($details['GID']) || !is_int($details['GID'])) {
-            return null;
+        return $this->intDetail('GID');
+    }
+
+    /**
+     * The account's own UID and GID, never a fallback.
+     *
+     * @return array{int, int}
+     * @throws MissingLinuxUserException
+     */
+    public function linuxIds(): array
+    {
+        $uid = $this->getUid();
+        $gid = $this->getGid();
+        if ($uid === null || $gid === null) {
+            throw MissingLinuxUserException::for((string) $this->username);
         }
-        return $details['GID'];
+
+        return [$uid, $gid];
     }
 
     public function getChownString(): ?string
@@ -853,7 +887,7 @@ class User extends Authenticatable
 
     public function getConfig(): array
     {
-        $config = [
+        return [
             "home_dir" => $this->getHomeDir(),
             "mysql_prefix" => $this->getMysqlPrefix(),
             "disk_space_limit" => $this->getDiskSpaceLimit(),
@@ -877,8 +911,6 @@ class User extends Authenticatable
             "UID" => $this->getUid(),
             "GID" => $this->getGid(),
         ];
-
-        return $config;
     }
 
     /**
@@ -897,8 +929,10 @@ class User extends Authenticatable
         return RuntimeSettings::lsphp($this->getDetails()['lsphp_settings'] ?? null);
     }
 
-    // The vhost's lsphp maxConns must equal the plan's PHP_LSAPI_CHILDREN;
-    // more connections than children queue inside lsphp and requests hang.
+    /**
+     * The vhost's lsphp maxConns must equal the plan's PHP_LSAPI_CHILDREN;
+     * more connections than children queue inside lsphp and requests hang.
+     */
     public function getLsPhpMaxConns(): int
     {
         return max(1, (int) $this->getLsPhpSettings()['PHP_LSAPI_CHILDREN']);
@@ -983,20 +1017,12 @@ class User extends Authenticatable
 
     public function getTemplate(): ?string
     {
-        $details = $this->getDetails();
-        if (empty($details['template']) || !is_string($details['template'])) {
-            return null;
-        }
-        return $details['template'];
+        return $this->stringDetail('template');
     }
 
     public function getGitRepo(): ?string
     {
-        $details = $this->getDetails();
-        if (empty($details['git_repo']) || !is_string($details['git_repo'])) {
-            return null;
-        }
-        return $details['git_repo'];
+        return $this->stringDetail('git_repo');
     }
 
     public function getGitRepoOrFail(): string
@@ -1015,13 +1041,7 @@ class User extends Authenticatable
 
     public function getGitBranch(): ?string
     {
-        $details = $this->getDetails();
-        if (empty($details['git_branch']) || !is_string($details['git_branch'])) {
-            return null;
-        }
-        $branch = trim($details['git_branch']);
-
-        return $branch !== '' ? $branch : null;
+        return self::trimmed($this->stringDetail('git_branch'));
     }
 
     /** The Git token this project clones with, or null for an anonymous clone. */
@@ -1064,37 +1084,35 @@ class User extends Authenticatable
         return ($trimmed = trim($value)) !== '' ? $trimmed : null;
     }
 
+    /** A details value that is a string and not empty() (so not '' nor '0'), else null. */
+    private function stringDetail(string $key): ?string
+    {
+        $value = $this->getDetails()[$key] ?? null;
+
+        return !empty($value) && is_string($value) ? $value : null;
+    }
+
+    /** A details value that is a non-zero int, else null. */
+    private function intDetail(string $key): ?int
+    {
+        $value = $this->getDetails()[$key] ?? null;
+
+        return !empty($value) && is_int($value) ? $value : null;
+    }
+
     public function getCloudflareAccountId(): ?string
     {
-        $details = $this->getDetails();
-        if (empty($details['cloudflare_account_id']) || !is_string($details['cloudflare_account_id'])) {
-            return null;
-        }
-        $id = trim($details['cloudflare_account_id']);
-
-        return $id !== '' ? $id : null;
+        return self::trimmed($this->stringDetail('cloudflare_account_id'));
     }
 
     public function getCloudflareTunnelId(): ?string
     {
-        $details = $this->getDetails();
-        if (empty($details['cloudflare_tunnel_id']) || !is_string($details['cloudflare_tunnel_id'])) {
-            return null;
-        }
-        $id = trim($details['cloudflare_tunnel_id']);
-
-        return $id !== '' ? $id : null;
+        return self::trimmed($this->stringDetail('cloudflare_tunnel_id'));
     }
 
     public function getCloudflareTunnelToken(): ?string
     {
-        $details = $this->getDetails();
-        if (empty($details['cloudflare_tunnel_token']) || !is_string($details['cloudflare_tunnel_token'])) {
-            return null;
-        }
-        $token = trim($details['cloudflare_tunnel_token']);
-
-        return $token !== '' ? $token : null;
+        return self::trimmed($this->stringDetail('cloudflare_tunnel_token'));
     }
 
     /**
@@ -1113,21 +1131,27 @@ class User extends Authenticatable
             ];
         }
 
-        // Deploy accounts store the remote on git_repo; surface it as site_git
-        // for the default DinD checkout so status reports connected without a
-        // separate POST /git/connect.
-        if ($pathKey === 'project') {
-            $repo = $this->getGitRepo();
-            if ($repo !== null && $repo !== '') {
-                return [
-                    'repo_url' => $repo,
-                    'branch' => $this->getGitBranch() ?? '',
-                    'token' => $this->getGitToken(),
-                ];
-            }
+        return $pathKey === 'project' ? $this->deployRepoAsSiteGit() : null;
+    }
+
+    /**
+     * A deploy account stores its remote on git_repo; surfaced as the default checkout's
+     * site_git, status reports it connected without a separate POST /git/connect.
+     *
+     * @return array{repo_url: string, branch: string, token: ?string}|null
+     */
+    private function deployRepoAsSiteGit(): ?array
+    {
+        $repo = $this->getGitRepo();
+        if ($repo === null || $repo === '') {
+            return null;
         }
 
-        return null;
+        return [
+            'repo_url' => $repo,
+            'branch' => $this->getGitBranch() ?? '',
+            'token' => $this->getGitToken(),
+        ];
     }
 
     /**
@@ -1135,26 +1159,36 @@ class User extends Authenticatable
      */
     public function putSiteGit(string $pathKey, array $entry): void
     {
-        $details = $this->getDetails();
-        $site = $details['site_git'] ?? [];
-        if (!is_array($site)) {
-            $site = [];
-        }
+        $site = $this->siteGitEntries();
         $site[$pathKey] = $entry;
-        $this->setDetails(['site_git' => $site]);
-        if ($this->exists) {
-            $this->save();
-        }
+        $this->storeSiteGit($site);
     }
 
     public function forgetSiteGit(string $pathKey): void
     {
-        $details = $this->getDetails();
-        $site = $details['site_git'] ?? [];
-        if (!is_array($site) || !array_key_exists($pathKey, $site)) {
+        $site = $this->siteGitEntries();
+        if (!array_key_exists($pathKey, $site)) {
             return;
         }
         unset($site[$pathKey]);
+        $this->storeSiteGit($site);
+    }
+
+    /** @return array<array-key, mixed> */
+    private function siteGitEntries(): array
+    {
+        $site = $this->getDetails()['site_git'] ?? [];
+
+        return is_array($site) ? $site : [];
+    }
+
+    /**
+     * Saves only a project that already exists.
+     *
+     * @param array<array-key, mixed> $site
+     */
+    private function storeSiteGit(array $site): void
+    {
         $this->setDetails(['site_git' => $site]);
         if ($this->exists) {
             $this->save();
@@ -1163,53 +1197,27 @@ class User extends Authenticatable
 
     public function getDeployStrategy(): ?string
     {
-        $details = $this->getDetails();
-        if (empty($details['deploy_strategy']) || !is_string($details['deploy_strategy'])) {
-            return null;
-        }
-
-        return $details['deploy_strategy'];
+        return $this->stringDetail('deploy_strategy');
     }
 
     /**
-     * The image the last deploy resolved for this project, e.g.
-     * `golang:1.27-alpine`.
-     *
-     * Frozen with the rest of the snapshot because the version comes from the
-     * project -- go.mod, pom.xml, composer.json -- and the prewarm catalogue
-     * is a fixed list. Without it the launcher can only guess from the
-     * strategy, which is how a Go project resolved to 1.27 and had 1.22 seeded
-     * for it.
+     * The image the last deploy resolved for this project, e.g. `golang:1.27-alpine`.
+     * Frozen with the snapshot: the version comes from the project (go.mod, pom.xml,
+     * composer.json), which the strategy alone cannot tell.
      */
     public function getDeployImage(): ?string
     {
-        $details = $this->getDetails();
-        if (empty($details['deploy_image']) || !is_string($details['deploy_image'])) {
-            return null;
-        }
-
-        return $details['deploy_image'];
+        return $this->stringDetail('deploy_image');
     }
 
     public function getDeployRuntime(): ?string
     {
-        $details = $this->getDetails();
-        if (empty($details['deploy_runtime']) || !is_string($details['deploy_runtime'])) {
-            return null;
-        }
-
-        return $details['deploy_runtime'];
+        return $this->stringDetail('deploy_runtime');
     }
 
     public function getGitCommit(): ?string
     {
-        $details = $this->getDetails();
-        if (empty($details['git_commit']) || !is_string($details['git_commit'])) {
-            return null;
-        }
-        $commit = trim($details['git_commit']);
-
-        return $commit !== '' ? $commit : null;
+        return self::trimmed($this->stringDetail('git_commit'));
     }
 
     /**
@@ -1225,16 +1233,18 @@ class User extends Authenticatable
         }
         $result = [];
         foreach ($details['env_vars'] as $key => $value) {
-            if (!is_string($key) || $key === '' || !preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $key)) {
-                continue;
+            if (self::isUsableEnvVar($key, $value)) {
+                $result[$key] = (string) $value;
             }
-            if (!is_string($value) && !is_numeric($value)) {
-                continue;
-            }
-            $result[$key] = (string) $value;
         }
 
         return $result;
+    }
+
+    private static function isUsableEnvVar(mixed $key, mixed $value): bool
+    {
+        return is_string($key) && $key !== '' && preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $key)
+            && (is_string($value) || is_numeric($value));
     }
 
     /**
@@ -1265,14 +1275,9 @@ class User extends Authenticatable
 
     public function getAppPort(): ?int
     {
-        $details = $this->getDetails();
-        if (array_key_exists('app_port', $details)) {
-            if ($details['app_port'] === null) {
-                return null;
-            }
-            return (int)$details['app_port'];
-        }
-        return null;
+        $port = $this->getDetails()['app_port'] ?? null;
+
+        return $port === null ? null : (int) $port;
     }
 
     public function setAppPort(?int $value): void
@@ -1295,14 +1300,7 @@ class User extends Authenticatable
 
     public function getDeploymentStatus(): string
     {
-        $details = $this->getDetails();
-        if (
-            !empty($details['deployment_status'])
-            && is_string($details['deployment_status'])
-        ) {
-            return $details['deployment_status'];
-        }
-        return 'unknown';
+        return $this->stringDetail('deployment_status') ?? 'unknown';
     }
 
     /** Set when a deploy failed after an earlier one had succeeded. */
@@ -1332,19 +1330,20 @@ class User extends Authenticatable
      * Record a clean deploy: the status and an empty warnings list, together.
      * The API reports deployment_warnings as a list once a deploy has finished,
      * and setDetails() merges, so a list left by an earlier partial run has to
-     * be overwritten rather than left in place. Does not save.
+     * be overwritten rather than left in place. A failed deploy's error is cleared, and so is a stop
+     * asked for earlier: the app runs again. Does not save.
      */
     public function markDeploySucceeded(): void
     {
-        // A failed deploy's message would otherwise sit beside the success.
         $this->setDetails([
             'deployment_status' => 'success',
             'deployment_warnings' => [],
             'error' => null,
+            'app_stopped_by_request' => null,
         ]);
     }
 
-    /** Set by a stop/down through the API, cleared by anything that starts the app again. Saves. */
+    /** Set by a stop/down through the API, cleared by a start action or a deploy that finished. Saves. */
     public function markAppStoppedByRequest(bool $stopped): void
     {
         if ($this->isAppStoppedByRequest() === $stopped) {

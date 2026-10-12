@@ -169,7 +169,7 @@ take different routes, and the difference is forced rather than chosen:
 `RuntimeSidecars` mines this recipe's own `overrides/docker-compose.override.yml`
 as if it were a stack template the repository ships.
 `RuntimeSidecars::exampleComposeFilenames()`
-(`core/app/System/Project/Dind/RuntimeSidecars.php:141-152`) globs
+(`core/app/System/Project/Dind/RuntimeSidecars.php`) globs
 `docker-compose.*.yml` in the project directory and skips only
 `ComposeFileInspector::COMPOSE_FILE_CANDIDATES`, which does not contain
 `docker-compose.override.yml` — the engine's own overlay name
@@ -177,10 +177,12 @@ as if it were a stack template the repository ships.
 therefore copied into the generated compose, and two things happen to it:
 
 1. `SidecarCredentials::pinSidecarCredentials()` fills in the engine's
-   `init_vars` for the recognised engine, and `resolvedComposeValue()`
-   (`core/app/Lib/Deploy/Sidecar/SidecarCredentials.php:361-373`) turns an
-   absent or `${VAR}` value into the literal string `app`. So a postgres
-   declared with `env_file:` comes up as `POSTGRES_PASSWORD=app` — compose gives
+   `init_vars` for the recognised engine, and
+   `SidecarCredentials::resolvedComposeValue()` turns an absent or `${VAR}`
+   value into the engine's fallback: `app` for a user or database name, and for
+   a password the one `SidecarPasswords` gives the account (`app` on an account
+   whose databases predate derived passwords). So a postgres declared with
+   `env_file:` comes up with the engine's `POSTGRES_PASSWORD` — compose gives
    `environment:` precedence over `env_file:` — while the application has the
    generated one.
 2. The generated `app` gains `depends_on:` on every kept service. A `ready`

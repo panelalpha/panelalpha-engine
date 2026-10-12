@@ -52,6 +52,50 @@ class GenerationStateTest extends TestCase
         new GenerationState('../etc');
     }
 
+    /**
+     * Not every writer holds the deploy lock: a checkout moved aside for a
+     * manual pull records CHECKOUT, while a sweep or a running deploy writes
+     * NEXT. Each put() reads the whole file, changes one key and renames it
+     * back, so two such writers that interleave drop each other's key. Both
+     * put() and forget() have to hold the same file lock.
+     */
+    public function test_a_put_waits_for_the_state_lock_another_writer_holds(): void
+    {
+        if (!function_exists('pcntl_fork')) {
+            $this->markTestSkipped('pcntl is not available');
+        }
+
+        $path = GenerationState::path($this->username);
+        @mkdir(dirname($path), 0755, true);
+        $lock = fopen($path . '.lock', 'c');
+        $this->assertNotFalse($lock, 'put() has a lock file to take');
+        flock($lock, LOCK_EX);
+
+        $pid = pcntl_fork();
+        $this->assertNotSame(-1, $pid, 'could not fork');
+        if ($pid === 0) {
+            (new GenerationState($this->username))->put(GenerationState::CHECKOUT, ['path' => '/home/x/.project-prev']);
+            exit(0);
+        }
+
+        // While the lock is held elsewhere, the child's put() must not land.
+        usleep(300_000);
+        $this->assertNull(
+            (new GenerationState($this->username))->get(GenerationState::CHECKOUT),
+            'the child blocked on the lock instead of writing'
+        );
+
+        flock($lock, LOCK_UN);
+        fclose($lock);
+        pcntl_waitpid($pid, $status);
+
+        $this->assertSame(
+            '/home/x/.project-prev',
+            (new GenerationState($this->username))->get(GenerationState::CHECKOUT)['path'] ?? null,
+            'the child wrote once the lock was free'
+        );
+    }
+
     /** A checkout moved aside before a pull takes the lock is not the sweep's yet. */
     public function test_an_entry_belongs_to_the_live_process_that_wrote_it_for_a_while(): void
     {

@@ -30,6 +30,9 @@ final class RecordingMechanics implements DeployMechanics
     /** @var list<string> */
     public array $calls = [];
 
+    /** @var list<string> the order of recording and syncing on a redeploy */
+    public array $runningVersionOrder = [];
+
     /** @var list<string> */
     public array $partialWarnings = [];
 
@@ -77,13 +80,20 @@ final class RecordingMechanics implements DeployMechanics
         return false;
     }
 
+    public function recordRunningVersion(): void
+    {
+        $this->runningVersionOrder[] = 'record';
+    }
+
     public function syncHostingForCheckoutRebuild(bool $reuseRunning): void
     {
+        $this->runningVersionOrder[] = 'syncCheckout';
         $this->calls[] = 'syncCheckoutRebuild';
     }
 
     public function syncHostingForSourceRebuild(?string $zipPath): void
     {
+        $this->runningVersionOrder[] = 'syncSource';
         $this->calls[] = 'syncSourceRebuild';
     }
 
@@ -99,6 +109,7 @@ final class RecordingMechanics implements DeployMechanics
 
     public function ingestArchive(string $zipPath): void
     {
+        $this->runningVersionOrder[] = 'ingestArchive';
         $this->calls[] = 'ingestArchive';
         if ($this->ingestArchiveException !== null) {
             throw $this->ingestArchiveException;

@@ -8,6 +8,7 @@ use App\Jobs\DeleteBackup;
 use App\Jobs\DeployProject;
 use App\Jobs\RebuildProject;
 use App\Jobs\RestoreBackup;
+use App\Lib\Deploy\DeployLog\DeployLock;
 use App\Lib\Project\ProjectRebuild;
 use App\Models\Task;
 
@@ -18,6 +19,8 @@ use App\Models\Task;
  */
 class ProjectBusyException extends \RuntimeException
 {
+    private const WAIT = 'Wait for it to finish.';
+
     private function __construct(
         private readonly string $state,
         string $hint,
@@ -28,8 +31,14 @@ class ProjectBusyException extends \RuntimeException
 
     public static function taskRunning(string $project, Task $task): self
     {
+        $state = "Project '{$project}' is busy: " . self::kind($task) . " task {$task->id} is running.";
+
+        if (!self::canBeCancelled($task)) {
+            return new self($state, self::WAIT, self::WAIT);
+        }
+
         return new self(
-            "Project '{$project}' is busy: " . self::kind($task) . " task {$task->id} is running.",
+            $state,
             "Cancel it (POST /tasks/{$task->id}/cancel) or wait for it to finish.",
             "Cancel task {$task->id} or wait for it to finish.",
         );
@@ -40,25 +49,43 @@ class ProjectBusyException extends \RuntimeException
     {
         return new self(
             "Project '{$project}' is busy: " . self::kind($task) . " task {$task->id} was cancelled and is still stopping.",
-            'Wait for it to finish.',
-            'Wait for it to finish.',
+            self::WAIT,
+            self::WAIT,
         );
     }
 
-    /** The deploy lock is held by a deploy with no task: a rebuild, a git pull, a push to deploy. */
-    public static function deployRunning(string $project): self
+    /** The deploy lock is held by something with no task: a deploy started elsewhere, a delete, a backup or a restore. */
+    public static function lockHeld(string $project): self
     {
-        return new self("Project '{$project}' is busy: a deploy is running.", 'Wait for it to finish.', 'Wait for it to finish.');
+        $holder = DeployLock::heldBy($project);
+
+        return match ($holder) {
+            DeployLock::HOLDER_BACKUP, DeployLock::HOLDER_RESTORE => new self(
+                "Project '{$project}' is busy: a {$holder} is running.",
+                self::WAIT,
+                self::WAIT,
+            ),
+            DeployLock::HOLDER_DELETE => new self("Project '{$project}' is being deleted.", self::WAIT, self::WAIT),
+            default => new self("Project '{$project}' is busy: a deploy is running.", self::WAIT, self::WAIT),
+        };
     }
 
     public static function pushRunning(string $project): self
     {
-        return new self("Project '{$project}' is busy: a push is running.", 'Wait for it to finish.', 'Wait for it to finish.');
+        return new self("Project '{$project}' is busy: a push is running.", self::WAIT, self::WAIT);
     }
 
     public function plainMessage(): string
     {
         return "{$this->state} {$this->plainHint}";
+    }
+
+    /**
+     * TaskCanceller refuses a running job that records no pid, so a cancel must not be offered for it.
+     */
+    private static function canBeCancelled(Task $task): bool
+    {
+        return !($task->status === Task::STATUS_RUNNING && !$task->isDeploy() && $task->pid === null);
     }
 
     private static function kind(Task $task): string

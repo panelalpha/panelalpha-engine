@@ -18,25 +18,20 @@ use Symfony\Component\Yaml\Tag\TaggedValue;
 final class ServiceHardener
 {
     /**
-     * Options that escape isolation or hand over the daemon. None of them is
-     * ever needed by an application service.
+     * Options that escape isolation, hand over the daemon, or opt out of the
+     * account's cgroup view, runtime or OOM handling. None of them is ever
+     * needed by an application service; `privileged` means little while the
+     * capabilities it implies can be asked for one at a time.
      *
-     * The second half of the list was added after a hostile compose file was
-     * run through this class and came out still carrying `cap_add: [ALL]`,
-     * `security_opt: [seccomp:unconfined]` and `userns_mode: host`: dropping
-     * `privileged` means little while the capabilities it implies can be asked
-     * for one at a time. Keys stay a denylist on purpose: an allowlist would
-     * drop every Compose key added since (`post_start`, `gpus`, ...) and break
-     * apps that use them. Bind sources are an allowlist ({@see isForbiddenSource()}).
-     * `cap_add` is not here: it is allowlisted by {@see withSafeCapabilities()}.
+     * A denylist on purpose: an allowlist would drop every Compose key added
+     * since (`post_start`, `gpus`, ...). Bind sources are an allowlist
+     * ({@see isForbiddenSource()}), `cap_add` too ({@see withSafeCapabilities()}).
+     * An `extends` left here came through a path with no file reader and would
+     * merge in an unhardened service. `storage_opt` only fails off xfs+pquota.
      *
      * @var list<string>
      */
     private const FORBIDDEN_KEYS = [
-        // The run file resolves `extends` before hardening; any left here came
-        // through a path with no file reader (a compose override, a harvested
-        // sidecar), where an unresolved `extends` would merge in an unhardened
-        // service. Drop it rather than let Compose pull that service in.
         'extends',
         'privileged',
         'pid',
@@ -49,8 +44,6 @@ final class ServiceHardener
         'cgroup',
         'group_add',
         'device_cgroup_rules',
-        // Opt out of the account's cgroup view, its runtime or its OOM
-        // handling; storage_opt only fails off xfs+pquota.
         'cgroupns_mode',
         'runtime',
         'oom_kill_disable',
@@ -61,16 +54,15 @@ final class ServiceHardener
     /**
      * Docker's default capability set, plus NET_ADMIN. Re-adding one after
      * `cap_drop: [ALL]` never exceeds a default container's reach, so these
-     * are all `cap_add` may keep.
+     * are all `cap_add` may keep. NET_ADMIN only administers the service's own
+     * network namespace, and binaries carrying it as a file capability fail
+     * execve without it.
      *
      * @var list<string>
      */
     private const DEFAULT_CAPABILITIES = [
         'CHOWN', 'DAC_OVERRIDE', 'FSETID', 'FOWNER', 'MKNOD', 'NET_RAW', 'SETGID',
         'SETUID', 'SETFCAP', 'SETPCAP', 'NET_BIND_SERVICE', 'SYS_CHROOT', 'KILL', 'AUDIT_WRITE',
-        // Not a default, but it only administers the service's own network
-        // namespace, and images whose binaries carry it as a file capability
-        // cannot exec them without it (EPERM at execve).
         'NET_ADMIN',
     ];
 
@@ -93,9 +85,8 @@ final class ServiceHardener
     private const DOCKER_SOCKETS = ['/var/run/docker.sock', '/run/docker.sock'];
 
     /**
-     * The socket itself, and the directories it sits in. Matching only the
-     * exact path left `- /var/run:/var/run` as a way to mount the socket
-     * without naming it.
+     * The socket itself, and the directories it sits in: `- /var/run:/var/run`
+     * mounts the socket without naming it.
      */
     private const DOCKER_SOCKET_PATTERN = '#(^|:)\s*/(?:var/)?run(?:/docker\.sock)?(?:/)?(?::|$)#';
 
@@ -121,9 +112,10 @@ final class ServiceHardener
     /** Grace a CPU-capped service's own healthcheck gets when its author gave none. */
     private const CAPPED_START_PERIOD = '60s';
 
-    // 256 starved multi-daemon images (a supervisor plus several daemons and a
-    // forked plugin per check exhausted it silently); 1024 clears them and still
-    // caps a fork bomb. A per-service pids_limit overrides this default.
+    /**
+     * Enough for a supervisor running several daemons that fork per check,
+     * still a cap on a fork bomb. A per-service pids_limit overrides it.
+     */
     private const PIDS_LIMIT = 1024;
 
     /** At most 30 MB of log per container; the account's daemon defaults to the same. */
@@ -131,8 +123,8 @@ final class ServiceHardener
 
     /**
      * Thread pools sized from the visible core count (OpenMP, MKL, OpenBLAS).
-     * A CPU quota does not hide the host's cores, so torch under `cpus: 0.75`
-     * ran one thread per host core and was ~12x slower than with one.
+     * A CPU quota does not hide the host's cores, so without these a pool runs
+     * one thread per host core under a fraction of one.
      *
      * @var list<string>
      */
@@ -140,8 +132,14 @@ final class ServiceHardener
 
     private const LEGACY_POSTGRES_DATA = '/var/lib/postgresql/data';
 
-    /** @var list<string> */
-    private const LOOPBACK_HOSTS = ['127.0.0.1', '::1', 'localhost'];
+    /** The tag in `name:tag@digest`, which only fails the reference checks. */
+    private const TAG_BEFORE_DIGEST = '#:[\w][\w.-]*(?=@sha256:)#';
+
+    /** `~` and $HOME are root's home, or the account's, which holds ~/docker. */
+    private const HOME_REFERENCE = '#^(~|\$HOME\b|\$\{HOME\})#';
+
+    /** A short-syntax port's `[::]:` host prefix. */
+    private const IPV6_WILDCARD = '/^\s*\[\s*::\s*\]:/';
 
     /**
      * @param array<string, mixed> $service
@@ -202,8 +200,8 @@ final class ServiceHardener
 
     /**
      * `network_mode: host` is removed by {@see withoutEscapes()}, and a service
-     * that relied on it publishes nothing: Hypermind listens on its `PORT=3000`
-     * and the domain 502'd. The port its `PORT` env names is published instead.
+     * that relied on it publishes nothing, so the port its `PORT` env names is
+     * published instead.
      *
      * @param array<string, mixed> $service
      * @return array<string, mixed>
@@ -244,8 +242,8 @@ final class ServiceHardener
 
     /**
      * postgres 18+ keeps its data under /var/lib/postgresql/18/docker and
-     * refuses to start when /var/lib/postgresql/data is a mount point
-     * (docker-library/postgres#1259). Files written for 17 and earlier mount
+     * refuses to start when /var/lib/postgresql/data is a mount point.
+     * Files written for 17 and earlier mount
      * exactly there, and an unpinned `postgres` tag now resolves to 18. Naming
      * the mount as PGDATA skips that check and keeps the data where the volume
      * is; on 17 and earlier it is the image's own default, so nothing changes.
@@ -286,8 +284,7 @@ final class ServiceHardener
      * port the engine can find and detection falls back to a dead default.
      *
      * With $keepLoopback (another service in the file publishes a web port) a
-     * loopback binding is a sidecar kept local on purpose, and stays: Poznote's
-     * MCP server on `127.0.0.1:8045` next to its web server.
+     * loopback binding is a sidecar kept local on purpose, and stays.
      *
      * @param array<string, mixed> $service
      * @return array<string, mixed>
@@ -299,25 +296,66 @@ final class ServiceHardener
             return $service;
         }
 
+        $publishedOutsideIpv6 = self::hostPortsPublishedOutsideIpv6Wildcard($ports);
         foreach ($ports as $index => $port) {
-            if (is_string($port)) {
-                $port = self::withDefaultedHostPort($port);
-                $ports[$index] = $keepLoopback ? $port : self::withoutLoopbackHost($port);
-                continue;
-            }
-            if ($keepLoopback) {
-                continue;
-            }
-            // The long form says the same thing in a field of its own.
-            if (is_array($port) && isset($port['host_ip']) && self::isLoopbackHost((string) $port['host_ip'])) {
-                unset($port['host_ip']);
-                $ports[$index] = $port;
-            }
+            $port = self::withIpv6WildcardOnEveryAddress($port, $publishedOutsideIpv6);
+            $ports[$index] = self::withReachableHost($port, $keepLoopback);
         }
 
         $service['ports'] = $ports;
 
         return $service;
+    }
+
+    /**
+     * @param array<mixed> $ports
+     * @return array<int, true>
+     */
+    private static function hostPortsPublishedOutsideIpv6Wildcard(array $ports): array
+    {
+        $published = [];
+        foreach ($ports as $port) {
+            if (!self::isIpv6Wildcard($port) && ($hostPort = self::anyHostPort($port)) !== null) {
+                $published[$hostPort] = true;
+            }
+        }
+
+        return $published;
+    }
+
+    /**
+     * Docker publishes `[::]` on IPv6 only, and the proxy and the health check
+     * reach the account over IPv4, so such a port is published on every
+     * address unless another entry already publishes it there.
+     *
+     * @param array<int, true> $publishedOutsideIpv6
+     */
+    private static function withIpv6WildcardOnEveryAddress(mixed $port, array $publishedOutsideIpv6): mixed
+    {
+        if (!self::isIpv6Wildcard($port) || isset($publishedOutsideIpv6[self::anyHostPort($port) ?? 0])) {
+            return $port;
+        }
+        if (is_string($port)) {
+            return (string) preg_replace(self::IPV6_WILDCARD, '', $port);
+        }
+        unset($port['host_ip']);
+
+        return $port;
+    }
+
+    /** One port entry with its host port defaulted and, unless kept, its loopback host dropped. */
+    private static function withReachableHost(mixed $port, bool $keepLoopback): mixed
+    {
+        if (is_string($port)) {
+            $port = self::withDefaultedHostPort($port);
+
+            return $keepLoopback ? $port : self::withoutLoopbackHost($port);
+        }
+        if (!$keepLoopback && is_array($port) && isset($port['host_ip']) && self::isLoopbackHost((string) $port['host_ip'])) {
+            unset($port['host_ip']);
+        }
+
+        return $port;
     }
 
     /**
@@ -361,26 +399,51 @@ final class ServiceHardener
         return implode(':', $parts);
     }
 
+    /** The host port an entry publishes, on whatever address. */
+    private static function anyHostPort(mixed $port): ?int
+    {
+        if (is_string($port)) {
+            $port = (string) preg_replace('/^\s*\[[^\]]*\]:/', '', self::withDefaultedHostPort($port));
+            $parts = self::splitFields(trim($port));
+            if (count($parts) === 3) {
+                array_shift($parts);
+                $port = implode(':', $parts);
+            }
+        } elseif (is_array($port)) {
+            unset($port['host_ip']);
+        }
+
+        return PortMapping::parse($port)?->hostPort;
+    }
+
+    /** `[::]:8080:80`, or the long form with `host_ip: "::"`. */
+    private static function isIpv6Wildcard(mixed $port): bool
+    {
+        if (is_string($port)) {
+            return preg_match(self::IPV6_WILDCARD, $port) === 1;
+        }
+
+        return is_array($port) && trim((string) ($port['host_ip'] ?? ''), '[] ') === '::';
+    }
+
+    /**
+     * A short-syntax entry without its loopback host; the ports stay as the
+     * file wrote them, so an operator who sets `${PORT}` still chooses. Only a
+     * bracketed IPv6 host or the brace-aware three-field form carries a host.
+     */
     private static function withoutLoopbackHost(string $port): string
     {
         $port = trim($port);
 
-        // An IPv6 address is bracketed, so it has to be taken off before the
-        // rest can be split on colons at all.
         if (preg_match('/^\[([^\]]*)\]:(\d.*)$/', $port, $m) === 1) {
             return self::isLoopbackHost($m[1]) ? $m[2] : $port;
         }
 
-        // Only the three-part form carries a host address. Split on field
-        // colons and not on ones inside `${VAR:-default}`, or
-        // `${BIND_ADDRESS:-127.0.0.1}:${PORT:-3000}:3000` counts five fields.
         $parts = self::splitFields($port);
         if (count($parts) !== 3 || !self::isLoopbackHost(EnvVarDefault::resolve($parts[0]))) {
             return $port;
         }
 
-        // The host goes; the ports stay as the file wrote them, so an operator
-        // who sets `${PORT}` still chooses the port.
         return $parts[1] . ':' . $parts[2];
     }
 
@@ -391,30 +454,12 @@ final class ServiceHardener
      */
     private static function splitFields(string $port): array
     {
-        $fields = [];
-        $field = '';
-        $depth = 0;
-        foreach (str_split($port) as $char) {
-            if ($char === '{') {
-                $depth++;
-            } elseif ($char === '}') {
-                $depth = max(0, $depth - 1);
-            } elseif ($char === ':' && $depth === 0) {
-                $fields[] = $field;
-                $field = '';
-
-                continue;
-            }
-            $field .= $char;
-        }
-        $fields[] = $field;
-
-        return $fields;
+        return PortMapping::splitFields($port);
     }
 
     private static function isLoopbackHost(string $host): bool
     {
-        return in_array(trim($host, '[]'), self::LOOPBACK_HOSTS, true);
+        return PortMapping::isLoopbackHost($host);
     }
 
     /** A source compose reads as a path, spelled so it is checked as one: `data` is `./data`. */
@@ -426,42 +471,31 @@ final class ServiceHardener
     }
 
     /**
-     * The top-level entries that mount a path of their own: a service only
-     * names them, so its mount checks never see the path. A volume keeps its
-     * name and loses `driver_opts` unless they are a tmpfs (a bind, overlay or
-     * device mount can name any path of the account container); a secret or
-     * config whose `file:` is a forbidden source is removed.
+     * Top-level volumes mount a path of their own, and a service only names them, so its mount
+     * checks never see it: each keeps its name and loses `driver_opts` unless they are a tmpfs.
      *
      * @param array<string, mixed> $compose
      * @return array{0: array<string, mixed>, 1: list<string>} the file, and what was removed
      */
-    public static function withoutHostPathEntries(array $compose): array
+    public static function withoutVolumeDriverOptions(array $compose): array
     {
         $removed = [];
         foreach ((is_array($compose['volumes'] ?? null) ? $compose['volumes'] : []) as $name => $volume) {
             $options = is_array($volume) ? ($volume['driver_opts'] ?? null) : null;
-            if ($options === null) {
-                continue;
-            }
-            $isTmpfs = is_array($options)
-                && strtolower(trim((string) ($options['type'] ?? ''))) === 'tmpfs'
-                && preg_match('/(^|,)\s*r?bind\s*(,|$)/', (string) ($options['o'] ?? '')) !== 1;
-            if (!$isTmpfs) {
+            if ($options !== null && !self::isTmpfsDriverOptions($options)) {
                 unset($compose['volumes'][$name]['driver_opts']);
                 $removed[] = "volume {$name}: driver_opts";
             }
         }
-        foreach (['secrets', 'configs'] as $section) {
-            foreach ((is_array($compose[$section] ?? null) ? $compose[$section] : []) as $name => $entry) {
-                $file = is_array($entry) ? ($entry['file'] ?? null) : null;
-                if (is_string($file) && self::isForbiddenSource($file)) {
-                    unset($compose[$section][$name]);
-                    $removed[] = rtrim($section, 's') . " {$name}: file {$file}";
-                }
-            }
-        }
 
         return [$compose, $removed];
+    }
+
+    private static function isTmpfsDriverOptions(mixed $options): bool
+    {
+        return is_array($options)
+            && strtolower(trim((string) ($options['type'] ?? ''))) === 'tmpfs'
+            && preg_match('/(^|,)\s*r?bind\s*(,|$)/', (string) ($options['o'] ?? '')) !== 1;
     }
 
     /**
@@ -484,19 +518,41 @@ final class ServiceHardener
         if (($service['network_mode'] ?? null) === 'host') {
             unset($service['network_mode']);
         }
-        if (is_array($service['volumes'] ?? null)) {
-            $kept = array_values(array_filter(
-                $service['volumes'],
-                static fn ($volume): bool => !self::isForbiddenMount($volume, $env, $accountUser, $projectDir)
-            ));
-            // Dropped when empty: an empty PHP array dumps as `volumes: {  }` --
-            // a map, not a sequence -- and Compose refuses the whole file with
-            // `services.<name>.volumes must be a array`.
-            if ($kept === []) {
-                unset($service['volumes']);
-            } else {
-                $service['volumes'] = $kept;
-            }
+
+        return self::withoutForbiddenMounts($service, $env, $accountUser, $projectDir);
+    }
+
+    /**
+     * @param array<string, mixed> $service
+     * @param array<string, list<?string>|string> $env
+     * @return array<string, mixed>
+     */
+    private static function withoutForbiddenMounts(array $service, array $env, ?string $accountUser, ?string $projectDir): array
+    {
+        if (!is_array($service['volumes'] ?? null)) {
+            return $service;
+        }
+        $kept = array_values(array_filter(
+            $service['volumes'],
+            static fn ($volume): bool => !self::isForbiddenMount($volume, $env, $accountUser, $projectDir)
+        ));
+
+        return self::withListOrWithout($service, 'volumes', $kept);
+    }
+
+    /**
+     * $service with $key set to $value, or without $key when $value is empty:
+     * an empty PHP array dumps as `{  }`, a map Compose refuses where it wants a list.
+     *
+     * @param array<string, mixed> $service
+     * @return array<string, mixed>
+     */
+    private static function withListOrWithout(array $service, string $key, mixed $value): array
+    {
+        if ($value === []) {
+            unset($service[$key]);
+        } else {
+            $service[$key] = $value;
         }
 
         return $service;
@@ -535,30 +591,53 @@ final class ServiceHardener
     {
         $removed = [];
         foreach (['secrets', 'configs'] as $section) {
-            // An override may tag the block (`!override`); the tag is no way around the check.
-            $block = $compose[$section] ?? null;
-            $tag = $block instanceof TaggedValue ? $block->getTag() : null;
-            $entries = $block instanceof TaggedValue ? $block->getValue() : $block;
-            if (!is_array($entries)) {
-                continue;
-            }
-            $names = [];
-            foreach ($entries as $name => $entry) {
-                $entry = $entry instanceof TaggedValue ? $entry->getValue() : $entry;
-                $file = is_array($entry) ? ($entry['file'] ?? null) : null;
-                if (is_string($file) && self::isForbiddenSourceIn(self::asPath($file), $env, $accountUser, $projectDir)) {
-                    unset($entries[$name]);
-                    $names[] = (string) $name;
-                    $removed[] = rtrim($section, 's') . " {$name}: file {$file}";
-                }
-            }
-            if ($names !== []) {
-                $compose[$section] = $tag === null ? $entries : new TaggedValue($tag, $entries);
-                $compose = self::withoutReferencesTo($compose, $section, $names);
-            }
+            [$compose, $removedFromSection] = self::withoutUnsafeFileSourcesIn($section, $compose, $env, $accountUser, $projectDir);
+            $removed = [...$removed, ...$removedFromSection];
         }
 
         return [$compose, $removed];
+    }
+
+    /**
+     * One top-level `secrets:` or `configs:` block; an override's tag on it
+     * (`!override`) is kept and is no way around the check.
+     *
+     * @param array<string, mixed> $compose
+     * @param array<string, list<?string>|string> $env
+     * @return array{0: array<string, mixed>, 1: list<string>}
+     */
+    private static function withoutUnsafeFileSourcesIn(string $section, array $compose, array $env, ?string $accountUser, ?string $projectDir): array
+    {
+        $block = $compose[$section] ?? null;
+        $entries = self::untagged($block);
+        if (!is_array($entries)) {
+            return [$compose, []];
+        }
+        $names = [];
+        $removed = [];
+        foreach ($entries as $name => $entry) {
+            $file = self::fileOfEntry($entry);
+            if ($file !== null && self::isForbiddenSourceIn(self::asPath($file), $env, $accountUser, $projectDir)) {
+                unset($entries[$name]);
+                $names[] = (string) $name;
+                $removed[] = rtrim($section, 's') . " {$name}: file {$file}";
+            }
+        }
+        if ($names !== []) {
+            $compose[$section] = self::retagged(self::tagOf($block), $entries);
+            $compose = self::withoutReferencesTo($compose, $section, $names);
+        }
+
+        return [$compose, $removed];
+    }
+
+    /** A secret's or config's `file:`, or null when it names none. */
+    private static function fileOfEntry(mixed $entry): ?string
+    {
+        $entry = self::untagged($entry);
+        $file = is_array($entry) ? ($entry['file'] ?? null) : null;
+
+        return is_string($file) ? $file : null;
     }
 
     /**
@@ -575,31 +654,53 @@ final class ServiceHardener
             return $compose;
         }
         foreach ($compose['services'] as $serviceName => $service) {
-            $serviceTag = $service instanceof TaggedValue ? $service->getTag() : null;
-            $service = $service instanceof TaggedValue ? $service->getValue() : $service;
-            $list = is_array($service) ? ($service[$section] ?? null) : null;
-            $listTag = $list instanceof TaggedValue ? $list->getTag() : null;
-            $list = $list instanceof TaggedValue ? $list->getValue() : $list;
-            if (!is_array($list)) {
-                continue;
+            $pruned = self::serviceWithoutReferencesTo($service, $section, $names);
+            if ($pruned !== null) {
+                $compose['services'][$serviceName] = $pruned;
             }
-            $kept = array_values(array_filter($list, static function (mixed $ref) use ($names): bool {
-                $source = is_array($ref) ? ($ref['source'] ?? null) : $ref;
-
-                return !is_string($source) || !in_array($source, $names, true);
-            }));
-            if (count($kept) === count($list)) {
-                continue;
-            }
-            if ($kept === []) {
-                unset($service[$section]);
-            } else {
-                $service[$section] = $listTag === null ? $kept : new TaggedValue($listTag, $kept);
-            }
-            $compose['services'][$serviceName] = $serviceTag === null ? $service : new TaggedValue($serviceTag, $service);
         }
 
         return $compose;
+    }
+
+    /**
+     * The service without references to $names, or null when it had none.
+     *
+     * @param list<string> $names
+     */
+    private static function serviceWithoutReferencesTo(mixed $taggedService, string $section, array $names): mixed
+    {
+        $service = self::untagged($taggedService);
+        $taggedList = is_array($service) ? ($service[$section] ?? null) : null;
+        $list = self::untagged($taggedList);
+        if (!is_array($list)) {
+            return null;
+        }
+        $kept = array_values(array_filter(
+            $list,
+            static fn (mixed $ref): bool => !in_array(is_array($ref) ? ($ref['source'] ?? null) : $ref, $names, true)
+        ));
+        if (count($kept) === count($list)) {
+            return null;
+        }
+        $service = self::withListOrWithout($service, $section, $kept === [] ? [] : self::retagged(self::tagOf($taggedList), $kept));
+
+        return self::retagged(self::tagOf($taggedService), $service);
+    }
+
+    private static function tagOf(mixed $value): ?string
+    {
+        return $value instanceof TaggedValue ? $value->getTag() : null;
+    }
+
+    private static function untagged(mixed $value): mixed
+    {
+        return $value instanceof TaggedValue ? $value->getValue() : $value;
+    }
+
+    private static function retagged(?string $tag, mixed $value): mixed
+    {
+        return $tag === null ? $value : new TaggedValue($tag, $value);
     }
 
     /**
@@ -629,12 +730,8 @@ final class ServiceHardener
         }
 
         unset($service['ulimits']['memlock']);
-        // An empty map would still be valid, but says nothing.
-        if ($service['ulimits'] === []) {
-            unset($service['ulimits']);
-        }
 
-        return $service;
+        return self::withListOrWithout($service, 'ulimits', $service['ulimits']);
     }
 
     /**
@@ -672,7 +769,7 @@ final class ServiceHardener
     /**
      * Keeps the `cap_add` entries in {@see DEFAULT_CAPABILITIES}, so a service
      * that drops everything and adds back CHOWN/SETUID/SETGID can still drop to
-     * its own user. ALL, SYS_ADMIN and the rest are removed as before.
+     * its own user. ALL, SYS_ADMIN and the rest are removed.
      *
      * @param array<string, mixed> $service
      * @return array<string, mixed>
@@ -684,6 +781,16 @@ final class ServiceHardener
         }
 
         $requested = is_string($service['cap_add']) ? [$service['cap_add']] : (array) $service['cap_add'];
+
+        return self::withListOrWithout($service, 'cap_add', self::defaultCapabilitiesIn($requested));
+    }
+
+    /**
+     * @param array<mixed> $requested
+     * @return list<string>
+     */
+    private static function defaultCapabilitiesIn(array $requested): array
+    {
         $kept = [];
         foreach ($requested as $capability) {
             if (!is_string($capability)) {
@@ -695,14 +802,7 @@ final class ServiceHardener
             }
         }
 
-        // An empty list would dump as `cap_add: {  }`, a map Compose refuses.
-        if ($kept === []) {
-            unset($service['cap_add']);
-        } else {
-            $service['cap_add'] = $kept;
-        }
-
-        return $service;
+        return $kept;
     }
 
     /**
@@ -726,34 +826,25 @@ final class ServiceHardener
             }
         }
 
-        if ($kept === []) {
-            unset($service['sysctls']);
-        } else {
-            $service['sysctls'] = array_is_list($sysctls) ? array_values($kept) : $kept;
-        }
-
-        return $service;
+        return self::withListOrWithout($service, 'sysctls', array_is_list($sysctls) ? array_values($kept) : $kept);
     }
 
     /**
+     * Skipped for a service sharing another's network namespace, which cannot
+     * set net.* sysctls, and one that sets the range itself.
+     *
      * @param array<string, mixed> $service
      * @return array<string, mixed>
      */
     private static function withPingGroupRange(array $service): array
     {
-        // A service sharing another's network namespace cannot set net.* sysctls.
-        if (preg_match('/^(service|container):/', (string) ($service['network_mode'] ?? '')) === 1) {
+        if (self::sharesAnotherNetworkNamespace($service)) {
             return $service;
         }
 
         $sysctls = $service['sysctls'] ?? [];
-        if (!is_array($sysctls)) {
+        if (!is_array($sysctls) || self::setsSysctl($sysctls, 'net.ipv4.ping_group_range')) {
             return $service;
-        }
-        foreach ($sysctls as $key => $value) {
-            if (self::sysctlName($key, $value) === 'net.ipv4.ping_group_range') {
-                return $service;
-            }
         }
 
         if ($sysctls !== [] && array_is_list($sysctls)) {
@@ -764,6 +855,24 @@ final class ServiceHardener
         $service['sysctls'] = $sysctls;
 
         return $service;
+    }
+
+    /** @param array<string, mixed> $service */
+    private static function sharesAnotherNetworkNamespace(array $service): bool
+    {
+        return preg_match('/^(service|container):/', (string) ($service['network_mode'] ?? '')) === 1;
+    }
+
+    /** @param array<mixed> $sysctls */
+    private static function setsSysctl(array $sysctls, string $name): bool
+    {
+        foreach ($sysctls as $key => $value) {
+            if (self::sysctlName($key, $value) === $name) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** A sysctl's name, from a map key or a `key=value` list entry. */
@@ -842,23 +951,32 @@ final class ServiceHardener
             return $service;
         }
 
-        $limits = is_array($deploy['resources']['limits'] ?? null) ? $deploy['resources']['limits'] : [];
+        $service = self::withResourcesFrom($service, $deploy['resources']);
+        unset($deploy['resources']);
+
+        return self::withListOrWithout($service, 'deploy', $deploy);
+    }
+
+    /**
+     * `deploy.resources` limits and memory reservation as service keys, where
+     * the service does not already set them.
+     *
+     * @param array<string, mixed> $service
+     * @param array<mixed> $resources
+     * @return array<string, mixed>
+     */
+    private static function withResourcesFrom(array $service, array $resources): array
+    {
+        $limits = is_array($resources['limits'] ?? null) ? $resources['limits'] : [];
         foreach (['memory' => 'mem_limit', 'cpus' => 'cpus', 'pids' => 'pids_limit'] as $from => $to) {
             if (isset($limits[$from]) && !isset($service[$to])) {
                 $service[$to] = $limits[$from];
             }
         }
 
-        $reservation = $deploy['resources']['reservations']['memory'] ?? null;
+        $reservation = $resources['reservations']['memory'] ?? null;
         if ($reservation !== null && !isset($service['mem_reservation'])) {
             $service['mem_reservation'] = $reservation;
-        }
-
-        unset($deploy['resources']);
-        if ($deploy === []) {
-            unset($service['deploy']);
-        } else {
-            $service['deploy'] = $deploy;
         }
 
         return $service;
@@ -881,9 +999,8 @@ final class ServiceHardener
      * Applied when the service is recognisably Node or builds from source (no
      * `image:` to match on): a stray NODE_OPTIONS on a non-Node process is inert.
      *
-     * A service's `environment:` replaces the image's own NODE_OPTIONS, so the
-     * cap is appended to it: Overleaf's image loads through Yarn PnP there
-     * (`--require /overleaf/.pnp.cjs`) and died on a missing package without it.
+     * A service's `environment:` replaces the image's own NODE_OPTIONS (which
+     * may load the app, e.g. `--require` for Yarn PnP), so the cap is appended to it.
      *
      * @param array<string, mixed> $service
      * @param (callable(string): list<string>)|null $imageEnvironment an image's `Config.Env`
@@ -908,16 +1025,22 @@ final class ServiceHardener
         $cap = '--max-old-space-size=' . ServiceLimits::nodeHeapMbFor($limit);
         $service['environment'] = ServiceEnvironment::withDefaults(
             $service['environment'] ?? [],
-            // `$$`: compose would interpolate the image's value otherwise.
-            ['NODE_OPTIONS' => $own === null || $own === '' ? $cap : str_replace('$', '$$', $own) . ' ' . $cap]
+            ['NODE_OPTIONS' => self::nodeOptionsWithCap($own, $cap)]
         );
 
         return $service;
     }
 
+    /** The image's own options escaped as `$$`, which compose would interpolate otherwise, then the cap. */
+    private static function nodeOptionsWithCap(?string $imageOptions, string $cap): string
+    {
+        return $imageOptions === null || $imageOptions === '' ? $cap : str_replace('$', '$$', $imageOptions) . ' ' . $cap;
+    }
+
     /**
      * NODE_OPTIONS the service's image sets for itself; null when it sets none,
-     * the service builds its own, or the image could not be read.
+     * the service builds its own, or the image could not be read. A
+     * `name:tag@digest` reference is looked up by its digest alone.
      *
      * @param array<string, mixed> $service
      * @param callable(string): list<string> $imageEnvironment
@@ -928,8 +1051,7 @@ final class ServiceHardener
         if (!is_string($image) || $image === '' || isset($service['build'])) {
             return null;
         }
-        // `name:tag@digest` (recipes pin that way) is the digest; the tag only fails the reference checks.
-        $image = (string) preg_replace('#:[\w][\w.-]*(?=@sha256:)#', '', $image);
+        $image = (string) preg_replace(self::TAG_BEFORE_DIGEST, '', $image);
         foreach ($imageEnvironment($image) as $line) {
             if (is_string($line) && str_starts_with($line, 'NODE_OPTIONS=')) {
                 return trim(substr($line, strlen('NODE_OPTIONS=')));
@@ -958,8 +1080,8 @@ final class ServiceHardener
 
     /**
      * A healthcheck tuned for an unthrottled container, on a service the CPU cap
-     * will slow down: Tiledesk's RabbitMQ (`retries: 1`, no start period) was
-     * never healthy under 0.5 CPU. Probes failing in a start period do not count.
+     * will slow down (`retries: 1` and no start period may never pass under
+     * 0.5 CPU). Probes failing in a start period do not count.
      *
      * @param array<string, mixed> $service
      */
@@ -1004,7 +1126,8 @@ final class ServiceHardener
 
     /**
      * An `image:` naming a runtime that is definitely not Node. Absence of
-     * `image:` means the service builds locally and tells us nothing.
+     * `image:` means the service builds locally and tells us nothing. The
+     * sidecar catalogue already knows which images are datastores.
      *
      * @param array<string, mixed> $service
      */
@@ -1015,7 +1138,6 @@ final class ServiceHardener
             return false;
         }
 
-        // The catalogue already knows which images are datastores.
         return SidecarEngine::isKnownDatastore('', $service)
             || preg_match(self::NON_NODE_IMAGE_PATTERN, $image) === 1;
     }
@@ -1054,35 +1176,48 @@ final class ServiceHardener
     }
 
     /**
-     * @param mixed $volume
      * @param array<string, list<?string>|string> $env
      */
-    private static function isForbiddenMount($volume, array $env = [], ?string $accountUser = null, ?string $projectDir = null): bool
+    private static function isForbiddenMount(mixed $volume, array $env = [], ?string $accountUser = null, ?string $projectDir = null): bool
     {
         if (is_string($volume)) {
-            if (preg_match(self::DOCKER_SOCKET_PATTERN, $volume) === 1) {
-                return true;
-            }
-
-            // Only the source side is a host path. A named volume has no
-            // leading slash and is not one of these.
-            $source = self::splitFields(trim($volume))[0] ?? '';
-
-            return self::isForbiddenSourceIn($source, $env, $accountUser, $projectDir);
-        }
-        if (!is_array($volume)) {
-            return false;
+            return self::isForbiddenShortMount($volume, $env, $accountUser, $projectDir);
         }
 
+        return is_array($volume) && self::isForbiddenLongMount($volume, $env, $accountUser, $projectDir);
+    }
+
+    /**
+     * Only the source side is a host path; a named volume has no leading
+     * slash and is not one of these.
+     *
+     * @param array<string, list<?string>|string> $env
+     */
+    private static function isForbiddenShortMount(string $volume, array $env, ?string $accountUser, ?string $projectDir): bool
+    {
+        if (preg_match(self::DOCKER_SOCKET_PATTERN, $volume) === 1) {
+            return true;
+        }
+        $source = self::splitFields(trim($volume))[0] ?? '';
+
+        return self::isForbiddenSourceIn($source, $env, $accountUser, $projectDir);
+    }
+
+    /**
+     * A bind source is a path even without a leading `./`, and the socket's
+     * directory counts here too: `source: /var/run` hands over the daemon.
+     *
+     * @param array<mixed> $volume
+     * @param array<string, list<?string>|string> $env
+     */
+    private static function isForbiddenLongMount(array $volume, array $env, ?string $accountUser, ?string $projectDir): bool
+    {
         $source = (string) ($volume['source'] ?? '');
         $target = (string) ($volume['target'] ?? '');
         if (($volume['type'] ?? null) === 'bind') {
-            // The long form's bind source is a path even without a leading `./`.
             $source = self::asPath($source);
         }
 
-        // The socket's directory counts here too: `source: /var/run` in the long
-        // form hands over the daemon exactly like `/var/run:/var/run` does.
         return in_array($source, self::DOCKER_SOCKETS, true)
             || in_array($target, self::DOCKER_SOCKETS, true)
             || preg_match(self::DOCKER_SOCKET_PATTERN, trim($source)) === 1
@@ -1093,31 +1228,16 @@ final class ServiceHardener
      * A host path the account's own services never get. An absolute source is
      * allowed only in the checkout or the account's ~/.panelalpha: everything
      * else is the account container's own (its /home holds the inner daemon's
-     * data-root, /run its init's state, /usr the binaries its init runs as root), and
-     * a list of what to refuse kept missing a path (/tmp, /srv). `/hostfs`
-     * bound from `/` was the case that prompted the check.
+     * data-root, /run its init's state, /usr the binaries its init runs as root),
+     * and a list of what to refuse would miss paths such as /tmp or /srv.
      */
     private static function isForbiddenSource(string $source, ?string $accountUser = null, ?string $projectDir = null): bool
     {
         $source = trim($source);
-        // Docker follows symlinks in a bind source, and a checkout keeps them.
-        // Skipped for a path that resolves into ~/.panelalpha, relative or
-        // absolute: the account already owns that tree outright, and it being
-        // account-private (0700) means the engine's own process often cannot
-        // even stat into it to tell a symlink from a missing file --
-        // LinkedSource::escapes() then has to assume the worst and refuses a
-        // bind this function means to allow (leavesProject()'s own docblock).
-        $inPanelalpha = str_starts_with($source, '/')
-            ? self::isOwnPanelalpha(self::normalisedAbsolute($source), $accountUser)
-            : self::relativeFirstSegment($source) === self::PANELALPHA_DIR;
-        if ($projectDir !== null && str_starts_with($projectDir, '/') && preg_match('#^[./]#', $source) === 1
-            && !$inPanelalpha
-            && LinkedSource::escapes($source, $projectDir)
-        ) {
+        if (self::escapesThroughSymlink($source, $accountUser, $projectDir)) {
             return true;
         }
-        // `~` and $HOME are root's home, or the account's, which holds ~/docker.
-        if (preg_match('#^(~|\$HOME\b|\$\{HOME\})#', $source) === 1) {
+        if (preg_match(self::HOME_REFERENCE, $source) === 1) {
             return true;
         }
         if (str_starts_with($source, '.')) {
@@ -1126,26 +1246,58 @@ final class ServiceHardener
         if (!str_starts_with($source, '/')) {
             return false;
         }
-        // Normalised first, so `/home/u/.panelalpha/../docker` is /home/u/docker.
-        $source = self::normalisedAbsolute($source);
+
+        return self::isForbiddenAbsoluteSource(self::normalisedAbsolute($source), $accountUser, $projectDir);
+    }
+
+    /**
+     * Docker follows symlinks in a bind source, and a checkout keeps them.
+     * Not checked inside ~/.panelalpha: the account owns that tree, and being
+     * 0700 the engine often cannot stat into it, so {@see LinkedSource::escapes()}
+     * would refuse a bind that is allowed.
+     */
+    private static function escapesThroughSymlink(string $source, ?string $accountUser, ?string $projectDir): bool
+    {
+        return $projectDir !== null && str_starts_with($projectDir, '/') && preg_match('#^[./]#', $source) === 1
+            && !self::isInOwnPanelalpha($source, $accountUser)
+            && LinkedSource::escapes($source, $projectDir);
+    }
+
+    /** Whether $source, relative or absolute, resolves into the account's ~/.panelalpha. */
+    private static function isInOwnPanelalpha(string $source, ?string $accountUser): bool
+    {
+        return str_starts_with($source, '/')
+            ? self::isOwnPanelalpha(self::normalisedAbsolute($source), $accountUser)
+            : self::relativeFirstSegment($source) === self::PANELALPHA_DIR;
+    }
+
+    /**
+     * $source is normalised, so `/home/u/.panelalpha/../docker` is /home/u/docker.
+     * The filesystem root is refused; ~/.panelalpha, the one writable tree a
+     * rebuild keeps, is allowed; anything else only inside the checkout.
+     */
+    private static function isForbiddenAbsoluteSource(string $source, ?string $accountUser, ?string $projectDir): bool
+    {
         if ($source === '/') {
-            // The root of the filesystem, the worst one of all.
             return true;
         }
-        // The account's own ~/.panelalpha: the one writable tree a rebuild keeps,
-        // which recipe hooks record in .env by its absolute path.
         if (self::isOwnPanelalpha($source, $accountUser)) {
             return false;
         }
-
         if ($projectDir === null || !str_starts_with($projectDir, '/')) {
             return true;
         }
-        // The checkout as the account container sees it, as LinkedSource maps it.
-        $projectDir = rtrim($projectDir, '/');
-        $checkout = '/home/' . basename(dirname($projectDir)) . '/' . basename($projectDir);
+        $checkout = self::checkoutInAccount($projectDir);
 
         return $source !== $checkout && !str_starts_with($source, $checkout . '/');
+    }
+
+    /** The checkout as the account container sees it, as LinkedSource maps it. */
+    private static function checkoutInAccount(string $projectDir): string
+    {
+        $projectDir = rtrim($projectDir, '/');
+
+        return '/home/' . basename(dirname($projectDir)) . '/' . basename($projectDir);
     }
 
     /** Whether normalised absolute $source is the account's ~/.panelalpha or under it. */
@@ -1180,13 +1332,12 @@ final class ServiceHardener
      * A relative bind resolves against ~/project (the run file sits there), so
      * `../../../etc` is /etc. One level up is the account's home: allowed
      * (`../.panelalpha/...`, WeTTY's `../:/account`), except its docker/
-     * data-root.
+     * data-root; past `~` itself is not.
      */
     private static function leavesProject(string $source): bool
     {
         $first = self::relativeFirstSegment($source);
 
-        // false means more `..` than there were segments to pop: past ~ itself.
         return $first === false || $first === 'docker';
     }
 

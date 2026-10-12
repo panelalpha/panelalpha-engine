@@ -54,7 +54,7 @@ class ProjectDeleteBusyTest extends TestCase
 
     public function test_a_refusal_is_not_logged_as_an_error(): void
     {
-        $this->assertFalse(app(ExceptionHandler::class)->shouldReport(ProjectBusyException::deployRunning($this->name)));
+        $this->assertFalse(app(ExceptionHandler::class)->shouldReport(ProjectBusyException::lockHeld($this->name)));
     }
 
     /** What a rebuild asked for during a delete gets: the delete holds the account's lock, so nothing is queued. */
@@ -108,6 +108,52 @@ class ProjectDeleteBusyTest extends TestCase
         $this->assertSame(Task::STATUS_FAILED, $task->status);
         $this->assertSame('deploy_already_running', $task->details['problems'][0]['code'] ?? null);
         $this->assertSame('A deployment is already running for this user.', $task->details['error'] ?? null);
+    }
+
+    /**
+     * engine#840: a backup or restore stops the stack and swaps ~/project
+     * under the deploy lock. A rebuild queued beside one must be refused
+     * before it runs inside that window, naming the backup task.
+     */
+    public function test_a_queued_backup_makes_a_rebuild_refuse(): void
+    {
+        $name = $this->name . 'bk';
+        $this->beforeApplicationDestroyed(static fn () => DeployLogger::deleteUserLogs($name));
+        $this->makeUser($name);
+        $backupTask = Task::start(jobType: \App\Jobs\CreateBackup::class, queue: 'default', username: $name, details: [
+            'backup_id' => 1,
+            'action' => 'backup',
+        ]);
+
+        $rebuild = app(ProjectRebuild::class);
+
+        try {
+            $this->expectException(ProjectBusyException::class);
+            $rebuild->assertIdle(User::findByUsername($name));
+        } finally {
+            $backupTask->delete();
+        }
+    }
+
+    /**
+     * engine#840: a create/rebuild task still takes precedence in the message,
+     * so a deploy that is actually running is what a client is told to cancel.
+     */
+    public function test_a_deploy_task_is_named_over_a_backup_task(): void
+    {
+        $name = $this->name . 'bo';
+        $this->beforeApplicationDestroyed(static fn () => DeployLogger::deleteUserLogs($name));
+        $this->makeUser($name);
+        Task::start(jobType: \App\Jobs\CreateBackup::class, queue: 'default', username: $name, details: ['backup_id' => 1]);
+
+        $rebuild = app(ProjectRebuild::class);
+        $task = $rebuild->pendingTask($name);
+
+        // pendingTask() is the deploy subset, so it does not see the backup...
+        $this->assertNull($task);
+        // ...but assertIdle() refuses because of it.
+        $this->expectException(ProjectBusyException::class);
+        $rebuild->assertIdle(User::findByUsername($name));
     }
 
     public function test_the_cli_prints_a_plain_line_and_exits_1(): void

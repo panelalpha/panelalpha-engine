@@ -11,7 +11,7 @@ use Tests\TestCase;
 
 /**
  * appManager() aborts with its own status/message (e.g. 403 "only available
- * for dind users") via abort(Response), which throws HttpResponseException --
+ * on container projects") via abort(Response), which throws HttpResponseException --
  * a plain \Exception whose getMessage() is empty. Every app/* endpoint used
  * to catch that as a generic \Exception and flatten it into an empty-message
  * 422, silently discarding the real 403. This is what made app_info's error
@@ -28,7 +28,7 @@ class AppUserExceptionHandlingTest extends TestCase
 
     public function test_an_http_response_exception_passes_through_unchanged(): void
     {
-        $response = new JsonResponse(['message' => 'App user management is only available for dind users'], 403);
+        $response = new JsonResponse(['message' => 'App user management works only on container projects (template dind).'], 403);
         $original = new HttpResponseException($response);
 
         try {

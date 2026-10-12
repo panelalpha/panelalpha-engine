@@ -64,8 +64,14 @@ class DindDeployMechanicsTest extends TestCase
             $this->assertGreaterThan($prepare, $exclude, "{$method} writes the block after preparing the app");
         }
 
+        // Not only after a re-clone: a git_connect'd checkout rebuilt in place takes
+        // the same method's other path, and its first push would lose the files.
+        $wipe = $this->existingMethodBody($source, 'ingestForWipeRebuild');
+        $this->assertSame(1, substr_count($wipe, 'excludeEngineArtifacts()'));
+        $this->assertStringNotContainsString('} else {', $wipe, 'the block is written on every path');
+
         $helper = $this->existingMethodBody($source, 'excludeEngineArtifacts');
-        $this->assertStringContainsString('hasGitProject()', $helper);
+        $this->assertStringContainsString('writeForDeploy()', $helper);
         $this->assertStringContainsString('EngineArtifactExclude::forProject', $helper);
     }
 
@@ -86,6 +92,31 @@ class DindDeployMechanicsTest extends TestCase
         $this->assertStringContainsString('importProjectArchive', $source);
     }
 
+    /** A slow archive import showed nothing between "Importing project archive" and the cloning stage. */
+    public function test_the_archive_rebuild_says_each_silent_step(): void
+    {
+        $files = file_get_contents($this->coreAppRoot . '/System/Project/Dind/Source/Files.php');
+        $body = self::methodBody($files, 'importProjectArchive');
+
+        $milestones = [
+            "info('Copying the project archive into the stage directory')",
+            "info('Unpacking the project archive')",
+            "info('Writing the project archive into ~/project')",
+        ];
+        foreach ($milestones as $milestone) {
+            $this->assertStringContainsString($milestone, $body);
+        }
+
+        $this->assertLessThan(strpos($body, '$this->stage('), strpos($body, $milestones[0]));
+        $this->assertLessThan(strpos($body, '$this->extractAsAccount('), strpos($body, $milestones[1]));
+        $this->assertLessThan(strpos($body, '$this->syncIntoProject('), strpos($body, $milestones[2]));
+
+        $mechanics = file_get_contents($this->coreAppRoot . '/System/Project/Deployment/DindDeployMechanics.php');
+        $sync = self::methodBody($mechanics, 'syncHostingForSourceRebuild');
+        $this->assertMatchesRegularExpression("/info\\([^)]*\\).*prepareLinuxIsolation\\(\\)/s", $sync);
+        $this->assertMatchesRegularExpression("/info\\([^)]*\\).*recreateOuterCompose\\(\\)/s", $sync);
+    }
+
     // The bare "prepareFromSources appears somewhere" assertion above stays green even if the
     // git-clone branch of ingestForWipeRebuild forgets to bootstrap, because the else branch and
     // reprepareApplicationFromCheckout() also call it. Check the git branch specifically.
@@ -97,21 +128,11 @@ class DindDeployMechanicsTest extends TestCase
 
         $body = self::methodBody($source, 'ingestForWipeRebuild');
 
-        $branchStart = strpos($body, 'if (');
-        $branchEnd = strpos($body, '} else {');
-        $this->assertNotFalse($branchStart, 'ingestForWipeRebuild no longer branches.');
-        $this->assertNotFalse($branchEnd, 'ingestForWipeRebuild no longer branches.');
-
-        $gitBranch = substr($body, $branchStart, $branchEnd - $branchStart);
-
-        $this->assertStringContainsString(
-            'cloneConfiguredRepository',
-            $gitBranch,
-            'The wipe rebuild branch is expected to re-clone the repository.'
-        );
-        $this->assertStringContainsString(
-            'prepareFromSources',
-            $gitBranch,
+        $clone = strpos($body, 'cloneConfiguredRepository');
+        $this->assertNotFalse($clone, 'The wipe rebuild is expected to re-clone the repository.');
+        $this->assertGreaterThan(
+            $clone,
+            (int) strpos($body, 'prepareFromSources'),
             'ingestForWipeRebuild re-clones over the directory the app config wrote into '
             . 'but never bootstraps the checkout again.'
         );

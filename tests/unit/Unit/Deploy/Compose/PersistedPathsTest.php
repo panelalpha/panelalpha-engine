@@ -70,4 +70,52 @@ class PersistedPathsTest extends TestCase
             $this->assertSame(['data-app-uploads:/app/uploads'], $compose['services']['app']['volumes']);
         }
     }
+
+    /**
+     * `volumeNameFor()` folds non-alphanumerics and lowercases, so paths that
+     * differ only in punctuation or case folded onto one volume and shared its
+     * content. The first path keeps the legacy name; the second gets its own.
+     */
+    public function test_paths_that_fold_onto_one_slug_do_not_share_a_volume(): void
+    {
+        $yaml = DeployCompose::framework(['runtime' => 'php', 'strategy' => 'laravel'], 8000);
+
+        $compose = Yaml::parse(GeneratedCompose::withPersistedPaths($yaml, ['/app/storage-logs', '/app/storage/logs']));
+
+        $mounts = $compose['services']['app']['volumes'];
+        $this->assertContains('data-app-storage-logs:/app/storage-logs', $mounts);
+        $this->assertCount(2, $compose['volumes'], 'one volume per path');
+        $this->assertArrayHasKey('data-app-storage-logs', $compose['volumes'], 'the first path keeps the legacy name');
+        $suffixed = array_values(array_diff(array_keys($compose['volumes']), ['data-app-storage-logs']));
+        $this->assertCount(1, $suffixed);
+        $this->assertStringStartsWith('data-app-storage-logs-', $suffixed[0]);
+        $this->assertContains($suffixed[0] . ':/app/storage/logs', $mounts);
+    }
+
+    public function test_case_varied_paths_get_separate_volumes(): void
+    {
+        $yaml = DeployCompose::framework(['runtime' => 'php', 'strategy' => 'laravel'], 8000);
+
+        $compose = Yaml::parse(GeneratedCompose::withPersistedPaths($yaml, ['/app/Uploads', '/app/uploads']));
+
+        $this->assertCount(2, $compose['volumes']);
+        $this->assertArrayHasKey('data-app-uploads', $compose['volumes']);
+    }
+
+    /**
+     * A Dockerfile `VOLUME /app/Uploads` and `persist-paths: /app/uploads` fold
+     * onto one slug; the persisted path must not land on the volume the
+     * Dockerfile already named.
+     */
+    public function test_a_persisted_path_never_folds_onto_a_dockerfile_volume(): void
+    {
+        $yaml = DeployCompose::dockerfile('Dockerfile', 8080, ['dockerfile_volumes' => ['/app/Uploads']]);
+
+        $compose = Yaml::parse(GeneratedCompose::withPersistedPaths($yaml, ['/app/uploads']));
+
+        $this->assertCount(2, $compose['volumes']);
+        $this->assertArrayHasKey('data-app-uploads', $compose['volumes'], 'the Dockerfile volume keeps its name');
+        $uploads = array_values(array_filter($compose['services']['app']['volumes'], static fn (string $m): bool => str_ends_with($m, ':/app/uploads')))[0];
+        $this->assertStringStartsWith('data-app-uploads-', $uploads);
+    }
 }

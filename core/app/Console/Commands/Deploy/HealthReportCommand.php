@@ -14,34 +14,21 @@ use Illuminate\Support\Facades\Log;
  * Ask every deployed application whether it is still serving itself, and
  * report the ones that are not.
  *
- * A deploy report is a photograph of the moment an install finished. This is
- * the only thing that ever says the site stopped working afterwards — the
- * database that went away, the certificate that lapsed, the index page
- * somebody deleted over SFTP — and none of that changes a deploy that already
- * succeeded. Until this ran, an application could be serving the engine's own
- * placeholder for a month and the only signal anywhere was a support ticket.
+ * A deploy report only describes the moment an install finished; this sweep is
+ * what notices a site that stopped working afterwards (a lost database, a lapsed
+ * certificate, a deleted index page).
  *
- * Runs every six hours from {@see \App\Console\Kernel}. Six rather than one:
- * the probe is a `docker exec` per account, none of these failures is
- * minute-sensitive, and a sweep that costs a container round trip per project
- * per hour would be paid for by every customer on the host.
+ * Runs every six hours from {@see \App\Console\Kernel}: the probe is a
+ * `docker exec` per account and none of these failures is minute-sensitive.
  *
- * Sends nothing when telemetry is off. That is not a courtesy — an install
- * with telemetry disabled has said it does not report, and running the sweep
- * anyway to write reports nothing will ever ship would spend every account's
- * CPU on a spool that only grows. The verdict is still worth having locally,
- * so `--local` runs the sweep and records it on the accounts without sending.
+ * Sends nothing when telemetry is off, because such an install has said it does
+ * not report; `--local` still runs the sweep and records the verdicts on the accounts.
  */
 class HealthReportCommand extends Command
 {
     /**
-     * One probe, briefly.
-     *
-     * The deploy's budget is fifteen attempts over a minute, because
-     * `compose up` returning is not an application serving and a slow first
-     * boot must not be called broken. Nothing here is booting: these
-     * applications have been up for hours, so a port that does not answer
-     * twice in a row is a port that is not answering.
+     * One brief probe: these applications have been up for hours, so unlike a
+     * deploy's boot budget, a port that does not answer twice is down.
      */
     private const SWEEP_TIMEOUT = 5;
     private const SWEEP_ATTEMPTS = 2;
@@ -67,64 +54,12 @@ class HealthReportCommand extends Command
             return self::SUCCESS;
         }
 
-        $timeout = max(1, (int) ($this->option('timeout') ?: self::SWEEP_TIMEOUT));
-        $attempts = max(1, (int) ($this->option('attempts') ?: self::SWEEP_ATTEMPTS));
-        $limit = max(0, (int) $this->option('limit'));
-
-        $swept = 0;
-        $degraded = 0;
-        $reported = 0;
-        $rows = [];
-
-        foreach ($this->projects() as $user) {
-            if ($limit > 0 && $swept >= $limit) {
-                break;
-            }
-
-            $project = $this->projectFor($user);
-            if ($project === null) {
-                continue;
-            }
-
-            $swept++;
-
-            // One account's wedged container is not the next account's. A
-            // sweep that stops at the first failure is a sweep that reports
-            // nothing about the ninety projects behind it.
-            try {
-                $report = $project->appHealth()->observe($timeout, $attempts, self::SWEEP_DELAY);
-            } catch (\Throwable $e) {
-                Log::debug("Health sweep skipped {$user->username}: " . $e->getMessage());
-                continue;
-            }
-
-            if ($report === null) {
-                continue;
-            }
-
-            $details = $user->fresh()?->getDetails() ?? $user->getDetails();
-            if (!self::notServing($details)) {
-                continue;
-            }
-            $failures = AppHealth::failedChecks($details);
-
-            $degraded++;
-            $rows[] = [
-                'project' => $user->username,
-                'serving' => (string) ($report['serving'] ?? CheckRunner::SERVING_UNKNOWN),
-                'checks' => $failures === [] ? 'nothing answered' : implode(', ', array_map(
-                    static fn (array $f): string => $f['id'] . ' (' . $f['severity'] . ')',
-                    $failures
-                )),
-            ];
-
-            if (!$local) {
-                Telemetry::captureHealth($user->username, $user->fresh()?->getDetails() ?? $user->getDetails());
-                $reported++;
-            }
+        $projects = $this->projects();
+        if ($projects === null) {
+            return self::FAILURE;
         }
 
-        $this->present($rows, $swept, $degraded, $reported, $local);
+        $this->present($this->sweep($projects, $local), $local);
 
         return self::SUCCESS;
     }
@@ -141,55 +76,172 @@ class HealthReportCommand extends Command
     }
 
     /**
-     * @param list<array<string, string>> $rows
+     * Probe every project up to --limit and report the ones not serving themselves.
+     *
+     * @param iterable<User> $projects
+     * @return array{swept: int, degraded: int, reported: int, projects: list<array<string, string>>}
      */
-    private function present(array $rows, int $swept, int $degraded, int $reported, bool $local): void
+    private function sweep(iterable $projects, bool $local): array
+    {
+        $limit = max(0, (int) $this->option('limit'));
+        $sweep = ['swept' => 0, 'degraded' => 0, 'reported' => 0, 'projects' => []];
+
+        foreach ($projects as $user) {
+            if ($limit > 0 && $sweep['swept'] >= $limit) {
+                break;
+            }
+
+            $project = $this->projectFor($user);
+            if ($project === null) {
+                continue;
+            }
+
+            $sweep['swept']++;
+
+            $row = $this->degradedRow($user, $project);
+            if ($row === null) {
+                continue;
+            }
+
+            $sweep['degraded']++;
+            $sweep['projects'][] = $row;
+
+            if (!$local) {
+                Telemetry::captureHealth($user->username, $this->currentDetails($user));
+                $sweep['reported']++;
+            }
+        }
+
+        return $sweep;
+    }
+
+    /**
+     * The table row for a project that is not serving itself, or null when it
+     * is serving or could not be asked.
+     *
+     * @return array{project: string, serving: string, checks: string}|null
+     */
+    private function degradedRow(User $user, Dind $project): ?array
+    {
+        $report = $this->probe($user, $project);
+        if ($report === null) {
+            return null;
+        }
+
+        $details = $this->currentDetails($user);
+        if (!self::notServing($details)) {
+            return null;
+        }
+
+        return [
+            'project' => $user->username,
+            'serving' => (string) ($report['serving'] ?? CheckRunner::SERVING_UNKNOWN),
+            'checks' => self::describeFailures(AppHealth::failedChecks($details)),
+        ];
+    }
+
+    /**
+     * Observe one project's health. A probe that throws is logged and skipped,
+     * so one wedged container never stops the sweep of the projects behind it.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function probe(User $user, Dind $project): ?array
+    {
+        $timeout = max(1, (int) ($this->option('timeout') ?: self::SWEEP_TIMEOUT));
+        $attempts = max(1, (int) ($this->option('attempts') ?: self::SWEEP_ATTEMPTS));
+
+        try {
+            return $project->appHealth()->observe($timeout, $attempts, self::SWEEP_DELAY);
+        } catch (\Throwable $e) {
+            Log::debug("Health sweep skipped {$user->username}: " . $e->getMessage());
+
+            return null;
+        }
+    }
+
+    /**
+     * The account's details as the probe just recorded them.
+     *
+     * @return array<string, mixed>
+     */
+    private function currentDetails(User $user): array
+    {
+        return $user->fresh()?->getDetails() ?? $user->getDetails();
+    }
+
+    /**
+     * @param list<array{id: string, severity: string}> $failures
+     */
+    private static function describeFailures(array $failures): string
+    {
+        if ($failures === []) {
+            return 'nothing answered';
+        }
+
+        return implode(', ', array_map(
+            static fn (array $f): string => $f['id'] . ' (' . $f['severity'] . ')',
+            $failures
+        ));
+    }
+
+    /**
+     * @param array{swept: int, degraded: int, reported: int, projects: list<array<string, string>>} $sweep
+     */
+    private function present(array $sweep, bool $local): void
     {
         if ($this->option('json')) {
-            $this->line((string) json_encode(
-                ['swept' => $swept, 'degraded' => $degraded, 'reported' => $reported, 'projects' => $rows],
-                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES
-            ));
+            $this->line((string) json_encode($sweep, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
             return;
         }
 
-        if ($rows !== []) {
-            $this->table(['project', 'serving', 'failed checks'], $rows);
+        if ($sweep['projects'] !== []) {
+            $this->table(['project', 'serving', 'failed checks'], $sweep['projects']);
         }
 
-        $sent = $local ? 'not sent (--local)' : "{$reported} reported";
-        $this->info("Swept {$swept} project(s): {$degraded} not serving themselves, {$sent}.");
+        $sent = $local ? 'not sent (--local)' : "{$sweep['reported']} reported";
+        $this->info("Swept {$sweep['swept']} project(s): {$sweep['degraded']} not serving themselves, {$sent}.");
     }
 
     /**
-     * @return iterable<User>
+     * Every project to sweep, or null when the one named does not exist. The
+     * error goes to stderr so a --json caller still gets parseable stdout.
+     *
+     * @return iterable<User>|null
      */
-    private function projects(): iterable
+    private function projects(): ?iterable
     {
         $one = $this->argument('project');
-        if (is_string($one) && $one !== '') {
-            $user = User::findByUsername($one);
-            if (!$user) {
-                $this->error("No such project: '{$one}'");
-
-                return [];
-            }
-
-            return [$user];
+        if (!is_string($one) || $one === '') {
+            return $this->allProjects();
         }
 
-        return User::query()->cursor();
+        $user = User::findByUsername($one);
+        if (!$user) {
+            $this->getOutput()->getErrorStyle()->error("No such project: '{$one}'");
+
+            return null;
+        }
+
+        return [$user];
     }
 
     /**
-     * The container project behind an account, or null when there is nothing
-     * deployed to ask.
+     * Paged rather than a cursor: a cursor pins SQLite's read snapshot for the
+     * whole sweep, and later writes then fail with SQLITE_BUSY_SNAPSHOT.
      *
-     * A suspended account is skipped on purpose: its application is stopped
-     * because somebody stopped it, and reporting a stopped site as a fault
-     * would fill the sweep with the one failure that is not one. The same for
-     * an app stopped through the API's stop/down action.
+     * @return iterable<User>
+     */
+    private function allProjects(): iterable
+    {
+        return User::query()->lazyById();
+    }
+
+    /**
+     * The DinD runtime behind an account, or null when there is nothing
+     * deployed to ask. Suspended accounts and apps stopped through the API are
+     * skipped on purpose: a stopped site is not a fault.
      */
     private function projectFor(User $user): ?Dind
     {
@@ -203,7 +255,6 @@ class HealthReportCommand extends Command
             return null;
         }
 
-        // project() is the System\Project wrapper; the DinD runtime sits behind it.
         return $runtime instanceof Dind ? $runtime : null;
     }
 }

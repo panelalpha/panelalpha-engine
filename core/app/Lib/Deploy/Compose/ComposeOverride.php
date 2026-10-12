@@ -45,7 +45,7 @@ final class ComposeOverride
             ['compose' => $parsed, 'sources' => $sources] = ComposeInclude::flatten($parsed, $read);
         }
         // A top-level volume redefined here applies to the base file's services too.
-        [$parsed, $removed] = ServiceHardener::withoutHostPathEntries($parsed);
+        [$parsed, $removed] = ServiceHardener::withoutVolumeDriverOptions($parsed);
         foreach (is_array($parsed['services'] ?? null) ? $parsed['services'] : [] as $name => $service) {
             if (!is_array($service)) {
                 continue;

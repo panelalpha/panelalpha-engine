@@ -99,6 +99,9 @@ class DindDeployStrategyTest extends TestCase
         $this->assertStringContainsString('prepare()->run(', $systemBody);
         $this->assertStringContainsString('userCompose()->apply(', $systemBody);
         $this->assertStringContainsString('Strategies::STATIC', $systemBody);
+        // PAEMD reaches the same branch as a repository compose, so it is not
+        // dispatched to the fallback placeholder the way it used to be.
+        $this->assertStringContainsString('Strategies::PAEMD', $systemBody);
 
         // Compose apply must run before prepare so user-compose wins the
         // dispatcher when both would match — same guard PrepareStageReachabilityTest.

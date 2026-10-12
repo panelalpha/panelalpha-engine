@@ -45,7 +45,7 @@ class DindEngineArtifactMigrationTest extends TestCase
 
     public function test_a_recipe_run_file_under_the_clients_name_is_moved_to_the_reserved_name(): void
     {
-        $this->put('docker-compose.yml', '# '.GeneratedCompose::LABEL."\nservices:\n  app:\n    image: nginx\n");
+        $this->put('docker-compose.yml', "services:\n  app:\n    image: nginx\n    labels:\n      ".GeneratedCompose::LABEL.": framework-recipe\n");
 
         $report = $this->migration('express')->migrate();
 

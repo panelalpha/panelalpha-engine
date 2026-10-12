@@ -3,6 +3,7 @@
 namespace App\Lib\Deploy\Sidecar;
 
 use App\Lib\Deploy\Compose\ComposeEnvironment;
+use App\Lib\Deploy\Compose\ComposeInterpolation;
 use App\Lib\Deploy\Compose\ComposePlaceholders;
 
 /**
@@ -16,6 +17,9 @@ class SidecarCredentials
     private const BARE_REFERENCE = '/(?<!\$)\$\{([A-Za-z_][A-Za-z0-9_]*)\}/';
 
     /**
+     * A database's unresolved `${VAR}` credentials settled once, so the
+     * sidecar and the application are configured from the same text.
+     *
      * @param array<string, mixed> $service
      * @param list<int> $observedPorts ports the image declares, when known
      * @param ?SidecarPasswords $passwords fills a password nobody set; null
@@ -33,11 +37,21 @@ class SidecarCredentials
             return $service;
         }
 
-        // A database started with unresolved ${VAR} credentials comes up with
-        // values the application cannot guess; settle them once so both sides
-        // are configured from the same text. A password nobody set is the
-        // account's own, not `app`.
-        $env = self::environmentMap($service['environment'] ?? null);
+        $env = self::settledEngineEnvironment(self::environmentMap($service['environment'] ?? null), $engine, $passwords);
+        $service['environment'] = $env;
+
+        return self::withServiceOverrides($service, $engine, $env);
+    }
+
+    /**
+     * The engine's prefixed and init variables resolved as Compose would,
+     * with a password nobody set taken from the account, not `app`.
+     *
+     * @param array<string, string> $env
+     * @return array<string, string>
+     */
+    private static function settledEngineEnvironment(array $env, string $engine, SidecarPasswords $passwords): array
+    {
         $prefix = strtoupper($engine);
         foreach ($env as $key => $value) {
             if (str_starts_with(strtoupper((string) $key), $prefix . '_')) {
@@ -50,8 +64,17 @@ class SidecarCredentials
                 self::fallbackFor($variable, $passwords)
             );
         }
-        $service['environment'] = $env;
 
+        return $env;
+    }
+
+    /**
+     * @param array<string, mixed> $service
+     * @param array<string, string> $env
+     * @return array<string, mixed>
+     */
+    private static function withServiceOverrides(array $service, string $engine, array $env): array
+    {
         foreach (SidecarEngine::serviceOverridesFor($engine) as $key => $value) {
             $service[$key] = $key === 'environment' && is_array($value)
                 ? array_merge($env, $value)
@@ -69,7 +92,7 @@ class SidecarCredentials
     /**
      * Connection settings the application needs to reach one sidecar. An
      * engine with no dialect entry still gets its host, port and credentials
-     * under its own prefix.
+     * under its own prefix, plus every variable it declares under that prefix.
      *
      * @param array<string, mixed> $service
      * @param list<int> $observedPorts
@@ -92,29 +115,70 @@ class SidecarCredentials
             return [];
         }
 
-        $username = self::resolvedComposeValue((string) ($credentials['username'] ?? ''), '');
-        $password = self::resolvedComposeValue((string) ($credentials['password'] ?? ''), '');
-        if ($password === '') {
-            $password = self::requirePassOf($service['command'] ?? null);
-        }
-        $database = self::resolvedComposeValue((string) ($credentials['database'] ?? ''), '');
+        [$username, $password, $database] = self::resolvedCredentials($credentials, $service['command'] ?? null);
 
-        $env = [$prefix . '_HOST' => $name];
-        if ($dialect['port'] > 0) {
-            $env[$prefix . '_PORT'] = (string) $dialect['port'];
-        }
-
-        // Whatever the service declares under its own prefix is handed back:
-        // POSTGRES_PASSWORD, TYPESENSE_API_KEY and MEILI_MASTER_KEY arrive
-        // without anyone enumerating them.
-        $env += self::declaredVariablesUnderPrefix($declared, $prefix);
-
-        $url = self::connectionUrl($dialect, $name, $username, $password, $database);
+        $env = self::hostAndPort($prefix, $name, $dialect) + self::declaredVariablesUnderPrefix($declared, $prefix);
+        $url = self::uninterpolatedUrl($dialect, $name, $username, $password, $database);
         if ($url !== null) {
             $env[$prefix . '_URL'] = $url;
         }
 
         return $env + self::frameworkEnvironment($dialect, $name, $username, $password, $database, $url);
+    }
+
+    /**
+     * Username, password and database as Compose settles them; a blank
+     * password falls back to redis's `--requirepass`.
+     *
+     * @param array{prefix: ?string, username: ?string, password: ?string, database: ?string} $credentials
+     * @return array{0: string, 1: string, 2: string}
+     */
+    private static function resolvedCredentials(array $credentials, mixed $command): array
+    {
+        $username = self::resolvedComposeValue((string) ($credentials['username'] ?? ''), '');
+        $password = self::resolvedComposeValue((string) ($credentials['password'] ?? ''), '');
+        if ($password === '') {
+            $password = self::requirePassOf($command);
+        }
+        $database = self::resolvedComposeValue((string) ($credentials['database'] ?? ''), '');
+
+        return [$username, $password, $database];
+    }
+
+    /**
+     * @param array{engine: string, port: int, scheme: ?string, driver: ?string} $dialect
+     * @return array<string, string>
+     */
+    private static function hostAndPort(string $prefix, string $host, array $dialect): array
+    {
+        $env = [$prefix . '_HOST' => $host];
+        if ($dialect['port'] > 0) {
+            $env[$prefix . '_PORT'] = (string) $dialect['port'];
+        }
+
+        return $env;
+    }
+
+    /**
+     * The connection URL, or null while the password still carries a
+     * reference: nothing interpolates a *_URL, so the app would get it literally.
+     *
+     * @param array{engine: string, port: int, scheme: ?string, driver: ?string} $dialect
+     */
+    private static function uninterpolatedUrl(
+        array $dialect,
+        string $host,
+        string $username,
+        string $password,
+        string $database
+    ): ?string {
+        return self::unresolved($password) ? null : self::connectionUrl($dialect, $host, $username, $password, $database);
+    }
+
+    /** Whether a value still carries a Compose reference the sidecar would leave literal. */
+    private static function unresolved(string $value): bool
+    {
+        return str_contains($value, '$');
     }
 
     /**
@@ -212,13 +276,22 @@ class SidecarCredentials
     /** Redis's `--requirepass <literal>`, so its URL carries the password; '' otherwise. */
     private static function requirePassOf(mixed $command): string
     {
-        $text = is_array($command) ? implode(' ', array_filter($command, 'is_string')) : (is_string($command) ? $command : '');
-        if (preg_match('/--requirepass[ =]+("?)([^\s"]+)\1/', $text, $m) !== 1) {
+        if (preg_match('/--requirepass[ =]+("?)([^\s"]+)\1/', self::commandText($command), $m) !== 1) {
             return '';
         }
         $password = self::resolvedComposeValue($m[2], '');
 
-        return str_contains($password, '$') ? '' : $password;
+        return self::unresolved($password) ? '' : $password;
+    }
+
+    /** A `command:` in either form as one line; '' for anything else. */
+    private static function commandText(mixed $command): string
+    {
+        if (is_array($command)) {
+            return implode(' ', array_filter($command, 'is_string'));
+        }
+
+        return is_string($command) ? $command : '';
     }
 
     /**
@@ -235,35 +308,84 @@ class SidecarCredentials
     {
         $generated = [];
         $fill = static function (string $text, ?string $key) use ($seed, $env, &$generated): string {
-            return (string) preg_replace_callback(
-                self::BARE_REFERENCE,
-                static function (array $m) use ($key, $seed, $env, &$generated): string {
-                    $name = $m[1];
-                    if (!ComposePlaceholders::isSecretKey($name) && ($key === null || !ComposePlaceholders::isSecretKey($key))) {
-                        return $m[0];
-                    }
-                    foreach ((array) ($env[$name] ?? []) as $candidate) {
-                        if (is_string($candidate) && trim($candidate) !== '') {
-                            return $m[0];
-                        }
-                    }
-
-                    return $generated[$name] ??= ComposePlaceholders::requiredSecretValue($name, $seed);
-                },
-                $text
-            );
+            return self::bareSecretsFilledIn($text, $key, $seed, $env, $generated);
         };
 
-        if (isset($service['environment']) && is_array($service['environment'])) {
-            $map = self::environmentMap($service['environment']);
-            $filled = [];
-            foreach ($map as $key => $value) {
-                $filled[$key] = $fill((string) $value, (string) $key);
-            }
-            if ($filled !== $map) {
-                $service['environment'] = $filled;
+        $service = self::withEnvironmentFilled($service, $fill);
+        $service = self::withCommandFilled($service, $fill);
+
+        return [$service, $generated];
+    }
+
+    /**
+     * @param array<string, list<?string>|string> $env
+     * @param array<string, string> $generated NAME => value, extended in place
+     */
+    private static function bareSecretsFilledIn(string $text, ?string $key, string $seed, array $env, array &$generated): string
+    {
+        return (string) preg_replace_callback(
+            self::BARE_REFERENCE,
+            static function (array $m) use ($key, $seed, $env, &$generated): string {
+                $name = $m[1];
+                if (!self::isUnsetSecret($name, $key, $env)) {
+                    return $m[0];
+                }
+
+                return $generated[$name] ??= ComposePlaceholders::requiredSecretValue($name, $seed);
+            },
+            $text
+        );
+    }
+
+    /**
+     * Whether `${NAME}` is a secret, by its own name or the key it sits under,
+     * that compose has no non-blank value for.
+     *
+     * @param array<string, list<?string>|string> $env
+     */
+    private static function isUnsetSecret(string $name, ?string $key, array $env): bool
+    {
+        if (!ComposePlaceholders::isSecretKey($name) && ($key === null || !ComposePlaceholders::isSecretKey($key))) {
+            return false;
+        }
+        foreach ((array) ($env[$name] ?? []) as $candidate) {
+            if (is_string($candidate) && trim($candidate) !== '') {
+                return false;
             }
         }
+
+        return true;
+    }
+
+    /**
+     * @param array<string, mixed> $service
+     * @param \Closure(string, ?string): string $fill
+     * @return array<string, mixed>
+     */
+    private static function withEnvironmentFilled(array $service, \Closure $fill): array
+    {
+        if (!isset($service['environment']) || !is_array($service['environment'])) {
+            return $service;
+        }
+        $map = self::environmentMap($service['environment']);
+        $filled = [];
+        foreach ($map as $key => $value) {
+            $filled[$key] = $fill((string) $value, (string) $key);
+        }
+        if ($filled !== $map) {
+            $service['environment'] = $filled;
+        }
+
+        return $service;
+    }
+
+    /**
+     * @param array<string, mixed> $service
+     * @param \Closure(string, ?string): string $fill
+     * @return array<string, mixed>
+     */
+    private static function withCommandFilled(array $service, \Closure $fill): array
+    {
         $command = $service['command'] ?? null;
         if (is_string($command)) {
             $service['command'] = $fill($command, null);
@@ -274,9 +396,13 @@ class SidecarCredentials
             );
         }
 
-        return [$service, $generated];
+        return $service;
     }
 
+    /**
+     * `${VAR:-default}` keeps its default; a bare `${VAR}`, `${VAR:?}` without
+     * a seed, or a reference inside a longer value has nothing to fill it: null.
+     */
     private static function harvestedValue(string $key, string $value, ?string $seed): ?string
     {
         if ($seed !== null) {
@@ -288,8 +414,6 @@ class SidecarCredentials
         if (!str_contains($value, '${')) {
             return $value;
         }
-        // `${VAR:-default}` keeps its default; a bare `${VAR}`, `${VAR:?}` or
-        // a reference inside a longer value has nothing to fill it.
         $resolved = self::resolvedComposeValue($value, '');
 
         return $resolved === '' || str_contains($resolved, '${') ? null : $resolved;
@@ -304,18 +428,35 @@ class SidecarCredentials
         if (!is_array($environment)) {
             return [];
         }
-        $map = [];
-        if (self::isEnvList($environment)) {
-            foreach ($environment as $line) {
-                if (!is_string($line) || !str_contains($line, '=')) {
-                    continue;
-                }
-                [$key, $value] = explode('=', $line, 2);
-                $map[$key] = $value;
-            }
 
-            return $map;
+        return self::isEnvList($environment) ? self::mapFromEnvList($environment) : self::mapFromEnvMap($environment);
+    }
+
+    /**
+     * @param list<mixed> $environment `KEY=value` lines
+     * @return array<string, string>
+     */
+    private static function mapFromEnvList(array $environment): array
+    {
+        $map = [];
+        foreach ($environment as $line) {
+            if (!is_string($line) || !str_contains($line, '=')) {
+                continue;
+            }
+            [$key, $value] = explode('=', $line, 2);
+            $map[$key] = $value;
         }
+
+        return $map;
+    }
+
+    /**
+     * @param array<mixed> $environment
+     * @return array<string, string> only string keys with scalar, non-bool values
+     */
+    private static function mapFromEnvMap(array $environment): array
+    {
+        $map = [];
         foreach ($environment as $key => $value) {
             if (is_string($key) && (is_string($value) || is_int($value) || is_float($value))) {
                 $map[$key] = (string) $value;
@@ -445,14 +586,7 @@ class SidecarCredentials
         string $database,
         ?string $url
     ): array {
-        $env = [];
-        foreach ($dialect['env'] as $key => $value) {
-            $env[(string) $key] = strtr((string) $value, [
-                '{host}' => $host,
-                '{port}' => (string) $dialect['port'],
-            ]);
-        }
-
+        $env = self::dialectEnvironment($dialect, $host);
         if ($dialect['driver'] === null) {
             return $env;
         }
@@ -469,8 +603,28 @@ class SidecarCredentials
     }
 
     /**
-     * Compose `${VAR:-default}` keeps the default, so DATABASE_URL matches
-     * what docker compose passes into the sidecar. Bare `${VAR}` falls back.
+     * The dialect's own `env` entries with `{host}` and `{port}` filled in.
+     *
+     * @param array{port: int, env: array<string, string>} $dialect
+     * @return array<string, string>
+     */
+    private static function dialectEnvironment(array $dialect, string $host): array
+    {
+        $env = [];
+        foreach ($dialect['env'] as $key => $value) {
+            $env[(string) $key] = strtr((string) $value, [
+                '{host}' => $host,
+                '{port}' => (string) $dialect['port'],
+            ]);
+        }
+
+        return $env;
+    }
+
+    /**
+     * A service's own variable as Compose settles it with the variable unset,
+     * so DATABASE_URL matches what the sidecar gets. Only a value that is one
+     * whole reference is resolved; one that settles to nothing falls back.
      */
     private static function resolvedComposeValue(string $value, string $fallback): string
     {
@@ -478,12 +632,32 @@ class SidecarCredentials
         if ($value === '') {
             return $fallback;
         }
-        if (preg_match('/^\$\{[A-Z0-9_]+(?::-([^}]*))?\}$/', $value, $m) !== 1) {
+        if (preg_match('/^\$(?:\{[^{}]*\}|[A-Za-z_][A-Za-z0-9_]*)$/', $value) !== 1) {
             return $value;
         }
-        $default = $m[1] ?? '';
+        $resolved = self::interpolateUnset($value);
+        if ($resolved === null) {
+            return $value;
+        }
 
-        return $default !== '' ? $default : $fallback;
+        return $resolved !== '' ? $resolved : $fallback;
+    }
+
+    /**
+     * What the reference is worth with every variable it names unset. Null when
+     * the interpreter cannot tell (bad syntax, a process variable).
+     */
+    private static function interpolateUnset(string $value): ?string
+    {
+        $env = [];
+        if (preg_match_all('/[A-Za-z_][A-Za-z0-9_]*/', $value, $m) !== false) {
+            foreach ($m[0] as $name) {
+                $env[$name] = [null];
+            }
+        }
+        $candidates = ComposeInterpolation::candidates($value, $env);
+
+        return $candidates === null || $candidates === [] ? null : $candidates[0];
     }
 
     /**

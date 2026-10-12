@@ -19,6 +19,9 @@ final class GenerationState
 
     public const ROUTES = 'routes';
 
+    /** The app ran nothing when a redeploy started: a cancel must leave it stopped again. */
+    public const STOPPED = 'stopped';
+
     private const FILE = 'generation.json';
 
     /** How long the sweep leaves an entry to the live process that wrote it. */
@@ -96,17 +99,52 @@ final class GenerationState
     /** @param array<string, mixed> $value */
     public function put(string $key, array $value): void
     {
-        $this->write([$key => $value] + $this->all());
+        $this->withLock(function () use ($key, $value): void {
+            $this->write([$key => $value] + $this->all());
+        });
     }
 
     public function forget(string $key): void
     {
-        $state = $this->all();
-        unset($state[$key]);
-        $this->write($state);
+        $this->withLock(function () use ($key): void {
+            $state = $this->all();
+            unset($state[$key]);
+            $this->write($state);
+        });
     }
 
-    /** @param array<string, mixed> $state */
+    /**
+     * Read-modify-write under a flock on a sibling file: not every writer holds the deploy lock
+     * ({@see CheckoutAside::moveAside()}), and two renames would drop each other's keys.
+     * Without a lock file it writes anyway rather than fail a deploy.
+     *
+     * @param callable(): void $change
+     */
+    private function withLock(callable $change): void
+    {
+        $path = self::path($this->username);
+        self::ensureDirectory($path);
+        $lockPath = $path . '.lock';
+        $handle = @fopen($lockPath, 'c');
+        if ($handle === false) {
+            $change();
+
+            return;
+        }
+
+        try {
+            @flock($handle, LOCK_EX);
+            $change();
+        } finally {
+            @flock($handle, LOCK_UN);
+            @fclose($handle);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $state
+     * @throws \RuntimeException so a record written before an irreversible move is known to have landed
+     */
     private function write(array $state): void
     {
         $path = self::path($this->username);
@@ -115,11 +153,19 @@ final class GenerationState
 
             return;
         }
+        self::ensureDirectory($path);
+        $tmp = $path . '.' . bin2hex(random_bytes(4));
+        if (@file_put_contents($tmp, json_encode($state, JSON_UNESCAPED_SLASHES)) === false || !@rename($tmp, $path)) {
+            @unlink($tmp);
+
+            throw new \RuntimeException("Could not write the generation state of {$this->username}.");
+        }
+    }
+
+    private static function ensureDirectory(string $path): void
+    {
         if (!is_dir(dirname($path))) {
             @mkdir(dirname($path), 0755, true);
         }
-        $tmp = $path . '.' . bin2hex(random_bytes(4));
-        file_put_contents($tmp, json_encode($state, JSON_UNESCAPED_SLASHES));
-        rename($tmp, $path);
     }
 }

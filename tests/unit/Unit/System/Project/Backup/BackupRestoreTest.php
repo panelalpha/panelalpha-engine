@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Project\Backup;
 
+use App\Lib\Deploy\DeployLog\DeployLock;
 use App\Models\Backup as BackupRecord;
 use App\Models\BackupContainer;
 use App\Models\BackupItem;
@@ -189,6 +190,30 @@ class BackupRestoreTest extends TestCase
         $this->assertLessThan($startIndex, $volumeIndex);
     }
 
+    /** A restore holds the deploy lock too; the lock names it so a refusal can say which. */
+    public function test_a_restore_records_itself_as_the_lock_holder(): void
+    {
+        $user = $this->makeUser('alice');
+        $container = $this->makeContainer();
+        $storage = new FakeStorage();
+        $created = $this->makeCompletedBackup($user, $container, $storage);
+        $backup = $created->model()->fresh(['items']);
+
+        $holderDuringRestore = null;
+        $restore = new BackupDouble(
+            $this->project($user),
+            $backup,
+            $storage,
+            onComposeStop: function () use (&$holderDuringRestore): void {
+                $holderDuringRestore = DeployLock::heldBy('alice');
+            },
+        );
+        $restore->restore();
+
+        $this->assertSame(DeployLock::HOLDER_RESTORE, $holderDuringRestore);
+        $this->assertNull(DeployLock::heldBy('alice'), 'the lock is released when the restore ends');
+    }
+
     public function test_swap_failure_with_successful_rollback_starts_compose(): void
     {
         $user = $this->makeUser('alice');
@@ -365,7 +390,7 @@ class BackupRestoreTest extends TestCase
                 return '';
             }
 
-            public function execOnHost(string|array $cmd, array $env = []): string
+            public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 return '';
             }

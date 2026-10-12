@@ -4,7 +4,7 @@ namespace App\Http\Controllers\User;
 
 use App\Exceptions\ProblemException;
 use App\Http\Controllers\Controller;
-use App\Models\User;
+use App\Http\Controllers\Concerns\StreamsNdjson;
 use App\System;
 use App\System\Project\Dind;
 use App\System\Project\Dind\ContainerOperations;
@@ -17,19 +17,52 @@ use Symfony\Component\Process\Exception\ProcessTimedOutException;
 
 class ContainerController extends Controller
 {
+    use StreamsNdjson;
+
+    private bool $clientGone = false;
+
     private function getDind(string $username): Dind
     {
         $user = $this->projectOr404($username);
         if ($user->getTemplate() !== 'dind') {
-            abort(new JsonResponse(['message' => 'Container management is only available for dind users'], 403));
+            $this->refuseNonContainerProject();
         }
 
         $runtime = $user->project(app(System::class))->runtime();
         if (!$runtime instanceof Dind) {
-            abort(new JsonResponse(['message' => 'Container management is only available for dind users'], 403));
+            $this->refuseNonContainerProject();
         }
 
         return $runtime;
+    }
+
+    private function refuseNonContainerProject(): never
+    {
+        abort(new JsonResponse(['message' => 'Container management works only on container projects (template dind).'], 403));
+    }
+
+    private function isServiceName(string $service): bool
+    {
+        return (bool) preg_match(ContainerOperations::SERVICE_NAME, $service);
+    }
+
+    private function invalidServiceName(): JsonResponse
+    {
+        return new JsonResponse(['message' => 'Invalid service name'], 422);
+    }
+
+    /**
+     * A stop asked for is not a fault: the health sweep skips the project until it is started again.
+     *
+     * @param array{exit_code: int} $result
+     */
+    private function actionResponse(Dind $dind, array $result, bool $stopsApp): JsonResponse
+    {
+        if ($result['exit_code'] === 0 && $stopsApp) {
+            $dind->userModel()->markAppStoppedByRequest(true);
+        }
+
+        return new JsonResponse($result, $result['exit_code'] === 0 ? 200 : 500);
     }
 
     #[OA\Get(
@@ -83,12 +116,8 @@ class ContainerController extends Controller
 
         $dind = $this->getDind($username);
         $result = $dind->projectAction($validated['action']);
-        // A stop asked for is not a fault: the health sweep skips the project until it is started again.
-        if ($result['exit_code'] === 0 && in_array($validated['action'], ['stop', 'down'], true)) {
-            $dind->userModel()->markAppStoppedByRequest(true);
-        }
 
-        return new JsonResponse($result, $result['exit_code'] === 0 ? 200 : 500);
+        return $this->actionResponse($dind, $result, in_array($validated['action'], ['stop', 'down'], true));
     }
 
     #[OA\Post(
@@ -116,8 +145,8 @@ class ContainerController extends Controller
     )]
     public function serviceAction(string $username, string $service, Request $request): JsonResponse
     {
-        if (!preg_match(ContainerOperations::SERVICE_NAME, $service)) {
-            return new JsonResponse(['message' => 'Invalid service name'], 422);
+        if (!$this->isServiceName($service)) {
+            return $this->invalidServiceName();
         }
 
         /**
@@ -131,11 +160,8 @@ class ContainerController extends Controller
 
         $dind = $this->getDind($username);
         $result = $dind->serviceAction($service, $validated['action']);
-        if ($result['exit_code'] === 0 && $validated['action'] === 'stop') {
-            $dind->userModel()->markAppStoppedByRequest(true);
-        }
 
-        return new JsonResponse($result, $result['exit_code'] === 0 ? 200 : 500);
+        return $this->actionResponse($dind, $result, $validated['action'] === 'stop');
     }
 
     /**
@@ -170,8 +196,8 @@ class ContainerController extends Controller
     )]
     public function logs(string $username, string $service, Request $request): JsonResponse
     {
-        if (!preg_match(ContainerOperations::SERVICE_NAME, $service)) {
-            return new JsonResponse(['message' => 'Invalid service name'], 422);
+        if (!$this->isServiceName($service)) {
+            return $this->invalidServiceName();
         }
 
         $times = $this->validateLogTimes($request, ['since', 'until']);
@@ -209,68 +235,70 @@ class ContainerController extends Controller
     )]
     public function streamLogs(string $username, string $service, Request $request): StreamedResponse|JsonResponse
     {
-        if (!preg_match(ContainerOperations::SERVICE_NAME, $service)) {
-            return new JsonResponse(['message' => 'Invalid service name'], 422);
+        if (!$this->isServiceName($service)) {
+            return $this->invalidServiceName();
         }
 
         $since = $this->validateLogTimes($request, ['since'])['since'];
         $lines = $this->validateLogLines($request);
         $dind = $this->getDind($username);
-        // The stream answers 200 before the follow runs, so an unknown service is refused here.
         $dind->assertServiceExists($service);
 
-        ignore_user_abort(true);
-        set_time_limit(0);
+        return $this->ndjsonStream($dind, $service, $lines, $since);
+    }
 
-        return response()->stream(function () use ($dind, $service, $lines, $since) {
-            // Same buffering rules as the task log stream.
-            if (!app()->runningUnitTests()) {
-                while (ob_get_level() > 0) {
-                    ob_end_clean();
-                }
+    /** Answers 200 before the follow runs, so whatever can refuse the request, an unknown service included, runs first. */
+    private function ndjsonStream(Dind $dind, string $service, int $lines, ?string $since): StreamedResponse
+    {
+        return self::ndjsonResponse(fn () => $this->followLogs($dind, $service, $lines, $since));
+    }
+
+    /** Streams the service's log lines and heartbeats, ending with a finish frame unless the client left. */
+    private function followLogs(Dind $dind, string $service, int $lines, ?string $since): void
+    {
+        $this->dropOutputBuffers();
+        try {
+            $dind->followServiceLogs(
+                $service,
+                $lines,
+                $since,
+                fn (string $line, ?string $ts) => $this->sendOrHangUp(['line' => $line, 'ts' => $ts]),
+                fn () => $this->sendOrHangUp(['type' => 'heartbeat']),
+            );
+        } catch (\RuntimeException $e) {
+            if ($this->clientGone) {
+                return;
             }
-
-            $emit = static function (array $frame): void {
-                echo json_encode($frame, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE) . "\n";
-                if (!app()->runningUnitTests()) {
-                    flush();
-                }
-            };
-
-            $gone = false;
-            // PHP learns the client left only when a write fails, so a quiet
-            // service gets heartbeats; without them the follow and this worker
-            // would wait for the next log line, or the full 10 minutes.
-            $send = static function (array $frame) use ($emit, &$gone): void {
-                $emit($frame);
-                if (connection_aborted()) {
-                    $gone = true;
-                    // Unwinds the follow; the process is stopped with it.
-                    throw new \RuntimeException('The client closed the log stream.');
-                }
-            };
-            try {
-                $dind->followServiceLogs(
-                    $service,
-                    $lines,
-                    $since,
-                    static fn (string $line, ?string $ts) => $send(['line' => $line, 'ts' => $ts]),
-                    static fn () => $send(['type' => 'heartbeat']),
-                );
-            } catch (\RuntimeException $e) {
-                if ($gone) {
-                    return;
-                }
-                if (!$e instanceof ProcessTimedOutException) {
-                    throw $e;
-                }
+            if (!$e instanceof ProcessTimedOutException) {
+                throw $e;
             }
-            $emit(['type' => 'finish']);
-        }, 200, [
-            'Content-Type' => 'application/x-ndjson',
-            'X-Accel-Buffering' => 'no',
-            'Cache-Control' => 'no-cache',
-        ]);
+        }
+        self::emitFrame(['type' => 'finish']);
+    }
+
+    /**
+     * PHP learns the client left only when a write fails, so a quiet service gets heartbeats; without
+     * them the follow and this worker would wait for the next line, or the full 10 minutes. A closed
+     * client unwinds the follow by throwing, which stops its process.
+     *
+     * @param array<string, mixed> $frame
+     */
+    private function sendOrHangUp(array $frame): void
+    {
+        self::emitFrame($frame);
+        if (connection_aborted()) {
+            $this->clientGone = true;
+            throw new \RuntimeException('The client closed the log stream.');
+        }
+    }
+
+    /** @param array<string, mixed> $frame */
+    private static function emitFrame(array $frame): void
+    {
+        echo json_encode($frame, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE) . "\n";
+        if (!app()->runningUnitTests()) {
+            flush();
+        }
     }
 
     /** Docker reads a negative tail as every line, past MAX_LOG_LINES, and 0 as none. */

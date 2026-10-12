@@ -133,16 +133,68 @@ class AppManagerTest extends TestCase
         $dind = $this->dindProject('run', Strategies::COMPOSE);
         $dir = $this->appDir('run');
         touch($dir.'/'.EngineArtifacts::RUN_COMPOSE);
+        $this->replies[] = [0, '', ''];
         $this->replies[] = [0, '[{"id":"1","username":"admin","email":"a@b.c","role":"administrator"}]', ''];
 
         $users = $dind->apps()->listUsers();
 
         $this->assertSame('admin', $users[0]['username']);
-        $command = $this->commands[0];
+        $command = $this->commands[1];
         $exec = array_search('exec', $command, true);
         $this->assertSame(['-u', '1000:1000', '-T', 'dind', 'env'], array_slice($command, $exec + 1, 5));
         $this->assertSame('COMPOSE_FILE='.$dir.'/'.EngineArtifacts::RUN_COMPOSE, $command[$exec + 6]);
         $this->assertSame(['bash', $dir.'/'.AppConfig::APP_SCRIPT, 'users:list'], array_slice($command, -3));
+    }
+
+    /**
+     * The README promises the engine will not call a command `info` does not
+     * list. It used to run anyway and return the script's unknown-action
+     * output as if it had worked.
+     */
+    public function test_a_command_info_does_not_list_is_refused(): void
+    {
+        $dind = $this->dindProject('nostub', Strategies::COMPOSE);
+        $dir = $this->appDir('nostub');
+        touch($dir.'/'.EngineArtifacts::RUN_COMPOSE);
+        // info() lists no users:sso, so the script is never asked for it.
+        $this->replies[] = [0, '["users:list","users:add","users:delete","users:reset-password"]', ''];
+
+        try {
+            $dind->apps()->ssoCredentials('7');
+            $this->fail('Expected the unsupported command to be refused');
+        } catch (\Exception $e) {
+            $this->assertStringContainsString("does not support the 'users:sso' command", $e->getMessage());
+            $this->assertStringContainsString('users:list, users:add', $e->getMessage());
+        }
+        $this->assertCount(1, $this->commands, 'only info ran');
+        $this->assertSame('info', $this->commands[0][count($this->commands[0]) - 1]);
+    }
+
+    public function test_a_listed_command_is_left_alone(): void
+    {
+        $dind = $this->dindProject('stub', Strategies::COMPOSE);
+        $dir = $this->appDir('stub');
+        touch($dir.'/'.EngineArtifacts::RUN_COMPOSE);
+        $this->replies[] = [0, '["users:list","users:add"]', ''];
+        $this->replies[] = [0, '[{"id":"1","username":"admin","email":"a@b.c","role":"administrator"}]', ''];
+
+        $users = $dind->apps()->listUsers();
+
+        $this->assertSame('admin', $users[0]['username']);
+    }
+
+    /** A script whose `info` fails is not refused for it: nothing is known. */
+    public function test_a_failing_info_does_not_block_the_command(): void
+    {
+        $dind = $this->dindProject('noinfo', Strategies::COMPOSE);
+        $dir = $this->appDir('noinfo');
+        touch($dir.'/'.EngineArtifacts::RUN_COMPOSE);
+        $this->replies[] = [1, '', '{"error":"Unknown action"}'];
+        $this->replies[] = [0, '{"success":true}', ''];
+
+        $dind->apps()->resetUserPassword('7', 'secret-password');
+
+        $this->assertCount(2, $this->commands);
     }
 
     public function test_the_scripts_own_error_is_what_the_caller_sees(): void
@@ -183,6 +235,7 @@ class AppManagerTest extends TestCase
     {
         $dind = $this->dindProject('down', Strategies::COMPOSE);
         $run = $this->appDir('down').'/'.EngineArtifacts::RUN_COMPOSE;
+        $this->replies[] = [0, '["users:reset-password"]', ''];
         $this->replies[] = [1, '', "open {$run}: no such file or directory\n"];
 
         try {
@@ -192,7 +245,7 @@ class AppManagerTest extends TestCase
             $this->assertSame("The application's management command failed. The engine log has the details.", $e->getMessage());
         }
 
-        $this->assertCount(1, $this->commands, 'no reinstall and retry');
+        $this->assertCount(2, $this->commands, 'info, then the command: no reinstall and retry');
         $this->assertCount(1, $this->logged);
         $this->assertStringContainsString('users:reset-password', $this->logged[0]);
         $this->assertStringContainsString('no such file or directory', $this->logged[0]);

@@ -852,6 +852,10 @@ final class RecordingDeployMechanics implements DeployMechanics
         return $this->applicationRunning;
     }
 
+    public function recordRunningVersion(): void
+    {
+    }
+
     public function syncHostingForCheckoutRebuild(bool $reuseRunning): void
     {
     }

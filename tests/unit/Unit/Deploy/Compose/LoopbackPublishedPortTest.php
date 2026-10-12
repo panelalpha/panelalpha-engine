@@ -35,6 +35,41 @@ final class LoopbackPublishedPortTest extends TestCase
         ];
     }
 
+    #[DataProvider('ipv6WildcardBindings')]
+    public function testAnIpv6WildcardHostIsDropped(string $binding, string $expected): void
+    {
+        $hardened = ServiceHardener::harden('app', ['image' => 'app', 'ports' => [$binding]]);
+
+        $this->assertSame([$expected], $hardened['ports']);
+    }
+
+    /** @return array<string, list<string>> */
+    public static function ipv6WildcardBindings(): array
+    {
+        return [
+            'short form' => ['[::]:8080:80', '8080:80'],
+            'with a protocol' => ['[::]:8080:80/tcp', '8080:80/tcp'],
+        ];
+    }
+
+    public function testTheLongFormLosesAnIpv6WildcardHostIp(): void
+    {
+        $hardened = ServiceHardener::harden('app', [
+            'image' => 'app',
+            'ports' => [['target' => 80, 'published' => '8080', 'host_ip' => '::']],
+        ]);
+
+        $this->assertSame([['target' => 80, 'published' => '8080']], $hardened['ports']);
+    }
+
+    /** IPv4 already has the port: publishing `[::]` everywhere too would clash with it. */
+    public function testAnIpv6WildcardBesideAnIpv4PublishOfThePortStays(): void
+    {
+        $hardened = ServiceHardener::harden('app', ['image' => 'app', 'ports' => ['0.0.0.0:8080:80', '[::]:8080:80']]);
+
+        $this->assertSame(['0.0.0.0:8080:80', '[::]:8080:80'], $hardened['ports']);
+    }
+
     #[DataProvider('bindingsToLeaveAlone')]
     public function testEverythingElseIsUntouched(string $binding): void
     {

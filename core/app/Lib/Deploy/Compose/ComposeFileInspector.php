@@ -2,9 +2,11 @@
 
 namespace App\Lib\Deploy\Compose;
 
+use App\Lib\Deploy\Detect\DockerfileFinder;
 use App\Lib\Deploy\Platform\DockerfileBuilder;
+use App\Lib\Deploy\Port\EnvVarDefault;
+use App\Lib\Deploy\Port\PortMapping;
 use App\Lib\Deploy\Sidecar\SidecarEngine;
-use Symfony\Component\Yaml\Yaml;
 
 /**
  * What kind of compose file is this: a live hosting stack, a workstation
@@ -23,11 +25,8 @@ class ComposeFileInspector
      * Host-user mapping vars. Templates pass these from the laptop; they are
      * empty in hosting and `groupadd -g` exits 3.
      *
-     * `UID`/`GID` are here because `$uid` is what a hand-written Dockerfile
-     * tends to call it, and matched case-insensitively for the same reason:
-     * Crater's is `ARG uid` / `useradd -u $uid`, and missing it meant the file
-     * was accepted as deployable and then died on `useradd: invalid user ID
-     * '-d'` once the empty argument shifted the rest of the command along.
+     * `UID`/`GID` are included and matched case-insensitively because a
+     * hand-written Dockerfile tends to say `ARG uid` / `useradd -u $uid`.
      */
     private const HOST_UID_VARS = 'WWWGROUP|WWWUSER|PUID|PGID|USER_ID|GROUP_ID|USERID|GROUPID|USER_UID|USER_GID'
         . '|HOST_UID|HOST_GID|HOSTUID|HOSTGID|UID|GID';
@@ -43,6 +42,10 @@ class ComposeFileInspector
         . '|(?:[^/]+/)*cockroachdb/cockroach$|(?:[^/]+/)*gvenzl/oracle-|container-registry\.oracle\.com/database/'
         . '|(?:[^/]+/)*[^/]*oracle[^/]*-xe)#';
 
+    private const STATIC_BOOTSTRAP_IMAGE = 'nginx:alpine';
+
+    private const STATIC_BOOTSTRAP_DOCROOT = '/usr/share/nginx/html';
+
     /**
      * Docker Compose V2 filename priority.
      *
@@ -56,14 +59,11 @@ class ComposeFileInspector
     ];
 
     /**
-     * Compose files a repo ships as a template rather than as a live stack.
-     *
-     * A widespread convention: the author documents the full stack - app,
-     * database, cache - and expects the operator to copy the file and fill in
-     * secrets. Nothing loads these automatically, so a repo like this looks to
-     * us like an app with no database, and the deploy ends in "connection
-     * refused" that a non-technical customer cannot act on. They are read for
-     * their runtime services only; the file itself is never run.
+     * Compose files a repo ships as a template rather than as a live stack:
+     * the author documents the full stack and expects the operator to copy it
+     * and fill in secrets. They are read for their runtime services only; the
+     * file itself is never run. Stack slices named by engine
+     * (`docker-compose.mysql.yml`) count too.
      */
     public const COMPOSE_EXAMPLE_CANDIDATES = [
         'compose.example.yml',
@@ -76,7 +76,6 @@ class ComposeFileInspector
         'docker-compose.yml.example',
         'docker-compose.yml.dist',
         'compose.yml.dist',
-        // Stack slices named by engine (Quenti ships docker-compose.mysql.yml).
         'docker-compose.mysql.yml',
         'docker-compose.mysql.yaml',
         'docker-compose.postgres.yml',
@@ -160,27 +159,17 @@ class ComposeFileInspector
     }
 
     /**
+     * Every service's build Dockerfile; a file under docker/ builds relative to docker/.
+     *
      * @return list<array{relative: string, absolute: string}>
      */
     private static function composeBuildDockerfileRefs(string $composePath, string $projectDir): array
     {
-        if (!is_file($composePath) || !is_readable($composePath)) {
+        $raw = self::readNonEmpty($composePath);
+        $parsed = $raw === null ? null : self::parseOrNull($raw);
+        if (self::servicesOf($parsed) === null) {
             return [];
         }
-        $raw = @file_get_contents($composePath);
-        if (!is_string($raw) || $raw === '') {
-            return [];
-        }
-
-        try {
-            $parsed = ComposeYaml::parse($raw);
-        } catch (\Throwable $e) {
-            return [];
-        }
-        if (!is_array($parsed) || !isset($parsed['services']) || !is_array($parsed['services'])) {
-            return [];
-        }
-        // A file under docker/ builds relative to docker/.
         $nested = NestedCompose::relativeDir($composePath, $projectDir);
         if ($nested !== null) {
             $parsed = NestedCompose::rebase($parsed, $nested);
@@ -188,18 +177,14 @@ class ComposeFileInspector
 
         $refs = [];
         foreach ($parsed['services'] as $service) {
-            if (!is_array($service) || !isset($service['build'])) {
-                continue;
-            }
-            $build = $service['build'];
+            $build = is_array($service) ? ($service['build'] ?? null) : null;
             if (!is_string($build) && !is_array($build)) {
                 continue;
             }
             $resolved = self::resolveComposeBuildDockerfile($projectDir, $build);
-            if ($resolved === null) {
-                continue;
+            if ($resolved !== null) {
+                $refs[] = $resolved;
             }
-            $refs[] = $resolved;
         }
 
         return $refs;
@@ -210,6 +195,38 @@ class ComposeFileInspector
      * @return array{relative: string, absolute: string}|null
      */
     private static function resolveComposeBuildDockerfile(string $projectDir, array|string $build): ?array
+    {
+        $paths = self::buildContextAndDockerfile($build);
+        if ($paths === null || self::isUncheckableBuildPath(...$paths)) {
+            return null;
+        }
+        [$context, $dockerfile] = $paths;
+        if (str_starts_with($dockerfile, '/')) {
+            return [
+                'relative' => $dockerfile,
+                'absolute' => $dockerfile,
+            ];
+        }
+
+        $relative = self::dockerfileInContext($context, $dockerfile);
+        if ($relative === '' || str_contains($relative, '..')) {
+            return null;
+        }
+
+        return [
+            'relative' => $relative,
+            'absolute' => rtrim($projectDir, '/') . '/' . ltrim($relative, '/'),
+        ];
+    }
+
+    /**
+     * A `build:`'s context and Dockerfile with compose's defaults applied, or
+     * null for an inline Dockerfile.
+     *
+     * @param array<string, mixed>|string $build
+     * @return array{0: string, 1: string}|null
+     */
+    private static function buildContextAndDockerfile(array|string $build): ?array
     {
         if (is_string($build)) {
             $context = $build;
@@ -228,39 +245,26 @@ class ComposeFileInspector
             }
         }
 
-        $context = str_replace('\\', '/', trim($context));
-        $dockerfile = str_replace('\\', '/', trim($dockerfile));
-        if ($context === '' || $dockerfile === '') {
-            return null;
-        }
-        if (preg_match('#^(https?://|git@|ssh://)#i', $context) === 1) {
-            return null;
-        }
-        if (str_contains($context, '..') || str_contains($dockerfile, '..')) {
-            return null;
-        }
-        if (str_starts_with($dockerfile, '/')) {
-            return [
-                'relative' => $dockerfile,
-                'absolute' => $dockerfile,
-            ];
-        }
+        return [str_replace('\\', '/', trim($context)), str_replace('\\', '/', trim($dockerfile))];
+    }
 
+    /** Empty, a git/HTTP context, or a path climbing out with `..`: nothing on disk to check. */
+    private static function isUncheckableBuildPath(string $context, string $dockerfile): bool
+    {
+        return $context === '' || $dockerfile === ''
+            || preg_match('#^(https?://|git@|ssh://)#i', $context) === 1
+            || str_contains($context, '..') || str_contains($dockerfile, '..');
+    }
+
+    private static function dockerfileInContext(string $context, string $dockerfile): string
+    {
         $contextRel = self::stripDotSlash($context);
         $fileRel = self::stripDotSlash($dockerfile);
         if ($contextRel === '' || $contextRel === '.') {
-            $relative = $fileRel;
-        } else {
-            $relative = rtrim($contextRel, '/') . '/' . ltrim($fileRel, '/');
-        }
-        if ($relative === '' || str_contains($relative, '..')) {
-            return null;
+            return $fileRel;
         }
 
-        return [
-            'relative' => $relative,
-            'absolute' => rtrim($projectDir, '/') . '/' . ltrim($relative, '/'),
-        ];
+        return rtrim($contextRel, '/') . '/' . ltrim($fileRel, '/');
     }
 
     private static function stripDotSlash(string $path): string
@@ -279,15 +283,9 @@ class ComposeFileInspector
      */
     public static function isLocalDevCompose(string $composePath): bool
     {
-        if (!is_file($composePath) || !is_readable($composePath)) {
-            return false;
-        }
-        $raw = @file_get_contents($composePath);
-        if (!is_string($raw) || $raw === '') {
-            return false;
-        }
+        $raw = self::readNonEmpty($composePath);
 
-        return self::isLocalDevComposeYaml($raw);
+        return $raw !== null && self::isLocalDevComposeYaml($raw);
     }
 
     public static function isLocalDevComposeYaml(string $raw): bool
@@ -298,50 +296,41 @@ class ComposeFileInspector
     /**
      * Why a file reads as a workstation dev compose, or null when it does not.
      * The boolean check and the deploy log share this, so a demotion can name
-     * the service and mount that triggered it instead of leaving a silent gap.
+     * the service and mount that triggered it.
      */
     public static function localDevComposeReason(string $composePath): ?string
     {
-        if (!is_file($composePath) || !is_readable($composePath)) {
-            return null;
-        }
-        $raw = @file_get_contents($composePath);
-        if (!is_string($raw) || $raw === '') {
-            return null;
-        }
+        $raw = self::readNonEmpty($composePath);
 
-        return self::localDevComposeReasonYaml($raw);
+        return $raw === null ? null : self::localDevComposeReasonYaml($raw);
     }
 
     public static function localDevComposeReasonYaml(string $raw): ?string
     {
-        if ($raw === '') {
-            return null;
+        foreach (self::servicesOf(self::parseOrNull($raw)) ?? [] as $name => $service) {
+            $reason = is_array($service) ? self::workstationServiceReason((string) $name, $service) : null;
+            if ($reason !== null) {
+                return $reason;
+            }
         }
 
-        try {
-            $parsed = ComposeYaml::parse($raw);
-        } catch (\Throwable $e) {
-            return null;
-        }
-        if (!is_array($parsed) || !isset($parsed['services']) || !is_array($parsed['services'])) {
-            return null;
-        }
+        return null;
+    }
 
-        foreach ($parsed['services'] as $name => $service) {
-            if (!is_array($service)) {
-                continue;
-            }
-            if (self::serviceHasUndefaultedHostUidBuildArg($service)) {
-                return 'service `' . (string) $name . '` maps a host UID/GID build arg';
-            }
-            if (isset($service['build']) && ($source = self::projectRootBindSource($service)) !== null) {
-                $where = in_array($source, ['.', './', '${PWD}', '$PWD'], true)
-                    ? 'the project root'
-                    : '`' . $source . '`';
+    /**
+     * @param array<string, mixed> $service
+     */
+    private static function workstationServiceReason(string $name, array $service): ?string
+    {
+        if (self::serviceHasUndefaultedHostUidBuildArg($service)) {
+            return 'service `' . $name . '` maps a host UID/GID build arg';
+        }
+        if (isset($service['build']) && ($source = self::projectRootBindSource($service)) !== null) {
+            $where = self::isProjectRootSource($source)
+                ? 'the project root'
+                : '`' . $source . '`';
 
-                return 'service `' . (string) $name . '` mounts ' . $where;
-            }
+            return 'service `' . $name . '` mounts ' . $where;
         }
 
         return null;
@@ -354,22 +343,15 @@ class ComposeFileInspector
      */
     public static function isLegacyV1Compose(string $composePath): bool
     {
-        if (!is_file($composePath) || !is_readable($composePath)) {
-            return false;
-        }
-        $raw = @file_get_contents($composePath);
+        $raw = self::readNonEmpty($composePath);
 
-        return is_string($raw) && self::isLegacyV1ComposeYaml($raw);
+        return $raw !== null && self::isLegacyV1ComposeYaml($raw);
     }
 
+    /** `include:` alone is a valid v2 file with no services of its own. */
     public static function isLegacyV1ComposeYaml(string $raw): bool
     {
-        try {
-            $parsed = ComposeYaml::parse($raw);
-        } catch (\Throwable $e) {
-            return false;
-        }
-        // `include:` alone is a valid v2 file with no services of its own.
+        $parsed = self::parseOrNull($raw);
         if (!is_array($parsed) || isset($parsed['services']) || isset($parsed['include'])) {
             return false;
         }
@@ -384,25 +366,21 @@ class ComposeFileInspector
 
     /**
      * Why `docker compose up` starts nothing from this file as written: every
-     * service sits behind a profile nobody activates (NextChat), or one has
-     * neither image nor build (poke) and Compose rejects the project. Null when
-     * it can start something.
+     * service sits behind a profile nobody activates, or one has neither image
+     * nor build and Compose rejects the project. Null when it can start something.
      *
      * @param list<string> $activeProfiles COMPOSE_PROFILES the repository sets
      */
     public static function startsNothingReasonYaml(string $raw, array $activeProfiles = []): ?string
     {
-        try {
-            $parsed = ComposeYaml::parse($raw);
-        } catch (\Throwable) {
-            return null;
-        }
-        if (!is_array($parsed) || !is_array($parsed['services'] ?? null) || isset($parsed['include'])) {
+        $parsed = self::parseOrNull($raw);
+        $services = self::servicesOf($parsed);
+        if ($services === null || isset($parsed['include'])) {
             return null;
         }
 
         $startable = false;
-        foreach ($parsed['services'] as $name => $service) {
+        foreach ($services as $name => $service) {
             if (!is_array($service)) {
                 continue;
             }
@@ -415,7 +393,7 @@ class ComposeFileInspector
             }
         }
 
-        return $startable || $parsed['services'] === [] ? null : 'every service is behind a profile';
+        return $startable || $services === [] ? null : 'every service is behind a profile';
     }
 
     /**
@@ -438,61 +416,43 @@ class ComposeFileInspector
      */
     public static function isSidecarsOnlyCompose(string $composePath): bool
     {
-        if (!is_file($composePath) || !is_readable($composePath)) {
-            return false;
-        }
-        $raw = @file_get_contents($composePath);
-        if (!is_string($raw) || $raw === '') {
-            return false;
-        }
+        $raw = self::readNonEmpty($composePath);
 
-        return self::isSidecarsOnlyComposeYaml($raw);
+        return $raw !== null && self::isSidecarsOnlyComposeYaml($raw);
     }
 
     public static function isSidecarsOnlyComposeYaml(string $raw): bool
     {
-        if ($raw === '') {
-            return false;
-        }
-
-        try {
-            $parsed = ComposeYaml::parse($raw);
-        } catch (\Throwable $e) {
-            return false;
-        }
-        if (!is_array($parsed) || !isset($parsed['services']) || !is_array($parsed['services'])) {
-            return false;
-        }
-
         $seen = 0;
-        foreach ($parsed['services'] as $name => $service) {
+        foreach (self::servicesOf(self::parseOrNull($raw)) ?? [] as $name => $service) {
             if (!is_array($service)) {
                 continue;
             }
             $seen++;
-            if (isset($service['build'])) {
-                return false;
-            }
-            if (self::isWorkstationAppService($service)) {
-                return false;
-            }
-            // Datastores and the consoles that come with them. A file that is
-            // only those is somebody's development environment -- Vendure's
-            // ships five database servers, Elasticsearch, Redis, Keycloak,
-            // Jaeger, Loki and Grafana, and not one line of Vendure -- so
-            // deploying it would run a stack that contains no application.
-            // A published port's number alone does not make one: OpenCloud
-            // serves on 9200, Elasticsearch's port.
-            $identity = isset($service['ports']) ? array_diff_key($service, ['ports' => true, 'expose' => true]) : $service;
-            if (!SidecarEngine::isKnownDatastore((string) $name, $identity)
-                && !DevServices::isDevSidecar((string) $name, $service)
-                && !self::isDialectlessDatastore($service)
+            if (isset($service['build']) || self::isWorkstationAppService($service)
+                || !self::isDatastoreOrConsole((string) $name, $service)
             ) {
                 return false;
             }
         }
 
         return $seen > 0;
+    }
+
+    /**
+     * A datastore or a console that comes with one: a file of only these is a
+     * development environment with no application in it. A published port's
+     * number alone does not make one (an app may serve on Elasticsearch's 9200).
+     *
+     * @param array<string, mixed> $service
+     */
+    private static function isDatastoreOrConsole(string $name, array $service): bool
+    {
+        $identity = isset($service['ports']) ? array_diff_key($service, ['ports' => true, 'expose' => true]) : $service;
+
+        return SidecarEngine::isKnownDatastore($name, $identity)
+            || DevServices::isDevSidecar($name, $service)
+            || self::isDialectlessDatastore($service);
     }
 
     /** @param array<string, mixed> $service */
@@ -525,30 +485,31 @@ class ComposeFileInspector
     /**
      * Dockerfile that maps a host UID/GID with no numeric ARG or ENV default.
      * Nested copies of local-dev runtimes (docker/8.x, docker/Dockerfile)
-     * must not win over PHP/JS/Railpack recipes.
+     * must not win over PHP/JS/Railpack recipes. Heredoc bodies are ignored:
+     * an entrypoint written as one reads $PUID at run time, not from a build ARG.
      */
     public static function isHostUidMappedDockerfile(string $path): bool
     {
-        if (!is_file($path) || !is_readable($path)) {
+        $raw = self::readNonEmpty($path);
+        if ($raw === null) {
             return false;
         }
-        $raw = @file_get_contents($path);
-        if (!is_string($raw) || $raw === '') {
-            return false;
-        }
-        // An entrypoint written as a heredoc reads $PUID at run time, not from a build ARG.
-        $raw = \App\Lib\Deploy\Detect\DockerfileFinder::withoutHeredocBodies($raw);
+        $raw = DockerfileFinder::withoutHeredocBodies($raw);
         if (preg_match('/\b(groupadd|useradd|addgroup|adduser)\b/', $raw) !== 1) {
             return false;
         }
         if (preg_match('/\$(?:\{)?(' . self::HOST_UID_VARS . ')\b/i', $raw, $match) !== 1) {
             return false;
         }
-        $var = preg_quote($match[1], '/');
 
-        // Koillection's `ENV PUID=1001` sets it as surely as an ARG default.
-        return preg_match('/^\s*ARG\s+' . $var . '\s*=\s*\d+/mi', $raw) !== 1
-            && preg_match('/^\s*ENV\s+(?:(?:\S+=\S+\s+)*' . $var . '\s*=\s*["\']?\d+|' . $var . '\s+["\']?\d+)/mi', $raw) !== 1;
+        return !self::hasNumericDefault($raw, preg_quote($match[1], '/'));
+    }
+
+    /** An `ARG` default, or an `ENV` value (`ENV PUID=1001`), which sets it as surely. */
+    private static function hasNumericDefault(string $dockerfile, string $quotedVar): bool
+    {
+        return preg_match('/^\s*ARG\s+' . $quotedVar . '\s*=\s*\d+/mi', $dockerfile) === 1
+            || preg_match('/^\s*ENV\s+(?:(?:\S+=\S+\s+)*' . $quotedVar . '\s*=\s*["\']?\d+|' . $quotedVar . '\s+["\']?\d+)/mi', $dockerfile) === 1;
     }
 
     /**
@@ -588,12 +549,24 @@ class ComposeFileInspector
     public static function mountsWholeProjectRoot(array $service): bool
     {
         foreach ((array) ($service['volumes'] ?? []) as $volume) {
-            if (in_array(self::readBindVolume($volume)[0], self::PROJECT_ROOT_SOURCES, true)) {
+            if (self::isProjectRootSource(self::readBindVolume($volume)[0])) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /**
+     * A bind source that is the project root, as written or through a default
+     * (`${APP_SRC:-.}`). Both forms: resolving a bare `${PWD}` empties it.
+     */
+    private static function isProjectRootSource(?string $source): bool
+    {
+        return $source !== null && (
+            in_array($source, self::PROJECT_ROOT_SOURCES, true)
+            || in_array(EnvVarDefault::resolve($source), self::PROJECT_ROOT_SOURCES, true)
+        );
     }
 
     /**
@@ -605,20 +578,9 @@ class ComposeFileInspector
     }
 
     /**
-     * The bind source that marks a service a workstation app service, or null.
-     *
-     * The project root (`.`/`./`/`${PWD}`) always counts: the service builds
-     * an image and then mounts the whole source over it, which is how a laptop
-     * gets live reload and never how a deployment ships.
-     *
-     * A `./subdir` counts only when it is a read-write mount of a source tree
-     * -- OpenCart 4.1 mounts `./upload`, its whole shop. It does NOT count when
-     * it is read-only, or a single generated file: that is a recipe injecting
-     * one artifact (an entrypoint/config/answer file, as Centreon, Saleor and
-     * Socioboard do), and demoting the whole compose over it wrote the wrong
-     * container topology. Nor when it is a log directory. A datastore's
-     * `./data:/var/lib/mysql` is not reached here: that service carries an
-     * `image:`, and the caller only asks about services that `build:`.
+     * The bind source that marks a service a workstation app service, or null:
+     * the project root, which a laptop mounts over the built image for live
+     * reload, or a {@see isSourceTreeBind() source-tree subdirectory}.
      *
      * @param array<string, mixed> $service
      */
@@ -630,23 +592,25 @@ class ComposeFileInspector
         }
         foreach ($volumes as $volume) {
             [$source, $target, $readOnly] = self::readBindVolume($volume);
-            if ($source === null) {
-                continue;
-            }
-            if (in_array($source, self::PROJECT_ROOT_SOURCES, true)) {
+            if ($source !== null && (self::isProjectRootSource($source) || self::isSourceTreeBind($source, $target, $readOnly))) {
                 return $source;
             }
-            if (!str_starts_with($source, './')) {
-                continue;
-            }
-            if ($readOnly || self::mountsSingleFile($source, $target) || self::mountsLogDirectory($source, $target)) {
-                continue;
-            }
-
-            return $source;
         }
 
         return null;
+    }
+
+    /**
+     * A read-write `./subdir` holding source (a whole shop under `./upload`).
+     * Not a read-only bind, a single injected file or a log directory: those
+     * are a recipe injecting an artifact, not a workstation.
+     */
+    private static function isSourceTreeBind(string $source, string $target, bool $readOnly): bool
+    {
+        return str_starts_with($source, './')
+            && !$readOnly
+            && !self::mountsSingleFile($source, $target)
+            && !self::mountsLogDirectory($source, $target);
     }
 
     /**
@@ -673,40 +637,58 @@ class ComposeFileInspector
      * A bind volume as [source, target, readOnly]; source is null for a named
      * volume or a non-bind mount.
      *
-     * @param mixed $volume
      * @return array{0: ?string, 1: string, 2: bool}
      */
     private static function readBindVolume(mixed $volume): array
     {
         if (is_string($volume)) {
-            if (!str_contains($volume, ':')) {
-                return [null, '', false];
-            }
-            $parts = explode(':', $volume);
-            $mode = isset($parts[2]) ? trim($parts[2]) : '';
-            $readOnly = in_array('ro', array_map('trim', explode(',', $mode)), true);
-
-            return [
-                str_replace('\\', '/', trim($parts[0])),
-                str_replace('\\', '/', trim($parts[1] ?? '')),
-                $readOnly,
-            ];
+            return self::readShortBindVolume($volume);
         }
         if (is_array($volume)) {
-            $type = strtolower((string) ($volume['type'] ?? 'bind'));
-            if ($type !== '' && $type !== 'bind') {
-                return [null, '', false];
-            }
-            $source = str_replace('\\', '/', trim((string) ($volume['source'] ?? '')));
-
-            return [
-                $source === '' ? null : $source,
-                str_replace('\\', '/', trim((string) ($volume['target'] ?? ''))),
-                ($volume['read_only'] ?? false) === true,
-            ];
+            return self::readLongBindVolume($volume);
         }
 
         return [null, '', false];
+    }
+
+    /**
+     * Split brace-aware: `${APP_SRC:-.}:/var/www/html` is two fields, not three.
+     *
+     * @return array{0: ?string, 1: string, 2: bool}
+     */
+    private static function readShortBindVolume(string $volume): array
+    {
+        if (!str_contains($volume, ':')) {
+            return [null, '', false];
+        }
+        $parts = PortMapping::splitFields($volume);
+        $mode = isset($parts[2]) ? trim($parts[2]) : '';
+        $readOnly = in_array('ro', array_map('trim', explode(',', $mode)), true);
+
+        return [
+            str_replace('\\', '/', trim($parts[0])),
+            str_replace('\\', '/', trim($parts[1] ?? '')),
+            $readOnly,
+        ];
+    }
+
+    /**
+     * @param array<mixed> $volume
+     * @return array{0: ?string, 1: string, 2: bool}
+     */
+    private static function readLongBindVolume(array $volume): array
+    {
+        $type = strtolower((string) ($volume['type'] ?? 'bind'));
+        if ($type !== '' && $type !== 'bind') {
+            return [null, '', false];
+        }
+        $source = str_replace('\\', '/', trim((string) ($volume['source'] ?? '')));
+
+        return [
+            $source === '' ? null : $source,
+            str_replace('\\', '/', trim((string) ($volume['target'] ?? ''))),
+            ($volume['read_only'] ?? false) === true,
+        ];
     }
 
     /**
@@ -729,74 +711,111 @@ class ComposeFileInspector
     /**
      * Engine-written compose (welcome nginx, framework recipe, Dockerfile
      * wrap). Skipping it lets a zip of HTML or a known framework win on
-     * rebuild instead of freezing strategy=compose.
+     * rebuild instead of freezing strategy=compose. An unreadable file counts
+     * as generated: the engine's own may be mode 600 to the app user, which
+     * PHP-FPM (www-data) cannot read.
      */
     public static function isGeneratedBootstrapCompose(string $composePath): bool
     {
         if (!is_file($composePath)) {
             return false;
         }
-        // createFromTemplate used to write mode 600 owned by the app user.
-        // PHP-FPM (www-data) then cannot read the generated-label and would
-        // freeze strategy=compose over a zip that already has real sources.
         if (!is_readable($composePath)) {
             return true;
         }
-        $raw = @file_get_contents($composePath);
-        if (!is_string($raw) || $raw === '') {
+        $raw = self::readNonEmpty($composePath);
+        if ($raw === null) {
             return false;
         }
-        if (str_contains($raw, GeneratedCompose::LABEL)) {
-            return true;
-        }
-        if (str_contains($raw, DockerfileBuilder::FILENAME)) {
-            return true;
-        }
 
-        return self::isUnlabelledStaticBootstrapYaml($raw);
+        return self::hasEngineService(ComposeYaml::parse($raw)) || self::isUnlabelledStaticBootstrapYaml($raw);
     }
 
     /**
-     * The static bootstrap as the engine wrote it before it carried the label
-     * (August 2026): one `nginx:alpine` service, no build, serving the project
-     * root itself. Still left on an account nobody has migrated.
-     *
-     * The project root, not any directory: the engine only ever mounted `./`.
-     * A client stack serving `./html` or `./dist` with the same image is the
-     * client's own, and reading it as ours dropped their site for the
-     * placeholder page (ticket 08, live run).
+     * A service carrying the engine's label or building its Dockerfile. A
+     * customer file that only mentions either in a comment is still theirs.
      */
-    private static function isUnlabelledStaticBootstrapYaml(string $raw): bool
+    private static function hasEngineService(mixed $parsed): bool
     {
-        try {
-            $parsed = ComposeYaml::parse($raw);
-        } catch (\Throwable) {
-            return false;
-        }
-        $services = is_array($parsed) ? ($parsed['services'] ?? null) : null;
-        if (!is_array($services) || count($services) !== 1) {
-            return false;
-        }
-        $service = reset($services);
-        if (!is_array($service) || isset($service['build']) || ($service['image'] ?? null) !== 'nginx:alpine') {
-            return false;
-        }
-
-        foreach ((array) ($service['volumes'] ?? []) as $volume) {
-            if (!is_string($volume)) {
+        foreach (is_array($parsed) ? ($parsed['services'] ?? []) : [] as $service) {
+            if (!is_array($service)) {
                 continue;
             }
-            $parts = explode(':', $volume);
-            if (count($parts) < 2) {
-                continue;
-            }
-            if (in_array(trim($parts[0]), ['.', './'], true)
-                && rtrim(trim($parts[1]), '/') === '/usr/share/nginx/html'
+            if (array_key_exists(GeneratedCompose::LABEL, (array) ($service['labels'] ?? []))
+                || ($service['build']['dockerfile'] ?? null) === DockerfileBuilder::FILENAME
             ) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /**
+     * The static bootstrap as the engine wrote it before it carried the label:
+     * one `nginx:alpine` service, no build, serving the project root itself.
+     * Only the root: a client stack serving `./html` or `./dist` with the same
+     * image is the client's own.
+     */
+    private static function isUnlabelledStaticBootstrapYaml(string $raw): bool
+    {
+        $parsed = self::parseOrNull($raw);
+        $services = is_array($parsed) ? ($parsed['services'] ?? null) : null;
+        if (!is_array($services) || count($services) !== 1) {
+            return false;
+        }
+        $service = reset($services);
+        if (!is_array($service) || isset($service['build']) || ($service['image'] ?? null) !== self::STATIC_BOOTSTRAP_IMAGE) {
+            return false;
+        }
+
+        foreach ((array) ($service['volumes'] ?? []) as $volume) {
+            if (is_string($volume) && self::servesProjectRootAsDocroot($volume)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static function servesProjectRootAsDocroot(string $volume): bool
+    {
+        $parts = explode(':', $volume);
+
+        return count($parts) >= 2
+            && in_array(trim($parts[0]), ['.', './'], true)
+            && rtrim(trim($parts[1]), '/') === self::STATIC_BOOTSTRAP_DOCROOT;
+    }
+
+    /** The file's contents, or null when it is missing, unreadable or empty. */
+    private static function readNonEmpty(string $path): ?string
+    {
+        if (!is_file($path) || !is_readable($path)) {
+            return null;
+        }
+        $raw = @file_get_contents($path);
+
+        return is_string($raw) && $raw !== '' ? $raw : null;
+    }
+
+    /**
+     * @return array<mixed>|null
+     */
+    private static function parseOrNull(string $raw): ?array
+    {
+        try {
+            return ComposeYaml::parse($raw);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * @param array<mixed>|null $parsed
+     * @return array<mixed>|null
+     */
+    private static function servicesOf(?array $parsed): ?array
+    {
+        return is_array($parsed['services'] ?? null) ? $parsed['services'] : null;
     }
 }

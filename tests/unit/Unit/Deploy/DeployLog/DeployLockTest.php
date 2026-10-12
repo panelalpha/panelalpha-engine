@@ -121,11 +121,93 @@ class DeployLockTest extends TestCase
         $this->assertFalse((new DeployLock(new DeployLogPaths('lock-' . bin2hex(random_bytes(6)))))->isHeld());
     }
 
+    public function test_the_holder_is_named_only_while_it_holds_the_lock(): void
+    {
+        $this->assertNull(DeployLock::heldBy($this->username));
+
+        $delete = DeployLock::acquireFor($this->username, DeployLock::HOLDER_DELETE);
+        $this->assertSame(DeployLock::HOLDER_DELETE, DeployLock::heldBy($this->username));
+        $delete->release();
+        $this->assertNull(DeployLock::heldBy($this->username));
+
+        // A holder that died left its name in the file; the next one must not inherit it.
+        file_put_contents($this->paths->lock(), DeployLock::HOLDER_DELETE);
+        $deploy = new DeployLock($this->paths);
+        $deploy->acquire();
+        try {
+            $this->assertNull(DeployLock::heldBy($this->username));
+        } finally {
+            $deploy->release();
+        }
+    }
+
+    public function test_a_backup_and_a_restore_leave_their_own_names(): void
+    {
+        foreach ([DeployLock::HOLDER_BACKUP, DeployLock::HOLDER_RESTORE] as $holder) {
+            $lock = DeployLock::acquireFor($this->username, $holder);
+            $this->assertSame($holder, DeployLock::heldBy($this->username));
+            $lock->release();
+            $this->assertNull(DeployLock::heldBy($this->username));
+        }
+    }
+
+    public function test_a_refused_second_lock_names_the_backup_that_holds_it(): void
+    {
+        $backup = DeployLock::acquireFor($this->username, DeployLock::HOLDER_BACKUP);
+
+        try {
+            $this->expectException(DeployAlreadyRunningException::class);
+            $this->expectExceptionMessage('A backup is already running for this user.');
+            (new DeployLock($this->paths))->acquire();
+        } finally {
+            $backup->release();
+        }
+    }
+
+    public function test_a_refused_second_lock_names_the_restore_that_holds_it(): void
+    {
+        $restore = DeployLock::acquireFor($this->username, DeployLock::HOLDER_RESTORE);
+
+        try {
+            $this->expectException(DeployAlreadyRunningException::class);
+            $this->expectExceptionMessage('A restore is already running for this user.');
+            (new DeployLock($this->paths))->acquire();
+        } finally {
+            $restore->release();
+        }
+    }
+
     public function test_releasing_a_lock_never_taken_is_harmless(): void
     {
         (new DeployLock($this->paths))->release();
 
         $this->addToAssertionCount(1);
+    }
+
+    public function test_it_reports_a_lock_this_process_holds_and_forgets_it_on_release(): void
+    {
+        $this->assertFalse(DeployLock::heldByThisProcess($this->username));
+
+        $lock = new DeployLock($this->paths);
+        $lock->acquire();
+        $this->assertTrue(DeployLock::heldByThisProcess($this->username));
+
+        $lock->release();
+        $this->assertFalse(DeployLock::heldByThisProcess($this->username));
+    }
+
+    public function test_anothers_lock_is_not_reported_as_this_processes(): void
+    {
+        $held = fopen($this->paths->lock(), 'c');
+        flock($held, LOCK_EX | LOCK_NB);
+
+        try {
+            $this->assertFalse(DeployLock::heldByThisProcess($this->username));
+            $this->assertTrue((new DeployLock($this->paths))->isHeld());
+        } finally {
+            flock($held, LOCK_UN);
+            fclose($held);
+        }
     }
 
     public function test_releasing_twice_is_harmless(): void

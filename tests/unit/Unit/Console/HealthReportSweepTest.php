@@ -82,4 +82,15 @@ class HealthReportSweepTest extends TestCase
         $this->assertFalse($user->fresh()->isAppStoppedByRequest());
         $this->assertArrayNotHasKey('app_stopped_by_request', array_filter($user->fresh()->getDetails(), static fn ($v) => $v !== null));
     }
+
+    /** A mistyped name is a failure, not an empty-but-healthy sweep. */
+    public function test_an_unknown_project_exits_nonzero_without_a_json_payload(): void
+    {
+        $exit = Artisan::call('project:health:report', ['project' => 'nosuch999', '--local' => true, '--json' => true]);
+
+        $this->assertSame(1, $exit);
+        $this->assertStringContainsString("No such project: 'nosuch999'", Artisan::output());
+        $this->assertStringNotContainsString('"swept"', Artisan::output());
+        $this->assertStringNotContainsString('Swept 0 project(s)', Artisan::output());
+    }
 }

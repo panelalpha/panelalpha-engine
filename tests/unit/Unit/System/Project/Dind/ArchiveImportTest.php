@@ -38,9 +38,8 @@ class ArchiveImportTest extends TestCase
         $system = $this->system("d myapp\0");
         $this->files($system)->importProjectArchive('/fw.tar.gz');
 
-        $find = $this->commandsStartingWith($system, ['sudo', 'find']);
-        $this->assertCount(1, $find);
-        $extract = $find[0][2];
+        $find = $this->extractFind($system);
+        $extract = $find[2];
         $this->assertStringStartsWith($this->root . '/home/alice/.panelalpha/archive-extract-', $extract);
         // Nothing was extracted for real: only the root listing knows what is there.
         $this->assertDirectoryDoesNotExist($extract);
@@ -56,10 +55,48 @@ class ArchiveImportTest extends TestCase
         $system = $this->system("f index.php\0d assets\0");
         $this->files($system)->importProjectArchive('/fw.tar.gz');
 
-        $extract = $this->commandsStartingWith($system, ['sudo', 'find'])[0][2];
+        $extract = $this->extractFind($system)[2];
         $this->assertSame(
             [['sudo', 'rsync', '-a', '--delete', '--checksum', '--no-times', $extract . '/', $this->root . '/home/alice/project/']],
             $this->commandsStartingWith($system, ['sudo', 'rsync'])
+        );
+    }
+
+    /**
+     * A killed import skips the `finally`: an archive-sized copy under the
+     * stage root and an extract under the home are swept before the next one.
+     * Both are found as root and removed; the current import's own entries are
+     * younger than the threshold and are not listed.
+     */
+    public function test_stale_stage_and_extract_directories_are_swept_before_an_import(): void
+    {
+        $staleStage = $this->root . '/stage/deadbeef01';
+        $staleExtract = $this->root . '/home/alice/.panelalpha/archive-extract-deadbeef02';
+        $system = $this->system("f index.php\0");
+        $system->answers = [
+            'sudo find ' . $this->root . '/stage ' => $staleStage . "\n",
+            'sudo find ' . $this->root . '/home/alice/.panelalpha ' => $staleExtract . "\n",
+        ];
+
+        $this->files($system)->importProjectArchive('/fw.tar.gz');
+
+        $sweeps = $this->commandsStartingWith($system, ['sudo', 'find']);
+        $this->assertCount(3, $sweeps);
+        $this->assertSame(
+            ['sudo', 'find', $this->root . '/stage', '-mindepth', '1', '-maxdepth', '1', '-type', 'd', '-name', '*', '-mmin', '+1440', '-print'],
+            $sweeps[0]
+        );
+        $this->assertSame(
+            ['sudo', 'find', $this->root . '/home/alice/.panelalpha', '-mindepth', '1', '-maxdepth', '1', '-type', 'd', '-name', 'archive-extract-*', '-mmin', '+1440', '-print'],
+            $sweeps[1]
+        );
+        $removals = array_values(array_filter(
+            $this->commandsStartingWith($system, ['sudo', 'rm', '-rf']),
+            static fn ($cmd): bool => count($cmd) === 4
+        ));
+        $this->assertSame(
+            [['sudo', 'rm', '-rf', $staleStage], ['sudo', 'rm', '-rf', $staleExtract]],
+            $removals
         );
     }
 
@@ -112,6 +149,15 @@ class ArchiveImportTest extends TestCase
     private function stagedZip(System $system): string
     {
         return $this->commandsStartingWith($system, ['sudo', 'cp', '--no-dereference'])[0][4];
+    }
+
+    /** The root listing of the current import's extract -- not one of the sweep finds. */
+    private function extractFind(System $system): array
+    {
+        return array_values(array_filter(
+            $this->commandsStartingWith($system, ['sudo', 'find']),
+            static fn ($cmd): bool => !in_array('-mmin', $cmd, true)
+        ))[0];
     }
 
     /** Reproducible builds stamp every file alike: a same-length edit must still land. */
@@ -191,13 +237,14 @@ class ArchiveImportTest extends TestCase
                     @mkdir(dirname($cmd[4]), 0777, true);
                     copy($cmd[3], $cmd[4]);
                 }
-                if (is_array($cmd) && array_slice($cmd, 0, 2) === ['sudo', 'find']) {
-                    return $this->listing;
-                }
                 foreach ($this->answers as $prefix => $output) {
                     if (is_array($cmd) && str_starts_with(implode(' ', $cmd), $prefix)) {
                         return $output;
                     }
+                }
+                if (is_array($cmd) && array_slice($cmd, 0, 2) === ['sudo', 'find']) {
+                    // A sweep find lists stale entries; by default there are none.
+                    return in_array('-mmin', $cmd, true) ? '' : $this->listing;
                 }
 
                 return '';

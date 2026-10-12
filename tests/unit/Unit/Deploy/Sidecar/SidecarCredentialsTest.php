@@ -154,6 +154,59 @@ class SidecarCredentialsTest extends TestCase
         $this->assertSame('chosen', $env['POSTGRES_PASSWORD']);
     }
 
+    /** `${VAR-default}` is a Compose operator too: its default is what runs, not the literal. */
+    public function test_pin_sidecar_credentials_keeps_a_dash_default_password(): void
+    {
+        $service = [
+            'image' => 'postgres:16',
+            'environment' => ['POSTGRES_PASSWORD' => '${POSTGRES_PASSWORD-chosen}'],
+        ];
+
+        $env = SidecarCredentials::pinSidecarCredentials('db', $service, [], SidecarPasswords::derived('s'))['environment'];
+
+        $this->assertSame('chosen', $env['POSTGRES_PASSWORD']);
+    }
+
+    /** `${VAR-default}` in a password must reach DATABASE_URL resolved, not URL-encoded. */
+    public function test_env_for_sidecar_resolves_a_dash_default_password_into_the_url(): void
+    {
+        $service = [
+            'image' => 'postgres:16',
+            'environment' => [
+                'POSTGRES_USER' => 'app',
+                'POSTGRES_PASSWORD' => '${DB_PASSWORD-secret}',
+                'POSTGRES_DB' => 'app',
+            ],
+        ];
+
+        $env = SidecarCredentials::envForSidecar('database', $service, [5432]);
+
+        $this->assertSame('postgres://app:secret@database:5432/app', $env['POSTGRES_URL']);
+        $this->assertSame('postgres://app:secret@database:5432/app', $env['DATABASE_URL']);
+        $this->assertStringNotContainsString('%24', $env['DATABASE_URL'], 'the reference was not URL-encoded in');
+    }
+
+    /** A bare `$VAR` resolves the same way: its (unset) value, not the literal. */
+    public function test_env_for_sidecar_leaves_the_url_out_for_a_bare_password_reference(): void
+    {
+        $service = [
+            'image' => 'postgres:16',
+            'environment' => [
+                'POSTGRES_USER' => 'app',
+                'POSTGRES_PASSWORD' => '${DB_PASSWORD:?DB_PASSWORD must be set}',
+                'POSTGRES_DB' => 'app',
+            ],
+        ];
+
+        $env = SidecarCredentials::envForSidecar('database', $service, [5432]);
+
+        $this->assertArrayNotHasKey('POSTGRES_URL', $env);
+        $this->assertArrayNotHasKey('DATABASE_URL', $env, 'a URL carrying an unresolved password is left out, not URL-encoded');
+        // The password itself is still handed on as Compose wrote it; the app
+        // can settle the reference, the engine cannot.
+        $this->assertSame('${DB_PASSWORD:?DB_PASSWORD must be set}', $env['POSTGRES_PASSWORD']);
+    }
+
     public function test_pin_sidecar_credentials_is_a_no_op_for_an_engine_without_a_driver(): void
     {
         $service = ['image' => 'redis:7-alpine', 'environment' => ['FOO' => 'bar']];

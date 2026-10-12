@@ -367,6 +367,16 @@ class JsPackageManagerTest extends TestCase
         $this->assertStringStartsWith('timeout ', JsPackageManager::dockerfileStripGitHookScriptsCommand('bun'));
     }
 
+    public function test_dockerfile_strip_git_hook_scripts_command_writes_only_when_a_script_went(): void
+    {
+        $command = JsPackageManager::dockerfileStripGitHookScriptsCommand('npm');
+
+        $this->assertStringContainsString('let removed=false;', $command);
+        $this->assertStringContainsString('removed=true;}', $command);
+        $this->assertStringContainsString('if(removed)fs.writeFileSync("package.json",JSON.stringify(p));', $command);
+        $this->assertStringNotContainsString('}fs.writeFileSync("package.json"', $command);
+    }
+
     public function test_is_js_workspace_detects_array_string_and_pnpm_workspace_file(): void
     {
         $this->assertTrue(JsPackageManager::isJsWorkspace(['workspaces' => ['packages/*']]));

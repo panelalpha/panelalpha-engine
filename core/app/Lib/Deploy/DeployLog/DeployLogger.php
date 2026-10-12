@@ -666,8 +666,9 @@ class DeployLogger
     private function settleStatus(array $latest, string $status, ?string $error): array
     {
         $wasCancelled = ($latest['status'] ?? null) === self::STATUS_CANCELLED;
+        $cancellationOutcome = in_array($status, [self::STATUS_FAILED, self::STATUS_PARTIAL], true);
 
-        return $wasCancelled && $status === self::STATUS_FAILED
+        return $wasCancelled && $cancellationOutcome
             ? [self::STATUS_CANCELLED, null]
             : [$status, $error];
     }

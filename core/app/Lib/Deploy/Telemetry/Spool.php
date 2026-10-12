@@ -6,31 +6,14 @@ use App\System;
 use App\System\ProcessRunner;
 
 /**
- * The outbox: reports waiting to be sent.
+ * The outbox: reports written during a deploy and sent later by `telemetry:ship`,
+ * so a deploy request (`QUEUE_CONNECTION` is `sync`) never waits on the network.
+ * A failed deploy's report is sent at once ({@see TelemetryShipper::sendNow()})
+ * and lands here only when that send does not get through.
  *
- * Telemetry is written during a deploy and sent later, by the scheduler. That
- * split is not an optimisation, it is the design. `QUEUE_CONNECTION` defaults
- * to `sync` on this engine, so a dispatched job would run *inside* the deploy
- * request — a request that already carries a 3600s build and a customer waiting
- * on an HTTP response. Nothing about reporting a failure is worth adding a
- * network round trip, a DNS timeout or a TLS handshake to that path.
- *
- * So capture writes one small file and returns. `telemetry:ship` drains the
- * directory on a schedule. The queue survives a reboot, an offline box, and an
- * ingest endpoint that is down for a week.
- *
- * One exception: a failed deploy's report is sent at once with a short
- * timeout ({@see TelemetryShipper::sendNow()}), because monitoring may answer
- * with the fix. It lands here only when that send does not get through.
- *
- * Every method swallows its own errors and reports failure by return value. A
- * full disk is exactly when deploys fail, and exactly when telemetry must not
- * make it worse.
- *
- * Ownership: the engine runs as www-data (php-fpm, cron) or root (`pae` /
- * `docker compose exec`). Cron ships as www-data, so every mkdir and write
- * chowns to www-data — the same pattern {@see \App\Lib\Deploy\DeployLog\LogStorage}
- * uses for deploy logs.
+ * Every method swallows its own errors and reports failure by return value: a
+ * full disk is exactly when deploys fail. Cron ships as www-data, so every mkdir
+ * and write chowns to www-data, as {@see \App\Lib\Deploy\DeployLog\LogStorage} does.
  */
 class Spool
 {
@@ -44,13 +27,14 @@ class Spool
 
     private const OWNER = 'www-data:www-data';
 
+    private const VALID_ID = '/^[A-Za-z0-9_-]{1,64}$/';
+
     private string $dir;
 
     private ?ProcessRunner $processes;
 
     /**
-     * @param ?ProcessRunner $processes only the chown below needs it; built on
-     *                                  demand so no caller has to supply one.
+     * @param ?ProcessRunner $processes for chown only; built on demand when null
      */
     public function __construct(string $dir, ?ProcessRunner $processes = null)
     {
@@ -64,16 +48,12 @@ class Spool
     }
 
     /**
-     * Where a report's source bundle lives, if it has one.
-     *
-     * A sibling of the report rather than a field inside it: the zip is written
-     * during the deploy, when the source still exists on disk, and the report
-     * JSON is written straight after. Keeping them as two files means a bundle
-     * that fails to build costs the report nothing.
+     * Where a report's source bundle lives: a sibling file, so a bundle that
+     * fails to build costs the report nothing.
      */
     public function bundlePathFor(string $id): ?string
     {
-        if (!preg_match('/^[A-Za-z0-9_-]{1,64}$/', $id)) {
+        if (!preg_match(self::VALID_ID, $id)) {
             return null;
         }
 
@@ -89,11 +69,7 @@ class Spool
         return $this->ensureDir();
     }
 
-    /**
-     * Hand a path under the spool to www-data so cron can ship it.
-     *
-     * Used for source-bundle zips written outside {@see writeAtomic()}.
-     */
+    /** Hand a source bundle written outside {@see writeAtomic()} to www-data so cron can ship it. */
     public function claimOwnership(string $path): void
     {
         $this->fixOwnership($path);
@@ -108,7 +84,7 @@ class Spool
     public function put(array $report): ?string
     {
         $id = $report['id'] ?? null;
-        if (!is_string($id) || !preg_match('/^[A-Za-z0-9_-]{1,64}$/', $id)) {
+        if (!is_string($id) || !preg_match(self::VALID_ID, $id)) {
             return null;
         }
 
@@ -116,15 +92,13 @@ class Spool
             return null;
         }
 
-        $envelope = [
-            'report' => $report,
-            'attempts' => 0,
-            'first_queued_at' => time(),
-            'last_attempt_at' => null,
-        ];
+        $encoded = self::encodedEnvelope($report);
+        if ($encoded === null) {
+            return null;
+        }
 
         $path = $this->dir . '/' . $id . '.json';
-        if (!$this->writeAtomic($path, (string) json_encode($envelope))) {
+        if (!$this->writeAtomic($path, $encoded)) {
             return null;
         }
 
@@ -134,11 +108,30 @@ class Spool
     }
 
     /**
-     * How long to wait before retrying a report that failed to send.
+     * A new report's envelope as JSON. Raw stderr or a branch name need not be
+     * UTF-8, so invalid bytes are substituted rather than failing the encode.
      *
-     * Doubling from a minute, capped at six hours. An ingest endpoint that is
-     * down for a weekend should cost an install a handful of requests, not one
-     * every five minutes for sixty hours.
+     * @param array<string, mixed> $report
+     */
+    private static function encodedEnvelope(array $report): ?string
+    {
+        $envelope = [
+            'report' => $report,
+            'attempts' => 0,
+            'first_queued_at' => time(),
+            'last_attempt_at' => null,
+        ];
+
+        try {
+            return json_encode($envelope, JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return null;
+        }
+    }
+
+    /**
+     * How long to wait before retrying a report that failed to send: doubling
+     * from a minute, capped at six hours.
      */
     public static function backoffSeconds(int $attempts): int
     {
@@ -150,7 +143,8 @@ class Spool
     }
 
     /**
-     * Queued reports, oldest first, whose backoff has elapsed.
+     * Queued reports, oldest first, whose backoff has elapsed. An unreadable or
+     * hollow file is dropped with its bundle: the ingest would refuse its whole batch.
      *
      * @return list<array{path: string, id: string, attempts: int, report: array<string, mixed>, bundle: ?string}>
      */
@@ -166,41 +160,49 @@ class Spool
             }
             $envelope = $this->read($path);
             if ($envelope === null || !self::isSendable($envelope)) {
-                // Unreadable, corrupt, or readable JSON with no report inside
-                // it. The last one is the dangerous shape: it would ship as a
-                // payload with no id, no outcome and no fingerprint, the
-                // ingest would refuse the *batch* as malformed, and a 4xx is
-                // permanent -- so one hollow file takes every good report
-                // batched with it. Drop it here instead.
-                @unlink($path);
+                $this->forget($path);
                 continue;
             }
-            $attempts = (int) ($envelope['attempts'] ?? 0);
-            $deferrals = (int) ($envelope['deferrals'] ?? 0);
-            $lastAttempt = $envelope['last_attempt_at'] ?? null;
-            if (is_int($lastAttempt) && $now < $lastAttempt + self::backoffSeconds($attempts + $deferrals)) {
+            if (self::isBackingOff($envelope, $now)) {
                 continue;
             }
-            $id = (string) ($envelope['report']['id'] ?? basename($path, '.json'));
-            $bundle = $this->bundlePathFor($id);
-            $items[] = [
-                'path' => $path,
-                'id' => $id,
-                'attempts' => $attempts,
-                'report' => is_array($envelope['report'] ?? null) ? $envelope['report'] : [],
-                'bundle' => $bundle !== null && is_file($bundle) ? $bundle : null,
-            ];
+            $items[] = $this->pendingItem($path, $envelope);
         }
 
         return $items;
     }
 
+    /** @param array<string, mixed> $envelope */
+    private static function isBackingOff(array $envelope, int $now): bool
+    {
+        $attempts = (int) ($envelope['attempts'] ?? 0);
+        $deferrals = (int) ($envelope['deferrals'] ?? 0);
+        $lastAttempt = $envelope['last_attempt_at'] ?? null;
+
+        return is_int($lastAttempt) && $now < $lastAttempt + self::backoffSeconds($attempts + $deferrals);
+    }
+
     /**
-     * Is there a report in here the ingest could actually interpret?
-     *
-     * `id` and `outcome` are the two fields every consumer keys on -- one is
-     * the idempotency key, the other is the event itself. A file missing
-     * either is not a report that lost some detail; it is not a report.
+     * @param array<string, mixed> $envelope
+     * @return array{path: string, id: string, attempts: int, report: array<string, mixed>, bundle: ?string}
+     */
+    private function pendingItem(string $path, array $envelope): array
+    {
+        $id = (string) ($envelope['report']['id'] ?? basename($path, '.json'));
+        $bundle = $this->bundlePathFor($id);
+
+        return [
+            'path' => $path,
+            'id' => $id,
+            'attempts' => (int) ($envelope['attempts'] ?? 0),
+            'report' => is_array($envelope['report'] ?? null) ? $envelope['report'] : [],
+            'bundle' => $bundle !== null && is_file($bundle) ? $bundle : null,
+        ];
+    }
+
+    /**
+     * Whether the envelope holds a report the ingest can interpret: `id` (the
+     * idempotency key) and `outcome` (the event) are both non-empty strings.
      *
      * @param array<string, mixed> $envelope
      */
@@ -214,12 +216,8 @@ class Spool
     }
 
     /**
-     * Drop a report and any source bundle that belongs to it.
-     *
-     * The bundle goes with the report unconditionally. It is the customer's
-     * source code sitting on their own disk waiting to be uploaded: once the
-     * report it belongs to is settled, there is nothing that will ever send it,
-     * and leaving it behind is just an unattended copy of their repository.
+     * Drop a report and, unconditionally, its source bundle: once the report is
+     * settled nothing will send that copy of the customer's source.
      */
     public function forget(string $path): void
     {
@@ -236,13 +234,8 @@ class Spool
     }
 
     /**
-     * Record a failed send. Returns false when the report has been given up on
-     * and removed.
-     *
-     * Both give-up paths go through forget() rather than unlink(), so a source
-     * bundle dies with the report it belongs to. Deleting only the report would
-     * leave the customer's zipped source on their disk with nothing left that
-     * would ever send or clean it up.
+     * Record a failed send. False when the report has been given up on and
+     * removed together with its source bundle.
      */
     public function recordFailure(string $path): bool
     {
@@ -268,16 +261,9 @@ class Spool
     }
 
     /**
-     * Record a send that never reached an ingest.
-     *
-     * Backs the report off exactly like a failure, but does not spend one of
-     * its {@see self::MAX_ATTEMPTS}: those exist to stop retrying a payload a
-     * server has looked at and refused, and a socket that never opened is not
-     * that. An ingest that does not resolve -- one being stood up, one an operator
-     * has firewalled off -- must cost reports nothing but delay, or telemetry
-     * destroys its own evidence precisely when nobody is receiving it.
-     *
-     * MAX_FILES still bounds the spool, so holding is not unbounded.
+     * Record a send that never reached an ingest: backed off like a failure but
+     * not counted against {@see self::MAX_ATTEMPTS}, which are for payloads a
+     * server refused. {@see self::MAX_FILES} still bounds the spool.
      */
     public function recordDeferral(string $path): void
     {
@@ -299,6 +285,24 @@ class Spool
     public function stats(): array
     {
         $files = $this->files();
+        [$bytes, $oldest] = self::sizeAndOldest($files);
+        [$bundles, $bundleBytes] = $this->bundleUsage();
+
+        return [
+            'count' => count($files),
+            'bytes' => $bytes,
+            'oldest' => $oldest,
+            'bundles' => count($bundles),
+            'bundle_bytes' => $bundleBytes,
+        ];
+    }
+
+    /**
+     * @param list<string> $files
+     * @return array{0: int, 1: ?int} total bytes, oldest mtime
+     */
+    private static function sizeAndOldest(array $files): array
+    {
         $bytes = 0;
         $oldest = null;
         foreach ($files as $path) {
@@ -309,22 +313,24 @@ class Spool
             }
         }
 
-        // Bundles are counted separately: they are megabytes where reports are
-        // kilobytes, and an operator asking what telemetry costs them in disk
-        // is really asking about these.
+        return [$bytes, $oldest];
+    }
+
+    /**
+     * Source bundles, counted apart from reports: they are megabytes where
+     * reports are kilobytes, so they are what telemetry costs in disk.
+     *
+     * @return array{0: list<string>, 1: int} bundle paths, total bytes
+     */
+    private function bundleUsage(): array
+    {
         $bundles = @glob($this->dir . '/*.zip') ?: [];
         $bundleBytes = 0;
         foreach ($bundles as $bundle) {
             $bundleBytes += (int) @filesize($bundle);
         }
 
-        return [
-            'count' => count($files),
-            'bytes' => $bytes,
-            'oldest' => $oldest,
-            'bundles' => count($bundles),
-            'bundle_bytes' => $bundleBytes,
-        ];
+        return [$bundles, $bundleBytes];
     }
 
     /**
@@ -361,12 +367,8 @@ class Spool
     }
 
     /**
-     * Cap the outbox. An install that has been offline for a month must not
-     * fill its own disk with reports about deploys nobody will read.
-     *
-     * Also sweeps orphaned bundles — a zip whose report was pruned, or whose
-     * report never got written because the disk filled between the two. Nothing
-     * will ever send those, and they are copies of customer source code.
+     * Cap the outbox at {@see MAX_FILES}, oldest first, and sweep bundles whose
+     * report is gone or was never written: nothing will ever send those.
      */
     private function prune(): void
     {
@@ -397,22 +399,27 @@ class Spool
             return false;
         }
 
-        // `pae` mkdir -p as root leaves storage/app and telemetry as root:700;
-        // cron (www-data) cannot traverse those parents. Claim the outbox and
-        // its parents up through …/storage/app (outbox → telemetry → app), but
-        // only in that layout: a custom TELEMETRY_SPOOL_DIR's parent is not ours.
+        $this->claimOutboxAndParents();
+
+        return true;
+    }
+
+    /**
+     * Root's `mkdir -p` leaves telemetry and storage/app root:700, which cron cannot
+     * traverse: claim them too, but only in that layout, never a custom spool dir's parent.
+     */
+    private function claimOutboxAndParents(): void
+    {
         $this->fixOwnership($this->dir);
         $telemetry = dirname($this->dir);
         if (basename($telemetry) !== 'telemetry') {
-            return true;
+            return;
         }
         $this->fixOwnership($telemetry);
         $app = dirname($telemetry);
         if (basename($app) === 'app') {
             $this->fixOwnership($app);
         }
-
-        return true;
     }
 
     private function writeAtomic(string $path, string $contents): bool
@@ -438,19 +445,19 @@ class Spool
         return $this->processes ??= new System();
     }
 
+    /**
+     * Best-effort chown to www-data: when it fails (no sudo rule, no Laravel app)
+     * cron just cannot see the file, the same as not trying.
+     */
     private function fixOwnership(string $path): void
     {
         if ($path === '' || $path === '/') {
             return;
         }
 
-        // Best-effort: unit tests have no Laravel app / sudo rule. A failed
-        // chown must not fail put() — cron simply will not see a root-owned
-        // file, which is the same outcome as not trying.
         try {
             $this->processes()->runProcess(['sudo', 'chown', '-R', self::OWNER, $path]);
         } catch (\Throwable) {
-            // ignore
         }
     }
 }

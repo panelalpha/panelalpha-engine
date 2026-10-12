@@ -97,6 +97,7 @@ final class DeploymentWorkflow
         if ($mechanics->hasGitProject() || $user->getTemplate() === 'dind') {
             try {
                 $result = $mechanics->startApplication();
+                $deployLogger?->throwIfCancelled();
                 if ($result['exit_code'] !== 0) {
                     try {
                         // A first deploy: the volumes hold only what this failed start wrote.
@@ -179,6 +180,7 @@ final class DeploymentWorkflow
 
         $succeeded = false;
         try {
+            $mechanics->recordRunningVersion();
             $reuseRunning = $user->getTemplate() === 'dind' && $mechanics->isApplicationEnvironmentRunning();
             if (!$reuseRunning) {
                 $deployLogger->stage(DeployLogger::STAGE_PREPARING);
@@ -190,6 +192,7 @@ final class DeploymentWorkflow
 
             $domain = $mechanics->requireMainDomain();
             $result = $mechanics->startApplication();
+            $deployLogger->throwIfCancelled();
             if ($result['exit_code'] !== 0) {
                 if (!empty($result[AppLauncher::RELEASE_FAILED])) {
                     // Nothing new was started: tearing down now would only stop the version still serving.
@@ -278,6 +281,7 @@ final class DeploymentWorkflow
 
         $succeeded = false;
         try {
+            $mechanics->recordRunningVersion();
             $reuseRunning = $mechanics->isApplicationEnvironmentRunning();
             if (!$reuseRunning) {
                 $deployLogger->stage(DeployLogger::STAGE_PREPARING);
@@ -326,6 +330,7 @@ final class DeploymentWorkflow
 
         $succeeded = false;
         try {
+            $mechanics->recordRunningVersion();
             $deployLogger?->stage(DeployLogger::STAGE_CLONING);
             $mechanics->ingestArchive($zipPath);
 
@@ -354,6 +359,7 @@ final class DeploymentWorkflow
     {
         $deployLogger?->stage(DeployLogger::STAGE_RUNNING);
         $result = $mechanics->startApplication();
+        $deployLogger?->throwIfCancelled();
         if ($result['exit_code'] !== 0) {
             if (!empty($result[AppLauncher::RELEASE_FAILED])) {
                 $deployLogger?->info(self::releaseFailedLine($result));

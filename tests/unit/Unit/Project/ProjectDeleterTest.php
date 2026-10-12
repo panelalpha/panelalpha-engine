@@ -3,6 +3,7 @@
 namespace Tests\Unit\Project;
 
 use App\Exceptions\DeployAlreadyRunningException;
+use App\Exceptions\DeployBusyException;
 use App\Exceptions\ProjectBusyException;
 use App\Jobs\CreateBackup;
 use App\Jobs\CreateStaging;
@@ -275,8 +276,7 @@ class ProjectDeleterTest extends TestCase
         $e = $this->refusal(fn () => $this->deleter()->delete($source));
 
         $this->assertSame(
-            "Project '{$this->name}' is busy: staging copy task {$copy->id} is running. "
-            . "Cancel it (POST /tasks/{$copy->id}/cancel) or wait for it to finish.",
+            "Project '{$this->name}' is busy: staging copy task {$copy->id} is running. Wait for it to finish.",
             $e->getMessage(),
         );
         $this->assertSame([], $this->destroyed);
@@ -373,6 +373,22 @@ class ProjectDeleterTest extends TestCase
         $this->assertSame([], $this->destroyed);
     }
 
+    /** A CLI backup has no task either; the refusal has to name it from the lock. */
+    public function test_a_cli_backup_holding_the_lock_names_the_backup(): void
+    {
+        $user = $this->makeUser($this->name);
+        $backup = DeployLock::acquireFor($this->name, DeployLock::HOLDER_BACKUP);
+
+        try {
+            $e = $this->refusal(fn () => $this->deleter()->delete($user));
+        } finally {
+            $backup->release();
+        }
+
+        $this->assertSame("Project '{$this->name}' is busy: a backup is running. Wait for it to finish.", $e->getMessage());
+        $this->assertSame([], $this->destroyed);
+    }
+
     public function test_the_account_lock_is_held_while_the_account_is_torn_down(): void
     {
         $user = $this->makeUser($this->name);
@@ -406,6 +422,24 @@ class ProjectDeleterTest extends TestCase
         })->delete($user);
 
         $this->assertTrue($refused);
+    }
+
+    public function test_a_rebuild_asked_for_during_the_delete_is_told_the_project_is_being_deleted(): void
+    {
+        $user = $this->makeUser($this->name, ['template' => 'dind']);
+        $refusal = null;
+
+        $this->deleter(function () use ($user, &$refusal): void {
+            try {
+                app(ProjectRebuild::class)->assertIdle($user);
+            } catch (DeployBusyException $e) {
+                $refusal = $e;
+            }
+        })->delete($user);
+
+        $this->assertNotNull($refusal);
+        $this->assertSame("Project '{$this->name}' is being deleted.", $refusal->getMessage());
+        $this->assertNull($refusal->task);
     }
 
     public function test_a_refused_delete_leaves_no_lock_directory_behind(): void

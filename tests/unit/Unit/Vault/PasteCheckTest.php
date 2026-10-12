@@ -137,13 +137,9 @@ class PasteCheckTest extends VaultTestCase
 
     public function test_an_unreachable_host_saves_the_token_unchecked(): void
     {
-        $server = stream_socket_server('tcp://127.0.0.1:0');
-        $this->assertNotFalse($server);
-        $name = (string) stream_socket_get_name($server, false);
-        fclose($server);
-        $port = substr($name, strrpos($name, ':') + 1);
-
-        $ref = $this->entryCheckedAgainst(['repo_url' => "https://127.0.0.1:{$port}/o/r.git"]);
+        // A private address is now refused outright (engine#786); an
+        // unresolvable public host is the unreachable case that is unchecked.
+        $ref = $this->entryCheckedAgainst(['repo_url' => 'https://unreachable.invalid/o/r.git']);
 
         $response = $this->post('/vault/' . $ref, ['secret' => $this->token()]);
 

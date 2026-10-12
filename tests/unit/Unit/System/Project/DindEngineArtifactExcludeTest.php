@@ -171,9 +171,37 @@ class DindEngineArtifactExcludeTest extends TestCase
         $this->assertSame("*.swp\n", file_get_contents($this->homeRoot . '/.git/info/exclude'));
     }
 
-    private function exclude(): EngineArtifactExclude
+    public function test_a_deploy_writes_the_block_into_a_git_connected_checkout(): void
     {
-        $git = new TestableGitRepository($this->dind(), function (array $command): string {
+        $this->gitInit();
+        $this->put('docker-compose.panelalpha.yml', "services: {}\n");
+
+        $this->exclude([
+            'site_git' => ['project' => ['repo_url' => 'https://github.com/org/repo.git', 'branch' => 'main']],
+        ])->writeForDeploy();
+        $this->git('clean', '-fd');
+
+        $this->assertFileExists($this->checkout . '/docker-compose.panelalpha.yml');
+        $this->assertStringContainsString("\n/docker-compose.panelalpha.yml\n", $this->excludeFile('.git/info/exclude'));
+    }
+
+    public function test_a_deploy_leaves_a_checkout_it_does_not_manage_alone(): void
+    {
+        $this->gitInit();
+        file_put_contents($this->checkout . '/.git/info/exclude', "*.swp\n");
+        $this->put('.env', "A=1\n");
+
+        $this->exclude([])->writeForDeploy();
+
+        $this->assertSame("*.swp\n", $this->excludeFile('.git/info/exclude'));
+    }
+
+    /**
+     * @param array<string, mixed>|null $git the account's git details; git_repo when null
+     */
+    private function exclude(?array $git = null): EngineArtifactExclude
+    {
+        $git = new TestableGitRepository($this->dind($git), function (array $command): string {
             return $this->shell($command);
         });
 
@@ -229,7 +257,10 @@ class DindEngineArtifactExcludeTest extends TestCase
         return (string) file_get_contents($this->checkout . '/' . $relative);
     }
 
-    private function dind(): Dind
+    /**
+     * @param array<string, mixed>|null $git
+     */
+    private function dind(?array $git = null): Dind
     {
         $model = new ModelsUser();
         $model->username = 'alice';
@@ -237,7 +268,7 @@ class DindEngineArtifactExcludeTest extends TestCase
             'template' => 'dind',
             'UID' => 1000,
             'GID' => 1000,
-            'git_repo' => 'https://github.com/org/repo.git',
+            ...($git ?? ['git_repo' => 'https://github.com/org/repo.git']),
         ]);
 
         $runtime = (new ProjectAggregate($this->system(), $model))->runtime();

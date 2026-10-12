@@ -245,6 +245,49 @@ YAML;
     }
 
     /**
+     * engine#860. A short-syntax volume whose source is a defaulted variable
+     * (`${APP_SRC:-.}`) holds a colon inside its own braces. Splitting the
+     * entry with a plain explode() cut it into `${APP_SRC` and `-.}`, so the
+     * source never matched the project root and the bind was left over the
+     * built image. The split is brace-aware and the default is resolved.
+     */
+    public function test_a_defaulted_project_root_bind_is_split_at_the_field_colon(): void
+    {
+        $compose = <<<'YAML'
+services:
+  web:
+    build: .
+    volumes:
+      - ${APP_SRC:-.}:/var/www/html
+YAML;
+        $this->assertTrue(ComposeFileInspector::isLocalDevComposeYaml($compose));
+        $this->assertSame(
+            'service `web` mounts the project root',
+            ComposeFileInspector::localDevComposeReasonYaml($compose)
+        );
+
+        // `${PWD}` has no defaulted form, and a bare defaulted variable must
+        // not be mistaken for a root bind either.
+        $pwd = <<<'YAML'
+services:
+  web:
+    build: .
+    volumes:
+      - ${PWD}:/var/www/html
+YAML;
+        $this->assertTrue(ComposeFileInspector::isLocalDevComposeYaml($pwd));
+
+        $notRoot = <<<'YAML'
+services:
+  web:
+    build: .
+    volumes:
+      - ${SRC_DIR:-app}:/var/www/html
+YAML;
+        $this->assertNull(ComposeFileInspector::localDevComposeReasonYaml($notRoot));
+    }
+
+    /**
      * masoudei/docker-wordpress-nginx (`./nginx/log:/var/log/nginx`) and
      * PrivyDrop (`./logs:/app/logs`): a log directory holds no source, so the
      * stack was demoted to the placeholder for nothing.
@@ -543,7 +586,8 @@ DOCKER
 
     public function test_is_generated_bootstrap_compose_matches_engine_markers_and_welcome_nginx(): void
     {
-        $labelled = $this->writeFile('compose.labelled.yml', "# panelalpha.generated\nservices: {}\n");
+        // The label on a service, as every generator writes it.
+        $labelled = $this->writeFile('compose.labelled.yml', "services:\n  app:\n    image: nginx\n    labels:\n      panelalpha.generated: framework-recipe\n");
         $this->assertTrue(ComposeFileInspector::isGeneratedBootstrapCompose($labelled));
 
         // The unlabelled shape the engine wrote before the label existed.
@@ -593,6 +637,35 @@ YAML
         $path = $this->writeFile('client-nginx.yml', $contents);
 
         $this->assertFalse(ComposeFileInspector::isGeneratedBootstrapCompose($path));
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function composeFilesMentioningEngineMarkers(): array
+    {
+        return [
+            'label only in a comment' => ["# copied from an engine stack: panelalpha.generated\nservices:\n  web:\n    image: myorg/app\n"],
+            'label under a different key' => ["services:\n  web:\n    image: myorg/app\n    environment:\n      NOTE: panelalpha.generated\n"],
+            'engine dockerfile only in a comment' => ["# build: { dockerfile: panelalpha.Dockerfile }\nservices:\n  web:\n    image: myorg/app\n"],
+        ];
+    }
+
+    /** A file that only mentions the engine's markers is the customer's, not engine output. */
+    #[DataProvider('composeFilesMentioningEngineMarkers')]
+    public function test_a_compose_file_that_merely_mentions_an_engine_marker_is_not_generated(string $contents): void
+    {
+        $path = $this->writeFile('mentions.yml', $contents);
+
+        $this->assertFalse(ComposeFileInspector::isGeneratedBootstrapCompose($path));
+    }
+
+    /** The engine's Dockerfile is recognised as a service's build.dockerfile, as FrameworkService writes it. */
+    public function test_a_service_building_the_engine_dockerfile_is_generated(): void
+    {
+        $path = $this->writeFile('engine-dockerfile.yml', "services:\n  app:\n    build:\n      context: .\n      dockerfile: panelalpha.Dockerfile\n    ports: ['3000:3000']\n");
+
+        $this->assertTrue(ComposeFileInspector::isGeneratedBootstrapCompose($path));
     }
 
     public function test_is_generated_bootstrap_compose_treats_unreadable_file_as_engine_written(): void

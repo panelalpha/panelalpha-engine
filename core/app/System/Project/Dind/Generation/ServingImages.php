@@ -6,10 +6,8 @@ use App\System\Project\Dind as DindProject;
 use Illuminate\Support\Facades\Log;
 
 /**
- * The image each running container was started from, noted and held by a tag
- * of its own before a redeploy builds. A build retags `project-app` even when
- * the deploy then fails, and the old image is dropped with its name: after the
- * deploy, a name whose container still runs is pointed back at what it runs.
+ * The image each running container was started from, held by a tag of its own before a redeploy builds:
+ * a build retags `project-app` even when the deploy fails, so each name whose container still runs is pointed back.
  */
 final class ServingImages
 {
@@ -21,21 +19,48 @@ final class ServingImages
     /** Holds the image a running container uses while its own name moves to a new build. */
     private const KEEP_REPOSITORY = 'panelalpha-serving';
 
+    /** Ends a retag script: drops each holding tag in `$keep` once, then prints the count `$n`. */
+    private const DROP_HOLDING_TAGS = 'for k in $(printf "%s\\n" $keep | sort -u); do docker rmi "$k" >/dev/null 2>&1; done; echo $n';
+
     public function __construct(private readonly DindProject $project)
     {
     }
 
+    /** Holds and notes the image of every running container; only those a tag now holds are noted. */
     public function remember(): void
+    {
+        $raw = $this->inspectRunning();
+        if ($raw === null) {
+            return;
+        }
+        $images = self::parse($raw);
+        $held = $this->hold($images);
+        $images = array_values(array_filter($images, static fn (array $image): bool => in_array(self::keepTag($image['image']), $held, true)));
+        $state = new GenerationState($this->project->username());
+        $images === [] ? $state->forget(GenerationState::IMAGES) : $state->put(GenerationState::IMAGES, ['containers' => $images]);
+    }
+
+    /** {@see INSPECT_FORMAT} for every running container, or null when they could not be read. */
+    private function inspectRunning(): ?string
     {
         $ps = implode(' ', array_map('escapeshellarg', $this->project->userAppComposeCommand(['ps', '--quiet'])));
         $script = 'ids=$(' . $ps . ') || exit 1; [ -n "$ids" ] || exit 0; docker inspect --format '
             . escapeshellarg(self::INSPECT_FORMAT) . ' $ids';
         try {
-            $raw = $this->project->shell()->execAsUserQuiet(['bash', '-c', $script], [], self::TIMEOUT_SECONDS);
-        } catch (\Throwable) {
-            return;
+            return $this->project->shell()->execAsUserQuiet(['bash', '-c', $script], [], self::TIMEOUT_SECONDS);
+        } catch (\Throwable $e) {
+            $this->couldNotHold('its running containers could not be read: ' . $e->getMessage());
+
+            return null;
         }
-        $images = self::parse($raw);
+    }
+
+    /**
+     * @param list<array{id: string, image: string, ref: string}> $images
+     * @return list<string> the holding tags that were set
+     */
+    private function hold(array $images): array
+    {
         $args = [];
         foreach ($images as $image) {
             array_push($args, $image['image'], self::keepTag($image['image']));
@@ -47,11 +72,23 @@ final class ServingImages
                 $out = $this->project->shell()->execQuiet(['bash', '-c', $script, 'hold', ...$args], [], self::TIMEOUT_SECONDS);
                 $held = preg_split('/\R/', trim($out)) ?: [];
             }
+        } catch (\Throwable $e) {
+            $this->couldNotHold('their images could not be tagged: ' . $e->getMessage());
+        }
+
+        return $held;
+    }
+
+    /** Said in the deploy log too: a later rollback would only report the images gone. */
+    private function couldNotHold(string $why): void
+    {
+        $message = "Could not keep the images {$this->project->username()} is serving, so the previous "
+            . 'version will not be startable after a redeploy: ' . $why;
+        Log::warning($message);
+        try {
+            $this->project->shell()->logger()?->warn($message);
         } catch (\Throwable) {
         }
-        $images = array_values(array_filter($images, static fn (array $image): bool => in_array(self::keepTag($image['image']), $held, true)));
-        $state = new GenerationState($this->project->username());
-        $images === [] ? $state->forget(GenerationState::IMAGES) : $state->put(GenerationState::IMAGES, ['containers' => $images]);
     }
 
     /** `panelalpha-serving:<12 hex of the image id>`. */
@@ -61,8 +98,8 @@ final class ServingImages
     }
 
     /**
-     * Points each name back at the image its still-running container runs,
-     * then lets go of the holding tags. Null when nothing was noted, or the
+     * Points each name back at the image its still-running container runs, then lets go of the holding
+     * tags, all names first as two containers may share an image. Null when nothing was noted, or the
      * account could not be asked.
      */
     public function settle(): ?int
@@ -73,16 +110,13 @@ final class ServingImages
             return null;
         }
         $args = [];
-        foreach ((array) ($noted['containers'] ?? []) as $container) {
-            if (is_array($container) && isset($container['id'], $container['image'], $container['ref'])) {
-                array_push($args, (string) $container['id'], (string) $container['image'], (string) $container['ref'], self::keepTag((string) $container['image']));
-            }
+        foreach (self::containersIn($noted) as $container) {
+            array_push($args, $container['id'], $container['image'], $container['ref'], self::keepTag($container['image']));
         }
-        // Every name first, then the holding tags: two containers may share an image.
         $script = 'n=0; keep=; while [ $# -ge 4 ]; do '
             . '[ "$(docker inspect --format "{{.State.Running}} {{.Image}}" "$1" 2>/dev/null)" = "true $2" ] '
             . '&& docker tag "$4" "$3" && n=$((n+1)); keep="$keep $4"; shift 4; done; '
-            . 'for k in $(printf "%s\\n" $keep | sort -u); do docker rmi "$k" >/dev/null 2>&1; done; echo $n';
+            . self::DROP_HOLDING_TAGS;
         try {
             $out = $args === [] ? '0' : $this->project->shell()->execQuiet(['bash', '-c', $script, 'retag', ...$args], [], self::TIMEOUT_SECONDS);
         } catch (\Throwable $e) {
@@ -128,7 +162,7 @@ final class ServingImages
             return null;
         }
         $script = 'n=0; keep=; while [ $# -ge 2 ]; do docker tag "$2" "$1" && n=$((n+1)); keep="$keep $2"; shift 2; done; '
-            . 'for k in $(printf "%s\\n" $keep | sort -u); do docker rmi "$k" >/dev/null 2>&1; done; echo $n';
+            . self::DROP_HOLDING_TAGS;
         try {
             $out = $this->project->shell()->execQuiet(['bash', '-c', $script, 'restore', ...$args], [], self::TIMEOUT_SECONDS);
         } catch (\Throwable $e) {
@@ -148,7 +182,15 @@ final class ServingImages
      */
     public function noted(): array
     {
-        $noted = (new GenerationState($this->project->username()))->get(GenerationState::IMAGES);
+        return self::containersIn((new GenerationState($this->project->username()))->get(GenerationState::IMAGES));
+    }
+
+    /**
+     * @param ?array<string, mixed> $noted the IMAGES entry
+     * @return list<array{id: string, image: string, ref: string}>
+     */
+    private static function containersIn(?array $noted): array
+    {
         $containers = [];
         foreach ((array) ($noted['containers'] ?? []) as $container) {
             if (is_array($container) && isset($container['id'], $container['image'], $container['ref'])) {

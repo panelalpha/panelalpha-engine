@@ -7,6 +7,7 @@ use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Compose\GeneratedCompose;
 use App\Lib\Deploy\DeployLog\DependencyFailure;
+use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Dind\DindBuildStorage;
 use App\Lib\Deploy\DeployLog\FailureOutput;
 use App\Lib\Deploy\DetectAppPort;
@@ -36,8 +37,7 @@ final class AppLauncher
 
     private const PS_TIMEOUT_SECONDS = 30;
 
-    // A gate that waits or retries before its verdict (Manticore's credential
-    // loop, SOGo's 249 s probe) is still running when `up -d` returns.
+    /** A gate that waits or retries before its verdict (Manticore's credential loop, SOGo's 249 s probe) is still running when `up -d` returns. */
     private const ONE_SHOT_WAIT_SECONDS = 180;
 
     private const ONE_SHOT_POLL_SECONDS = 2;
@@ -57,12 +57,13 @@ final class AppLauncher
     }
 
     /**
+     * A copy an earlier redeploy left still serves when a start fails: nothing is torn down under it.
+     *
      * @return array{stdout: string, stderr: string, exit_code: ?int}
      * @throws \Exception
      */
     public function start(): array
     {
-        // A copy an earlier redeploy left still serves when a start fails: nothing is torn down under it.
         return ZeroDowntimeRedeploy::withHeldCopy(
             $this->project->username(),
             $this->project->registryLogin()->during(fn (): array => $this->startWithLogins())
@@ -76,8 +77,6 @@ final class AppLauncher
     private function startWithLogins(): array
     {
         $model = $this->project->userModel();
-        // A deploy starts the app, so a stop asked for earlier no longer holds.
-        $model->markAppStoppedByRequest(false);
         $strategy = $model->getDeployStrategy();
         $runtime = $model->getDeployRuntime();
         $skipBuild = DeployCompose::skipBuild($strategy, $runtime);
@@ -87,130 +86,183 @@ final class AppLauncher
             (new BindSourceOwners($this->project))->apply();
         }
 
-        // A redeploy gets every image before anything is replaced: a tag that
-        // does not exist fails here, with the running version untouched.
-        if (ZeroDowntimeRedeploy::canonicalId($this->project, null) !== null) {
-            $pulled = $this->pullImages();
-            if ($pulled !== null) {
-                return $pulled;
-            }
+        $pulled = $this->pullImages();
+        if ($pulled !== null) {
+            return $pulled;
         }
 
-        $release = $this->runRelease($skipBuild);
+        $reloadAfterReclaim = fn () => $this->preloadImages($strategy, $runtime, $skipBuild, $model->getDeployImage(), afterReclaim: true);
+
+        $release = $this->runRelease($skipBuild, $reloadAfterReclaim);
         if ($release !== null) {
             return $release;
         }
 
-        // A checkout moved aside is still what the running containers read:
-        // recreate them onto the new one, as a stop before the wipe did.
-        $forceRecreate = DeployCompose::forceRecreate($strategy, $runtime)
+        $up = $this->bringUp($skipBuild, $this->mustForceRecreate($strategy, $runtime), $reloadAfterReclaim);
+
+        return is_array($up) ? $up : $this->outcome($up);
+    }
+
+    /** A checkout moved aside is still what the running containers read: they are recreated onto the new one, as a stop before the wipe did. */
+    private function mustForceRecreate(?string $strategy, ?string $runtime): bool
+    {
+        return DeployCompose::forceRecreate($strategy, $runtime)
             || CheckoutAside::bindsMovedAside($this->project->username());
-        $reload = fn () => $this->preloadImages($strategy, $runtime, $skipBuild, $model->getDeployImage(), afterReclaim: true);
+    }
 
+    /**
+     * `up` beside the running version when a swap is planned, in place otherwise.
+     *
+     * @param \Closure(): void $reload puts back the images the ENOSPC reclaim deletes
+     * @return Process|array{stdout: string, stderr: string, exit_code: ?int} an array ends the start as it is
+     */
+    private function bringUp(bool $skipBuild, bool $forceRecreate, \Closure $reload): Process|array
+    {
+        $swap = $this->beginPlannedSwap($skipBuild, $reload);
+        if (is_array($swap)) {
+            return $swap;
+        }
+        if ($swap === null) {
+            return $this->upInPlace($skipBuild, $forceRecreate, $reload);
+        }
+
+        return $this->replaceAndFinish($swap, $forceRecreate);
+    }
+
+    /**
+     * The planned swap once its build is done; null when there is none or the redeploy goes in place.
+     *
+     * @return ZeroDowntimeRedeploy|array{stdout: string, stderr: string, exit_code: int, previous_kept: true}|null
+     */
+    private function beginPlannedSwap(bool $skipBuild, \Closure $reload): ZeroDowntimeRedeploy|array|null
+    {
         $swap = ZeroDowntimeRedeploy::plan($this->project);
-        if ($swap !== null) {
-            try {
-                $begun = $this->beginSwap($swap, $skipBuild, $reload);
-            } catch (\Throwable $e) {
-                $swap->abandon();
-                throw $e;
-            }
-            if (is_array($begun)) {
-                return $begun;
-            }
-            if ($begun === ZeroDowntimeRedeploy::IN_PLACE) {
-                $swap = null;
-            }
+        if ($swap === null) {
+            return null;
+        }
+        try {
+            $begun = $this->beginSwap($swap, $skipBuild, $reload);
+        } catch (\Throwable $e) {
+            $swap->abandon();
+            throw $e;
+        }
+        if (is_array($begun)) {
+            return $begun;
         }
 
-        if ($swap !== null) {
-            try {
-                $process = $this->replaceBehind($swap, $forceRecreate);
-                $rolledBack = $swap->finish($process->getExitCode() === 0, self::failureOutput($process));
-            } catch (\Throwable $e) {
-                $swap->abandon();
-                throw $e;
-            }
-            // The replaced app never answered: the previous version, or the copy, serves instead.
-            if ($rolledBack !== null) {
-                return $rolledBack;
-            }
-        } else {
-            $command = $this->project->userAppComposeCommand(['up', '-d', '--remove-orphans']);
-            if ($forceRecreate) {
-                $command[] = '--force-recreate';
-            }
-            if ($skipBuild) {
-                $command[] = '--no-build';
-            } else {
-                $command[] = '--build';
-            }
-            $command = self::withDockerConfig($command, $this->project->registryLogin()->configDir());
+        return $begun === ZeroDowntimeRedeploy::IN_PLACE ? null : $swap;
+    }
 
-            $process = $this->run($command);
-            $process = $this->retryOnceIfDiskFull($process, $command, $reload);
-        }
-        if ($process->getExitCode() === 0) {
-            // The new version has taken over: the site follows it to its port.
-            (new RoutingSnapshot($this->project))->apply();
+    /**
+     * When the replaced app never answered, the previous version or the copy serves instead and that result is returned.
+     *
+     * @return Process|array{stdout: string, stderr: string, exit_code: ?int}
+     */
+    private function replaceAndFinish(ZeroDowntimeRedeploy $swap, bool $forceRecreate): Process|array
+    {
+        try {
+            $process = $this->replaceBehind($swap, $forceRecreate);
+            $rolledBack = $swap->finish($process->getExitCode() === 0, self::failureOutput($process));
+        } catch (\Throwable $e) {
+            $swap->abandon();
+            throw $e;
         }
 
+        return $rolledBack ?? $process;
+    }
+
+    private function upInPlace(bool $skipBuild, bool $forceRecreate, \Closure $reload): Process
+    {
+        $flags = $forceRecreate ? ['--force-recreate'] : [];
+        $flags[] = $skipBuild ? '--no-build' : '--build';
+        $command = $this->composeWithLogins(['up', '-d', '--remove-orphans', ...$flags]);
+
+        return $this->retryOnceIfDiskFull($this->run($command), $command, $reload);
+    }
+
+    /**
+     * On success the site follows the new version to its port, then gates and health are checked.
+     *
+     * @return array{stdout: string, stderr: string, exit_code: ?int}
+     */
+    private function outcome(Process $process): array
+    {
         if ($process->getExitCode() !== 0) {
+            return $this->failedUp($process);
+        }
+        (new RoutingSnapshot($this->project))->apply();
+
+        $failure = $this->gateFailure();
+        if ($failure !== null) {
             $this->recordContainerOutput();
-            $cause = $this->failedDependencyCause($process->getErrorOutput() . "\n" . $process->getOutput());
-            if ($cause !== '') {
-                return [
-                    'stdout' => $process->getOutput(),
-                    'stderr' => $cause . "\n" . $process->getErrorOutput(),
-                    'exit_code' => $process->getExitCode(),
-                ];
-            }
+
+            return [
+                'stdout' => $process->getOutput(),
+                'stderr' => $failure,
+                'exit_code' => 1,
+            ];
+        }
+        $this->recordServingVerdict();
+
+        return self::result($process);
+    }
+
+    /** @return array{stdout: string, stderr: string, exit_code: ?int} */
+    private function failedUp(Process $process): array
+    {
+        $this->recordContainerOutput();
+        $cause = $this->failedDependencyCause($process->getErrorOutput() . "\n" . $process->getOutput());
+        if ($cause === '') {
+            return self::result($process);
         }
 
-        if ($process->getExitCode() === 0) {
-            $failure = $this->gateFailure();
-            if ($failure !== null) {
-                $this->recordContainerOutput();
+        return [
+            'stdout' => $process->getOutput(),
+            'stderr' => $cause . "\n" . $process->getErrorOutput(),
+            'exit_code' => $process->getExitCode(),
+        ];
+    }
 
-                return [
-                    'stdout' => $process->getOutput(),
-                    'stderr' => $failure,
-                    'exit_code' => 1,
-                ];
-            }
-            $this->project->alignAppPort();
-            // Advisory: the deploy has already succeeded, this only says
-            // whether the application behind it answers. See {@see AppHealth}.
+    /**
+     * Advisory, after the deploy has succeeded: whether the app answers ({@see AppHealth}), asked again
+     * after a reroute so the verdict is about the new route, then the certificate its URL depends on ({@see AppCertificate}).
+     */
+    private function recordServingVerdict(): void
+    {
+        $this->project->alignAppPort();
+        $report = $this->project->appHealth()->report();
+        if ($report !== null && $this->routeToTheAnsweringPort($report)) {
             $report = $this->project->appHealth()->report();
-            // Asked again on the new route, so the remembered verdict is about it.
-            if ($report !== null && $this->routeToTheAnsweringPort($report)) {
-                $report = $this->project->appHealth()->report();
-            }
-            // What a rebuild keeps while the app's ports stay as they are.
-            if ($report !== null) {
-                try {
-                    AnsweringPort::remember($this->project, $report);
-                } catch (\Throwable) {
-                }
-            }
-            // A version that answered is kept if the deploy dies before it finishes.
-            if (($report['healthy'] ?? null) === true) {
-                RoutingSnapshot::markGated($this->project->username());
-            }
-            // `up` returning 0 is not the only way to end up with nothing
-            // serving: a container that starts and then dies on its own
-            // configuration finishes `partial`, and so does one that answers
-            // 5xx. The health report has just named the failure; this pastes
-            // what the container printed.
-            if ($this->healthSawAFailingContainer()) {
-                $this->recordContainerOutput();
-            }
-            // Same contract, for the certificate the app's URL depends on:
-            // recorded so a caller reporting the deploy does not have to
-            // assume what "https://" got it. See {@see AppCertificate}.
-            $this->project->appCertificate()->remember();
         }
+        $this->rememberAnsweringVersion($report);
+        if ($this->healthSawAFailingContainer()) {
+            $this->recordContainerOutput();
+        }
+        $this->project->appCertificate()->remember();
+    }
 
+    /**
+     * Remembers the port a rebuild keeps while the app's ports stay as they are, and marks a version
+     * that answered as kept if the deploy dies before it finishes.
+     *
+     * @param array<string, mixed>|null $report
+     */
+    private function rememberAnsweringVersion(?array $report): void
+    {
+        if ($report !== null) {
+            try {
+                AnsweringPort::remember($this->project, $report);
+            } catch (\Throwable) {
+            }
+        }
+        if (($report['healthy'] ?? null) === true) {
+            RoutingSnapshot::markGated($this->project->username());
+        }
+    }
+
+    /** @return array{stdout: string, stderr: string, exit_code: ?int} */
+    private static function result(Process $process): array
+    {
         return [
             'stdout' => $process->getOutput(),
             'stderr' => self::failureOutput($process),
@@ -218,60 +270,72 @@ final class AppLauncher
         ];
     }
 
+    /** @return array{stdout: string, stderr: string, exit_code: int, previous_kept: true} */
+    private static function previousKept(Process $process): array
+    {
+        return ZeroDowntimeRedeploy::previousKept($process->getOutput(), self::failureOutput($process), (int) $process->getExitCode());
+    }
+
     /**
-     * A Procfile `release:` line, run once to completion before `up`: its
-     * failure is the deploy's, and the app is not started on top of it.
-     * Null when there is none or it succeeded; a failed build of its image is
-     * returned as a failed start, not flagged as the release's.
+     * A Procfile `release:` line, run once to completion before `up`: its failure is the deploy's,
+     * and the app is not started on top of it. Null when there is none or it succeeded.
+     * Whether anything runs is asked first, since the release's own run may start the services it depends on.
      *
+     * @param \Closure(): void $reload puts back the images the ENOSPC reclaim deletes
      * @return ?array{stdout: string, stderr: string, exit_code: ?int, release_failed?: true, ran_before_release?: ?bool, previous_kept?: true}
      */
-    private function runRelease(bool $skipBuild): ?array
+    private function runRelease(bool $skipBuild, \Closure $reload): ?array
     {
-        try {
-            $compose = ComposeYaml::parse((string) $this->project->system()->filesystem()->fileGetContents(
-                $this->project->userAppComposeFileToRun()
-            ));
-        } catch (\Throwable) {
-            return null;
-        }
-        $service = is_array($compose) ? GeneratedCompose::releaseService($compose) : null;
+        $compose = $this->runFile();
+        $service = GeneratedCompose::releaseService($compose);
         if ($service === null) {
             return null;
         }
 
-        // Asked first: the release's own run may start the services it depends on.
         $ranBefore = $this->anythingRunning();
-        // Built on its own, so a failed build is reported as one and not as the release.
         $toBuild = $skipBuild ? [] : self::servicesToBuild($compose, $service);
         if ($toBuild !== []) {
-            $build = $this->run(
-                self::withDockerConfig(
-                    $this->project->userAppComposeCommand(array_merge(['build'], $toBuild)),
-                    $this->project->registryLogin()->configDir()
-                ),
-                'Building the image the Procfile release runs in (docker compose build ' . implode(' ', $toBuild) . ')'
-            );
-            if ($build->getExitCode() !== 0) {
-                // Nothing was replaced yet: a running version keeps serving, as when beginSwap()'s build fails.
-                return $ranBefore === true
-                    ? ZeroDowntimeRedeploy::previousKept($build->getOutput(), self::failureOutput($build), (int) $build->getExitCode())
-                    : [
-                        'stdout' => $build->getOutput(),
-                        'stderr' => self::failureOutput($build),
-                        'exit_code' => $build->getExitCode(),
-                    ];
+            $failedBuild = $this->buildForRelease($toBuild, $ranBefore, $reload);
+            if ($failedBuild !== null) {
+                return $failedBuild;
             }
         }
-        $command = $this->project->userAppComposeCommand(['run', '--rm', '-T', $service]);
-        $command = self::withDockerConfig($command, $this->project->registryLogin()->configDir());
-        $shell = $this->project->shell();
-        $logger = $shell->logger();
-        $logger?->info("Running the Procfile release process (docker compose run {$service})");
-        $process = $logger === null
-            ? $shell->runProcess($command, [], self::COMPOSE_TIMEOUT_SECONDS)
-            : $shell->streamProcess($shell->wrap($command), [], self::COMPOSE_TIMEOUT_SECONDS, $logger);
-        $logger?->throwIfCancelled();
+
+        return $this->runReleaseProcess($service, $ranBefore);
+    }
+
+    /**
+     * Built on its own, so a failed build is returned as a failed start, not flagged as the release's.
+     * An ENOSPC is reclaimed and retried as the `up` and beginSwap() builds are; a running version keeps serving.
+     *
+     * @param list<string> $services
+     * @return ?array{stdout: string, stderr: string, exit_code: ?int, previous_kept?: true}
+     */
+    private function buildForRelease(array $services, ?bool $ranBefore, \Closure $reload): ?array
+    {
+        $buildCommand = $this->composeWithLogins(array_merge(['build'], $services));
+        $build = $this->retryOnceIfDiskFull(
+            $this->run(
+                $buildCommand,
+                'Building the image the Procfile release runs in (docker compose build ' . implode(' ', $services) . ')'
+            ),
+            $buildCommand,
+            $reload
+        );
+        if ($build->getExitCode() === 0) {
+            return null;
+        }
+
+        return $ranBefore === true ? self::previousKept($build) : self::result($build);
+    }
+
+    /** @return ?array{stdout: string, stderr: string, exit_code: ?int, release_failed: true, ran_before_release: ?bool} */
+    private function runReleaseProcess(string $service, ?bool $ranBefore): ?array
+    {
+        $process = $this->run(
+            $this->composeWithLogins(['run', '--rm', '-T', $service]),
+            "Running the Procfile release process (docker compose run {$service})"
+        );
         if ($process->getExitCode() === 0) {
             return null;
         }
@@ -308,15 +372,24 @@ final class AppLauncher
             if (isset($services[$name]['build'])) {
                 $build[] = $name;
             }
-            $deps = $services[$name]['depends_on'] ?? [];
-            if (is_array($deps)) {
-                foreach ($deps as $key => $value) {
-                    $queue[] = is_int($key) ? (string) $value : (string) $key;
-                }
-            }
+            array_push($queue, ...self::dependencyNames($services[$name]['depends_on'] ?? []));
         }
 
         return $build;
+    }
+
+    /** @return list<string> the services a `depends_on` names, in its list or map form */
+    private static function dependencyNames(mixed $dependsOn): array
+    {
+        if (!is_array($dependsOn)) {
+            return [];
+        }
+        $names = [];
+        foreach ($dependsOn as $key => $value) {
+            $names[] = is_int($key) ? (string) $value : (string) $key;
+        }
+
+        return $names;
     }
 
     private function anythingRunning(): ?bool
@@ -352,24 +425,32 @@ final class AppLauncher
     }
 
     /**
-     * The registry images the run file names and the account lacks, pulled
-     * while the running version serves. Null when there was nothing missing
-     * or it all arrived; otherwise the failed deploy, with that version kept.
+     * @param list<string> $args
+     * @return list<string>
+     */
+    private function composeWithLogins(array $args): array
+    {
+        return self::withDockerConfig($this->project->userAppComposeCommand($args), $this->project->registryLogin()->configDir());
+    }
+
+    /**
+     * On a redeploy, the registry images the run file names and the account lacks, pulled while the running
+     * version serves: a missing tag fails here, with that version untouched. Null when nothing was missing or it all arrived.
      *
      * @return ?array{stdout: string, stderr: string, exit_code: int, previous_kept: true}
      */
     private function pullImages(): ?array
     {
+        if (ZeroDowntimeRedeploy::canonicalId($this->project, null) === null) {
+            return null;
+        }
         $config = ZeroDowntimeRedeploy::composeConfig($this->project);
         $services = $config === null ? [] : ZeroDowntimeRedeploy::servicesToPull($config);
         if ($services === []) {
             return null;
         }
         $process = $this->run(
-            self::withDockerConfig(
-                $this->project->userAppComposeCommand(array_merge(['pull', '--policy', 'missing'], $services)),
-                $this->project->registryLogin()->configDir()
-            ),
+            $this->composeWithLogins(array_merge(['pull', '--policy', 'missing'], $services)),
             'Pulling the images the new version needs while the running one serves (docker compose pull)'
         );
         if ($process->getExitCode() === 0) {
@@ -394,10 +475,10 @@ final class AppLauncher
         if ($skipBuild) {
             $this->project->shell()->logger()?->info($announce);
         } else {
-            $command = self::withDockerConfig($this->project->userAppComposeCommand(['build']), $this->project->registryLogin()->configDir());
+            $command = $this->composeWithLogins(['build']);
             $process = $this->retryOnceIfDiskFull($this->run($command, $announce . ': docker compose build'), $command, $reload);
             if ($process->getExitCode() !== 0) {
-                return ZeroDowntimeRedeploy::previousKept($process->getOutput(), self::failureOutput($process), (int) $process->getExitCode());
+                return self::previousKept($process);
             }
         }
 
@@ -408,10 +489,7 @@ final class AppLauncher
     private function replaceBehind(ZeroDowntimeRedeploy $swap, bool $forceRecreate): Process
     {
         $process = $this->run(
-            self::withDockerConfig(
-                $this->project->userAppComposeCommand(['up', '-d', '--remove-orphans', '--no-build']),
-                $this->project->registryLogin()->configDir()
-            ),
+            $this->composeWithLogins(['up', '-d', '--remove-orphans', '--no-build']),
             'Replacing the running app behind the new version (docker compose up -d)'
         );
         if ($process->getExitCode() !== 0 || !$forceRecreate) {
@@ -420,18 +498,14 @@ final class AppLauncher
         $services = $swap->generationServices();
 
         return $this->run(
-            self::withDockerConfig(
-                $this->project->userAppComposeCommand(array_merge(['up', '-d', '--no-build', '--no-deps', '--force-recreate'], $services)),
-                $this->project->registryLogin()->configDir()
-            ),
+            $this->composeWithLogins(array_merge(['up', '-d', '--no-build', '--no-deps', '--force-recreate'], $services)),
             'Recreating ' . implode(', ', $services) . ' on the new files (docker compose up -d --force-recreate)'
         );
     }
 
     /**
-     * stderr, led by what a failed build step printed. Compose keeps BuildKit's
-     * progress on stdout, so stderr alone reads `exit code: 101` and every
-     * caller explaining it ends at `build-step-failed`.
+     * stderr, led by what a failed build step printed: compose keeps BuildKit's progress on stdout,
+     * so stderr alone reads `exit code: 101` and every caller explaining it ends at `build-step-failed`.
      */
     public static function failureOutput(Process $process): string
     {
@@ -445,61 +519,52 @@ final class AppLauncher
     }
 
     /**
-     * A service that ran, failed, and left `up -d` exiting 0.
-     *
-     * Without `--wait`, `up -d` returns once containers are created and
-     * started and does not care what exit code a one-shot service produces.
-     * So a gate service -- one whose whole job is to refuse the deploy if a
-     * post-condition does not hold -- can run, print its refusal, exit 1, and
-     * the deploy is still reported successful.
-     *
-     * Manticore with authentication switched off shows it: `ready` exits 1,
-     * `up -d` exits 0, the rebuild endpoint returns success, and the account
-     * is published with an unauthenticated writable search engine on it. The
-     * thing the gate exists to prevent is exactly what ships. Baikal,
-     * Mattermost and Dolibarr all rely on a gate to close a
-     * first-visitor-wins installer before the port opens.
-     *
-     * Reading exit codes after the fact rather than passing `--wait`: `--wait`
-     * also waits on health checks, so any service with a slow or wrong one
-     * would start delaying or failing deploys that pass today. That is a
-     * change worth measuring against real projects first, and it is not
-     * needed to close this -- the exit codes are already there to read.
-     *
-     * A one-shot still running when `up -d` returns is waited for, bounded:
-     * a gate that sleeps 8 s and exits 1 was read while running, and the
-     * deploy was reported successful 8 s before the refusal.
+     * A gate service that ran, failed, and left `up -d` exiting 0, which is not reported without `--wait`
+     * (not passed: it also waits on health checks). One-shots still running are waited for, bounded.
      */
     private function gateFailure(): ?string
     {
-        $shell = $this->project->shell();
-        $logger = $shell->logger();
+        $logger = $this->project->shell()->logger();
         $runFile = $this->runFile();
-        $oneShots = self::oneShotServices($runFile);
+        $output = $this->psOnceOneShotsFinish(self::oneShotServices($runFile), $logger);
+        if ($output === null) {
+            return null;
+        }
+
+        $failed = self::withoutHelpers(self::failedServices($output), $runFile, $logger);
+        if ($failed === []) {
+            return null;
+        }
+
+        return self::describeFailedGates($failed, $logger);
+    }
+
+    /**
+     * `compose ps --all` once the one-shots stop running or ONE_SHOT_WAIT_SECONDS pass; null when it could
+     * not be asked, which never counts as failed.
+     *
+     * @param list<string> $oneShots
+     */
+    private function psOnceOneShotsFinish(array $oneShots, ?DeployLogger $logger): ?string
+    {
         $deadline = time() + self::ONE_SHOT_WAIT_SECONDS;
         $announced = false;
         while (true) {
-            try {
-                $output = $shell->execAsUserQuiet(
-                    $this->project->userAppComposeCommand(['ps', '--all', '--format', 'json']),
-                    [],
-                    self::PS_TIMEOUT_SECONDS
-                );
-            } catch (\Throwable) {
-                // Never turn "could not ask" into "failed": that would be the same
-                // defect pointed the other way.
+            $output = $this->psAll();
+            if ($output === null) {
                 return null;
             }
             $running = self::stillRunning($output, $oneShots);
             if ($running === []) {
-                break;
+                return $output;
             }
             if (time() >= $deadline) {
                 $logger?->warn(
                     'One-shot services still running after ' . self::ONE_SHOT_WAIT_SECONDS
                     . 's, their exit code is not checked: ' . implode(', ', $running)
                 );
-                break;
+
+                return $output;
             }
             if (!$announced) {
                 $logger?->info('Waiting for one-shot services to finish: ' . implode(', ', $running));
@@ -508,25 +573,45 @@ final class AppLauncher
             $logger?->throwIfCancelled();
             sleep(self::ONE_SHOT_POLL_SECONDS);
         }
+    }
 
-        $failed = self::failedServices($output);
-        // A service with no restart policy is a helper its author let exit (a
-        // `wp shell` with no database to reach), not a gate: said, not failed.
+    private function psAll(): ?string
+    {
+        try {
+            return $this->project->shell()->execAsUserQuiet(
+                $this->project->userAppComposeCommand(['ps', '--all', '--format', 'json']),
+                [],
+                self::PS_TIMEOUT_SECONDS
+            );
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * A failed service with no restart policy is a helper its author let exit (a `wp shell` with no
+     * database to reach), not a gate: said, not failed.
+     *
+     * @param array<string, int> $failed
+     * @param array<string, mixed> $runFile
+     * @return array<string, int>
+     */
+    private static function withoutHelpers(array $failed, array $runFile, ?DeployLogger $logger): array
+    {
         $helpers = array_flip(self::withoutRestartPolicy($runFile));
         foreach (array_intersect_key($failed, $helpers) as $service => $code) {
             $logger?->warn("Service {$service} exited with code {$code}; nothing depends on it, it publishes no port and has no restart policy, so it stays stopped");
         }
-        $failed = array_diff_key($failed, $helpers);
-        if ($failed === []) {
-            return null;
-        }
 
-        foreach ($failed as $service => $code) {
-            $logger?->info("Service {$service} exited with code {$code}; the deploy is not successful");
-        }
+        return array_diff_key($failed, $helpers);
+    }
 
+    /** @param array<string, int> $failed */
+    private static function describeFailedGates(array $failed, ?DeployLogger $logger): string
+    {
         $described = [];
         foreach ($failed as $service => $code) {
+            $logger?->info("Service {$service} exited with code {$code}; the deploy is not successful");
             $described[] = "{$service} (exit {$code})";
         }
 
@@ -534,15 +619,8 @@ final class AppLauncher
     }
 
     /**
-     * Services that exited non-zero, name => exit code.
-     *
-     * Its own function, over `docker compose ps --format json`, so the rule
-     * can be tested against real compose output with no daemon. Compose
-     * writes either one JSON array or one object per line depending on the
-     * version, and both are read here.
-     *
-     * Only `exited`: a service that is running, restarting or created has not
-     * reported anything yet, and a one-shot that exited 0 did its job.
+     * Services that exited non-zero, name => exit code, from `docker compose ps --format json`.
+     * Only `exited`: running, restarting or created has reported nothing yet, and exit 0 did its job.
      *
      * @return array<string, int>
      */
@@ -588,8 +666,8 @@ final class AppLauncher
     }
 
     /**
-     * Services the run file gives no restart policy at all: they publish no
-     * port and nothing depends on them, so the hardener left them as written ({@see \App\Lib\Deploy\Compose\ServiceHardener::withRestartPolicy()}).
+     * Services the run file gives no restart policy at all: they publish no port and nothing depends
+     * on them, so the hardener left them as written ({@see \App\Lib\Deploy\Compose\ServiceHardener::withRestartPolicy()}).
      *
      * @param array<string, mixed> $compose
      * @return list<string>
@@ -664,10 +742,9 @@ final class AppLauncher
     }
 
     /**
-     * @param string|null $strategy
-     * @param string|null $runtime
-     * @param bool $skipBuild
-     * @param string|null $resolvedImage
+     * Reclaims first, since its prune removes every image no container uses, including a base just fetched
+     * that Docker Hub does not have (panelalpha/*); the preloads then put back what the run file names.
+     *
      * @throws \Exception
      */
     private function preloadImages(
@@ -678,10 +755,6 @@ final class AppLauncher
         bool $afterReclaim = false
     ): void {
         $innerDocker = $this->project->innerDocker();
-        // First: the reclaim is `docker system prune -af`, which removes every image
-        // no container uses -- including a base fetched moments ago, which then has
-        // to come from Docker Hub, where panelalpha/* does not exist. The preloads
-        // below put back whatever the run file names.
         if (!$afterReclaim && !DeployCompose::skipReclaimBeforeBuild($strategy, $runtime)) {
             $innerDocker->reclaimStorageIfNeeded();
         }
@@ -690,39 +763,49 @@ final class AppLauncher
             $innerDocker->ensureImage($resolvedImage);
         }
 
-        // After the ENOSPC reclaim only the images are gone: the host compile's
-        // output lives in the account's files, not in Docker.
+        $this->preloadRuntimeImages($innerDocker, $strategy, $runtime, $skipBuild, $afterReclaim);
+        $innerDocker->preloadComposeImages($this->project->userAppComposeFileToRun());
+    }
+
+    private function preloadRuntimeImages(
+        InnerDocker $innerDocker,
+        ?string $strategy,
+        ?string $runtime,
+        bool $skipBuild,
+        bool $afterReclaim
+    ): void {
         if ($runtime === PlatformManifest::RUNTIME_NGINX) {
-            if (!$afterReclaim) {
-                $this->project->hostCompile()->run();
-            }
+            $this->compileOnHost($afterReclaim);
             $innerDocker->ensureImage(Images::NGINX_IMAGE);
         } elseif (StandaloneNodeServe::isStandaloneStrategy($strategy) || HostRunProject::isStrategy($strategy)) {
-            if (!$afterReclaim) {
-                $this->project->hostCompile()->run();
-            }
+            $this->compileOnHost($afterReclaim);
             if (HostRunProject::isNode($strategy) || StandaloneNodeServe::isStandaloneStrategy($strategy)) {
                 $innerDocker->ensureImage(Images::nodeImage($this->project->userAppDirPath()));
             }
         } elseif (!$skipBuild) {
             $innerDocker->preloadFrameworkBaseImages($strategy, $runtime);
         }
-        $innerDocker->preloadComposeImages($this->project->userAppComposeFileToRun());
+    }
+
+    /** Not again after the ENOSPC reclaim: only images are gone, and the compile's output lives in the account's files. */
+    private function compileOnHost(bool $afterReclaim): void
+    {
+        if (!$afterReclaim) {
+            $this->project->hostCompile()->run();
+        }
     }
 
     /**
+     * Reclaims and retries once when the build hit ENOSPC; the prune takes every base no container
+     * holds, and panelalpha/* exists on no registry compose would ask, so $preload puts them back.
+     *
      * @param list<string> $command
      * @param \Closure(): void $preload puts back the images the reclaim deletes
      */
     private function retryOnceIfDiskFull(Process $process, array $command, \Closure $preload): Process
     {
         $innerDocker = $this->project->innerDocker();
-        $message = $process->getErrorOutput() . "\n" . $process->getOutput();
-        if (
-            $process->getExitCode() === 0
-            || !DindBuildStorage::isDiskFullError($message)
-            || !$innerDocker->canAggressivelyReclaim()
-        ) {
+        if (!self::isReclaimableDiskFull($process, $innerDocker)) {
             return $process;
         }
 
@@ -735,11 +818,16 @@ final class AppLauncher
             'Build hit ENOSPC; reclaimed the inner Docker cache and retried once'
         );
         $innerDocker->reclaimStorage(true);
-        // `docker system prune -af` took every base no container holds, and
-        // panelalpha/* exists on no registry compose would ask.
         $preload();
 
         return $this->run($command);
+    }
+
+    private static function isReclaimableDiskFull(Process $process, InnerDocker $innerDocker): bool
+    {
+        return $process->getExitCode() !== 0
+            && DindBuildStorage::isDiskFullError($process->getErrorOutput() . "\n" . $process->getOutput())
+            && $innerDocker->canAggressivelyReclaim();
     }
 
     /**
@@ -752,14 +840,7 @@ final class AppLauncher
         $shell = $this->project->shell();
         $described = [];
         foreach (DependencyFailure::failed($composeOutput) as $failed) {
-            $command = $failed['kind'] === 'container'
-                ? ['docker', 'logs', '--tail=' . self::FAILURE_LOG_LINES, $failed['name']]
-                : $this->project->userAppComposeCommand(['logs', '--tail=' . self::FAILURE_LOG_LINES, '--no-color', $failed['name']]);
-            try {
-                $logs = $shell->execAsUserQuiet(array_merge(['sh', '-c', '"$@" 2>&1', 'sh'], $command), [], self::FAILURE_LOG_TIMEOUT_SECONDS);
-            } catch (\Throwable) {
-                $logs = '';
-            }
+            $logs = $this->failedDependencyLogs($failed['kind'], $failed['name']);
             $line = DependencyFailure::describe($failed['name'], $failed['state'], DependencyFailure::cause($logs));
             $shell->logger()?->info($line);
             $described[] = $line;
@@ -768,17 +849,28 @@ final class AppLauncher
         return implode("\n", $described);
     }
 
+    /** The last lines a failed container or compose service printed; empty when they could not be read. */
+    private function failedDependencyLogs(string $kind, string $name): string
+    {
+        $command = $kind === 'container'
+            ? ['docker', 'logs', '--tail=' . self::FAILURE_LOG_LINES, $name]
+            : $this->project->userAppComposeCommand(['logs', '--tail=' . self::FAILURE_LOG_LINES, '--no-color', $name]);
+        try {
+            return $this->project->shell()->execAsUserQuiet(array_merge(['sh', '-c', '"$@" 2>&1', 'sh'], $command), [], self::FAILURE_LOG_TIMEOUT_SECONDS);
+        } catch (\Throwable) {
+            return '';
+        }
+    }
+
     private function healthSawAFailingContainer(): bool
     {
         return $this->healthSawARestartLoop() || AppHealth::sawServerError($this->project->userModel()->getDetails());
     }
 
     /**
-     * The site was routed before anything ran, to the lowest of the ports one
-     * service publishes when nothing else told them apart (Cabernet: 5004, a
-     * stream, over 6077, its web UI), or a rebuild kept it on one of the
-     * others. When the probe has since shown that port serving no page and
-     * exactly one of the others serving one, the site goes there.
+     * The site was routed before anything ran, to the lowest port of a service when nothing else told them
+     * apart (Cabernet: 5004, a stream, over 6077, its web UI), or a rebuild kept it on another one.
+     * When the probe shows that port serving no page and exactly one of the others serving one, the site goes there.
      *
      * @param array<string, mixed> $report
      */
@@ -830,21 +922,15 @@ final class AppLauncher
             return null;
         }
 
-        $codes = [];
-        foreach ($results as $result) {
-            if (is_array($result) && is_int($result['port'] ?? null)) {
-                $codes[$result['port']] = is_int($result['http_code'] ?? null) && $result['http_code'] > 0 ? $result['http_code'] : null;
-            }
-        }
-        $serves = static fn (?int $code): bool => $code !== null && $code >= 200 && $code < 400;
+        $codes = self::probedCodes($results);
         $routedCode = $codes[$routed] ?? null;
-        if ($serves($routedCode)) {
+        if (self::servesAPage($routedCode)) {
             return null;
         }
 
         $answering = array_values(array_filter(
             array_diff($equals, [$routed]),
-            static fn (int $port): bool => $serves($codes[$port] ?? null)
+            static fn (int $port): bool => self::servesAPage($codes[$port] ?? null)
         ));
         if (count($answering) !== 1) {
             return null;
@@ -855,11 +941,32 @@ final class AppLauncher
         return ['port' => $port, 'reason' => "{$was}, {$port} answered {$codes[$port]}"];
     }
 
+    /**
+     * @param list<array<string, mixed>> $results
+     * @return array<int, int|null> port => HTTP code, null when it did not answer
+     */
+    private static function probedCodes(array $results): array
+    {
+        $codes = [];
+        foreach ($results as $result) {
+            if (is_array($result) && is_int($result['port'] ?? null)) {
+                $codes[$result['port']] = is_int($result['http_code'] ?? null) && $result['http_code'] > 0 ? $result['http_code'] : null;
+            }
+        }
+
+        return $codes;
+    }
+
+    private static function servesAPage(?int $code): bool
+    {
+        return $code !== null && $code >= 200 && $code < 400;
+    }
+
+    /** A restart loop, or a container that is up and silent: either printed why. */
     private function healthSawARestartLoop(): bool
     {
         $details = $this->project->userModel()->getDetails();
         foreach ((array) ($details[AppHealth::DETAIL_CHECKS] ?? []) as $check) {
-            // A container that is up and silent printed why, too.
             if (is_array($check) && in_array($check['id'] ?? null, [AppHealth::CHECK_RESTART_LOOPING, SilentPortCheck::ID], true)) {
                 return true;
             }
@@ -870,14 +977,28 @@ final class AppLauncher
 
     private function recordContainerOutput(): void
     {
-        $shell = $this->project->shell();
-        $logger = $shell->logger();
+        $logger = $this->project->shell()->logger();
         if ($logger === null) {
             return;
         }
 
+        $output = trim($this->containerLogTail() ?? '');
+        if ($output === '') {
+            return;
+        }
+
+        $logger->info('Container output at the point of failure:');
+        foreach (preg_split('/\R/', $output) ?: [] as $line) {
+            if (trim($line) !== '') {
+                $logger->info($line);
+            }
+        }
+    }
+
+    private function containerLogTail(): ?string
+    {
         try {
-            $output = $shell->execAsUserQuiet(
+            return $this->project->shell()->execAsUserQuiet(
                 $this->project->userAppComposeCommand([
                     'logs',
                     '--tail=' . self::FAILURE_LOG_LINES,
@@ -888,19 +1009,7 @@ final class AppLauncher
                 self::FAILURE_LOG_TIMEOUT_SECONDS
             );
         } catch (\Throwable) {
-            return;
-        }
-
-        $output = trim($output);
-        if ($output === '') {
-            return;
-        }
-
-        $logger->info('Container output at the point of failure:');
-        foreach (preg_split('/\R/', $output) ?: [] as $line) {
-            if (trim($line) !== '') {
-                $logger->info($line);
-            }
+            return null;
         }
     }
 

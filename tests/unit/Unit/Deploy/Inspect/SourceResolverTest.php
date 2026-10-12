@@ -237,9 +237,11 @@ class SourceResolverTest extends TestCase
         $fresh = $workspace . '/inspect-cafecafecafecafe';
         mkdir($fresh, 0700, true);
 
-        // Any clone attempt sweeps first; this one fails immediately.
+        // Any clone attempt sweeps first; this one fails immediately (the host
+        // is unresolvable, and a private address would be refused before the
+        // workspace is even made).
         try {
-            (new SourceResolver($workspace, 15))->fromGit('https://127.0.0.1:1/nope.git');
+            (new SourceResolver($workspace, 15))->fromGit('https://nonexistent.invalid/nope.git');
         } catch (InspectException $e) {
             // expected
         }
@@ -259,8 +261,8 @@ class SourceResolverTest extends TestCase
         $resolver = new SourceResolver($workspace, 15);
 
         try {
-            $resolver->fromGit('https://127.0.0.1:1/nope.git');
-            $this->fail('Cloning from a closed port should fail');
+            $resolver->fromGit('https://nonexistent.invalid/nope.git');
+            $this->fail('Cloning from an unresolvable host should fail');
         } catch (InspectException $e) {
             $this->assertStringContainsString('Could not clone the repository', $e->getMessage());
         }
