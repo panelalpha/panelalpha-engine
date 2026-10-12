@@ -1,17 +1,6 @@
----
-name: engine-tests
-description: >-
-  Run and report the PanelAlpha Engine test layers: the PHPUnit suites in
-  tests/unit/ (run from core/), the Playwright API + MCP suite in tests/api/
-  against a live engine, and the chat-request scenarios in docs/ driven through
-  an assistant connected over MCP. Covers which level to run when, the groups
-  that change the whole engine, data safety, and what a result must contain.
-  Use when asked to test the engine, run unit or API tests, verify a change
-  before review, check MCP tools, run the supported-app
-  deploys, or play the docs scenarios as an AI tester.
----
-
 # Engine tests
+
+Agents asked to test the engine start here: which tests to run, in what order, what not to touch, and what to report.
 
 Three layers, cheapest first. Run them in this order and stop at the first red layer: a unit failure makes a live run meaningless.
 
@@ -21,7 +10,7 @@ Three layers, cheapest first. Run them in this order and stop at the first red l
 | 2. API + MCP (Playwright) | `tests/api/` | Bun 1.4.2, Node 20.19+, a live engine you may change | about 36 min, more with app deploys |
 | 3. Docs scenarios over MCP | `docs/` | an assistant connected to a live engine | per scenario |
 
-How to run each suite is in its README: [`unit/README.md`](unit/README.md), [`api/README.md`](api/README.md), and the API suite's options in [`api/docs/maintainers.md`](api/docs/maintainers.md). Deploy timing, caches and onboarding an application are in `AGENTS.md` (§1, §1a, §2 to §4, §11). This file adds what an agent must decide and must not get wrong.
+How to run each suite is in its README: [`unit/README.md`](unit/README.md), [`api/README.md`](api/README.md), and the API suite's options in [`api/docs/maintainers.md`](api/docs/maintainers.md). Deploy timing, caches and onboarding an application are in the root [`AGENTS.md`](../AGENTS.md) (§1, §1a, §2 to §4, §11). This file adds what an agent must decide and must not get wrong.
 
 ## Before anything: data safety
 
