@@ -9,6 +9,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
+use Tests\Support\TaskSchema;
 use Tests\TestCase;
 
 /**
@@ -61,9 +62,7 @@ class ProjectCreateAsyncTest extends TestCase
             $table->timestamps();
         });
 
-        $path = base_path('database/migrations/2026_09_04_000000_create_tasks_tables.php');
-        require_once $path;
-        (new \CreateTasksTables())->up();
+        TaskSchema::migrate();
 
         $this->withoutMiddleware(Authenticate::class);
     }

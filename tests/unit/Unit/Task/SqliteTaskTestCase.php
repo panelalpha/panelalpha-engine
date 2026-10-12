@@ -4,6 +4,7 @@ namespace Tests\Unit\Task;
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Tests\Support\TaskSchema;
 use Tests\TestCase;
 
 abstract class SqliteTaskTestCase extends TestCase
@@ -21,9 +22,7 @@ abstract class SqliteTaskTestCase extends TestCase
         DB::reconnect('sqlite');
         DB::setDefaultConnection('sqlite');
 
-        $path = base_path('database/migrations/2026_09_04_000000_create_tasks_tables.php');
-        require_once $path;
-        (new \CreateTasksTables())->up();
+        TaskSchema::migrate();
     }
 
     protected function tearDown(): void

@@ -4,6 +4,7 @@ namespace Tests\Unit\Exceptions;
 
 use App\Exceptions\ProjectBusyException;
 use App\Jobs\CreateBackup;
+use App\Jobs\PushState;
 use App\Jobs\RebuildProject;
 use App\Models\Task;
 use PHPUnit\Framework\TestCase;
@@ -25,6 +26,13 @@ class ProjectBusyExceptionHintTest extends TestCase
 
         $this->assertStringContainsString('Cancel it (POST /tasks/36/cancel)', $queued);
         $this->assertStringContainsString('Cancel it (POST /tasks/36/cancel)', $rebuild);
+    }
+
+    public function test_a_running_push_is_named_and_waited_for(): void
+    {
+        $message = ProjectBusyException::taskRunning('alice', $this->task(PushState::class, Task::STATUS_RUNNING))->getMessage();
+
+        $this->assertSame("Project 'alice' is busy: push task 36 is running. Wait for it to finish.", $message);
     }
 
     private function task(string $jobType, string $status): Task

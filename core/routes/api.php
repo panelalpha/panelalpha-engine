@@ -97,6 +97,7 @@ Route::post('/vault/secrets', [SecretVaultController::class, 'store']);
 Route::get('/vault/secrets/{ref}', [SecretVaultController::class, 'show']);
 Route::delete('/vault/secrets/{ref}', [SecretVaultController::class, 'destroy']);
 
+Route::get('/tasks', [TaskController::class, 'index']);
 Route::get('/tasks/{id}', [TaskController::class, 'show']);
 Route::get('/tasks/{id}/logs', [TaskController::class, 'logs']);
 Route::get('/tasks/{id}/logs/stream', [TaskController::class, 'streamLogs']);

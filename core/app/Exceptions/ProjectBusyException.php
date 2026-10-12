@@ -6,6 +6,7 @@ use App\Jobs\CreateBackup;
 use App\Jobs\CreateStaging;
 use App\Jobs\DeleteBackup;
 use App\Jobs\DeployProject;
+use App\Jobs\PushState;
 use App\Jobs\RebuildProject;
 use App\Jobs\RestoreBackup;
 use App\Lib\Deploy\DeployLog\DeployLock;
@@ -100,6 +101,7 @@ class ProjectBusyException extends \RuntimeException
                 default => 'rebuild',
             },
             CreateStaging::class => 'staging copy',
+            PushState::class => 'push',
             CreateBackup::class => 'backup',
             RestoreBackup::class => 'restore',
             DeleteBackup::class => 'backup delete',

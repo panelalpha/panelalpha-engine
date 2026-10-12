@@ -6,6 +6,7 @@ use App\Models\DeployHook;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Tests\Support\TaskSchema;
 use Tests\TestCase;
 
 /**
@@ -42,8 +43,7 @@ abstract class DeployHookTestCase extends TestCase
             (require base_path('database/migrations/' . $migration))->up();
         }
 
-        require_once base_path('database/migrations/2026_09_04_000000_create_tasks_tables.php');
-        (new \CreateTasksTables())->up();
+        TaskSchema::migrate();
     }
 
     protected function tearDown(): void

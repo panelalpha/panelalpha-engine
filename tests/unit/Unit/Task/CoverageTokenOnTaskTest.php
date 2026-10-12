@@ -34,11 +34,9 @@ class CoverageTokenOnTaskTest extends SqliteTaskTestCase
         parent::tearDown();
     }
 
-    public function test_start_stamps_api_token_id_when_recording(): void
+    public function test_start_stamps_api_token_id_from_the_request_token(): void
     {
         $this->fakeAuthToken($this->tokenId);
-        File::ensureDirectoryExists(dirname(CoverageRecorder::recordingPath($this->tokenId)));
-        File::put(CoverageRecorder::recordingPath($this->tokenId), '');
 
         $task = Task::start(
             jobType: StubTaskJob::class,
@@ -46,21 +44,19 @@ class CoverageTokenOnTaskTest extends SqliteTaskTestCase
             details: ['action' => 'deploy'],
         );
 
-        $this->assertSame($this->tokenId, $task->details['api_token_id'] ?? null);
-        $this->assertSame('deploy', $task->details['action'] ?? null);
+        $this->assertSame($this->tokenId, $task->api_token_id);
+        $this->assertSame(['action' => 'deploy'], $task->details);
     }
 
-    public function test_start_does_not_stamp_without_recording_file(): void
+    public function test_start_leaves_token_null_without_a_request_token(): void
     {
-        $this->fakeAuthToken($this->tokenId);
-
         $task = Task::start(
             jobType: StubTaskJob::class,
             queue: 'default',
             details: ['action' => 'deploy'],
         );
 
-        $this->assertArrayNotHasKey('api_token_id', $task->details ?? []);
+        $this->assertNull($task->api_token_id);
         $this->assertSame(['action' => 'deploy'], $task->details);
     }
 
@@ -104,8 +100,9 @@ class CoverageTokenOnTaskTest extends SqliteTaskTestCase
         $task = Task::start(
             jobType: StubTaskJob::class,
             queue: 'default',
-            details: ['api_token_id' => $this->tokenId],
         );
+        $task->api_token_id = $this->tokenId;
+        $task->save();
         $job = new StubTaskJob();
         $job->attachTask($task);
 
@@ -151,5 +148,6 @@ class CoverageTokenOnTaskTest extends SqliteTaskTestCase
 
         Auth::guard('api')->setUser($admin);
         Auth::setUser($admin);
+        request()->setUserResolver(static fn () => $admin);
     }
 }

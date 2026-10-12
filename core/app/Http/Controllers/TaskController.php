@@ -2,15 +2,19 @@
 
 namespace App\Http\Controllers;
 
+use App\Auth\TokenAbilities;
 use App\Http\Controllers\Concerns\StreamsNdjson;
+use App\Http\Requests\TaskListRequest;
 use App\Http\Resources\TaskLogCollection;
 use App\Http\Resources\TaskLogResource;
 use App\Http\Resources\TaskResource;
+use App\Http\Resources\TaskSummaryCollection;
 use App\System;
 use App\Lib\Task\LogStreamLimiter;
 use App\Lib\Task\ProcessTreeKiller;
 use App\Lib\Task\TaskCanceller;
 use App\Models\Task;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use OpenApi\Attributes as OA;
@@ -48,6 +52,114 @@ class TaskController extends Controller
         }
 
         return $since;
+    }
+
+    #[OA\Get(
+        path: '/tasks',
+        summary: 'List tasks newest first, filtered by project, status, action or time',
+        description: 'Covers every queued job on the engine, not only deploys. `scope=mine` (the default) shows the '
+            . 'tasks the calling token started plus engine-originated work (deploy hooks, schedules, CLI) on projects '
+            . 'it may reach; `scope=all` shows every task and is refused with 403 for a token limited to part of the '
+            . 'API. `status` takes a comma list of queued, running, completed, failed, cancelled; `active` is '
+            . 'shorthand for queued, running. `action` matches details.action, for example deploy, rebuild, staging, '
+            . 'push, backup, restore or attach_source.',
+        security: [['bearerAuth' => []]],
+        tags: ['Tasks'],
+        parameters: [
+            new OA\Parameter(name: 'username', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'status', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'action', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'since', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'date-time')),
+            new OA\Parameter(name: 'scope', in: 'query', required: false, schema: new OA\Schema(type: 'string', enum: ['mine', 'all'], default: 'mine')),
+            new OA\Parameter(name: 'per_page', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 50, maximum: 200, minimum: 1)),
+            new OA\Parameter(name: 'page', in: 'query', required: false, schema: new OA\Schema(type: 'integer', minimum: 1)),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Paginated list of task summaries', content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(property: 'data', type: 'array', items: new OA\Items(ref: '#/components/schemas/TaskSummary')),
+                    new OA\Property(property: 'meta', type: 'object'),
+                    new OA\Property(property: 'links', type: 'object'),
+                ],
+            )),
+            new OA\Response(response: 403, description: 'scope=all was asked for with a limited token', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'message', type: 'string')],
+            )),
+            new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+        ],
+    )]
+    public function index(TaskListRequest $request): TaskSummaryCollection
+    {
+        $abilities = TokenAbilities::forCurrentRequest();
+        $this->refuseScopeAllUnlessUnrestricted($request, $abilities);
+
+        $query = Task::query()->orderByDesc('id');
+        $this->applyFilters($query, $request);
+        $this->applyScope($query, $request, $abilities);
+
+        return new TaskSummaryCollection($query->paginate($request->perPage()));
+    }
+
+    private function refuseScopeAllUnlessUnrestricted(TaskListRequest $request, TokenAbilities $abilities): void
+    {
+        if ($request->scope() !== TaskListRequest::SCOPE_ALL || $abilities->isUnrestricted()) {
+            return;
+        }
+
+        abort(new JsonResponse(['message' => 'This token is limited to part of the API, so it may not read every task.'], 403));
+    }
+
+    /**
+     * @param Builder<Task> $query
+     */
+    private function applyFilters(Builder $query, TaskListRequest $request): void
+    {
+        $filters = $request->validated();
+
+        if (isset($filters['username'])) {
+            $query->where('username', $filters['username']);
+        }
+        if (isset($filters['action'])) {
+            $query->where('details->action', $filters['action']);
+        }
+        if ($request->statuses() !== []) {
+            $query->whereIn('status', $request->statuses());
+        }
+        if ($request->sinceAt() !== null) {
+            $query->where('updated_at', '>=', $request->sinceAt());
+        }
+    }
+
+    /**
+     * @param Builder<Task> $query
+     */
+    private function applyScope(Builder $query, TaskListRequest $request, TokenAbilities $abilities): void
+    {
+        if ($request->scope() === TaskListRequest::SCOPE_ALL) {
+            $this->applyProjectReach($query, $abilities);
+
+            return;
+        }
+
+        $tokenId = Task::currentTokenId();
+        $query->where(function (Builder $caller) use ($tokenId, $abilities): void {
+            $caller->where('api_token_id', $tokenId)
+                ->orWhere(function (Builder $engine) use ($abilities): void {
+                    $engine->whereNull('api_token_id');
+                    $this->applyProjectReach($engine, $abilities);
+                });
+        });
+    }
+
+    /**
+     * @param Builder<Task> $query
+     */
+    private function applyProjectReach(Builder $query, TokenAbilities $abilities): void
+    {
+        $projects = $abilities->projects();
+        if ($projects !== null) {
+            $query->whereIn('username', $projects);
+        }
     }
 
     #[OA\Get(

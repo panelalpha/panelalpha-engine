@@ -199,6 +199,7 @@ return [
     \App\Mcp\Tools\Api\System\SystemSslConfigSetTool::class,
     \App\Mcp\Tools\Api\System\SystemUpdateTool::class,
     \App\Mcp\Tools\Api\System\SystemWebserverConfigSetTool::class,
+    \App\Mcp\Tools\Api\Tasks\TaskListTool::class,
     \App\Mcp\Tools\Api\Tasks\TaskGetTool::class,
     \App\Mcp\Tools\Api\Tasks\TaskCancelTool::class,
     \App\Mcp\Tools\Api\Tasks\TaskLogListTool::class,

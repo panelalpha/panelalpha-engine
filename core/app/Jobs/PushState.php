@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Concerns\AttachTask;
 use App\Models\User;
 use App\Support\JobBudget;
 use App\System;
@@ -14,6 +15,7 @@ use Illuminate\Support\Facades\Log;
 
 class PushState implements ShouldQueue
 {
+    use AttachTask;
     use Dispatchable;
     use InteractsWithQueue;
     use Queueable;
@@ -30,11 +32,18 @@ class PushState implements ShouldQueue
 
     public function handle(): void
     {
-        (new System())->projects()->pushToApp($this->fromUsername, $this->toUsername);
+        $this->runTask(function (): void {
+            (new System())->projects()->pushToApp($this->fromUsername, $this->toUsername);
+        });
     }
 
     public function failed(\Throwable $e): void
     {
+        $task = $this->task();
+        if ($task !== null && !$task->isTerminal()) {
+            $this->markFailed($e);
+        }
+
         $from = User::findByUsername($this->fromUsername);
         $to = User::findByUsername($this->toUsername);
         $system = new System();

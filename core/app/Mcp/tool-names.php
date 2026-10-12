@@ -304,6 +304,7 @@ return [
     'POST /lighthouse/generate-report' => 'lighthouse_report_create',
 
     // Tasks
+    'GET /tasks' => 'task_list',
     'GET /tasks/{id}' => 'task_get',
     'GET /tasks/{id}/logs' => 'task_log_list',
     'POST /tasks/{id}/cancel' => 'task_cancel',

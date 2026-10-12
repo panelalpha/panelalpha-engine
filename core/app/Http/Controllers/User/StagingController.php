@@ -145,8 +145,9 @@ class StagingController extends Controller
         path: '/projects/{username}/push',
         description: 'Copies application state from the source to a paired live or staging project '
             . '(the pair is linked by `staging`), then swaps it in asynchronously. Source and destination '
-            . 'must use the same project template. Returns HTTP 202 with the target project; poll '
-            . '`GET /projects/{target}` until `async_status.push` is `completed` or `failed`. '
+            . 'must use the same project template. Returns HTTP 202 with the target project and a `task_id`; '
+            . 'poll `GET /tasks/{task_id}` for the push Task, or `GET /projects/{target}` until '
+            . '`async_status.push` is `completed` or `failed`. '
             . 'CLI equivalent: `php artisan project:push`.',
         summary: 'Push project state to a paired staging or live project',
         security: [['bearerAuth' => []]],
@@ -190,9 +191,20 @@ class StagingController extends Controller
         $to->setDetails(['error' => null]);
         $to->save();
 
-        PushState::dispatch($from->username, $to->username);
+        $task = Task::start(
+            jobType: PushState::class,
+            queue: 'default',
+            username: $to->username,
+            details: [
+                'action' => 'push',
+                'source' => $from->username,
+                'target' => $to->username,
+            ],
+        );
+        PushState::dispatch($from->username, $to->username)->attachTask($task);
 
         return (new UserResource($to->loadMissing(['liveUser', 'stagingUser'])))
+            ->additional(['task_id' => $task->id])
             ->response()
             ->setStatusCode(202);
     }

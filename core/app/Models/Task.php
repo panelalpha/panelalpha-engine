@@ -2,13 +2,10 @@
 
 namespace App\Models;
 
-use App\Lib\Testing\CoverageRecorder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\App;
-use Illuminate\Support\Facades\Auth;
 use InvalidArgumentException;
 use Laravel\Sanctum\PersonalAccessToken;
 
@@ -19,6 +16,15 @@ class Task extends Model
     public const STATUS_COMPLETED = 'completed';
     public const STATUS_FAILED = 'failed';
     public const STATUS_CANCELLED = 'cancelled';
+
+    /** @var list<string> */
+    public const STATUSES = [
+        self::STATUS_QUEUED,
+        self::STATUS_RUNNING,
+        self::STATUS_COMPLETED,
+        self::STATUS_FAILED,
+        self::STATUS_CANCELLED,
+    ];
 
     /** @var list<string> */
     public const TERMINAL_STATUSES = [
@@ -44,6 +50,7 @@ class Task extends Model
     public const SINCE_EXPECTED = 'since must be unix seconds or an ISO-8601 datetime';
 
     protected $fillable = [
+        'api_token_id',
         'job_id',
         'username',
         'queue',
@@ -60,6 +67,7 @@ class Task extends Model
     ];
 
     protected $casts = [
+        'api_token_id' => 'integer',
         'details' => 'array',
         'pid' => 'integer',
         'queued_at' => 'datetime',
@@ -79,60 +87,23 @@ class Task extends Model
             throw new InvalidArgumentException('job_type and queue are required');
         }
 
-        $details = self::stampCoverageTokenId($details);
-
         return self::create([
             'job_type' => $jobType,
             'queue' => $queue,
             'username' => $username,
+            'api_token_id' => self::currentTokenId(),
             'details' => $details,
             'status' => self::STATUS_QUEUED,
             'queued_at' => now(),
         ]);
     }
 
-    /**
-     * When a coverage recording session is active for the current API token,
-     * persist its id on the task so queue workers can dump coverage later.
-     *
-     * @param array<string, mixed>|null $details
-     * @return array<string, mixed>|null
-     */
-    private static function stampCoverageTokenId(?array $details): ?array
+    /** The bearer that started this task, or null for work the engine began itself. */
+    public static function currentTokenId(): ?int
     {
-        $tokenId = self::currentCoverageTokenId();
-        if ($tokenId === null) {
-            return $details;
-        }
+        $token = request()?->user()?->currentAccessToken();
 
-        $details ??= [];
-        $details['api_token_id'] = $tokenId;
-
-        return $details;
-    }
-
-    private static function currentCoverageTokenId(): ?int
-    {
-        if (!App::hasDebugModeEnabled()) {
-            return null;
-        }
-
-        $user = Auth::user();
-        if (!$user instanceof Admin) {
-            return null;
-        }
-
-        $token = $user->currentAccessToken();
-        if (!$token instanceof PersonalAccessToken) {
-            return null;
-        }
-
-        $tokenId = (int) $token->id;
-        if (!CoverageRecorder::isRecording($tokenId)) {
-            return null;
-        }
-
-        return $tokenId;
+        return $token instanceof PersonalAccessToken ? (int) $token->id : null;
     }
 
     public function logs(): HasMany

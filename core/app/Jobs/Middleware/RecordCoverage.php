@@ -10,8 +10,8 @@ class RecordCoverage
     {
         $tokenId = null;
         if (method_exists($job, 'task')) {
-            $raw = data_get($job->task()?->details, 'api_token_id');
-            $tokenId = is_numeric($raw) ? (int) $raw : null;
+            $task = $job->task();
+            $tokenId = $task?->api_token_id;
         }
 
         return CoverageRecorder::around(

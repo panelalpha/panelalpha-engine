@@ -8,6 +8,7 @@ use App\Exceptions\ProjectBusyException;
 use App\Jobs\CreateBackup;
 use App\Jobs\CreateStaging;
 use App\Jobs\DeployProject;
+use App\Jobs\PushState;
 use App\Jobs\RebuildProject;
 use App\Lib\Deploy\DeployLog\DeployLock;
 use App\Lib\Deploy\DeployLog\DeployLogger;
@@ -307,6 +308,20 @@ class ProjectDeleterTest extends TestCase
             $e = $this->refusal(fn () => $this->deleter()->delete($side));
             $this->assertSame("Project '{$side->username}' is busy: a push is running. Wait for it to finish.", $e->getMessage());
         }
+        $this->assertSame([], $this->destroyed);
+    }
+
+    public function test_a_running_push_task_refuses_the_delete_and_names_it(): void
+    {
+        $target = $this->makeUser($this->name);
+        $task = $this->running($this->task(PushState::class, $this->name, ['action' => 'push']));
+
+        $e = $this->refusal(fn () => $this->deleter()->delete($target));
+
+        $this->assertSame(
+            "Project '{$this->name}' is busy: push task {$task->id} is running. Wait for it to finish.",
+            $e->getMessage(),
+        );
         $this->assertSame([], $this->destroyed);
     }
 

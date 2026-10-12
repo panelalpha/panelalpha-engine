@@ -123,6 +123,26 @@ class TokenAbilities
         return $this->abilities === [] || in_array(self::EVERYTHING, $this->abilities, true);
     }
 
+    /**
+     * A token that neither limits operations nor limits projects. Only such a
+     * token may ask for every project's tasks at once.
+     */
+    public function isUnrestricted(): bool
+    {
+        return $this->isLegacy() || ($this->routes() === null && $this->projects() === null);
+    }
+
+    /**
+     * The project usernames this token may reach, or null for every project.
+     * Per-project token scoping does not exist yet; when it does, this reads it.
+     *
+     * @return array<int, string>|null
+     */
+    public function projects(): ?array
+    {
+        return null;
+    }
+
     /** A named operation implies the surface it is named on. */
     public function mayUseApi(): bool
     {
