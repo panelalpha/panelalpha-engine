@@ -28,7 +28,7 @@ class BackupContainerApiTest extends TestCase
 
     private function container(string $name, string $driver = 'local', ?array $credentials = null): BackupContainer
     {
-        return BackupContainer::create(['name' => $name, 'driver' => $driver, 'location' => "/backups/{$name}", 'credentials' => $credentials]);
+        return BackupContainer::create(['name' => $name, 'driver' => $driver, 'location' => "/opt/panelalpha/backups/{$name}", 'credentials' => $credentials]);
     }
 
     public function test_the_list_is_ordered_by_name_and_never_shows_credentials(): void
@@ -52,7 +52,7 @@ class BackupContainerApiTest extends TestCase
 
     public function test_a_local_container_is_created_without_credentials(): void
     {
-        $this->postJson('/api/backup-containers', ['name' => 'disk', 'driver' => 'local', 'location' => '/backups/disk'])
+        $this->postJson('/api/backup-containers', ['name' => 'disk', 'driver' => 'local', 'location' => '/opt/panelalpha/backups/disk'])
             ->assertCreated()
             ->assertJsonPath('data.name', 'disk')
             ->assertJsonPath('data.has_credentials', false);
@@ -64,7 +64,7 @@ class BackupContainerApiTest extends TestCase
     {
         $box = $this->container('box', 'sftp', ['host' => 'h', 'username' => 'u']);
 
-        $this->putJson("/api/backup-containers/{$box->id}", ['driver' => 'local', 'location' => '/backups/box'])
+        $this->putJson("/api/backup-containers/{$box->id}", ['driver' => 'local', 'location' => '/opt/panelalpha/backups/box'])
             ->assertOk()
             ->assertJsonPath('data.driver', 'local')
             ->assertJsonPath('data.has_credentials', false);
@@ -90,7 +90,7 @@ class BackupContainerApiTest extends TestCase
 
         $this->deleteJson("/api/backup-containers/{$box->id}")
             ->assertStatus(409)
-            ->assertExactJson(['message' => 'Cannot delete backup container while backups exist']);
+            ->assertExactJson(['message' => 'Cannot delete backup container while backups exist. Pass delete_backups to remove them with the container.']);
         Queue::assertNothingPushed();
 
         $this->deleteJson("/api/backup-containers/{$box->id}?delete_backups=1")

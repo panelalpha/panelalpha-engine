@@ -21,8 +21,15 @@ A backup has to be written somewhere, and that somewhere is called a **store**. 
 
 If the assistant cannot create a store, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
+A `local` store writes from inside the engine container, so its folder must be
+under a path the engine persists on the host -- `/home`, `/opt/panelalpha` or
+the engine's own storage volume (`/var/www/html/storage`). Anywhere else (a plain `/var/backups`, say) lives in
+the container's writable layer and is lost the next time that container is
+recreated, while the backup rows still point at it; the engine refuses such a
+location when you create the store.
+
 ```text
-Create a backup store on this host at /var/backups.
+Create a backup store on this host at /opt/panelalpha/backups.
 ```
 
 **A store on the same VPS as the engine does not protect you from losing the VPS.** It is fine for "I am about to do something risky and want to be able to undo it". For real protection against disk failure or the VPS being lost, use a remote store.

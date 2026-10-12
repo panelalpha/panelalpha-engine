@@ -83,7 +83,7 @@ class DindHostDiskGuardWiringTest extends TestCase
                 return sys_get_temp_dir() . '/pa-disk-guard-home';
             }
 
-            public function execOnHost(string|array $cmd, array $env = []): string
+            public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 $path = is_array($cmd) ? (string) end($cmd) : '';
 

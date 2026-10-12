@@ -58,7 +58,7 @@ class FirewallRuleClashTest extends TestCase
                 return '';
             }
 
-            public function execOnHost(string|array $cmd, array $env = []): string
+            public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 return '';
             }

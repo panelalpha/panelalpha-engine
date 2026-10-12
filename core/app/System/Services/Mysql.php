@@ -2,6 +2,8 @@
 
 namespace App\System\Services;
 
+use App\Support\JobBudget;
+use App\Support\SitesDbCaches;
 use App\System as EngineSystem;
 use App\System\Services\Mysql\Databases;
 use App\System\Services\Mysql\Privileges;
@@ -11,7 +13,11 @@ use RuntimeException;
 
 class Mysql
 {
-    private const DB_COMMAND_TIMEOUT = 7200;
+    /**
+     * Below the job's own budget, so a long dump/restore fails through this
+     * timeout and cleans up before the job's alarm SIGKILLs the worker.
+     */
+    private const DB_COMMAND_TIMEOUT = JobBudget::COMMAND_SECONDS;
 
     private ?PDO $pdo = null;
 
@@ -41,27 +47,32 @@ class Mysql
     public function dumpToGzip(string $name, string $dest): void
     {
         $this->assertDatabaseName($name);
-        [$host, $user, $password] = $this->usersDbCredentials();
+        $this->runInCore(
+            $this->inSitesDb('mariadb-dump --single-transaction -uroot ' . escapeshellarg($name))
+            . ' | gzip -c > ' . escapeshellarg($dest),
+            'mysqldump failed'
+        );
+        $this->assertDumpCompleted($name, $dest);
+    }
 
-        $command = 'mysqldump --single-transaction -h ' . escapeshellarg($host)
-            . ' -u ' . escapeshellarg($user)
-            . ' ' . escapeshellarg($name)
-            . ' | gzip -c > ' . escapeshellarg($dest);
-
-        $this->runUsersDbCommand($command, $password, 'mysqldump failed');
+    /**
+     * A dump cut short still gzips cleanly; only a finished one ends with `-- Dump completed`.
+     */
+    private function assertDumpCompleted(string $name, string $dest): void
+    {
+        $last = trim($this->runInCore('gzip -cd ' . escapeshellarg($dest) . ' | tail -n 1', 'mysqldump failed'));
+        if (!str_starts_with($last, '-- Dump completed')) {
+            throw new RuntimeException("mysqldump failed: the dump of {$name} is incomplete");
+        }
     }
 
     public function restoreFromGzip(string $name, string $sqlGzPath): void
     {
         $this->assertDatabaseName($name);
-        [$host, $user, $password] = $this->usersDbCredentials();
-
-        $command = 'gunzip -c ' . escapeshellarg($sqlGzPath)
-            . ' | mysql -h ' . escapeshellarg($host)
-            . ' -u ' . escapeshellarg($user)
-            . ' ' . escapeshellarg($name);
-
-        $this->runUsersDbCommand($command, $password, 'database restore failed');
+        $this->runInCore(
+            'gunzip -c ' . escapeshellarg($sqlGzPath) . ' | ' . $this->inSitesDb('mariadb -uroot ' . escapeshellarg($name)),
+            'database restore failed'
+        );
     }
 
     private function pdo(): PDO
@@ -70,21 +81,9 @@ class Mysql
             return $this->pdo;
         }
 
-        /** @var mixed $host */
-        $host = config('env.USERS_DB_HOST');
-        if (!is_string($host)) {
-            $host = 'localhost';
-        }
-        /** @var mixed $user */
-        $user = config('env.USERS_DB_USERNAME');
-        if (!is_string($user)) {
-            $user = 'root';
-        }
-        /** @var mixed $pass */
-        $pass = config('env.USERS_DB_PASSWORD');
-        if (!is_string($pass)) {
-            $pass = '';
-        }
+        $host = self::configString('env.USERS_DB_HOST', 'localhost');
+        $user = self::configString('env.USERS_DB_USERNAME', 'root');
+        $pass = self::configString('env.USERS_DB_PASSWORD', '');
 
         $this->pdo = new PDO("mysql:host={$host}", $user, $pass);
         $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -92,45 +91,39 @@ class Mysql
         return $this->pdo;
     }
 
-    /**
-     * @return array{0: string, 1: string, 2: string}
-     */
-    private function usersDbCredentials(): array
+    private static function configString(string $key, string $default): string
     {
-        $host = config('env.USERS_DB_HOST');
-        $user = config('env.USERS_DB_USERNAME');
-        $password = config('env.USERS_DB_PASSWORD');
+        $value = config($key);
 
-        if (!is_string($host) || $host === '') {
-            throw new RuntimeException('USERS_DB_HOST is not configured');
-        }
-        if (!is_string($user) || $user === '') {
-            throw new RuntimeException('USERS_DB_USERNAME is not configured');
-        }
-        if (!is_string($password)) {
-            throw new RuntimeException('USERS_DB_PASSWORD is not configured');
-        }
-
-        return [$host, $user, $password];
+        return is_string($value) ? $value : $default;
     }
 
-    private function runUsersDbCommand(string $command, string $password, string $failurePrefix): void
+    /** Core has no MySQL client; sites-db, which holds every site database, has MariaDB's. */
+    private function inSitesDb(string $command): string
     {
-        $system = $this->system;
-        if ($system === null) {
-            throw new RuntimeException('Mysql dump/restore requires an Engine System');
-        }
+        $argv = [
+            'sudo', 'docker', 'compose', '--project-directory', $this->system()->engineDirPath(),
+            'exec', '-T', SitesDbCaches::SERVICE, 'sh', '-c', 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" ' . $command,
+        ];
 
-        $process = $system->runProcess(
-            ['sh', '-c', $command],
-            ['MYSQL_PWD' => $password],
-            self::DB_COMMAND_TIMEOUT,
-        );
+        return implode(' ', array_map('escapeshellarg', $argv));
+    }
 
+    /** pipefail, so a failing dump is not hidden by gzip's success. */
+    private function runInCore(string $command, string $failurePrefix): string
+    {
+        $process = $this->system()->runProcess(['bash', '-c', 'set -o pipefail; ' . $command], [], self::DB_COMMAND_TIMEOUT);
         if (!$process->isSuccessful()) {
             $message = $process->getErrorOutput() ?: $process->getOutput();
             throw new RuntimeException($failurePrefix . ': ' . trim($message));
         }
+
+        return $process->getOutput();
+    }
+
+    private function system(): EngineSystem
+    {
+        return $this->system ?? throw new RuntimeException('Mysql dump/restore requires an Engine System');
     }
 
     private function assertDatabaseName(string $name): void

@@ -28,6 +28,8 @@ final class BackupDouble extends Backup
         private bool $swapProjectThrows = false,
         private bool $rollbackProjectThrows = false,
         private bool $restoreVolumeThrows = false,
+        /** Called from composeStop(), to observe state during the stopped window. */
+        private mixed $onComposeStop = null,
     ) {
         parent::__construct($project, $record);
     }
@@ -40,6 +42,9 @@ final class BackupDouble extends Backup
     protected function composeStop(): void
     {
         $this->calls[] = 'composeStop';
+        if (is_callable($this->onComposeStop)) {
+            ($this->onComposeStop)();
+        }
     }
 
     protected function composeStart(): void

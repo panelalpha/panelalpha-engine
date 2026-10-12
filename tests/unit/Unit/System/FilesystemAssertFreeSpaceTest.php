@@ -58,7 +58,7 @@ class FilesystemAssertFreeSpaceTest extends TestCase
             {
             }
 
-            public function execOnHost(string|array $cmd, array $env = []): string
+            public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 $key = is_array($cmd) ? implode(' ', $cmd) : $cmd;
                 if (!array_key_exists($key, $this->dfOutputs)) {

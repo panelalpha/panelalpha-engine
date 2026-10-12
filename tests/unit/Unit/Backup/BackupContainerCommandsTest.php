@@ -34,7 +34,7 @@ class BackupContainerCommandsTest extends TestCase
 
     public function test_create_refuses_what_a_script_left_out_or_got_wrong(): void
     {
-        BackupContainer::create(['name' => 'taken', 'driver' => 'local', 'location' => '/backups/taken', 'credentials' => null]);
+        BackupContainer::create(['name' => 'taken', 'driver' => 'local', 'location' => '/opt/panelalpha/backups/taken', 'credentials' => null]);
 
         $cases = [
             ['--driver=local --location=/b', 'The --name option is required in non-interactive mode.'],
@@ -43,8 +43,8 @@ class BackupContainerCommandsTest extends TestCase
             ['--name=a --driver=nfs --location=/b', 'Driver must be one of: local, s3, ftp, ftps, sftp.'],
             ['--name=a --driver=local --location=' . str_repeat('x', 1025), 'Storage location must be at most 1024 characters.'],
             ['--name=a --driver=local --location=/home', 'Local backup location must not be empty, filesystem root, or /home.'],
-            ['--name=a --driver=local --location=/b/../etc', 'Local backup location must not contain .. segments.'],
-            ['--name=taken --driver=local --location=/b', "A backup container named 'taken' already exists."],
+            ['--name=a --driver=local --location=/opt/panelalpha/backups/../etc', 'Local backup location must not contain .. segments.'],
+            ['--name=taken --driver=local --location=/opt/panelalpha/backups/taken', "A backup container named 'taken' already exists."],
             ['--name=a --driver=s3 --location=bucket', 'The --s3-access-key-id option is required in non-interactive mode for s3.'],
             ['--name=a --driver=s3 --location=bucket --s3-access-key-id=K', 'The --s3-secret-access-key option is required in non-interactive mode for s3.'],
             ['--name=a --driver=ftp --location=/b', 'The --ftp-host option is required in non-interactive mode for ftp/ftps.'],
@@ -77,7 +77,7 @@ class BackupContainerCommandsTest extends TestCase
 
     public function test_create_stores_no_credentials_for_local_storage(): void
     {
-        $this->create('--force --name=disk --driver=local --location=/backups/disk')
+        $this->create('--force --name=disk --driver=local --location=/opt/panelalpha/backups/disk')
             ->expectsOutputToContain('Has credentials: no')
             ->assertExitCode(0);
 
@@ -86,8 +86,8 @@ class BackupContainerCommandsTest extends TestCase
 
     public function test_update_refuses_what_would_leave_the_container_unusable(): void
     {
-        BackupContainer::create(['name' => 'disk', 'driver' => 'local', 'location' => '/backups/disk', 'credentials' => null]);
-        BackupContainer::create(['name' => 'other', 'driver' => 'local', 'location' => '/backups/other', 'credentials' => null]);
+        BackupContainer::create(['name' => 'disk', 'driver' => 'local', 'location' => '/opt/panelalpha/backups/disk', 'credentials' => null]);
+        BackupContainer::create(['name' => 'other', 'driver' => 'local', 'location' => '/opt/panelalpha/backups/other', 'credentials' => null]);
 
         $cases = [
             ['missing', "Backup container 'missing' not found."],
@@ -132,7 +132,7 @@ class BackupContainerCommandsTest extends TestCase
             'credentials' => ['host' => 'h', 'username' => 'u'],
         ]);
 
-        $this->update('ftpbox --force --driver=local --location=/backups/ftpbox')
+        $this->update('ftpbox --force --driver=local --location=/opt/panelalpha/backups/ftpbox')
             ->expectsOutputToContain('Credentials: none')
             ->assertExitCode(0);
 

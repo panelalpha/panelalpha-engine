@@ -42,6 +42,51 @@ class BackupContainerRequestTest extends TestCase
         });
     }
 
+    /**
+     * engine#809: a local store writes from inside the core container, so a
+     * path outside the bind-mounted host paths is lost on the next recreate.
+     */
+    public function test_a_local_location_outside_a_persisted_path_is_refused(): void
+    {
+        $request = new BackupContainerStoreRequest();
+
+        try {
+            $request->assertLocalLocationIsSafe('/var/backups');
+            $this->fail('a container-only location was accepted');
+        } catch (ValidationException $e) {
+            $this->assertStringContainsString(
+                'must be under a path this engine persists',
+                $e->errors()['location'][0]
+            );
+            $this->assertStringContainsString('/opt/panelalpha', $e->errors()['location'][0]);
+        }
+    }
+
+    /** The backup staging scratch is mounted, but a store there is lost: cleanup and tmpfiles. */
+    public function test_the_backup_staging_scratch_is_refused(): void
+    {
+        $request = new BackupContainerStoreRequest();
+
+        foreach (['/var/tmp/panelalpha-backup', '/var/tmp/panelalpha-backup/backups'] as $scratch) {
+            try {
+                $request->assertLocalLocationIsSafe($scratch);
+                $this->fail("{$scratch} was accepted");
+            } catch (ValidationException $e) {
+                $this->assertStringContainsString('must be under a path this engine persists', $e->errors()['location'][0]);
+            }
+        }
+    }
+
+    public function test_a_local_location_under_a_persisted_path_is_kept(): void
+    {
+        $request = new BackupContainerStoreRequest();
+
+        foreach (['/home/backups', '/opt/panelalpha/backups', '/var/www/html/storage/backups'] as $safe) {
+            $request->assertLocalLocationIsSafe($safe);
+        }
+        $this->assertTrue(true);
+    }
+
     public function test_local_driver_drops_credentials(): void
     {
         $request = new BackupContainerStoreRequest();

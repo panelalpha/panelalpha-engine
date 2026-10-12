@@ -19,33 +19,61 @@ class MysqlDumpRestoreTest extends TestCase
         ]);
     }
 
-    public function test_dump_to_gzip_runs_mysqldump_pipeline(): void
+    public function test_the_dump_runs_in_sites_db_and_is_gzipped_in_core(): void
     {
         $recorded = [];
-        $system = $this->recordingSystem($recorded, successful: true);
-        $mysql = new Mysql($system);
+        $mysql = new Mysql($this->recordingSystem($recorded, successful: true, lastLine: "-- Dump completed on 2026-10-09 12:00:00\n"));
 
         $mysql->dumpToGzip('alice_app', '/tmp/alice_app.sql.gz');
 
-        $this->assertCount(1, $recorded);
-        $this->assertSame(['sh', '-c'], array_slice($recorded[0]['cmd'], 0, 2));
-        $this->assertStringContainsString('mysqldump', $recorded[0]['cmd'][2]);
-        $this->assertStringContainsString('alice_app', $recorded[0]['cmd'][2]);
-        $this->assertSame('secret', $recorded[0]['env']['MYSQL_PWD']);
+        $this->assertCount(2, $recorded);
+        $this->assertSame(['bash', '-c'], array_slice($recorded[0]['cmd'], 0, 2));
+        $script = $recorded[0]['cmd'][2];
+        $this->assertStringStartsWith('set -o pipefail; ', $script);
+        $this->assertStringContainsString("'exec' '-T' 'sites-db'", $script);
+        $this->assertStringContainsString('mariadb-dump --single-transaction -uroot', $script);
+        $this->assertStringContainsString('alice_app', $script);
+        $this->assertStringEndsWith("| gzip -c > '/tmp/alice_app.sql.gz'", $script);
+        // The password stays inside sites-db: it is read there from the container's own environment.
+        $this->assertStringContainsString('MYSQL_PWD="$MYSQL_ROOT_PASSWORD"', $script);
+        $this->assertSame([], $recorded[0]['env']);
     }
 
-    public function test_restore_from_gzip_runs_mysql_pipeline(): void
+    public function test_a_dump_without_its_completion_line_fails_the_backup(): void
     {
         $recorded = [];
-        $system = $this->recordingSystem($recorded, successful: true);
-        $mysql = new Mysql($system);
+        $mysql = new Mysql($this->recordingSystem($recorded, successful: true, lastLine: "INSERT INTO `t` VALUES (1"));
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('the dump of alice_app is incomplete');
+
+        $mysql->dumpToGzip('alice_app', '/tmp/alice_app.sql.gz');
+    }
+
+    public function test_a_failed_dump_fails_the_backup(): void
+    {
+        $recorded = [];
+        $mysql = new Mysql($this->recordingSystem($recorded, successful: false));
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('mysqldump failed: boom');
+
+        $mysql->dumpToGzip('alice_app', '/tmp/alice_app.sql.gz');
+    }
+
+    public function test_the_restore_feeds_the_dump_to_mariadb_in_sites_db(): void
+    {
+        $recorded = [];
+        $mysql = new Mysql($this->recordingSystem($recorded, successful: true));
 
         $mysql->restoreFromGzip('alice_app', '/tmp/alice_app.sql.gz');
 
         $this->assertCount(1, $recorded);
-        $this->assertStringContainsString('gunzip', $recorded[0]['cmd'][2]);
-        $this->assertStringContainsString('mysql', $recorded[0]['cmd'][2]);
-        $this->assertStringContainsString('alice_app', $recorded[0]['cmd'][2]);
+        $script = $recorded[0]['cmd'][2];
+        $this->assertStringStartsWith("set -o pipefail; gunzip -c '/tmp/alice_app.sql.gz' | ", $script);
+        $this->assertStringContainsString("'exec' '-T' 'sites-db'", $script);
+        $this->assertStringContainsString('mariadb -uroot', $script);
+        $this->assertStringContainsString('alice_app', $script);
     }
 
     public function test_invalid_database_name_is_rejected(): void
@@ -73,13 +101,14 @@ class MysqlDumpRestoreTest extends TestCase
     /**
      * @param list<array{cmd: list<string>, env: array<string, string>}> $recorded
      */
-    private function recordingSystem(array &$recorded, bool $successful): System
+    private function recordingSystem(array &$recorded, bool $successful, string $lastLine = ''): System
     {
-        return new class ($recorded, $successful) extends System {
+        return new class ($recorded, $successful, $lastLine) extends System {
             /** @param list<array{cmd: list<string>, env: array<string, string>}> $recorded */
             public function __construct(
                 private array &$recorded,
                 private bool $successful,
+                private string $lastLine,
             ) {
             }
 
@@ -88,9 +117,10 @@ class MysqlDumpRestoreTest extends TestCase
                 $argv = is_array($cmd) ? $cmd : [$cmd];
                 $this->recorded[] = ['cmd' => $argv, 'env' => $env];
                 $successful = $this->successful;
+                $output = str_contains($argv[2] ?? '', 'tail -n 1') ? $this->lastLine : '';
 
-                return new class ($successful) extends Process {
-                    public function __construct(private bool $ok)
+                return new class ($successful, $output) extends Process {
+                    public function __construct(private bool $ok, private string $out)
                     {
                         parent::__construct(['php', '-r', '']);
                     }
@@ -107,7 +137,7 @@ class MysqlDumpRestoreTest extends TestCase
 
                     public function getOutput(): string
                     {
-                        return '';
+                        return $this->out;
                     }
                 };
             }

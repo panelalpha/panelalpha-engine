@@ -32,7 +32,7 @@ trait RecordsWebserverApply
             {
             }
 
-            public function execOnHost(string|array $cmd, array $env = []): string
+            public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 $cmd = (array) $cmd;
                 if (($cmd[0] ?? null) !== 'ss') {

@@ -2,9 +2,11 @@
 
 namespace App\Jobs;
 
+use App\Exceptions\DeployAlreadyRunningException;
 use App\Jobs\Concerns\AttachTask;
 use App\Models\Backup as BackupRecord;
 use App\Models\User;
+use App\Support\JobBudget;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -23,7 +25,7 @@ class CreateBackup implements ShouldQueue
 
     public int $tries = 1;
 
-    public int $timeout = 7200;
+    public int $timeout = JobBudget::SECONDS;
 
     public function __construct(public int $backupId)
     {
@@ -38,18 +40,10 @@ class CreateBackup implements ShouldQueue
         $this->runTask(function (): void {
             $record = BackupRecord::query()->find($this->backupId);
             if ($record === null) {
-                return;
+                throw new RuntimeException('The backup no longer exists.');
             }
 
-            $user = User::query()->find($record->user_id);
-            if ($user === null) {
-                $record->setBackupStatus('failed');
-                $record->error = 'Backup user not found';
-                $record->save();
-                throw new RuntimeException('Backup user not found');
-            }
-
-            $user->project()->backup($record)->run();
+            $this->runBackup($this->ownerOf($record), $record);
 
             $record->refresh();
             if ($record->backupStatus() === 'failed') {
@@ -58,16 +52,44 @@ class CreateBackup implements ShouldQueue
         });
     }
 
+    private function ownerOf(BackupRecord $record): User
+    {
+        $user = User::query()->find($record->user_id);
+        if ($user === null) {
+            $this->recordFailure($record, 'Backup user not found');
+            throw new RuntimeException('Backup user not found');
+        }
+
+        return $user;
+    }
+
+    /**
+     * A deploy, backup or restore already holding the lock fails the row too,
+     * or a poller would see it stay `pending`.
+     */
+    private function runBackup(User $user, BackupRecord $record): void
+    {
+        try {
+            $user->project()->backup($record)->run();
+        } catch (DeployAlreadyRunningException $e) {
+            $this->recordFailure($record, $e->getMessage());
+
+            throw new RuntimeException($e->getMessage(), 0, $e);
+        }
+    }
+
+    private function recordFailure(BackupRecord $record, string $error): void
+    {
+        $record->setBackupStatus('failed');
+        $record->error = $error;
+        $record->save();
+    }
+
     public function failed(?Throwable $e): void
     {
         $record = BackupRecord::query()->find($this->backupId);
-        if ($record !== null) {
-            $status = $record->backupStatus();
-            if (!in_array($status, ['completed', 'failed'], true)) {
-                $record->setBackupStatus('failed');
-                $record->error = $e?->getMessage() ?? 'Backup job failed';
-                $record->save();
-            }
+        if ($record !== null && !in_array($record->backupStatus(), ['completed', 'failed'], true)) {
+            $this->recordFailure($record, $e?->getMessage() ?? 'Backup job failed');
         }
 
         $task = $this->task();

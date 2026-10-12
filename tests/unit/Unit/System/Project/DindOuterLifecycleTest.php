@@ -93,7 +93,7 @@ class DindOuterLifecycleTest extends TestCase
                 return false;
             }
 
-            public function execOnHost(string|array $cmd, array $env = []): string
+            public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 return "1000\n";
             }
@@ -330,7 +330,7 @@ class DindOuterLifecycleTest extends TestCase
                 return false;
             }
 
-            public function execOnHost(string|array $cmd, array $env = []): string
+            public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 if (is_array($cmd) && ($cmd[0] ?? '') === 'id') {
                     return "1000\n";

@@ -2,6 +2,8 @@
 
 namespace Tests\Unit\System\Project\Backup;
 
+use App\Exceptions\DeployAlreadyRunningException;
+use App\Lib\Deploy\DeployLog\DeployLock;
 use App\Models\Backup as BackupRecord;
 use App\Models\BackupContainer;
 use App\Models\BackupItem;
@@ -277,7 +279,7 @@ class BackupCreateTest extends TestCase
                 return '';
             }
 
-            public function execOnHost(string|array $cmd, array $env = []): string
+            public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 return '';
             }
@@ -312,6 +314,69 @@ class BackupCreateTest extends TestCase
                 };
             }
         };
+    }
+
+    /**
+     * engine#840: while a backup runs, the account's deploy lock is held, so a
+     * deploy or push started beside it fails instead of tarring a half-written
+     * project. The lock is released when the backup ends.
+     */
+    public function test_a_backup_holds_and_releases_the_deploy_lock(): void
+    {
+        $user = $this->makeUser('alice');
+        $container = $this->makeContainer();
+        $storage = new FakeStorage(failPutOn: 1);
+        $project = $this->project($user);
+        $record = BackupRecord::prepare($user, $container, 'artisan');
+
+        $heldDuringRun = null;
+        $holderDuringRun = null;
+        $backup = new BackupDouble(
+            $project,
+            $record,
+            $storage,
+            onComposeStop: function () use (&$heldDuringRun, &$holderDuringRun): void {
+                $heldDuringRun = \App\Lib\Deploy\DeployLog\DeployLogger::isLockedFor('alice');
+                $holderDuringRun = DeployLock::heldBy('alice');
+            },
+        );
+
+        try {
+            $backup->run();
+        } catch (\Throwable) {
+        }
+
+        $this->assertTrue($heldDuringRun, 'the deploy lock was not held while the stack was stopped');
+        $this->assertSame(DeployLock::HOLDER_BACKUP, $holderDuringRun, 'the lock does not name the backup holding it');
+        $this->assertFalse(
+            \App\Lib\Deploy\DeployLog\DeployLogger::isLockedFor('alice'),
+            'the deploy lock was not released when the backup ended',
+        );
+    }
+
+    /**
+     * engine#840: a deploy already holding the lock makes the backup fail with
+     * the lock conflict rather than stopping the stack under the deploy.
+     */
+    public function test_a_backup_is_refused_while_a_deploy_holds_the_lock(): void
+    {
+        $user = $this->makeUser('alice');
+        $container = $this->makeContainer();
+        $storage = new FakeStorage();
+        $project = $this->project($user);
+        $record = BackupRecord::prepare($user, $container, 'artisan');
+        $backup = new BackupDouble($project, $record, $storage);
+
+        $deployLock = DeployLock::acquireFor('alice');
+
+        try {
+            $this->expectException(DeployAlreadyRunningException::class);
+            $backup->run();
+        } finally {
+            $deployLock->release();
+        }
+
+        $this->assertNotContains('composeStop', $backup->calls);
     }
 
     private function makeUser(string $username, ?string $template = 'dind'): User

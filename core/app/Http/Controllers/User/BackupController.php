@@ -9,6 +9,7 @@ use App\Http\Resources\BackupResource;
 use App\Jobs\CreateBackup;
 use App\Jobs\DeleteBackup;
 use App\Jobs\RestoreBackup;
+use App\Lib\Project\ProjectRebuild;
 use App\Models\Backup as BackupRecord;
 use App\Models\BackupContainer;
 use App\Models\Task;
@@ -65,11 +66,9 @@ class BackupController extends Controller
     {
         $user = $this->projectOr404($username);
 
-        if ($user->getTemplate() !== 'dind') {
-            abort(new JsonResponse([
-                'message' => 'not supported',
-            ], 422));
-        }
+        $this->refuseNonContainerProject($user);
+
+        $this->assertIdle($user);
 
         $validated = $request->validate([
             'container' => ['required', 'string'],
@@ -91,11 +90,7 @@ class BackupController extends Controller
         );
         CreateBackup::dispatch($backup->id)->attachTask($task);
 
-        $backup->refresh();
-        $status = $backup->async_status ?? [];
-        $status['task_id'] = $task->id;
-        $backup->async_status = $status;
-        $backup->save();
+        $this->recordTask($backup, $task);
         $backup->load(['container', 'items']);
 
         return (new BackupResource($backup))
@@ -121,14 +116,7 @@ class BackupController extends Controller
     {
         $user = $this->projectOr404($username);
 
-        $backup = BackupRecord::query()->find($id);
-        if ($backup === null || $backup->user_id !== $user->id) {
-            abort(new JsonResponse([
-                'message' => 'Backup not found',
-            ], 404));
-        }
-
-        $backup->loadMissing(['container', 'items']);
+        $backup = $this->backupOr404($user, $id);
 
         return new BackupResource($backup);
     }
@@ -160,20 +148,9 @@ class BackupController extends Controller
     {
         $user = $this->projectOr404($username);
 
-        if ($user->getTemplate() !== 'dind') {
-            abort(new JsonResponse([
-                'message' => 'not supported',
-            ], 422));
-        }
+        $this->refuseNonContainerProject($user);
 
-        $backup = BackupRecord::query()->find($id);
-        if ($backup === null || $backup->user_id !== $user->id) {
-            abort(new JsonResponse([
-                'message' => 'Backup not found',
-            ], 404));
-        }
-
-        $backup->loadMissing(['container', 'items']);
+        $backup = $this->backupOr404($user, $id);
 
         if ($backup->backupStatus() !== 'completed' || $backup->items->isEmpty()) {
             abort(new JsonResponse([
@@ -183,6 +160,8 @@ class BackupController extends Controller
 
         $only = $request->onlyFilter();
         $exclude = $request->excludeFilter();
+
+        $this->assertIdle($user);
 
         $backup->restore_details = ['only' => $only, 'exclude' => $exclude];
         $backup->setRestoreStatus('pending');
@@ -197,11 +176,7 @@ class BackupController extends Controller
         );
         RestoreBackup::dispatch($backup->id, $only, $exclude)->attachTask($task);
 
-        $backup->refresh();
-        $status = $backup->async_status ?? [];
-        $status['task_id'] = $task->id;
-        $backup->async_status = $status;
-        $backup->save();
+        $this->recordTask($backup, $task);
 
         return (new BackupResource($backup->fresh(['container', 'items'])))
             ->response()
@@ -226,14 +201,7 @@ class BackupController extends Controller
     {
         $user = $this->projectOr404($username);
 
-        $backup = BackupRecord::query()->find($id);
-        if ($backup === null || $backup->user_id !== $user->id) {
-            abort(new JsonResponse([
-                'message' => 'Backup not found',
-            ], 404));
-        }
-
-        $backup->loadMissing(['container', 'items']);
+        $backup = $this->backupOr404($user, $id);
 
         $backup->setDeleteStatus('pending');
         $backup->error = null;
@@ -247,14 +215,49 @@ class BackupController extends Controller
         );
         DeleteBackup::dispatch($backup->id)->attachTask($task);
 
+        $this->recordTask($backup, $task);
+
+        return (new BackupResource($backup->fresh(['container', 'items'])))
+            ->response()
+            ->setStatusCode(202);
+    }
+
+    private function refuseNonContainerProject(User $user): void
+    {
+        if ($user->getTemplate() !== 'dind') {
+            abort(new JsonResponse([
+                'message' => 'not supported',
+            ], 422));
+        }
+    }
+
+    /** A 409 now rather than a queued task that fails: backup and restore stop the stack and need the deploy lock. */
+    private function assertIdle(User $user): void
+    {
+        app(ProjectRebuild::class)->assertIdle($user);
+    }
+
+    /** The project's own backup with its container and items loaded, or a 404. */
+    private function backupOr404(User $user, int $id): BackupRecord
+    {
+        $backup = BackupRecord::query()->find($id);
+        if ($backup === null || $backup->user_id !== $user->id) {
+            abort(new JsonResponse([
+                'message' => 'Backup not found',
+            ], 404));
+        }
+
+        $backup->loadMissing(['container', 'items']);
+
+        return $backup;
+    }
+
+    private function recordTask(BackupRecord $backup, Task $task): void
+    {
         $backup->refresh();
         $status = $backup->async_status ?? [];
         $status['task_id'] = $task->id;
         $backup->async_status = $status;
         $backup->save();
-
-        return (new BackupResource($backup->fresh(['container', 'items'])))
-            ->response()
-            ->setStatusCode(202);
     }
 }

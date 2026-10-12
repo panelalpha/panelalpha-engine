@@ -112,4 +112,30 @@ class CreateBackupJobTest extends TestCase
             return $pushed->backupId === $backup->id && $pushed->taskId === $task->id;
         });
     }
+
+    /**
+     * engine#843: a backup row deleted between queueing and running used to
+     * make the job `return` and the task be marked completed -- a client was
+     * told the backup was taken when nothing ran.
+     */
+    public function test_a_vanished_backup_row_fails_the_task(): void
+    {
+        $task = Task::start(
+            jobType: CreateBackup::class,
+            queue: 'default',
+            username: 'alice',
+            details: ['backup_id' => 999, 'action' => 'backup'],
+        );
+        $job = (new CreateBackup(999))->attachTask($task);
+
+        try {
+            $this->app->call([$job, 'handle']);
+        } catch (\Throwable) {
+            // runTask() records the failure on the task.
+        }
+
+        $task->refresh();
+        $this->assertSame(Task::STATUS_FAILED, $task->status);
+        $this->assertSame('The backup no longer exists.', $task->details['error'] ?? null);
+    }
 }

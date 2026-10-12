@@ -125,7 +125,7 @@ SS;
     public function test_a_listing_that_cannot_be_read_refuses_nothing(): void
     {
         $system = new class extends System {
-            public function execOnHost(string|array $cmd, array $env = []): string
+            public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 throw new \RuntimeException('nsenter: permission denied');
             }
@@ -152,7 +152,7 @@ SS;
             {
             }
 
-            public function execOnHost(string|array $cmd, array $env = []): string
+            public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 $cmd = (array) $cmd;
                 TestCase::assertSame(['ss', '-Hln'], array_slice($cmd, 0, 2));

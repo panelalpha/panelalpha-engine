@@ -91,13 +91,8 @@ final class Local extends AbstractStorage
             RecursiveIteratorIterator::CHILD_FIRST
         );
 
-        /** @var SplFileInfo $entry */
         foreach ($iterator as $entry) {
-            $path = $entry->getPathname();
-            if ($path === $root || !str_starts_with($path, $root . '/')) {
-                continue;
-            }
-            $entry->isDir() ? @rmdir($path) : @unlink($path);
+            $this->removeBelowRoot($entry, $root);
         }
 
         if (is_dir($dir) && $dir !== $root) {
@@ -144,6 +139,16 @@ final class Local extends AbstractStorage
         @unlink($probe);
     }
 
+    private function removeBelowRoot(SplFileInfo $entry, ?string $root): void
+    {
+        $path = $entry->getPathname();
+        if ($path === $root || !str_starts_with($path, $root . '/')) {
+            return;
+        }
+
+        $entry->isDir() ? @rmdir($path) : @unlink($path);
+    }
+
     private function rootRealPath(): ?string
     {
         $real = realpath($this->root);
@@ -167,7 +172,7 @@ final class Local extends AbstractStorage
         if ($dirReal === false) {
             return $candidate;
         }
-        if ($dirReal !== $root && !str_starts_with($dirReal, $root . '/')) {
+        if (!self::isInside($dirReal, $root)) {
             throw new InvalidArgumentException('Prefix must stay inside the storage root.');
         }
 
@@ -182,24 +187,37 @@ final class Local extends AbstractStorage
         }
 
         $root = $this->rootRealPath();
-        $path = ($root ?? rtrim($this->root, '/')) . '/' . $relative;
+        if ($root === null) {
+            return rtrim($this->root, '/') . '/' . $relative;
+        }
 
-        if ($root !== null) {
-            $parent = dirname($path);
-            if (is_dir($parent)) {
-                $parentReal = realpath($parent);
-                if ($parentReal === false) {
-                    throw new InvalidArgumentException('Key must stay inside the storage root.');
-                }
-                $path = $parentReal . '/' . basename($path);
-            }
+        return $this->confinedToRoot($root . '/' . $relative, $root);
+    }
 
-            if ($path !== $root && !str_starts_with($path, $root . '/')) {
+    /**
+     * The path with its existing parent resolved through symlinks, refused when that lands outside the root.
+     */
+    private function confinedToRoot(string $path, string $root): string
+    {
+        $parent = dirname($path);
+        if (is_dir($parent)) {
+            $parentReal = realpath($parent);
+            if ($parentReal === false) {
                 throw new InvalidArgumentException('Key must stay inside the storage root.');
             }
+            $path = $parentReal . '/' . basename($path);
+        }
+
+        if (!self::isInside($path, $root)) {
+            throw new InvalidArgumentException('Key must stay inside the storage root.');
         }
 
         return $path;
+    }
+
+    private static function isInside(string $path, string $root): bool
+    {
+        return $path === $root || str_starts_with($path, $root . '/');
     }
 
     private function ensureWritableDirectory(string $dir): void
@@ -212,7 +230,11 @@ final class Local extends AbstractStorage
             return;
         }
 
-        $this->privilegedEnsureWritable($dir);
+        try {
+            $this->privilegedEnsureWritable($dir);
+        } catch (RuntimeException $e) {
+            throw new RuntimeException("Could not create backup storage directory {$dir}: " . $e->getMessage(), 0, $e);
+        }
 
         if (!is_dir($dir) || !is_writable($dir)) {
             throw new RuntimeException("Could not create backup storage directory: {$dir}");
@@ -221,9 +243,9 @@ final class Local extends AbstractStorage
 
     private function privilegedEnsureWritable(string $dir): void
     {
-        $root = rtrim(str_replace('\\', '/', $this->root), '/');
-        $dir = rtrim(str_replace('\\', '/', $dir), '/');
-        if ($dir !== $root && !str_starts_with($dir, $root . '/')) {
+        $root = self::normalizedDir($this->root);
+        $dir = self::normalizedDir($dir);
+        if (!self::isInside($dir, $root)) {
             throw new RuntimeException("Refusing to create directory outside storage root: {$dir}");
         }
         if (str_contains($dir, '..')) {
@@ -232,18 +254,25 @@ final class Local extends AbstractStorage
 
         $this->assertSafeToChown($root);
         $this->sudo(['mkdir', '-p', $dir]);
+        $this->handToWebUserUpTo($dir, $root);
+    }
 
+    /**
+     * Gives www-data every directory from $dir up to the storage root, stopping short of `/`.
+     */
+    private function handToWebUserUpTo(string $dir, string $root): void
+    {
         $cursor = $dir;
         while (true) {
             $this->assertSafeToChown($cursor);
             $this->sudo(['chown', 'www-data:www-data', $cursor]);
             $this->sudo(['chmod', '0775', $cursor]);
             if ($cursor === $root) {
-                break;
+                return;
             }
             $parent = dirname($cursor);
             if ($parent === $cursor || $parent === '/') {
-                break;
+                return;
             }
             $cursor = $parent;
         }
@@ -251,10 +280,15 @@ final class Local extends AbstractStorage
 
     private function assertSafeToChown(string $path): void
     {
-        $path = rtrim(str_replace('\\', '/', $path), '/');
+        $path = self::normalizedDir($path);
         if (in_array($path, self::CHOWN_BLOCKLIST, true)) {
             throw new RuntimeException("Refusing to change ownership of {$path}");
         }
+    }
+
+    private static function normalizedDir(string $path): string
+    {
+        return rtrim(str_replace('\\', '/', $path), '/');
     }
 
     /**

@@ -152,7 +152,7 @@ class GuardHostDiskCommandTest extends TestCase
                 return '';
             }
 
-            public function execOnHost(string|array $cmd, array $env = []): string
+            public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 $path = is_array($cmd) ? (string) end($cmd) : '';
                 $size = 100 * 1048576;

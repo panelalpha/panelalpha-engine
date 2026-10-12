@@ -185,7 +185,7 @@ class ProjectSftpTest extends TestCase
                 return true;
             }
 
-            public function execOnHost(string|array $cmd, array $env = []): string
+            public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
                 if (preg_match('/id -u (.+)$/', $line, $m)) {

@@ -65,7 +65,7 @@ class StepDiskLimitTest extends TestCase
             {
             }
 
-            public function execOnHost(string|array $cmd, array $env = []): string
+            public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
                 $this->asked[] = $line;
