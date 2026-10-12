@@ -22,6 +22,7 @@ export * from './backup.types';
 export * from './git.types';
 export * from './tunnel.types';
 export * from './project-setting.types';
+export * from './env-var.types';
 export * from './task.types';
 export * from './bug-report.types';
 export * from './vault.types';

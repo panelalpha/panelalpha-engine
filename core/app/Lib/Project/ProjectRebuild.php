@@ -79,14 +79,14 @@ class ProjectRebuild
     }
 
     /**
-     * The deploy of this project that is queued or running: a create still
-     * deploying, a rebuild or an archive deploy.
+     * The deploy or env var apply of this project that is queued or running:
+     * any work that takes the account's deploy lock.
      */
     public static function pendingTask(string $username): ?Task
     {
         return Task::query()
             ->where('username', $username)
-            ->whereIn('job_type', Task::DEPLOY_JOB_TYPES)
+            ->whereIn('job_type', Task::DEPLOY_LOCK_JOB_TYPES)
             ->whereNotIn('status', Task::TERMINAL_STATUSES)
             ->orderByDesc('id')
             ->first();

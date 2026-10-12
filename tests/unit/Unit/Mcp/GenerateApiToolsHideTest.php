@@ -24,7 +24,14 @@ class GenerateApiToolsHideTest extends TestCase
         $this->dir = 'storage/framework/testing/mcp-hide-' . bin2hex(random_bytes(4));
         File::makeDirectory(base_path($this->dir . '/out'), 0755, true);
         file_put_contents(base_path($this->dir . '/spec.json'), json_encode(['paths' => [
-            '/things' => ['get' => ['summary' => 'List things', 'tags' => ['Things']]],
+            '/things' => ['get' => [
+                'summary' => 'List things',
+                'tags' => ['Things'],
+                'parameters' => [
+                    ['name' => 'page', 'in' => 'query', 'schema' => ['type' => 'integer']],
+                    ['name' => 'reveal', 'in' => 'query', 'schema' => ['type' => 'string'], 'x-mcp-hide' => true],
+                ],
+            ]],
             '/things/stream' => ['get' => ['summary' => 'Stream things', 'tags' => ['Things'], 'x-mcp-hide' => true]],
         ]]));
     }
@@ -54,6 +61,19 @@ class GenerateApiToolsHideTest extends TestCase
         $registry = (string)file_get_contents(base_path($this->dir . '/out/generated-tools.php'));
         $this->assertStringContainsString('ThingListTool', $registry);
         $this->assertStringNotContainsString('Stream', $registry);
+    }
+
+    /**
+     * A parameter with x-mcp-hide stays on the REST operation and is not an
+     * argument of the generated tool.
+     */
+    public function test_a_hidden_query_parameter_is_not_offered(): void
+    {
+        $this->assertSame(0, $this->generate(['GET /things' => 'thing_list']));
+
+        $tool = (string)file_get_contents(base_path($this->dir . '/out/Things/ThingListTool.php'));
+        $this->assertStringContainsString('page', $tool);
+        $this->assertStringNotContainsString('reveal', $tool);
     }
 
     public function test_naming_a_hidden_operation_is_refused_as_stale(): void

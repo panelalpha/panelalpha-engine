@@ -112,6 +112,8 @@ return [
     \App\Mcp\Tools\Api\Tunnels\TunnelDeleteTool::class,
     \App\Mcp\Tools\Api\Usage\DomainVisitorsTool::class,
     \App\Mcp\Tools\Api\Usage\DomainVisitorsBreakdownTool::class,
+    \App\Mcp\Tools\Api\Projects\EnvVarListTool::class,
+    \App\Mcp\Tools\Api\Projects\EnvVarSetTool::class,
     \App\Mcp\Tools\Api\Files\FileChmodTool::class,
     \App\Mcp\Tools\Api\Files\FileCopyTool::class,
     \App\Mcp\Tools\Api\Files\FileDownloadTool::class,

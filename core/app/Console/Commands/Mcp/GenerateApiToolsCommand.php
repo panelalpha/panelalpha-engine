@@ -527,6 +527,14 @@ class GenerateApiToolsCommand extends Command
             $in = $p['in'] ?? 'query';
             $name = $p['name'];
 
+            // x-mcp-hide: a parameter the API keeps that the tool does not
+            // offer. Marked seen so a body field of the same name is dropped
+            // too rather than becoming the argument.
+            if (($p['x-mcp-hide'] ?? false) === true) {
+                $seen[$name] = true;
+                continue;
+            }
+
             if ($in === 'path') {
                 $path[] = $name;
             } elseif ($in === 'query') {

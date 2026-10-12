@@ -13,6 +13,7 @@ use App\Http\Controllers\SystemController;
 use App\Http\Controllers\User\CronJobController;
 use App\Http\Controllers\User\DeployHookController;
 use App\Http\Controllers\User\Domain\LogFileController;
+use App\Http\Controllers\User\EnvVarsController;
 use App\Http\Controllers\User\DomainController as UserDomainController;
 use App\Http\Controllers\User\ProjectSettingController;
 use App\Http\Controllers\User\ProjectPasswordController;
@@ -137,6 +138,9 @@ $projectRoutes = function (): void {
     Route::put('/{username}/password', [ProjectPasswordController::class, 'update']);
     Route::delete('/{username}/password', [ProjectPasswordController::class, 'destroy']);
     Route::delete('/{username}', [UserController::class, 'destroy']);
+
+    Route::get('/{username}/env-vars', [EnvVarsController::class, 'index']);
+    Route::put('/{username}/env-vars', [EnvVarsController::class, 'update']);
 
     Route::get('/{username}/usage', [UsageController::class, 'getUsage']);
     Route::get('/{username}/bandwidth', [UsageController::class, 'getBandwidth']);

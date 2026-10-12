@@ -19,6 +19,9 @@ final class DeployLock
 
     public const HOLDER_RESTORE = 'restore';
 
+    /** What an env var apply writes, so a refusal without a task can still name who holds the lock. */
+    public const HOLDER_ENV_VARS = 'env_vars';
+
     /** @var resource|null */
     private $handle = null;
 
@@ -99,6 +102,7 @@ final class DeployLock
         return match (self::heldBy($username)) {
             self::HOLDER_BACKUP => 'A backup is already running for this user.',
             self::HOLDER_RESTORE => 'A restore is already running for this user.',
+            self::HOLDER_ENV_VARS => 'The environment variables of this user are being applied.',
             default => 'A deployment is already running for this user.',
         };
     }

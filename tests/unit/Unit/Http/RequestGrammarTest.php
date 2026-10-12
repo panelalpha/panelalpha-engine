@@ -3,6 +3,7 @@
 namespace Tests\Unit\Http;
 
 use App\Http\Requests\DomainUpdateRequest;
+use App\Http\Requests\EnvVarsUpdateRequest;
 use App\Http\Requests\FtpAccountStoreRequest;
 use App\Http\Requests\MysqlDatabaseStoreRequest;
 use App\Http\Requests\MysqlUserRenameRequest;
@@ -169,6 +170,31 @@ class RequestGrammarTest extends TestCase
             'database user rename' => [MysqlUserRenameRequest::class, 'name'],
             'sftp account' => [SftpAccountStoreRequest::class, 'username'],
         ];
+    }
+
+    /** A name that reaches `.env` may not spell a second line or a shell metacharacter. */
+    #[DataProvider('configEnvVarNames')]
+    public function test_env_vars_rejects_a_key_that_is_not_a_name(string $key): void
+    {
+        $this->assertArrayHasKey('env_vars', $this->errors(new EnvVarsUpdateRequest(), ['env_vars' => [$key => 'value']]), json_encode($key));
+    }
+
+    public static function configEnvVarNames(): array
+    {
+        return [
+            'leading digit' => ['1BAD'],
+            'space' => ['MY KEY'],
+            'newline' => ["FOO\nBAR"],
+            'trailing newline' => ["FOO\n"],
+            'equals' => ['A=B'],
+            'dash' => ['A-B'],
+            'empty' => [''],
+        ];
+    }
+
+    public function test_env_vars_accepts_a_plain_name(): void
+    {
+        $this->assertSame([], $this->errors(new EnvVarsUpdateRequest(), ['env_vars' => ['APP_ENV' => 'production']]));
     }
 
     /** @return array<string, mixed> */

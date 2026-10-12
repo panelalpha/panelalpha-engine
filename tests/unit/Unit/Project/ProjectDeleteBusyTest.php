@@ -3,6 +3,7 @@
 namespace Tests\Unit\Project;
 
 use App\Exceptions\ProjectBusyException;
+use App\Jobs\ApplyEnvVars;
 use App\Jobs\DeployProject;
 use App\Jobs\RebuildProject;
 use App\Lib\Deploy\DeployLog\DeployLock;
@@ -50,6 +51,32 @@ class ProjectDeleteBusyTest extends TestCase
                 . "Cancel it (POST /tasks/{$this->deploy->id}/cancel) or wait for it to finish.",
         ]);
         $this->assertTrue(User::existsByUsername($this->name));
+    }
+
+    /**
+     * A running env var apply holds the account's deploy lock, so a delete
+     * refuses rather than tear the account down under it.
+     */
+    public function test_a_running_env_apply_makes_a_delete_refuse(): void
+    {
+        $name = $this->name . 'ev';
+        $this->beforeApplicationDestroyed(static fn () => DeployLogger::deleteUserLogs($name));
+        $this->makeUser($name);
+        $task = Task::start(jobType: ApplyEnvVars::class, queue: 'default', username: $name, details: [
+            'action' => 'env_apply',
+            'keys' => [],
+        ]);
+        $task->markRunning('job-env');
+        $lock = DeployLock::acquireFor($name, DeployLock::HOLDER_ENV_VARS);
+
+        try {
+            $response = $this->deleteJson("/api/projects/{$name}");
+        } finally {
+            $lock->release();
+        }
+
+        $response->assertStatus(409);
+        $this->assertTrue(User::existsByUsername($name));
     }
 
     public function test_a_refusal_is_not_logged_as_an_error(): void
@@ -149,7 +176,7 @@ class ProjectDeleteBusyTest extends TestCase
         $rebuild = app(ProjectRebuild::class);
         $task = $rebuild->pendingTask($name);
 
-        // pendingTask() is the deploy subset, so it does not see the backup...
+        // pendingTask() is the deploy-lock subset, so it does not see the backup...
         $this->assertNull($task);
         // ...but assertIdle() refuses because of it.
         $this->expectException(ProjectBusyException::class);

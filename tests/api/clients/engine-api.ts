@@ -11,6 +11,7 @@ import { BackupsApi } from './resources/backups.api';
 import { GitApi } from './resources/git.api';
 import { TunnelsApi } from './resources/tunnels.api';
 import { ProjectSettingsApi } from './resources/project-settings.api';
+import { EnvVarsApi } from './resources/env-vars.api';
 import { TasksApi } from './resources/tasks.api';
 import { BugReportsApi } from './resources/bug-reports.api';
 import { CronApi } from './resources/cron.api';
@@ -61,6 +62,7 @@ export interface EngineApi
     GitApi,
     TunnelsApi,
     ProjectSettingsApi,
+    EnvVarsApi,
     TasksApi,
     BugReportsApi,
     VaultApi {}
@@ -101,6 +103,7 @@ export class EngineApi extends EngineApiBase {
     git: GitApi;
     tunnels: TunnelsApi;
     projectSettings: ProjectSettingsApi;
+    envVars: EnvVarsApi;
     tasks: TasksApi;
     bugReports: BugReportsApi;
     vault: VaultApi;
@@ -136,6 +139,7 @@ export class EngineApi extends EngineApiBase {
       git: new GitApi(transport),
       tunnels: new TunnelsApi(transport),
       projectSettings: new ProjectSettingsApi(transport),
+      envVars: new EnvVarsApi(transport),
       tasks: new TasksApi(transport),
       bugReports: new BugReportsApi(transport),
       vault: new VaultApi(transport),

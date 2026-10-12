@@ -46,6 +46,19 @@ class Task extends Model
         \App\Jobs\RebuildProject::class,
     ];
 
+    /**
+     * Jobs that run under the account's deploy lock: a deploy, and an env var
+     * apply that recreates its services. A delete or another deploy refuses
+     * while one is queued or running.
+     *
+     * @var list<class-string>
+     */
+    public const DEPLOY_LOCK_JOB_TYPES = [
+        \App\Jobs\DeployProject::class,
+        \App\Jobs\RebuildProject::class,
+        \App\Jobs\ApplyEnvVars::class,
+    ];
+
     /** The message a refused `since` answers with, on the API and over MCP. */
     public const SINCE_EXPECTED = 'since must be unix seconds or an ISO-8601 datetime';
 

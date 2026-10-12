@@ -82,6 +82,8 @@ return [
     // Cloudflare API token a cloudflare tunnel needs. Secrets read back
     // redacted.
     'GET /projects/{username}/settings' => 'project_setting_list',
+    'GET /projects/{username}/env-vars' => 'env_var_list',
+    'PUT /projects/{username}/env-vars' => 'env_var_set',
     'GET /projects/{username}/settings/{key}' => 'project_setting_get',
     'PUT /projects/{username}/settings/{key}' => 'project_setting_set',
     'DELETE /projects/{username}/settings/{key}' => 'project_setting_delete',

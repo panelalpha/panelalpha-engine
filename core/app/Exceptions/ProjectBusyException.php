@@ -5,6 +5,7 @@ namespace App\Exceptions;
 use App\Jobs\CreateBackup;
 use App\Jobs\CreateStaging;
 use App\Jobs\DeleteBackup;
+use App\Jobs\ApplyEnvVars;
 use App\Jobs\DeployProject;
 use App\Jobs\PushState;
 use App\Jobs\RebuildProject;
@@ -104,6 +105,7 @@ class ProjectBusyException extends \RuntimeException
             CreateStaging::class => 'staging copy',
             PushState::class => 'push',
             CreateBackup::class => 'backup',
+            ApplyEnvVars::class => 'environment change',
             RestoreBackup::class => 'restore',
             DeleteBackup::class => 'backup delete',
             default => class_basename((string) $task->job_type),

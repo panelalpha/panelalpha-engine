@@ -22,6 +22,7 @@ import { BackupsApi } from './resources/backups.api';
 import { GitApi } from './resources/git.api';
 import { TunnelsApi } from './resources/tunnels.api';
 import { ProjectSettingsApi } from './resources/project-settings.api';
+import { EnvVarsApi } from './resources/env-vars.api';
 import { TasksApi } from './resources/tasks.api';
 import { BugReportsApi } from './resources/bug-reports.api';
 import { SystemApi } from './resources/system.api';
@@ -57,6 +58,7 @@ export const ENGINE_API_CLIENTS = [
   GitApi,
   TunnelsApi,
   ProjectSettingsApi,
+  EnvVarsApi,
   TasksApi,
   BugReportsApi,
   VaultApi,
