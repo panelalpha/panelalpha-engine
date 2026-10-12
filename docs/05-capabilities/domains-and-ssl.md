@@ -118,6 +118,128 @@ Covered on the [Cloudflare](cloudflare.md#troubleshooting) page.
 **"Let's Encrypt rate limit."**
 Let's Encrypt caps how many new certificates you can get per week. If you have been retrying a failing request, stop, fix the DNS, and wait - retrying burns the allowance without getting you a certificate.
 
+## More requests to try
+
+**Mode** is the lowest permission mode that allows it: read, modify or full ([Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do)). Replace `shop.example.com` with a name whose DNS already points at the test engine. Examples assume a project named `tshop`.
+
+**Add a domain and get the padlock**
+
+```text
+Add the domain shop.example.com to tshop and request a Let's Encrypt
+certificate for it.
+```
+
+Mode: modify. Tools: `domain_create`, `ssl_cert_request`, `ssl_cert_get`. Check: the domain is listed, the certificate is installed, and `https://shop.example.com/` opens with no warning.
+
+**Dry run before the real request**
+
+```text
+Try the certificate request for shop.example.com against Let's Encrypt staging
+first, without installing anything. Then do the real one.
+```
+
+Mode: modify. Tools: `ssl_cert_request` with `staging` or `dry_run`. Check: the dry run installs nothing, and the real request follows only after it passes. A name that does not resolve here fails with a DNS reason, and the assistant stops retrying (rate limit).
+
+**Domain details and search**
+
+```text
+List the domains of tshop. Show the details of shop.example.com. Which project
+owns the name www.shop.example.com, if any?
+```
+
+Mode: read. Tools: `domain_list`, `domain_get`, `domain_find`. Check: `domain_find` answers for the whole engine, not one project.
+
+**Redirects, document root, aliases**
+
+```text
+On shop.example.com: force HTTPS, add the alias www.shop.example.com, and
+redirect all other requests to https://www.shop.example.com.
+```
+
+Mode: modify. Tools: `domain_update` with `force_https_redirect`, `aliases`, `redirect_enabled`, `redirect_url`. Check: a request over plain HTTP is redirected, and the new setting reads back from `domain_get`.
+
+**Subdomain and addon domain**
+
+```text
+Add the subdomain blog.shop.example.com to tshop, and the separate domain
+second-example.com as an addon domain, without requesting certificates yet.
+```
+
+Mode: modify. Tools: `domain_create` with `type`, `parent_domain`, `no_ssl`. Check: both are listed with the right type, and neither has a certificate yet (`ssl_cert_list`).
+
+**Certificates in one view**
+
+```text
+Which domains of tshop have a certificate, who issued it, and when does it
+expire?
+```
+
+Mode: read. Tools: `ssl_cert_list`, `ssl_cert_get`. Check: one row per domain, with the expiry date.
+
+**Your own certificate**
+
+```text
+Install my own certificate on shop.example.com. The certificate, the key and
+the chain are the files in /project/certs of tshop.
+```
+
+Mode: modify. Tools: `file_download`, `ssl_cert_install` with `cert`, `key`, `ca`, `ssl_cert_get`. Check: the key is not echoed back in the answer, and `ssl_cert_get` shows the new certificate.
+
+**Name under panelalpha.online, with sibling names**
+
+```text
+Give tshop a public panelalpha.online name with a trusted certificate, then add
+api-tshop as an extra name beside it. Show me both.
+```
+
+Mode: modify. Tools: `tunnel_create` with `provider` panelalpha, `tunnel_list`. Check: both names open over HTTPS, and removing the extra name with `tunnel_delete` releases it so the label can be taken again.
+
+**HTTP-01 challenges by hand**
+
+```text
+For shop.example.com, create an HTTP-01 challenge with token test-token and
+content test-content. List them, read that one, delete it, then delete all of
+them.
+```
+
+Mode: full. Tools: `acme_challenge_create`, `acme_challenge_list`, `acme_challenge_get`, `acme_challenge_delete`, `acme_challenge_delete_all`. Check: each call reads back, and `acme_challenge_list` is empty at the end.
+
+**Mail DNS**
+
+```text
+Check the mail DNS records for shop.example.com. My relay's DKIM selector is
+s1.
+```
+
+Mode: read. Tools: `domain_mail_dns_get` with `check` and `dkim_selector`. Check: each of SPF, DKIM, DMARC and MX is reported as ok, missing, wrong or unknown, with the value to publish where the engine knows it. The engine does not claim to sign mail itself.
+
+**PHP version and settings (traditional PHP hosting)**
+
+```text
+List the PHP versions available. Set shop.example.com to PHP 8.2, show its PHP
+settings, set memory_limit to 256M while keeping the others, then read the
+project's own PHP settings.
+```
+
+Mode: modify. Tools: `php_version_list`, `domain_php_version_get`, `domain_php_version_set`, `domain_php_directives_get`, `domain_php_directives_set`, `php_ini_get`, `php_ini_set`. Check: saving the directives with only `memory_limit` would drop the others, so the assistant sends the full set. On a container project the project-level PHP settings answer is a refusal with the reason.
+
+**Extra routes**
+
+```text
+List the proxy rules on this engine. Add one that sends port 8081 to the
+project tshop's app, change it to point at port 3000, and delete it.
+```
+
+Mode: full. Tools: `proxy_rule_list`, `proxy_rule_create`, `proxy_rule_get`, `proxy_rule_update`, `proxy_rule_delete`. Check: a rule that belongs to a project can only point at that project's own app, and any other destination is refused. The rule's port is opened in the firewall and removed again with the rule.
+
+**Remove a domain**
+
+```text
+Remove www.shop.example.com from tshop.
+```
+
+Mode: full. Tools: `domain_delete`, `domain_list`. Check: the domain is gone and the main domain is untouched.
+
 ## From the server
 
 Adding hostnames, requesting certificates and attaching tunnels: [CLI commands](../06-commands/pae-cli.md#domains-and-https).

@@ -66,6 +66,99 @@ It is looking at the directory it was configured with. Check that against where 
 **I deployed an archive and the site is showing a directory listing.**
 Your archive had a wrapper folder inside it, so the site's files ended up one level too deep. Repackage it with the files at the top level of the zip.
 
+## More requests to try
+
+**Mode** is the lowest permission mode that allows it: read, modify or full ([Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do)). Examples assume a project named `tshop`.
+
+**Look before touching**
+
+```text
+In tshop, does /project/index.html exist? Show its size and permissions, and
+show me the first 200 bytes.
+```
+
+Mode: read. Tools: `file_exists`, `file_stat`, `file_download` with `offset` and `length`. Check: the three answers agree, and the download returns only the range asked for.
+
+**Write, upload, fetch**
+
+```text
+In tshop, create the folder /project/notes, write hello.txt into it with the
+text "test run", upload a small file named upload.txt, and download
+https://example.com/robots.txt into the same folder.
+```
+
+Mode: modify. Tools: `file_mkdir` (with `parents`), `file_write`, `file_upload`, `file_fetch`. Check: all three files exist afterwards with the content asked for. A non-http address for the fetch is refused.
+
+**Move, copy, rename**
+
+```text
+In tshop, copy /project/notes/hello.txt to /project/notes/hello-copy.txt, rename
+the copy to greeting.txt, and move everything directly inside /project/notes
+into /project/archive. Keep files that are already there.
+```
+
+Mode: modify. Tools: `file_copy`, `file_move`, `file_move_contents` (`override` false), `file_mkdir`. Check: only the immediate children moved, the destination folder existed first, and an existing file with the same name was not replaced.
+
+**Permissions**
+
+```text
+In tshop, set /project/notes/hello.txt to mode 640, then to 999.
+```
+
+Mode: modify. Tools: `file_chmod`, `file_stat`. Check: 640 is applied and read back. 999 is refused: a mode is three or four digits from 0 to 7.
+
+**Archive and unpack**
+
+```text
+In tshop, zip /project/notes into /project/notes.zip, then unzip it into
+/project/restored.
+```
+
+Mode: modify. Tools: `file_zip`, `file_unzip`, `file_exists`. Check: the zip exists, and the unpacked folder has the same files.
+
+**Delete**
+
+```text
+In tshop, delete /project/restored and everything in it.
+```
+
+Mode: full. Tools: `file_delete` with `recursive`. Check: the assistant asks first, and the folder is gone. Without `recursive`, a non-empty folder is not deleted.
+
+**Change a file and have the site follow**
+
+```text
+In tshop, write "maintenance" into /project/public/status.txt and rebuild so
+the running site picks it up.
+```
+
+Mode: modify. Tools: `file_write`, `project_rebuild`, `task_get`. Check: the rebuild is part of the answer on a repository project, and not needed on traditional PHP hosting.
+
+**FTP**
+
+```text
+Give tshop an FTP account ftpuser1 for shop.example.com with directory /project
+and a 50 MB quota. Then raise it to unlimited, change its password, and delete it.
+```
+
+Mode: full. Tools: `ftp_account_create`, `ftp_account_list`, `ftp_account_update`, `ftp_account_delete`. Check: the credentials come back once, the quota reads back as set and then as unlimited, and the account is gone from the list.
+
+**SFTP with a password and with a key**
+
+```text
+Give tshop an SFTP account sftpuser1 with a password. Then change it to key
+login using this public key: ssh-ed25519 AAAA...example. Delete it afterwards.
+```
+
+Mode: full. Tools: `sftp_account_create`, `sftp_account_list`, `sftp_account_update` with `auth_method`, `sftp_account_delete`. Check: after the update the account accepts the key and not the password. Prefer SFTP in the answer over plain FTP.
+
+**A command inside the project**
+
+```text
+Run `ls -la /project | head` inside the tshop container and show me the output.
+```
+
+Mode: modify. Tools: `ssh_run` with `cwd` and `timeout`. Check: pipes work, a non-zero exit is reported in the answer rather than as an error, and the same request on traditional PHP hosting is refused.
+
 ## From the server
 
 Copying single files in and out: [CLI commands](../06-commands/pae-cli.md#files).

@@ -184,6 +184,120 @@ You did not rebuild, or the application needs more than the limit you set. See [
 **The assistant says stored secrets cannot be decoded.**
 Ask the assistant to list the affected secrets and check the engine's system information. The engine's encryption key, `APP_KEY` in `/opt/panelalpha/shared-hosting/.env-core`, may be invalid or may have changed since the secrets were stored. The project's environment variables, Git token, Cloudflare token, registry login or site password then read as empty, and the next save of the project, a redeploy included, stores them empty. Put the previous `APP_KEY` back before you change or redeploy the project. If you no longer have it, ask the assistant to set each named secret again. The application's database password is the exception: it is kept, and deploys are refused until it can be read, because a new one would lock the application out of its own database.
 
+## More requests to try
+
+**Mode** is the lowest permission mode that allows it: read, modify or full ([Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do)). Examples assume a project named `tshop`.
+
+**What is on this engine**
+
+```text
+List the projects on this engine, with their domain names. Then give me the
+short summary view of the same thing.
+```
+
+Mode: read. Tools: `project_list` (with `per_page`), `project_list_all` (with `with_domain_names`), `project_list_summary`. Check: the three views agree on the set of projects, and the paged one is paged.
+
+**One project in full**
+
+```text
+Show everything about project tshop: domain, template, limits, deploy status.
+```
+
+Mode: read. Tools: `project_get`. Check: the domain, the template and the deployment status match what `domain_list` and `deploy_log_get` say.
+
+**Change a limit and make it real**
+
+```text
+Show tshop's limits. Raise its memory limit to 2048 MB, its FTP accounts to 3
+and its databases to 2, then rebuild.
+```
+
+Mode: modify. Tools: `project_get`, `project_update`, `project_rebuild`, `task_get`. Check: the new numbers read back from `project_get`, the rebuild completes, and a value above the server's maximum is refused.
+
+**Usage against limits**
+
+```text
+How close is tshop to its limits this month? Include transfer.
+```
+
+Mode: read. Tools: `project_usage`. Check: `bandwidth.usage` against `bandwidth.maximum` (null means unlimited), and the log disk use is shown.
+
+**Offline and back**
+
+```text
+Suspend tshop. Check that the site no longer opens. Then unsuspend it.
+```
+
+Mode: modify. Tools: `project_suspend`, `project_unsuspend`, `project_get`. Check: nothing is deleted, the project reads suspended, and after the unsuspend the site opens again.
+
+**Site password**
+
+```text
+Put the password ShopTest-2026 on tshop. Check that the site asks for it.
+Then remove it.
+```
+
+Mode: modify. Tools: `project_password_set`, `project_password_unset`. Check: while set, an anonymous request to the site is refused and the page says "This site is password protected." After the removal it opens without a prompt. The password is not repeated in the assistant's answer.
+
+**Settings of a project**
+
+```text
+List the settings of tshop, read one, change it, then clear it.
+```
+
+Mode: full. Tools: `project_setting_list`, `project_setting_get`, `project_setting_set`, `project_setting_delete`. Check: a secret value comes back redacted, and the list says whether a value is present. Clearing a Cloudflare token while tunnels exist is refused unless forced: [Cloudflare](cloudflare.md#remove-a-hostname-or-the-token).
+
+**Generated login**
+
+```text
+What is the admin login for tshop?
+```
+
+Mode: modify (held back in `readonly`). Tools: `app_credentials_get`. Check: the answer has the sign-in address, the username and the password, or says the application declares none. In `readonly` mode the tool is not offered.
+
+**Clone**
+
+```text
+Clone tshop as tshopcopy. List what was not copied.
+```
+
+Mode: modify. Tools: `project_clone`, `project_get`, `domain_list`, `mysql_database_list`, `ftp_account_list`. Check: the copy has the same limits and files, a staging-style domain, and no subdomains, FTP or SFTP accounts, or databases.
+
+**Staging and back**
+
+```text
+Make a staging copy of tshop called tshopstage. When it is ready, push staging
+live. Later, push live back to staging.
+```
+
+Mode: modify. Tools: `project_staging`, `project_get` (until the staging copy is completed), `project_push` with `target`, `project_get` (until the push is completed). Check: the pair is linked, a second staging copy of the same project is refused, and a push while another runs is answered "busy".
+
+**Name checks**
+
+```text
+Create a project called x with no repository.
+```
+
+Mode: modify. Tools: `project_verify_name`, `project_create`. Check: a too-short name is refused with the rule (3 to 15 lowercase letters and digits, starting with a letter), and nothing is created.
+
+**Cron jobs**
+
+```text
+On the traditional PHP project tphpsite, list the cron jobs, add one that runs
+/usr/bin/php /home/tphpsite/cron.php every hour on the hour, change it to every
+30 minutes, then delete it.
+```
+
+Mode: full. Tools: `cron_job_list`, `cron_job_create`, `cron_job_update`, `cron_job_delete`. Check: the job is addressed by its `hash`, the schedule reads back as asked, and the same request on a container project (such as `tshop`) is refused with the reason.
+
+**Delete**
+
+```text
+Delete the project tshopcopy and everything in it.
+```
+
+Mode: full. Tools: `project_delete`, `project_list`. Check: the assistant states that there is no undo and asks first. The project is gone from the list and its address no longer answers.
+
 ## From the server
 
 Most of this is available as a `pae` command: [CLI commands](../06-commands/pae-cli.md).

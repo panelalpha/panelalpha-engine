@@ -104,6 +104,36 @@ Ask the assistant for a new one. Links last one hour.
 **The assistant asked me to paste the token in the chat.**
 Do not. Ask it to send a paste link on the engine instead.
 
+## More requests to try
+
+These need a Cloudflare account with a zone and a token with the two permissions named above. **Mode** is the lowest permission mode that allows it: read, modify or full ([Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do)).
+
+**Save the token without pasting it**
+
+```text
+Save a Cloudflare API token on tshop. Send me the page to paste it, do not ask
+for it here.
+```
+
+Mode: modify. Tools: `vault_secret_create`, `project_setting_set`, `project_setting_get`. Check: the token is verified against Cloudflare when stored, the account it belongs to comes back, and a later read shows the token redacted.
+
+**Attach, check, remove**
+
+```text
+Attach shop.example.com to tshop through a Cloudflare tunnel. Show the tunnel
+hostnames on that domain. Then remove the hostname.
+```
+
+Mode: full. Tools: `tunnel_create` with `provider` cloudflare, `tunnel_list`, `tunnel_delete`. Check: the site opens through Cloudflare, and after the delete the DNS record and ingress rule are gone.
+
+**The token cannot be cleared under live tunnels**
+
+```text
+Clear the Cloudflare token on tshop while a tunnel hostname still exists.
+```
+
+Mode: full. Tools: `project_setting_delete`. Check: the call is refused, and the assistant offers removing the hostnames first. `force` is used only when asked for.
+
 ## From the server
 
 Saving a token and attaching or removing tunnel hostnames: [CLI commands](../06-commands/pae-cli.md#domains-and-https).

@@ -109,6 +109,191 @@ The identifying file is often not at the top of the repository: [What your repos
 **I pasted the git token in the chat.**
 Revoke that token at your git host and create a new one. Ask the assistant to send the paste page. The engine never needed the value in chat.
 
+## More requests to try
+
+**Mode** is the lowest permission mode that allows it: read, modify or full ([Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do)). Deploys of real applications, one per stack, are on [Project types](../07-supported-projects/project-types.md#real-applications-to-try).
+
+**Is the name free?**
+
+```text
+Is the project name tshop free on this engine?
+```
+
+Mode: read. Tools: `project_verify_name`. Check: the answer says free or taken, and a name that breaks the rules (for example `Shop-1`) is refused with the reason.
+
+**Look before deploying**
+
+```text
+Check https://github.com/FreshRSS/FreshRSS without deploying it. What stack,
+which branch, which port?
+```
+
+Mode: read. Tools: `source_inspect`. Check: the answer names a stack, a branch and the way it was read (`tree` or `clone`). No project exists afterwards (`project_list` does not show a new one). No `.env` values appear, only names.
+
+**Choose another way to run it**
+
+```text
+Inspect https://github.com/org/app and list every way the engine could run it.
+Then deploy it as php.
+```
+
+Mode: modify. Tools: `source_inspect`, `project_create`. Check: the ways to run it come from the inspection, and the deploy log names the one that was asked for.
+
+**Deploy from a public repository, in the background**
+
+```text
+Deploy https://github.com/usememos/memos as project tmemos on this PanelAlpha
+Engine and tell me the address when it is up.
+```
+
+Mode: modify. Tools: `project_create`, `task_get` (repeated), `project_get`. Check: the first answer carries a task id at once, the assistant polls until `completed`, and `project_get` shows the domain. The assistant does not start a second deploy while the first runs.
+
+**Deploy and wait in one call**
+
+```text
+Create project tntfy from https://github.com/binwiederhier/ntfy and wait for
+the deploy to finish before you answer.
+```
+
+Mode: modify. Tools: `project_create_sync`. Check: one call returns the project with its final deploy status, without the assistant having to poll.
+
+**Deploy with settings**
+
+```text
+Deploy https://github.com/org/app as project tsettings, branch develop, with
+the environment variable APP_MODE set to staging and a 1024 MB memory limit.
+```
+
+Mode: modify. Tools: `project_create` (`git_branch`, `env_vars`), `project_update` (`memory_limit`), `project_rebuild`. Check: the deployed branch is `develop`; `project_inspect` lists `APP_MODE` by name only, never by value; the memory limit reads 1024.
+
+**Private repository without a token in the chat**
+
+```text
+Deploy https://github.com/org/private-app as project tprivate. The repository
+is private. Do not ask me to paste the token here.
+```
+
+Mode: modify. Tools: `vault_secret_create`, `vault_secret_status`, `project_create`. Check: the assistant returns a page address, not a request for the token. After the paste, `vault_secret_status` reads `filled`. The token appears nowhere in the conversation.
+
+**Shared token, inventory, replace, remove**
+
+```text
+Save a global Git token for the acme organisation. Then list the secrets stored
+on this engine, show which global ones exist, and delete the acme one.
+```
+
+Mode: full. Tools: `vault_secret_create` (`scope` global), `vault_secret_list`, `vault_config_get`, `vault_secret_delete`. Check: the list never contains a secret value, only reference, type, scope, purpose and status. After the delete, using the reference fails. A stored secret is replaced by delete and create, never by overwrite.
+
+**Follow a deploy**
+
+```text
+What is the deploy of tmemos doing right now? Show me the log so far, and the
+task's own log lines.
+```
+
+Mode: read. Tools: `deploy_log_get` (with `offset` while `more` is true), `task_get`, `task_log_list`. Check: the log is read in pages, the second call continues from `next_offset`, and a failed deploy shows a `problem` with the fix when the failure is a known one.
+
+**Cancel a deploy**
+
+```text
+Start a rebuild of tmemos, then cancel it while it is running.
+```
+
+Mode: full. Tools: `project_rebuild`, `deploy_cancel` or `task_cancel`. Check: the task ends `cancelled`, nothing is left running, and the project can be rebuilt again afterwards.
+
+**Is it really the application?**
+
+```text
+Is tmemos serving the application itself, or a placeholder page?
+```
+
+Mode: read. Tools: `app_health_check`. Check: the answer says the application itself is answering. A page that answers but is not the application is not a pass.
+
+**Deploy a zip**
+
+```text
+Upload /path/to/app.zip into project tzip and deploy it.
+```
+
+Mode: modify. Tools: `file_upload`, `project_deploy_archive`, `task_get`. Check: a single top-level folder in the zip is unwrapped, the deploy completes, and a second request while it runs is refused with a pointer to the running task.
+
+**Do not deploy twice**
+
+```text
+Rebuild tmemos. While that runs, rebuild it again.
+```
+
+Mode: modify. Tools: `project_rebuild` twice. Check: the second answer is a conflict that names the running task. No second deploy starts.
+
+**Project inspection against the last deploy**
+
+```text
+Inspect tmemos. Have its files changed since the last deploy?
+```
+
+Mode: read. Tools: `project_inspect`, `file_write`, `project_inspect`. Check: after a file is written by hand, the second inspection reports the difference.
+
+**Pull, branch, history**
+
+```text
+On tmemos: show git status, list the branches and the last five commits.
+Then switch to the branch release and pull the latest commit.
+```
+
+Mode: modify. Tools: `git_status`, `git_branches`, `git_commits`, `git_change_branch`, `git_pull`, `task_get`. Check: `git_status` is called first and says the project is deployed by the engine. Both the branch change and the pull return a task and rebuild the app. A dirty tree or a missing branch is refused.
+
+**Go back**
+
+```text
+Roll tmemos back to the previous commit.
+```
+
+Mode: modify. Tools: `git_commits`, `git_revert` with `ref`, `task_get`. Check: the assistant warns that local changes are discarded and asks first. The deployed commit afterwards is the one asked for.
+
+**Push local edits, force a pull**
+
+```text
+On project tsitegit, commit my edits and push them. Then pull, and if history
+has diverged, tell me before you force anything.
+```
+
+Mode: modify. Tools: `git_push`, `git_pull` with `strategy` ff, `push_first` or `force`. Check: on a project the engine deploys, the push is refused with the reason. On a project whose files are kept in git, it commits and pushes. `force` is never used without confirmation.
+
+**Connect and disconnect git on files**
+
+```text
+Connect the project tfiles to https://github.com/org/site.git, branch main.
+Later, disconnect it again without deleting the files.
+```
+
+Mode: full. Tools: `git_connect`, `git_status` (poll while `connecting` is true), `git_disconnect`. Check: connect is not called a second time while `connecting` is true. After the disconnect the files are still there and a deploy hook, if it had one, is gone.
+
+**Replace a token**
+
+```text
+The git token of tmemos no longer works. Send me the page to replace it.
+```
+
+Mode: modify. Tools: `vault_secret_create`, `git_update_credentials`. Check: the token is not typed in chat, and `git_pull` works afterwards.
+
+**Deploy key for an SSH remote**
+
+```text
+Create a deploy key for tprivate and connect git@github.com:acme/shop.git,
+branch main. Then remove the key.
+```
+
+Mode: full. Tools: `git_deploy_key_create`, `git_connect`, `git_deploy_key_delete`. Check: only the public half is shown, and it starts with `ssh-ed25519`. Asking again returns the same key. After the delete, SSH remotes stop authenticating.
+
+**A deploy that fails**
+
+```text
+Deploy https://github.com/org/repo-without-a-start-script as project tbroken.
+The deploy fails: read the log and tell me what to change.
+```
+
+Mode: modify. Tools: `project_create`, `task_get`, `deploy_log_get`. Check: the task ends `failed`, the answer quotes the engine's own explanation from `problem` or `details.problems`, and the assistant does not retry in a loop.
+
 ## From the server
 
 Git commands for a project that is already deployed: [CLI commands](../06-commands/pae-cli.md#repository-projects). The paste link and the shared token: [Secrets](../06-commands/pae-cli.md#secrets).

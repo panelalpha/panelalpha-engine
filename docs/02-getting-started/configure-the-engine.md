@@ -62,6 +62,18 @@ Reconnect it. It keeps the command list from when it connected.
 **I asked for a certificate and could not reach the engine for a moment.**
 That is the request. The engine's own address on port 2011 stops briefly while the certificate is fetched, then comes back.
 
+## More requests to try
+
+**Mode** is the lowest permission mode that allows it: read, modify or full ([Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do)).
+
+**What this engine is**
+
+```text
+Tell me about this engine: version, webserver, address and what it runs on.
+```
+
+Mode: read. Tools: `system_info`. Check: the version matches `pae system:version` on the server, and the webserver is nginx-proxy.
+
 ## From the server
 
 The same areas as single commands: [CLI commands](../06-commands/pae-cli.md#configuring-the-engine).

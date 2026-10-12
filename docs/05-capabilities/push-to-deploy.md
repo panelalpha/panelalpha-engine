@@ -79,6 +79,44 @@ Rotating gives a new URL and a new secret, shown this once. The old URL stops an
 
 Deleting removes the hook and that history. It does not change the files on the server. Remove the webhook in your git host as well, or it keeps calling an address that no longer answers. Deleting the project removes its hooks too.
 
+## More requests to try
+
+These assume a project connected to git. **Mode** is the lowest permission mode that allows it: read, modify or full ([Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do)). Examples assume a project named `tshop`.
+
+**Create the hook**
+
+```text
+Set up a push-to-deploy hook for tshop. I'll be pushing from GitHub.
+```
+
+Mode: modify. Tools: `git_deploy_hook_create` with `provider`. Check: a URL and a secret come back, and the assistant tells the user to copy the secret now. A project that is not connected to git is refused.
+
+**Asking again changes nothing**
+
+```text
+Show me the push-to-deploy hook for tshop. Create it again.
+```
+
+Mode: modify. Tools: `git_deploy_hook_show`, `git_deploy_hook_create`. Check: the URL is the same, the secret is not shown a second time, and no second hook exists. The `tls` state and `url_changed_since_registration` are reported.
+
+**A push deploys**
+
+```text
+I pushed a commit to the branch tshop follows. Show me the last deliveries on
+its hook. Did that push deploy?
+```
+
+Mode: read. Tools: `git_deploy_hook_show`, `deploy_log_get`. Check: the delivery is listed with its outcome. A push to another branch, a tag, or the same delivery sent twice does not start a second deploy.
+
+**Replace and remove**
+
+```text
+Rotate the push-to-deploy hook of tshop, I think the secret leaked. Later,
+delete it.
+```
+
+Mode: full. Tools: `git_deploy_hook_rotate`, `git_deploy_hook_delete`. Check: after the rotate the old URL answers 404 and a new URL and secret are given once. After the delete the URL answers 404, and the assistant reminds the user to remove the webhook in the git host.
+
 ## From the server
 
 The same operations from the command line: [CLI commands](../06-commands/pae-cli.md#repository-projects).

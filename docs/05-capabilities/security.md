@@ -153,6 +153,99 @@ Use [manage.panelalpha.com/contact](https://manage.panelalpha.com/contact).
 
 A failing deploy is not a vulnerability. That goes through [What happens when a deploy fails](../02-getting-started/what-happens.md).
 
+## More requests to try
+
+Keep another way into the server open while you try firewall requests, so a mistake does not lock you out. **Mode** is the lowest permission mode that allows it: read, modify or full ([Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do)). Site passwords are in [Projects](projects.md#more-requests-to-try).
+
+**Firewall state**
+
+```text
+Is the firewall on? Show every rule in the order it is evaluated, then the
+published-port rules.
+```
+
+Mode: read. Tools: `firewall_status`, `firewall_rule_list` (also with `scope` published). Check: the engine's own rules are marked as managed, and the two lists are different.
+
+**Block and unblock an address**
+
+```text
+Block 203.0.113.7 from this server, both ways. Show me the rule, then delete it.
+```
+
+Mode: full. Tools: `firewall_rule_create` with `action` deny, `direction` both, `firewall_rule_list`, `firewall_rule_delete`. Check: the deny is one rule for both host and published ports, it sits above the allows, and a second identical rule is refused naming the first.
+
+**Allow a published port, then edit it**
+
+```text
+Allow 203.0.113.7 to reach published container port 8080. Then change the
+comment to "office". Do not open any port for an application's website.
+```
+
+Mode: modify. Tools: `firewall_rule_create` with `scope` published, `firewall_rule_update`. Check: the rule gets a new id when what it matches changes, and a comment starting `by Fail2Ban` is refused.
+
+**Trusted addresses and the log**
+
+```text
+Trust 203.0.113.7, that's our office. Show the trusted addresses. What did the
+firewall block in the last hour, and was 203.0.113.7 banned?
+```
+
+Mode: full. Tools: `firewall_trusted_add`, `firewall_trusted_list`, `firewall_log_list` with `address`, `firewall_trusted_delete`. Check: a trusted address is never banned, and it still follows the firewall rules.
+
+**Off and on, reload**
+
+```text
+Reload the firewall. Then disable it, check the status, and enable it again.
+```
+
+Mode: full. Tools: `firewall_reload`, `firewall_disable`, `firewall_status`, `firewall_enable`. Check: the assistant warns that every port is open while it is off, and the engine's own ports answer after the enable.
+
+**ModSecurity mode and rulesets**
+
+```text
+What mode is ModSecurity in? List the rulesets. Switch on owasp-crs, then
+switch it off again.
+```
+
+Mode: modify. Tools: `modsec_mode_get`, `modsec_mode_set`, `modsec_ruleset_list`, `modsec_ruleset_enable`, `modsec_ruleset_disable`. Check: neither ruleset does anything while the mode is off, and the state reads back.
+
+**Tune a ruleset**
+
+```text
+In owasp-crs, switch off one config file that causes false positives and keep
+the rest. Show what changed.
+```
+
+Mode: modify. Tools: `modsec_ruleset_configs_set` with `enable` and `disable`, `modsec_ruleset_list`. Check: only the named files change.
+
+**Your own rule**
+
+```text
+Add a ModSecurity rule that blocks every request to /xyz with a 403, and switch
+the custom ruleset on. Show me the custom rules. Then replace them with an
+empty set.
+```
+
+Mode: modify. Tools: `modsec_custom_rules_get`, `modsec_custom_rules_set`, `modsec_ruleset_enable`. Check: `/xyz` answers 403, the rule id is between 1100000 and 1199999, and a rule that uses `SecRuleEngine` is refused with the parser's message while the rules in place keep working.
+
+**Find which rule blocked a request**
+
+```text
+A legitimate form submission was blocked. Read the ModSecurity audit log and
+tell me which rule fired.
+```
+
+Mode: read. Tools: `modsec_audit_log_list`, `modsec_audit_log_tail`, `modsec_audit_log_download`. Check: the answer names one rule id and suggests turning off that rule, not ModSecurity as a whole.
+
+**Extra IP addresses**
+
+```text
+List the IP subnets and the assigned addresses. Add the subnet 203.0.113.0/24,
+assign 203.0.113.20 to tshop, then unassign it and remove the subnet.
+```
+
+Mode: full. Tools: `ip_subnet_list`, `ip_assigned_list`, `ip_subnet_create`, `ip_assign`, `ip_unassign`, `ip_subnet_delete`. Check: each step reads back.
+
 ## From the server
 
 The project password, and the ModSecurity audit log: [CLI commands](../06-commands/pae-cli.md#security).

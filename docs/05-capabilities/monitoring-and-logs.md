@@ -165,6 +165,90 @@ It only reports applications it could actually reach. Suspended projects and pro
 **A site is fine in my browser but reported as not serving itself.**
 The engine checks from inside the account, so it is seeing something you are not - often a cached page in your browser, or a difference between what the proxy serves and what the application returns. Trust the engine's answer and ask it what specifically failed.
 
+## More requests to try
+
+**Mode** is the lowest permission mode that allows it: read, modify or full ([Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do)). Examples assume a project named `tshop`.
+
+**The server**
+
+```text
+How is this server doing? Give me CPU, memory and disk now, the last five
+minutes, the last hour and the last 12 hours, and the hourly averages.
+```
+
+Mode: read. Tools: `metrics_latest`, `metrics_current`, `metrics_last_5_minutes`, `metrics_last_hour`, `metrics_last_12_hours`, `metrics_last_hour_averages`, `system_info`. Check: the numbers are consistent between views, and the memory budget is shown.
+
+**One site, is it itself?**
+
+```text
+Is tshop serving the application itself, or something else?
+```
+
+Mode: read. Tools: `app_health_check` with `timeout` and `attempts`. Check: the answer separates "something answers" from "it is the application", and says what to do when it is not.
+
+**Everything at once**
+
+```text
+Sweep every project on this engine and tell me which ones are not serving
+themselves properly.
+```
+
+Mode: read. Tools: `project_list_summary`, `app_health_check` per project. Check: a suspended project is skipped, and each failure is paired with what it serves instead.
+
+**Web logs**
+
+```text
+List the log files of shop.example.com on tshop, then show me the end of the
+error log.
+```
+
+Mode: read. Tools: `domain_log_list`, `domain_log_download` with `offset` and `length`. Check: the answer is an excerpt, not the whole file, and the log is the site's, not the deploy log.
+
+**What the app printed**
+
+```text
+Show what the app container of tshop printed between 14:00 and 14:30 today, at
+most 200 lines.
+```
+
+Mode: read. Tools: `container_list`, `container_service_logs` with `since`, `until`, `lines`. Check: the lines are inside the window and the service name comes from `container_list`.
+
+**Restart pieces**
+
+```text
+Restart just the app service of tshop. Then stop the whole project and start it
+again.
+```
+
+Mode: modify. Tools: `container_service_action`, `container_project_action`, `container_list`. Check: after each action the containers are running again, and the site answers.
+
+**Is it fast?**
+
+```text
+Run a Lighthouse report on https://shop.example.com/ for desktop, summary only.
+Then try https://example.org/.
+```
+
+Mode: modify. Tools: `lighthouse_report_create` with `desktop_preset`, `summary`. Check: the first returns scores. The second is refused, because only the engine's own domains, aliases and tunnel hostnames are accepted. An IP address is refused the same way.
+
+**Report a problem**
+
+```text
+File a bug report about tshop: the site shows a blank page after deploy.
+Severity: medium. Attach the deploy log and health, and show me exactly what
+will be sent before you send it.
+```
+
+Mode: modify. Tools: `bug_report_create` with `attach_log` and `attach_health`. Check: the answer carries the redacted report, no `.env` values or tokens are in it, and the status says accepted and queued, not delivered.
+
+**Tasks**
+
+```text
+List the log lines of the latest task for tshop after the last line you saw.
+```
+
+Mode: read. Tools: `task_get` with `after_id`, `task_log_list` with `since`. Check: only newer lines come back, even when several share one second.
+
 ## From the server
 
 Deploy logs, health checks and site logs as `pae` commands: [CLI commands](../06-commands/pae-cli.md).

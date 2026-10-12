@@ -67,6 +67,70 @@ The project has used up its plan's database allowance. Either raise the limit ([
 **phpMyAdmin gives a 404, or loops back to the login page.**
 The sign-on link has expired - they last five minutes. Ask for a fresh one. If a new link does the same, the project's database user is missing; recreate it, then request the link again.
 
+## More requests to try
+
+**Mode** is the lowest permission mode that allows it: read, modify or full ([Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do)). Examples assume a project named `tshop`.
+
+**A working database**
+
+```text
+Create a MySQL database named shop on tshop, create a user shopuser for it with
+a strong password, and give that user full access. Then give me the details my
+application needs.
+```
+
+Mode: modify. Tools: `mysql_database_create`, `mysql_user_create`, `mysql_privileges_set`, `mysql_server_info`. Check: the database and user names come back with the project's prefix, and the assistant hands over those prefixed names and the host and port, not `localhost`.
+
+**Look at what exists**
+
+```text
+List the databases and database users of tshop. Show the details of the
+database shop and of the user shopuser, and what shopuser may do on shop.
+```
+
+Mode: read. Tools: `mysql_database_list`, `mysql_database_get`, `mysql_user_list`, `mysql_user_get`, `mysql_privileges_get`. Check: the privileges read back as the ones granted when the database was created.
+
+**Narrow, then remove, access**
+
+```text
+Make shopuser read-only on shop. Then take all its access to shop away.
+```
+
+Mode: full. Tools: `mysql_privileges_set` with a read-only list, `mysql_privileges_get`, `mysql_privileges_revoke`. Check: after the first call the user can read and not write. After the revoke the user exists and has no access.
+
+**Password and name of a user**
+
+```text
+Change the password of shopuser to a new strong one, rename the user to
+shopowner, and tell me what my application must change.
+```
+
+Mode: modify. Tools: `mysql_user_change_password`, `mysql_user_rename`. Check: the assistant says the application's settings must be updated and a rebuild is needed, and that changing the variable alone does not change the password inside the database. A password under 8 characters is refused.
+
+**Browse in phpMyAdmin**
+
+```text
+Give me a phpMyAdmin sign-on link for tshop.
+```
+
+Mode: modify. Tools: `phpmyadmin_sso_token_create`. Check: the link logs in straight away and the assistant says it expires after five minutes.
+
+**The limit**
+
+```text
+Set tshop's database limit to 1, then create a second database.
+```
+
+Mode: modify. Tools: `project_update`, `mysql_database_create`. Check: the second database is refused as "limit reached", and the assistant points at raising the limit or deleting one.
+
+**Remove**
+
+```text
+Delete the user shopowner and the database shop from tshop.
+```
+
+Mode: full. Tools: `mysql_user_delete`, `mysql_database_delete`, `mysql_database_list`. Check: the assistant asks first, and both are gone from the lists.
+
 ## From the server
 
 Databases have no `pae` command of their own. Ask your assistant, or use phpMyAdmin.
