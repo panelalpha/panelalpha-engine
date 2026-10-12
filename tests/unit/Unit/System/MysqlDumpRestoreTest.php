@@ -31,8 +31,10 @@ class MysqlDumpRestoreTest extends TestCase
         $script = $recorded[0]['cmd'][2];
         $this->assertStringStartsWith('set -o pipefail; ', $script);
         $this->assertStringContainsString("'exec' '-T' 'sites-db'", $script);
-        $this->assertStringContainsString('mariadb-dump --single-transaction -uroot', $script);
-        $this->assertStringContainsString('alice_app', $script);
+        $this->assertStringContainsString(
+            escapeshellarg('MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mariadb-dump --single-transaction -uroot ' . escapeshellarg('alice_app')),
+            $script,
+        );
         $this->assertStringEndsWith("| gzip -c > '/tmp/alice_app.sql.gz'", $script);
         // The password stays inside sites-db: it is read there from the container's own environment.
         $this->assertStringContainsString('MYSQL_PWD="$MYSQL_ROOT_PASSWORD"', $script);
@@ -72,8 +74,34 @@ class MysqlDumpRestoreTest extends TestCase
         $script = $recorded[0]['cmd'][2];
         $this->assertStringStartsWith("set -o pipefail; gunzip -c '/tmp/alice_app.sql.gz' | ", $script);
         $this->assertStringContainsString("'exec' '-T' 'sites-db'", $script);
-        $this->assertStringContainsString('mariadb -uroot', $script);
-        $this->assertStringContainsString('alice_app', $script);
+        $this->assertStringContainsString(
+            escapeshellarg('MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mariadb -uroot ' . escapeshellarg('alice_app')),
+            $script,
+        );
+    }
+
+    public function test_a_hyphenated_database_name_reaches_mariadb_as_a_plain_argument(): void
+    {
+        $recorded = [];
+        $mysql = new Mysql($this->recordingSystem($recorded, successful: true, lastLine: "-- Dump completed on 2026-10-09 12:00:00\n"));
+
+        $mysql->dumpToGzip('alice_my-db', '/tmp/alice_my-db.sql.gz');
+        $mysql->restoreFromGzip('alice_my-db', '/tmp/alice_my-db.sql.gz');
+
+        $dump = $recorded[0]['cmd'][2];
+        $restore = $recorded[2]['cmd'][2];
+
+        $this->assertStringContainsString(
+            escapeshellarg('MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mariadb-dump --single-transaction -uroot ' . escapeshellarg('alice_my-db')),
+            $dump,
+        );
+        $this->assertStringEndsWith("| gzip -c > '/tmp/alice_my-db.sql.gz'", $dump);
+        $this->assertStringContainsString(
+            escapeshellarg('MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mariadb -uroot ' . escapeshellarg('alice_my-db')),
+            $restore,
+        );
+        $this->assertStringNotContainsString('`', $dump);
+        $this->assertStringNotContainsString('`', $restore);
     }
 
     public function test_invalid_database_name_is_rejected(): void

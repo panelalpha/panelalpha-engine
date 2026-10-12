@@ -128,7 +128,7 @@ class Mysql
 
     private function assertDatabaseName(string $name): void
     {
-        if (!preg_match('/^[a-zA-Z0-9_]+$/', $name)) {
+        if (!preg_match('/^[A-Za-z_-][A-Za-z0-9_-]*$/D', $name)) {
             throw new RuntimeException('Invalid database name');
         }
     }
