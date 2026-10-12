@@ -25,11 +25,15 @@ class PushState implements ShouldQueue
 
     public int $timeout = JobBudget::SECONDS;
 
+    /**
+     * @param list<array{database: string, name: string}>|null $tables
+     */
     public function __construct(
         public string $fromUsername,
         public string $toUsername,
         public bool $files = true,
         public bool $databases = true,
+        public ?array $tables = null,
     ) {
         $this->onQueue('default');
     }
@@ -42,11 +46,13 @@ class PushState implements ShouldQueue
                 $this->toUsername,
                 $this->files,
                 $this->databases,
+                $this->tables,
             );
 
             $this->task()?->mergeDetails([
                 'files' => $this->files,
                 'databases' => $this->databases,
+                'tables' => $this->tables,
                 'databases_copied' => $result->databasePairs(),
                 'warnings' => $result->warnings,
             ]);

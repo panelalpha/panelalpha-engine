@@ -228,7 +228,7 @@ class DatabaseCopierTest extends TestCase
                 $this->record->scripts[] = $script;
             }
 
-            public function dumpToGzip(string $name, string $dest): void
+            public function dumpToGzip(string $name, string $dest, ?string $table = null): void
             {
                 $this->record->dumps[] = $dest;
             }

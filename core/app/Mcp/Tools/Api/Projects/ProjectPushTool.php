@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Push project state to a paired staging or live project
 
-    Copies application state from the source to a paired live or staging project (the pair is linked by `staging`), then swaps it in asynchronously. Source and destination must use the same project template. Returns HTTP 202 with the target project and a `task_id`; poll `GET /tasks/{task_id}` for the push Task, or `GET /projects/{target}` until `async_status.push` is `completed` or `failed`. CLI equivalent: `php artisan project:push`.
+    Copies application state from the source to a paired live or staging project (the pair is linked by `staging`), then swaps it in asynchronously. Source and destination must use the same project template. `tables` is only accepted for a classic project with `databases` true: it copies just the named source tables and leaves the target's other tables alone. Returns HTTP 202 with the target project and a `task_id`; poll `GET /tasks/{task_id}` for the push Task, or `GET /projects/{target}` until `async_status.push` is `completed` or `failed`. CLI equivalent: `php artisan project:push`.
     MARKDOWN)]
 #[IsDestructive]
 class ProjectPushTool extends ApiTool
@@ -50,6 +50,7 @@ class ProjectPushTool extends ApiTool
             'target',
             'files',
             'databases',
+            'tables',
         ];
     }
 
@@ -73,6 +74,7 @@ class ProjectPushTool extends ApiTool
             'target' => $schema->string()->required(),
             'files' => $schema->boolean()->description('Replace the target home directory with the source files. Defaults to true.'),
             'databases' => $schema->boolean()->description('Replace the target MySQL databases with the source data. Defaults to true.'),
+            'tables' => $schema->array()->description('Replace only these source tables, leaving the target\'s other tables untouched. Only valid for a classic project with `databases` true. Each item names a source database and table.'),
         ];
     }
 }

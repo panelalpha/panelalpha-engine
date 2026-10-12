@@ -4,6 +4,7 @@ namespace App\Http\Requests;
 
 use App\Exceptions\ProblemException;
 use App\Models\User;
+use App\System;
 use App\System\Projects;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Validator;
@@ -21,6 +22,9 @@ class ProjectPushRequest extends FormRequest
             'target' => 'required|string',
             'files' => 'sometimes|boolean',
             'databases' => 'sometimes|boolean',
+            'tables' => 'sometimes|array|max:500',
+            'tables.*.database' => 'required|string',
+            'tables.*.name' => ['required', 'string', 'regex:/^[A-Za-z0-9_$]+$/D'],
         ];
     }
 
@@ -55,7 +59,38 @@ class ProjectPushRequest extends FormRequest
             if ($problems !== []) {
                 throw ProblemException::of($problems);
             }
+
+            $this->assertTablesApplicable($from);
         });
+    }
+
+    private function assertTablesApplicable(User $from): void
+    {
+        $tables = $this->input('tables');
+        if (!is_array($tables) || $tables === []) {
+            return;
+        }
+
+        if (!$this->boolean('databases', true)) {
+            throw ProblemException::one(
+                'tables',
+                'tables_not_applicable',
+                'Selecting tables requires the databases flag.',
+            );
+        }
+
+        if (Projects::isDind($from)) {
+            throw ProblemException::one(
+                'tables',
+                'tables_not_applicable',
+                'Selecting tables is only available for classic projects.',
+            );
+        }
+
+        $problems = Projects::tableProblems($from, $tables, app(System::class)->mysql()->tables());
+        if ($problems !== []) {
+            throw ProblemException::of($problems);
+        }
     }
 
     public static function assertCanPush(User $from, User $to): void

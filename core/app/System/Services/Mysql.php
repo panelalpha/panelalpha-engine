@@ -7,6 +7,7 @@ use App\Support\SitesDbCaches;
 use App\System as EngineSystem;
 use App\System\Services\Mysql\Databases;
 use App\System\Services\Mysql\Privileges;
+use App\System\Services\Mysql\Tables;
 use App\System\Services\Mysql\Users;
 use PDO;
 use RuntimeException;
@@ -44,15 +45,38 @@ class Mysql
         return new Privileges($this->pdo(), $this->host);
     }
 
-    public function dumpToGzip(string $name, string $dest): void
+    public function tables(): Tables
+    {
+        return new Tables($this->pdo());
+    }
+
+    public function dumpToGzip(string $name, string $dest, ?string $table = null): void
     {
         self::assertDatabaseName($name);
+        if ($table !== null) {
+            self::assertTableName($table);
+        }
+
         $this->runInCore(
-            $this->inSitesDb('mariadb-dump --single-transaction -uroot ' . escapeshellarg($name))
+            $this->inSitesDb($this->dumpCommand($name, $table))
             . ' | gzip -c > ' . escapeshellarg($dest),
             'mysqldump failed'
         );
-        $this->assertDumpCompleted($name, $dest);
+        $this->assertDumpCompleted($table ?? $name, $dest);
+    }
+
+    /**
+     * The table name travels as a plain argument; flags that dump database-level
+     * objects (routines, events) are left off a single-table dump.
+     */
+    private function dumpCommand(string $database, ?string $table): string
+    {
+        $command = 'mariadb-dump --single-transaction -uroot ' . escapeshellarg($database);
+        if ($table !== null) {
+            return $command . ' ' . escapeshellarg($table);
+        }
+
+        return $command . ' --routines --triggers --events';
     }
 
     /**
@@ -147,6 +171,19 @@ class Mysql
     {
         if (!self::isValidDatabaseName($name)) {
             throw new RuntimeException('Invalid database name');
+        }
+    }
+
+    /** The grammar every table name this engine copies must satisfy. */
+    public static function isValidTableName(string $name): bool
+    {
+        return preg_match('/^[A-Za-z0-9_$]+$/', $name) === 1;
+    }
+
+    public static function assertTableName(string $name): void
+    {
+        if (!self::isValidTableName($name)) {
+            throw new RuntimeException('Invalid table name');
         }
     }
 }

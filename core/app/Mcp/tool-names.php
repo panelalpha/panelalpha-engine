@@ -45,6 +45,7 @@ return [
     'POST /projects/{username}/clone' => 'project_clone',
     'POST /projects/{username}/staging' => 'project_staging',
     'POST /projects/{username}/push' => 'project_push',
+    'GET /projects/{username}/push/diff' => 'project_push_diff',
     'POST /projects/{username}/deploy-archive' => 'project_deploy_archive',
     'POST /projects/{username}/rebuild' => 'project_rebuild',
     'POST /projects/{username}/source' => 'project_source_attach',

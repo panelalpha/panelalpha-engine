@@ -14,6 +14,7 @@ use App\System\Project\HomeSwap;
 use App\System\Services\Mysql;
 use App\System\Services\Mysql\DatabaseCopier;
 use App\System\Services\Mysql\DatabaseCopyResult;
+use App\System\Services\Mysql\Tables;
 use Illuminate\Support\Facades\Log;
 
 class Projects
@@ -44,11 +45,15 @@ class Projects
         return $this->cloneOrCopy($source, $target, asStaging: true, copyDatabases: $copyDatabases, log: $log);
     }
 
+    /**
+     * @param list<array{database: string, name: string}>|null $tables
+     */
     public function pushToApp(
         string $sourceUsername,
         string $targetUsername,
         bool $files = true,
         bool $databases = true,
+        ?array $tables = null,
     ): DatabaseCopyResult {
         $from = ModelsUser::findByUsernameOrFail($sourceUsername);
         $to = ModelsUser::findByUsernameOrFail($targetUsername);
@@ -67,6 +72,7 @@ class Projects
         $isDindDest = self::isDind($to);
         $rollbacks = [];
         $createdDatabases = [];
+        $tableReplacement = null;
         $result = new DatabaseCopyResult();
 
         try {
@@ -91,7 +97,16 @@ class Projects
             $this->pauseAppForCopy($toProject);
 
             if ($databases && !$isDindDest) {
-                $result = $this->pushDatabases($from, $to, $rollbackDir, $rollbacks, $createdDatabases);
+                if ($tables === null || $tables === []) {
+                    $result = $this->pushDatabases($from, $to, $rollbackDir, $rollbacks, $createdDatabases);
+                } else {
+                    $this->runPushProcess(
+                        ['sudo', 'mkdir', '-p', $rollbackDir],
+                        'Failed to prepare the push database rollback directory'
+                    );
+                    $tableReplacement = $this->databaseCopier()->replaceTables($from, $to, $tables, $rollbackDir);
+                    $result = $tableReplacement->result;
+                }
             }
 
             if ($files) {
@@ -119,6 +134,9 @@ class Projects
 
             return $result;
         } catch (\Throwable $e) {
+            if ($tableReplacement !== null) {
+                $this->databaseCopier()->restoreTables($tableReplacement);
+            }
             $this->restorePushDatabases($rollbacks, $createdDatabases, $to);
             $this->cleanupIncomingDir($incomingDir);
             $this->resumeBoth($fromProject, $toProject);
@@ -344,7 +362,7 @@ class Projects
         $this->runPushProcess(['sudo', 'mv', '-T', $from, $to], "Failed to move '{$from}' to '{$to}'");
     }
 
-    private static function isDind(ModelsUser $user): bool
+    public static function isDind(ModelsUser $user): bool
     {
         return $user->hasGitProject() || $user->getTemplate() === 'dind';
     }
@@ -718,6 +736,48 @@ class Projects
         }
 
         return [...$problems, ...self::databaseNameProblems($from, $to->getMysqlPrefix(), 'target')];
+    }
+
+    /**
+     * Every selected table must name a database the source owns and a table that
+     * database holds, checked before the push is queued.
+     *
+     * @param list<array{database: string, name: string}> $tables
+     * @return list<array{field: string, code: string, message: string}>
+     */
+    public static function tableProblems(ModelsUser $source, array $tables, Tables $sourceTables): array
+    {
+        $owned = $source->mysqlDatabases()->pluck('database')->all();
+        $known = [];
+        $problems = [];
+
+        foreach ($tables as $selection) {
+            $database = is_array($selection) ? ($selection['database'] ?? null) : null;
+            $table = is_array($selection) ? ($selection['name'] ?? null) : null;
+            if (!is_string($database) || !is_string($table)) {
+                continue;
+            }
+
+            if (!in_array($database, $owned, true)) {
+                $problems[] = [
+                    'field'   => 'tables',
+                    'code'    => 'database_not_found',
+                    'message' => "The source project does not own database '{$database}'.",
+                ];
+                continue;
+            }
+
+            $known[$database] ??= $sourceTables->names($database);
+            if (!in_array($table, $known[$database], true)) {
+                $problems[] = [
+                    'field'   => 'tables',
+                    'code'    => 'table_not_found',
+                    'message' => "Table '{$database}.{$table}' does not exist in the source project.",
+                ];
+            }
+        }
+
+        return $problems;
     }
 
     private function pauseAppForCopy(Project $project): void

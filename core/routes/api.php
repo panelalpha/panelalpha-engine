@@ -134,6 +134,7 @@ $projectRoutes = function (): void {
     Route::post('/{username}/clone', [UserController::class, 'clone']);
     Route::post('/{username}/staging', [StagingController::class, 'staging']);
     Route::post('/{username}/push', [StagingController::class, 'push']);
+    Route::get('/{username}/push/diff', [StagingController::class, 'pushDiff']);
     Route::get('/{username}', [UserController::class, 'show']);
     Route::put('/{username}', [UserController::class, 'update']);
     Route::put('/{username}/suspend', [UserController::class, 'suspend']);

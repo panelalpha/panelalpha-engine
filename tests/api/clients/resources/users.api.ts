@@ -5,6 +5,8 @@ import {
   type ApiResponse,
   type AttachSourceRequest,
   type CreateUserRequest,
+  type PushDiff,
+  type PushTable,
   type TaskSnapshot,
   type UpdateUserRequest,
   type User,
@@ -284,7 +286,7 @@ export class UsersApi extends EngineApiBase {
   async pushProject(
     username: string,
     target: string,
-    flags: { files?: boolean; databases?: boolean } = {}
+    flags: { files?: boolean; databases?: boolean; tables?: PushTable[] } = {}
   ): Promise<ApiResponse<User>> {
     const response = await this.api.post(`projects/${username}/push`, {
       data: { target, ...flags },
@@ -296,11 +298,26 @@ export class UsersApi extends EngineApiBase {
   async pushProjectRaw(
     username: string,
     target: string,
-    flags: { files?: boolean; databases?: boolean } = {}
+    flags: { files?: boolean; databases?: boolean; tables?: PushTable[] } = {}
   ): Promise<{ status: number; body: any }> {
     const response = await this.api.post(`projects/${username}/push`, {
       data: { target, ...flags },
     });
+    return this.rawCall(response);
+  }
+
+  async pushDiff(username: string, target: string): Promise<ApiResponse<PushDiff>> {
+    const response = await this.api.get(
+      `projects/${username}/push/diff?target=${encodeURIComponent(target)}`
+    );
+    await this.assertStatus(response, 200);
+    return response.json();
+  }
+
+  async pushDiffRaw(username: string, target: string): Promise<{ status: number; body: any }> {
+    const response = await this.api.get(
+      `projects/${username}/push/diff?target=${encodeURIComponent(target)}`
+    );
     return this.rawCall(response);
   }
 

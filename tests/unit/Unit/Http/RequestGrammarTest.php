@@ -9,6 +9,7 @@ use App\Http\Requests\MysqlDatabaseRenameRequest;
 use App\Http\Requests\MysqlDatabaseStoreRequest;
 use App\Http\Requests\MysqlUserRenameRequest;
 use App\Http\Requests\MysqlUserStoreRequest;
+use App\Http\Requests\ProjectPushRequest;
 use App\Http\Requests\SftpAccountStoreRequest;
 use App\Http\Requests\UserUpdateRequest;
 use Illuminate\Foundation\Http\FormRequest;
@@ -205,5 +206,51 @@ class RequestGrammarTest extends TestCase
         $request->setContainer($this->app);
 
         return Validator::make($payload, $request->rules())->errors()->toArray();
+    }
+
+    #[DataProvider('tableNames')]
+    public function test_push_rejects_a_table_name_that_reaches_the_command_line(string $name): void
+    {
+        $errors = $this->errors(new ProjectPushRequest(), [
+            'tables' => [['database' => 'acme_wp', 'name' => $name]],
+        ]);
+
+        $this->assertArrayHasKey('tables.0.name', $errors, json_encode($name));
+    }
+
+    public static function tableNames(): array
+    {
+        return [
+            'command substitution' => ['wp$(id>/tmp/pwn)'],
+            'semicolon' => ['wp_posts;touch /tmp/pwn'],
+            'backticks' => ['wp`id`posts'],
+            'space' => ['wp posts'],
+            'dash' => ['wp-posts'],
+            'newline' => ["wp_posts\nDROP TABLE x"],
+            'empty' => [''],
+        ];
+    }
+
+    public function test_push_accepts_a_table_name_with_a_dollar_sign(): void
+    {
+        $errors = $this->errors(new ProjectPushRequest(), [
+            'target' => 'acme',
+            'tables' => [['database' => 'acme_wp', 'name' => 'wp_$posts']],
+        ]);
+
+        $this->assertArrayNotHasKey('tables.0.name', $errors);
+    }
+
+    public function test_push_refuses_more_than_five_hundred_tables(): void
+    {
+        $tables = [];
+        for ($i = 0; $i <= 500; $i++) {
+            $tables[] = ['database' => 'acme_wp', 'name' => 't' . $i];
+        }
+
+        $this->assertArrayHasKey('tables', $this->errors(new ProjectPushRequest(), [
+            'target' => 'acme',
+            'tables' => $tables,
+        ]));
     }
 }

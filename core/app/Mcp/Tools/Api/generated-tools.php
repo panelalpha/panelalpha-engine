@@ -175,6 +175,7 @@ return [
     \App\Mcp\Tools\Api\PHP\PhpIniGetTool::class,
     \App\Mcp\Tools\Api\PHP\PhpIniSetTool::class,
     \App\Mcp\Tools\Api\Projects\ProjectPushTool::class,
+    \App\Mcp\Tools\Api\Projects\ProjectPushDiffTool::class,
     \App\Mcp\Tools\Api\Projects\ProjectRebuildTool::class,
     \App\Mcp\Tools\Api\ProjectSettings\ProjectSettingListTool::class,
     \App\Mcp\Tools\Api\ProjectSettings\ProjectSettingDeleteTool::class,

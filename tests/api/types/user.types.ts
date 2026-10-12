@@ -76,11 +76,22 @@ export interface UserCredentials {
   mysqlPassword: string;
 }
 
+/** One table of one database, as a push selection and the table diff name it. */
+export interface PushTable {
+  database: string;
+  name: string;
+}
+
+/** What `GET /projects/{username}/push/diff` answers under `data`. */
+export interface PushDiff {
+  tables_structure_diff: PushTable[];
+  tables_data_diff: PushTable[];
+}
+
 /**
  * Combined data structure produced by the setup test and consumed by dependent tests.
  * Shared via playwright-relay under key '[setup] should create test user with WordPress'.
- */
-export interface SetupTestData extends UserCredentials {
+ */ export interface SetupTestData extends UserCredentials {
   wpPath: string;
   url: string;
   admin_username: string;

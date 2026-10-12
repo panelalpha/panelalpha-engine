@@ -7,6 +7,7 @@ use App\Models\MysqlDatabase;
 use App\Models\MysqlUser;
 use App\Models\User;
 use App\System\Services\Mysql;
+use Illuminate\Support\Facades\Log;
 
 /**
  * The MySQL half of a project copy: every database the source owns, under the
@@ -72,6 +73,185 @@ class DatabaseCopier
         }
 
         $this->reapplyGrants($grants, $to);
+    }
+
+    /**
+     * One table of $to, dropped and recreated from $from. The caller dumps the
+     * target's own copy first, so a failure can put it back.
+     */
+    public function copyTable(string $from, string $to, string $table): void
+    {
+        Mysql::assertDatabaseName($from);
+        Mysql::assertDatabaseName($to);
+        Mysql::assertTableName($table);
+
+        $this->mysql->runSitesDbScript($this->streamTableCopy($from, $to, $table), 'table copy failed');
+    }
+
+    public function dropTable(string $database, string $table): void
+    {
+        Mysql::assertDatabaseName($database);
+        Mysql::assertTableName($table);
+
+        $this->mysql->runSitesDbScript(
+            'mariadb -uroot ' . escapeshellarg($database)
+            . ' -e ' . escapeshellarg('DROP TABLE IF EXISTS ' . Tables::quote($table)),
+            'table drop failed'
+        );
+    }
+
+    public static function tableRollbackPath(string $rollbackDir, string $database, string $table): string
+    {
+        return rtrim($rollbackDir, '/') . '/' . $database . '.' . $table . '.sql.gz';
+    }
+
+    /**
+     * Only the selected source tables, each dropped and recreated on its target
+     * database. A target database the project does not own is created first.
+     * The target's own copy of a replaced table is dumped before it is touched,
+     * so a failure part way through restores what it already replaced, and a
+     * failure in a later stage restores the whole selection.
+     *
+     * @param list<array{database: string, name: string}> $tables
+     */
+    public function replaceTables(User $source, User $target, array $tables, string $rollbackDir): TableReplacement
+    {
+        $grouped = self::groupByTarget($tables, $source->getMysqlPrefix(), $target->getMysqlPrefix());
+        $targetTables = $this->mysql->tables();
+        $rollbacks = [];
+        $createdDatabases = [];
+        $createdTables = [];
+
+        try {
+            $result = $this->replaceSelected(
+                $grouped,
+                $target,
+                $rollbackDir,
+                $targetTables,
+                $rollbacks,
+                $createdDatabases,
+                $createdTables,
+            );
+        } catch (\Throwable $e) {
+            $this->restoreTables(new TableReplacement(
+                new DatabaseCopyResult(),
+                $rollbacks,
+                $createdDatabases,
+                $createdTables,
+            ));
+            throw $e;
+        }
+
+        return new TableReplacement($result, $rollbacks, $createdDatabases, $createdTables);
+    }
+
+    /**
+     * @param array<string, list<array{database: string, name: string}>> $grouped
+     * @param list<array{database: string, table: string, dump: string}> $rollbacks
+     * @param list<string>                                              $createdDatabases
+     * @param list<array{database: string, table: string}>              $createdTables
+     */
+    private function replaceSelected(
+        array $grouped,
+        User $target,
+        string $rollbackDir,
+        Tables $targetTables,
+        array &$rollbacks,
+        array &$createdDatabases,
+        array &$createdTables,
+    ): DatabaseCopyResult {
+        $owned = $target->mysqlDatabases()->pluck('database')->all();
+        $databases = [];
+        $warnings = [];
+
+        foreach ($grouped as $dest => $selections) {
+            if (!in_array($dest, $owned, true)) {
+                MysqlDatabase::create(['user_id' => $target->id, 'database' => $dest]);
+                $this->mysql->databases()->createDatabase($dest);
+                $createdDatabases[] = $dest;
+                $warnings[] = "Created database '{$dest}' without grants: the target does not own that database.";
+            }
+
+            foreach ($selections as $selection) {
+                $this->replaceTable($selection, $dest, $rollbackDir, $targetTables, $rollbacks, $createdTables);
+                $databases[$selection['database']] = $dest;
+            }
+        }
+
+        return new DatabaseCopyResult($databases, warnings: $warnings);
+    }
+
+    public function restoreTables(TableReplacement $replacement): void
+    {
+        foreach ($replacement->rollbacks as $entry) {
+            try {
+                $this->mysql->restoreFromGzip($entry['database'], $entry['dump']);
+            } catch (\Throwable $e) {
+                Log::warning(
+                    "Push rollback failed for table '{$entry['database']}.{$entry['table']}': " . $e->getMessage()
+                );
+            }
+        }
+
+        foreach ($replacement->createdTables as $entry) {
+            try {
+                $this->dropTable($entry['database'], $entry['table']);
+            } catch (\Throwable $e) {
+                Log::warning(
+                    "Push cleanup failed for table '{$entry['database']}.{$entry['table']}': " . $e->getMessage()
+                );
+            }
+        }
+
+        foreach ($replacement->createdDatabases as $database) {
+            try {
+                if ($this->mysql->databases()->databaseExists($database)) {
+                    $this->mysql->databases()->deleteDatabase($database);
+                }
+            } catch (\Throwable $e) {
+                Log::warning("Push cleanup failed for database '{$database}': " . $e->getMessage());
+            }
+        }
+    }
+
+    /**
+     * @param array{database: string, name: string}                $selection
+     * @param list<array{database: string, table: string, dump: string}> $rollbacks
+     * @param list<array{database: string, table: string}>         $createdTables
+     */
+    private function replaceTable(
+        array $selection,
+        string $dest,
+        string $rollbackDir,
+        Tables $targetTables,
+        array &$rollbacks,
+        array &$createdTables,
+    ): void {
+        $table = $selection['name'];
+
+        if ($targetTables->exists($dest, $table)) {
+            $dump = self::tableRollbackPath($rollbackDir, $dest, $table);
+            $this->mysql->dumpToGzip($dest, $dump, $table);
+            $rollbacks[] = ['database' => $dest, 'table' => $table, 'dump' => $dump];
+        } else {
+            $createdTables[] = ['database' => $dest, 'table' => $table];
+        }
+
+        $this->copyTable($selection['database'], $dest, $table);
+    }
+
+    /**
+     * @param list<array{database: string, name: string}> $tables
+     * @return array<string, list<array{database: string, name: string}>>
+     */
+    private static function groupByTarget(array $tables, string $sourcePrefix, string $targetPrefix): array
+    {
+        $grouped = [];
+        foreach ($tables as $selection) {
+            $grouped[self::mapName($selection['database'], $sourcePrefix, $targetPrefix)][] = $selection;
+        }
+
+        return $grouped;
     }
 
     public static function rollbackPath(string $rollbackDir, string $database): string
@@ -184,6 +364,15 @@ class DatabaseCopier
     private function streamCopy(string $from, string $to): string
     {
         $dump = 'mariadb-dump --single-transaction --routines --triggers --events -uroot ' . escapeshellarg($from);
+        $import = 'mariadb -uroot ' . escapeshellarg($to);
+
+        return 'set -o pipefail; ' . $dump . ' | ' . self::DEFINER_STRIP . ' | ' . $import;
+    }
+
+    private function streamTableCopy(string $from, string $to, string $table): string
+    {
+        $dump = 'mariadb-dump --single-transaction -uroot '
+            . escapeshellarg($from) . ' ' . escapeshellarg($table);
         $import = 'mariadb -uroot ' . escapeshellarg($to);
 
         return 'set -o pipefail; ' . $dump . ' | ' . self::DEFINER_STRIP . ' | ' . $import;
