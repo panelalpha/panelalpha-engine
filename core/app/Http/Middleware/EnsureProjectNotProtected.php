@@ -53,6 +53,7 @@ class EnsureProjectNotProtected
         'POST /projects/{username}/containers/{service}/action',
         'DELETE /projects/{username}/domains/{domain}',
         'POST /projects/{username}/push',
+        'POST /projects/{username}/staging/retry',
     ];
 
     public function handle(Request $request, Closure $next): mixed
