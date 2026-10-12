@@ -2,6 +2,8 @@
 
 namespace App\Http\Middleware;
 
+use App\Mcp\ToolRegistry;
+use App\Mcp\Tools\Api\ApiTool;
 use App\Models\McpActivityLog;
 use App\Models\PersonalAccessToken;
 use Closure;
@@ -21,6 +23,9 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class McpActivityLogMiddleware
 {
+    /** @var array<string, string>|null tool name => the tool argument carrying the project */
+    private static ?array $projectArguments = null;
+
     public function handle(Request $request, Closure $next): mixed
     {
         $body = json_decode((string)$request->getContent(), true);
@@ -133,6 +138,7 @@ class McpActivityLogMiddleware
             McpActivityLog::create([
                 'token_id'      => $token instanceof PersonalAccessToken ? $token->id : null,
                 'token_name'    => $token->name ?? 'unknown',
+                'project'       => self::projectOf($toolName, $input),
                 'tool_name'     => $toolName,
                 // Credentials are stripped by McpActivityLog's own mutator, so
                 // no write path can forget to.
@@ -146,6 +152,44 @@ class McpActivityLogMiddleware
             // operation as a 500 and invite the client to retry it.
             report($e);
         }
+    }
+
+    /**
+     * The project a call names, read from the argument its own endpoint took
+     * the project in. A global endpoint names none.
+     */
+    private static function projectOf(string $toolName, mixed $input): ?string
+    {
+        $argument = self::projectArguments()[$toolName] ?? null;
+
+        if ($argument === null || !is_array($input)) {
+            return null;
+        }
+
+        $value = $input[$argument] ?? null;
+
+        return is_string($value) && $value !== '' ? $value : null;
+    }
+
+    /** @return array<string, string> */
+    private static function projectArguments(): array
+    {
+        if (self::$projectArguments !== null) {
+            return self::$projectArguments;
+        }
+
+        $map = [];
+
+        foreach (ToolRegistry::all() as $class) {
+            $tool = new $class();
+            $argument = $tool instanceof ApiTool ? $tool->projectArgument() : null;
+
+            if ($argument !== null) {
+                $map[$tool->name()] = $argument;
+            }
+        }
+
+        return self::$projectArguments = $map;
     }
 
     /**

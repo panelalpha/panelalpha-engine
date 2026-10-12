@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Task;
 
+use App\Auth\TokenAbilities;
 use App\Http\Middleware\Authenticate;
 use App\Models\Admin;
 use App\Models\PersonalAccessToken;
@@ -128,6 +129,26 @@ class TaskListHttpTest extends SqliteTaskTestCase
         $response = $this->getJson('/api/tasks?scope=all');
 
         $response->assertStatus(403);
+    }
+
+    public function test_scope_all_is_refused_for_a_project_scoped_token(): void
+    {
+        $this->task('alice', Task::STATUS_COMPLETED, tokenId: self::TOKEN_A);
+
+        $this->actingAsToken(self::TOKEN_A, TokenAbilities::build(api: true, mcp: true, projects: ['alice']));
+        $this->getJson('/api/tasks?scope=all')->assertStatus(403);
+    }
+
+    public function test_a_project_scoped_token_sees_only_its_projects_tasks(): void
+    {
+        $mine = $this->task('alice', Task::STATUS_COMPLETED, tokenId: self::TOKEN_A);
+        $this->task('bob', Task::STATUS_COMPLETED, tokenId: self::TOKEN_A);
+
+        $this->actingAsToken(self::TOKEN_A, TokenAbilities::build(api: true, mcp: true, projects: ['alice']));
+        $response = $this->getJson('/api/tasks?scope=mine');
+
+        $response->assertStatus(200);
+        $this->assertSame([$mine->id], $this->ids($response->json('data')));
     }
 
     public function test_the_summary_names_the_action_and_token_and_omits_logs(): void

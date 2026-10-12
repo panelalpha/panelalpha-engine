@@ -10,21 +10,35 @@ import {
 import { EngineApiBase } from '../engine-api-base';
 
 export class McpApi extends EngineApiBase {
-  async listMcpTokens(): Promise<ApiListResponse<McpToken>> {
-    const response = await this.api.get('mcp-tokens');
+  async listMcpTokens(project?: string): Promise<ApiListResponse<McpToken>> {
+    const suffix = project === undefined ? '' : `?project=${encodeURIComponent(project)}`;
+    const response = await this.api.get(`mcp-tokens${suffix}`);
     await this.assertStatus(response, 200);
     return response.json();
   }
 
-  async createMcpToken(name: string): Promise<ApiResponse<McpToken>> {
-    const response = await this.api.post('mcp-tokens', { data: { name } });
+  async createMcpToken(name: string, projects?: string[]): Promise<ApiResponse<McpToken>> {
+    const response = await this.api.post('mcp-tokens', {
+      data: projects === undefined ? { name } : { name, projects },
+    });
     await this.assertStatus(response, 201);
     return response.json();
   }
 
-  async createMcpTokenRaw(name: string): Promise<{ status: number; body: any }> {
-    const response = await this.api.post('mcp-tokens', { data: { name } });
+  async createMcpTokenRaw(
+    name: string,
+    projects?: string[]
+  ): Promise<{ status: number; body: any }> {
+    const response = await this.api.post('mcp-tokens', {
+      data: projects === undefined ? { name } : { name, projects },
+    });
     return this.rawCall(response);
+  }
+
+  async updateMcpTokenProjects(id: number, projects: string[]): Promise<ApiResponse<McpToken>> {
+    const response = await this.api.put(`mcp-tokens/${id}/projects`, { data: { projects } });
+    await this.assertStatus(response, 200);
+    return response.json();
   }
 
   async revokeMcpToken(id: number): Promise<ApiResponse<McpToken>> {
@@ -44,13 +58,18 @@ export class McpApi extends EngineApiBase {
     return response.status();
   }
 
-  async listMcpActivityLogs(options: { tokenName?: string; page?: number } = {}): Promise<{
+  async listMcpActivityLogs(
+    options: { tokenName?: string; project?: string; page?: number } = {}
+  ): Promise<{
     data: McpActivityLog[];
     [key: string]: unknown;
   }> {
     const params = new URLSearchParams();
     if (options.tokenName) {
       params.set('token_name', options.tokenName);
+    }
+    if (options.project) {
+      params.set('project', options.project);
     }
     if (options.page !== undefined) {
       params.set('page', String(options.page));

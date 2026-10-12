@@ -77,6 +77,23 @@ abstract class ApiTool extends Tool
     /** The API path, relative to /api, with {placeholders} for path parameters. */
     abstract protected function path(): string;
 
+    /** The `VERB /path` operation this tool performs, as the API names it. */
+    public function operationKey(): string
+    {
+        return $this->httpMethod() . ' ' . $this->path();
+    }
+
+    /**
+     * The tool argument carrying the project username, or null for an endpoint
+     * that is not about one project.
+     */
+    public function projectArgument(): ?string
+    {
+        return in_array('username', $this->pathParams(), true)
+            ? $this->argument('username')
+            : null;
+    }
+
     /** @return array<int, string> Names of parameters substituted into the path. */
     protected function pathParams(): array
     {

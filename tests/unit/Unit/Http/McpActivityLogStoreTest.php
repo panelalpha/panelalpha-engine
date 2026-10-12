@@ -43,6 +43,8 @@ class McpActivityLogStoreTest extends TestCase
         });
         require_once database_path('migrations/2026_06_24_100001_create_mcp_activity_logs_table.php');
         (new \CreateMcpActivityLogsTable())->up();
+        require_once database_path('migrations/2026_10_10_000000_add_project_to_mcp_activity_logs_table.php');
+        (new \AddProjectToMcpActivityLogsTable())->up();
     }
 
     protected function tearDown(): void

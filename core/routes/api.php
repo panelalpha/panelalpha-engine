@@ -79,6 +79,7 @@ Route::post('/internal/site-password/{username}/login', [SitePasswordGateControl
 Route::get('/mcp-tokens', [McpTokenController::class, 'index']);
 Route::post('/mcp-tokens', [McpTokenController::class, 'store']);
 Route::put('/mcp-tokens/{id}/revoke', [McpTokenController::class, 'revoke']);
+Route::put('/mcp-tokens/{id}/projects', [McpTokenController::class, 'updateProjects']);
 Route::delete('/mcp-tokens/{id}', [McpTokenController::class, 'destroy']);
 
 Route::get('/mcp-activity-logs', [McpActivityLogController::class, 'index']);

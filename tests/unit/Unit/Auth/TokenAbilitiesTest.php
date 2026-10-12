@@ -106,6 +106,119 @@ class TokenAbilitiesTest extends TestCase
         $this->assertSame(ToolRegistry::all(), $abilities->filterTools(ToolRegistry::all()));
     }
 
+    public function test_a_project_scope_is_read_off_the_abilities(): void
+    {
+        $abilities = TokenAbilities::fromList(
+            TokenAbilities::build(api: false, mcp: true, projects: ['alice'])
+        );
+
+        $this->assertTrue($abilities->isProjectScoped());
+        $this->assertSame(['alice'], $abilities->projects());
+        $this->assertTrue($abilities->mayReachProject('alice'));
+        $this->assertFalse($abilities->mayReachProject('bob'));
+        $this->assertFalse($abilities->mayReachProject(null));
+    }
+
+    /** An empty scope must not fall back to the unscoped "every project". */
+    public function test_an_empty_project_scope_reaches_no_project(): void
+    {
+        $abilities = TokenAbilities::fromList(
+            TokenAbilities::build(api: false, mcp: true, projects: [])
+        );
+
+        $this->assertTrue($abilities->isProjectScoped());
+        $this->assertSame([], $abilities->projects());
+        $this->assertFalse($abilities->mayReachProject('alice'));
+    }
+
+    public function test_a_token_without_a_project_scope_reaches_every_project(): void
+    {
+        $abilities = TokenAbilities::fromList(TokenAbilities::build(api: false, mcp: true));
+
+        $this->assertFalse($abilities->isProjectScoped());
+        $this->assertNull($abilities->projects());
+        $this->assertTrue($abilities->mayReachProject('anyone'));
+    }
+
+    public function test_a_project_scope_survives_replacing_the_other_limits(): void
+    {
+        $scoped = TokenAbilities::fromList(TokenAbilities::build(
+            api: true,
+            mcp: true,
+            commands: ['project_list'],
+            routes: ['GET /domains'],
+            projects: ['alice'],
+        ));
+
+        $this->assertSame(['alice'], TokenAbilities::fromList($scoped->withCommands(['domain_create']))->projects());
+        $this->assertSame(['alice'], TokenAbilities::fromList($scoped->withRoutes(null))->projects());
+    }
+
+    public function test_replacing_the_project_scope_keeps_the_other_limits(): void
+    {
+        $scoped = TokenAbilities::fromList(TokenAbilities::build(
+            api: true,
+            mcp: true,
+            commands: ['project_list'],
+            projects: ['alice'],
+        ));
+
+        $updated = TokenAbilities::fromList($scoped->withProjects(['bob']));
+
+        $this->assertSame(['bob'], $updated->projects());
+        $this->assertSame(['project_list'], $updated->commands());
+
+        $unscoped = TokenAbilities::fromList($updated->withProjects(null));
+
+        $this->assertNull($unscoped->projects());
+        $this->assertSame(['project_list'], $unscoped->commands());
+    }
+
+    public function test_a_project_scoped_token_is_not_unrestricted(): void
+    {
+        $scoped = TokenAbilities::fromList(TokenAbilities::build(api: false, mcp: true, projects: ['alice']));
+
+        $this->assertFalse($scoped->isUnrestricted());
+        $this->assertTrue(TokenAbilities::fromList(TokenAbilities::build(api: false, mcp: true))->isUnrestricted());
+    }
+
+    public function test_a_project_scope_hides_the_tools_of_refused_global_routes(): void
+    {
+        $names = $this->toolNamesOf(TokenAbilities::build(api: false, mcp: true, projects: ['alice']));
+
+        foreach (['project_list', 'project_get', 'domain_php_version_set', 'task_list', 'task_cancel',
+                  'system_info', 'source_inspect', 'project_list_summary'] as $kept) {
+            $this->assertContains($kept, $names, "{$kept} should stay reachable for a project-scoped token");
+        }
+
+        foreach (['firewall_status', 'metrics_latest', 'project_create', 'project_create_sync', 'system_ssl_config_get'] as $hidden) {
+            $this->assertNotContains($hidden, $names, "{$hidden} should be hidden from a project-scoped token");
+        }
+    }
+
+    public function test_a_project_scope_may_reach_its_parameterised_routes(): void
+    {
+        $abilities = TokenAbilities::fromList(TokenAbilities::build(api: true, mcp: true, projects: ['alice']));
+
+        $this->assertTrue($abilities->mayReachRoute('GET /projects/{username}'));
+        $this->assertTrue($abilities->mayReachRoute('PUT /domains/{domain}/php-version'));
+        $this->assertTrue($abilities->mayReachRoute('GET /tasks/{id}'));
+        $this->assertFalse($abilities->mayReachRoute('GET /firewall/status'));
+        $this->assertFalse($abilities->mayReachRoute('POST /projects'));
+    }
+
+    /** @param array<int, string> $abilities */
+    private function toolNamesOf(array $abilities): array
+    {
+        $token = TokenAbilities::fromList($abilities);
+        $policy = new ToolPolicy();
+
+        return array_map(
+            fn (string $class): string => $policy->nameOf($class),
+            $token->filterTools(ToolRegistry::all())
+        );
+    }
+
     /** Re-saving replaces the command list rather than growing it. */
     public function test_saving_again_replaces_the_previous_commands(): void
     {

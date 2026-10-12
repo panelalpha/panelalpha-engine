@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools;
 
+use App\Auth\TokenAbilities;
 use App\Models\User;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -22,7 +23,14 @@ class ProjectListSummaryTool extends Tool
 
     public function handle(Request $request): Response
     {
-        $projects = User::withCount('domains')
+        $scope = TokenAbilities::forCurrentRequest()->projects();
+        $query = User::withCount('domains');
+
+        if ($scope !== null) {
+            $query->whereIn('username', $scope);
+        }
+
+        $projects = $query
             ->get(['id', 'username', 'status', 'created_at'])
             ->map(fn ($u): array => [
                 'id' => $u->id,

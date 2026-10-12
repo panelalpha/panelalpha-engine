@@ -135,19 +135,16 @@ class TaskController extends Controller
      */
     private function applyScope(Builder $query, TaskListRequest $request, TokenAbilities $abilities): void
     {
-        if ($request->scope() === TaskListRequest::SCOPE_ALL) {
-            $this->applyProjectReach($query, $abilities);
+        $this->applyProjectReach($query, $abilities);
 
+        if ($request->scope() === TaskListRequest::SCOPE_ALL) {
             return;
         }
 
         $tokenId = Task::currentTokenId();
-        $query->where(function (Builder $caller) use ($tokenId, $abilities): void {
+        $query->where(function (Builder $caller) use ($tokenId): void {
             $caller->where('api_token_id', $tokenId)
-                ->orWhere(function (Builder $engine) use ($abilities): void {
-                    $engine->whereNull('api_token_id');
-                    $this->applyProjectReach($engine, $abilities);
-                });
+                ->orWhereNull('api_token_id');
         });
     }
 

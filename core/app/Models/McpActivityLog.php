@@ -12,6 +12,7 @@ class McpActivityLog extends Model
     protected $fillable = [
         'token_id',
         'token_name',
+        'project',
         'tool_name',
         'input',
         'status',

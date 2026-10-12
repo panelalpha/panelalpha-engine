@@ -42,6 +42,8 @@ class McpActivityLogMiddlewareTest extends TestCase
         });
         require_once database_path('migrations/2026_06_24_100001_create_mcp_activity_logs_table.php');
         (new \CreateMcpActivityLogsTable())->up();
+        require_once database_path('migrations/2026_10_10_000000_add_project_to_mcp_activity_logs_table.php');
+        (new \AddProjectToMcpActivityLogsTable())->up();
     }
 
     protected function tearDown(): void
@@ -75,6 +77,30 @@ class McpActivityLogMiddlewareTest extends TestCase
         $this->assertSame('project_get', $row->tool_name);
         $this->assertSame('error', $row->status);
         $this->assertSame('boom', $row->error_message);
+    }
+
+    public function test_a_project_call_records_the_project_it_named(): void
+    {
+        $reply = new JsonResponse(['jsonrpc' => '2.0', 'id' => 1, 'result' => [
+            'content' => [['type' => 'text', 'text' => '{}']],
+            'isError' => false,
+        ]]);
+
+        (new McpActivityLogMiddleware())->handle($this->request('project_get', ['name' => 'shop']), fn () => $reply);
+
+        $this->assertSame('shop', McpActivityLog::sole()->project);
+    }
+
+    public function test_a_call_about_no_project_records_none(): void
+    {
+        $reply = new JsonResponse(['jsonrpc' => '2.0', 'id' => 1, 'result' => [
+            'content' => [['type' => 'text', 'text' => '{}']],
+            'isError' => false,
+        ]]);
+
+        (new McpActivityLogMiddleware())->handle($this->request('firewall_status', []), fn () => $reply);
+
+        $this->assertNull(McpActivityLog::sole()->project);
     }
 
     public function test_a_failed_direct_call_answered_as_a_plain_response_is_logged_as_an_error(): void

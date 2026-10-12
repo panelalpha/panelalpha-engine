@@ -164,13 +164,140 @@ class EnsureTokenMayUseApiTest extends TestCase
         $this->assertSame(200, $this->statusOf($request));
     }
 
-    /**
-     * @param array<int, string>      $abilities
-     * @param array{0: string, 1: string}|null $route the verb and URI Laravel matched
-     */
-    private function through(array $abilities, bool $internal = false, ?array $route = null): int
+    public function test_a_project_scoped_token_may_call_only_its_projects(): void
     {
-        $request = $this->request($abilities);
+        $abilities = TokenAbilities::build(api: true, mcp: false, projects: ['alice']);
+
+        $this->assertSame(200, $this->through(
+            $abilities,
+            route: ['GET', 'api/projects/{username}'],
+            params: ['username' => 'alice'],
+        ));
+
+        $response = $this->dispatched(
+            $abilities,
+            route: ['GET', 'api/projects/{username}'],
+            params: ['username' => 'bob'],
+        );
+
+        $this->assertSame(403, $response->getStatusCode());
+        $this->assertSame(
+            'This token is limited to projects alice; GET /projects/{username} is outside it.',
+            $response->getData(true)['error'],
+        );
+    }
+
+    public function test_a_project_scoped_token_is_refused_a_global_route(): void
+    {
+        $abilities = TokenAbilities::build(api: true, mcp: false, projects: ['alice']);
+
+        $response = $this->dispatched($abilities, route: ['GET', 'api/firewall/status']);
+
+        $this->assertSame(403, $response->getStatusCode());
+        $this->assertStringContainsString('outside it', $response->getData(true)['error']);
+    }
+
+    /** The lists are filtered in their controller, and the two reads are not about a project. */
+    public function test_a_project_scoped_token_may_reach_the_routes_that_filter_or_ignore_it(): void
+    {
+        $abilities = TokenAbilities::build(api: true, mcp: false, projects: ['alice']);
+
+        $this->assertSame(200, $this->through($abilities, route: ['GET', 'api/projects']));
+        $this->assertSame(200, $this->through($abilities, route: ['GET', 'api/projects/all']));
+        $this->assertSame(200, $this->through($abilities, route: ['GET', 'api/tasks']));
+        $this->assertSame(200, $this->through($abilities, route: ['GET', 'api/system/info']));
+        $this->assertSame(200, $this->through($abilities, route: ['POST', 'api/source/inspect']));
+    }
+
+    /** A project limit travels with the token, so an MCP tool call is bound by it too. */
+    public function test_the_project_scope_is_enforced_on_a_tool_call(): void
+    {
+        $abilities = TokenAbilities::build(api: false, mcp: true, projects: ['alice']);
+
+        $this->assertSame(200, $this->through(
+            $abilities,
+            internal: true,
+            route: ['GET', 'api/projects/{username}'],
+            params: ['username' => 'alice'],
+        ));
+
+        $this->assertSame(403, $this->through(
+            $abilities,
+            internal: true,
+            route: ['GET', 'api/projects/{username}'],
+            params: ['username' => 'bob'],
+        ));
+    }
+
+    public function test_the_named_project_field_is_enforced_on_a_tool_call(): void
+    {
+        $abilities = TokenAbilities::build(api: false, mcp: true, projects: ['alice']);
+        $route = ['POST', 'api/projects/{username}/push'];
+
+        $this->assertSame(200, $this->through(
+            $abilities,
+            internal: true,
+            route: $route,
+            params: ['username' => 'alice'],
+            body: ['target' => 'alice'],
+        ));
+
+        $this->assertSame(403, $this->through(
+            $abilities,
+            internal: true,
+            route: $route,
+            params: ['username' => 'alice'],
+            body: ['target' => 'bob'],
+        ));
+    }
+
+    public function test_an_unscoped_token_is_not_project_refused(): void
+    {
+        $abilities = TokenAbilities::build(api: true, mcp: false);
+
+        $this->assertSame(200, $this->through($abilities, route: ['GET', 'api/firewall/status']));
+        $this->assertSame(200, $this->through(
+            $abilities,
+            route: ['GET', 'api/projects/{username}'],
+            params: ['username' => 'bob'],
+        ));
+    }
+
+    /**
+     * @param array<int, string>               $abilities
+     * @param array{0: string, 1: string}|null $route the verb and URI Laravel matched
+     * @param array<string, string>            $params
+     * @param array<string, string>            $body
+     */
+    private function through(
+        array $abilities,
+        bool $internal = false,
+        ?array $route = null,
+        array $params = [],
+        array $body = []
+    ): int {
+        return $this->dispatched($abilities, $internal, $route, $params, $body)->getStatusCode();
+    }
+
+    /**
+     * @param array<int, string>               $abilities
+     * @param array{0: string, 1: string}|null $route the verb and URI Laravel matched
+     * @param array<string, string>            $params
+     * @param array<string, string>            $body
+     */
+    private function dispatched(
+        array $abilities,
+        bool $internal = false,
+        ?array $route = null,
+        array $params = [],
+        array $body = []
+    ): mixed {
+        $request = $this->request(
+            $abilities,
+            $route === null ? '/api/projects' : '/' . self::pathOf($route[1], $params)
+        );
+
+        $request->merge($body);
 
         if ($internal) {
             $request->attributes->set(ApiTool::VIA_ATTRIBUTE, true);
@@ -178,22 +305,40 @@ class EnsureTokenMayUseApiTest extends TestCase
 
         if ($route !== null) {
             $request->setMethod($route[0]);
-            $request->setRouteResolver(fn (): Route => new Route([$route[0]], $route[1], []));
+            $request->setRouteResolver(function () use ($route, $request): Route {
+                $matched = new Route([$route[0]], $route[1], []);
+                $matched->bind($request);
+
+                return $matched;
+            });
         }
 
-        return $this->statusOf($request);
+        return (new EnsureTokenMayUseApi())->handle(
+            $request,
+            fn (): Response => new Response('ok', 200)
+        );
     }
 
     /** @param array<int, string> $abilities */
-    private function request(array $abilities): Request
+    private function request(array $abilities, string $path = '/api/projects'): Request
     {
         $admin = (new Admin(['name' => 'root']))
             ->withAccessToken(new PersonalAccessToken(['name' => 'test', 'abilities' => $abilities]));
 
-        $request = Request::create('/api/projects');
+        $request = Request::create($path);
         $request->setUserResolver(fn () => $admin);
 
         return $request;
+    }
+
+    /** @param array<string, string> $params */
+    private static function pathOf(string $uri, array $params): string
+    {
+        foreach ($params as $name => $value) {
+            $uri = str_replace('{' . $name . '}', $value, $uri);
+        }
+
+        return $uri;
     }
 
     private function statusOf(Request $request): int

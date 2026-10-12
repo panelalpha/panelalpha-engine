@@ -5,7 +5,9 @@ namespace App\Http\Middleware;
 use App\Auth\ApiSurface;
 use App\Auth\TokenAbilities;
 use App\Mcp\Tools\Api\ApiTool;
+use App\Models\Domain;
 use App\Models\PersonalAccessToken;
+use App\Models\Task;
 use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,47 +20,198 @@ use Illuminate\Http\Request;
  * MCP. {@see ApiTool} dispatches tool calls through this router in-process
  * and marks them on the `attributes` bag — server-side, never populated from
  * an inbound request, so only this engine can claim it.
+ *
+ * A project-limited token is asked about at both doors: a tool call carries
+ * the project it names, so skipping it here would let a scoped assistant
+ * reach another project's MCP tools.
  */
 class EnsureTokenMayUseApi
 {
+    /**
+     * Operations that also name a project in the body or the query, and the
+     * field it is in. A scoped token must have every project it names in
+     * scope, not only the one the URL does: `POST /{alice}/push {"target":"bob"}`
+     * would otherwise write alice's state into bob.
+     *
+     * @var array<string, list<string>>
+     */
+    private const PROJECT_FIELDS = [
+        'POST /projects/{username}/push' => ['target'],
+        'GET /tasks' => ['username'],
+    ];
+
     public function handle(Request $request, Closure $next): mixed
     {
-        // Already authorised at the other door.
-        if ($request->attributes->get(ApiTool::VIA_ATTRIBUTE) === true) {
-            return $next($request);
-        }
+        $token = $this->tokenOf($request);
 
-        $user = $request->user();
-
-        // A caller with no token API has no token to limit: the CLI dispatches
-        // routes in-process as a plain authenticatable, not a token-bearing Admin.
-        $token = $user !== null && method_exists($user, 'currentAccessToken')
-            ? $user->currentAccessToken()
-            : null;
-
-        // Sanctum has decided who this is; not ours to second-guess.
         if (!$token instanceof PersonalAccessToken) {
             return $next($request);
         }
 
         $abilities = TokenAbilities::of($token);
+        $operation = ApiSurface::keyFor($request->route(), $request->method());
+
+        $refusal = $this->doorRefusal($request, $abilities, $operation)
+            ?? $this->projectRefusal($request, $abilities, $operation);
+
+        return $refusal === null ? $next($request) : $this->refuse($refusal);
+    }
+
+    /**
+     * The token's own limits at the door it arrived at.
+     *
+     * A tool call was already measured at `/mcp`, and re-deciding it against a
+     * REST allow-list it was never given would refuse every tool on the engine.
+     */
+    private function doorRefusal(Request $request, TokenAbilities $abilities, ?string $operation): ?string
+    {
+        if ($request->attributes->get(ApiTool::VIA_ATTRIBUTE) === true) {
+            return null;
+        }
 
         if (!$abilities->mayUseApi()) {
-            return $this->refuse(
-                'This token was not issued for the API. Mint one with `pae api:token:create`.'
+            return 'This token was not issued for the API. Mint one with `pae api:token:create`.';
+        }
+
+        if (!$abilities->mayCallRoute($operation)) {
+            return sprintf(
+                'This token is limited to part of the API, and %s is not in it.',
+                $operation ?? 'this route'
             );
         }
 
-        $operation = ApiSurface::keyFor($request->route(), $request->method());
+        return null;
+    }
 
-        if (!$abilities->mayCallRoute($operation)) {
-            return $this->refuse(sprintf(
-                'This token is limited to part of the API, and %s is not in it.',
-                $operation ?? 'this route'
-            ));
+    /**
+     * Why a project-scoped token may not reach this request, or null when it
+     * names no project, or every project it names is in scope.
+     */
+    private function projectRefusal(Request $request, TokenAbilities $abilities, ?string $operation): ?string
+    {
+        $scope = $abilities->projects();
+
+        if ($scope === null) {
+            return null;
         }
 
-        return $next($request);
+        return $this->routeProjectRefusal($request, $scope, $operation)
+            ?? $this->namedProjectRefusal($request, $scope, $operation)
+            ?? $this->globalProjectRefusal($abilities, $scope, $operation);
+    }
+
+    /**
+     * The project the route itself names, if any: the path parameter, the
+     * project owning a domain, or the task owner.
+     *
+     * @param array<int, string> $scope
+     */
+    private function routeProjectRefusal(Request $request, array $scope, ?string $operation): ?string
+    {
+        $route = $request->route();
+
+        if ($route === null) {
+            return null;
+        }
+
+        if ($route->hasParameter('username')) {
+            return $this->outsideUnless($scope, (string) $route->parameter('username'), $operation);
+        }
+
+        if ($route->hasParameter('domain')) {
+            return $this->domainRefusal($scope, (string) $route->parameter('domain'), $operation);
+        }
+
+        if (str_starts_with($route->uri(), 'api/tasks/')) {
+            return $this->taskRefusal($scope, (int) $route->parameter('id'), $operation);
+        }
+
+        return null;
+    }
+
+    /**
+     * Every project named in a body or query field this operation is known to
+     * carry, refused as a whole when one is outside the scope.
+     *
+     * @param array<int, string> $scope
+     */
+    private function namedProjectRefusal(Request $request, array $scope, ?string $operation): ?string
+    {
+        foreach (self::PROJECT_FIELDS[$operation] ?? [] as $field) {
+            $value = $request->input($field);
+
+            if (is_string($value) && $value !== '' && !in_array($value, $scope, true)) {
+                return $this->outsideScope($scope, $operation);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<int, string> $scope
+     */
+    private function globalProjectRefusal(TokenAbilities $abilities, array $scope, ?string $operation): ?string
+    {
+        return $abilities->mayReachRoute($operation) ? null : $this->outsideScope($scope, $operation);
+    }
+
+    /**
+     * A domain that belongs to a project in scope. A domain outside every
+     * scoped project, or one that does not exist, is outside the token.
+     *
+     * @param array<int, string> $scope
+     */
+    private function domainRefusal(array $scope, string $domain, ?string $operation): ?string
+    {
+        $username = Domain::findByName($domain)?->user?->username;
+
+        return in_array($username, $scope, true) ? null : $this->outsideScope($scope, $operation);
+    }
+
+    /**
+     * @param array<int, string> $scope
+     */
+    private function taskRefusal(array $scope, int $id, ?string $operation): ?string
+    {
+        $username = Task::find($id)?->username;
+
+        return in_array($username, $scope, true) ? null : $this->outsideScope($scope, $operation);
+    }
+
+    /**
+     * @param array<int, string> $scope
+     */
+    private function outsideUnless(array $scope, string $username, ?string $operation): ?string
+    {
+        return in_array($username, $scope, true) ? null : $this->outsideScope($scope, $operation);
+    }
+
+    /**
+     * @param array<int, string> $scope
+     */
+    private function outsideScope(array $scope, ?string $operation): string
+    {
+        return sprintf(
+            'This token is limited to projects %s; %s is outside it.',
+            implode(', ', $scope),
+            $operation ?? 'this route'
+        );
+    }
+
+    /**
+     * A caller with no token API has no token to limit: the CLI dispatches
+     * routes in-process as a plain authenticatable, not a token-bearing Admin.
+     */
+    private function tokenOf(Request $request): ?PersonalAccessToken
+    {
+        $user = $request->user();
+
+        $token = $user !== null && method_exists($user, 'currentAccessToken')
+            ? $user->currentAccessToken()
+            : null;
+
+        return $token instanceof PersonalAccessToken ? $token : null;
     }
 
     private function refuse(string $message): JsonResponse

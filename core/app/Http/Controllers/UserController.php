@@ -6,6 +6,7 @@ use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\DeployBusyException;
 use App\Exceptions\ProblemException;
 use App\Exceptions\ProjectBusyException;
+use App\Auth\TokenAbilities;
 use App\Http\Controllers\Concerns\StreamsNdjson;
 use App\Http\Requests\DeployPlanInput;
 use App\Http\Requests\ProjectSourceAttachRequest;
@@ -90,10 +91,15 @@ class UserController extends Controller
             'per_page' => 'integer',
         ]);
 
+        $query = User::query()->with(['liveUser', 'stagingUser']);
+
+        $projects = TokenAbilities::forCurrentRequest()->projects();
+        if ($projects !== null) {
+            $query->whereIn('username', $projects);
+        }
+
         /** @var LengthAwarePaginator */
-        $users = User::query()
-            ->with(['liveUser', 'stagingUser'])
-            ->paginate($params['per_page'] ?? 15);
+        $users = $query->paginate($params['per_page'] ?? 15);
 
         return new UserCollection($users);
     }
@@ -115,6 +121,11 @@ class UserController extends Controller
     public function listAll(Request $request): UserCollection
     {
         $query = User::query()->with(['liveUser', 'stagingUser']);
+
+        $projects = TokenAbilities::forCurrentRequest()->projects();
+        if ($projects !== null) {
+            $query->whereIn('username', $projects);
+        }
 
         if (!empty($request->get('with_domain_names'))) {
             $query->with('domains');
