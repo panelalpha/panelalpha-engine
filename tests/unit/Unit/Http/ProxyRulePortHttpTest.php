@@ -24,6 +24,8 @@ class ProxyRulePortHttpTest extends TestCase
         $this->bootInMemoryDatabase();
         $this->recordWebserverApply();
         $this->withoutMiddleware(Authenticate::class);
+        // A project may answer for its own domain; a system rule for any.
+        $this->makeMainDomain($this->makeUser('alice'), 'shop.test');
         $this->hostListens("LISTEN 0 4096 0.0.0.0:2011 0.0.0.0:*\nLISTEN 0 80 127.0.0.1:3306 0.0.0.0:*");
     }
 
@@ -76,6 +78,52 @@ class ProxyRulePortHttpTest extends TestCase
 
         $this->assertSame(2, ProxyRule::query()->count());
         $this->assertWebserverApplied(2);
+    }
+
+    /** @return array<string, mixed> */
+    private function httpRule(string $name, int $port, string $scope, string $upstream, string $listenIp, bool $enabled = true): array
+    {
+        return [
+            'owner_scope' => $scope,
+            'username' => $scope === 'user' ? 'alice' : null,
+            'transport' => 'http',
+            'listen_port' => $port,
+            'listen_ip' => $listenIp,
+            'server_name' => $name,
+            'upstream_host' => $upstream,
+            'upstream_port' => 3000,
+            'enabled' => $enabled,
+        ];
+    }
+
+    /** Two HTTP rules on one name and port: the vhost keys one entry per port, so one is refused. */
+    public function test_an_http_duplicate_on_another_listen_ip_or_owner_scope_is_refused(): void
+    {
+        $this->postJson('/api/proxy-rules', $this->httpRule('shop.test', 8081, 'user', 'alice', '10.0.0.5'))->assertSuccessful();
+        // Same name and port, different listen IP.
+        $this->postJson('/api/proxy-rules', $this->httpRule('shop.test', 8081, 'user', 'alice', '*'))
+            ->assertStatus(422)
+            ->assertJsonPath('errors.listen_port.0', 'A rule with the same transport, port, and server_name already exists');
+        // Same name and port, a system rule beside a user rule.
+        $this->postJson('/api/proxy-rules', $this->httpRule('shop.test', 8081, 'system', '10.0.0.5', '*'))
+            ->assertStatus(422);
+
+        $this->assertSame(1, ProxyRule::query()->count());
+    }
+
+    /** Re-enabling a disabled HTTP duplicate runs the same check a fresh rule gets. */
+    public function test_re_enabling_a_disabled_http_duplicate_is_refused(): void
+    {
+        $this->postJson('/api/proxy-rules', $this->httpRule('shop.test', 8081, 'system', '10.0.0.5', '*'))->assertSuccessful();
+        $this->postJson('/api/proxy-rules', $this->httpRule('shop.test', 8081, 'user', 'alice', '*', false))->assertSuccessful();
+
+        /** @var ProxyRule $duplicate */
+        $duplicate = ProxyRule::query()->where('owner_scope', 'user')->sole();
+        $this->putJson("/api/proxy-rules/{$duplicate->id}", ['enabled' => true])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.listen_port.0', 'A rule with the same transport, port, and server_name already exists');
+
+        $this->assertFalse($duplicate->fresh()->enabled);
     }
 
     public function test_a_disabled_rule_is_stored_whatever_its_port_and_checked_when_enabled(): void

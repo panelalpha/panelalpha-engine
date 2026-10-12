@@ -14,6 +14,10 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Str;
 use Symfony\Component\Console\Helper\Table;
 
+/**
+ * @psalm-type CreateRequest = array{user: User, domain: string, type: string, parent: string,
+ *   aliases: list<string>, noSsl: bool, upstreamHost: ?string, upstreamPort: ?int}
+ */
 class DomainsCreate extends Command
 {
     use ResolvesProject;
@@ -38,89 +42,62 @@ class DomainsCreate extends Command
     {
         $this->foldProjectOption();
 
-        $input = $this->readInput();
-        if ($input === null) {
-            return 1;
-        }
-        [$domainName, $project, $type, $parentDomain, $aliases] = $input;
-
-        $user = User::findByUsername($project);
-        if (!$user) {
-            $this->error("Project '{$project}' not found.");
+        $request = $this->validatedRequest();
+        if ($request === null) {
             return 1;
         }
 
-        $upstreamHost = null;
-        $upstreamPort = null;
-        $proxyToRaw = trim((string) ($this->option('proxy-to') ?? ''));
-        if ($proxyToRaw !== '') {
-            try {
-                [$upstreamHost, $upstreamPort] = UpstreamSpec::parse($proxyToRaw, $user->username);
-            } catch (\InvalidArgumentException $e) {
-                $this->error($e->getMessage());
-                return 1;
-            }
-            // The rules are the project's own.
-            $refusal = ProxyRuleUpstream::refusal('user', $user->username, $upstreamHost);
-            if ($refusal !== null) {
-                $this->error($refusal);
-                return 1;
-            }
-        }
-
-        $refusal = $this->typeRefusal($user, $project, $type, $domainName, $parentDomain)
-            ?? $this->nameRefusal($domainName, $aliases);
-        if ($refusal !== null) {
-            $this->error($refusal);
-            return 1;
-        }
-
-        $noSsl = (bool) $this->option('no-ssl');
-        $this->summarize($user, $domainName, $type, $parentDomain, $aliases, $noSsl, $upstreamHost, $upstreamPort);
+        $this->summarize($request);
 
         if (!$this->option('force') && !$this->confirm('Create this domain?')) {
             $this->info('Cancelled.');
             return 0;
         }
 
-        $details = NewDomain::details($domainName, $noSsl, $aliases);
-        if ($type === 'sub') {
-            $details['parent_domain'] = $parentDomain;
+        return $this->create($request);
+    }
+
+    /**
+     * The domain to create and its project, or null once a refusal has been printed.
+     *
+     * @return ?CreateRequest
+     */
+    private function validatedRequest(): ?array
+    {
+        $input = $this->readInput();
+        if ($input === null) {
+            return null;
+        }
+        [$domainName, $project, $type, $parentDomain, $aliases] = $input;
+
+        $user = User::findByUsername($project);
+        if (!$user) {
+            $this->error("Project '{$project}' not found.");
+            return null;
         }
 
-        /** @var Domain $domain */
-        $domain = Domain::create([
-            'user_id' => $user->id,
+        $upstream = $this->readUpstream($user);
+        if ($upstream === null) {
+            return null;
+        }
+
+        $refusal = $this->typeRefusal($user, $project, $type, $domainName, $parentDomain)
+            ?? $this->nameRefusal($domainName, $aliases);
+        if ($refusal !== null) {
+            $this->error($refusal);
+            return null;
+        }
+
+        return [
+            'user' => $user,
             'domain' => $domainName,
             'type' => $type,
-            'details' => $details,
-        ]);
-
-        try {
-            $domain->projectDomain()->create();
-            $user->project()->syncPhpHandlersScripts();
-            $user->project()->syncServices();
-
-            if ($upstreamHost !== null && $upstreamPort !== null) {
-                $this->proxyTo($user, $domain, $upstreamHost, $upstreamPort);
-            }
-        } catch (\Throwable $e) {
-            try {
-                $domain->delete();
-            } catch (\Throwable $cleanupError) {
-                // best-effort
-            }
-            $this->error('Domain create failed: ' . $e->getMessage());
-            return 1;
-        }
-
-        $this->info("Domain '{$domainName}' created.");
-        if ($upstreamHost !== null) {
-            $this->line("Proxy rules set → {$upstreamHost}:{$upstreamPort} (listen 80/443).");
-        }
-        $this->line('');
-
-        return 0;
+            'parent' => $parentDomain,
+            'aliases' => $aliases,
+            'noSsl' => (bool) $this->option('no-ssl'),
+            'upstreamHost' => $upstream[0],
+            'upstreamPort' => $upstream[1],
+        ];
     }
 
     /**
@@ -130,16 +107,13 @@ class DomainsCreate extends Command
      */
     private function readInput(): ?array
     {
-        $positional = strtolower(trim((string) ($this->argument('domain') ?? '')));
-        $optionDomain = strtolower(trim((string) ($this->option('domain') ?? '')));
-        if ($positional !== '' && $optionDomain !== '' && $positional !== $optionDomain) {
-            $this->error("Conflicting domain names: argument '{$positional}' vs --domain='{$optionDomain}'.");
+        $domainName = $this->requestedDomain();
+        if ($domainName === null) {
             return null;
         }
-        $domainName = $positional !== '' ? $positional : $optionDomain;
         $project = trim((string) $this->option('username'));
-        $type = strtolower(trim((string) $this->option('type')));
-        $parentDomain = strtolower(trim((string) $this->option('parent-domain')));
+        $type = $this->requestedType();
+        $parentDomain = self::normalised($this->option('parent-domain'));
 
         if ($domainName === '') {
             $this->error('Domain name is required (positional argument or --domain).');
@@ -149,28 +123,87 @@ class DomainsCreate extends Command
             $this->error('--project is required.');
             return null;
         }
-
-        if ($type === 'subdomain') {
-            $type = 'sub';
-        }
         if (!in_array($type, ['addon', 'sub'], true)) {
             $this->error("--type must be 'addon' or 'sub'.");
             return null;
         }
 
-        $aliases = [];
-        $rawAliases = $this->option('alias');
-        if (is_array($rawAliases)) {
-            foreach ($rawAliases as $alias) {
-                if (!is_string($alias) || trim($alias) === '') {
-                    continue;
-                }
-                $aliases[] = strtolower(trim($alias));
-            }
-        }
-        [$domainName, $aliases] = NewDomain::withoutWww($domainName, array_values(array_unique($aliases)));
+        [$domainName, $aliases] = NewDomain::withoutWww($domainName, $this->requestedAliases());
 
         return [$domainName, $project, $type, $parentDomain, $aliases];
+    }
+
+    /** The domain from the argument or --domain, or null once a conflict between the two has been printed. */
+    private function requestedDomain(): ?string
+    {
+        $positional = self::normalised($this->argument('domain'));
+        $optionDomain = self::normalised($this->option('domain'));
+        if ($positional !== '' && $optionDomain !== '' && $positional !== $optionDomain) {
+            $this->error("Conflicting domain names: argument '{$positional}' vs --domain='{$optionDomain}'.");
+            return null;
+        }
+
+        return $positional !== '' ? $positional : $optionDomain;
+    }
+
+    /** The --type option, with "subdomain" accepted as "sub". */
+    private function requestedType(): string
+    {
+        $type = self::normalised($this->option('type'));
+
+        return $type === 'subdomain' ? 'sub' : $type;
+    }
+
+    /** @return list<string> the non-empty --alias values, normalised and unique */
+    private function requestedAliases(): array
+    {
+        $rawAliases = $this->option('alias');
+        if (!is_array($rawAliases)) {
+            return [];
+        }
+
+        $aliases = [];
+        foreach ($rawAliases as $alias) {
+            if (is_string($alias) && trim($alias) !== '') {
+                $aliases[] = self::normalised($alias);
+            }
+        }
+
+        return array_values(array_unique($aliases));
+    }
+
+    private static function normalised(mixed $value): string
+    {
+        return strtolower(trim((string) ($value ?? '')));
+    }
+
+    /**
+     * The --proxy-to upstream as [host, port], [null, null] when none was
+     * given, or null once a refusal has been printed. The rules are the project's own.
+     *
+     * @return ?array{0: ?string, 1: ?int}
+     */
+    private function readUpstream(User $user): ?array
+    {
+        $proxyTo = trim((string) ($this->option('proxy-to') ?? ''));
+        if ($proxyTo === '') {
+            return [null, null];
+        }
+
+        try {
+            [$upstreamHost, $upstreamPort] = UpstreamSpec::parse($proxyTo, $user->username);
+        } catch (\InvalidArgumentException $e) {
+            $this->error($e->getMessage());
+            return null;
+        }
+
+        $refusal = ProxyRuleUpstream::refusal('user', $user->username, $upstreamHost);
+        if ($refusal !== null) {
+            $this->error($refusal);
+            return null;
+        }
+
+        return [$upstreamHost, $upstreamPort];
     }
 
     /** Why the project cannot take a domain of this type here, or null. */
@@ -217,65 +250,134 @@ class DomainsCreate extends Command
         };
     }
 
-    /** @param list<string> $aliases */
-    private function summarize(
-        User $user,
-        string $domainName,
-        string $type,
-        string $parentDomain,
-        array $aliases,
-        bool $noSsl,
-        ?string $upstreamHost,
-        ?int $upstreamPort,
-    ): void {
-        $proxyLabel = ($upstreamHost !== null && $upstreamPort !== null)
-            ? "{$upstreamHost}:{$upstreamPort}"
+    /** @param CreateRequest $request */
+    private function summarize(array $request): void
+    {
+        $proxyLabel = ($request['upstreamHost'] !== null && $request['upstreamPort'] !== null)
+            ? "{$request['upstreamHost']}:{$request['upstreamPort']}"
             : '-';
 
         $this->line('');
         $this->info('Create domain');
         $table = new Table($this->output);
         $table->setRows([
-            ['Domain', $domainName],
-            ['Project', $user->username],
-            ['Type', $type],
-            ['Parent domain', $type === 'sub' ? $parentDomain : '-'],
-            ['Aliases', $aliases === [] ? '-' : implode("\n", $aliases)],
-            ['SSL', $noSsl ? 'disabled' : 'enabled'],
-            ['Document root', "/{$domainName}/public_html"],
+            ['Domain', $request['domain']],
+            ['Project', $request['user']->username],
+            ['Type', $request['type']],
+            ['Parent domain', $request['type'] === 'sub' ? $request['parent'] : '-'],
+            ['Aliases', $request['aliases'] === [] ? '-' : implode("\n", $request['aliases'])],
+            ['SSL', $request['noSsl'] ? 'disabled' : 'enabled'],
+            ['Document root', "/{$request['domain']}/public_html"],
             ['Proxy to', $proxyLabel],
         ]);
         $table->render();
     }
 
+    /**
+     * Write the row, set the domain up and report it; a failure rolls it all back.
+     *
+     * @param CreateRequest $request
+     */
+    private function create(array $request): int
+    {
+        $domain = $this->createRow($request);
+
+        try {
+            $this->provision($request['user'], $domain, $request['upstreamHost'], $request['upstreamPort']);
+        } catch (\Throwable $e) {
+            $this->rollBack($domain);
+            $this->error('Domain create failed: ' . $e->getMessage());
+            return 1;
+        }
+
+        $this->reportCreated($request['domain'], $request['upstreamHost'], $request['upstreamPort']);
+
+        return 0;
+    }
+
+    /** @param CreateRequest $request */
+    private function createRow(array $request): Domain
+    {
+        $parent = $request['type'] === 'sub' ? $request['parent'] : null;
+        $details = NewDomain::details($request['domain'], $request['noSsl'], $request['aliases'], $parent);
+
+        return Domain::create([
+            'user_id' => $request['user']->id,
+            'domain' => $request['domain'],
+            'type' => $request['type'],
+            'details' => $details,
+        ]);
+    }
+
+    /** Set the domain up on the host and in the project's services, then proxy it when an upstream was given. */
+    private function provision(User $user, Domain $domain, ?string $upstreamHost, ?int $upstreamPort): void
+    {
+        $domain->projectDomain()->create();
+        $user->project()->syncPhpHandlersScripts();
+        $user->project()->syncServices();
+
+        if ($upstreamHost !== null && $upstreamPort !== null) {
+            $this->proxyTo($user, $domain, $upstreamHost, $upstreamPort);
+        }
+    }
+
+    /**
+     * Undo create() as the REST path does, best-effort: deleting the row alone
+     * would orphan its vhost, certificate and proxy rules.
+     */
+    private function rollBack(Domain $domain): void
+    {
+        try {
+            $domain->projectDomain()->delete();
+        } catch (\Throwable) {
+        }
+        try {
+            $domain->delete();
+        } catch (\Throwable) {
+        }
+    }
+
+    private function reportCreated(string $domainName, ?string $upstreamHost, ?int $upstreamPort): void
+    {
+        $this->info("Domain '{$domainName}' created.");
+        if ($upstreamHost !== null) {
+            $this->line("Proxy rules set → {$upstreamHost}:{$upstreamPort} (listen 80/443).");
+        }
+        $this->line('');
+    }
+
     /** Route the domain's 80 and 443 to the upstream, then rebuild it. */
     private function proxyTo(User $user, Domain $domain, string $upstreamHost, int $upstreamPort): void
     {
-        $domainName = $domain->domain;
         foreach ([80, 443] as $listenPort) {
-            ProxyRule::updateOrCreate(
-                [
-                    'owner_scope' => 'user',
-                    'username' => $user->username,
-                    'transport' => 'http',
-                    'listen_port' => $listenPort,
-                    'server_name' => $domainName,
-                ],
-                [
-                    'enabled' => true,
-                    'listen_ip' => '*',
-                    'upstream_host' => $upstreamHost,
-                    'upstream_port' => $upstreamPort,
-                    'upstream_protocol' => 'http',
-                    'is_generated' => false,
-                    'metadata' => [
-                        'source' => 'domain-create',
-                        'description' => "{$listenPort}→{$upstreamPort} for {$domainName}",
-                    ],
-                ]
-            );
+            $this->writeProxyRule($user, $domain->domain, $listenPort, $upstreamHost, $upstreamPort);
         }
         $domain->projectDomain()->rebuild();
         (new System())->webserver()->scheduleWebserverReloadInBackground();
+    }
+
+    private function writeProxyRule(User $user, string $domainName, int $listenPort, string $upstreamHost, int $upstreamPort): void
+    {
+        ProxyRule::updateOrCreate(
+            [
+                'owner_scope' => 'user',
+                'username' => $user->username,
+                'transport' => 'http',
+                'listen_port' => $listenPort,
+                'server_name' => $domainName,
+            ],
+            [
+                'enabled' => true,
+                'listen_ip' => '*',
+                'upstream_host' => $upstreamHost,
+                'upstream_port' => $upstreamPort,
+                'upstream_protocol' => 'http',
+                'is_generated' => false,
+                'metadata' => [
+                    'source' => 'domain-create',
+                    'description' => "{$listenPort}→{$upstreamPort} for {$domainName}",
+                ],
+            ]
+        );
     }
 }

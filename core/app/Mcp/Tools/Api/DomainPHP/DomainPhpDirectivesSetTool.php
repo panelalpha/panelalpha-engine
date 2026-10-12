@@ -15,7 +15,9 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 
 #[Name('domain_php_directives_set')]
 #[Description(<<<'MARKDOWN'
-    Replace domain PHP directives
+    Replace domain PHP directives (PHP hosting projects only)
+
+    PHP hosting projects only: a dind app runs PHP from its own image and reads neither the domain file nor php.ini, so a dind project answers 422. Set the directive in the image instead.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

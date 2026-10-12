@@ -55,6 +55,19 @@ class ProxyRuleServerNameHttpTest extends TestCase
         $this->assertWebserverApplied(0);
     }
 
+    /** REST and the CLI share one grammar: `_` is a name, a bare `*` is not. */
+    public function test_underscore_is_accepted_and_a_bare_star_is_refused(): void
+    {
+        $this->postJson('/api/proxy-rules', $this->rule('alice', '_', ['owner_scope' => 'system', 'upstream_host' => '10.0.0.5']))
+            ->assertCreated();
+
+        $this->postJson('/api/proxy-rules', $this->rule('alice', '*'))
+            ->assertStatus(422)
+            ->assertJsonPath('errors.server_name.0', 'The server name must be "_" or a hostname.');
+
+        $this->assertSame('_', ProxyRule::query()->sole()->server_name);
+    }
+
     public function test_a_project_rule_on_its_own_domain_or_alias_or_no_name_is_stored(): void
     {
         $this->postJson('/api/proxy-rules', $this->rule('alice', 'alice.test'))->assertCreated();

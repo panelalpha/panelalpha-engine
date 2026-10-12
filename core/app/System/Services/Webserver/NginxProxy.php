@@ -2,9 +2,13 @@
 
 namespace App\System\Services\Webserver;
 
+use App\Integrations\Tunnels\PanelAlphaConnect;
 use App\Models\Domain;
+use App\Models\ProxyRule;
 use App\Models\Setting;
+use App\Models\User;
 use App\System\Project\Domain as ProjectDomain;
+use App\System\Project\SitePasswordProtection;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Log;
 
@@ -14,6 +18,16 @@ use Illuminate\Support\Facades\Log;
  */
 class NginxProxy extends AbstractWebserver implements WebserverInterface
 {
+    /**
+     * Ports whose listeners have to match the rendered config for it to be live.
+     */
+    private const LISTEN_PORTS = [80, 443];
+
+    /**
+     * A LISTEN (st 0A) row of /proc/net/tcp: `sl local_address rem_address st ...`.
+     */
+    private const PROC_NET_TCP_LISTEN_ROW = '/^\s*\d+:\s+([0-9A-F]{8}):([0-9A-F]{4})\s+[0-9A-F]{8}:[0-9A-F]{4}\s+0A\b/';
+
     public function getDetails(): array
     {
         return [
@@ -26,7 +40,6 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
 
     public function addDomain(Domain $domain): void
     {
-        // TODO: use rebuildConfig() or createDomainConfig() ?
         $this->createDomainConfig($domain);
     }
 
@@ -40,19 +53,25 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
 
         $domains ??= Domain::getAll();
 
-        // Compile routing rules with conflict suppression
         $compiler = new RoutingCompiler($this->system);
-        $compiledRules = $compiler->compile($domains);
+        $this->renderCustomProxyRules($compiler->compile($domains));
 
-        // Render custom proxy rules (persisted, non-generated rules)
-        // `*` takes IPv6 too where the main config listens on it; an IPv4-only host cannot bind [::].
-        $listenIpv6 = $this->getAllIpsVars()['ips_v6'] !== [];
-        $this->renderProxyRuleVhosts($compiledRules['http'], $listenIpv6);
+        $this->rebuildDomainConfigs($domains);
+    }
+
+    /**
+     * Render the persisted, non-generated proxy rules. A `*` rule takes IPv6 too
+     * where the main config listens on it; an IPv4-only host cannot bind [::].
+     *
+     * @param array{http: list<HttpRule>, stream: list<StreamRule>} $compiledRules
+     */
+    private function renderCustomProxyRules(array $compiledRules): void
+    {
+        $ips = $this->getAllIpsVars();
+        $listenIpv6 = $ips['ips_v6'] !== [];
+        $this->renderProxyRuleVhosts($compiledRules['http'], $listenIpv6, [...$ips['ips_v4'], ...$ips['ips_v6']]);
         $this->renderStreamRules($compiledRules['stream'], $listenIpv6);
         $this->syncProxyRulePorts([...$compiledRules['http'], ...$compiledRules['stream']]);
-
-        // Render domain vhost configs (generated defaults)
-        $this->rebuildDomainConfigs($domains);
     }
 
     private function rebuildMainConfig(): void
@@ -76,33 +95,16 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
     {
         $appLiteProxyEnabled = (bool)config('env.APP_LITE_PROXY_ENABLED');
         if (!$appLiteProxyEnabled) {
-            $confPath = $this->system->engineDirPath() . '/webserver-config/nginx-proxy/vhosts/app-lite.conf';
             $this->system->runProcess([
                 "sudo",
                 "rm",
                 "-f",
-                $confPath,
+                $this->appLiteConfigPath(),
             ]);
             return;
         }
 
-        // Instead of rendering from template, render persisted system proxy rules
-        // This is now handled by the RoutingCompiler in rebuildConfig()
-        // For now, keep the legacy template path for backward compatibility
-        // TODO: Remove legacy template once migration is complete
-        $confPath = $this->system->engineDirPath() . '/webserver-config/nginx-proxy/vhosts/app-lite.conf';
-        $confTemplatePath = $this->system->engineDirPath() . '/templates/virtualHost-nginx-proxy-app-lite.blade.php';
-
-        if ($this->system->filesystem()->fileExists($confTemplatePath)) {
-            $confTemplate = $this->system->filesystem()->fileGetContents($confTemplatePath);
-            $templateVars = [
-                ...$this->getAppProxyVars(),
-                ...$this->getAllIpsVars(),
-                ...$this->getSslCertVars(),
-            ];
-            $virtualHost = Blade::render($confTemplate, $templateVars);
-            $this->system->filesystem()->filePutContents($confPath, $virtualHost);
-        }
+        $this->renderAppLiteFromLegacyTemplate();
 
         $this->system->exec([
             'sudo',
@@ -110,6 +112,32 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
             '-p',
             $this->system->engineDirPath() . '/webserver-logs/nginx-proxy/app-lite',
         ]);
+    }
+
+    /**
+     * The app-lite vhost from its template, when that still ships; the persisted
+     * system proxy rules the RoutingCompiler renders are meant to replace it.
+     */
+    private function renderAppLiteFromLegacyTemplate(): void
+    {
+        $confTemplatePath = $this->system->engineDirPath() . '/templates/virtualHost-nginx-proxy-app-lite.blade.php';
+        if (!$this->system->filesystem()->fileExists($confTemplatePath)) {
+            return;
+        }
+
+        $confTemplate = $this->system->filesystem()->fileGetContents($confTemplatePath);
+        $templateVars = [
+            ...$this->getAppProxyVars(),
+            ...$this->getAllIpsVars(),
+            ...$this->getSslCertVars(),
+        ];
+        $virtualHost = Blade::render($confTemplate, $templateVars);
+        $this->system->filesystem()->filePutContents($this->appLiteConfigPath(), $virtualHost);
+    }
+
+    private function appLiteConfigPath(): string
+    {
+        return $this->system->engineDirPath() . '/webserver-config/nginx-proxy/vhosts/app-lite.conf';
     }
 
     /**
@@ -131,12 +159,13 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
             || (bool)preg_match('/^\s*listen\s+443\s+ssl(\s+default_server)?\s*;/m', $contents);
     }
 
+    /**
+     * A rebind restarts the container from the host: `/etc/init.d/nginx restart`
+     * inside it exits PID 1 and loops the webserver (see Modsec::restartWebserver).
+     */
     public function reload(bool $rebindIpListeners = false): void
     {
         if ($rebindIpListeners) {
-            // Never `/etc/init.d/nginx restart` inside the container: that exits
-            // PID 1 and loops the webserver (see Modsec::restartWebserver).
-            // Rebind via host-level compose restart instead.
             $this->system->webserver()->restartWebserverContainerFromHost();
             return;
         }
@@ -145,26 +174,10 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
     }
 
     /**
-     * Ports whose listeners have to match the rendered config for it to be live.
-     */
-    private const LISTEN_PORTS = [80, 443];
-
-    /**
      * Restart the webserver when the reload it was just asked for did not take.
      *
-     * A reload cannot report this itself. `nginx -s reload` exits 0 once the
-     * signal is delivered, and `nginx -t` passes because the configuration is
-     * valid -- the failure is a runtime bind, not a syntax error. A master that
-     * cannot open its new listening sockets logs `still could not bind()` and
-     * goes on serving the configuration it started with, so a caller that
-     * trusts the exit code believes a config is live that never loaded. The
-     * listeners are the only observable that tells the two apart.
-     *
-     * nginx retries a failed bind five times at 500ms, so give it a moment
-     * before concluding anything.
-     *
-     * The restart runs here rather than through `at`: a host without `at`
-     * dropped the queued one silently and stayed on wildcard sockets for good.
+     * A reload exits 0 even when the master cannot bind its new listeners and keeps
+     * serving the old config; the listeners are the only observable that tells.
      */
     private function ensureReloadApplied(): void
     {
@@ -192,6 +205,9 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
         }
     }
 
+    /**
+     * nginx retries a failed bind five times at 500ms, so recheck a few times first.
+     */
     private function listenersSettle(): bool
     {
         for ($attempt = 0; $attempt < 3; $attempt++) {
@@ -212,13 +228,8 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
     }
 
     /**
-     * Whether nginx is listening where the rendered main config says it should.
-     *
-     * IPv4 only, and only the main config: it carries the `default_server`
-     * blocks, and every vhost derives its addresses from the same list
-     * ({@see AbstractWebserver::getAllIpsVars()}), so the main config is the
-     * authoritative bind shape. A check that cannot run is never a reason to
-     * fail a reload, so any error here reads as "matching".
+     * Whether nginx listens on IPv4 where the rendered main config says it should;
+     * every vhost derives its addresses from the same list. A check that cannot run reads as matching.
      */
     public function listenersMatchConfig(): bool
     {
@@ -243,12 +254,8 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
     }
 
     /**
-     * IPv4 listen addresses the rendered main config declares, by port.
-     *
-     * A bare `listen 80` is the wildcard, which is a different socket from
-     * `listen <ip>:80` and the whole reason this check exists. IPv6 lines carry
-     * brackets and never match, which is deliberate: they follow the same
-     * source, so IPv4 is enough to detect a config that did not load.
+     * IPv4 listen addresses the rendered main config declares, by port; a bare
+     * `listen 80` is the wildcard. Bracketed IPv6 lines never match, deliberately.
      *
      * @return array<int, list<string>>
      */
@@ -266,11 +273,7 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
             $found[$port][] = $match[1] === '' ? '0.0.0.0' : rtrim($match[1], ':');
         }
 
-        return array_map(static function (array $addresses): array {
-            $addresses = array_values(array_unique($addresses));
-            sort($addresses);
-            return $addresses;
-        }, $found);
+        return self::sortedUniqueByPort($found);
     }
 
     /**
@@ -290,8 +293,7 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
 
         $bound = [];
         foreach (explode("\n", $raw) as $line) {
-            // sl  local_address rem_address st ...  -- st 0A is LISTEN
-            if (!preg_match('/^\s*\d+:\s+([0-9A-F]{8}):([0-9A-F]{4})\s+[0-9A-F]{8}:[0-9A-F]{4}\s+0A\b/', $line, $match)) {
+            if (!preg_match(self::PROC_NET_TCP_LISTEN_ROW, $line, $match)) {
                 continue;
             }
             $port = (int)hexdec($match[2]);
@@ -301,11 +303,20 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
             $bound[$port][] = self::hexToIpv4($match[1]);
         }
 
+        return self::sortedUniqueByPort($bound);
+    }
+
+    /**
+     * @param array<int, list<string>> $addressesByPort
+     * @return array<int, list<string>>
+     */
+    private static function sortedUniqueByPort(array $addressesByPort): array
+    {
         return array_map(static function (array $addresses): array {
             $addresses = array_values(array_unique($addresses));
             sort($addresses);
             return $addresses;
-        }, $bound);
+        }, $addressesByPort);
     }
 
     /** /proc/net/tcp stores the local address as little-endian hex. */
@@ -328,7 +339,7 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
 
     public function listDomains(): array
     {
-        $dir = $this->domainsConfigDirPath();
+        $dir = $this->domainsConfigsDirPath();
         $domains = [];
         foreach ((new \FilesystemIterator($dir)) as $file) {
             if (!($file instanceof \SplFileInfo)) {
@@ -342,43 +353,29 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
     }
 
     /**
-     * Hardcoded nginx-proxy vhost dir (from the former Services\NginxProxy helper).
+     * The nginx-proxy vhost directory, whatever webserver is current.
      */
-    public function domainsConfigDirPath(): string
+    public function domainsConfigsDirPath(): string
     {
         return $this->system->engineDirPath() . '/webserver-config/nginx-proxy/vhosts';
     }
 
     public function domainConfigExists(string $domainName): bool
     {
-        return file_exists($this->domainsConfigDirPath() . '/' . $domainName . '.conf');
+        return file_exists($this->domainsConfigsDirPath() . '/' . $domainName . '.conf');
     }
 
     public function createDomainConfig(Domain $domain): void
     {
         $domainName = $domain->domain;
-
         $user = $domain->getUser();
-        $ips = $user->getBindIpAddresses();
 
-        $templateVars = [
-            'user' => $user->username,
-            'suspended' => $user->status === 'suspended',
-            'ips_v4' => $ips['ipv4'],
-            'ips_v6' => $ips['ipv6'],
-            'domain' => $domainName,
-            'aliases' => $domain->getVhostAltNames(),
-            'redirect_url' => $domain->getRedirectUrl(),
-            'force_https_redirect' => $domain->forceHttpsRedirectEnabled(),
-            'relative_document_root' => $domain->getDocumentRoot(),
-            'app_port' => $user->getAppPort() ?? 80,
-            'app_ssl_port' => $user->getAppPort() ?? 443,
-            'trusted_fronts' => \App\Integrations\Tunnels\PanelAlphaConnect::trustedFrontsFor($domain),
-        ];
-        $templateVars = array_merge($templateVars, \App\System\Project\SitePasswordProtection::nginxTemplateVars($user));
-        $templateVars = array_merge($templateVars, $this->httpAcmeChallengeTemplateVars($domain));
-        $connection = $this->system->project($user)->domain($domain);
-        $templateVars = array_merge($templateVars, $this->sslTemplateVars($connection));
+        $templateVars = array_merge(
+            $this->domainTemplateVars($domain, $user),
+            SitePasswordProtection::nginxTemplateVars($user),
+            $this->httpAcmeChallengeTemplateVars($domain),
+            $this->sslTemplateVars($this->system->project($user)->domain($domain)),
+        );
 
         $isDind = $user->getTemplate() === 'dind';
         if ($isDind) {
@@ -389,11 +386,61 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
         $this->system->exec(['sudo', 'mkdir', '-p', $domainLogsDir]);
 
         $domainConfigFile = "{$this->domainsConfigsDirPath()}/{$domainName}.conf";
+        $this->system->filesystem()->makeFileFromTemplate($domainConfigFile, $this->domainTemplatePath($isDind), $templateVars);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function domainTemplateVars(Domain $domain, User $user): array
+    {
+        $ips = $user->getBindIpAddresses();
+
+        return [
+            'user' => $user->username,
+            'suspended' => $user->status === 'suspended',
+            'ips_v4' => $ips['ipv4'],
+            'ips_v6' => $ips['ipv6'],
+            'domain' => $domain->domain,
+            'aliases' => $domain->getVhostAltNames(),
+            'redirect_url' => $this->safeRedirectUrl($domain->getRedirectUrl()),
+            'force_https_redirect' => $domain->forceHttpsRedirectEnabled(),
+            'relative_document_root' => $domain->getDocumentRoot(),
+            'app_port' => $user->getAppPort() ?? 80,
+            'app_ssl_port' => $user->getAppPort() ?? 443,
+            'trusted_fronts' => PanelAlphaConnect::trustedFrontsFor($domain),
+        ];
+    }
+
+    private function domainTemplatePath(bool $isDind): string
+    {
         $templatesDir = $this->system->templatesDirPath();
-        $templateConfigFile = $isDind
+
+        return $isDind
             ? "{$templatesDir}/dind/virtualHost-nginx-proxy.blade.php"
             : "{$templatesDir}/virtualHost-nginx-proxy.blade.php";
-        $this->system->filesystem()->makeFileFromTemplate($domainConfigFile, $templateConfigFile, $templateVars);
+    }
+
+    /**
+     * Drops a stored redirect URL holding nginx metacharacters (rows older than
+     * `App\Rules\RedirectUrl`): one such URL fails the reload for every site on the host.
+     */
+    private function safeRedirectUrl(?string $url): ?string
+    {
+        if ($url === null || $url === '') {
+            return null;
+        }
+
+        if (preg_match("/[\s\"'\\$;{}`]/", $url) === 1) {
+            Log::warning(
+                'Refusing to render a redirect URL with nginx metacharacters for domain; '
+                . 'clear or re-enter it in the panel.'
+            );
+
+            return null;
+        }
+
+        return $url;
     }
 
     /**
@@ -429,50 +476,76 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
      *   proxy_extra: list<array{listen_port: int, host: string, port: int, protocol: string, ips_v4: list<string>, ips_v6: list<string>}>
      * }
      */
-    private function dindProxyTemplateVars(\App\Models\User $user, string $domainName): array
+    private function dindProxyTemplateVars(User $user, string $domainName): array
     {
         $accountIps = $user->getBindIpAddresses();
-        // Any HTTP rule targeting this domain's server_name belongs in {domain}.conf
-        // (including system-scoped CLI rules that omitted username).
-        $rules = \App\Models\ProxyRule::query()
+        $rules = $this->httpRulesNamedAfter($domainName);
+
+        $vars = [
+            'proxy_http' => null,
+            'proxy_https' => null,
+            'proxy_extra' => [],
+        ];
+        foreach ($rules as $rule) {
+            if (ProxyRuleUpstream::serves($rule) && ProxyRuleServerName::answersFor($rule, $user->username)) {
+                $vars = self::withDindUpstream($vars, (int) $rule->listen_port, $this->dindRuleUpstream($rule, $accountIps));
+            }
+        }
+
+        return $vars;
+    }
+
+    /**
+     * Port 80 and 443 each take one upstream, the last rule winning; any other port is an extra.
+     *
+     * @param array{proxy_http: ?array, proxy_https: ?array, proxy_extra: list<array>} $vars
+     * @param array<string, mixed> $upstream
+     * @return array{proxy_http: ?array, proxy_https: ?array, proxy_extra: list<array>}
+     */
+    private static function withDindUpstream(array $vars, int $listenPort, array $upstream): array
+    {
+        if ($listenPort === 80) {
+            $vars['proxy_http'] = $upstream;
+        } elseif ($listenPort === 443) {
+            $vars['proxy_https'] = $upstream;
+        } else {
+            $vars['proxy_extra'][] = array_merge([
+                'listen_port' => $listenPort,
+            ], $upstream);
+        }
+
+        return $vars;
+    }
+
+    /**
+     * Every enabled HTTP rule whose server_name is this domain, system-scoped CLI rules
+     * without a username included; another project's rule is filtered out by the caller.
+     *
+     * @return iterable<ProxyRule>
+     */
+    private function httpRulesNamedAfter(string $domainName): iterable
+    {
+        return ProxyRule::query()
             ->where('transport', 'http')
             ->where('enabled', true)
             ->where('server_name', $domainName)
             ->get();
+    }
 
-        $proxyHttp = null;
-        $proxyHttps = null;
-        $proxyExtra = [];
-
-        foreach ($rules as $rule) {
-            // Another project's rule named after this domain does not answer for it.
-            if (!ProxyRuleUpstream::serves($rule) || !ProxyRuleServerName::answersFor($rule, $user->username)) {
-                continue;
-            }
-            $listenIps = $this->resolveProxyRuleListenIps($rule->listen_ip, $accountIps);
-            $upstream = [
-                'host' => $rule->upstream_host,
-                'port' => (int) $rule->upstream_port,
-                'protocol' => $rule->upstream_protocol ?: 'http',
-                'ips_v4' => $listenIps['ipv4'],
-                'ips_v6' => $listenIps['ipv6'],
-            ];
-            $listenPort = (int) $rule->listen_port;
-            if ($listenPort === 80) {
-                $proxyHttp = $upstream;
-            } elseif ($listenPort === 443) {
-                $proxyHttps = $upstream;
-            } else {
-                $proxyExtra[] = array_merge([
-                    'listen_port' => $listenPort,
-                ], $upstream);
-            }
-        }
+    /**
+     * @param array{ipv4: list<string>, ipv6: list<string>} $accountIps
+     * @return array{host: string, port: int, protocol: string, ips_v4: list<string>, ips_v6: list<string>}
+     */
+    private function dindRuleUpstream(ProxyRule $rule, array $accountIps): array
+    {
+        $listenIps = $this->resolveProxyRuleListenIps($rule->listen_ip, $accountIps);
 
         return [
-            'proxy_http' => $proxyHttp,
-            'proxy_https' => $proxyHttps,
-            'proxy_extra' => $proxyExtra,
+            'host' => $rule->upstream_host,
+            'port' => (int) $rule->upstream_port,
+            'protocol' => $rule->upstream_protocol ?: 'http',
+            'ips_v4' => $listenIps['ipv4'],
+            'ips_v6' => $listenIps['ipv6'],
         ];
     }
 
@@ -508,15 +581,14 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
 
     public function deleteDomainConfig(string $domainName): void
     {
-        $configFile = $this->domainsConfigDirPath() . '/' . $domainName . '.conf';
+        $configFile = $this->domainsConfigsDirPath() . '/' . $domainName . '.conf';
         $this->system->exec(['sudo', 'rm', '-f', $configFile]);
     }
 
     public function deleteDomainsConfigs(array $domainNames): void
     {
         foreach ($domainNames as $domainName) {
-            $configFile = $this->domainsConfigDirPath() . '/' . $domainName . '.conf';
-            $this->system->exec(['sudo', 'rm', '-f', $configFile]);
+            $this->deleteDomainConfig($domainName);
         }
     }
 
@@ -527,85 +599,120 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
     }
 
     /**
-     * Render persisted HTTP proxy rules to vhost config files.
-     * 
+     * Render persisted HTTP proxy rules to vhost config files, one per port and server name.
+     *
      * @param array<array> $httpRules HTTP rules from RoutingCompiler
      * @psalm-param list<HttpRule> $httpRules
      */
-    private function renderProxyRuleVhosts(array $httpRules, bool $listenIpv6): void
+    protected function renderProxyRuleVhosts(array $httpRules, bool $listenIpv6, array $hostIps = []): void
     {
         $vhostsDir = $this->domainsConfigsDirPath();
         $this->system->exec("sudo mkdir -p {$vhostsDir}");
-
-        // Clean up old proxy rule configs before rendering new ones
         $this->system->exec("sudo rm -f {$vhostsDir}/proxy-rule-*.conf");
 
-        // Group rules by port for rendering
-        $rulesByIdentifier = [];
-        foreach ($httpRules as $rule) {
-            // Domain-owned HTTP rules are rendered into vhosts/{domain}.conf (DinD template).
-            // Only port-only / non-domain custom rules stay in proxy-rule-*.conf.
-            if (!empty($rule['server_name']) && $rule['server_name'] !== '_') {
-                continue;
-            }
-            if (($rule['is_generated'] ?? false) === true) {
-                continue;
-            }
-                // Use port + server_name as identifier
-                $identifier = $rule['listen_port'] . '_' . ($rule['server_name'] ?? 'wildcard');
-                $identifier = preg_replace('/[^a-z0-9_-]/', '_', strtolower((string) $identifier));
-
-                if (!isset($rulesByIdentifier[$identifier])) {
-                    $rulesByIdentifier[$identifier] = [
-                        'id' => $rule['id'],
-                        'listen_port' => $rule['listen_port'],
-                        'listen_ip' => $rule['listen_ip'],
-                        'server_names' => [$rule['server_name'] ?? '_'],
-                        'upstream_host' => $rule['upstream_host'],
-                        'upstream_port' => $rule['upstream_port'],
-                        'upstream_protocol' => $rule['upstream_protocol'],
-                        'ssl_enabled' => $rule['ssl_enabled'] ?? false,
-                        'ssl_cert_pem_file' => $rule['ssl_cert_pem_file'] ?? null,
-                        'ssl_cert_key_file' => $rule['ssl_cert_key_file'] ?? null,
-                    ];
-                } else {
-                    // Merge server_names
-                    if (!empty($rule['server_name']) && !in_array($rule['server_name'], $rulesByIdentifier[$identifier]['server_names'])) {
-                        $rulesByIdentifier[$identifier]['server_names'][] = $rule['server_name'];
-                    }
-                }
-        }
-
-        // Render each grouping
-        foreach ($rulesByIdentifier as $identifier => $ruleGroup) {
-            $filename = "proxy-rule-{$identifier}.conf";
-            $configPath = "{$vhostsDir}/{$filename}";
-
-            // Build template variables
-            $templateVars = [
-                'id' => $ruleGroup['id'],
-                'listen_ip' => $ruleGroup['listen_ip'],
-                'listen_port' => $ruleGroup['listen_port'],
-                'server_names' => $ruleGroup['server_names'],
-                'upstream_protocol' => $ruleGroup['upstream_protocol'],
-                'upstream_host' => $ruleGroup['upstream_host'],
-                'upstream_port' => $ruleGroup['upstream_port'],
-                'ssl_enabled' => $ruleGroup['ssl_enabled'],
-            ];
-
-            if ($ruleGroup['ssl_enabled']) {
-                $templateVars['ssl_cert_pem_file'] = $ruleGroup['ssl_cert_pem_file'];
-                $templateVars['ssl_cert_key_file'] = $ruleGroup['ssl_cert_key_file'];
-            }
-
-            // Render using custom proxy rule template (or inline)
-            $vhostConfig = self::renderHttpProxyRule($templateVars, $listenIpv6);
+        foreach ($this->groupStandaloneProxyRules($httpRules) as $identifier => $ruleGroup) {
+            $configPath = "{$vhostsDir}/proxy-rule-{$identifier}.conf";
+            $vhostConfig = self::renderHttpProxyRule(self::proxyRuleTemplateVars($ruleGroup), $listenIpv6, $hostIps);
             $this->system->filesystem()->filePutContents($configPath, $vhostConfig);
         }
     }
 
     /**
-     * Generate nginx HTTP vhost config for a proxy rule.
+     * The rules that need their own vhost, grouped by port and server name.
+     *
+     * @psalm-param list<HttpRule> $httpRules
+     * @return array<string, array<string, mixed>>
+     */
+    private function groupStandaloneProxyRules(array $httpRules): array
+    {
+        $domainOwnedNames = array_keys(ProxyRuleServerName::owners());
+
+        $rulesByIdentifier = [];
+        foreach ($httpRules as $rule) {
+            if (!self::isStandaloneProxyRule($rule, $domainOwnedNames)) {
+                continue;
+            }
+            $identifier = self::proxyRuleIdentifier($rule);
+            if (!isset($rulesByIdentifier[$identifier])) {
+                $rulesByIdentifier[$identifier] = self::proxyRuleGroup($rule);
+            } elseif (!empty($rule['server_name']) && !in_array($rule['server_name'], $rulesByIdentifier[$identifier]['server_names'])) {
+                $rulesByIdentifier[$identifier]['server_names'][] = $rule['server_name'];
+            }
+        }
+
+        return $rulesByIdentifier;
+    }
+
+    /**
+     * A rule named exactly after a domain or alias is rendered into that domain's vhost
+     * by the DinD template, and a generated one never stands alone; wildcards do.
+     *
+     * @param list<string> $domainOwnedNames
+     */
+    private static function isStandaloneProxyRule(array $rule, array $domainOwnedNames): bool
+    {
+        $serverName = (string) ($rule['server_name'] ?? '');
+        $ownedByDomain = $serverName !== '' && $serverName !== '_'
+            && in_array(strtolower($serverName), $domainOwnedNames, true);
+
+        return !$ownedByDomain && ($rule['is_generated'] ?? false) !== true;
+    }
+
+    private static function proxyRuleIdentifier(array $rule): string
+    {
+        $identifier = $rule['listen_port'] . '_' . ($rule['server_name'] ?? 'wildcard');
+
+        return preg_replace('/[^a-z0-9_-]/', '_', strtolower((string) $identifier));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function proxyRuleGroup(array $rule): array
+    {
+        return [
+            'id' => $rule['id'],
+            'listen_port' => $rule['listen_port'],
+            'listen_ip' => $rule['listen_ip'],
+            'server_names' => [$rule['server_name'] ?? '_'],
+            'upstream_host' => $rule['upstream_host'],
+            'upstream_port' => $rule['upstream_port'],
+            'upstream_protocol' => $rule['upstream_protocol'],
+            'ssl_enabled' => $rule['ssl_enabled'] ?? false,
+            'ssl_cert_pem_file' => $rule['ssl_cert_pem_file'] ?? null,
+            'ssl_cert_key_file' => $rule['ssl_cert_key_file'] ?? null,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $ruleGroup
+     * @return array<string, mixed>
+     */
+    private static function proxyRuleTemplateVars(array $ruleGroup): array
+    {
+        $templateVars = [
+            'id' => $ruleGroup['id'],
+            'listen_ip' => $ruleGroup['listen_ip'],
+            'listen_port' => $ruleGroup['listen_port'],
+            'server_names' => $ruleGroup['server_names'],
+            'upstream_protocol' => $ruleGroup['upstream_protocol'],
+            'upstream_host' => $ruleGroup['upstream_host'],
+            'upstream_port' => $ruleGroup['upstream_port'],
+            'ssl_enabled' => $ruleGroup['ssl_enabled'],
+        ];
+
+        if ($ruleGroup['ssl_enabled']) {
+            $templateVars['ssl_cert_pem_file'] = $ruleGroup['ssl_cert_pem_file'];
+            $templateVars['ssl_cert_key_file'] = $ruleGroup['ssl_cert_key_file'];
+        }
+
+        return $templateVars;
+    }
+
+    /**
+     * Generate nginx HTTP vhost config for a proxy rule. Log names keep the bare
+     * address; only `listen` needs IPv6 brackets.
+     *
      * @param array{
      *   id: int,
      *   listen_ip: string,
@@ -619,37 +726,17 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
      *   ssl_cert_key_file?: ?string
      * } $vars
      */
-    public static function renderHttpProxyRule(array $vars, bool $listenIpv6 = false): string
+    public static function renderHttpProxyRule(array $vars, bool $listenIpv6 = false, array $hostIps = []): string
     {
         $serverNames = implode(' ', $vars['server_names']);
         $ip = $vars['listen_ip'];
-        // Log names keep the bare address; only `listen` needs the IPv6 brackets.
-        $listenDirective = $ip === '*' ? (string) $vars['listen_port'] : "{$ip}:{$vars['listen_port']}";
-        $listenAddress = str_contains($ip, ':') ? "[{$ip}]:{$vars['listen_port']}" : $listenDirective;
-
-        $sslConfig = '';
-        if (
-            $vars['ssl_enabled']
-            && !empty($vars['ssl_cert_pem_file'])
-            && !empty($vars['ssl_cert_key_file'])
-        ) {
-            $sslConfig = <<<NGINX
-    ssl_certificate {$vars['ssl_cert_pem_file']};
-    ssl_certificate_key {$vars['ssl_cert_key_file']};
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-NGINX;
-        }
+        $logAddress = $ip === '*' ? (string) $vars['listen_port'] : "{$ip}:{$vars['listen_port']}";
+        $sslConfig = self::proxyRuleSslDirectives($vars);
 
         $upstreamProtocol = $vars['upstream_protocol'] ?? 'http';
         $scheme = $upstreamProtocol === 'https' ? 'https' : 'http';
 
-        $ssl = $vars['ssl_enabled'] ? ' ssl' : '';
-        $listen = "listen {$listenAddress}{$ssl};";
-        // nginx binds [::] ipv6only by default, so it does not clash with the IPv4 wildcard.
-        if ($ip === '*' && $listenIpv6) {
-            $listen .= "\n    listen [::]:{$vars['listen_port']}{$ssl};";
-        }
+        $listen = self::proxyRuleListen($vars, $listenIpv6, $hostIps);
 
         return <<<NGINX
 upstream upstream-{$vars['id']}-{$vars['upstream_host']}-{$vars['upstream_port']} {
@@ -661,8 +748,8 @@ server {
     {$listen}
     server_name {$serverNames};
 
-    access_log /var/log/nginx/proxy-rule-{$listenDirective}.access.log;
-    error_log /var/log/nginx/proxy-rule-{$listenDirective}.error.log;
+    access_log /var/log/nginx/proxy-rule-{$logAddress}.access.log;
+    error_log /var/log/nginx/proxy-rule-{$logAddress}.error.log;
 {$sslConfig}
 
     location / {
@@ -680,16 +767,72 @@ server {
 NGINX;
     }
 
+    private static function proxyRuleSslDirectives(array $vars): string
+    {
+        if (
+            !$vars['ssl_enabled']
+            || empty($vars['ssl_cert_pem_file'])
+            || empty($vars['ssl_cert_key_file'])
+        ) {
+            return '';
+        }
+
+        return <<<NGINX
+    ssl_certificate {$vars['ssl_cert_pem_file']};
+    ssl_certificate_key {$vars['ssl_cert_key_file']};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+NGINX;
+    }
+
     /**
-     * Render stream rules to stream.conf.
-     * 
+     * On 80/443 a `*` rule takes the main config's per-address binds instead: a
+     * wildcard socket beside them fails every reload with EADDRINUSE.
+     */
+    private static function proxyRuleListen(array $vars, bool $listenIpv6, array $hostIps): string
+    {
+        $ssl = $vars['ssl_enabled'] ? ' ssl' : '';
+        if ($vars['listen_ip'] === '*' && $hostIps !== [] && in_array((int) $vars['listen_port'], self::LISTEN_PORTS, true)) {
+            return implode("\n    ", array_map(
+                static fn (string $a): string => 'listen ' . (str_contains($a, ':') ? "[{$a}]" : $a) . ":{$vars['listen_port']}{$ssl};",
+                array_values(array_unique($hostIps)),
+            ));
+        }
+
+        return self::listenDirectives($vars['listen_ip'], $vars['listen_port'], $ssl, $listenIpv6);
+    }
+
+    /**
+     * `listen` for one address, plus `[::]` for a `*` rule on an IPv6 host: nginx binds
+     * [::] ipv6only by default, so it does not clash with the IPv4 wildcard.
+     */
+    private static function listenDirectives(string $ip, int|string $port, string $parameters, bool $listenIpv6): string
+    {
+        $listen = 'listen ' . self::listenAddress($ip, $port) . "{$parameters};";
+        if ($ip === '*' && $listenIpv6) {
+            $listen .= "\n    listen [::]:{$port}{$parameters};";
+        }
+
+        return $listen;
+    }
+
+    private static function listenAddress(string $ip, int|string $port): string
+    {
+        return match (true) {
+            $ip === '*' => (string) $port,
+            str_contains($ip, ':') => "[{$ip}]:{$port}",
+            default => "{$ip}:{$port}",
+        };
+    }
+
+    /**
+     * Render stream rules to stream.conf, always: an empty file clears old rules.
+     *
      * @psalm-param list<StreamRule> $streamRules
      */
     private function renderStreamRules(array $streamRules, bool $listenIpv6): void
     {
         $streamConfPath = $this->system->engineDirPath() . '/webserver-config/nginx-proxy/stream.conf';
-
-        // Always write the file (even if empty) to clear old rules
         $this->system->filesystem()->filePutContents($streamConfPath, self::streamConfig($streamRules, $listenIpv6));
     }
 
@@ -726,7 +869,7 @@ NGINX;
     }
 
     /**
-     * stream {} content for the custom tcp/udp rules.
+     * stream {} content for the custom (non-generated) tcp/udp rules.
      *
      * The upstream is resolved at run time, as the http rules' are: a name
      * resolved at load (an account that is not running) makes nginx refuse
@@ -739,23 +882,26 @@ NGINX;
         $config = "# Stream (TCP/UDP) rules\n";
 
         foreach ($streamRules as $rule) {
-            if ($rule['is_generated'] !== false) {  // Only custom rules
+            if ($rule['is_generated'] !== false) {
                 continue;
             }
-            $ip = $rule['listen_ip'];
-            $address = match (true) {
-                $ip === '*' => (string) $rule['listen_port'],
-                str_contains($ip, ':') => "[{$ip}]:{$rule['listen_port']}",
-                default => "{$ip}:{$rule['listen_port']}",
-            };
-            // tcp is nginx's default; `udp` is the only transport parameter it takes.
-            $udp = $rule['transport'] === 'udp' ? ' udp' : '';
-            $listen = "listen {$address}{$udp};";
-            if ($ip === '*' && $listenIpv6) {
-                $listen .= "\n    listen [::]:{$rule['listen_port']}{$udp};";
-            }
+            $config .= self::streamServer($rule, $listenIpv6);
+        }
 
-            $config .= <<<NGINX
+        return $config;
+    }
+
+    /**
+     * tcp is nginx's default; `udp` is the only transport parameter `listen` takes.
+     *
+     * @psalm-param StreamRule $rule
+     */
+    private static function streamServer(array $rule, bool $listenIpv6): string
+    {
+        $udp = $rule['transport'] === 'udp' ? ' udp' : '';
+        $listen = self::listenDirectives($rule['listen_ip'], $rule['listen_port'], $udp, $listenIpv6);
+
+        return <<<NGINX
 
 upstream stream_proxy_{$rule['id']} {
     zone stream_upstreams 64k;
@@ -769,8 +915,5 @@ server {
 }
 
 NGINX;
-        }
-
-        return $config;
     }
 }

@@ -42,6 +42,16 @@ class NginxProxyHttpRulesTest extends TestCase
         $this->assertStringNotContainsString('[::]', NginxProxy::renderHttpProxyRule($this->vars('*', 8081)));
     }
 
+    public function test_a_wildcard_on_80_or_443_binds_the_host_addresses_the_main_config_binds(): void
+    {
+        $conf = NginxProxy::renderHttpProxyRule($this->vars('*', 80), true, ['10.0.0.5', '2a01:4f8::1']);
+
+        $this->assertMatchesRegularExpression('/^\s*listen 10\.0\.0\.5:80;\n\s*listen \[2a01:4f8::1\]:80;$/m', $conf);
+        $this->assertDoesNotMatchRegularExpression('/^\s*listen (80|\[::\]:80);$/m', $conf);
+        // Any other port keeps the wildcard: nothing else binds it per address.
+        $this->assertMatchesRegularExpression('/^\s*listen 8081;$/m', NginxProxy::renderHttpProxyRule($this->vars('*', 8081), false, ['10.0.0.5']));
+    }
+
     public function test_ssl_follows_the_bracketed_address_and_log_names_keep_the_bare_one(): void
     {
         $vars = $this->vars('2a01:4f8::1', 8443);

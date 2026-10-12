@@ -38,15 +38,6 @@ class ProxyRuleCreateCommand extends Command
         {--project= : Username (required for user-owned rules)} {--username= : Deprecated alias for --project}
         {--force : Skip confirmation}';
 
-    protected function getListenIp(): string
-    {
-        $listenIp = $this->option('listen-ip');
-        if (is_string($listenIp) && $listenIp !== '') {
-            return $listenIp;
-        }
-        return '*';
-    }
-
     protected $description = 'Create a new proxy rule';
 
     public function handle(): int
@@ -70,7 +61,6 @@ class ProxyRuleCreateCommand extends Command
             return 1;
         }
 
-        /** @var ProxyRule */
         $created = ProxyRule::create($rule + [
             'enabled' => true,
             'is_generated' => false,
@@ -93,6 +83,39 @@ class ProxyRuleCreateCommand extends Command
      */
     private function readRule(): ?array
     {
+        $scope = $this->scope();
+        if ($scope === null) {
+            return null;
+        }
+
+        $username = $this->username($scope);
+        if ($scope === 'user' && ($username === null || !User::query()->where('username', $username)->exists())) {
+            $this->error('A user-owned rule needs an existing project (--project).');
+            return null;
+        }
+
+        $transport = $this->transport();
+        if ($transport === null) {
+            return null;
+        }
+
+        $listen = $this->listen($transport);
+        if ($listen === null) {
+            return null;
+        }
+
+        $upstream = $this->upstream($transport);
+        if ($upstream === null) {
+            return null;
+        }
+
+        $rule = ['owner_scope' => $scope, 'username' => $username, 'transport' => $transport] + $listen + $upstream;
+
+        return $this->invalidFields($rule) || $this->refused($rule) ? null : $rule;
+    }
+
+    private function scope(): ?string
+    {
         $scope = $this->option('scope');
         if (!in_array($scope, ['system', 'user'])) {
             $this->error("Scope must be 'system' or 'user'.");
@@ -100,40 +123,56 @@ class ProxyRuleCreateCommand extends Command
         }
         assert(is_string($scope));
 
+        return $scope;
+    }
+
+    /** The owning project from --project, asked for a user rule; null when none was given. */
+    private function username(string $scope): ?string
+    {
         $username = $this->option('username');
         if ($scope === 'user' && !is_string($username)) {
-            /** @var mixed $username */
             $username = $this->ask('Username (for user-owned rule)');
         }
-        if (!is_string($username) || $username === '') {
-            $username = null;
-        }
-        if ($scope === 'user' && ($username === null || !User::query()->where('username', $username)->exists())) {
-            $this->error('A user-owned rule needs an existing project (--project).');
-            return null;
-        }
 
+        return is_string($username) && $username !== '' ? $username : null;
+    }
+
+    /** The transport, or null once refused: any other value is stored but never rendered, so the rule would silently do nothing. */
+    private function transport(): ?string
+    {
         $transport = $this->option('transport') ?: $this->choice(
             'Transport type',
             ['http', 'tcp', 'udp'],
             0
         );
         assert(is_string($transport));
-        // Anything else is stored but never rendered, so the rule would silently do nothing.
         if (!in_array($transport, ['http', 'tcp', 'udp'], true)) {
             $this->error('The selected transport is invalid.');
             return null;
         }
 
+        return $transport;
+    }
+
+    /** @return ?array{listen_ip: string, listen_port: int, server_name: ?string} */
+    private function listen(string $transport): ?array
+    {
         $listenPort = $this->port($this->option('listen-port') ?? $this->ask('Listen port (1-65535)'));
         if ($listenPort === null) {
             $this->error('Invalid port number.');
             return null;
         }
 
-        $listenIp = $this->getListenIp();
-        $serverName = $transport === 'http' ? $this->serverName() : null;
+        return [
+            'listen_ip' => $this->getListenIp(),
+            'listen_port' => $listenPort,
+            'server_name' => $transport === 'http' ? $this->serverName() : null,
+        ];
+    }
 
+    /** @return ?array{upstream_host: string, upstream_port: int, upstream_protocol: ?string} */
+    private function upstream(string $transport): ?array
+    {
         $upstreamHost = $this->upstreamHost();
         if (!is_string($upstreamHost)) {
             $this->error('Invalid upstream host.');
@@ -146,21 +185,27 @@ class ProxyRuleCreateCommand extends Command
             return null;
         }
 
-        $upstreamProtocol = null;
-        if ($transport === 'http') {
-            $upstreamProtocolOption = $this->option('upstream-protocol');
-            if (!empty($upstreamProtocolOption) && is_string($upstreamProtocolOption)) {
-                $upstreamProtocol = $upstreamProtocolOption;
-            }
-        }
+        return [
+            'upstream_host' => $upstreamHost,
+            'upstream_port' => $upstreamPort,
+            'upstream_protocol' => $transport === 'http' ? self::filled($this->option('upstream-protocol')) : null,
+        ];
+    }
 
-        // The same rules as POST /proxy-rules: these go into the shared proxy config verbatim.
+    /**
+     * Print every field error under the same rules as POST /proxy-rules, since
+     * these values go into the shared proxy config verbatim.
+     *
+     * @param array<string, mixed> $rule
+     */
+    private function invalidFields(array $rule): bool
+    {
         $validator = Validator::make(
             [
-                'listen_ip' => $listenIp,
-                'server_name' => $serverName,
-                'upstream_host' => $upstreamHost,
-                'upstream_protocol' => $upstreamProtocol,
+                'listen_ip' => $rule['listen_ip'],
+                'server_name' => $rule['server_name'],
+                'upstream_host' => $rule['upstream_host'],
+                'upstream_protocol' => $rule['upstream_protocol'],
             ],
             [
                 'listen_ip' => [new ListenIp()],
@@ -169,32 +214,45 @@ class ProxyRuleCreateCommand extends Command
                 'upstream_protocol' => ['nullable', Rule::in(['http', 'https'])],
             ]
         );
-        if ($validator->fails()) {
-            foreach ($validator->errors()->all() as $message) {
-                $this->error($message);
-            }
-            return null;
+        if (!$validator->fails()) {
+            return false;
         }
 
-        $refusal = ProxyRuleUpstream::refusal($scope, $username, $upstreamHost)
-            ?? ProxyRuleServerName::refusal($scope, $username, $serverName)
-            ?? (new ProxyListenPort(app(System::class)))->refusal($transport, $listenIp, $listenPort);
-        if ($refusal !== null) {
-            $this->error($refusal);
-            return null;
+        foreach ($validator->errors()->all() as $message) {
+            $this->error($message);
         }
 
-        return [
-            'owner_scope' => $scope,
-            'username' => $username,
-            'transport' => $transport,
-            'listen_ip' => $listenIp,
-            'listen_port' => $listenPort,
-            'server_name' => $serverName,
-            'upstream_host' => $upstreamHost,
-            'upstream_port' => $upstreamPort,
-            'upstream_protocol' => $upstreamProtocol,
-        ];
+        return true;
+    }
+
+    /**
+     * Print why the owner may not use this upstream, server name or listen port, if it may not.
+     *
+     * @param array<string, mixed> $rule
+     */
+    private function refused(array $rule): bool
+    {
+        $scope = $rule['owner_scope'];
+        $username = $rule['username'];
+        $refusal = ProxyRuleUpstream::refusal($scope, $username, $rule['upstream_host'])
+            ?? ProxyRuleServerName::refusal($scope, $username, $rule['server_name'])
+            ?? (new ProxyListenPort(app(System::class)))->refusal($rule['transport'], $rule['listen_ip'], $rule['listen_port']);
+        if ($refusal === null) {
+            return false;
+        }
+
+        $this->error($refusal);
+
+        return true;
+    }
+
+    protected function getListenIp(): string
+    {
+        $listenIp = $this->option('listen-ip');
+        if (is_string($listenIp) && $listenIp !== '') {
+            return $listenIp;
+        }
+        return '*';
     }
 
     /** A port 1-65535 as an int, or null for anything else. */
@@ -210,34 +268,25 @@ class ProxyRuleCreateCommand extends Command
     /** The option, else the answer; null for a wildcard. */
     private function serverName(): ?string
     {
-        $serverName = null;
-        $serverNameOption = $this->option('server-name');
-        if (!empty($serverNameOption) && is_string($serverNameOption)) {
-            $serverName = $serverNameOption;
-        }
-        if (empty($serverName)) {
-            /** @var mixed $serverNameAsk */
-            $serverNameAsk = $this->ask('Server name/hostname (or leave blank for wildcard)');
-            if (!empty($serverNameAsk) && is_string($serverNameAsk)) {
-                $serverName = $serverNameAsk;
-            }
-        }
-
-        return $serverName;
+        return self::filled($this->option('server-name'))
+            ?? self::filled($this->ask('Server name/hostname (or leave blank for wildcard)'));
     }
 
+    /** The option, else a non-empty answer, else the option as it was. */
     private function upstreamHost(): mixed
     {
         $upstreamHost = $this->option('upstream-host');
-        if (empty($upstreamHost) || !is_string($upstreamHost)) {
-            /** @var mixed */
-            $upstreamHostAsk = $this->ask('Upstream host');
-            if (!empty($upstreamHostAsk) && is_string($upstreamHostAsk)) {
-                $upstreamHost = $upstreamHostAsk;
-            }
+        if (self::filled($upstreamHost) !== null) {
+            return $upstreamHost;
         }
 
-        return $upstreamHost;
+        return self::filled($this->ask('Upstream host')) ?? $upstreamHost;
+    }
+
+    /** The value when it is a non-empty string, otherwise null. */
+    private static function filled(mixed $value): ?string
+    {
+        return !empty($value) && is_string($value) ? $value : null;
     }
 
     /** @param array<string, mixed> $rule */
@@ -256,13 +305,18 @@ class ProxyRuleCreateCommand extends Command
     }
 
     /**
-     * Whether this owner already has a rule on the same transport, address
-     * and port (and, for http, the same server name or the same wildcard).
+     * Whether a rule like this already exists. An HTTP name and port is one
+     * vhost entry whatever the listen IP or owner, as the API's store checks;
+     * a stream rule is judged per owner, transport, address and port.
      *
      * @param array<string, mixed> $rule
      */
     private function duplicateExists(array $rule): bool
     {
+        if ($rule['transport'] === 'http') {
+            return ProxyRule::conflictingHttpRule($rule['server_name'] ?? null, (int) $rule['listen_port']) !== null;
+        }
+
         $existing = ProxyRule::query();
         $existing->where('transport', $rule['transport'])
             ->where('listen_port', $rule['listen_port'])
@@ -273,12 +327,6 @@ class ProxyRuleCreateCommand extends Command
             $existing->where('username', $rule['username']);
         } else {
             $existing->whereNull('username');
-        }
-
-        if ($rule['transport'] === 'http' && $rule['server_name']) {
-            $existing->where('server_name', $rule['server_name']);
-        } elseif ($rule['transport'] === 'http') {
-            $existing->whereNull('server_name');
         }
 
         return $existing->first() !== null;

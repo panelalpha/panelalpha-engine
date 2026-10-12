@@ -15,7 +15,9 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 
 #[Name('domain_php_version_set')]
 #[Description(<<<'MARKDOWN'
-    Set PHP version for a domain
+    Set PHP version for a domain (PHP hosting projects only)
+
+    PHP hosting projects only: a dind app runs PHP from its own image, and a dind project answers 422. Set the version in the image instead.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

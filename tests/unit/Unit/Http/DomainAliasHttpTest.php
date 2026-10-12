@@ -57,4 +57,19 @@ class DomainAliasHttpTest extends TestCase
 
         $this->assertSame([], $this->shop->fresh()?->getAliases());
     }
+
+    /**
+     * The controller treats a present `aliases` key as the new list. `[]`
+     * removes them all; an absent key leaves them alone. The empty list used
+     * to be skipped, so a domain could never lose its last alias.
+     */
+    public function test_an_empty_alias_list_is_the_new_list_and_an_absent_key_is_not(): void
+    {
+        $source = (string) file_get_contents(dirname(__DIR__, 4) . '/core/app/Http/Controllers/User/DomainController.php');
+
+        // The guard is array_key_exists, not !empty(): an empty list reaches
+        // removeAliases(), an absent key does not.
+        $this->assertStringContainsString("if (array_key_exists('aliases', \$params)) {", $source);
+        $this->assertStringNotContainsString("if (!empty(\$params['aliases'])) {", $source);
+    }
 }

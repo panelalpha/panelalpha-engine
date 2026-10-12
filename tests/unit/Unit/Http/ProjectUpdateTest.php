@@ -70,6 +70,23 @@ class ProjectUpdateTest extends TestCase
         $this->assertSame('shop.example.test', User::findByUsernameOrFail('alice')->getMainDomain()?->domain);
     }
 
+    /**
+     * `details.domain` described the creation-time name. Left alone, a later
+     * deploy reads it to judge the new URL: the old proxy TLS verdict hides a
+     * broken certificate, and the old "resolves on this host only" marks a
+     * working site partial for ever.
+     */
+    public function test_a_rename_records_an_allocation_for_the_new_name(): void
+    {
+        $allocation = MainDomainRename::allocationFor('shop.example.test');
+
+        $this->assertSame('requested', $allocation['source']);
+        $this->assertNull($allocation['publicly_resolvable'], 'DNS for a caller-chosen name is unknown, not false');
+        $this->assertSame('engine', $allocation['tls_terminated_at']);
+        $this->assertNull($allocation['tunnel']);
+        $this->assertNull($allocation['fallback_reason']);
+    }
+
     public function test_the_renamed_main_domain_keeps_its_settings_and_moves_its_www_alias(): void
     {
         $user = $this->makeUser('alice', ['template' => 'wordpress'], 'old.test');

@@ -18,7 +18,7 @@ class WebserverTest extends TestCase
 
         $this->assertSame(
             '/opt/panelalpha/shared-hosting/webserver-config/nginx-proxy/vhosts',
-            $driver->domainsConfigDirPath()
+            $driver->domainsConfigsDirPath()
         );
         $this->assertFalse($driver->domainConfigExists('no-such-domain.example'));
         $this->assertFalse($system->webserver()->domainExists('no-such-domain.example'));

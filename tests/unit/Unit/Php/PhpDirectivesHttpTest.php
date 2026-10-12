@@ -284,6 +284,28 @@ class PhpDirectivesHttpTest extends TestCase
             ->assertExactJson(['data' => []]);
     }
 
+    /** The domain-level tools change nothing a dind app reads, so they refuse too. */
+    public function test_domain_directives_and_version_on_a_dind_project_are_422_and_write_nothing(): void
+    {
+        $this->account('dind');
+        $this->domain('a.example', '/a.example/public_html');
+        $this->makeDocumentRoot('a.example');
+        $path = $this->userIni('a.example');
+        file_put_contents($path, "memory_limit=256M\n");
+
+        $this->getJson('/api/domains/a.example/php-directives')->assertStatus(422);
+        $this->putJson('/api/domains/a.example/php-directives', [
+            'settings' => ['memory_limit' => '64M'],
+        ])->assertStatus(422);
+        $this->putJson('/api/domains/a.example/php-version', ['version' => '8.2'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('version');
+
+        $this->assertSame("memory_limit=256M\n", file_get_contents($path));
+        // The domain was not switched: the request never got past the guard.
+        $this->assertNull(Domain::findByName('a.example')->getDetails()['php_version'] ?? null);
+    }
+
     public function test_account_ini_on_a_dind_project_is_a_422_and_writes_nothing(): void
     {
         $this->account('dind');

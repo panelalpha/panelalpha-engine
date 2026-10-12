@@ -41,7 +41,6 @@ class DomainController extends Controller
     )]
     /**
      * @param string $username
-     * @param Request $request
      * @return DomainCollection
      */
     public function index($username, Request $request)
@@ -108,13 +107,7 @@ class DomainController extends Controller
     {
         $user = $this->projectOr404($username);
 
-        /** @var ?Domain */
-        $domain = $user->domains()->getQuery()->where('domain', $domain)->first();
-        if (!$domain) {
-            abort(new JsonResponse([
-                'message' => 'Domain not found',
-            ], 404));
-        }
+        $domain = $this->domainOr404($user, $domain);
         if (!$domain->projectDomain()->hasSslCertificate()) {
             abort(new JsonResponse([
                 'message' => 'SSL certificate not found',
@@ -148,13 +141,7 @@ class DomainController extends Controller
     {
         $user = $this->projectOr404($username);
 
-        /** @var ?Domain */
-        $domain = $user->domains()->getQuery()->where('domain', $domain)->first();
-        if (!$domain) {
-            abort(new JsonResponse([
-                'message' => 'Domain not found',
-            ], 404));
-        }
+        $domain = $this->domainOr404($user, $domain);
 
         return new DomainResource($domain);
     }
@@ -186,21 +173,33 @@ class DomainController extends Controller
     {
         $user = $this->projectOr404($username);
 
-        /** @var ?Domain */
-        $model = $user->domains()->getQuery()->where('domain', $domain)->first();
-        if (!$model) {
-            abort(new JsonResponse([
-                'message' => 'Domain not found',
-            ], 404));
-        }
+        $model = $this->domainOr404($user, $domain);
 
-        /** @var array{dkim_selector?: ?string} $params */
-        $params = $request->validate([
-            'dkim_selector' => ['sometimes', 'nullable', 'string', 'max:63', 'regex:/^[a-z0-9_]([a-z0-9_-]*[a-z0-9])?(\.[a-z0-9_]([a-z0-9_-]*[a-z0-9])?)*$/i'],
-        ]);
-        $selector = isset($params['dkim_selector']) && $params['dkim_selector'] !== '' ? strtolower($params['dkim_selector']) : null;
+        $selector = $this->dkimSelector($request);
         $check = $request->boolean('check');
 
+        return new JsonResponse([
+            'data' => $this->mailDnsRecords($model, $selector, $check),
+        ]);
+    }
+
+    private function dkimSelector(Request $request): ?string
+    {
+        /** @var array{dkim_selector?: ?string} $params */
+        $params = $request->validate([
+            'dkim_selector' => ['sometimes', 'nullable', 'string', 'max:63', 'regex:/^[a-z0-9_]([a-z0-9_-]*[a-z0-9])?(\.[a-z0-9_]([a-z0-9_-]*[a-z0-9])?)*$/iD'],
+        ]);
+
+        return isset($params['dkim_selector']) && $params['dkim_selector'] !== '' ? strtolower($params['dkim_selector']) : null;
+    }
+
+    /**
+     * The mail DNS records the domain needs for the configured relay, or, with $check, what DNS holds against them.
+     *
+     * @return array<string, mixed>
+     */
+    private function mailDnsRecords(Domain $model, ?string $selector, bool $check): array
+    {
         $exim = Setting::getEximConfig();
         $relay = MailDnsRecords::relay($exim['smarthost_provider']);
         $sending = MailDnsRecords::sendingDomain($model->domain, $exim['sender_domain']);
@@ -210,17 +209,15 @@ class DomainController extends Controller
 
         $records = MailDnsRecords::usingDns();
 
-        return new JsonResponse([
-            'data' => [
-                'domain' => $model->domain,
-                'sending_domain' => $sending,
-                'relay' => $relay !== '' ? $relay : 'direct',
-                'checked' => $check,
-                'records' => $check
-                    ? $records->check($sending, $relay, $ips, $selector)
-                    : $records->expected($sending, $relay, $ips, $selector),
-            ],
-        ]);
+        return [
+            'domain' => $model->domain,
+            'sending_domain' => $sending,
+            'relay' => $relay !== '' ? $relay : 'direct',
+            'checked' => $check,
+            'records' => $check
+                ? $records->check($sending, $relay, $ips, $selector)
+                : $records->expected($sending, $relay, $ips, $selector),
+        ];
     }
 
     #[OA\Post(
@@ -247,7 +244,6 @@ class DomainController extends Controller
     )]
     /**
      * @param string $username
-     * @param DomainStoreRequest $request
      * @return DomainResource
      */
     public function store($username, DomainStoreRequest $request)
@@ -267,61 +263,19 @@ class DomainController extends Controller
 
         [$params['domain'], $params['aliases']] = NewDomain::withoutWww($params['domain'], $params['aliases'] ?? []);
 
-        $limit = NewDomain::reachedLimit($user, $params['type']);
-        if ($limit !== null) {
-            abort(new JsonResponse($params['type'] === 'addon'
-                ? ['message' => "Addon domains limit of {$limit} reached.", 'error_type' => 'addon_domains_limit_reached']
-                : ['message' => "Subdomains limit of {$limit} reached.", 'error_type' => 'subdomains_limit_reached'], 422));
-        }
-
-        $problem = NewDomain::nameProblem($params['domain'], $params['aliases']);
-        if ($problem !== null) {
-            throw ValidationException::withMessages(match ($problem[0]) {
-                NewDomain::INVALID_DOMAIN => ['domain' => 'Invalid domain name.'],
-                NewDomain::DOMAIN_EXISTS => ['domain' => 'Domain already exists.'],
-                NewDomain::INVALID_ALIAS => ['aliases' => 'Invalid alias domain name.'],
-                NewDomain::ALIAS_EXISTS => ['aliases' => 'Domain already exists.'],
-            });
-        }
+        $this->refuseOverLimit($user, $params['type']);
+        $this->refuseNameProblem($params['domain'], $params['aliases']);
 
         /** @var Domain */
         $domain = Domain::create([
             'user_id' => $user->id,
             'domain' => $params['domain'],
             'type' => $params['type'],
-            'details' => NewDomain::details($params['domain'], !empty($params['no_ssl']), $params['aliases']),
+            'details' => NewDomain::details($params['domain'], !empty($params['no_ssl']), $params['aliases'], self::parentOf($params)),
         ]);
 
         try {
-            switch ($params['type']) {
-                case 'addon':
-                    $domain->projectDomain()->create();
-                    break;
-                case 'sub':
-                    if (empty($params['parent_domain'])) {
-                        throw ValidationException::withMessages([
-                            'parent_domain' => 'Invalid value.',
-                        ]);
-                    }
-                    if (!$user->domains()->getQuery()->where('domain', $params['parent_domain'])->exists()) {
-                        throw ValidationException::withMessages([
-                            'parent_domain' => 'Invalid value.',
-                        ]);
-                    }
-                    if (!Str::endsWith($params['domain'], $params['parent_domain'])) {
-                        throw ValidationException::withMessages([
-                            'domain' => 'Invalid value.',
-                        ]);
-                    }
-                    $domain->projectDomain()->create();
-                    $domain->setDetails(['parent_domain' => $params['parent_domain']]);
-                    break;
-                default:
-                    throw ValidationException::withMessages([
-                        'type' => 'Invalid value.',
-                    ]);
-                    break;
-            }
+            $this->createOnHost($domain, $user, $params);
         } catch (\Exception $e) {
             $domain->delete();
             throw $e;
@@ -360,20 +314,13 @@ class DomainController extends Controller
     /**
      * @param string $username
      * @param string $domain
-     * @param DomainUpdateRequest $request
      * @return DomainResource
      */
     public function update($username, $domain, DomainUpdateRequest $request)
     {
         $user = $this->projectOr404($username);
 
-        /** @var ?Domain */
-        $domain = $user->domains()->getQuery()->where('domain', $domain)->first();
-        if (!$domain) {
-            abort(new JsonResponse([
-                'message' => 'Domain not found',
-            ], 404));
-        }
+        $domain = $this->domainOr404($user, $domain);
 
         /**
          * @var array{
@@ -386,21 +333,7 @@ class DomainController extends Controller
          */
         $params = $request->validated();
 
-        if (array_key_exists('redirect_enabled', $params) && !$params['redirect_enabled'] && $domain->redirectEnabled()) {
-            $domain->disableRedirect();
-        }
-
-        if (array_key_exists('redirect_enabled', $params) && $params['redirect_enabled']) {
-            $redirectUrl = $params['redirect_url'] ?? $domain->getRedirectUrl();
-            if (empty($redirectUrl)) {
-                throw ValidationException::withMessages([
-                    'redirect_url' => 'redirect_url is required',
-                ]);
-            }
-            if ($redirectUrl != $domain->getRedirectUrl()) {
-                $domain->setRedirectUrl($redirectUrl);
-            }
-        }
+        $this->applyRedirect($domain, $params);
 
         if (array_key_exists('document_root', $params) && $params['document_root'] != $domain->getDocumentRoot()) {
             $domain->setDocumentRoot($params['document_root']);
@@ -410,23 +343,7 @@ class DomainController extends Controller
             $domain->setForceHttpsRedirect($params['force_https_redirect']);
         }
 
-        if (!empty($params['aliases'])) {
-            $domain->removeAliases();
-            foreach ($params['aliases'] as $alias) {
-                if (!filter_var($alias, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
-                    throw ValidationException::withMessages([
-                        'aliases' => 'Invalid alias domain name.'
-                    ]);
-                }
-                // What addAlias() refuses, tunnel hostnames included; it would throw a bare 500.
-                if (!$domain->isAliasAvailable($alias)) {
-                    throw ValidationException::withMessages([
-                        'aliases' => "Domain alias {$alias} is not available",
-                    ]);
-                }
-                $domain->addAlias($alias);
-            }
-        }
+        $this->replaceAliases($domain, $params);
 
         $domain->save();
         $domain->projectDomain()->rebuild();
@@ -447,6 +364,7 @@ class DomainController extends Controller
         responses: [
             new OA\Response(response: 200, description: 'Domain deleted', content: new OA\JsonContent(ref: '#/components/schemas/Domain')),
             new OA\Response(response: 404, description: 'Not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'The domain is the main domain, or has subdomains', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     /**
@@ -458,12 +376,12 @@ class DomainController extends Controller
     {
         $user = $this->projectOr404($username);
 
-        /** @var ?Domain */
-        $domain = $user->domains()->getQuery()->where('domain', $domain)->first();
-        if (!$domain) {
-            abort(new JsonResponse([
-                'message' => 'Domain not found',
-            ], 404));
+        $domain = $this->domainOr404($user, $domain);
+
+        if ($domain->type === 'main') {
+            throw ValidationException::withMessages([
+                'domain' => 'Cannot delete the main domain: rename it with project_update instead.',
+            ]);
         }
 
         if ($domain->subdomains()->exists()) {
@@ -507,9 +425,13 @@ class DomainController extends Controller
                 new OA\Property(
                     property: 'dry_run',
                     type: 'boolean',
-                    description: 'Report what would be requested and why it would or would not work, '
-                        . 'without contacting the authority.',
-                    x: ['mcp-description' => 'Only report whether a request would work.']
+                    description: 'Report what would be requested and whether the name is eligible, '
+                        . 'without contacting the authority. This checks only that the name is '
+                        . 'publicly issuable and the shared-zone rule; it does not resolve DNS, so a '
+                        . 'name with no A/AAAA record, or one pointing elsewhere, still reports '
+                        . 'ineligible_reason: null and then fails HTTP-01. Confirm the name resolves '
+                        . 'to this host before requesting.',
+                    x: ['mcp-description' => 'Check eligibility only (issuable name, shared zone); does NOT verify DNS. A name that does not resolve to this host still reports no reason here.']
                 ),
             ],
         )),
@@ -545,16 +467,21 @@ class DomainController extends Controller
         try {
             $status = ProjectCertificate::request($model, $staging);
         } catch (\Throwable $e) {
-            // The site keeps the certificate it had, so this is a refused
-            // request rather than a broken domain. The message is the
-            // authority's own where there is one -- "DNS problem: NXDOMAIN
-            // looking up A for ..." is the answer the caller needs.
-            return new JsonResponse([
-                'message' => "Could not obtain a certificate for {$model->domain}: " . $e->getMessage(),
-            ], 422);
+            return $this->certificateRefused($model, $e);
         }
 
         return new JsonResponse(['data' => $status]);
+    }
+
+    /**
+     * The site keeps the certificate it had, so a failed issue is a refused request (422), not a broken
+     * domain. The message is the authority's own where there is one, e.g. "DNS problem: NXDOMAIN ...".
+     */
+    private function certificateRefused(Domain $model, \Throwable $e): JsonResponse
+    {
+        return new JsonResponse([
+            'message' => "Could not obtain a certificate for {$model->domain}: " . $e->getMessage(),
+        ], 422);
     }
 
     #[OA\Put(
@@ -583,20 +510,13 @@ class DomainController extends Controller
     /**
      * @param string $username
      * @param string $domain
-     * @param DomainInstallSslCertRequest $request
      * @return DomainResource
      */
     public function installSslCert($username, $domain, DomainInstallSslCertRequest $request)
     {
         $user = $this->projectOr404($username);
 
-        /** @var ?Domain */
-        $domain = $user->domains()->getQuery()->where('domain', $domain)->first();
-        if (!$domain) {
-            abort(new JsonResponse([
-                'message' => 'Domain not found',
-            ], 404));
-        }
+        $domain = $this->domainOr404($user, $domain);
 
         /**
          * @var array{
@@ -609,7 +529,7 @@ class DomainController extends Controller
 
         if (openssl_x509_check_private_key($params['cert'], $params['key']) === false) {
             throw ValidationException::withMessages([
-                'Invalid certificate/key',
+                'cert' => 'Invalid certificate/key',
             ]);
         }
 
@@ -620,5 +540,156 @@ class DomainController extends Controller
         (new System())->webserver()->reload();
 
         return new DomainResource($domain);
+    }
+
+    private function domainOr404(User $user, string $name): Domain
+    {
+        /** @var ?Domain */
+        $domain = $user->domains()->getQuery()->where('domain', $name)->first();
+        if (!$domain) {
+            abort(new JsonResponse([
+                'message' => 'Domain not found',
+            ], 404));
+        }
+
+        return $domain;
+    }
+
+    private function refuseOverLimit(User $user, string $type): void
+    {
+        $limit = NewDomain::reachedLimit($user, $type);
+        if ($limit !== null) {
+            abort(new JsonResponse($type === 'addon'
+                ? ['message' => "Addon domains limit of {$limit} reached.", 'error_type' => 'addon_domains_limit_reached']
+                : ['message' => "Subdomains limit of {$limit} reached.", 'error_type' => 'subdomains_limit_reached'], 422));
+        }
+    }
+
+    /**
+     * @param array<string> $aliases
+     * @throws ValidationException
+     */
+    private function refuseNameProblem(string $name, array $aliases): void
+    {
+        $problem = NewDomain::nameProblem($name, $aliases);
+        if ($problem !== null) {
+            throw ValidationException::withMessages(match ($problem[0]) {
+                NewDomain::INVALID_DOMAIN => ['domain' => 'Invalid domain name.'],
+                NewDomain::DOMAIN_EXISTS => ['domain' => 'Domain already exists.'],
+                NewDomain::INVALID_ALIAS => ['aliases' => 'Invalid alias domain name.'],
+                NewDomain::ALIAS_EXISTS => ['aliases' => 'Domain already exists.'],
+            });
+        }
+    }
+
+    /** @param array{type: string, parent_domain?: ?string} $params */
+    private static function parentOf(array $params): ?string
+    {
+        return $params['type'] === 'sub' ? ($params['parent_domain'] ?? null) : null;
+    }
+
+    /**
+     * Creates an addon domain, or a subdomain of one of the project's own domains, on the host.
+     *
+     * @param array{domain: string, type: string, parent_domain?: ?string} $params
+     * @throws ValidationException
+     */
+    private function createOnHost(Domain $domain, User $user, array $params): void
+    {
+        switch ($params['type']) {
+            case 'addon':
+                $domain->projectDomain()->create();
+                break;
+            case 'sub':
+                $this->assertParentDomain($user, $params);
+                $domain->projectDomain()->create();
+                break;
+            default:
+                throw ValidationException::withMessages([
+                    'type' => 'Invalid value.',
+                ]);
+        }
+    }
+
+    /**
+     * @param array{domain: string, parent_domain?: ?string} $params
+     * @throws ValidationException
+     */
+    private function assertParentDomain(User $user, array $params): void
+    {
+        if (empty($params['parent_domain'])) {
+            throw ValidationException::withMessages([
+                'parent_domain' => 'Invalid value.',
+            ]);
+        }
+        if (!$user->domains()->getQuery()->where('domain', $params['parent_domain'])->exists()) {
+            throw ValidationException::withMessages([
+                'parent_domain' => 'Invalid value.',
+            ]);
+        }
+        if (!Str::endsWith($params['domain'], $params['parent_domain'])) {
+            throw ValidationException::withMessages([
+                'domain' => 'Invalid value.',
+            ]);
+        }
+    }
+
+    /**
+     * @param array{redirect_enabled?: bool, redirect_url?: ?string} $params
+     * @throws ValidationException when enabling a redirect with no URL sent or stored
+     */
+    private function applyRedirect(Domain $domain, array $params): void
+    {
+        if (array_key_exists('redirect_enabled', $params) && !$params['redirect_enabled'] && $domain->redirectEnabled()) {
+            $domain->disableRedirect();
+        }
+
+        if (array_key_exists('redirect_enabled', $params) && $params['redirect_enabled']) {
+            $redirectUrl = $params['redirect_url'] ?? $domain->getRedirectUrl();
+            if (empty($redirectUrl)) {
+                throw ValidationException::withMessages([
+                    'redirect_url' => 'redirect_url is required',
+                ]);
+            }
+            if ($redirectUrl != $domain->getRedirectUrl()) {
+                $domain->setRedirectUrl($redirectUrl);
+            }
+        }
+    }
+
+    /**
+     * A present `aliases` key is the new list, so `[]` removes them all; an absent key leaves them alone.
+     *
+     * @param array{aliases?: ?array<mixed>} $params
+     * @throws ValidationException
+     */
+    private function replaceAliases(Domain $domain, array $params): void
+    {
+        if (array_key_exists('aliases', $params)) {
+            $domain->removeAliases();
+            foreach ($params['aliases'] ?? [] as $alias) {
+                $this->assertAliasAvailable($domain, $alias);
+                $domain->addAlias($alias);
+            }
+        }
+    }
+
+    /**
+     * Checks what addAlias() would refuse, tunnel hostnames included, so it is a 422 rather than a bare 500.
+     *
+     * @throws ValidationException
+     */
+    private function assertAliasAvailable(Domain $domain, mixed $alias): void
+    {
+        if (!is_string($alias) || !filter_var($alias, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
+            throw ValidationException::withMessages([
+                'aliases' => 'Invalid alias domain name.'
+            ]);
+        }
+        if (!$domain->isAliasAvailable($alias)) {
+            throw ValidationException::withMessages([
+                'aliases' => "Domain alias {$alias} is not available",
+            ]);
+        }
     }
 }

@@ -58,14 +58,18 @@ class ProxyRule extends Model
         'metadata' => 'array',
     ];
 
-    /** @return array<ProxyRule> */
+    /**
+     * System rules first, then in creation order.
+     *
+     * @return array<ProxyRule>
+     */
     public static function getEnabled(): array
     {
         /** @var Collection<array-key, ProxyRule> */
         $query = self::query()
             ->where('enabled', true)
-            ->orderBy('owner_scope', 'asc')  // System rules first
-            ->orderBy('created_at', 'asc')   // Then by creation order
+            ->orderBy('owner_scope', 'asc')
+            ->orderBy('created_at', 'asc')
             ->get();
 
         return $query->all();
@@ -189,28 +193,11 @@ class ProxyRule extends Model
         bool $isPrimary = false,
         ?string $upstreamProtocol = null
     ): ?self {
-        // The domain vhost renders one rule per port, and an operator's rule beats the default.
-        // Another project's rule named after the domain is never rendered, so it beats nothing.
-        $handMade = self::query()
-            ->where('transport', 'http')
-            ->where('listen_port', $listenPort)
-            ->where('server_name', $fqdn)
-            ->where('is_generated', false)
-            ->where(static fn (Builder $q) => $q->where('owner_scope', 'system')->orWhere('username', $username))
-            ->exists();
-        if ($handMade) {
+        if (self::handMadeRuleServes($username, $fqdn, $listenPort)) {
             return null;
         }
 
-        $key = [
-            'owner_scope' => 'user',
-            'username' => $username,
-            'transport' => 'http',
-            'listen_port' => $listenPort,
-            'server_name' => $fqdn,
-        ];
-        /** @var self $rule */
-        $rule = self::query()->where($key)->where('is_generated', true)->first() ?? new self($key);
+        $rule = self::generatedRuleFor($username, $fqdn, $listenPort);
         $setByRecipe = ($rule->metadata['port_scheme'] ?? null) === 'https';
         $rule->fill([
             'enabled' => true,
@@ -218,22 +205,99 @@ class ProxyRule extends Model
             'upstream_host' => $username,
             'upstream_port' => $upstreamPort,
             'is_generated' => true,
-            'metadata' => [
-                'description' => ($isPrimary ? 'Primary' : 'Additional')
-                    . " {$listenPort}→{$upstreamPort} for {$username}",
-                'source' => 'auto-detected-from-compose',
-                'detected_port' => $upstreamPort,
-            ] + ($upstreamProtocol === 'https' ? ['port_scheme' => 'https'] : []),
+            'metadata' => self::generatedMetadata($username, $listenPort, $upstreamPort, $isPrimary, $upstreamProtocol),
         ]);
-        if ($upstreamProtocol === 'https') {
-            $rule->upstream_protocol = 'https';
-        } elseif (!$rule->exists || $rule->upstream_protocol === null || $setByRecipe) {
-            // Undeclared: http, except an operator's own switch to https, which stays.
-            $rule->upstream_protocol = 'http';
-        }
+        self::applyUpstreamProtocol($rule, $upstreamProtocol, $setByRecipe);
         $rule->save();
 
         return $rule;
+    }
+
+    /** @return array<string, mixed> */
+    private static function generatedMetadata(
+        string $username,
+        int $listenPort,
+        int $upstreamPort,
+        bool $isPrimary,
+        ?string $upstreamProtocol
+    ): array {
+        return [
+            'description' => ($isPrimary ? 'Primary' : 'Additional')
+                . " {$listenPort}→{$upstreamPort} for {$username}",
+            'source' => 'auto-detected-from-compose',
+            'detected_port' => $upstreamPort,
+        ] + ($upstreamProtocol === 'https' ? ['port_scheme' => 'https'] : []);
+    }
+
+    /**
+     * An enabled hand-made rule for the domain and port, the system's or this project's own:
+     * the vhost renders one rule per port and an operator's rule beats the generated one.
+     */
+    private static function handMadeRuleServes(string $username, string $fqdn, int $listenPort): bool
+    {
+        return self::query()
+            ->where('transport', 'http')
+            ->where('listen_port', $listenPort)
+            ->where('server_name', $fqdn)
+            ->where('is_generated', false)
+            ->where('enabled', true)
+            ->where(static fn (Builder $q) => $q->where('owner_scope', 'system')->orWhere('username', $username))
+            ->exists();
+    }
+
+    /** The project's existing generated rule for the domain and port, or a new unsaved one. */
+    private static function generatedRuleFor(string $username, string $fqdn, int $listenPort): self
+    {
+        $key = [
+            'owner_scope' => 'user',
+            'username' => $username,
+            'transport' => 'http',
+            'listen_port' => $listenPort,
+            'server_name' => $fqdn,
+        ];
+
+        /** @var self */
+        return self::query()->where($key)->where('is_generated', true)->first() ?? new self($key);
+    }
+
+    /**
+     * https when the recipe declares it; otherwise http, except an operator's own
+     * switch to https on an existing rule, which stays.
+     */
+    private static function applyUpstreamProtocol(self $rule, ?string $upstreamProtocol, bool $setByRecipe): void
+    {
+        if ($upstreamProtocol === 'https') {
+            $rule->upstream_protocol = 'https';
+        } elseif (!$rule->exists || $rule->upstream_protocol === null || $setByRecipe) {
+            $rule->upstream_protocol = 'http';
+        }
+    }
+
+    /**
+     * The enabled HTTP rule that already serves $serverName on $listenPort,
+     * ignoring the listen address and the owner. Two such rules reach the
+     * vhost renderer, which keys one entry per port and keeps the last row:
+     * which listen IP or upstream serves the domain then depends on row order,
+     * so whichever rule is already there has to be found at write time.
+     */
+    public static function conflictingHttpRule(?string $serverName, int $listenPort, ?int $ignoreId = null): ?self
+    {
+        $name = trim((string) $serverName);
+        $query = self::query()
+            ->where('enabled', true)
+            ->where('transport', 'http')
+            ->where('listen_port', $listenPort);
+        if ($name === '') {
+            $query->whereNull('server_name');
+        } else {
+            $query->where('server_name', $name);
+        }
+        if ($ignoreId !== null) {
+            $query->whereKeyNot($ignoreId);
+        }
+
+        /** @var ?self */
+        return $query->first();
     }
 
     /**
