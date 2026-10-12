@@ -164,6 +164,30 @@ class GitCheckoutSyncTest extends TestCase
         }
     }
 
+    public function test_a_cancel_during_the_pull_finishes_the_deploy_and_releases_its_lock(): void
+    {
+        $runner = $this->runner();
+        $runner->failIfContains = ['fetch origin'];
+        $username = $this->username;
+        $git = new TestableProjectGit(new Project(new System(), $this->user()), 'project', static function (array $args, ?string $token, int $timeout = 600) use ($runner, $username): string {
+            if (str_contains(implode(' ', $args), 'fetch origin')) {
+                DeployLogger::requestCancel($username);
+            }
+
+            return $runner->run($args, $token, $timeout);
+        });
+
+        try {
+            (new TestableGitCheckoutSync(new SpyCheckoutRedeploy(), $git))->pullAndRebuild($this->user(), 'project', null);
+            $this->fail('A failed fetch was swallowed.');
+        } catch (GitException) {
+            $latest = DeployLogger::readLatestFor($this->username);
+            $this->assertSame(DeployLogger::STATUS_CANCELLED, $latest['status'] ?? null);
+            $this->assertNotNull($latest['finished_at'] ?? null);
+            $this->assertFalse(DeployLogger::isLockedFor($this->username));
+        }
+    }
+
     public function test_it_falls_back_to_the_pushed_commit_when_the_checkout_cannot_say(): void
     {
         $runner = $this->runner();

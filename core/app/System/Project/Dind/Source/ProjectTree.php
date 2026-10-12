@@ -19,10 +19,31 @@ final class ProjectTree
         return $this->project->homeDirPath() . '/project';
     }
 
-    /** Where a rebuild clones before it replaces ~/project; same filesystem, so the move is a rename. */
+    /**
+     * Where a rebuild clones before it replaces ~/project; same filesystem, so the move is a rename.
+     * Each run gets its own, so an abandoned clone of an earlier run cannot collide with this one.
+     */
     public function stagingDirPath(): string
     {
-        return $this->project->homeDirPath() . '/.project-next';
+        return $this->project->homeDirPath() . '/.project-next-' . bin2hex(random_bytes(6));
+    }
+
+    /**
+     * Every staging directory an earlier rebuild left behind, the old fixed name included.
+     * The deploy lock keeps a second rebuild of the account from running meanwhile.
+     */
+    public function removeAbandonedStaging(): void
+    {
+        $home = $this->project->homeDirPath();
+        if (preg_match('#^/home/[a-zA-Z0-9_.-]+$#', $home) !== 1) {
+            throw new \InvalidArgumentException('Refusing to clean staging outside a home directory.');
+        }
+
+        $this->project->system()->exec([
+            'sudo', 'find', $home,
+            '-mindepth', '1', '-maxdepth', '1', '-name', '.project-next*',
+            '-exec', 'rm', '-rf', '{}', '+',
+        ], [], 120);
     }
 
     public function removeStaging(string $stagingDir): void
@@ -49,8 +70,8 @@ final class ProjectTree
 
     private static function assertStagingDir(string $stagingDir): void
     {
-        if (preg_match('#^/home/[a-zA-Z0-9_.-]+/\.project-next$#', $stagingDir) !== 1) {
-            throw new \InvalidArgumentException('Refusing to touch a path outside ~/.project-next.');
+        if (preg_match('#^/home/[a-zA-Z0-9_.-]+/\.project-next-[0-9a-f]+$#', $stagingDir) !== 1) {
+            throw new \InvalidArgumentException('Refusing to touch a path outside a ~/.project-next staging directory.');
         }
     }
 

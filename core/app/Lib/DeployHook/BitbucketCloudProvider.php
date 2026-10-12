@@ -20,8 +20,8 @@ use Illuminate\Http\Request;
  * `X-Request-UUID` identifies the request, and is the delivery id. Bitbucket
  * documents it only as "the UUID of the request", next to an
  * `X-Attempt-Number` that counts the retries of one payload, so a retry is
- * taken to repeat it. If a retry ever arrives with a fresh one it is a second
- * deploy of the same commit, which pulls nothing new.
+ * taken to repeat it. If a retry ever arrives with a fresh one, its signed body
+ * is still the same, and HookReceiver acts on that once.
  */
 final class BitbucketCloudProvider extends BitbucketProvider
 {
@@ -52,6 +52,10 @@ final class BitbucketCloudProvider extends BitbucketProvider
         );
     }
 
+    /**
+     * One `push.changes[]` entry, or null when it cannot be read. A deletion has
+     * no `new`, so the ref it removed is described by `old`.
+     */
     private function change(mixed $change): ?RefChange
     {
         if (!is_array($change)) {
@@ -61,14 +65,21 @@ final class BitbucketCloudProvider extends BitbucketProvider
         $new = is_array($change['new'] ?? null) ? $change['new'] : null;
         $old = is_array($change['old'] ?? null) ? $change['old'] : null;
 
-        // A deletion has no `new`; the ref it removed is described by `old`.
-        $ref = $new ?? $old ?? [];
-        $name = $ref['name'] ?? null;
-        $type = $ref['type'] ?? null;
+        $described = $new ?? $old ?? [];
+        $name = $described['name'] ?? null;
+        $type = $described['type'] ?? null;
         if (!is_string($name) || $name === '' || !is_string($type)) {
             return null;
         }
 
+        return $this->refChange($type, $name, $new);
+    }
+
+    /**
+     * @param ?array<string, mixed> $new the ref after the push; null when the push deleted it
+     */
+    private function refChange(string $type, string $name, ?array $new): RefChange
+    {
         $deleted = $new === null;
         $hash = $new['target']['hash'] ?? null;
         $commit = !$deleted && is_string($hash) ? $hash : null;

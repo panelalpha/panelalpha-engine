@@ -64,4 +64,14 @@ class Git extends WorkTree
 
         return $this->project->system()->execOnHost(['sudo', '-u', $this->user()->username, ...$cmd]);
     }
+
+    protected function runQuietCommand(array $cmd, int $timeout): string
+    {
+        $runtime = $this->project->runtime();
+        if ($runtime instanceof Dind) {
+            return $runtime->shell()->execAsUserQuiet($cmd, [], $timeout);
+        }
+
+        return $this->runCommand($cmd, $timeout);
+    }
 }

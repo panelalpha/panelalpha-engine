@@ -290,6 +290,27 @@ class ProjectGitTest extends TestCase
         }
     }
 
+    /** The docs promise a 422 here too; push used to commit and push anyway. */
+    public function test_push_blocked_on_deploy_managed_checkout(): void
+    {
+        $model = $this->dindModel();
+        $runner = new FakeGitRunner();
+        $git = $this->testable($model, 'project', $runner);
+
+        $this->assertTrue($git->isDeployManaged());
+        try {
+            $git->push();
+            $this->fail('Expected GitException');
+        } catch (GitException $e) {
+            $this->assertSame(422, $e->httpStatus);
+            $this->assertSame('Git is managed by deploy.', $e->getMessage());
+        }
+        $this->assertSame([], array_values(array_filter(
+            $this->joined($runner),
+            static fn (string $c): bool => str_contains($c, 'push ')
+        )), 'nothing was pushed to the repository');
+    }
+
     public function test_pull_ff_leaves_dirtiness_to_git(): void
     {
         $model = $this->connectedPhpHostingModel();

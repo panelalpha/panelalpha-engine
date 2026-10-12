@@ -3,7 +3,10 @@
 namespace Tests\Unit\Git;
 
 use App\Exceptions\ProblemException;
+use App\Jobs\CreateBackup;
 use App\Jobs\RebuildProject;
+use App\Jobs\RestoreBackup;
+use App\Lib\Deploy\DeployLog\DeployLock;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\DeployLogPaths;
 use App\Lib\Project\ProjectRebuild;
@@ -218,6 +221,75 @@ class GitRedeployJobTest extends DeployHookTestCase
         $this->assertSame('settle:checkout removed', $this->redeploy->events[array_key_last($this->redeploy->events)]);
         $this->assertSame('dev', $user->refresh()->getGitBranch());
         $this->assertSame('dev', $user->getSiteGit('project')['branch']);
+    }
+
+    /**
+     * A Deploy Hook delivery holds the deploy lock with its tree aside but
+     * queued no task, so `refuseWhileCreating()` cannot see it. The manual
+     * (CLI) path must still be refused: otherwise CheckoutAside would settle a
+     * live deploy's tree in the middle of its build.
+     */
+    public function test_a_manual_pull_is_refused_while_a_deploy_holds_the_lock(): void
+    {
+        $user = $this->user('main');
+        // A push-hook deploy in another process: the lock is held, no task queued.
+        $running = DeployLogger::start('alice');
+        $this->assertTrue(DeployLogger::isLockedFor('alice'));
+
+        try {
+            app(\App\Lib\Git\GitActions::class)->pull($user, ['path' => 'project', 'strategy' => 'force']);
+            $this->fail('the manual pull was not refused');
+        } catch (\App\System\Project\Git\Exception $e) {
+            $this->assertSame(409, $e->httpStatus);
+            $this->assertSame("A deploy of project 'alice' is running; try again when it has finished.", $e->getMessage());
+        }
+
+        $this->assertFalse($this->called("'reset'"), 'the checkout was not touched');
+        unset($running);
+        gc_collect_cycles();
+    }
+
+    /** A backup or restore holds the same lock; the refusal names it, as the endpoints' 409 does. */
+    public function test_a_manual_pull_refused_while_a_backup_holds_the_lock_names_the_backup(): void
+    {
+        $user = $this->user('main');
+        foreach ([CreateBackup::class => 'backup', RestoreBackup::class => 'restore'] as $job => $kind) {
+            $task = Task::start(jobType: $job, queue: 'default', username: 'alice');
+            $task->update(['status' => Task::STATUS_RUNNING]);
+            $lock = DeployLock::acquireFor('alice');
+
+            try {
+                app(\App\Lib\Git\GitActions::class)->pull($user, ['path' => 'project', 'strategy' => 'force']);
+                $this->fail("the manual pull was not refused during a {$kind}");
+            } catch (\App\System\Project\Git\Exception $e) {
+                $this->assertSame(409, $e->httpStatus);
+                $this->assertSame("Project 'alice' is busy: {$kind} task {$task->id} is running. Wait for it to finish.", $e->getMessage());
+            } finally {
+                $lock->release();
+                $task->delete();
+            }
+        }
+
+        $this->assertFalse($this->called("'reset'"), 'the checkout was not touched');
+    }
+
+    /** A CLI backup queued no task, so the refusal has only the lock's own holder to name it. */
+    public function test_a_manual_pull_refused_while_a_cli_backup_holds_the_lock_names_the_backup(): void
+    {
+        $user = $this->user('main');
+        $lock = DeployLock::acquireFor('alice', DeployLock::HOLDER_BACKUP);
+
+        try {
+            app(\App\Lib\Git\GitActions::class)->pull($user, ['path' => 'project', 'strategy' => 'force']);
+            $this->fail('the manual pull was not refused during a backup');
+        } catch (\App\System\Project\Git\Exception $e) {
+            $this->assertSame(409, $e->httpStatus);
+            $this->assertSame("A backup of project 'alice' is running; try again when it has finished.", $e->getMessage());
+        } finally {
+            $lock->release();
+        }
+
+        $this->assertFalse($this->called("'reset'"), 'the checkout was not touched');
     }
 
     /** Git refused the change in the worker: nothing is rebuilt, and the deploy it opened is closed before the settle. */

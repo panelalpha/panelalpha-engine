@@ -3,9 +3,11 @@
 namespace Tests\Unit\Git;
 
 use App\Http\Requests\Git\GitChangeBranchRequest;
+use App\Http\Requests\Git\GitCommitsRequest;
 use App\Http\Requests\Git\GitConnectRequest;
 use App\Http\Requests\Git\GitPathRequest;
 use App\Http\Requests\Git\GitPullRequest;
+use App\Http\Requests\Git\GitRevertRequest;
 use App\Http\Requests\Git\GitStatusRequest;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Request;
@@ -54,6 +56,17 @@ class GitFormRequestTest extends TestCase
         $this->assertFalse($this->fails(['fetch' => true], GitStatusRequest::class));
     }
 
+    /** engine#848: no upper bound let `git log -n 1000000` build the whole history in core's memory. */
+    public function test_the_commits_limit_has_an_upper_bound(): void
+    {
+        $request = new \App\Http\Requests\Git\GitCommitsRequest();
+
+        $this->assertFalse($this->fails(['limit' => 1000], $request::class));
+        $this->assertTrue($this->fails(['limit' => 1001], $request::class));
+        $this->assertTrue($this->fails(['limit' => 0], $request::class));
+        $this->assertTrue($this->fails(['limit' => -5], $request::class));
+    }
+
     public function test_invalid_pull_strategy_fails(): void
     {
         $this->assertTrue($this->fails([
@@ -93,6 +106,20 @@ class GitFormRequestTest extends TestCase
         $this->assertTrue($this->fails([
             'branch' => '--output=/tmp/x',
         ], GitChangeBranchRequest::class));
+    }
+
+    public function test_every_git_request_refuses_an_invalid_ref_name_and_takes_a_valid_one(): void
+    {
+        $connect = ['repo_url' => 'https://github.com/o/r'];
+        foreach ([
+            [GitCommitsRequest::class, 'branch', []],
+            [GitConnectRequest::class, 'branch', $connect],
+            [GitRevertRequest::class, 'ref', []],
+        ] as [$class, $field, $base]) {
+            $this->assertTrue($this->fails([...$base, $field => 'a..b'], $class), $class);
+            $this->assertFalse($this->fails([...$base, $field => 'feature/x'], $class), $class);
+        }
+        $this->assertFalse($this->fails(['ref' => 'HEAD'], GitRevertRequest::class));
     }
 
     public function test_fetch_query_string_true_passes_after_prepare(): void

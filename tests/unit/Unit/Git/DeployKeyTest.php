@@ -53,6 +53,37 @@ class DeployKeyTest extends DeployHookTestCase
         parent::tearDown();
     }
 
+    /**
+     * ssh-keygen and ssh-keyscan (10 s per address) must not run under the row
+     * lock: on SQLite that transaction is BEGIN IMMEDIATE, the whole database.
+     */
+    public function test_keygen_and_keyscan_run_outside_the_lock(): void
+    {
+        $user = $this->project();
+        $base = DB::transactionLevel();
+        $seen = new \ArrayObject();
+        $system = new class ($seen) extends \App\System {
+            public function __construct(private \ArrayObject $seen)
+            {
+            }
+
+            public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
+            {
+                $this->seen[] = [((array) $cmd)[0] ?? '', DB::transactionLevel()];
+
+                return parent::exec($cmd, $env, $timeout);
+            }
+        };
+
+        (new DeployKey($system))->ensure($user, 'git.example.test:2222');
+
+        $this->assertSame(['ssh-keygen', 'ssh-keyscan'], array_column($seen->getArrayCopy(), 0));
+        foreach ($seen as [$bin, $level]) {
+            $this->assertSame($base, $level, "{$bin} ran inside the transaction");
+        }
+        $this->assertTrue(DeployKey::pins($user->fresh(), '[git.example.test]:2222'));
+    }
+
     public function test_a_key_is_created_once_and_only_its_public_half_leaves(): void
     {
         $user = $this->project();

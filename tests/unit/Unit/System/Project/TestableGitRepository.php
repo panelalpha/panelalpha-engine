@@ -18,8 +18,9 @@ final class TestableGitRepository extends GitRepository
     public function __construct(
         Dind $project,
         $execute,
+        ?string $relativePath = null,
     ) {
-        parent::__construct($project);
+        parent::__construct($project, $relativePath);
         $this->execute = $execute;
     }
 }

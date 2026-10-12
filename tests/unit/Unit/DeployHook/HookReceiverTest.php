@@ -308,6 +308,41 @@ class HookReceiverTest extends DeployHookTestCase
         $this->assertSame(1, HookDelivery::count());
     }
 
+    public function test_a_signed_push_replayed_under_a_new_delivery_id_deploys_nothing_more(): void
+    {
+        $this->receive($this->github('push', 'push-main.json', 'guid-real'));
+        $replay = $this->receive($this->github('push', 'push-main.json', 'guid-replayed'));
+
+        $this->assertSame(202, $replay->status);
+        $this->assertSame(['outcome' => 'duplicate'], $replay->body);
+        $this->assertSame(1, HookDelivery::count());
+        Queue::assertPushed(RunHookDelivery::class, 1);
+    }
+
+    public function test_a_replay_stays_a_replay_after_its_delivery_left_the_history(): void
+    {
+        $this->receive($this->cloud('push-main.json', 'cloud-real'));
+        HookDelivery::where('delivery_id', 'cloud-real')->update(['result' => HookDelivery::RESULT_DEPLOYED]);
+        for ($i = 1; $i <= HookDelivery::KEEP_HISTORY; $i++) {
+            $this->receive($this->github('ping', 'ping.json', "guid-filler-{$i}"));
+        }
+        $this->assertSame(0, HookDelivery::where('delivery_id', 'cloud-real')->count(), 'the original must have aged out');
+
+        $this->receive($this->cloud('push-main.json', 'cloud-replayed'));
+
+        $this->assertSame(0, HookDelivery::where('delivery_id', 'cloud-replayed')->count());
+        Queue::assertPushed(RunHookDelivery::class, 1);
+    }
+
+    public function test_a_gitlab_body_seen_before_is_still_acted_on_under_a_new_key(): void
+    {
+        // Token-only: a repeated body proves nothing, and a real push can repeat one.
+        $this->receive($this->gitlab('push-main.json', key: 'gl-key-a'));
+        $this->receive($this->gitlab('push-main.json', key: 'gl-key-b'));
+
+        Queue::assertPushed(RunHookDelivery::class, 2);
+    }
+
     public function test_a_forged_request_cannot_claim_a_delivery_id(): void
     {
         // Someone who saw a delivery id in a log sends a forgery under it

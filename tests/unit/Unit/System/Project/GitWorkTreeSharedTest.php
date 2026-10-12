@@ -14,7 +14,7 @@ use ReflectionClass;
 
 /**
  * Git and GitRepository were forks of one another. These hold them to one
- * implementation: everything but the four hooks has to come from WorkTree.
+ * implementation: everything but the five hooks has to come from WorkTree.
  */
 class GitWorkTreeSharedTest extends TestCase
 {
@@ -22,7 +22,7 @@ class GitWorkTreeSharedTest extends TestCase
     private string $homeRoot;
 
     /** The only things a subclass is allowed to supply. */
-    private const HOOKS = ['user', 'system', 'homeDirPath', 'runCommand'];
+    private const HOOKS = ['user', 'system', 'homeDirPath', 'runCommand', 'runQuietCommand'];
 
     /** Hooks with a default in WorkTree that only one subclass replaces. */
     private const OPTIONAL_HOOKS = ['fetchAndSyncFreshInit'];

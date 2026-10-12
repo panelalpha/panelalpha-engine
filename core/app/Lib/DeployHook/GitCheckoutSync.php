@@ -45,42 +45,62 @@ class GitCheckoutSync implements CheckoutSync
             return;
         }
 
-        // The deploy -- and with it the account's lock -- starts before the
-        // forced pull, not after it: `reset --hard` and `clean -fd` rewrite
-        // the very files a running deploy is building from. A deploy that
-        // started after this job was queued makes this throw
-        // DeployAlreadyRunningException here, with nothing touched yet.
+        $deployLogger = $this->startDeployBeforeThePull($user, $onDeployStarted);
+
+        $this->redeploy->keepingTheServedTree(
+            $git,
+            $project,
+            fn () => $this->forcePullAndRebuild($git, $project, $pushedCommit, $deployLogger),
+        );
+    }
+
+    /**
+     * The deploy, and with it the account's lock, starts before the forced pull: `reset --hard`
+     * and `clean -fd` rewrite the files a running deploy builds from, so one that is running throws here.
+     *
+     * @throws DeployAlreadyRunningException
+     */
+    private function startDeployBeforeThePull(User $user, ?callable $onDeployStarted): ?DeployLogger
+    {
         $deployLogger = $this->startDeploy($user);
         if ($deployLogger !== null && $onDeployStarted !== null) {
             $onDeployStarted($deployLogger->getDeployId());
         }
 
-        $this->redeploy->keepingTheServedTree($git, $project, function () use ($git, $project, $pushedCommit, $deployLogger): void {
-            try {
-                $git->pull(ProjectGit::STRATEGY_FORCE);
+        return $deployLogger;
+    }
 
-                // What the checkout holds now, rather than what the push said it
-                // would: the two differ when another push landed in between.
-                $commit = $git->readHeadCommit() ?? $pushedCommit;
+    /**
+     * Rebuilds from what the checkout holds after the pull rather than what the push named; the two
+     * differ when another push landed in between. A pull that fails never reaches the rebuild, so it
+     * fails the deploy here.
+     */
+    private function forcePullAndRebuild(ProjectGit $git, ProjectAggregate $project, ?string $pushedCommit, ?DeployLogger $deployLogger): void
+    {
+        try {
+            $git->pull(ProjectGit::STRATEGY_FORCE);
+            $commit = $git->readHeadCommit() ?? $pushedCommit;
 
-                $this->forgetWorkerState();
-                $this->redeploy->afterMutation($git, $project, 'push', $commit, $deployLogger);
-            } catch (\Throwable $e) {
-                // The rebuild finishes its own deploy, whatever its outcome; a
-                // pull that failed never reached it, and must not leave the
-                // deploy it started `running`.
-                if ($deployLogger?->isRunning()) {
-                    $deployLogger->finish(DeployLogger::STATUS_FAILED, 'Could not update the checkout to the pushed branch: ' . $e->getMessage());
-                }
+            $this->forgetWorkerState();
+            $this->redeploy->afterMutation($git, $project, 'push', $commit, $deployLogger);
+        } catch (\Throwable $e) {
+            $this->finishIfUnfinished($deployLogger, DeployLogger::STATUS_FAILED, 'Could not update the checkout to the pushed branch: ' . $e->getMessage());
 
-                throw $e;
-            }
+            throw $e;
+        }
 
-            if ($deployLogger?->isRunning()) {
-                // A runtime with nothing to rebuild returned without finishing it.
-                $deployLogger->finish(DeployLogger::STATUS_SUCCESS);
-            }
-        });
+        $this->finishIfUnfinished($deployLogger, DeployLogger::STATUS_SUCCESS);
+    }
+
+    /**
+     * Finishes a deploy the rebuild left open (a runtime with nothing to rebuild returns without finishing).
+     * Not only `running`: a cancel sets `cancelled` without finishing, and its lock keeps the tree aside.
+     */
+    private function finishIfUnfinished(?DeployLogger $deployLogger, string $status, ?string $error = null): void
+    {
+        if ($deployLogger !== null && !$deployLogger->isFinished()) {
+            $deployLogger->finish($status, $error);
+        }
     }
 
     /**

@@ -35,7 +35,13 @@ class DindGitRepositoryRecloneTest extends TestCase
         foreach ($this->events as $event) {
             $this->assertStringNotContainsString('/home/alice/project', $event, 'nothing may touch ~/project');
         }
-        $this->assertContains('sudo rm -rf /home/alice/.project-next', $this->events, 'the staging clone is removed');
+        $this->assertNotEmpty(
+            array_filter(
+                $this->events,
+                static fn (string $event): bool => str_starts_with($event, 'sudo rm -rf /home/alice/.project-next-')
+            ),
+            'the staging clone is removed'
+        );
     }
 
     public function test_a_successful_clone_stops_the_app_then_replaces_the_project(): void
@@ -54,14 +60,53 @@ class DindGitRepositoryRecloneTest extends TestCase
 
         $clone = implode(' ', $runner->commands[0]);
         $this->assertStringContainsString('clone --depth=1', $clone);
-        $this->assertStringEndsWith('/home/alice/.project-next', $clone);
+        $this->assertMatchesRegularExpression('#/home/alice/\.project-next-[0-9a-f]+$#', $clone);
 
         $stop = array_search('stop app', $this->events, true);
         $clear = $this->indexOf('sudo find /home/alice/project -mindepth 1 -maxdepth 1 -exec rm -rf');
-        $move = $this->indexOf('sudo find /home/alice/.project-next -mindepth 1 -maxdepth 1 -exec mv -t /home/alice/project');
+        $move = $this->indexOf('sudo find /home/alice/.project-next');
         $this->assertNotFalse($stop);
         $this->assertLessThan($clear, $stop, 'the app is stopped before ~/project is emptied');
         $this->assertLessThan($move, $clear);
+    }
+
+    public function test_each_rebuild_clones_into_its_own_staging_directory(): void
+    {
+        $runner = new FakeGitRunner;
+        $runner->stdout = [
+            'rev-parse --is-inside-work-tree' => "true\n",
+            'config --get remote.origin.url' => "https://github.com/org/repo.git\n",
+            'branch --show-current' => "main\n",
+        ];
+        $git = new TestableGitRepository($this->dind(), $runner);
+
+        $git->cloneConfiguredRepository(static function (): void {});
+        $git->cloneConfiguredRepository(static function (): void {});
+
+        $targets = [];
+        foreach ($runner->commands as $command) {
+            if (in_array('clone', $command, true)) {
+                $targets[] = end($command);
+            }
+        }
+
+        $this->assertCount(2, $targets);
+        $this->assertNotSame($targets[0], $targets[1], 'a rebuild must not reuse a previous run\'s staging directory');
+    }
+
+    public function test_a_rebuild_first_removes_the_staging_directories_earlier_runs_left(): void
+    {
+        $runner = new FakeGitRunner;
+        $runner->stdout = [
+            'rev-parse --is-inside-work-tree' => "true\n",
+            'config --get remote.origin.url' => "https://github.com/org/repo.git\n",
+            'branch --show-current' => "main\n",
+        ];
+        $git = new TestableGitRepository($this->dind(), $runner);
+
+        $git->cloneConfiguredRepository(static function (): void {});
+
+        $this->assertSame(0, $this->indexOf('sudo find /home/alice -mindepth 1 -maxdepth 1 -name .project-next* -exec rm -rf'));
     }
 
     public function test_without_a_callback_it_clones_straight_into_the_project(): void

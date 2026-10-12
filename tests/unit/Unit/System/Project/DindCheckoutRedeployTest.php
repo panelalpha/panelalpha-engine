@@ -37,6 +37,11 @@ class DindCheckoutRedeployTest extends TestCase
         $this->assertSame(['alice'], $redeploy->usernames);
     }
 
+    /**
+     * A DinD project connected with git_connect is deployed from that remote
+     * too, so a mutation on it rebuilds (engine#817). A Site Git checkout that
+     * is not a DinD project's own `project` still does not.
+     */
     public function test_site_git_mutation_does_not_rebuild(): void
     {
         $model = new ModelsUser();
@@ -44,7 +49,7 @@ class DindCheckoutRedeployTest extends TestCase
         $model->setDetails([
             'template' => 'dind',
             'site_git' => [
-                'project' => [
+                'public_html' => [
                     'repo_url' => 'https://github.com/org/repo.git',
                     'branch' => 'main',
                     'token' => 'pat',
@@ -52,13 +57,38 @@ class DindCheckoutRedeployTest extends TestCase
             ],
         ]);
         $project = $this->dind($model);
-        $git = new TestableGitRepository($project, new FakeGitRunner());
+        $git = new TestableGitRepository($project, new FakeGitRunner(), 'public_html');
         $redeploy = new RecordingDindCheckoutRedeploy();
 
         $this->assertFalse($git->isDeployManaged());
         $redeploy->afterMutation($git, $project);
 
         $this->assertSame([], $redeploy->usernames);
+    }
+
+    /** The documented SSH deploy-key route: create without git_repo, then git_connect to ~/project. */
+    public function test_a_dind_checkout_connected_with_site_git_is_deploy_managed(): void
+    {
+        $model = new ModelsUser();
+        $model->username = 'alice';
+        $model->setDetails([
+            'template' => 'dind',
+            'site_git' => [
+                'project' => [
+                    'repo_url' => 'git@github.com:org/repo.git',
+                    'branch' => 'main',
+                    'token' => null,
+                ],
+            ],
+        ]);
+        $project = $this->dind($model);
+        $git = new TestableGitRepository($project, new FakeGitRunner());
+        $redeploy = new RecordingDindCheckoutRedeploy();
+
+        $this->assertTrue($git->isDeployManaged());
+        $redeploy->afterMutation($git, $project);
+
+        $this->assertSame(['alice'], $redeploy->usernames);
     }
 
     public function test_source_access_delegates_after_git_mutation(): void
@@ -79,6 +109,26 @@ class DindCheckoutRedeployTest extends TestCase
         $this->assertTrue(method_exists($source, 'afterGitMutation'));
     }
 
+
+    /** engine#817 made it deploy-managed; it must still be possible to disconnect it. */
+    public function test_a_git_connected_dind_checkout_can_still_be_disconnected(): void
+    {
+        $model = new ModelsUser();
+        $model->username = 'alice';
+        $model->setDetails([
+            'template' => 'dind',
+            'site_git' => [
+                'project' => ['repo_url' => 'git@github.com:org/repo.git', 'branch' => 'main', 'token' => null],
+            ],
+        ]);
+        $git = new TestableGitRepository($this->dind($model), new FakeGitRunner());
+        $this->assertTrue($git->isDeployManaged());
+
+        $git->disconnect();
+
+        $this->assertNull($model->getSiteGit('project'));
+        $this->assertFalse($git->isDeployManaged());
+    }
     private function dind(ModelsUser $model): Dind
     {
         $runtime = (new ProjectAggregate($this->system(), $model))->runtime();

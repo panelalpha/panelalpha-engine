@@ -30,6 +30,20 @@ trait FakesGitHost
                   exit "$code";;
               esac
             done < "$d/rules"
+            # No rule answered: track the directories the checkout moves, so
+            # `test -d` sees what `mv`, `rm` and `cp` did. Other paths exist.
+            st() { grep -F "  $1" "$d/fs" 2>/dev/null | tail -n 1 | cut -c1; }
+            case "$*" in
+              "test -d "*)
+                s=$(st "$3")
+                [ "$s" = A ] && exit 1
+                [ "$s" = P ] && exit 0
+                case "$3" in */.project-prev|*/.project-failed) exit 1;; esac
+                exit 0;;
+              "rm -rf "*) printf 'A  %s\n' "$3" >> "$d/fs";;
+              "mv -T "*) printf 'A  %s\nP  %s\n' "$3" "$4" >> "$d/fs";;
+              "cp -a -T "*) printf 'P  %s\n' "$5" >> "$d/fs";;
+            esac
             exit 0
             SH;
         foreach (['sudo', 'docker', 'nsenter'] as $bin) {

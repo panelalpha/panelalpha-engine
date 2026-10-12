@@ -37,6 +37,7 @@ abstract class DeployHookTestCase extends TestCase
             '2026_09_21_000000_create_deploy_hooks_tables.php',
             '2026_09_22_000000_add_pending_delivery_to_deploy_hooks_table.php',
             '2026_09_23_000000_add_diagnostics_to_deploy_hooks_tables.php',
+            '2026_10_08_000000_create_hook_payload_digests_table.php',
         ] as $migration) {
             (require base_path('database/migrations/' . $migration))->up();
         }
@@ -49,6 +50,7 @@ abstract class DeployHookTestCase extends TestCase
     {
         Schema::dropIfExists('task_logs');
         Schema::dropIfExists('tasks');
+        Schema::dropIfExists('hook_payload_digests');
         Schema::dropIfExists('hook_deliveries');
         Schema::dropIfExists('deploy_hooks');
         Schema::dropIfExists('users');

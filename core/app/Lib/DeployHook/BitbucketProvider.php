@@ -21,17 +21,23 @@ use Illuminate\Http\Request;
  */
 abstract class BitbucketProvider implements HookProvider
 {
+    /** Exactly `sha256=` and 64 hex digits, so hash_equals never compares a length the sender chose. */
+    private const SIGNATURE_PATTERN = '/^sha256=([0-9a-f]{64})$/i';
+
     public function verify(Request $request, string $secret): bool
     {
         $header = (string) $request->headers->get('X-Hub-Signature', '');
 
-        // Exactly `sha256=` and 64 hex characters. Anything looser would hand
-        // hash_equals a string whose length is the caller's to choose.
-        if ($secret === '' || preg_match('/^sha256=([0-9a-f]{64})$/i', $header, $m) !== 1) {
+        if ($secret === '' || preg_match(self::SIGNATURE_PATTERN, $header, $m) !== 1) {
             return false;
         }
 
         return hash_equals(hash_hmac('sha256', $request->getContent(), $secret), strtolower($m[1]));
+    }
+
+    public function signsTheBody(): bool
+    {
+        return true;
     }
 
     protected function eventKey(Request $request): string
@@ -73,6 +79,21 @@ abstract class BitbucketProvider implements HookProvider
             throw new InvalidPayload('A push without changes.');
         }
 
+        $readable = $this->readableChanges($changes, $toChange);
+        if ($changes !== [] && $readable === []) {
+            throw new InvalidPayload('A push none of whose changes can be read.');
+        }
+
+        return HookEvent::push($this->name(), $event, $delivery, $readable);
+    }
+
+    /**
+     * @param array<mixed> $changes
+     * @param callable(mixed): ?RefChange $toChange
+     * @return list<RefChange>
+     */
+    private function readableChanges(array $changes, callable $toChange): array
+    {
         $readable = [];
         foreach ($changes as $change) {
             $ref = $toChange($change);
@@ -81,11 +102,7 @@ abstract class BitbucketProvider implements HookProvider
             }
         }
 
-        if ($changes !== [] && $readable === []) {
-            throw new InvalidPayload('A push none of whose changes can be read.');
-        }
-
-        return HookEvent::push($this->name(), $event, $delivery, $readable);
+        return $readable;
     }
 
     /**

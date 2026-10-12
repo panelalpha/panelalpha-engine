@@ -41,9 +41,25 @@ final class GitlabProvider implements HookProvider
             return false;
         }
 
-        // Hashed first so the comparison is between equal-length strings and
-        // neither the secret's length nor a prefix match shows in the timing.
+        return $this->sameSecret($secret, $token);
+    }
+
+    /**
+     * Hashed first so the comparison is between equal-length strings and
+     * neither the secret's length nor a prefix match shows in the timing.
+     */
+    private function sameSecret(string $secret, string $token): bool
+    {
         return hash_equals(hash('sha256', $secret, true), hash('sha256', $token, true));
+    }
+
+    /**
+     * Whoever holds the token can send any body, so a body seen before proves
+     * nothing, and a genuine push can repeat one byte for byte (A to B again).
+     */
+    public function signsTheBody(): bool
+    {
+        return false;
     }
 
     public function parse(Request $request): HookEvent
@@ -59,6 +75,15 @@ final class GitlabProvider implements HookProvider
             throw new InvalidPayload('The push body is not JSON.');
         }
 
+        return $this->pushEvent($request, $event, $payload);
+    }
+
+    /**
+     * @param array<mixed> $payload
+     * @throws InvalidPayload
+     */
+    private function pushEvent(Request $request, string $event, array $payload): HookEvent
+    {
         $ref = $payload['ref'] ?? null;
         if (!is_string($ref) || $ref === '') {
             throw new InvalidPayload('A push without a ref.');
@@ -91,7 +116,8 @@ final class GitlabProvider implements HookProvider
      * the request or chain of webhooks that caused the event, so
      * `git push main feature` gives two push events one UUID, and treating it
      * as a delivery id would drop the second. Older GitLab omits the key; then
-     * the UUID is narrowed to the ref update it arrived with.
+     * the UUID is narrowed to the ref update it arrived with, and hashed so the
+     * id fits its column whatever length the sender's header has.
      */
     private function deliveryId(Request $request, ?string $ref, ?string $after): ?string
     {
@@ -105,8 +131,6 @@ final class GitlabProvider implements HookProvider
             return null;
         }
 
-        // A UUID is 36 characters, but the header is the sender's: hash the
-        // parts so the id fits its column whatever they typed.
         return $ref === null ? substr($uuid, 0, 128) : hash('sha256', $uuid . "\n" . $ref . "\n" . (string) $after);
     }
 }

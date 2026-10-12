@@ -84,6 +84,19 @@ class GithubProviderTest extends TestCase
         $this->assertFalse((new GithubProvider())->verify($this->pushRequest(), 'some-other-secret'));
     }
 
+    /** Anyone can sign with an empty key, so an endpoint without a secret verifies nothing. */
+    public function test_it_never_verifies_against_an_empty_secret(): void
+    {
+        $body = $this->fixture('push-main.json');
+        $request = $this->request($body, [
+            'CONTENT_TYPE' => 'application/json',
+            'HTTP_X_GITHUB_EVENT' => 'push',
+            'HTTP_X_HUB_SIGNATURE_256' => $this->sign($body, ''),
+        ]);
+
+        $this->assertFalse((new GithubProvider())->verify($request, ''));
+    }
+
     public function test_a_missing_signature_does_not_verify(): void
     {
         $request = $this->request($this->fixture('push-main.json'), [
