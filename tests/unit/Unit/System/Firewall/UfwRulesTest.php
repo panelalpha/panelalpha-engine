@@ -144,6 +144,23 @@ RULES;
         $this->assertSame(['in', 'out'], [$rules[2]->direction, $rules[3]->direction]);
     }
 
+    public function test_a_ufw_rule_is_found_as_the_listed_rule_it_is_part_of(): void
+    {
+        $c = 'comment=' . bin2hex('spam');
+        $out = "### tuple ### deny any any 203.0.113.7 any 0.0.0.0/0 out {$c}";
+        $port = '### tuple ### allow tcp 08080 ::/0 any ::/0 in';
+        $rules = UfwRules::parse(implode("\n", [
+            "### tuple ### deny any any 0.0.0.0/0 any 203.0.113.7 in {$c}",
+            '### tuple ### allow tcp 08080 0.0.0.0/0 any 0.0.0.0/0 in',
+            $out,
+        ]), $port);
+
+        $this->assertSame($rules[0], UfwRules::listedAs(UfwRules::parseTuple($out), $rules));
+        $this->assertSame(FirewallRule::BOTH, $rules[0]->direction);
+        $this->assertSame($rules[1], UfwRules::listedAs(UfwRules::parseTuple($port), $rules));
+        $this->assertNull(UfwRules::listedAs(UfwRules::parseTuple('### tuple ### allow tcp 9 0.0.0.0/0 any 0.0.0.0/0 in'), $rules));
+    }
+
     /** A deny is prepended half by half, so ufw keeps the outbound half above the inbound one. */
     public function test_the_pair_is_found_whichever_half_comes_first(): void
     {

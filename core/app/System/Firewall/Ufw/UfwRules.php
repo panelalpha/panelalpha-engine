@@ -285,6 +285,26 @@ final class UfwRules
     }
 
     /**
+     * The rule in $rules that $half, one ufw rule as {@see parseTuple()} reads it,
+     * is listed as, alone or as part of a rule both ways or in both scopes.
+     *
+     * @param list<FirewallRule> $rules
+     */
+    public static function listedAs(FirewallRule $half, array $rules): ?FirewallRule
+    {
+        $wanted = $half->toArray();
+        foreach ($rules as $rule) {
+            foreach ($rule->editable ? self::halves($rule) : [$rule] as $part) {
+                if ($part->toArray() === $wanted) {
+                    return $rule;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * What ufw tells its rules apart by, per ufw rule: the tuple without
      * the action and the comment.
      *

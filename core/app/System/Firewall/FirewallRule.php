@@ -41,6 +41,11 @@ final class FirewallRule
      */
     public const COMMENT_REFUSED_CHARACTERS = '/[\'\r\n\x00]/';
 
+    /**
+     * @param bool $editable false for a rule written on the host with options this
+     *                       model does not carry (an interface, an application profile,
+     *                       a source port, logging): listed as it is, never rewritten
+     */
     public function __construct(
         public readonly string $action,
         public readonly string $direction = self::IN,
@@ -49,9 +54,6 @@ final class FirewallRule
         public readonly ?string $source = null,
         public readonly ?string $destination = null,
         public readonly ?string $comment = null,
-        // A rule written on the host with options this model does not carry
-        // (an interface, an application profile, a source port, logging).
-        // Listed as it is, never rewritten from a lossy copy.
         public readonly bool $editable = true,
         public readonly ?string $raw = null,
         public readonly string $scope = self::HOST,
@@ -63,29 +65,42 @@ final class FirewallRule
      */
     public static function fromArray(array $data): self
     {
-        $blank = static fn (mixed $v): ?string => is_string($v) && trim($v) !== '' ? trim($v) : null;
-
-        $address = static fn (mixed $v): ?string => ($v = $blank($v)) === null ? null : self::normalizeAddress($v);
-
-        $direction = $blank($data['direction'] ?? null) ?? self::IN;
-        $scope = $blank($data['scope'] ?? null) ?? self::HOST;
-        // An outbound deny has nothing published to close.
-        if ($data['action'] === self::DENY && $scope === self::HOST && $direction !== self::OUT) {
-            $scope = self::BOTH;
-        } elseif ($scope === self::BOTH && $direction === self::OUT) {
-            $scope = self::HOST;
-        }
+        $direction = self::trimmedOrNull($data['direction'] ?? null) ?? self::IN;
+        $port = self::trimmedOrNull($data['port'] ?? null);
 
         return new self(
             action: $data['action'],
             direction: $direction,
-            protocol: $blank($data['protocol'] ?? null),
-            port: ($port = $blank($data['port'] ?? null)) === null ? null : self::normalizePort($port),
-            source: $address($data['source'] ?? null),
-            destination: $address($data['destination'] ?? null),
-            comment: $blank($data['comment'] ?? null),
-            scope: $scope,
+            protocol: self::trimmedOrNull($data['protocol'] ?? null),
+            port: $port === null ? null : self::normalizePort($port),
+            source: self::addressOrNull($data['source'] ?? null),
+            destination: self::addressOrNull($data['destination'] ?? null),
+            comment: self::trimmedOrNull($data['comment'] ?? null),
+            scope: self::scopeFor(self::trimmedOrNull($data['scope'] ?? null), $data['action'], $direction),
         );
+    }
+
+    /**
+     * Only a missing scope on an inbound deny becomes `both`; an explicit one is
+     * kept, except that an outbound deny has nothing published to close.
+     */
+    private static function scopeFor(?string $scope, string $action, string $direction): string
+    {
+        $scope ??= $action === self::DENY && $direction !== self::OUT ? self::BOTH : self::HOST;
+
+        return $scope === self::BOTH && $direction === self::OUT ? self::HOST : $scope;
+    }
+
+    private static function trimmedOrNull(mixed $value): ?string
+    {
+        return is_string($value) && trim($value) !== '' ? trim($value) : null;
+    }
+
+    private static function addressOrNull(mixed $value): ?string
+    {
+        $value = self::trimmedOrNull($value);
+
+        return $value === null ? null : self::normalizeAddress($value);
     }
 
     /** An IPv4 or IPv6 address, or a CIDR range. Hostnames are not rules. */
@@ -159,10 +174,7 @@ final class FirewallRule
             'comment' => $this->comment,
             'scope' => $this->scope,
         ];
-        /** @var array{action: string, direction?: ?string, protocol?: ?string, port?: ?string, source?: ?string, destination?: ?string, comment?: ?string, scope?: ?string} $merged */
-        $merged = array_merge($current, array_intersect_key($changes, $current));
-
-        return self::fromArray($merged);
+        return self::fromArray(array_merge($current, array_intersect_key($changes, $current)));
     }
 
     /**
@@ -173,20 +185,58 @@ final class FirewallRule
      */
     public function problems(?self $current = null): array
     {
+        return array_merge(
+            $this->targetProblems(),
+            $this->portProblems(),
+            $this->scopeProblems(),
+            $this->commentProblems($current),
+        );
+    }
+
+    /**
+     * A rule on nothing would allow or drop every connection, and ufw stores
+     * "any" as 0.0.0.0/0 and ::/0, so it would take such an address for any.
+     *
+     * @return array<string, string>
+     */
+    private function targetProblems(): array
+    {
         $problems = [];
-        // A rule on nothing would allow or drop every connection.
         if ($this->port === null && $this->source === null && $this->destination === null) {
             $problems['port'] = 'A rule needs a port, a source or a destination.';
         }
-        // ufw stores "any" as these, so it would take the rule for the one on any address.
         foreach (['source' => $this->source, 'destination' => $this->destination] as $field => $address) {
             if (in_array($address, ['0.0.0.0/0', '::/0'], true)) {
                 $problems[$field] = "The {$field} {$address} is every address; leave it out to match any address.";
             }
         }
-        if ($this->port !== null && $this->protocol === null && preg_match('/[:,]/', $this->port) === 1) {
+
+        return $problems;
+    }
+
+    /** @return array<string, string> */
+    private function portProblems(): array
+    {
+        if ($this->port === null) {
+            return [];
+        }
+
+        $problems = [];
+        $problem = self::portProblem($this->port);
+        if ($problem !== null) {
+            $problems['port'] = $problem;
+        }
+        if ($this->protocol === null && preg_match('/[:,]/', $this->port) === 1) {
             $problems['protocol'] = 'A port range or list needs a protocol.';
         }
+
+        return $problems;
+    }
+
+    /** @return array<string, string> */
+    private function scopeProblems(): array
+    {
+        $problems = [];
         if ($this->direction === self::BOTH && ($this->source === null || $this->destination !== null)) {
             $problems['source'] = 'A rule in both directions names the address on the other side as source, and no destination.';
         }
@@ -196,29 +246,75 @@ final class FirewallRule
         if ($this->scope === self::PUBLISHED && $this->direction !== self::IN) {
             $problems['direction'] = 'A rule for published ports is for connections coming in.';
         }
-        if ($this->comment !== null && ($problem = $this->banPrefixProblem($this->comment, $current) ?? $this->commentProblem($this->comment)) !== null) {
-            $problems['comment'] = $problem;
-        }
 
         return $problems;
     }
 
+    /** @return array<string, string> */
+    private function commentProblems(?self $current): array
+    {
+        if ($this->comment === null) {
+            return [];
+        }
+
+        $problem = $this->banPrefixProblem($this->comment, $current) ?? $this->commentProblem($this->comment);
+
+        return $problem === null ? [] : ['comment' => $problem];
+    }
+
     /**
-     * Deleting a rule taken for a ban lifts the ban on its address in fail2ban.
-     * So the prefix stays only on a rule that has it already, and on a deny
-     * from an address only on a ban that still bans the same address.
+     * A port outside 1-65535, or a range written high to low, which ufw refuses.
+     * A leading zero too: ufw stores `08080` as written and iptables-restore then
+     * rejects the whole ruleset on reload, which leaves the host dropping every new connection.
+     */
+    private static function portProblem(string $port): ?string
+    {
+        foreach (explode(',', $port) as $entry) {
+            $problem = self::portEntryProblem(explode(':', $entry, 2));
+            if ($problem !== null) {
+                return $problem;
+            }
+        }
+
+        return null;
+    }
+
+    /** @param list<string> $parts one port, or the two ends of a range */
+    private static function portEntryProblem(array $parts): ?string
+    {
+        foreach ($parts as $part) {
+            if (preg_match('/^0\d/', $part)) {
+                return 'A port is written without leading zeros.';
+            }
+        }
+        $bounds = array_map('intval', $parts);
+        foreach ($bounds as $bound) {
+            if ($bound < 1 || $bound > 65535) {
+                return 'A port must be between 1 and 65535.';
+            }
+        }
+        if (count($bounds) === 2 && $bounds[1] < $bounds[0]) {
+            return 'A port range must not run high to low.';
+        }
+
+        return null;
+    }
+
+    /**
+     * Deleting a rule taken for a ban lifts the ban on its address in fail2ban,
+     * so the prefix stays only on a rule that has it already, and on a deny from
+     * an address only on a ban of the same address. The comment is compared as
+     * normalised (trailing blanks), the ban read from it as stored, as ufw does.
      */
     private function banPrefixProblem(string $comment, ?self $current): ?string
     {
         if (!str_starts_with($comment, self::BAN_PREFIX)) {
             return null;
         }
-        // Read as this rule was, so a stored comment with trailing blanks is the same comment.
         $was = $current?->with([]);
         if ($was === null || $comment !== $was->comment) {
             return 'The comment prefix "' . self::BAN_PREFIX . '" marks the bans fail2ban makes.';
         }
-        // Whether it was a ban is read from the comment as stored, as ufw's own check reads it.
         if ($this->isBan() && !($current->isBan() && $was->source === $this->source)) {
             return 'A deny from an address with the comment prefix "' . self::BAN_PREFIX . '" is taken for a fail2ban ban; only a ban keeps it, from the address it bans. Change the comment.';
         }
@@ -228,21 +324,24 @@ final class FirewallRule
 
     /**
      * ufw checks a rule's words before it takes the comment out of them
-     * (ufw/parser.py), so a few comments read as part of the rule. A route
-     * rule's words are also checked joined by spaces, the comment last.
+     * (ufw/parser.py), so a few comments read as part of the rule, and
+     * /usr/sbin/ufw drops --rootdir= and --datadir= arguments before parsing.
      */
     private function commentProblem(string $comment): ?string
     {
-        // /usr/sbin/ufw drops these arguments before it parses the rule.
         if (str_starts_with($comment, '--rootdir=') || str_starts_with($comment, '--datadir=')) {
             return 'ufw drops a comment that starts with --rootdir= or --datadir= before it reads the rule; reword it.';
         }
         if (in_array($comment, ['in', 'out', 'log', 'log-all'], true)) {
             return "ufw takes the comment \"{$comment}\" for part of the rule; reword it.";
         }
-        if ($this->scope === self::HOST) {
-            return null;
-        }
+
+        return $this->scope === self::HOST ? null : self::routeCommentProblem($comment);
+    }
+
+    /** A route rule's words are also checked joined by spaces, the comment last. */
+    private static function routeCommentProblem(string $comment): ?string
+    {
         $route = 'On a rule for published ports, which an incoming deny also is, ufw takes ';
         if ($comment === 'delete') {
             return $route . 'the comment "delete" for part of the rule; reword it.';
@@ -256,14 +355,16 @@ final class FirewallRule
         return null;
     }
 
+    /**
+     * Only a published rule hashes its scope, so a host rule's id does not
+     * depend on the scope and a deny keeps its id when it gains its published half.
+     */
     public function id(): string
     {
         $key = [$this->action, $this->direction, $this->protocol, $this->port, $this->source, $this->destination];
         if (!$this->editable) {
             $key[] = $this->raw;
         }
-        // Host rules keep the ids they had before rules had a scope, and a
-        // deny keeps its id when it gains its published half.
         if ($this->scope === self::PUBLISHED) {
             $key[] = $this->scope;
         }
@@ -283,6 +384,59 @@ final class FirewallRule
     public function isBan(): bool
     {
         return $this->action === self::DENY && $this->source !== null && $this->comment !== null && str_starts_with($this->comment, self::BAN_PREFIX);
+    }
+
+    /** Whether some connection $allow lets in is one this rule matches too, with or without its source. */
+    public function overlaps(self $allow): bool
+    {
+        return self::portsOverlap($this->port, $allow->port)
+            && in_array($this->scope, [$allow->scope, self::BOTH], true)
+            && in_array($this->direction, [$allow->direction, self::BOTH], true)
+            && ($this->protocol === null || $allow->protocol === null || $this->protocol === $allow->protocol);
+    }
+
+    /** Whether any port of one list falls in a range of the other; null is every port. */
+    private static function portsOverlap(?string $ports, ?string $others): bool
+    {
+        foreach (self::portRanges($ports) as [$a, $b]) {
+            foreach (self::portRanges($others) as [$c, $d]) {
+                if ($a <= $d && $c <= $b) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /** @return list<array{0: int, 1: int}> each entry of the port list as a from-to range */
+    private static function portRanges(?string $port): array
+    {
+        return array_map(static function (string $p): array {
+            [$from, $to] = array_pad(explode(':', $p, 2), 2, null);
+
+            return [(int) $from, (int) ($to ?? $from)];
+        }, explode(',', $port ?? '1:65535'));
+    }
+
+    /** Whether this rule's source takes in $address: no source, or a range holding it. */
+    public function hasSource(string $address): bool
+    {
+        if ($this->source === null) {
+            return true;
+        }
+        [$network, $prefix] = array_pad(explode('/', $this->source, 2), 2, null);
+        $net = @inet_pton($network);
+        $ip = @inet_pton($address);
+        if ($net === false || $ip === false || strlen($net) !== strlen($ip)) {
+            return false;
+        }
+        $bits = $prefix === null ? strlen($ip) * 8 : (int) $prefix;
+        $whole = intdiv($bits, 8);
+        $mask = (0xff << (8 - $bits % 8)) & 0xff;
+
+        return substr($net, 0, $whole) === substr($ip, 0, $whole)
+            && ($bits % 8 === 0 || ((ord($net[$whole]) ^ ord($ip[$whole])) & $mask) === 0);
     }
 
     /** Whether both match the same traffic the same way; the comment does not count. */

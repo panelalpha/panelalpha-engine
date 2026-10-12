@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\Firewall\FirewallRuleRequest;
 use App\System\Firewall\Firewall;
+use App\System\Firewall\FirewallBusy;
+use App\System\Firewall\FirewallCommandFailed;
 use App\System\Firewall\FirewallException;
 use App\System\Firewall\FirewallFactory;
 use App\System\Firewall\FirewallLogEntry;
@@ -14,11 +16,14 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /** The host firewall, through whichever provider FIREWALL_PROVIDER names. */
 class FirewallController extends Controller
 {
+    private const ENGINE_API_LABEL = 'engine api';
+
     private function firewall(): Firewall
     {
         return FirewallFactory::default();
@@ -38,6 +43,16 @@ class FirewallController extends Controller
                     new OA\Property(property: 'default_incoming', type: 'string', nullable: true, example: 'deny'),
                     new OA\Property(property: 'default_outgoing', type: 'string', nullable: true, example: 'allow'),
                     new OA\Property(property: 'error', type: 'string', nullable: true),
+                    new OA\Property(
+                        property: 'refused_rules',
+                        type: 'array',
+                        description: 'Stored rules the firewall would refuse to load. Until each is deleted, every reload of the rules fails and a rule change ends with the firewall turned off to keep the host reachable. Empty when every rule loads.',
+                        items: new OA\Items(type: 'object', properties: [
+                            new OA\Property(property: 'id', type: 'string', nullable: true, description: 'The rule to delete (DELETE /firewall/rules/{id}); null when it is not one the API lists, such as a line outside any rule'),
+                            new OA\Property(property: 'rule', type: 'string', example: 'allow in tcp 08080'),
+                            new OA\Property(property: 'error', type: 'string', description: 'Why the firewall refuses it, in its own words', example: "invalid port/service `08080' specified"),
+                        ]),
+                    ),
                 ])],
             )),
         ],
@@ -66,10 +81,14 @@ class FirewallController extends Controller
     public function rules(Request $request): JsonResponse
     {
         $scope = $request->validate(['scope' => ['nullable', 'string', 'in:' . FirewallRule::HOST . ',' . FirewallRule::PUBLISHED]])['scope'] ?? FirewallRule::HOST;
-        $rules = array_filter($this->firewall()->rules(), static fn (FirewallRule $rule): bool => in_array($rule->scope, [$scope, FirewallRule::BOTH], true));
+        try {
+            $rules = $this->firewall()->rules();
+        } catch (FirewallException $e) {
+            return $this->hostFault($e);
+        }
 
         return new JsonResponse([
-            'data' => array_values(array_map(static fn (FirewallRule $rule): array => $rule->toArray(), $rules)),
+            'data' => $this->rulesInScope($rules, $scope),
         ]);
     }
 
@@ -94,11 +113,15 @@ class FirewallController extends Controller
                 new OA\Property(property: 'source', type: 'string', nullable: true, example: '203.0.113.7', description: 'IPv4/IPv6 address or CIDR. Omit for any.'),
                 new OA\Property(property: 'destination', type: 'string', nullable: true, description: 'IPv4/IPv6 address or CIDR. Omit for any.'),
                 new OA\Property(property: 'comment', type: 'string', nullable: true, description: 'One line, without \'. Also refused, as ufw would read it as part of the rule: a comment that is only in, out, log or log-all, and on an incoming deny or a published-port rule, delete or in or out followed by more words. A comment that starts with by Fail2Ban, which marks the bans fail2ban makes, is refused.'),
+                new OA\Property(property: 'confirm', type: 'boolean', nullable: true, description: 'A deny that covers the caller\'s own address on the engine\'s SSH port, or on its API port without naming a port, is refused unless this is true. A deny whose ports cover the engine API port is always refused.'),
             ],
         )),
         responses: [
             new OA\Response(response: 200, description: 'Rule added', content: new OA\JsonContent(
-                properties: [new OA\Property(property: 'data', ref: '#/components/schemas/FirewallRule')],
+                properties: [
+                    new OA\Property(property: 'data', ref: '#/components/schemas/FirewallRule'),
+                    new OA\Property(property: 'warnings', type: 'array', items: new OA\Items(type: 'string'), description: 'Present when a deny also covers ports the engine opened for itself.'),
+                ],
             )),
         ],
     )]
@@ -106,9 +129,11 @@ class FirewallController extends Controller
     {
         /** @var array{action: string} $data */
         $data = $request->rule();
-        $rule = $this->attempt(fn () => $this->firewall()->addRule(FirewallRule::fromArray($data)));
+        $rule = FirewallRule::fromArray($data);
+        $warnings = $this->engineOverlap($rule, $request);
+        $rule = $this->attempt(fn () => $this->firewall()->addRule($rule));
 
-        return new JsonResponse(['data' => $rule->toArray()]);
+        return $this->ruleWithWarnings($rule, $warnings);
     }
 
     #[OA\Put(
@@ -129,11 +154,15 @@ class FirewallController extends Controller
                 new OA\Property(property: 'source', type: 'string', nullable: true, x: ['mcp-nullable' => true]),
                 new OA\Property(property: 'destination', type: 'string', nullable: true, x: ['mcp-nullable' => true]),
                 new OA\Property(property: 'comment', type: 'string', nullable: true, description: 'One line, without \'. Also refused, as ufw would read it as part of the rule: a comment that is only in, out, log or log-all, and on an incoming deny or a published-port rule, delete or in or out followed by more words. A comment that starts with by Fail2Ban, which marks the bans fail2ban makes, is refused unless the rule has that comment already, and on a deny from an address only if the rule is a ban from that same address.', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'confirm', type: 'boolean', nullable: true, description: 'A deny that covers the caller\'s own address on the engine\'s SSH port, or on its API port without naming a port, is refused unless this is true. A deny whose ports cover the engine API port is always refused.'),
             ],
         )),
         responses: [
             new OA\Response(response: 200, description: 'Rule updated', content: new OA\JsonContent(
-                properties: [new OA\Property(property: 'data', ref: '#/components/schemas/FirewallRule')],
+                properties: [
+                    new OA\Property(property: 'data', ref: '#/components/schemas/FirewallRule'),
+                    new OA\Property(property: 'warnings', type: 'array', items: new OA\Items(type: 'string'), description: 'Present when a deny also covers ports the engine opened for itself.'),
+                ],
             )),
         ],
     )]
@@ -144,10 +173,11 @@ class FirewallController extends Controller
         if (($problems = $rule->problems($current)) !== []) {
             throw ValidationException::withMessages($problems);
         }
+        $warnings = $this->engineOverlap($rule, $request);
 
         $updated = $this->attempt(fn () => $this->firewall()->updateRule($id, $rule));
 
-        return new JsonResponse(['data' => $updated->toArray()]);
+        return $this->ruleWithWarnings($updated, $warnings);
     }
 
     #[OA\Delete(
@@ -276,7 +306,7 @@ class FirewallController extends Controller
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             required: ['address'],
             properties: [
-                new OA\Property(property: 'address', type: 'string', example: '203.0.113.7', description: 'IPv4/IPv6 address or CIDR.'),
+                new OA\Property(property: 'address', type: 'string', example: '203.0.113.7', description: 'IPv4/IPv6 address or CIDR, no wider than /8 (IPv4) or /16 (IPv6).'),
                 new OA\Property(property: 'comment', type: 'string', nullable: true, example: 'office'),
             ],
         )),
@@ -289,20 +319,10 @@ class FirewallController extends Controller
     public function trust(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'address' => ['required', 'string', 'max:64', function (string $attribute, mixed $value, \Closure $fail): void {
-                if (!is_string($value) || !FirewallRule::isAddress($value)) {
-                    $fail('The address must be an IPv4 or IPv6 address or a CIDR range.');
-                }
-            }],
-            // A line of the list file; a NUL cannot be passed to the host command that writes it.
-            'comment' => ['nullable', 'string', 'max:255', function (string $attribute, mixed $value, \Closure $fail): void {
-                if (is_string($value) && preg_match('/[\r\n\x00]/', $value) === 1) {
-                    $fail('The comment cannot contain a line break or a NUL character.');
-                }
-            }],
+            'address' => ['required', 'string', 'max:64', $this->trustableAddressRule(...)],
+            'comment' => ['nullable', 'string', 'max:255', $this->singleLineCommentRule(...)],
         ]);
-        $comment = isset($data['comment']) && trim((string) $data['comment']) !== '' ? trim((string) $data['comment']) : null;
-        $trusted = $this->attempt(fn () => $this->firewall()->trust(new TrustedAddress((string) $data['address'], $comment)));
+        $trusted = $this->attempt(fn () => $this->firewall()->trust(new TrustedAddress((string) $data['address'], $this->trimmedComment($data))));
 
         return new JsonResponse(['data' => $trusted->toArray()]);
     }
@@ -326,6 +346,110 @@ class FirewallController extends Controller
         return new JsonResponse(['data' => $removed->toArray()]);
     }
 
+    /**
+     * @param list<FirewallRule> $rules
+     * @return list<array<string, mixed>>
+     */
+    private function rulesInScope(array $rules, string $scope): array
+    {
+        $inScope = array_filter($rules, static fn (FirewallRule $rule): bool => in_array($rule->scope, [$scope, FirewallRule::BOTH], true));
+
+        return array_values(array_map(static fn (FirewallRule $rule): array => $rule->toArray(), $inScope));
+    }
+
+    /** @param list<string> $warnings */
+    private function ruleWithWarnings(FirewallRule $rule, array $warnings): JsonResponse
+    {
+        return new JsonResponse(['data' => $rule->toArray()] + ($warnings === [] ? [] : ['warnings' => $warnings]));
+    }
+
+    private function trustableAddressRule(string $attribute, mixed $value, \Closure $fail): void
+    {
+        if (!is_string($value) || !FirewallRule::isAddress($value)) {
+            $fail('The address must be an IPv4 or IPv6 address or a CIDR range.');
+        } elseif (($wide = TrustedAddress::widthProblem($value)) !== null) {
+            $fail($wide);
+        }
+    }
+
+    /** The comment becomes one line of the list file, and a NUL cannot reach the host command that writes it. */
+    private function singleLineCommentRule(string $attribute, mixed $value, \Closure $fail): void
+    {
+        if (is_string($value) && preg_match('/[\r\n\x00]/', $value) === 1) {
+            $fail('The comment cannot contain a line break or a NUL character.');
+        }
+    }
+
+    /** @param array<string, mixed> $data */
+    private function trimmedComment(array $data): ?string
+    {
+        return isset($data['comment']) && trim((string) $data['comment']) !== '' ? trim((string) $data['comment']) : null;
+    }
+
+    /**
+     * A deny over the ports the engine opened for itself. One whose ports cover the
+     * engine API is refused, one that would shut the caller out of SSH or this API
+     * is refused unless `confirm` is sent, and any other overlap is a warning.
+     *
+     * @return list<string>
+     */
+    private function engineOverlap(FirewallRule $rule, Request $request): array
+    {
+        if ($rule->action !== FirewallRule::DENY) {
+            return [];
+        }
+        $warnings = [];
+        foreach ($this->attempt(fn () => $this->firewall()->rules()) as $engine) {
+            if (!$this->deniesEngineAllow($rule, $engine)) {
+                continue;
+            }
+            $label = trim(substr((string) $engine->comment, strlen(FirewallRule::MANAGED_PREFIX)));
+            $port = sprintf('%s (%s/%s)', $label, $engine->port ?? 'any', $engine->protocol ?? 'any');
+            $this->refuseEngineApiPorts($rule, $engine, $label);
+            if ($this->sameMatch($rule, $engine)) {
+                continue;
+            }
+            $this->refuseSelfLockout($rule, $label, $port, $request);
+            $warnings[] = "This deny also covers the engine's own {$port}" . ($rule->source === null ? ', for every address.' : ", for {$rule->source}.");
+        }
+
+        return array_values(array_unique($warnings));
+    }
+
+    private function deniesEngineAllow(FirewallRule $rule, FirewallRule $engine): bool
+    {
+        return $engine->managed() && $engine->action === FirewallRule::ALLOW && $rule->overlaps($engine);
+    }
+
+    /** The same match as the engine's own rule is the provider's clash to refuse, not a warning. */
+    private function sameMatch(FirewallRule $rule, FirewallRule $engine): bool
+    {
+        return [$rule->protocol, $rule->port, $rule->source, $rule->destination] === [$engine->protocol, $engine->port, $engine->source, $engine->destination];
+    }
+
+    /**
+     * The engine API port is reserved for the engine: a deny may block an address
+     * from every port, but its port range may not include the API.
+     *
+     * @throws ValidationException
+     */
+    private function refuseEngineApiPorts(FirewallRule $rule, FirewallRule $engine, string $label): void
+    {
+        if ($label === self::ENGINE_API_LABEL && $rule->port !== null) {
+            throw ValidationException::withMessages(['port' => "Port {$engine->port}/{$engine->protocol} is reserved for the engine API, so a deny cannot cover it. Leave it out of the port range."]);
+        }
+    }
+
+    /** @throws ValidationException when the deny would cut the caller off SSH or this API without `confirm` */
+    private function refuseSelfLockout(FirewallRule $rule, string $label, string $port, Request $request): void
+    {
+        $client = (string) $request->ip();
+        if (in_array($label, ['ssh', self::ENGINE_API_LABEL], true) && $rule->hasSource($client) && !$request->boolean('confirm')) {
+            throw ValidationException::withMessages(['confirm' => "This deny covers your own address {$client} on the engine's {$port}, so it would shut you out of this host."
+                . ' Narrow its source or port, or send confirm: true to add it anyway.']);
+        }
+    }
+
     /** The rule, when the API may change it. */
     private function changeable(string $id): FirewallRule
     {
@@ -341,6 +465,9 @@ class FirewallController extends Controller
     }
 
     /**
+     * Runs a provider call, mapping its failures: lock held by another writer (retryable) 409,
+     * broken host 502, and a clash or a rule the provider refused 422.
+     *
      * @template T
      * @param callable(): T $call
      * @return T
@@ -351,6 +478,10 @@ class FirewallController extends Controller
             return $call();
         } catch (FirewallNotFound $e) {
             throw new NotFoundHttpException($e->getMessage(), $e);
+        } catch (FirewallBusy $e) {
+            throw new HttpException(409, $e->getMessage(), $e);
+        } catch (FirewallCommandFailed $e) {
+            throw new HttpException(502, $e->getMessage(), $e);
         } catch (FirewallException $e) {
             throw ValidationException::withMessages(['rule' => $e->getMessage()]);
         }
@@ -361,9 +492,15 @@ class FirewallController extends Controller
         try {
             $call();
         } catch (FirewallException $e) {
-            return new JsonResponse(['message' => $e->getMessage()], 502);
+            return $this->hostFault($e);
         }
 
         return new JsonResponse(['data' => '']);
+    }
+
+    /** A firewall that cannot be read or driven is a host fault: 502, not a 500. */
+    private function hostFault(FirewallException $e): JsonResponse
+    {
+        return new JsonResponse(['message' => $e->getMessage()], 502);
     }
 }

@@ -33,6 +33,14 @@ class CsfRenamesTest extends TestCase
         $this->assertSame('firewall_reload', CsfRenames::toolList('csf_restart'));
         $this->assertSame('project_delete, system_*', CsfRenames::toolList('project_delete, system_*'));
         $this->assertSame('^(firewall_reload|firewall_disable|modsec_.*)$', CsfRenames::regex('^(csf_restart|csf_disable|modsec_.*)$'));
+        // A pattern that named csf_restart only inside an alternative became
+        // firewall_restart, which does not exist: firewall_reload is appended
+        // so the operator's denial still holds (engine#771).
+        $this->assertSame('^firewall_(restart|disable)$|^firewall_reload$', CsfRenames::regex('^csf_(restart|disable)$'));
+        $this->assertTrue((bool) preg_match('/' . str_replace('/', '\\/', CsfRenames::regex('^csf_(restart|disable)$')) . '/i', 'firewall_reload'));
+        // A pattern that never matched csf_restart is left as it is.
+        $this->assertSame('^firewall_status$', CsfRenames::regex('^csf_status$'));
+        $this->assertSame('^firewall_.*$', CsfRenames::regex('^csf_.*$'));
     }
 
     public function test_toolsets_rename(): void

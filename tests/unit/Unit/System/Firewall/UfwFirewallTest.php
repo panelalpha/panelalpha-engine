@@ -21,20 +21,23 @@ class UfwFirewallTest extends TestCase
     private const BAN = '### tuple ### deny any any 0.0.0.0/0 any 198.51.100.9 in';
 
     private string $lock;
+    private string $trustedLock;
 
     protected function setUp(): void
     {
         $this->lock = (string) tempnam(sys_get_temp_dir(), 'ufw-lock');
+        $this->trustedLock = (string) tempnam(sys_get_temp_dir(), 'ufw-trusted-lock');
     }
 
     protected function tearDown(): void
     {
         @unlink($this->lock);
+        @unlink($this->trustedLock);
     }
 
     private function firewall(ProcessRunner $host, int $lockWait = 30): UfwFirewall
     {
-        return new UfwFirewall($host, $this->lock, $lockWait);
+        return new UfwFirewall($host, $this->lock, $lockWait, $this->trustedLock);
     }
 
     /** Whether someone holds the ufw lock: a second handle cannot take it. */
@@ -68,6 +71,8 @@ class UfwFirewallTest extends TestCase
             /** @var list<bool> whether the ufw lock was held, per command in $ran */
             public array $held = [];
             public ?string $unbanned = null;
+            /** ufw.conf's ENABLED, as the snapshot of the rule files reads it */
+            public string $enabled = 'yes';
 
             public function __construct(public string $rules, public string $ufwOut, public int $ufwCode, private string $lock, public ?string $written = null, public ?string $deleted = null)
             {
@@ -93,6 +98,7 @@ class UfwFirewallTest extends TestCase
                     $cmd === ['cat', '/etc/ufw/user6.rules'] => FakeProcess::failed('No such file'),
                     $cmd === ['ufw', 'version'] => FakeProcess::ok("ufw 0.36.2\nCopyright 2008-2023 Canonical Ltd.\n"),
                     $cmd === ['ufw', 'status', 'verbose'] => FakeProcess::ok("Status: active\nLogging: on (low)\nDefault: deny (incoming), allow (outgoing), deny (routed)\n"),
+                    $cmd[0] === 'sh' && ($cmd[3] ?? null) === UfwFirewall::SNAPSHOT => FakeProcess::ok($this->enabled),
                     default => FakeProcess::of($this->ufwCode, $this->ufwOut),
                 };
             }
@@ -102,7 +108,7 @@ class UfwFirewallTest extends TestCase
                 return '';
             }
 
-            public function execOnHost(string|array $cmd, array $env = []): string
+            public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 return '';
             }
@@ -241,7 +247,7 @@ class UfwFirewallTest extends TestCase
                 return '';
             }
 
-            public function execOnHost(string|array $cmd, array $env = []): string
+            public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 return '';
             }
@@ -276,7 +282,32 @@ class UfwFirewallTest extends TestCase
             'default_incoming' => 'deny',
             'default_outgoing' => 'allow',
             'error' => null,
+            'refused_rules' => [],
         ], $status);
+    }
+
+    public function test_status_lists_the_stored_rules_iptables_refuses_by_the_rule_to_delete(): void
+    {
+        $refused = self::OFFICE . "\tinvalid port/service `08080' specified\n/etc/ufw/user.rules line 2\tunknown option\n";
+        $host = $this->failing(['bash /opt/panelalpha/shared-hosting/scripts/firewall.sh --refused' => FakeProcess::ok($refused)]);
+
+        $status = $this->firewall($host)->status()->toArray();
+
+        $this->assertSame([
+            ['id' => UfwRules::parseTuple(self::OFFICE)?->id(), 'rule' => 'allow in tcp 22 from 203.0.113.7', 'error' => "invalid port/service `08080' specified"],
+            ['id' => null, 'rule' => '/etc/ufw/user.rules line 2', 'error' => 'unknown option'],
+        ], $status['refused_rules']);
+        $this->assertNotNull($status['refused_rules'][0]['id']);
+    }
+
+    public function test_status_without_the_refused_check_still_answers(): void
+    {
+        $host = $this->failing(['bash /opt/panelalpha/shared-hosting/scripts/firewall.sh --refused' => FakeProcess::failed('no such file', 127)]);
+
+        $status = $this->firewall($host)->status();
+
+        $this->assertTrue($status->enabled);
+        $this->assertSame([], $status->refusedRules);
     }
 
     public function test_a_deny_is_put_above_the_allows(): void
@@ -408,7 +439,7 @@ class UfwFirewallTest extends TestCase
         $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7', 'comment' => 'office']);
         $both = FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7']);
         $cases = [
-            'a new action' => [self::OFFICE, $office, $office->with(['action' => 'deny']), "### tuple ### deny tcp 22 0.0.0.0/0 any 203.0.113.7 in {$c}\n### tuple ### route:deny tcp 22 0.0.0.0/0 any 203.0.113.7 in {$c}", [
+            'a new action' => [self::OFFICE, $office, $office->with(['action' => 'deny', 'scope' => 'both']), "### tuple ### deny tcp 22 0.0.0.0/0 any 203.0.113.7 in {$c}\n### tuple ### route:deny tcp 22 0.0.0.0/0 any 203.0.113.7 in {$c}", [
                 ['ufw', 'delete', 'allow', 'in', 'proto', 'tcp', 'from', '203.0.113.7', 'to', 'any', 'port', '22'],
                 ['ufw', 'prepend', 'deny', 'in', 'proto', 'tcp', 'from', '203.0.113.7', 'to', 'any', 'port', '22', 'comment', 'office'],
                 ['ufw', 'route', 'prepend', 'deny', 'proto', 'tcp', 'from', '203.0.113.7', 'to', 'any', 'port', '22', 'comment', 'office'],
@@ -443,8 +474,8 @@ class UfwFirewallTest extends TestCase
         $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7']);
 
         try {
-            // As a deny it would cover published ports too, where the allow for the app holds that match.
-            $this->firewall($host)->updateRule($office->id(), $office->with(['action' => 'deny']));
+            // As a deny both ways it would cover published ports too, where the allow for the app holds that match.
+            $this->firewall($host)->updateRule($office->id(), $office->with(['action' => 'deny', 'scope' => 'both']));
             $this->fail('an edit onto ' . $app->id() . ' went through');
         } catch (FirewallException $e) {
             $this->assertStringContainsString('Rule ' . $app->id() . ' ', $e->getMessage());
@@ -528,7 +559,7 @@ class UfwFirewallTest extends TestCase
         $new = 'comment=' . bin2hex('by Fail2Ban after 3 attempts against sshd');
         $allow = FirewallRule::fromArray(['action' => 'allow', 'source' => '198.51.100.9', 'comment' => 'by Fail2Ban after 5 attempts against sshd']);
         $edits = [
-            'made a deny' => [$allow->with(['action' => 'deny']), "### tuple ### deny any any 0.0.0.0/0 any 198.51.100.9 in {$f2b}\n### tuple ### route:deny any any 0.0.0.0/0 any 198.51.100.9 in {$f2b}", [
+            'made a deny' => [$allow->with(['action' => 'deny', 'scope' => 'both']), "### tuple ### deny any any 0.0.0.0/0 any 198.51.100.9 in {$f2b}\n### tuple ### route:deny any any 0.0.0.0/0 any 198.51.100.9 in {$f2b}", [
                 ['ufw', 'delete', true],
                 ['ufw', 'prepend', true],
                 ['ufw', 'route', true],
@@ -692,6 +723,21 @@ class UfwFirewallTest extends TestCase
             ->addRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9']));
     }
 
+    /** engine#769: ufw refusing the rule is the request's fault (422); failing on the host is 502. */
+    public function test_a_rule_ufw_refuses_is_not_a_host_failure(): void
+    {
+        $published = FirewallRule::fromArray(['action' => 'allow', 'scope' => 'published', 'protocol' => 'tcp', 'port' => '8080']);
+        foreach (["ERROR: Bad port '8000:8000'\n" => false, "ERROR: problem running ufw-init\niptables-restore: line 12 failed\n" => true] as $stderr => $hostFault) {
+            $host = $this->failing(['ufw route allow' => FakeProcess::of(1, '', $stderr)]);
+            try {
+                ($this->firewall($host))->addRule($published);
+                $this->fail('the refusal was swallowed');
+            } catch (FirewallException $e) {
+                $this->assertSame($hostFault, $e instanceof \App\System\Firewall\FirewallCommandFailed, $stderr);
+            }
+        }
+    }
+
     public function test_a_rule_ufw_cannot_parse_is_refused_in_its_error_line_without_the_usage_page_or_traceback(): void
     {
         // What ufw 0.36.2 prints for a comment its parser refuses: the usage page, or a traceback.
@@ -734,10 +780,11 @@ class UfwFirewallTest extends TestCase
         }
     }
 
-    /** @param array<string, Process> $answers command => what the host returns, overriding host() */
-    private function failing(array $answers, string $ufwOut = 'Rule added', int $ufwCode = 0): ProcessRunner
+    /** @param array<string, Process|list<Process>> $answers command => what the host returns, overriding host(); a list is answered in turn, then host() answers */
+    private function failing(array $answers, string $ufwOut = 'Rule added', int $ufwCode = 0, string $enabled = 'yes'): ProcessRunner
     {
         $base = $this->host(ufwOut: $ufwOut, ufwCode: $ufwCode);
+        $base->enabled = $enabled;
 
         return new class ($base, $answers, $this->lock) implements ProcessRunner {
             /** @var list<list<string>> */
@@ -745,7 +792,7 @@ class UfwFirewallTest extends TestCase
             /** @var list<bool> */
             public array $held = [];
 
-            /** @param array<string, Process> $answers */
+            /** @param array<string, Process|list<Process>> $answers */
             public function __construct(private ProcessRunner $base, private array $answers, private string $lock)
             {
             }
@@ -756,7 +803,12 @@ class UfwFirewallTest extends TestCase
                 $this->held[] = UfwFirewallTest::lockHeld($this->lock);
                 foreach ($this->answers as $prefix => $answer) {
                     if (str_starts_with(implode(' ', (array) $cmd), $prefix)) {
-                        return $answer;
+                        if (!is_array($answer)) {
+                            return $answer;
+                        }
+                        if ($answer !== []) {
+                            return array_shift($this->answers[$prefix]);
+                        }
                     }
                 }
 
@@ -768,7 +820,7 @@ class UfwFirewallTest extends TestCase
                 return '';
             }
 
-            public function execOnHost(string|array $cmd, array $env = []): string
+            public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 return '';
             }
@@ -807,6 +859,31 @@ class UfwFirewallTest extends TestCase
         $this->expectExceptionMessage('/etc/ufw/user.rules');
 
         ($this->firewall($this->failing(['cat /etc/ufw/user.rules' => FakeProcess::failed('Permission denied')])))->rules();
+    }
+
+    /** engine#767: a failed read-back of the new rule must restore the old one, not answer 404. */
+    public function test_a_new_rule_that_cannot_be_read_back_puts_the_old_rule_back(): void
+    {
+        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7', 'comment' => 'office']);
+        // Only the comment changes, so the old rule goes out first and the edit
+        // runs through replace(). The new write "succeeds" (written: '') but the
+        // store no longer holds the new match, so add()'s read-back is not found.
+        $host = $this->host(self::OFFICE, written: '', deleted: '');
+        $firewall = $this->firewall($host);
+
+        try {
+            $firewall->updateRule($office->id(), $office->with(['comment' => 'home']));
+            $this->fail('the failed read-back was swallowed');
+        } catch (FirewallNotFound) {
+            // The failed read-back is the failure, not a silent 404 with no restore.
+        }
+
+        /** @var object{ran: list<list<string>>} $host */
+        $this->assertContains(
+            ['ufw', 'allow', 'in', 'proto', 'tcp', 'from', '203.0.113.7', 'to', 'any', 'port', '22', 'comment', 'office'],
+            $host->ran,
+            'the old rule is written back'
+        );
     }
 
     public function test_a_comment_change_that_ufw_refuses_puts_the_old_rule_back(): void
@@ -932,7 +1009,7 @@ class UfwFirewallTest extends TestCase
         $c = 'comment=' . bin2hex('c');
         $old = FirewallRule::fromArray(['action' => 'deny', 'direction' => 'out', 'protocol' => 'tcp', 'port' => '22', 'destination' => '192.0.2.1', 'comment' => 'c']);
         $host = $this->ufwStore("### tuple ### deny tcp 22 192.0.2.1 any 0.0.0.0/0 out {$c}");
-        $edit = $old->with(['direction' => 'in', 'source' => '192.0.2.1', 'destination' => null]);
+        $edit = $old->with(['direction' => 'in', 'source' => '192.0.2.1', 'destination' => null, 'scope' => 'both']);
 
         $new = $this->firewall($host)->updateRule($old->id(), $edit);
 
@@ -1069,6 +1146,60 @@ class UfwFirewallTest extends TestCase
         $firewall->untrust('000000000000');
     }
 
+    /** engine#768: the trusted read-modify-write runs under its own lock. */
+    public function test_the_trusted_list_is_changed_under_the_trusted_lock(): void
+    {
+        $trustedLock = $this->trustedLock;
+        $host = new class ($trustedLock, $this->lock) implements ProcessRunner {
+            /** @var list<bool> whether the trusted lock was held per command */
+            public array $trustedHeld = [];
+            /** @var list<bool> whether the ufw lock was held per command */
+            public array $ufwHeld = [];
+
+            public function __construct(private string $trustedLock, private string $ufwLock)
+            {
+            }
+
+            public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                $this->trustedHeld[] = UfwFirewallTest::lockHeld($this->trustedLock);
+                $this->ufwHeld[] = UfwFirewallTest::lockHeld($this->ufwLock);
+                $cmd = (array) $cmd;
+                if ($cmd[0] === 'cat') {
+                    return FakeProcess::ok('');
+                }
+
+                return FakeProcess::ok('Rule added');
+            }
+
+            public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
+            {
+                return '';
+            }
+
+            public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
+            {
+                return '';
+            }
+
+            public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                return FakeProcess::ok();
+            }
+
+            public function runProcessWithCallbacks(string|array $cmd, array $env = [], int $timeout = 600, ?callable $onStart = null, ?callable $onOutput = null, ?StepWatchdog $watchdog = null): Process
+            {
+                return FakeProcess::ok();
+            }
+        };
+
+        $this->firewall($host)->trust(new TrustedAddress('203.0.113.7'));
+
+        $this->assertNotSame([], $host->trustedHeld);
+        $this->assertSame([true], array_values(array_unique($host->trustedHeld)), 'every host command ran holding the trusted lock');
+        $this->assertSame([false], array_values(array_unique($host->ufwHeld)), 'the ufw lock, which fail2ban waits for, is not held');
+    }
+
     public function test_a_list_fail2ban_does_not_take_is_an_error(): void
     {
         $this->expectException(FirewallException::class);
@@ -1099,7 +1230,7 @@ class UfwFirewallTest extends TestCase
         $firewall->disable();
         $firewall->reload();
 
-        $this->assertSame([['ufw', '--force', 'enable'], ['ufw', 'disable'], ['ufw', 'reload']], $this->ufwCalls($host));
+        $this->assertSame([['ufw', '--force', 'enable'], ['ufw', 'reload'], ['ufw', 'disable'], ['ufw', 'reload']], $this->ufwCalls($host));
     }
 
     /** @return list<array{list<string>, bool}> each ufw write and whether the lock was held for it */
@@ -1134,7 +1265,7 @@ class UfwFirewallTest extends TestCase
         $firewall->reload();
 
         $writes = $this->ufwWrites($host);
-        $this->assertCount(13, $writes);
+        $this->assertCount(14, $writes);
         $this->assertSame([], array_values(array_filter($writes, fn (array $w): bool => !$w[1])), 'a ufw write ran without the lock');
         $this->assertFalse(self::lockHeld($this->lock), 'and it is released afterwards');
     }
@@ -1146,8 +1277,8 @@ class UfwFirewallTest extends TestCase
         $this->firewall($host)->addRule(FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '203.0.113.7']));
 
         /** @var object{ran: list<list<string>>, held: list<bool>} $host */
-        $this->assertSame(['cat', 'cat', 'ufw', 'ufw', 'ufw', 'cat', 'cat'], array_column($host->ran, 0));
-        $this->assertSame([true, true, true, true, true, true, true], $host->held, 'the check for a clashing rule, all three halves and the read-back');
+        $this->assertSame(['cat', 'cat', 'sh', 'ufw', 'ufw', 'ufw', 'cat', 'cat'], array_column($host->ran, 0));
+        $this->assertSame([true, true, true, true, true, true, true, true], $host->held, 'the check for a clashing rule, the copy of the rule files, all three halves and the read-back');
     }
 
     public function test_fail2ban_is_told_of_a_lifted_ban_only_once_the_lock_is_released(): void
@@ -1219,5 +1350,147 @@ class UfwFirewallTest extends TestCase
 
         /** @var object{ran: list<list<string>>} $host */
         $this->assertSame([['sh', '-c', 'mkdir -p "$(dirname "$0")" && touch "$0" && chmod 0644 "$0"', $missing]], $host->ran);
+    }
+
+    /** @return list<string> the host commands, as one line each, without the clash check and read-back */
+    private function steps(ProcessRunner $host): array
+    {
+        /** @var object{ran: list<list<string>>} $host */
+        $steps = [];
+        foreach ($host->ran as $cmd) {
+            if ($cmd[0] === 'sh') {
+                $steps[] = str_starts_with($cmd[2], 'rm -rf') ? 'snapshot' : 'restore';
+            } elseif ($cmd[0] === 'ufw') {
+                $steps[] = implode(' ', $cmd);
+            }
+        }
+
+        return $steps;
+    }
+
+    public function test_a_rule_iptables_refuses_while_ufw_says_added_is_refused_and_taken_back(): void
+    {
+        // ufw 0.36.2 with iptables 1.8.10 (nf_tables): the rule is stored, iptables refuses it, ufw exits 0.
+        $said = "iptables v1.8.10 (nf_tables): invalid port/service `08080' specified\nTry `iptables -h' or 'iptables --help' for more information.\nRule added\n"
+            . "ip6tables v1.8.10 (nf_tables): invalid port/service `08080' specified\nRule added (v6)\n";
+        $host = $this->failing(['ufw allow' => FakeProcess::ok($said)]);
+        $rule = new FirewallRule(action: 'allow', protocol: 'tcp', port: '08080');
+
+        try {
+            $this->firewall($host)->addRule($rule);
+            $this->fail('the refusal was answered as added');
+        } catch (FirewallException $e) {
+            $this->assertNotInstanceOf(\App\System\Firewall\FirewallCommandFailed::class, $e, 'the rule is at fault, 422');
+            $this->assertSame("iptables v1.8.10 (nf_tables): invalid port/service `08080' specified\nip6tables v1.8.10 (nf_tables): invalid port/service `08080' specified", $e->getMessage());
+        }
+        $this->assertSame(['snapshot', 'ufw allow in proto tcp from any to any port 08080', 'restore', 'ufw reload'], $this->steps($host), 'the rule files put back and loaded again');
+    }
+
+    public function test_a_failed_reload_puts_the_rule_files_back_and_loads_them_again(): void
+    {
+        $host = $this->failing(['ufw reload' => [FakeProcess::of(1, '', "ERROR: problem running ufw-init\niptables-restore v1.8.10 (nf_tables): invalid port/service `08080' specified\n")]]);
+
+        try {
+            $this->firewall($host)->reload();
+            $this->fail('the failed reload was swallowed');
+        } catch (\App\System\Firewall\FirewallCommandFailed $e) {
+            $this->assertStringContainsString('invalid port/service', $e->getMessage());
+            $this->assertStringNotContainsString('turned off', $e->getMessage(), 'the second load worked');
+        }
+        $this->assertSame(['snapshot', 'ufw reload', 'restore', 'ufw reload'], $this->steps($host));
+    }
+
+    public function test_rules_that_do_not_load_again_turn_ufw_off_instead_of_locking_the_host_out(): void
+    {
+        $refused = FakeProcess::of(1, '', "ERROR: problem running ufw-init\niptables-restore v1.8.10 (nf_tables): invalid port/service `08080' specified\n");
+        $host = $this->failing(['ufw reload' => $refused]);
+
+        try {
+            $this->firewall($host)->reload();
+            $this->fail('the failed reload was swallowed');
+        } catch (\App\System\Firewall\FirewallCommandFailed $e) {
+            $this->assertStringContainsString('ufw could not load its rules again, so it was turned off to keep the host reachable', $e->getMessage());
+            $this->assertStringContainsString("invalid port/service `08080' specified", $e->getMessage());
+        }
+        $this->assertSame(['snapshot', 'ufw reload', 'restore', 'ufw reload', 'ufw disable'], $this->steps($host));
+    }
+
+    public function test_enabling_a_ufw_that_is_on_but_not_loaded_is_not_answered_as_done(): void
+    {
+        // `ufw --force enable` on an active ufw loads nothing and says it is active.
+        $host = $this->failing([
+            'ufw --force enable' => FakeProcess::ok('Firewall is active and enabled on system startup'),
+            'ufw reload' => FakeProcess::of(1, '', "ERROR: problem running ufw-init\nProblem running '/etc/ufw/user.rules'\n"),
+        ]);
+
+        $this->expectException(\App\System\Firewall\FirewallCommandFailed::class);
+        $this->expectExceptionMessage('turned off to keep the host reachable');
+        try {
+            $this->firewall($host)->enable();
+        } finally {
+            $this->assertSame(['snapshot', 'ufw --force enable', 'ufw reload', 'restore', 'ufw reload', 'ufw disable'], $this->steps($host));
+        }
+    }
+
+    public function test_enabling_a_ufw_that_was_off_and_does_not_start_leaves_it_off_and_its_chains_cleared(): void
+    {
+        $host = $this->failing(['ufw --force enable' => FakeProcess::of(1, '', "ERROR: problem running ufw-init\nProblem running '/etc/ufw/user.rules'\n")], enabled: 'no');
+
+        try {
+            $this->firewall($host)->enable();
+            $this->fail('the failed start was swallowed');
+        } catch (\App\System\Firewall\FirewallCommandFailed $e) {
+            $this->assertStringContainsString("Problem running '/etc/ufw/user.rules'", $e->getMessage());
+        }
+        $this->assertSame(['snapshot', 'ufw --force enable', 'restore', 'ufw disable'], $this->steps($host));
+    }
+
+    public function test_a_rule_written_while_a_bad_one_is_stored_leaves_the_rule_files_as_they_were(): void
+    {
+        // A prepend reloads ufw's user chains: the bad rule already stored fails that load, after ufw wrote the new one.
+        $host = $this->failing(['ufw prepend' => FakeProcess::of(1, '', "ERROR: problem running iptables\n")]);
+
+        try {
+            $this->firewall($host)->addRule(FirewallRule::fromArray(['action' => 'deny', 'scope' => 'host', 'source' => '198.51.100.7']));
+            $this->fail('the failure was swallowed');
+        } catch (\App\System\Firewall\FirewallCommandFailed $e) {
+            $this->assertSame('problem running iptables', $e->getMessage());
+        }
+        $this->assertSame(['snapshot', 'ufw prepend deny in from 198.51.100.7 to any', 'restore', 'ufw reload'], $this->steps($host));
+    }
+
+    public function test_a_rule_ufw_refuses_itself_needs_nothing_put_back(): void
+    {
+        $host = $this->failing(['ufw allow' => FakeProcess::of(1, '', "ERROR: Bad port\n")]);
+
+        try {
+            $this->firewall($host)->addRule(FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '8080']));
+            $this->fail('the refusal was swallowed');
+        } catch (FirewallException $e) {
+            $this->assertSame('Bad port', $e->getMessage());
+        }
+        $this->assertSame(['snapshot', 'ufw allow in proto tcp from any to any port 8080'], $this->steps($host));
+    }
+
+    public function test_rule_files_that_cannot_be_copied_aside_are_not_changed(): void
+    {
+        $host = $this->failing(['sh -c rm -rf' => FakeProcess::failed('No space left on device')]);
+
+        try {
+            $this->firewall($host)->addRule(FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '8080']));
+            $this->fail('written without a copy to go back to');
+        } catch (\App\System\Firewall\FirewallCommandFailed $e) {
+            $this->assertStringContainsString('No space left on device', $e->getMessage());
+        }
+        $this->assertSame([], $this->ufwWrites($host));
+    }
+
+    public function test_the_rule_files_are_copied_aside_once_per_change(): void
+    {
+        $host = $this->host(self::OFFICE, written: self::OFFICE . "\n" . self::BOTH);
+        $this->firewall($host)->addRule(FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '203.0.113.7']));
+        $this->firewall($host)->reload();
+
+        $this->assertSame(['snapshot', 'ufw prepend deny in from 203.0.113.7 to any', 'ufw prepend deny out from any to 203.0.113.7', 'ufw route prepend deny from 203.0.113.7 to any', 'snapshot', 'ufw reload'], $this->steps($host));
     }
 }

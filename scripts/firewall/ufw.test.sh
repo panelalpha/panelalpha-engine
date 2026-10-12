@@ -44,16 +44,31 @@ case "\$*" in
 esac
 FAKE
 # ufw refuses any command matching the regex in $W/ufw-refuses, as ufw does a
-# rule it cannot parse: an error and a traceback, then its usage page.
+# rule it cannot parse: an error and a traceback, then its usage page. With
+# $W/ufw-writes every command but reload changes user.rules first, as ufw
+# writes it before loading it; with $W/ufw-closes a refusal leaves ufw-user-input empty, as a
+# failed load does. With $W/ufw-loads, enable and reload load user.rules's
+# ufw-user-input rules; disable takes the chain away.
 cat >"$W/bin/ufw" <<FAKE
 #!/bin/bash
 echo "ufw \$*" >>"$W/calls"
 flock -n "$LOCK" true 2>/dev/null && echo "ufw \$*" >>"$W/unlocked"
+[ ! -f "$W/ufw-writes" ] || [ "\$*" = reload ] || echo "# written by ufw \$*" >>"$W/etc/ufw/user.rules"
 if [ -f "$W/ufw-refuses" ] && echo "\$*" | grep -qE "\$(cat "$W/ufw-refuses")"; then
+    if [ -f "$W/ufw-closes" ]; then
+        grep -qx ufw-user-input "$W/chains" 2>/dev/null || echo ufw-user-input >>"$W/chains"
+        : >"$W/iptables-ufw-user-input"
+    fi
     printf 'ERROR: Bad rule\nTraceback (most recent call last):\n  File "/usr/sbin/ufw"\n' >&2
     printf '\nUsage: ufw COMMAND\n\nCommands:\n enable    enables the firewall\n'
     exit 1
 fi
+case "\$*" in
+*disable) sed -i '/^ufw-user-input\$/d' "$W/chains" 2>/dev/null; rm -f "$W/iptables-ufw-user-input" ;;
+"--force enable" | reload)
+    [ ! -f "$W/ufw-loads" ] || grep '^-A ufw-user-input ' "$W/etc/ufw/user.rules" >"$W/iptables-ufw-user-input" ;;
+esac
+exit 0
 FAKE
 # dpkg knows every package unless $W/dpkg-missing; apt-get fails with $W/apt-fails.
 printf '#!/bin/bash\necho "dpkg $*" >>"%s/calls"\n[ ! -f "%s/dpkg-missing" ]\n' "$W" "$W" >"$W/bin/dpkg"
@@ -77,17 +92,39 @@ esac
 FAKE
 cp "$W/bin/iptables" "$W/bin/ip6tables"
 # iptables-restore keeps its input in $W/restore-<name>, adds the chains it
-# declares, and fails with $W/restore-fails.
+# declares, and fails with $W/restore-fails. With --test it only reads its input,
+# and refuses the first line holding the text in $W/restore-refuses, as iptables
+# does: its error, then the line.
 cat >"$W/bin/iptables-restore" <<FAKE
 #!/bin/bash
 echo "\$(basename "\$0") \$*" >>"$W/calls"
+if [[ " \$* " == *" --test "* ]]; then
+    n=0
+    while IFS= read -r line; do
+        n=\$((n + 1))
+        [ -f "$W/restore-refuses" ] && [[ "\$line" == *"\$(cat "$W/restore-refuses")"* ]] || continue
+        printf '%s v1.8.10 (nf_tables): invalid rule\nError occurred at line: %s\nTry more\n' "\$(basename "\$0")" "\$n" >&2
+        exit 2
+    done
+    exit 0
+fi
 cat >"$W/restore-\$(basename "\$0" -restore)"
 [ ! -f "$W/restore-fails" ] || exit 1
 sed -n 's/^:\([^ ]*\) .*/\1/p' "$W/restore-\$(basename "\$0" -restore)" >>"$W/chains"
 FAKE
 cp "$W/bin/iptables-restore" "$W/bin/ip6tables-restore"
-# docker ps prints $W/docker-ports, the Ports column of each container.
-printf '#!/bin/bash\necho "docker $*" >>"%s/calls"\ncat "%s/docker-ports" 2>/dev/null || true\n' "$W" "$W" >"$W/bin/docker"
+# docker ps prints $W/docker-ports, the Ports column of each container;
+# docker network inspect prints $W/docker-subnets, the networks' subnets.
+cat >"$W/bin/docker" <<FAKE
+#!/bin/bash
+echo "docker \$*" >>"$W/calls"
+case "\$1 \$2" in
+"network ls") echo n1 ;;
+"network inspect") cat "$W/docker-subnets" 2>/dev/null ;;
+*) cat "$W/docker-ports" 2>/dev/null ;;
+esac
+true
+FAKE
 chmod +x "$W/bin/"*
 
 failures=0
@@ -102,8 +139,8 @@ expect() { # expect <label> <expected> <actual>
 reset() {
     rm -rf "$W/calls" "$W/unlocked" "$W/locked" "$W/chains" "$W/etc" "$W/engine" "$W/backups" "$W/src-csf" \
         "$W/src-csf.tgz" "$W/csget" "$W/configserver" \
-        "$W/ufw-refuses" "$W/dpkg-missing" "$W/apt-fails" "$W"/restore-* "$W"/iptables-* "$W"/ip6tables-* \
-        "$W/docker-ports" "$W/f2b-down" "$W/no-wait" "$W"/running-* "$W"/loaded-* "$W/bin/csf"
+        "$W/ufw-refuses" "$W/ufw-writes" "$W/ufw-closes" "$W/ufw-loads" "$W/dpkg-missing" "$W/apt-fails" "$W"/restore-* "$W"/iptables-* "$W"/ip6tables-* \
+        "$W/docker-ports" "$W/docker-subnets" "$W/f2b-down" "$W/no-wait" "$W"/running-* "$W"/loaded-* "$W/bin/csf"
     mkdir -p "$W/etc/ufw" "$W/etc/fail2ban" "$W/engine/scripts/firewall" "$W/engine/data" "$W/backups"
     printf 'IPV6=no\nDEFAULT_INPUT_POLICY="DROP"\nMANAGE_BUILTINS=yes\n' >"$W/etc/default-ufw"
     printf 'COMPOSE_PROFILES=full\nCSF_UI=0\nCSF_UI_PASSWORD=secret\n' >"$W/engine/.env"
@@ -175,6 +212,28 @@ expect "a fifth field" "SKIP" "$(convert allow 'tcp|in|d=22|s=1.2.3.4|x')"
 expect "an unknown address prefix" "SKIP" "$(convert allow 'tcp|in|d=22|x=1.2.3.4')"
 expect "a hostname in an advanced rule" "SKIP" "$(convert allow 'tcp|in|d=22|s=example.com')"
 expect "an unknown port prefix" "SKIP" "$(convert allow 'tcp|in|p=22|s=1.2.3.4')"
+# Addresses as the API takes them (FirewallRule::isAddress).
+for a in 010.0.0.1 999.1.1.1 1.2.3.4/99 1.2.3.4/ 1.2.3 :::: 2001:db8::/129 1::2::3 2001:db8::g; do
+    expect "not an address: $a" "SKIP" "$(convert allow "$a")"
+done
+expect "not an address in a rule either" "SKIP" "$(convert allow 'tcp|in|d=22|s=010.0.0.1')"
+# Ports as iptables reads them: a leading zero ufw would store as written is
+# refused by iptables-restore (08080) or read as octal (0443), so it goes.
+expect "a port with a leading zero is moved as the port it means" "allow in proto tcp from 1.2.3.4 to any port 8080" "$(convert allow 'tcp|in|d=08080|s=1.2.3.4')"
+expect "not as octal" "allow in proto tcp from 1.2.3.4 to any port 443" "$(convert allow 'tcp|in|d=0443|s=1.2.3.4')"
+expect "either end of a range" "allow in proto tcp from 1.2.3.4 to any port 8000:8010" "$(convert allow 'tcp|in|d=8000_08010|s=1.2.3.4')"
+expect "a source port" "allow in proto udp from 8.8.8.8 port 53 to any" "$(convert allow 'udp|in|s=053|s=8.8.8.8')"
+expect "a port list" "allow in proto tcp from 1.2.3.4 to any port 80,443,8000:8010" "$(convert allow 'tcp|in|d=80,0443,8000_8010|s=1.2.3.4')"
+expect "a range of one port is that port" "allow in proto tcp from 1.2.3.4 to any port 22" "$(convert allow 'tcp|in|d=22_22|s=1.2.3.4')"
+for p in 0 00 65536 0065536 9000_8000 80, ,80 80,,443 8a 22-23 '' 123456; do
+    expect "not a port ufw can hold: d=$p" "SKIP" "$(convert allow "tcp|in|d=$p|s=1.2.3.4")"
+done
+reset
+csf 'tcp|in|d=08080|s=1.2.3.4\ntcp|in|d=0|s=1.2.3.5\n' ''
+run install >/dev/null
+expect "moved with the port it means" "1" "$(calls '^ufw prepend allow in proto tcp from 1.2.3.4 to any port 8080$')"
+expect "and said" "1" "$(grep -cxF "firewall: tcp|in|d=08080|s=1.2.3.4: port 08080 is moved as 8080: a leading zero is dropped, which iptables refuses (08080) or reads as octal (0443)" "$W/out")"
+expect "a port that is none is not moved, and said" "0|1" "$(calls '1.2.3.5')|$(grep -cxF 'firewall: not moved, not a port ufw can hold (1-65535, a range low to high): tcp|in|d=0|s=1.2.3.5' "$W/out")"
 
 # A comment ufw cannot store as it is (ufw 0.36.2, parser.py) is changed as
 # little as it can be, never the rule; FirewallRule::commentProblem() is the
@@ -218,6 +277,10 @@ utf8_case() { # <label> <expected> <allow|deny> <line>
     expect "$1" "$2" "$(convert "$3" "$4")"
     [ -x "$W/nopy/iconv" ] && expect "$1 (iconv)" "$2" "$(PATH="$W/nopy" convert "$3" "$4")"
 }
+for a in :::: 1::2::3 2001:db8::g 2001:db8::/129; do
+    expect "not an address, without python3: $a" "SKIP" "$(PATH="$W/nopy" convert allow "$a")"
+done
+expect "an IPv6 address, without python3" "deny in from 2001:db8::/32 to any + deny out from any to 2001:db8::/32" "$(PATH="$W/nopy" convert deny '2001:db8::/32')"
 utf8_case "a stray byte before fail2ban's prefix" "deny in from 5.6.7.9 to any comment \"by Fail2Ban\" after 5 + deny out from any to 5.6.7.9 comment \"by Fail2Ban\" after 5" "deny" $'5.6.7.9 # \xffby Fail2Ban after 5'
 utf8_case "before the engine's" "allow in proto tcp from 1.2.3.4 to any port 22 comment \"panelalpha:\" mine" "allow" $'tcp|in|d=22|s=1.2.3.4 # \xffpanelalpha: mine'
 utf8_case "inside a word ufw reads" "allow in proto tcp from 1.2.3.4 to any port 22 comment \"in\"" "allow" $'tcp|in|d=22|s=1.2.3.4 # i\xffn'
@@ -246,6 +309,7 @@ done
 reset
 csf '1.2.3.4 # office\n172.25.0.0/24 # docker internal network\n' '5.6.7.8 # Manually denied\n9.9.9.9 # lfd: (sshd) Failed SSH login\n' '203.0.113.5\n'
 csf_leftovers
+printf '172.17.0.0/16 \n10.200.0.0/16 fd00:1::/64 \n' >"$W/docker-subnets"
 expect "a CSF host: installed" "0" "$(run install)"
 expect "CSF's archive, daily version check and its folder go with it" "gone gone gone" "$(csf_leftovers_state)"
 expect "deny moved on top" "1" "$(calls 'ufw prepend deny in from 5.6.7.8 to any comment Manually denied')"
@@ -289,6 +353,14 @@ expect "ftp jail" "filter = panelalpha-ftp|backend = systemd|port = 21" "$(secti
 expect "engine API jail on its own log" "logpath = $W/engine/logs/core/nginx/api-access.log" "$(section engine-api | grep '^logpath')"
 expect "which exists before fail2ban looks" "yes" "$([ -f "$W/engine/logs/core/nginx/api-access.log" ] && echo yes)"
 expect "the API takes more retries" "maxretry = 10" "$(section engine-api | grep '^maxretry')"
+expect "and a past ban does not make one 401 ban again" "bantime.increment = false" "$(section engine-api | grep '^bantime.increment')"
+expect "site-password jail on sites-http's shared log" "filter = panelalpha-site-password|logpath = $W/engine/webserver-logs/nginx-proxy/site-password.log|port = 80,443|maxretry = 10|bantime.increment = false" "$(section site-password | grep -E '^(filter|logpath|port|maxretry|bantime.increment)' | tr '\n' '|' | sed 's/|$//')"
+expect "which exists before fail2ban looks" "yes" "$([ -f "$W/engine/webserver-logs/nginx-proxy/site-password.log" ] && echo yes)"
+expect "nor the host's containers, a tunnel's cloudflared among them" "ignoreip = 127.0.0.1/8 ::1 1.2.3.4 203.0.113.5 10.200.0.0/16 172.17.0.0/16 fd00:1::/64" "$(section site-password | grep '^ignoreip')"
+# The filter's regex as fail2ban applies it, <HOST> being the address.
+site_re=$(sed -n 's/^failregex = //p' "$W/etc/fail2ban/filter.d/panelalpha-site-password.conf" | sed 's/<HOST>/([^ ]+)/')
+expect "a wrong password counts, by the visitor's address" "198.51.100.4" "$(printf '%s\n' '198.51.100.4 [10/Oct/2026:12:00:00 +0000] "shop.example.test" site-password 401 "POST /_pa_site_password"' | grep -oE "$site_re" | cut -d' ' -f1)"
+expect "a line of another status does not" "" "$(printf '%s\n' '198.51.100.4 [10/Oct/2026:12:00:00 +0000] "shop.example.test" site-password 200 "GET /"' | grep -E "$site_re")"
 expect "the host's sshd is told apart from the SFTP container's" "1" "$(grep -c '^journalmatch = _SYSTEMD_UNIT=ssh.service + _SYSTEMD_UNIT=sshd.service$' "$W/etc/fail2ban/filter.d/panelalpha-sshd.conf")"
 expect "and the jail says it too, over a distribution's own [sshd]" "journalmatch = _SYSTEMD_UNIT=ssh.service + _SYSTEMD_UNIT=sshd.service" "$(section sshd | grep '^journalmatch')"
 expect "SFTP is facility local5" "1" "$(grep -c '^journalmatch = SYSLOG_IDENTIFIER=sshd SYSLOG_FACILITY=21$' "$W/etc/fail2ban/filter.d/panelalpha-sftp.conf")"
@@ -378,7 +450,7 @@ reset
 mkdir -p "$W/etc/fail2ban"
 printf '# trusted\n198.51.100.7 # office\n\n2001:db8::/32 # vpn\n198.51.100.7\n' >"$W/etc/fail2ban/panelalpha-ignoreip"
 expect "fail2ban alone: done" "0" "$(run fail2ban)"
-expect "comments stay out of ignoreip" "ignoreip = 127.0.0.1/8 ::1 198.51.100.7 2001:db8::/32" "$(grep '^ignoreip' "$W/etc/fail2ban/jail.d/panelalpha.local")"
+expect "comments stay out of ignoreip" "ignoreip = 127.0.0.1/8 ::1 198.51.100.7 2001:db8::/32" "$(grep -m1 '^ignoreip' "$W/etc/fail2ban/jail.d/panelalpha.local")"
 expect "and nothing else is touched" "0" "$(calls '^ufw')"
 rm -f "$W/calls"
 run fail2ban >/dev/null
@@ -427,6 +499,96 @@ expect "and where CSF's configuration is" "1" "$(grep -c "CSF's configuration is
 reset
 echo 'force enable' >"$W/ufw-refuses"
 expect "without CSF, a ufw that does not start fails install too" "1|1" "$(run install)|$(grep -c "ufw did not start" "$W/out")"
+
+# A stored rule iptables refuses keeps CSF: ufw would not start with it.
+ufw_rules() { # <file> <port...>: a user.rules holding an allow for each port
+    local p
+    {
+        printf '%s\n' '*filter' ':ufw-user-input - [0:0]' '### RULES ###' ''
+        for p in "${@:2}"; do
+            printf '### tuple ### allow tcp %s 0.0.0.0/0 any 0.0.0.0/0 in\n-A ufw-user-input -p tcp --dport %s -j ACCEPT\n\n' "$p" "$p"
+        done
+        printf '%s\n' '### END RULES ###' 'COMMIT'
+    } >"$1"
+}
+reset
+csf '1.2.3.4\n' ''
+ufw_rules "$W/etc/ufw/user.rules" 22 08080 443
+printf '%s\n' '--dport 08080' >"$W/restore-refuses"
+expect "a stored rule iptables refuses: install fails" "1" "$(run install)"
+expect "before CSF is uninstalled or ufw enabled" "0|kept|0" "$(csf_kept)|$(calls 'ufw --force enable')"
+expect "it names the rule and says why" "1" "$(grep -cxF 'firewall: iptables refuses the stored rule allow tcp 08080 0.0.0.0/0 any 0.0.0.0/0 in: invalid rule' "$W/out")"
+expect "and that CSF is left in place" "1" "$(grep -c 'ufw would not start with them, so CSF is left in place' "$W/out")"
+rm "$W/restore-refuses"
+expect "once it is deleted, the next install moves the host" "0|1|gone" "$(run install)|$(csf_kept)"
+
+reset
+ufw_rules "$W/etc/ufw/user.rules" 22 08080 443 09090
+ufw_rules "$W/etc/ufw/user6.rules" 0443
+sed -i 's|0.0.0.0/0|::/0|g' "$W/etc/ufw/user6.rules"
+before=$(cat "$W/etc/ufw/user.rules")
+printf '%s\n' '--dport 0' >"$W/restore-refuses"
+expect "refused: every rule iptables refuses, in both files" "0|$(printf '%s\t%s\n' \
+    '### tuple ### allow tcp 08080 0.0.0.0/0 any 0.0.0.0/0 in' 'invalid rule' \
+    '### tuple ### allow tcp 09090 0.0.0.0/0 any 0.0.0.0/0 in' 'invalid rule' \
+    '### tuple ### allow tcp 0443 ::/0 any ::/0 in' 'invalid rule')" "$(run refused)|$(cat "$W/out")"
+expect "only tested, never loaded" "0" "$(grep -- '-restore ' "$W/calls" | grep -cv -- ' --test -n$')"
+expect "the rule files are left as they are" "$before" "$(cat "$W/etc/ufw/user.rules")"
+printf '%s\n' ':ufw-user-input' >"$W/restore-refuses"
+expect "a refused line outside any rule is named by its file and line" "$(printf '%s\t%s' "$W/etc/ufw/user.rules line 2" 'invalid rule')" "$(run refused >/dev/null; head -n 1 "$W/out")"
+rm "$W/restore-refuses"
+expect "nothing refused: nothing said" "0|" "$(run refused)|$(cat "$W/out")"
+
+# A load that fails never leaves the host behind INPUT DROP with ufw's user
+# chains empty: the rule files go back and load again, or ufw goes off.
+reset
+csf '1.2.3.4\n' ''
+printf '%s\n' '*filter' '-A ufw-user-input -p tcp --dport 22 -j ACCEPT' >"$W/etc/ufw/user.rules"
+printf 'ufw-user-forward\nDOCKER-USER\n' >"$W/chains"
+echo 'force enable' >"$W/ufw-refuses"
+touch "$W/ufw-closes"
+expect "ufw that fails to start after CSF is gone: install fails" "1" "$(run install)"
+expect "ufw is turned off after the failed start" "1" "$([ "$(line_of 'ufw --force disable')" -gt "$(line_of 'ufw --force enable')" ] && echo 1)"
+expect "which takes its empty chain away" "0" "$(grep -cx ufw-user-input "$W/chains")"
+expect "said: reachable, and no firewall" "1|1" "$(grep -c 'turned off to keep this host reachable' "$W/out")|$(grep -c 'this host has NO firewall' "$W/out")"
+
+# Already on: enable loads nothing, so the rules are checked to be loaded.
+reset
+printf '%s\n' '*filter' '-A ufw-user-input -p tcp --dport 22 -j ACCEPT' >"$W/etc/ufw/user.rules"
+echo 'ENABLED=yes' >"$W/etc/ufw/ufw.conf"
+printf 'ufw-user-forward\nDOCKER-USER\nufw-user-input\n' >"$W/chains"
+: >"$W/iptables-ufw-user-input"
+expect "an active ufw whose rules are not loaded: install fails" "1" "$(run install)"
+expect "a reload is tried, then ufw is turned off" "1|1" "$(calls '^ufw reload$')|$([ "$(line_of 'ufw --force disable')" -gt "$(line_of 'ufw reload')" ] && echo 1)"
+reset
+printf '%s\n' '*filter' '-A ufw-user-input -p tcp --dport 22 -j ACCEPT' >"$W/etc/ufw/user.rules"
+echo 'ENABLED=yes' >"$W/etc/ufw/ufw.conf"
+printf 'ufw-user-forward\nDOCKER-USER\nufw-user-input\n' >"$W/chains"
+printf '%s\n' '-N ufw-user-input' '-A ufw-user-input -p tcp --dport 22 -j ACCEPT' >"$W/iptables-ufw-user-input"
+expect "an active ufw whose rules are loaded: installed" "0" "$(run install)"
+expect "without a reload or turning it off" "0|0" "$(calls '^ufw reload$')|$(calls 'ufw --force disable')"
+
+# configure_ufw (every install and update) on an active ufw whose load fails.
+reset
+printf '%s\n' '*filter' '-A ufw-user-input -p tcp --dport 22 -j ACCEPT' >"$W/etc/ufw/user.rules"
+before=$(cat "$W/etc/ufw/user.rules")
+echo 'ENABLED=yes' >"$W/etc/ufw/ufw.conf"
+printf 'ufw-user-forward\nDOCKER-USER\nufw-user-input\n' >"$W/chains"
+echo 'default deny incoming' >"$W/ufw-refuses"
+touch "$W/ufw-writes" "$W/ufw-closes" "$W/ufw-loads"
+expect "a failed load while configuring: install fails" "1" "$(run install)"
+expect "the rule files are put back as they were" "$before" "$(cat "$W/etc/ufw/user.rules")"
+expect "and loaded again, ufw kept on" "1|0|1" "$(calls '^ufw reload$')|$(calls 'ufw --force disable')|$(grep -c '^-A ufw-user-input' "$W/iptables-ufw-user-input")"
+expect "ufw is not enabled past it" "0" "$(calls 'ufw --force enable')"
+reset
+printf '%s\n' '*filter' '-A ufw-user-input -p tcp --dport 22 -j ACCEPT' >"$W/etc/ufw/user.rules"
+echo 'ENABLED=yes' >"$W/etc/ufw/ufw.conf"
+printf 'ufw-user-forward\nDOCKER-USER\nufw-user-input\n' >"$W/chains"
+echo 'default deny incoming|reload' >"$W/ufw-refuses"
+touch "$W/ufw-closes"
+expect "and when they do not load again either: install fails" "1" "$(run install)"
+expect "ufw is turned off, not left closed" "1|0" "$(calls 'ufw --force disable')|$(grep -cx ufw-user-input "$W/chains")"
+expect "and it says how to turn it back on" "1|1" "$(grep -c 'turned off to keep this host reachable' "$W/out")|$(grep -c "fix the rules in $W/etc/ufw/user.rules, then run 'ufw enable'" "$W/out")"
 
 # CSF turned off by the operator: ufw stays off.
 reset
@@ -565,6 +727,21 @@ printf '1.2.3.4\n2001:db8::1\n10.0.0.0/8\n' >"$W/etc/fail2ban/panelalpha-ignorei
 env_run bash -c 'source "$1"; import_csf_ignores' _ "$DIR/ufw.sh"
 expect "only a new address is added, not a new spelling" "1.2.3.4|2001:db8::1|10.0.0.0/8|192.0.2.5" \
     "$(tr '\n' '|' <"$W/etc/fail2ban/panelalpha-ignoreip" | sed 's/|$//')"
+# What the API would not trust is not trusted: not an address, or a range so
+# wide fail2ban would ban almost no one. Each is named.
+reset
+csf '' '' '010.0.0.1\n999.1.1.1\n1.2.3.4/99\n::::\n0.0.0.0/0\n::/0\n10.0.0.0/7\n2001::/15\n192.0.2.7\n10.0.0.0/8\n2001:db8::/16\n'
+printf '0.0.0.0/0\ntcp|in|d=22|s=1.2.3.4\n' >"$W/etc/csf/csf.allow"
+env_run bash -c 'source "$1"; import_csf_ignores' _ "$DIR/ufw.sh" >"$W/out" 2>&1
+expect "only addresses the API takes are trusted" "10.0.0.0/8|192.0.2.7|2001:db8::/16" "$(LC_ALL=C sort "$W/etc/fail2ban/panelalpha-ignoreip" | tr '\n' '|' | sed 's/|$//')"
+for a in 010.0.0.1 999.1.1.1 1.2.3.4/99 ::::; do
+    expect "and $a is named" "1" "$(grep -cxF "firewall: not trusted, not an address: $a (csf.ignore)" "$W/out")"
+done
+for a in '0.0.0.0/0 (csf.ignore)' '::/0 (csf.ignore)' '10.0.0.0/7 (csf.ignore)' '2001::/15 (csf.ignore)' '0.0.0.0/0 (csf.allow)'; do
+    expect "a range too wide is named: $a" "1" "$(grep -cxF "firewall: not trusted, a range wider than /8 (IPv4) or /16 (IPv6) would keep much of the internet from ever being banned: $a" "$W/out")"
+done
+expect "a rule in csf.allow is no address, and not said to be one" "0" "$(grep -c 'tcp|in' "$W/out")"
+
 # A line written "address#comment": fail2ban ignores the address, and the import sees it there.
 reset
 csf '' '' '9.9.9.9\n'
@@ -572,7 +749,23 @@ printf '9.9.9.9#office\n' >"$W/etc/fail2ban/panelalpha-ignoreip"
 env_run bash -c 'source "$1"; import_csf_ignores' _ "$DIR/ufw.sh"
 expect "address#comment: not added again" "9.9.9.9#office" "$(cat "$W/etc/fail2ban/panelalpha-ignoreip")"
 run fail2ban >/dev/null
-expect "and fail2ban ignores the address, without its comment" "ignoreip = 127.0.0.1/8 ::1 9.9.9.9" "$(grep '^ignoreip' "$W/etc/fail2ban/jail.d/panelalpha.local")"
+expect "and fail2ban ignores the address, without its comment" "ignoreip = 127.0.0.1/8 ::1 9.9.9.9" "$(grep -m1 '^ignoreip' "$W/etc/fail2ban/jail.d/panelalpha.local")"
+
+# Moved again onto a host whose route rules are there already, where
+# convert_published does not run: each inbound deny gets its route rule then.
+reset
+rules "${ENGINE_ROUTES[@]}"
+csf '' "5.6.7.8 # spam\ntcp|in|d=22|s=9.9.9.9\ntcp|out|d=25|d=1.2.3.4\n"
+run install >/dev/null
+expect "a second move: a deny covers published ports too" "1" "$(calls '^ufw route prepend deny from 5.6.7.8 to any comment spam$')"
+expect "one on a port as well" "1" "$(calls '^ufw route prepend deny proto tcp from 9.9.9.9 to any port 22$')"
+expect "after its host rule" "1" "$([ "$(line_of 'ufw route prepend deny from 5.6.7.8')" -gt "$(line_of 'ufw prepend deny in from 5.6.7.8')" ] && echo 1)"
+expect "an outbound deny has no published port to close" "0" "$(calls 'ufw route prepend deny .*1.2.3.4')"
+expect "nothing is carried over twice" "0" "$(calls 'docker ps')"
+reset
+csf '' "5.6.7.8 # spam\n"
+run install >/dev/null
+expect "a first move leaves the route rule to convert_published" "0" "$(calls '^ufw route prepend deny from 5.6.7.8')"
 
 # A rule ufw refuses is reported and the move goes on.
 reset
@@ -898,6 +1091,12 @@ reset
 echo "FIREWALL_PROVIDER=firewalld" >>"$W/engine/.env"
 expect "an unknown provider is refused" "1" "$(dispatch --apply)"
 expect "and named" "1" "$(grep -c "no provider script for 'firewalld'" "$W/out")"
+reset
+# A quoted, spaced, uppercase or CRLF value is read as core reads it.
+for value in '"ufw"' "'UFW'" '  "ufw"  ' 'UFW ' $'ufw\r'; do
+    printf 'FIREWALL_PROVIDER=%s\n' "$value" >"$W/engine/.env"
+    expect "a provider spelled [$value] still resolves to ufw" "0" "$(dispatch --apply)"
+done
 reset
 expect "firewall.sh without a command shows its usage" "1" "$(dispatch)"
 expect "usage text" "1" "$(grep -c '^Usage:' "$W/out")"

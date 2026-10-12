@@ -209,6 +209,10 @@ class ProxyRulePortsTest extends TestCase
                 if ($cmd === ['cat', '/etc/ufw/user.rules']) {
                     return FakeProcess::ok($this->tuples);
                 }
+                // The rule files copied aside before a change; ufw is on.
+                if ($cmd[0] === 'sh') {
+                    return FakeProcess::ok("yes\n");
+                }
                 if ($cmd[0] !== 'ufw') {
                     return FakeProcess::failed('No such file');
                 }
@@ -230,7 +234,7 @@ class ProxyRulePortsTest extends TestCase
                 return '';
             }
 
-            public function execOnHost(string|array $cmd, array $env = []): string
+            public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 return '';
             }

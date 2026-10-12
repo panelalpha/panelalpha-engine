@@ -6,6 +6,8 @@ use App\Http\Middleware\Authenticate;
 use App\Mcp\Tools\Api\Firewall\FirewallRuleCreateTool;
 use App\Mcp\Tools\Api\Firewall\FirewallRuleUpdateTool;
 use App\System\Firewall\Firewall;
+use App\System\Firewall\FirewallBusy;
+use App\System\Firewall\FirewallCommandFailed;
 use App\System\Firewall\FirewallException;
 use App\System\Firewall\FirewallFactory;
 use App\System\Firewall\FirewallLogEntry;
@@ -35,6 +37,17 @@ class FirewallHttpTest extends TestCase
             /** @var array<string, FirewallRule> */
             public array $rules = [];
             public ?string $refuse = null;
+            /** The class of exception $refuse is thrown as. */
+            public string $refuseAs = FirewallException::class;
+
+            /** @throws \Throwable */
+            private function refuse(): void
+            {
+                if ($this->refuse !== null) {
+                    $class = $this->refuseAs;
+                    throw new $class($this->refuse);
+                }
+            }
             /** @var list<string> */
             public array $commands = [];
 
@@ -60,9 +73,7 @@ class FirewallHttpTest extends TestCase
 
             public function addRule(FirewallRule $rule): FirewallRule
             {
-                if ($this->refuse !== null) {
-                    throw new FirewallException($this->refuse);
-                }
+                $this->refuse();
 
                 return $this->rules[$rule->id()] = $rule;
             }
@@ -118,9 +129,7 @@ class FirewallHttpTest extends TestCase
 
             public function trust(TrustedAddress $address): TrustedAddress
             {
-                if ($this->refuse !== null) {
-                    throw new FirewallException($this->refuse);
-                }
+                $this->refuse();
 
                 return $this->trusted[$address->id()] = $address;
             }
@@ -135,9 +144,7 @@ class FirewallHttpTest extends TestCase
 
             private function command(string $name): void
             {
-                if ($this->refuse !== null) {
-                    throw new FirewallException($this->refuse);
-                }
+                $this->refuse();
                 $this->commands[] = $name;
             }
         };
@@ -172,7 +179,7 @@ class FirewallHttpTest extends TestCase
     {
         $this->getJson('/api/firewall/status')->assertOk()->assertExactJson(['data' => [
             'provider' => 'fake', 'enabled' => true, 'version' => '1.0',
-            'default_incoming' => 'deny', 'default_outgoing' => 'allow', 'error' => null,
+            'default_incoming' => 'deny', 'default_outgoing' => 'allow', 'error' => null, 'refused_rules' => [],
         ]]);
     }
 
@@ -257,6 +264,10 @@ class FirewallHttpTest extends TestCase
             [['action' => 'allow', 'direction' => 'sideways', 'port' => '22'], ['direction']],
             [['action' => 'allow', 'protocol' => 'icmp', 'port' => '22'], ['protocol']],
             [['action' => 'allow', 'port' => '22;rm'], ['port']],
+            [['action' => 'allow', 'port' => '0'], ['port']],
+            [['action' => 'allow', 'port' => '99999'], ['port']],
+            [['action' => 'allow', 'protocol' => 'tcp', 'port' => '9000:8000'], ['port']],
+            [['action' => 'allow', 'protocol' => 'tcp', 'port' => '80,99999'], ['port']],
             [['action' => 'allow'], ['port']],
             [['action' => 'allow', 'port' => '30000:30009'], ['protocol']],
             [['action' => 'allow', 'port' => '80,443'], ['protocol']],
@@ -302,10 +313,11 @@ class FirewallHttpTest extends TestCase
 
         $office = $this->hold($rule + ['comment' => 'office']);
         $this->assertSame([$characters], $this->putJson("/api/firewall/rules/{$office->id()}", ['comment' => "it's"])->assertStatus(422)->json('errors.comment'));
-        // Kept on an allow; a deny is also a route rule, which reads "in" followed by more words as an interface.
+        // Kept on an allow; a deny covering published ports is also a route rule,
+        // which reads "in" followed by more words as an interface.
         $this->putJson("/api/firewall/rules/{$office->id()}", ['comment' => 'let in office'])->assertOk();
         $edited = FirewallRule::fromArray($rule + ['comment' => 'let in office']);
-        $this->assertInvalid($this->putJson("/api/firewall/rules/{$edited->id()}", ['action' => 'deny']), ['comment']);
+        $this->assertInvalid($this->putJson("/api/firewall/rules/{$edited->id()}", ['action' => 'deny', 'scope' => 'both']), ['comment']);
         $this->assertSame('let in office', $this->firewall->rules[$edited->id()]->comment);
         $this->assertSame('allow', $this->firewall->rules[$edited->id()]->action);
 
@@ -482,6 +494,9 @@ class FirewallHttpTest extends TestCase
         $added = $this->postJson('/api/firewall/trusted', ['address' => '203.0.113.7/32', 'comment' => ' office '])->assertOk()->json('data');
         $this->assertSame(['address' => '203.0.113.7', 'comment' => 'office'], ['address' => $added['address'], 'comment' => $added['comment']]);
         $this->postJson('/api/firewall/trusted', ['address' => '2001:db8::/32'])->assertOk()->assertJsonPath('data.comment', null);
+        $this->postJson('/api/firewall/trusted', ['address' => '10.0.0.0/8'])->assertOk();
+        $this->postJson('/api/firewall/trusted', ['address' => '2001:db8::/16'])->assertOk();
+        $this->firewall->trusted = array_filter($this->firewall->trusted, fn (TrustedAddress $a): bool => !in_array($a->address, ['10.0.0.0/8', '2001::/16'], true));
 
         $this->assertSame(['203.0.113.7', '2001:db8::/32'], array_column($this->getJson('/api/firewall/trusted')->assertOk()->json('data'), 'address'));
 
@@ -494,6 +509,11 @@ class FirewallHttpTest extends TestCase
     {
         $this->assertInvalid($this->postJson('/api/firewall/trusted', []), ['address']);
         $this->assertInvalid($this->postJson('/api/firewall/trusted', ['address' => 'example.com']), ['address']);
+        // fail2ban would then ban no one on SSH, SFTP, FTP or the API.
+        foreach (['0.0.0.0/0', '::/0', '10.0.0.0/7', '2001::/15'] as $wide) {
+            $this->assertInvalid($this->postJson('/api/firewall/trusted', ['address' => $wide]), ['address']);
+        }
+        $this->assertStringContainsString('wider than /8', $this->postJson('/api/firewall/trusted', ['address' => '0.0.0.0/0'])->json('errors.address.0'));
         $this->assertInvalid($this->postJson('/api/firewall/trusted', ['address' => '203.0.113.7', 'comment' => "a\nb"]), ['comment']);
         $this->assertSame(
             ['The comment cannot contain a line break or a NUL character.'],
@@ -504,9 +524,32 @@ class FirewallHttpTest extends TestCase
         $this->postJson('/api/firewall/trusted', ['address' => '203.0.113.8', 'comment' => "Bob's office"])->assertOk()->assertJsonPath('data.comment', "Bob's office");
         $this->firewall->trusted = [];
 
+        // A host fault on the trusted list is a 502, not a 422 against a `rule` field it has not got.
         $this->firewall->refuse = 'fail2ban did not take the new list';
-        $this->assertInvalid($this->postJson('/api/firewall/trusted', ['address' => '203.0.113.7']), ['rule']);
+        $this->firewall->refuseAs = FirewallCommandFailed::class;
+        $this->postJson('/api/firewall/trusted', ['address' => '203.0.113.7'])
+            ->assertStatus(502)->assertExactJson(['message' => 'fail2ban did not take the new list']);
         $this->assertSame([], $this->firewall->trusted);
+    }
+
+    /** engine#769: a clash is 422, a lock timeout is 409, a command failure is 502. */
+    public function test_a_clash_a_lock_timeout_and_a_command_failure_get_different_statuses(): void
+    {
+        // A genuine clash: fix the request.
+        $this->firewall->refuse = 'Rule abc already matches this traffic';
+        $this->assertInvalid($this->postJson('/api/firewall/rules', ['action' => 'deny', 'source' => '203.0.113.7']), ['rule']);
+
+        // The lock was held too long: retry later.
+        $this->firewall->refuseAs = FirewallBusy::class;
+        $this->firewall->refuse = 'Another firewall change held the lock for over 30 s; nothing was changed';
+        $this->postJson('/api/firewall/rules', ['action' => 'deny', 'source' => '203.0.113.7'])
+            ->assertStatus(409)->assertExactJson(['message' => 'Another firewall change held the lock for over 30 s; nothing was changed']);
+
+        // The host's ufw/fail2ban failed: a server fault.
+        $this->firewall->refuseAs = FirewallCommandFailed::class;
+        $this->firewall->refuse = 'problem running ufw-init';
+        $this->postJson('/api/firewall/rules', ['action' => 'deny', 'source' => '203.0.113.7'])
+            ->assertStatus(502)->assertExactJson(['message' => 'problem running ufw-init']);
     }
 
     public function test_enable_disable_and_reload(): void
@@ -524,5 +567,106 @@ class FirewallHttpTest extends TestCase
         foreach (['enable', 'disable', 'reload'] as $command) {
             $this->putJson("/api/firewall/{$command}")->assertStatus(502)->assertExactJson(['message' => 'problem running ufw-init']);
         }
+    }
+
+    /** The engine's own allows, as ufw.sh opens them. */
+    private function holdEngineRules(): void
+    {
+        foreach ([['22', 'ssh'], ['2011', 'engine api'], ['80', 'http'], ['443', 'https'], ['21', 'ftp'], ['30000:30009', 'ftp passive'], ['2222', 'sftp']] as [$port, $label]) {
+            $this->hold(['action' => 'allow', 'protocol' => 'tcp', 'port' => $port, 'comment' => "panelalpha: {$label}"]);
+        }
+        $this->hold(['action' => 'allow', 'protocol' => 'tcp', 'port' => '2011', 'comment' => 'panelalpha: engine api', 'scope' => 'published']);
+    }
+
+    public function test_a_deny_that_would_shut_the_caller_out_of_ssh_or_the_api_needs_confirm(): void
+    {
+        $this->holdEngineRules();
+        $held = count($this->firewall->rules);
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.50']);
+        foreach ([
+            ['action' => 'deny', 'protocol' => 'tcp', 'port' => '20:22'],
+            ['action' => 'deny', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.0/24'],
+            ['action' => 'deny', 'source' => '203.0.113.50'],
+        ] as $deny) {
+            $response = $this->postJson('/api/firewall/rules', $deny);
+            $this->assertInvalid($response, ['confirm']);
+            $this->assertStringContainsString('covers your own address 203.0.113.50', $response->json('errors.confirm.0'));
+        }
+        $this->assertCount($held, $this->firewall->rules, 'nothing was added');
+
+        $added = $this->postJson('/api/firewall/rules', ['action' => 'deny', 'protocol' => 'tcp', 'port' => '20:22', 'confirm' => true])->assertOk();
+        $this->assertContains("This deny also covers the engine's own ssh (22/tcp), for every address.", $added->json('warnings'));
+        $this->assertArrayNotHasKey('confirm', $this->firewall->rules[$added->json('data.id')]->toArray());
+
+        // An edit into such a deny is held to the same.
+        $office = $this->hold(['action' => 'allow', 'protocol' => 'tcp', 'port' => '8443', 'source' => '203.0.113.0/24']);
+        $this->assertInvalid($this->putJson("/api/firewall/rules/{$office->id()}", ['action' => 'deny', 'port' => '22']), ['confirm']);
+        $this->putJson("/api/firewall/rules/{$office->id()}", ['action' => 'deny', 'port' => '22', 'confirm' => true])->assertOk();
+    }
+
+    public function test_a_deny_whose_ports_cover_the_engine_api_is_refused_even_with_confirm(): void
+    {
+        $this->holdEngineRules();
+        $held = count($this->firewall->rules);
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.50']);
+        foreach ([
+            ['action' => 'deny', 'protocol' => 'tcp', 'port' => '20:2100', 'confirm' => true],
+            ['action' => 'deny', 'protocol' => 'tcp', 'port' => '1:65535', 'source' => '198.51.100.0/24'],
+            ['action' => 'deny', 'protocol' => 'tcp', 'port' => '2011', 'scope' => 'published', 'confirm' => true],
+            ['action' => 'deny', 'protocol' => 'tcp', 'port' => '80,2011', 'source' => '198.51.100.7'],
+        ] as $deny) {
+            $response = $this->postJson('/api/firewall/rules', $deny);
+            $this->assertInvalid($response, ['port']);
+            $this->assertSame("Port 2011/tcp is reserved for the engine API, so a deny cannot cover it. Leave it out of the port range.", $response->json('errors.port.0'));
+        }
+        $this->assertCount($held, $this->firewall->rules, 'nothing was added');
+
+        $office = $this->hold(['action' => 'allow', 'protocol' => 'tcp', 'port' => '8443', 'source' => '198.51.100.0/24']);
+        $this->assertInvalid($this->putJson("/api/firewall/rules/{$office->id()}", ['action' => 'deny', 'port' => '2000:2100', 'confirm' => true]), ['port']);
+    }
+
+    public function test_a_deny_over_other_engine_ports_or_from_elsewhere_goes_in_with_warnings(): void
+    {
+        $this->holdEngineRules();
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.50']);
+
+        $web = $this->postJson('/api/firewall/rules', ['action' => 'deny', 'protocol' => 'tcp', 'port' => '80,443'])->assertOk();
+        $this->assertSame(["This deny also covers the engine's own http (80/tcp), for every address.", "This deny also covers the engine's own https (443/tcp), for every address."], $web->json('warnings'));
+
+        $other = $this->postJson('/api/firewall/rules', ['action' => 'deny', 'source' => '198.51.100.0/24'])->assertOk();
+        $this->assertContains("This deny also covers the engine's own engine api (2011/tcp), for 198.51.100.0/24.", $other->json('warnings'));
+        $this->assertContains("This deny also covers the engine's own ftp passive (30000:30009/tcp), for 198.51.100.0/24.", $other->json('warnings'));
+        $this->assertSame(array_unique($other->json('warnings')), $other->json('warnings'), 'once per port, though 2011 is a host and a route rule');
+
+        $this->assertArrayNotHasKey('warnings', $this->postJson('/api/firewall/rules', ['action' => 'deny', 'protocol' => 'tcp', 'port' => '3306'])->assertOk()->json());
+        $this->assertArrayNotHasKey('warnings', $this->postJson('/api/firewall/rules', ['action' => 'deny', 'direction' => 'out', 'protocol' => 'tcp', 'port' => '22'])->assertOk()->json());
+        $this->assertArrayNotHasKey('warnings', $this->postJson('/api/firewall/rules', ['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '192.0.2.1'])->assertOk()->json());
+    }
+
+    public function test_a_deny_matching_an_engine_rule_exactly_is_still_the_providers_clash(): void
+    {
+        $this->holdEngineRules();
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.50']);
+        $this->firewall->refuse = 'Rule abc (allow in tcp 22) already matches this traffic and is left as it is; the engine opened it and needs it.';
+
+        $this->assertInvalid($this->postJson('/api/firewall/rules', ['action' => 'deny', 'protocol' => 'tcp', 'port' => '22']), ['rule']);
+    }
+
+    public function test_the_mcp_tool_is_held_to_the_callers_own_address_too(): void
+    {
+        $this->holdEngineRules();
+        $held = count($this->firewall->rules);
+        // The MCP request's address, which the tool's own request to the API carries.
+        $this->app->instance('request', \Illuminate\Http\Request::create('/mcp', 'POST', [], [], [], ['REMOTE_ADDR' => '203.0.113.50']));
+
+        $response = (new FirewallRuleCreateTool())->handle(new Request(['action' => 'deny', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.0/24']));
+        $payload = json_decode((string) $response->content(), true);
+        $this->assertSame(422, $payload['status']);
+        $this->assertStringContainsString('203.0.113.50', $payload['data']['errors']['confirm'][0]);
+        $this->assertCount($held, $this->firewall->rules);
+
+        $response = (new FirewallRuleCreateTool())->handle(new Request(['action' => 'deny', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.0/24', 'confirm' => true]));
+        $this->assertFalse($response->isError(), (string) $response->content());
+        $this->assertCount($held + 1, $this->firewall->rules);
     }
 }

@@ -26,6 +26,8 @@ Let's Encrypt can still confirm you control the domain. That check is not behind
 
 A Cloudflare tunnel on the project is checked the same way. This is enforced on the webserver a normal install uses.
 
+Every wrong password, on any site, is written with the visitor's address to one file, `/opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/site-password.log`. A first visit, the password page itself and a correct password are not. After 10 wrong passwords in 10 minutes, fail2ban bans that address for an hour, the same kind of ban as below. Behind Cloudflare this ban does not stop anyone. Through a proxied DNS record the log names the real visitor, but their requests reach the server from Cloudflare's addresses, which the ban does not block. Through a Cloudflare tunnel every visitor arrives from the project's own address on the server, which is never banned, since that would cut the project off.
+
 ## The most important setting on this page
 
 **A token with default permissions can permanently delete an entire project and everything in it.**
@@ -79,7 +81,7 @@ Through the assistant or the API, an allow is a host rule unless you ask for pub
 
 A server updated from an engine without published-port rules keeps working: each allow rule that covered a port a container published at the time, and each incoming deny rule, gets a matching published-port rule, and the update log names each one.
 
-fail2ban watches the logins the server takes: SSH, SFTP, FTP, and the engine's own API on 2011, where a request with a wrong or expired token counts as a failed login. After 5 failed attempts in 10 minutes (10 for the API, since a client with a stale token retries), an address is banned for an hour, and for longer each time it comes back. A ban closes every port to that address, published ports included. It is listed as one deny rule for both; delete it to lift the ban early.
+fail2ban watches the logins the server takes: SSH, SFTP, FTP, the sites' passwords ([Password protection](#password-protection)), and the engine's own API on 2011, where a request with a wrong or expired token counts as a failed login. After 5 failed attempts in 10 minutes (10 for the API, since a client with a stale token retries, and 10 for site passwords), an address is banned for an hour, and for longer each time it comes back (a site-password ban is always an hour). A ban closes every port to that address, published ports included. It is listed as one deny rule for both; delete it to lift the ban early.
 
 Trust the addresses that must never be locked out: your office, your monitoring, the panel that drives this engine. A trusted address is never banned, and trusting it lifts a ban it has now. It is not an allow rule: the firewall rules still apply to it.
 
@@ -96,6 +98,8 @@ What did the firewall block in the last hour? Was 203.0.113.7 banned?
 A blocked entry is a connection refused because no rule allowed it, on any port, the ones Docker publishes included. The firewall writes at most a few of these a minute, so a flood shows as a sample. A connection dropped by a deny rule you added is not logged.
 
 A server that ran CSF before is moved to ufw on its next engine update. Its allow and deny lists become ufw rules, and its configuration is saved in `/var/backups/panelalpha-csf-<date>.tgz`. The addresses it trusted are never banned by fail2ban. If CSF had been switched off, ufw stays off too. CSF's own automatic login blocks are not carried over. A rule's comment that ufw cannot store as it is, such as one with an apostrophe, is adjusted (`Bob's office` becomes `Bob’s office`), and the update's output says how; no rule is left behind because of its comment.
+
+Before CSF is removed, every stored ufw rule is test-loaded. If iptables refuses one, such as a port written `08080`, CSF stays in place and the update's output names the rule: delete it (`ufw status numbered`, then `ufw delete <number>`) and update again. The firewall status lists such rules under `refused_rules` on any server, with the id to delete each one by: until it is deleted, every reload of the rules fails and a rule change ends with the firewall turned off so the server stays reachable.
 
 > **Do not open a public port for an application.** It is a natural instinct and it is the wrong move here. Applications deliberately do not publish public ports - traffic is supposed to arrive at the engine's webserver, which routes it into the right sandbox. Opening a port bypasses that, and with it the routing, the HTTPS termination, and the isolation. If a site is unreachable, the cause is almost never the firewall: [What the engine checks](monitoring-and-logs.md#what-the-engine-checks). Extra HTTP routing belongs as a proxy rule, not a firewall hole: [Extra routes](domains-and-ssl.md#extra-routes).
 

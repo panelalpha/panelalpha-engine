@@ -45,6 +45,7 @@ class FirewallRuleCreateTool extends ApiTool
             'source',
             'destination',
             'comment',
+            'confirm',
         ];
     }
 
@@ -62,6 +63,7 @@ class FirewallRuleCreateTool extends ApiTool
             'source' => $schema->string()->description('IPv4/IPv6 address or CIDR. Omit for any. Example: 203.0.113.7.'),
             'destination' => $schema->string()->description('IPv4/IPv6 address or CIDR. Omit for any.'),
             'comment' => $schema->string()->description('One line, without \'. Also refused, as ufw would read it as part of the rule: a comment that is only in, out, log or log-all, and on an incoming deny or a published-port rule, delete or in or out followed by more words. A comment that starts with by Fail2Ban, which marks the bans fail2ban makes, is refused.'),
+            'confirm' => $schema->boolean()->description('A deny that covers the caller\'s own address on the engine\'s SSH port, or on its API port without naming a port, is refused unless this is true. A deny whose ports cover the engine API port is always refused.'),
         ];
     }
 }

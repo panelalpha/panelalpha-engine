@@ -40,6 +40,29 @@ class FirewallRuleTest extends TestCase
         $this->assertArrayHasKey('source', FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '203.0.113.7', 'destination' => '198.51.100.1'])->problems());
     }
 
+    public function test_a_port_outside_1_to_65535_or_a_high_to_low_range_is_refused(): void
+    {
+        foreach (['0', '99999', '80,99999'] as $port) {
+            $this->assertArrayHasKey('port', FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => $port])->problems(), $port);
+        }
+        $this->assertSame(
+            ['port' => 'A port range must not run high to low.'],
+            FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '9000:8000'])->problems()
+        );
+
+        // A leading zero would break every later `ufw reload` (iptables-restore rejects `08080`).
+        foreach (['08080', '0080:9000', '80,08080'] as $port) {
+            $this->assertSame(
+                ['port' => 'A port is written without leading zeros.'],
+                FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => $port])->problems(),
+                $port
+            );
+        }
+        $this->assertSame([], FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '1'])->problems());
+        $this->assertSame([], FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '65535'])->problems());
+        $this->assertSame([], FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '80:443'])->problems());
+    }
+
     public function test_an_address_that_is_every_address_is_refused(): void
     {
         // ufw would take it for the rule on any address, the engine's own included.
@@ -122,8 +145,10 @@ class FirewallRuleTest extends TestCase
     {
         $deny = FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7']);
 
+        // Only a missing scope derives both; an explicit host is kept.
         $this->assertSame('both', $deny->scope);
-        $this->assertSame('both', FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '203.0.113.7', 'scope' => 'host'])->scope);
+        $this->assertSame('host', FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7', 'scope' => 'host'])->scope);
+        $this->assertSame('host', FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '203.0.113.7', 'scope' => 'host'])->scope);
         $this->assertSame('published', FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7', 'scope' => 'published'])->scope);
         $this->assertSame('host', FirewallRule::fromArray(['action' => 'deny', 'direction' => 'out', 'destination' => '203.0.113.7'])->scope, 'nothing published goes out');
         $this->assertSame('host', FirewallRule::fromArray(['action' => 'allow', 'port' => '22'])->scope);
@@ -132,6 +157,20 @@ class FirewallRuleTest extends TestCase
         $this->assertSame([], $deny->problems());
         $this->assertArrayHasKey('scope', $deny->with(['action' => 'allow', 'port' => '22'])->problems());
         $this->assertSame('host', $deny->with(['action' => 'allow', 'port' => '22', 'scope' => 'host'])->scope);
+    }
+
+    /** An edit that does not name the scope keeps the rule's own (engine#766). */
+    public function test_an_edit_without_a_scope_keeps_the_rules_current_scope(): void
+    {
+        $hostDeny = FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7', 'scope' => 'host']);
+
+        $this->assertSame('host', $hostDeny->with(['comment' => 'office'])->scope);
+        $this->assertSame('host', $hostDeny->with(['port' => '22'])->scope);
+        // A rule that was both stays both when only its comment changes.
+        $both = FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7']);
+        $this->assertSame('both', $both->with(['comment' => 'office'])->scope);
+        // An edit that does name it changes it.
+        $this->assertSame('published', $hostDeny->with(['scope' => 'published'])->scope);
     }
 
     public function test_a_comment_ufw_would_read_as_part_of_the_rule_is_refused(): void
@@ -228,5 +267,33 @@ class FirewallRuleTest extends TestCase
                 $this->assertSame([], $rule->with(['comment' => $comment])->problems(), $comment);
             }
         }
+    }
+
+    public function test_a_source_takes_in_an_address_inside_its_range_only(): void
+    {
+        $from = fn (?string $source): FirewallRule => FirewallRule::fromArray(['action' => 'deny', 'source' => $source]);
+        $this->assertTrue($from(null)->hasSource('203.0.113.50'));
+        $this->assertTrue($from('203.0.113.0/24')->hasSource('203.0.113.50'));
+        $this->assertTrue($from('203.0.112.0/23')->hasSource('203.0.113.50'));
+        $this->assertFalse($from('203.0.112.0/24')->hasSource('203.0.113.50'));
+        $this->assertTrue($from('203.0.113.50')->hasSource('203.0.113.50'));
+        $this->assertFalse($from('203.0.113.51')->hasSource('203.0.113.50'));
+        $this->assertTrue($from('2001:db8::/33')->hasSource('2001:db8:7fff::1'));
+        $this->assertFalse($from('2001:db8::/33')->hasSource('2001:db8:8000::1'));
+        $this->assertFalse($from('2001:db8::/32')->hasSource('203.0.113.50'), 'another IP version');
+    }
+
+    public function test_a_deny_overlaps_an_allow_on_a_shared_port_protocol_and_scope(): void
+    {
+        $ssh = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22']);
+        $deny = fn (array $d): FirewallRule => FirewallRule::fromArray(['action' => 'deny'] + $d);
+        $this->assertTrue($deny(['protocol' => 'tcp', 'port' => '20:2100'])->overlaps($ssh));
+        $this->assertTrue($deny(['port' => '22'])->overlaps($ssh), 'either protocol');
+        $this->assertTrue($deny(['source' => '198.51.100.7'])->overlaps($ssh), 'every port');
+        $this->assertTrue($deny(['protocol' => 'tcp', 'port' => '80,10:30'])->overlaps($ssh));
+        $this->assertFalse($deny(['protocol' => 'udp', 'port' => '22'])->overlaps($ssh));
+        $this->assertFalse($deny(['protocol' => 'tcp', 'port' => '23:2100'])->overlaps($ssh));
+        $this->assertFalse($deny(['direction' => 'out', 'port' => '22'])->overlaps($ssh));
+        $this->assertFalse($deny(['port' => '22', 'scope' => 'published'])->overlaps($ssh), 'a published-port deny never reaches the host');
     }
 }
