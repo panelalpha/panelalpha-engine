@@ -213,6 +213,7 @@ $projectRoutes = function (): void {
 
     Route::get('/{username}/files/exists', [FileController::class, 'exists']);
     Route::get('/{username}/files/stat', [FileController::class, 'stat']);
+    Route::get('/{username}/files/list', [FileController::class, 'list']);
     Route::post('/{username}/files/upload', [FileController::class, 'upload']);
     Route::get('/{username}/files/download', [FileController::class, 'download']);
     Route::delete('/{username}/files/remove', [FileController::class, 'remove']);

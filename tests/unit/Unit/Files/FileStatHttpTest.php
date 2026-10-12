@@ -67,9 +67,11 @@ class FileStatHttpTest extends TestCase
 
     public function test_a_file_is_stated(): void
     {
+        $this->requireGnuFind();
+
         $this->getJson('/api/projects/alice/files/stat?path=file.txt')
             ->assertOk()
-            ->assertJson(['size' => '5']);
+            ->assertJsonPath('data.size', 5);
     }
 
     public function test_a_missing_path_is_still_a_404_and_stat_never_runs(): void
@@ -116,7 +118,9 @@ class FileStatHttpTest extends TestCase
         $this->assertFileDoesNotExist($path);
         $this->getJson('/api/projects/alice/files/stat?path=private/secret.txt')
             ->assertOk()
-            ->assertJson(['file_name' => $path, 'size' => '7']);
+            ->assertJsonPath('data.name', 'secret.txt')
+            ->assertJsonPath('data.path', '/private/secret.txt')
+            ->assertJsonPath('data.size', 7);
     }
 
     private function fakeSystem(string $root): System
@@ -148,10 +152,13 @@ class FileStatHttpTest extends TestCase
                 $this->processJournal[] = is_array($cmd) ? $cmd : [$cmd];
                 $argv = array_slice((array) $cmd, 7);
                 $path = rtrim((string) end($argv), '/');
+                if (($argv[0] ?? '') === 'find' && isset($argv[1])) {
+                    $path = rtrim((string) $argv[1], '/');
+                }
                 if (isset($this->accountSees[$path])) {
                     $argv = in_array(FileManager::ENTRY_TYPE_SCRIPT, $argv, true)
                         ? ['echo', $this->accountSees[$path]]
-                        : ['printf', '%s', "{$path} 7 1001 1001 1 2 3 4"];
+                        : ['sh', '-c', 'printf %s "$1" | base64 -d', 'sh', base64_encode(implode("\0", [basename($path), 'f', '7', '2', '644', '1001', '1001', '', 'f']) . "\0")];
                 }
                 $process = new Process($argv);
                 $process->run();

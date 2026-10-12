@@ -11,6 +11,7 @@ use App\Http\Requests\Files\ChmodRequest;
 use App\Http\Requests\Files\CpRequest;
 use App\Http\Requests\Files\DownloadRequest;
 use App\Http\Requests\Files\FetchRequest;
+use App\Http\Requests\Files\ListRequest;
 use App\Http\Requests\Files\MkdirRequest;
 use App\Http\Requests\Files\MoveContentsRequest;
 use App\Http\Requests\Files\MvRequest;
@@ -21,6 +22,7 @@ use App\Http\Requests\Files\ZipRequest;
 use App\System as EngineSystem;
 use App\Lib\Project\ProjectFiles;
 use App\Lib\Net\EgressRefusedException;
+use App\System\Project\FileManager;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\UploadedFile;
@@ -527,14 +529,9 @@ class FileController extends Controller
         ],
         responses: [
             new OA\Response(response: 200, description: 'File stats', content: new OA\JsonContent(
-                properties: [
-                    new OA\Property(property: 'data', type: 'object', properties: [
-                        new OA\Property(property: 'size', type: 'integer'),
-                        new OA\Property(property: 'type', type: 'string', enum: ['file', 'dir']),
-                        new OA\Property(property: 'modified', type: 'integer'),
-                    ]),
-                ],
+                properties: [new OA\Property(property: 'data', ref: '#/components/schemas/FileEntry')],
             )),
+            new OA\Response(response: 404, description: 'Invalid path', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     public function stat(string $username, StatRequest $request, EngineSystem $system): JsonResponse
@@ -562,7 +559,81 @@ class FileController extends Controller
             ], 400);
         }
 
-        return new JsonResponse($result);
+        return new JsonResponse([
+            'data' => $result,
+        ]);
+    }
+
+    #[OA\Get(
+        path: '/projects/{username}/files/list',
+        summary: 'List the entries of a directory',
+        description: 'Classic and dind projects alike: reads the account home, as the account. Directories come '
+            . 'first, then names in byte order; dot-entries are included unless show_hidden is false. Refuses a '
+            . 'path that resolves outside the home, and a path that is not a directory.',
+        security: [['bearerAuth' => []]],
+        tags: ['Files'],
+        parameters: [
+            new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'path', in: 'query', required: true, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'show_hidden', in: 'query', required: false, schema: new OA\Schema(type: 'boolean', default: true)),
+            new OA\Parameter(name: 'limit', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 5000, minimum: 1, maximum: 20000)),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Directory entries', content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(property: 'data', type: 'array', items: new OA\Items(ref: '#/components/schemas/FileEntry')),
+                    new OA\Property(property: 'meta', type: 'object', properties: [
+                        new OA\Property(property: 'path', type: 'string', example: '/example.com/public_html'),
+                        new OA\Property(property: 'truncated', type: 'boolean', description: 'True when the directory holds more entries than the limit returned.'),
+                        new OA\Property(property: 'total', type: 'integer', description: 'Entries in the directory after the show_hidden filter, before the limit.'),
+                    ]),
+                ],
+            )),
+            new OA\Response(response: 404, description: 'Invalid path', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'Not a directory, or a path outside the home', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+        ],
+    )]
+    public function list(string $username, ListRequest $request, EngineSystem $system): JsonResponse
+    {
+        $user = $this->projectOr404($username);
+
+        /**
+         * @var array{
+         *   path: string,
+         *   show_hidden?: bool,
+         *   limit?: int,
+         * }
+         */
+        $params = $request->validated();
+        $path = $user->project($system)->resolvePath($params['path']);
+
+        $fileMan = $user->project($system)->fileManager();
+        try {
+            $result = $fileMan->list(
+                $path,
+                filter_var($params['show_hidden'] ?? true, FILTER_VALIDATE_BOOLEAN),
+                (int) ($params['limit'] ?? FileManager::LIST_DEFAULT_LIMIT),
+            );
+        } catch (NotFoundException) {
+            return new JsonResponse([
+                'message' => 'Invalid path',
+            ], 404);
+        } catch (ValidationException $e) {
+            throw $e;
+        } catch (\Exception $e) {
+            return new JsonResponse([
+                'message' => $e->getMessage(),
+            ], 400);
+        }
+
+        return new JsonResponse([
+            'data' => $result['entries'],
+            'meta' => [
+                'path' => $result['path'],
+                'truncated' => $result['truncated'],
+                'total' => $result['total'],
+            ],
+        ]);
     }
 
     #[OA\Post(

@@ -9,6 +9,9 @@ import {
   randomFileName,
 } from '@/helpers/file-path-helpers';
 import { expectStatus } from '@/helpers/expect-status';
+import { uniqueId } from '@/helpers/random';
+import { validateParsedApiResponse } from '@/helpers/validate-parsed-response';
+import { fileListResponseSchema } from '@/schemas';
 
 test.describe('file operations', () => {
   test(
@@ -18,7 +21,7 @@ test.describe('file operations', () => {
       const basePath = getDomainBasePath(setupUser.domain);
 
       expect((await api.fileExists(setupUser.username, basePath)).exists).toBe(true);
-      expect((await api.getFileStat(setupUser.username, basePath)).file_name).toBeTruthy();
+      expect((await api.getFileStat(setupUser.username, basePath)).name).toBeTruthy();
     }
   );
 
@@ -98,7 +101,7 @@ test.describe('file operations', () => {
     const cleanup = new CleanupSteps();
     try {
       await api.putFileContents(setupUser.username, path, 'body { margin: 0; }');
-      expect((await api.getFileStat(setupUser.username, path)).file_name).toMatch(/\.css$/);
+      expect((await api.getFileStat(setupUser.username, path)).name).toMatch(/\.css$/);
     } catch (error) {
       cleanup.bodyFailed(error);
       throw error;
@@ -433,6 +436,177 @@ test.describe('multipart uploads', () => {
     } finally {
       await cleanup.run(`remove ${directory}`, () =>
         removeFileIfPresent(api, setupUser.username, directory, true)
+      );
+      await cleanup.finish();
+    }
+  });
+});
+
+test.describe('directory listing', () => {
+  test('the document root lists its entries with type, size and mode', async ({
+    api,
+    setupUser,
+  }) => {
+    const dir = getDomainBasePath(setupUser.domain);
+    const fileName = randomFileName('txt');
+    const filePath = `${dir}/${fileName}`;
+    const dirName = uniqueId('list_dir_');
+    const dirPath = `${dir}/${dirName}`;
+
+    const cleanup = new CleanupSteps();
+    try {
+      await api.putFileContents(setupUser.username, filePath, 'listing content');
+      await api.createDirectory(setupUser.username, dirPath);
+
+      const listing = validateParsedApiResponse(
+        await api.listFiles(setupUser.username, dir),
+        fileListResponseSchema
+      );
+
+      expect(listing.meta.path).toBe(dir);
+      expect(listing.meta.truncated).toBe(false);
+
+      const file = listing.data.find((entry) => entry.name === fileName);
+      expect(file?.type, `${fileName} should be a file`).toBe('file');
+      expect(file?.size).toBe('listing content'.length);
+      expect(file?.mode).toMatch(/^0[0-7]{3}$/);
+      expect(file?.path).toBe(filePath);
+
+      const folder = listing.data.find((entry) => entry.name === dirName);
+      expect(folder?.type).toBe('dir');
+      expect(folder?.has_subdirectories).toBe(false);
+
+      const kinds = listing.data.map((entry) => (entry.type === 'dir' ? 0 : 1));
+      expect(kinds).toEqual([...kinds].sort((a, b) => a - b));
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
+    } finally {
+      for (const path of [dirPath, filePath]) {
+        await cleanup.run(`remove ${path}`, () =>
+          removeFileIfPresent(api, setupUser.username, path, true)
+        );
+      }
+      await cleanup.finish();
+    }
+  });
+
+  test('names with a space, a newline and UTF-8 characters survive listing', async ({
+    api,
+    setupUser,
+  }) => {
+    const dir = getDomainBasePath(setupUser.domain);
+    const id = uniqueId('list_name_');
+    const names = [`spaced name ${id}.txt`, `line\nbreak ${id}.txt`, `ünïcode_${id}.txt`];
+
+    const cleanup = new CleanupSteps();
+    try {
+      for (const name of names) {
+        await api.putFileContents(setupUser.username, `${dir}/${name}`, 'utf8');
+      }
+
+      const listing = await api.listFiles(setupUser.username, dir);
+
+      for (const name of names) {
+        const entry = listing.data.find((candidate) => candidate.name === name);
+        expect(entry?.name, `${JSON.stringify(name)} should be listed intact`).toBe(name);
+        expect(entry?.path).toBe(`${dir}/${name}`);
+        expect(entry?.size).toBe('utf8'.length);
+      }
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
+    } finally {
+      for (const name of names) {
+        await cleanup.run(`remove ${JSON.stringify(name)}`, () =>
+          removeFileIfPresent(api, setupUser.username, `${dir}/${name}`)
+        );
+      }
+      await cleanup.finish();
+    }
+  });
+
+  test('show_hidden=false omits dot entries', async ({ api, setupUser }) => {
+    const dir = getDomainBasePath(setupUser.domain);
+    const hiddenName = `.list_hidden_${uniqueId()}`;
+    const visibleName = `list_visible_${uniqueId()}.txt`;
+
+    const cleanup = new CleanupSteps();
+    try {
+      await api.putFileContents(setupUser.username, `${dir}/${hiddenName}`, 'hidden');
+      await api.putFileContents(setupUser.username, `${dir}/${visibleName}`, 'visible');
+
+      const all = await api.listFiles(setupUser.username, dir);
+      expect(all.data.map((entry) => entry.name)).toContain(hiddenName);
+
+      const shown = await api.listFiles(setupUser.username, dir, { showHidden: false });
+      const shownNames = shown.data.map((entry) => entry.name);
+      expect(shownNames).not.toContain(hiddenName);
+      expect(shownNames).toContain(visibleName);
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
+    } finally {
+      for (const name of [hiddenName, visibleName]) {
+        await cleanup.run(`remove ${name}`, () =>
+          removeFileIfPresent(api, setupUser.username, `${dir}/${name}`)
+        );
+      }
+      await cleanup.finish();
+    }
+  });
+
+  test('a limit truncates the listing and reports it', async ({ api, setupUser }) => {
+    const dir = `${getDomainBasePath(setupUser.domain)}/${uniqueId('list_limit_')}`;
+
+    const cleanup = new CleanupSteps();
+    try {
+      await api.createDirectory(setupUser.username, dir, true);
+      for (const name of ['a.txt', 'b.txt', 'c.txt']) {
+        await api.putFileContents(setupUser.username, `${dir}/${name}`, 'x');
+      }
+
+      const listing = await api.listFiles(setupUser.username, dir, { limit: 2 });
+
+      expect(listing.data).toHaveLength(2);
+      expect(listing.meta.truncated).toBe(true);
+      expect(listing.meta.total).toBe(3);
+      expect(listing.data.map((entry) => entry.name)).toEqual(['a.txt', 'b.txt']);
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
+    } finally {
+      await cleanup.run(`remove ${dir}`, () =>
+        removeFileIfPresent(api, setupUser.username, dir, true)
+      );
+      await cleanup.finish();
+    }
+  });
+
+  test('a missing path is 404 and a file is not a directory', async ({ api, setupUser }) => {
+    const dir = getDomainBasePath(setupUser.domain);
+    const filePath = `${dir}/${uniqueId('list_file_')}.txt`;
+
+    const missing = await api.listFilesRaw(setupUser.username, {
+      path: `${dir}/${uniqueId('list_missing_')}`,
+    });
+    expectOneOf(missing.status, [404], 'a missing path should not be listable');
+
+    const cleanup = new CleanupSteps();
+    try {
+      await api.putFileContents(setupUser.username, filePath, 'x');
+
+      const notADirectory = await api.listFilesRaw(setupUser.username, { path: filePath });
+      expectOneOf(notADirectory.status, [422], 'a file should not be listable');
+      expect(
+        (notADirectory.body as { problems?: { field: string; code: string }[] }).problems
+      ).toContainEqual(expect.objectContaining({ field: 'path', code: 'not_a_directory' }));
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
+    } finally {
+      await cleanup.run(`remove ${filePath}`, () =>
+        removeFileIfPresent(api, setupUser.username, filePath)
       );
       await cleanup.finish();
     }

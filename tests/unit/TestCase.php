@@ -7,6 +7,7 @@ use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Noodlehaus\Config;
 use ReflectionClass;
 use ReflectionMethod;
+use Symfony\Component\Process\Process;
 use Tests\Attributes\SetsCache;
 
 abstract class TestCase extends BaseTestCase
@@ -56,6 +57,18 @@ abstract class TestCase extends BaseTestCase
     {
         $this->cache->toFile($this->cacheFile);
         parent::tearDown();
+    }
+
+    /**
+     * Skips a test that shells out to GNU find, which BusyBox find cannot run.
+     */
+    protected function requireGnuFind(): void
+    {
+        $process = new Process(['find', '.', '-maxdepth', '0', '-printf', '']);
+        $process->run();
+        if (!$process->isSuccessful()) {
+            $this->markTestSkipped('GNU find is required: this find does not support -printf.');
+        }
     }
 
     public function getCacheAsString(string $key): string

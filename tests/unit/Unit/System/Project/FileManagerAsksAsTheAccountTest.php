@@ -89,10 +89,10 @@ class FileManagerAsksAsTheAccountTest extends TestCase
         $files = $this->files();
 
         $this->assertFileDoesNotExist($this->homeDir . '/private/secret.txt');
-        $this->assertSame('7', $files->stat('private/secret.txt')['size']);
+        $this->assertSame(7, $files->stat('private/secret.txt')['size']);
         $files->remove('private/secret.txt');
 
-        $this->assertSame(['confine', 'entry-type', 'stat', 'confine', 'entry-type', 'rm'], $this->ran());
+        $this->assertSame(['confine', 'entry-type', 'find', 'confine', 'entry-type', 'rm'], $this->ran());
         foreach ($this->commands as $argv) {
             $this->assertSame(
                 ['sudo', 'setpriv', '--reuid', '1001', '--regid', '1001', '--clear-groups'],
@@ -167,6 +167,8 @@ class FileManagerAsksAsTheAccountTest extends TestCase
 
     public function test_stat_and_exists_inside_the_home_are_unchanged(): void
     {
+        $this->requireGnuFind();
+
         mkdir($this->homeDir . '/real');
         file_put_contents($this->homeDir . '/real/file.txt', 'hello');
         symlink($this->homeDir . '/real', $this->homeDir . '/inner');
@@ -175,7 +177,7 @@ class FileManagerAsksAsTheAccountTest extends TestCase
 
         $this->assertTrue($files->exists('real/file.txt'));
         $this->assertTrue($files->exists('inner/file.txt'));
-        $this->assertSame('5', $files->stat('inner/file.txt')['size']);
+        $this->assertSame(5, $files->stat('inner/file.txt')['size']);
         $this->assertFalse($files->exists('dangling-in'));
         $this->assertNotFound(fn () => $files->stat('dangling-in'));
         $this->assertFalse($files->exists('nothing-here'));
@@ -262,14 +264,15 @@ class FileManagerAsksAsTheAccountTest extends TestCase
                 $this->commands[] = (array) $cmd;
                 $argv = array_slice((array) $cmd, 7);
                 $path = (string) end($argv);
-                if (isset($this->accountOnly[rtrim($path, '/')])) {
+                if (($argv[0] ?? '') === 'find' && isset($argv[1])) {
+                    $path = $argv[1];
+                }
+                $key = rtrim($path, '/');
+                if (isset($this->accountOnly[$key])) {
                     // What the account answers for a path the engine cannot enter.
-                    $answer = match (true) {
-                        in_array(FileManager::ENTRY_TYPE_SCRIPT, $argv, true) => $this->accountOnly[rtrim($path, '/')] . "\n",
-                        $argv[0] === 'stat' => "{$path} 7 1001 1001 1 2 3 4",
-                        default => '',
-                    };
-                    $argv = ['printf', '%s', $answer];
+                    $argv = in_array(FileManager::ENTRY_TYPE_SCRIPT, (array) $cmd, true)
+                        ? ['printf', '%s', $this->accountOnly[$key] . "\n"]
+                        : ['sh', '-c', 'printf %s "$1" | base64 -d', 'sh', base64_encode(implode("\0", [basename($key), 'f', '7', '2', '644', '1001', '1001', '', 'f']) . "\0")];
                 }
                 $process = new Process($argv);
                 $process->run();

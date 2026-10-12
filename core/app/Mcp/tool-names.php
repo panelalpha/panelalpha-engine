@@ -150,6 +150,7 @@ return [
     // command the route borrowed its spelling from.
     'GET /projects/{username}/files/exists' => 'file_exists',
     'GET /projects/{username}/files/stat' => 'file_stat',
+    'GET /projects/{username}/files/list' => 'file_list',
     'GET /projects/{username}/files/download' => 'file_download',
     'POST /projects/{username}/files/upload' => 'file_upload',
     'DELETE /projects/{username}/files/remove' => 'file_delete',

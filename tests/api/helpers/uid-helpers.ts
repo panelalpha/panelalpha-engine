@@ -5,10 +5,10 @@ export interface UidGidInfo {
   gid: number;
 }
 
-export function parseUidGid(stat: { user_id: string; group_id: string }): UidGidInfo {
+export function parseUidGid(stat: { uid: number | string; gid: number | string }): UidGidInfo {
   return {
-    uid: parseInt(stat.user_id, 10),
-    gid: parseInt(stat.group_id, 10),
+    uid: Number(stat.uid),
+    gid: Number(stat.gid),
   };
 }
 

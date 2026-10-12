@@ -3,6 +3,7 @@
 namespace App\System\Project;
 
 use App\Exceptions\NotFoundException;
+use App\Exceptions\ProblemException;
 use App\Lib\Deploy\Source\ArchiveSafety;
 use App\Lib\Http\OutboundUrl;
 use App\Lib\Deploy\Source\ArchiveUnpackedSize;
@@ -43,6 +44,18 @@ class FileManager
     public const ENTRY_TYPE_SCRIPT = 'if [ ! -e "$1" ]; then if [ -L "$1" ]; then echo dangling; else echo missing; fi; '
         . 'elif [ -d "$1" ]; then if [ -L "$2" ]; then echo dir-link; else echo dir; fi; '
         . 'else echo file; fi';
+
+    /** One find row per entry: name, type, size, mtime, mode, uid, gid, link target, target type. */
+    private const ENTRY_FIELDS = '%f\0%y\0%s\0%T@\0%m\0%U\0%G\0%l\0%Y\0';
+
+    /** The confinement script's exit code for a path that resolves outside the home. */
+    private const CONFINE_OUTSIDE_EXIT_CODE = 3;
+
+    /** Entries one listing returns when the caller does not cap it. */
+    public const LIST_DEFAULT_LIMIT = 5000;
+
+    /** Most entries one listing may return. */
+    public const LIST_MAX_LIMIT = 20000;
 
     public function __construct(
         private readonly UserProject $project,
@@ -169,9 +182,9 @@ class FileManager
     }
 
     /**
-     * Like exists(): a link out of the home is refused, not described.
+     * The entry at $path. Like exists(): a link out of the home is refused, not described.
      *
-     * @return array<string, string>
+     * @return array<string, mixed>
      */
     public function stat(string $path): array
     {
@@ -180,34 +193,187 @@ class FileManager
         if (in_array($this->entryType($path), ['missing', 'dangling'], true)) {
             throw new NotFoundException("No such file or directory: {$path}");
         }
-        $process = $this->runOnCore([
-            'stat',
-            '--printf=%n %s %u %g %X %Y %Z %W',
-            $path,
-        ]);
-        $this->assertSucceeded($process);
 
-        return $this->parseStat($process->getOutput());
+        $directory = rtrim($path, '/');
+        $process = $this->runOnCore(['find', $directory, '-maxdepth', '0', '-printf', self::ENTRY_FIELDS]);
+        $this->assertSucceeded($process);
+        $fields = $this->entryFields($process->getOutput());
+
+        return $this->entryFromFields($directory, $fields[0]);
     }
 
     /**
-     * @return array<string, string>
+     * The entries of one directory, read as the account. Directories first, then names in byte order.
+     *
+     * @return array{entries: list<array<string, mixed>>, path: string, truncated: bool, total: int}
      */
-    private function parseStat(string $output): array
+    public function list(string $path, bool $showHidden = true, int $limit = self::LIST_DEFAULT_LIMIT): array
     {
-        $result = [];
-        [
-            $result['file_name'],
-            $result['size'],
-            $result['user_id'],
-            $result['group_id'],
-            $result['access_time'],
-            $result['modify_time'],
-            $result['status_change_time'],
-            $result['create_time'],
-        ] = explode(' ', $output);
+        $path = $this->resolvePath($path);
+        $this->assertInsideHomeForList($path);
+        $this->assertListable($path);
 
-        return $result;
+        $entries = $this->readEntries($path, $showHidden);
+        $total = count($entries);
+        $entries = array_slice($this->sortEntries($entries), 0, $limit);
+        $this->flagSubdirectories($path, $entries);
+
+        return [
+            'entries' => array_values($entries),
+            'path' => $this->homeRelativePath($path),
+            'truncated' => $total > $limit,
+            'total' => $total,
+        ];
+    }
+
+    /** A listing is about a directory: a file is a refusal to act on, a missing path is not found. */
+    private function assertListable(string $path): void
+    {
+        $type = $this->entryType($path);
+        if (in_array($type, ['missing', 'dangling'], true)) {
+            throw new NotFoundException("No such file or directory: {$path}");
+        }
+        if (!in_array($type, ['dir', 'dir-link'], true)) {
+            throw ProblemException::one('path', 'not_a_directory', 'The path is not a directory.');
+        }
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function readEntries(string $path, bool $showHidden): array
+    {
+        $directory = rtrim($path, '/');
+        $process = $this->runOnCore([
+            'find', $directory . '/', '-mindepth', '1', '-maxdepth', '1', '-printf', self::ENTRY_FIELDS,
+        ]);
+        $output = $process->getOutput();
+        if ($process->getExitCode() !== 0 && $output === '') {
+            throw new NotFoundException("No such file or directory: {$path}");
+        }
+
+        $entries = [];
+        foreach ($this->entryFields($output) as $fields) {
+            if ($showHidden || !Str::startsWith($fields[0], '.')) {
+                $entries[] = $this->entryFromFields($directory . '/' . $fields[0], $fields);
+            }
+        }
+
+        return $entries;
+    }
+
+    /**
+     * Directories first, then names in byte order; find returns the readdir order.
+     *
+     * @param list<array<string, mixed>> $entries
+     * @return list<array<string, mixed>>
+     */
+    private function sortEntries(array $entries): array
+    {
+        usort($entries, function (array $a, array $b): int {
+            $byKind = ($a['type'] === 'dir' ? 0 : 1) <=> ($b['type'] === 'dir' ? 0 : 1);
+
+            return $byKind !== 0 ? $byKind : strcmp($a['name'], $b['name']);
+        });
+
+        return $entries;
+    }
+
+    /**
+     * @return list<list<string>>
+     */
+    private function entryFields(string $output): array
+    {
+        $fields = explode("\0", $output);
+        array_pop($fields);
+
+        return array_chunk($fields, substr_count(self::ENTRY_FIELDS, '\0'));
+    }
+
+    /**
+     * @param list<string> $fields
+     * @return array<string, mixed>
+     */
+    private function entryFromFields(string $absolutePath, array $fields): array
+    {
+        [$name, $type, $size, $mtime, $mode, $uid, $gid, $target, $targetType] = $fields;
+        $isLink = $type === 'l';
+
+        return [
+            'name' => $name,
+            'path' => $this->homeRelativePath($absolutePath),
+            'type' => $this->entryTypeFromFind($type),
+            'size' => (int) $size,
+            'mtime' => (int) $mtime,
+            'mode' => str_pad($mode, 4, '0', STR_PAD_LEFT),
+            'uid' => (int) $uid,
+            'gid' => (int) $gid,
+            'target' => $isLink ? $target : null,
+            'target_type' => $isLink ? $this->linkTargetType($targetType) : null,
+            'has_subdirectories' => null,
+        ];
+    }
+
+    private function entryTypeFromFind(string $type): string
+    {
+        return match ($type) {
+            'd' => 'dir',
+            'l' => 'link',
+            default => 'file',
+        };
+    }
+
+    private function linkTargetType(string $type): string
+    {
+        return match ($type) {
+            'd' => 'dir',
+            'f' => 'file',
+            default => 'missing',
+        };
+    }
+
+    /** A path as every other file route accepts it: relative to the home, with a leading slash. */
+    private function homeRelativePath(string $path): string
+    {
+        $home = rtrim($this->homeDirPath(), '/');
+        $relative = rtrim(Str::after(rtrim($path, '/'), $home), '/');
+
+        return $relative === '' ? '/' : $relative;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $entries
+     */
+    private function flagSubdirectories(string $path, array &$entries): void
+    {
+        $parents = null;
+        foreach ($entries as &$entry) {
+            if ($entry['type'] !== 'dir') {
+                continue;
+            }
+            $parents ??= $this->subdirectoryParents($path);
+            $entry['has_subdirectories'] = isset($parents[$entry['name']]);
+        }
+    }
+
+    /**
+     * Names of the immediate subdirectories that themselves hold a directory, in one find.
+     *
+     * @return array<string, true>
+     */
+    private function subdirectoryParents(string $path): array
+    {
+        $process = $this->runOnCore([
+            'find', rtrim($path, '/') . '/', '-mindepth', '2', '-maxdepth', '2', '-type', 'd', '-printf', '%h\0',
+        ]);
+        $parents = [];
+        foreach (explode("\0", $process->getOutput()) as $parent) {
+            if ($parent !== '') {
+                $parents[basename($parent)] = true;
+            }
+        }
+
+        return $parents;
     }
 
     public function mv(string $sourcePath, string $destPath): void
@@ -710,14 +876,33 @@ class FileManager
      */
     private function assertInsideHome(array $paths, array $entries = []): void
     {
+        $this->assertSucceeded($this->confine($paths, $entries));
+    }
+
+    /** A listing through a link out of the home is a refusal the caller can act on, not a bad request. */
+    private function assertInsideHomeForList(string $path): void
+    {
+        $process = $this->confine([$path]);
+        if ($process->getExitCode() === self::CONFINE_OUTSIDE_EXIT_CODE) {
+            throw ProblemException::one('path', 'outside_home', trim($process->getErrorOutput()));
+        }
+        $this->assertSucceeded($process);
+    }
+
+    /**
+     * @param list<string> $paths every symlink followed, the last one too
+     * @param list<string> $entries the last component is the entry itself
+     */
+    private function confine(array $paths, array $entries = []): Process
+    {
         $args = [
             ...array_map(fn (string $p): string => 'F:' . $p, $paths),
             ...array_map(fn (string $p): string => 'E:' . $p, $entries),
         ];
-        $process = $this->runOnCore([
+
+        return $this->runOnCore([
             'sh', '-c', self::CONFINE_SCRIPT, 'sh', $this->homeDirPath(), ...$args,
         ]);
-        $this->assertSucceeded($process);
     }
 
     /**

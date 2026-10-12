@@ -1,7 +1,7 @@
 import { expect, test } from '@/fixtures/test-options';
 import SftpClient from 'ssh2-sftp-client';
 import { expectOneOf } from '@/helpers/expect-one-of';
-import { getDomainBasePath } from '@/helpers/file-path-helpers';
+import { getDomainBasePath, removeFileIfPresent } from '@/helpers/file-path-helpers';
 import { rand } from '@/helpers/random';
 import { requireEngineConnectHost } from '@/helpers/engine-host';
 
@@ -102,3 +102,101 @@ async function createSymlink(
     return false;
   }
 }
+
+test('a symlink is listed as a link, and listing through one out of the home is refused', async ({
+  api,
+  ftpFactory,
+  settings,
+  setupUser,
+}) => {
+  const dir = getDomainBasePath(setupUser.domain);
+  const suffix = Date.now();
+  const targetName = `symlink_target_${suffix}.txt`;
+  const dirName = `symlink_dir_${suffix}`;
+  const fileLinkName = `symlink_file_${suffix}`;
+  const dirLinkName = `symlink_dir_link_${suffix}`;
+  const danglingName = `symlink_dangling_${suffix}`;
+  const escapeName = `symlink_escape_${suffix}`;
+  const host = await requireEngineConnectHost(api);
+
+  const account = await ftpFactory.createSftpAccountWithPassword(
+    setupUser.username,
+    `${setupUser.username}_${rand('sftp')}`
+  );
+  const sftp = new SftpClient();
+
+  try {
+    await expect
+      .poll(
+        async () => {
+          try {
+            await sftp.connect({
+              host,
+              port: settings.ports.sftp,
+              username: account.username,
+              password: account.password,
+            });
+            return 'connected';
+          } catch (error) {
+            await sftp.end().catch(() => undefined);
+            return error instanceof Error ? error.message : String(error);
+          }
+        },
+        {
+          timeout: settings.timing.propagationDelay,
+          intervals: [500],
+          message: 'SFTP account was not reachable',
+        }
+      )
+      .toBe('connected');
+
+    await api.putFileContents(setupUser.username, `${dir}/${targetName}`, 'target');
+    await api.createDirectory(setupUser.username, `${dir}/${dirName}`);
+
+    const sftpBase = `/${setupUser.domain}/public_html`;
+    const links = [
+      [targetName, `${sftpBase}/${fileLinkName}`],
+      [dirName, `${sftpBase}/${dirLinkName}`],
+      ['nowhere', `${sftpBase}/${danglingName}`],
+      ['/root', `${sftpBase}/${escapeName}`],
+    ] as const;
+
+    for (const [target, linkPath] of links) {
+      const created = await createSymlink(sftp, target, linkPath);
+      test.skip(!created, 'This SFTP server does not expose a symlink operation.');
+    }
+
+    const listing = await api.listFiles(setupUser.username, dir);
+    const byName = new Map(listing.data.map((entry) => [entry.name, entry]));
+
+    expect(byName.get(fileLinkName)?.type).toBe('link');
+    expect(byName.get(fileLinkName)?.target).toBe(targetName);
+    expect(byName.get(fileLinkName)?.target_type).toBe('file');
+
+    expect(byName.get(dirLinkName)?.type).toBe('link');
+    expect(byName.get(dirLinkName)?.target).toBe(dirName);
+    expect(byName.get(dirLinkName)?.target_type).toBe('dir');
+
+    expect(byName.get(danglingName)?.type).toBe('link');
+    expect(byName.get(danglingName)?.target_type).toBe('missing');
+
+    expect(byName.get(escapeName)?.type).toBe('link');
+
+    const throughEscape = await api.listFilesRaw(setupUser.username, {
+      path: `${dir}/${escapeName}`,
+    });
+    expectOneOf(throughEscape.status, [422], 'listing through a link out of the home was allowed');
+    expect(
+      (throughEscape.body as { problems?: { field: string; code: string }[] }).problems
+    ).toContainEqual(expect.objectContaining({ field: 'path', code: 'outside_home' }));
+  } finally {
+    await sftp.end().catch(() => undefined);
+    await ftpFactory.deleteSftpAccount(setupUser.username, account.username);
+    for (const name of [fileLinkName, dirLinkName, danglingName, escapeName]) {
+      await api.removeFile(setupUser.username, `${dir}/${name}`).catch(() => undefined);
+    }
+    for (const name of [targetName, dirName]) {
+      await removeFileIfPresent(api, setupUser.username, `${dir}/${name}`, true);
+    }
+  }
+});

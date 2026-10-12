@@ -114,13 +114,15 @@ class ProjectFileManagerTest extends TestCase
 
     public function test_exists_stat_move_copy_and_remove_use_the_project_home(): void
     {
+        $this->requireGnuFind();
+
         $files = $this->fileManager();
         file_put_contents($this->homeDir . '/hello.txt', 'panelalpha');
 
         $this->assertTrue($files->exists('hello.txt'));
         $this->assertFalse($files->exists('missing.txt'));
         $this->assertSame(
-            (string) filesize($this->homeDir . '/hello.txt'),
+            filesize($this->homeDir . '/hello.txt'),
             $files->stat('hello.txt')['size']
         );
 

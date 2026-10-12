@@ -46,7 +46,7 @@ export {
   deployHookRotateResponseSchema,
   deployHookShowResponseSchema,
 } from './deploy-hook.schemas';
-export { fileExistsResponseSchema, fileStatSchema } from './files.schemas';
+export { fileExistsResponseSchema, fileStatSchema, fileListResponseSchema } from './files.schemas';
 export {
   firewallLogEntrySchema,
   firewallLogsResponseSchema,

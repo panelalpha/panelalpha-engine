@@ -117,6 +117,7 @@ return [
     \App\Mcp\Tools\Api\Files\FileDownloadTool::class,
     \App\Mcp\Tools\Api\Files\FileExistsTool::class,
     \App\Mcp\Tools\Api\Files\FileFetchTool::class,
+    \App\Mcp\Tools\Api\Files\FileListTool::class,
     \App\Mcp\Tools\Api\Files\FileMkdirTool::class,
     \App\Mcp\Tools\Api\Files\FileMoveContentsTool::class,
     \App\Mcp\Tools\Api\Files\FileMoveTool::class,
