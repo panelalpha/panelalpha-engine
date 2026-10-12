@@ -7,13 +7,11 @@ use OpenApi\Attributes as OA;
 #[OA\Schema(
     schema: 'MysqlPrivileges',
     properties: [
-        new OA\Property(property: 'dbuser', type: 'string', example: 'johndoe_user'),
-        new OA\Property(property: 'dbname', type: 'string', example: 'johndoe_wp'),
         new OA\Property(
-            property: 'privileges',
-            type: 'array',
-            items: new OA\Items(type: 'string'),
-            example: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
+            property: 'data',
+            type: 'string',
+            description: 'The raw GRANT statement for the user on the database, or an empty string when the user has no privileges there.',
+            example: "GRANT SELECT, INSERT ON `johndoe_wp`.* TO `johndoe_user`@`localhost`",
         ),
     ],
     type: 'object',

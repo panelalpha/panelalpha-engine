@@ -13,16 +13,19 @@ class AppLauncherTest extends TestCase
     {
         $source = file_get_contents(dirname(__DIR__, 6) . '/core/app/System/Project/Dind/AppLauncher.php');
 
-        $start = $this->methodBody($source, 'startWithLogins');
-        $success = strpos($start, 'getExitCode() === 0');
-        $this->assertNotFalse($success, 'start() no longer branches on a successful up.');
+        $this->assertStringContainsString('$this->outcome(', $this->methodBody($source, 'startWithLogins'));
 
-        $afterUp = substr($start, $success);
-        $this->assertStringContainsString('appHealth()->report()', $afterUp);
-        $this->assertStringContainsString('appCertificate()->remember()', $afterUp);
+        $outcome = $this->methodBody($source, 'outcome');
+        $failure = strpos($outcome, 'getExitCode() !== 0');
+        $this->assertNotFalse($failure, 'start() no longer branches on a successful up.');
+        $this->assertStringContainsString('$this->recordServingVerdict()', substr($outcome, $failure));
+
+        $verdict = $this->methodBody($source, 'recordServingVerdict');
+        $this->assertStringContainsString('appHealth()->report()', $verdict);
+        $this->assertStringContainsString('appCertificate()->remember()', $verdict);
         $this->assertLessThan(
-            strpos($afterUp, 'appCertificate()->remember()'),
-            strpos($afterUp, 'appHealth()->report()'),
+            strpos($verdict, 'appCertificate()->remember()'),
+            strpos($verdict, 'appHealth()->report()'),
             'The health report is written before the certificate snapshot.'
         );
     }

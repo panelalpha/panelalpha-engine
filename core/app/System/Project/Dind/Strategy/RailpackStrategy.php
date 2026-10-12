@@ -210,19 +210,7 @@ class RailpackStrategy
         return true;
     }
 
-    /**
-     * Cache tags worth reading for this plan, or null to read them all.
-     *
-     * Anything unexpected — unreadable plan, a runtime we do not warm — returns
-     * null so the build keeps the old behaviour. Guessing a narrower list wrong
-     * costs a full rebuild; a spare round trip costs milliseconds.
-     *
-     * @return list<string>|null
-     */
-    /**
-     * The plan railpack wrote, or null when it cannot be read — the build
-     * still runs, it just gets every cache tag and no preload.
-     */
+    /** The plan railpack wrote, or null when it cannot be read; the build still runs, without a preload. */
     private function readPlan(string $planPath, string $username): ?string
     {
         try {

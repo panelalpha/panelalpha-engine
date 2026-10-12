@@ -56,7 +56,7 @@ class PhpController extends Controller
             ],
         )),
         responses: [
-            new OA\Response(response: 200, description: 'INI settings updated', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse')),
+            new OA\Response(response: 204, description: 'INI settings updated'),
             new OA\Response(response: 422, description: 'Not a PHP hosting project, or invalid settings', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]

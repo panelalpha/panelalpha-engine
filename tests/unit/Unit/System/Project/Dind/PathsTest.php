@@ -47,7 +47,10 @@ class PathsTest extends TestCase
     public function test_a_file_carrying_the_generated_label_is_the_engines_own(): void
     {
         $path = tempnam(sys_get_temp_dir(), 'compose');
-        file_put_contents($path, '# '.GeneratedCompose::LABEL."\nservices:\n  app:\n    image: nginx:alpine\n");
+        // The label on a service, as every generator writes it: a mention in a
+        // comment is not engine output (engine#778).
+        file_put_contents($path, "services:\n  app:\n    image: nginx:alpine\n    labels:\n      "
+            . GeneratedCompose::LABEL . ": framework-recipe\n");
 
         try {
             $this->assertTrue(Paths::isEngineComposeFile($path));
