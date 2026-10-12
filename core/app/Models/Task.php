@@ -260,6 +260,22 @@ class Task extends Model
         return $this->settle(['status' => self::STATUS_COMPLETED, 'completed_at' => now()]);
     }
 
+    /**
+     * Merge fields into `details` from the worker that owns the row right now.
+     *
+     * @param array<string, mixed> $details
+     */
+    public function mergeDetails(array $details): bool
+    {
+        if ($details === []) {
+            return false;
+        }
+
+        $this->details = array_merge($this->details ?? [], $details);
+
+        return $this->save();
+    }
+
     public function markFailed(string $error): bool
     {
         $details = $this->details ?? [];

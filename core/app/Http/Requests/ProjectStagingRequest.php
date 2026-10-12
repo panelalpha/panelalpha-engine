@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Exceptions\ProblemException;
 use App\Http\Requests\Concerns\LowercasesInput;
 use App\Models\User;
 use App\Rules\DomainName;
@@ -28,21 +29,35 @@ class ProjectStagingRequest extends FormRequest
         return [
             'new_username' => 'sometimes|nullable|string|alpha_num:ascii|regex:/^[a-z]{1}/|lowercase|between:3,15',
             'domain' => 'sometimes|nullable|string|regex:' . DomainName::REGEX,
+            'copy_databases' => 'sometimes|boolean',
         ];
     }
 
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator): void {
+            if ($validator->errors()->isNotEmpty()) {
+                return;
+            }
+
             $source = $this->sourceProject();
             if ($source === null) {
                 return;
             }
 
-            foreach (self::createProblems($source) as $problem) {
-                $validator->errors()->add($problem['field'], $problem['message']);
+            $problems = self::createProblems($source, $this->requestedMysqlPrefix());
+            if ($problems !== []) {
+                throw ProblemException::of($problems);
             }
         });
+    }
+
+    /** The prefix the requested (never the generated) destination would give its MySQL objects. */
+    private function requestedMysqlPrefix(): ?string
+    {
+        $newUsername = $this->input('new_username');
+
+        return is_string($newUsername) && $newUsername !== '' ? $newUsername . '_' : null;
     }
 
     private function sourceProject(): ?User
@@ -52,16 +67,16 @@ class ProjectStagingRequest extends FormRequest
         return is_string($username) && $username !== '' ? User::findByUsername($username) : null;
     }
 
-    public static function assertCanCreate(User $source): void
+    public static function assertCanCreate(User $source, ?string $destPrefix = null): void
     {
-        Projects::assertCanCreate($source);
+        Projects::assertCanCreate($source, $destPrefix);
     }
 
     /**
-     * @return list<array{field: string, message: string}>
+     * @return list<array{field: string, code: string, message: string}>
      */
-    public static function createProblems(User $source): array
+    public static function createProblems(User $source, ?string $destPrefix = null): array
     {
-        return Projects::createProblems($source);
+        return Projects::createProblems($source, $destPrefix);
     }
 }

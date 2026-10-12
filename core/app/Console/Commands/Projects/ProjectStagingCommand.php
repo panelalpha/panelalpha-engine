@@ -49,7 +49,7 @@ class ProjectStagingCommand extends Command
                 return 1;
             }
 
-            ProjectStagingRequest::assertCanCreate($source);
+            ProjectStagingRequest::assertCanCreate($source, $newUsername . '_');
             $dest = $source->makePendingStaging($newUsername, $destDomain, 'artisan');
             $system->projects()->copy($source->username, $dest->username);
 

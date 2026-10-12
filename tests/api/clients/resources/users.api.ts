@@ -266,7 +266,7 @@ export class UsersApi extends EngineApiBase {
 
   async createStaging(
     username: string,
-    data: { new_username?: string; domain?: string } = {}
+    data: { new_username?: string; domain?: string; copy_databases?: boolean } = {}
   ): Promise<ApiResponse<User>> {
     const response = await this.api.post(`projects/${username}/staging`, { data });
     await this.assertStatus(response, 202);
@@ -275,20 +275,32 @@ export class UsersApi extends EngineApiBase {
 
   async createStagingRaw(
     username: string,
-    data: { new_username?: string; domain?: string } = {}
+    data: { new_username?: string; domain?: string; copy_databases?: boolean } = {}
   ): Promise<{ status: number; body: any }> {
     const response = await this.api.post(`projects/${username}/staging`, { data });
     return this.rawCall(response);
   }
 
-  async pushProject(username: string, target: string): Promise<ApiResponse<User>> {
-    const response = await this.api.post(`projects/${username}/push`, { data: { target } });
+  async pushProject(
+    username: string,
+    target: string,
+    flags: { files?: boolean; databases?: boolean } = {}
+  ): Promise<ApiResponse<User>> {
+    const response = await this.api.post(`projects/${username}/push`, {
+      data: { target, ...flags },
+    });
     await this.assertStatus(response, 202);
     return response.json();
   }
 
-  async pushProjectRaw(username: string, target: string): Promise<{ status: number; body: any }> {
-    const response = await this.api.post(`projects/${username}/push`, { data: { target } });
+  async pushProjectRaw(
+    username: string,
+    target: string,
+    flags: { files?: boolean; databases?: boolean } = {}
+  ): Promise<{ status: number; body: any }> {
+    const response = await this.api.post(`projects/${username}/push`, {
+      data: { target, ...flags },
+    });
     return this.rawCall(response);
   }
 

@@ -20,6 +20,7 @@ use App\Http\Resources\TaskResource;
 use App\Http\Resources\UserCollection;
 use App\Http\Resources\UserResource;
 use App\System;
+use App\System\Projects;
 use App\Lib\Helper;
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\DeployLog\DeployLogger;
@@ -1068,6 +1069,12 @@ class UserController extends Controller
             properties: [
                 new OA\Property(property: 'new_username', type: 'string', nullable: true),
                 new OA\Property(property: 'domain', type: 'string', nullable: true),
+                new OA\Property(
+                    property: 'copy_databases',
+                    description: 'Copy the source project\'s MySQL databases under the clone prefix. Defaults to true.',
+                    type: 'boolean',
+                    nullable: true,
+                ),
             ],
         )),
         responses: [
@@ -1093,14 +1100,16 @@ class UserController extends Controller
     {
         $srcUser = $this->projectOr404($username);
 
-        /** @var array{new_username?: ?string, domain?: ?string} */
+        /** @var array{new_username?: ?string, domain?: ?string, copy_databases?: ?bool} */
         $params = $request->validated();
+        $copyDatabases = $params['copy_databases'] ?? true;
 
         $system = new System();
 
         $newUsername = $this->cloneUsername($srcUser, $params['new_username'] ?? null, $system);
         $cloneDomain = $this->cloneDomainName($srcUser, $params['domain'] ?? null);
         $this->assertMemoryLimitFits($srcUser);
+        Projects::assertDatabaseNamesFit($srcUser, $newUsername . '_');
         $newDetails = $srcUser->detailsForCopiedProject($newUsername);
         $domainAliases = $this->wwwAliasIfFree($cloneDomain);
 
@@ -1125,7 +1134,7 @@ class UserController extends Controller
         $cloneDomainModel->save();
 
         try {
-            $system->projects()->clone($srcUser->username, $cloneUser->username);
+            $system->projects()->clone($srcUser->username, $cloneUser->username, $copyDatabases);
             $cloneUser = $cloneUser->refresh();
         } catch (\Exception $e) {
             $this->cloneFailed($cloneUser, $e);

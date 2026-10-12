@@ -48,6 +48,8 @@ class ProjectPushTool extends ApiTool
     {
         return [
             'target',
+            'files',
+            'databases',
         ];
     }
 
@@ -69,6 +71,8 @@ class ProjectPushTool extends ApiTool
         return [
             'name' => $schema->string()->required(),
             'target' => $schema->string()->required(),
+            'files' => $schema->boolean()->description('Replace the target home directory with the source files. Defaults to true.'),
+            'databases' => $schema->boolean()->description('Replace the target MySQL databases with the source data. Defaults to true.'),
         ];
     }
 }

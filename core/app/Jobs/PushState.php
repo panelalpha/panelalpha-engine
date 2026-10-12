@@ -25,15 +25,31 @@ class PushState implements ShouldQueue
 
     public int $timeout = JobBudget::SECONDS;
 
-    public function __construct(public string $fromUsername, public string $toUsername)
-    {
+    public function __construct(
+        public string $fromUsername,
+        public string $toUsername,
+        public bool $files = true,
+        public bool $databases = true,
+    ) {
         $this->onQueue('default');
     }
 
     public function handle(): void
     {
         $this->runTask(function (): void {
-            (new System())->projects()->pushToApp($this->fromUsername, $this->toUsername);
+            $result = (new System())->projects()->pushToApp(
+                $this->fromUsername,
+                $this->toUsername,
+                $this->files,
+                $this->databases,
+            );
+
+            $this->task()?->mergeDetails([
+                'files' => $this->files,
+                'databases' => $this->databases,
+                'databases_copied' => $result->databasePairs(),
+                'warnings' => $result->warnings,
+            ]);
         });
     }
 
@@ -67,8 +83,8 @@ class PushState implements ShouldQueue
     private function removeIncoming(System $system, User $to): void
     {
         try {
-            $incoming = rtrim($system->project($to)->homeDirPath(), '/') . '/.incoming';
-            $system->runProcess(['sudo', 'rm', '-rf', $incoming]);
+            $home = rtrim($system->project($to)->homeDirPath(), '/');
+            $system->runProcess(['sudo', 'rm', '-rf', $home . '/.incoming', $home . '/.pre-push-db']);
         } catch (\Throwable $cleanup) {
             Log::warning('PushState failed cleanup could not remove .incoming', [
                 'target'    => $this->toUsername,

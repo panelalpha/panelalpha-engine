@@ -46,7 +46,7 @@ class Mysql
 
     public function dumpToGzip(string $name, string $dest): void
     {
-        $this->assertDatabaseName($name);
+        self::assertDatabaseName($name);
         $this->runInCore(
             $this->inSitesDb('mariadb-dump --single-transaction -uroot ' . escapeshellarg($name))
             . ' | gzip -c > ' . escapeshellarg($dest),
@@ -68,7 +68,7 @@ class Mysql
 
     public function restoreFromGzip(string $name, string $sqlGzPath): void
     {
-        $this->assertDatabaseName($name);
+        self::assertDatabaseName($name);
         $this->runInCore(
             'gunzip -c ' . escapeshellarg($sqlGzPath) . ' | ' . $this->inSitesDb('mariadb -uroot ' . escapeshellarg($name)),
             'database restore failed'
@@ -103,10 +103,21 @@ class Mysql
     {
         $argv = [
             'sudo', 'docker', 'compose', '--project-directory', $this->system()->engineDirPath(),
-            'exec', '-T', SitesDbCaches::SERVICE, 'sh', '-c', 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" ' . $command,
+            'exec', '-T', SitesDbCaches::SERVICE, 'bash', '-c',
+            'export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; ' . $command,
         ];
 
         return implode(' ', array_map('escapeshellarg', $argv));
+    }
+
+    /**
+     * Run one shell script inside sites-db, on the connection the dump and the
+     * restore use. Kept public so a copy can stream a dump straight into the
+     * destination without staging a file.
+     */
+    public function runSitesDbScript(string $script, string $failurePrefix): void
+    {
+        $this->runInCore($this->inSitesDb($script), $failurePrefix);
     }
 
     /** pipefail, so a failing dump is not hidden by gzip's success. */
@@ -126,9 +137,15 @@ class Mysql
         return $this->system ?? throw new RuntimeException('Mysql dump/restore requires an Engine System');
     }
 
-    private function assertDatabaseName(string $name): void
+    /** The grammar every database name this engine copies must satisfy. */
+    public static function isValidDatabaseName(string $name): bool
     {
-        if (!preg_match('/^[A-Za-z_-][A-Za-z0-9_-]*$/D', $name)) {
+        return preg_match('/^[A-Za-z_-][A-Za-z0-9_-]*$/D', $name) === 1;
+    }
+
+    public static function assertDatabaseName(string $name): void
+    {
+        if (!self::isValidDatabaseName($name)) {
             throw new RuntimeException('Invalid database name');
         }
     }

@@ -2,11 +2,18 @@
 
 namespace App\System;
 
+use App\Exceptions\ProblemException;
 use App\Lib\Deploy\DetectAppPort;
+use App\Models\Domain as DomainModel;
+use App\Models\MysqlDatabase;
 use App\Models\User as ModelsUser;
 use App\System as EngineSystem;
 use App\System\Project\Dind;
 use App\System\Project\Dind\Paths;
+use App\System\Services\Mysql;
+use App\System\Services\Mysql\DatabaseCopier;
+use App\System\Services\Mysql\DatabaseCopyResult;
+use Illuminate\Support\Facades\Log;
 
 class Projects
 {
@@ -17,22 +24,31 @@ class Projects
     ) {
     }
 
-    public function clone(string $sourceUsername, string $targetUsername): void
+    public function clone(string $sourceUsername, string $targetUsername, bool $copyDatabases = true): void
     {
         $source = ModelsUser::findByUsernameOrFail($sourceUsername);
         $target = ModelsUser::findByUsernameOrFail($targetUsername);
-        $this->cloneOrCopy($source, $target, asStaging: false);
+        $this->cloneOrCopy($source, $target, asStaging: false, copyDatabases: $copyDatabases);
     }
 
-    public function copy(string $sourceUsername, string $targetUsername): void
-    {
+    public function copy(
+        string $sourceUsername,
+        string $targetUsername,
+        bool $copyDatabases = true,
+        ?callable $log = null,
+    ): ?DatabaseCopyResult {
         $source = ModelsUser::findByUsernameOrFail($sourceUsername);
         $target = ModelsUser::findByUsernameOrFail($targetUsername);
-        $this->cloneOrCopy($source, $target, asStaging: true);
+
+        return $this->cloneOrCopy($source, $target, asStaging: true, copyDatabases: $copyDatabases, log: $log);
     }
 
-    public function pushToApp(string $sourceUsername, string $targetUsername): void
-    {
+    public function pushToApp(
+        string $sourceUsername,
+        string $targetUsername,
+        bool $files = true,
+        bool $databases = true,
+    ): DatabaseCopyResult {
         $from = ModelsUser::findByUsernameOrFail($sourceUsername);
         $to = ModelsUser::findByUsernameOrFail($targetUsername);
         self::assertCanPush($from, $to);
@@ -46,8 +62,11 @@ class Projects
         $toHome = rtrim($toProject->homeDirPath(), '/');
         $incomingDir = $toHome . '/.incoming';
         $prePushDir = $toHome . '/.pre-push';
-        $swapped = false;
-        $isDindDest = $to->getTemplate() === 'dind';
+        $rollbackDir = $toHome . '/.pre-push-db';
+        $isDindDest = self::isDind($to);
+        $rollbacks = [];
+        $createdDatabases = [];
+        $result = new DatabaseCopyResult();
 
         try {
             if ($this->pathIsDirectoryAsRoot($prePushDir)) {
@@ -63,93 +82,49 @@ class Projects
                 );
             }
 
-            $this->assertPushDiskSpace($fromProject, $fromHome, $toHome, $isDindDest);
+            if ($files) {
+                $this->assertPushDiskSpace($fromProject, $fromHome, $toHome, $isDindDest);
+            }
 
             $this->pauseAppForCopy($fromProject);
             $this->pauseAppForCopy($toProject);
 
-            $this->runPushProcess(
-                ['sudo', 'mkdir', '-p', $incomingDir],
-                'Failed to create .incoming directory'
-            );
-
-            $rsyncCmd = [
-                'sudo', 'rsync', '-a', '--delete',
-                '--exclude=.incoming',
-                '--exclude=.pre-push',
-            ];
-            if ($isDindDest) {
-                $rsyncCmd[] = '--exclude=docker/';
+            if ($databases && !$isDindDest) {
+                $result = $this->pushDatabases($from, $to, $rollbackDir, $rollbacks, $createdDatabases);
             }
-            $rsyncCmd[] = rtrim($fromHome, '/') . '/';
-            $rsyncCmd[] = rtrim($incomingDir, '/') . '/';
-            $this->runPushProcess(
-                $rsyncCmd,
-                'Failed to rsync source home into .incoming'
-            );
 
-            $incomingProject = rtrim($incomingDir, '/') . '/project';
-            $this->prepareVolumes($toProject, $incomingProject);
-
-            $sourceVolumeDataCount = $this->countVolumeDataDirs($fromProject);
-            $copiedVolumes = $toProject->copyVolumeDataToIncoming($fromProject);
-
-            if ($sourceVolumeDataCount > 0 && $copiedVolumes === 0) {
-                $this->cleanupIncomingDir($incomingDir);
-                $this->resumeBoth($fromProject, $toProject);
-                $this->markPushFailed($to, 'Failed to copy DinD volume data from source (0 volumes copied).');
-                throw new \RuntimeException(
-                    'Failed to copy DinD volume data from source (0 volumes copied).'
+            if ($files) {
+                $this->runPushProcess(
+                    ['sudo', 'mkdir', '-p', $incomingDir],
+                    'Failed to create .incoming directory'
                 );
-            }
-
-            if ($sourceVolumeDataCount > 0 && $copiedVolumes !== $sourceVolumeDataCount) {
-                $message = "Failed to copy DinD volume data from source ({$copiedVolumes} of {$sourceVolumeDataCount} volumes copied).";
-                $this->cleanupIncomingDir($incomingDir);
-                $this->resumeBoth($fromProject, $toProject);
-                $this->markPushFailed($to, $message);
-                throw new \RuntimeException($message);
-            }
-
-            $this->swapIncomingHome($toHome, $incomingDir, $prePushDir);
-            $swapped = true;
-            $toProject->copyVolumesForClone()?->swapIncomingVolumes();
-
-            $toProject->fixPermissions();
-
-            if (($to->hasGitProject() || $to->getTemplate() === 'dind') && $toProject->hasUserApp()) {
-                $start = $toProject->startUserApp();
-                if (($start['exit_code'] ?? 1) !== 0) {
-                    $output = trim(($start['stderr'] ?? '') . ' ' . ($start['stdout'] ?? ''));
-                    $this->resumeBoth($fromProject, $toProject);
-                    $this->markPushFailed(
-                        $to,
-                        $output !== '' ? $output : 'Failed to start target application after push.'
-                    );
-                    throw new \RuntimeException(
-                        $output !== '' ? $output : 'Failed to start target application after push.'
-                    );
+                $this->rsyncHomeIntoIncoming($fromHome, $incomingDir, $isDindDest);
+                if (!$isDindDest) {
+                    $this->rebaseIncomingDocumentRoot($from, $to, $incomingDir);
                 }
-            } else {
-                $toProject->start();
+                $this->copyVolumesToIncoming($fromProject, $toProject, $incomingDir, $isDindDest && $databases);
+                $this->swapIncomingHome($toHome, $incomingDir, $prePushDir);
+                $toProject->copyVolumesForClone()?->swapIncomingVolumes();
+                $toProject->fixPermissions();
             }
 
-            $this->resumeAppAfterCopy($fromProject);
+            $this->startTargetAfterPush($to, $toProject);
 
-            $this->cleanupPushSuccess($prePushDir, $incomingDir);
+            $this->resumeBoth($fromProject, $toProject);
+
+            $this->cleanupPushSuccess($prePushDir, $incomingDir, $rollbackDir);
             $toProject->copyVolumesForClone()?->discardVolumeBackups();
             $this->markPushCompleted($to);
+
+            return $result;
         } catch (\Throwable $e) {
-            if (!$swapped) {
-                $this->cleanupIncomingDir($incomingDir);
-                $this->resumeBoth($fromProject, $toProject);
-            } else {
-                $this->resumeBoth($fromProject, $toProject);
-            }
+            $this->restorePushDatabases($rollbacks, $createdDatabases, $to);
+            $this->cleanupIncomingDir($incomingDir);
+            $this->resumeBoth($fromProject, $toProject);
+            $this->cleanupPath($rollbackDir);
 
             $details = $to->getDetails();
-            $alreadyFailed = ($details['async_status']['push'] ?? null) === 'failed';
-            if (!$alreadyFailed) {
+            if (($details['async_status']['push'] ?? null) !== 'failed') {
                 $this->markPushFailed($to, $e->getMessage());
             }
 
@@ -161,8 +136,244 @@ class Projects
         }
     }
 
-    private function cloneOrCopy(ModelsUser $source, ModelsUser $dest, bool $asStaging): void
+    /**
+     * The target's own databases, each replaced with the source's data under its
+     * rollback dump. A source database the target does not own is created
+     * without the source's grants and recorded as a warning.
+     *
+     * @param array<string, string> $rollbacks destination database => rollback dump
+     * @param list<string>          $created
+     */
+    private function pushDatabases(
+        ModelsUser $from,
+        ModelsUser $to,
+        string $rollbackDir,
+        array &$rollbacks,
+        array &$created,
+    ): DatabaseCopyResult {
+        $copier = $this->databaseCopier();
+        $sourcePrefix = $from->getMysqlPrefix();
+        $targetPrefix = $to->getMysqlPrefix();
+        $owned = $to->mysqlDatabases()->pluck('database')->all();
+
+        if ($from->mysqlDatabases->isEmpty()) {
+            return new DatabaseCopyResult();
+        }
+
+        $this->runPushProcess(
+            ['sudo', 'mkdir', '-p', $rollbackDir],
+            'Failed to prepare the push database rollback directory'
+        );
+
+        $databases = [];
+        $warnings = [];
+        foreach ($from->mysqlDatabases as $row) {
+            $source = $row->database;
+            $dest = DatabaseCopier::mapName($source, $sourcePrefix, $targetPrefix);
+            if (in_array($dest, $owned, true)) {
+                $rollbacks[$dest] = DatabaseCopier::rollbackPath($rollbackDir, $dest);
+                $copier->replaceDatabase($source, $dest, $rollbackDir, $to);
+            } else {
+                MysqlDatabase::create(['user_id' => $to->id, 'database' => $dest]);
+                $created[] = $dest;
+                $copier->copyDatabase($source, $dest);
+                $warnings[] = "Created database '{$dest}' without grants: the target does not own that database.";
+            }
+            $databases[$source] = $dest;
+        }
+
+        return new DatabaseCopyResult($databases, warnings: $warnings);
+    }
+
+    /**
+     * @param array<string, string> $rollbacks
+     * @param list<string>          $created
+     */
+    private function restorePushDatabases(array $rollbacks, array $created, ModelsUser $to): void
     {
+        $mysql = $this->system->mysql();
+        foreach ($rollbacks as $database => $dump) {
+            try {
+                $mysql->restoreFromGzip($database, $dump);
+            } catch (\Throwable $e) {
+                Log::warning("Push rollback failed for database '{$database}': " . $e->getMessage());
+            }
+        }
+
+        foreach ($created as $database) {
+            try {
+                if ($mysql->databases()->databaseExists($database)) {
+                    $mysql->databases()->deleteDatabase($database);
+                }
+                $to->mysqlDatabases()->where('database', $database)->delete();
+            } catch (\Throwable $e) {
+                Log::warning("Push cleanup failed for database '{$database}': " . $e->getMessage());
+            }
+        }
+    }
+
+    private function startTargetAfterPush(ModelsUser $to, Project $toProject): void
+    {
+        if (($to->hasGitProject() || $to->getTemplate() === 'dind') && $toProject->hasUserApp()) {
+            $start = $toProject->startUserApp();
+            if (($start['exit_code'] ?? 1) !== 0) {
+                $output = trim(($start['stderr'] ?? '') . ' ' . ($start['stdout'] ?? ''));
+                throw new \RuntimeException(
+                    $output !== '' ? $output : 'Failed to start target application after push.'
+                );
+            }
+
+            return;
+        }
+
+        $toProject->start();
+    }
+
+    private function rsyncHomeIntoIncoming(string $fromHome, string $incomingDir, bool $isDindDest): void
+    {
+        $cmd = [
+            'sudo', 'rsync', '-a', '--delete',
+            '--exclude=.incoming',
+            '--exclude=.pre-push',
+            '--exclude=.pre-push-db',
+        ];
+        if ($isDindDest) {
+            $cmd[] = '--exclude=docker/';
+        }
+        $cmd[] = rtrim($fromHome, '/') . '/';
+        $cmd[] = rtrim($incomingDir, '/') . '/';
+
+        $this->runPushProcess($cmd, 'Failed to rsync source home into .incoming');
+    }
+
+    private function copyVolumesToIncoming(
+        Project $fromProject,
+        Project $toProject,
+        string $incomingDir,
+        bool $copyVolumes,
+    ): void {
+        if (!$copyVolumes) {
+            return;
+        }
+
+        $incomingProject = rtrim($incomingDir, '/') . '/project';
+        $this->prepareVolumes($toProject, $incomingProject);
+
+        $sourceVolumeDataCount = $this->countVolumeDataDirs($fromProject);
+        $copiedVolumes = $toProject->copyVolumeDataToIncoming($fromProject);
+
+        if ($sourceVolumeDataCount > 0 && $copiedVolumes === 0) {
+            throw new \RuntimeException(
+                'Failed to copy DinD volume data from source (0 volumes copied).'
+            );
+        }
+
+        if ($sourceVolumeDataCount > 0 && $copiedVolumes !== $sourceVolumeDataCount) {
+            throw new \RuntimeException(
+                "Failed to copy DinD volume data from source ({$copiedVolumes} of {$sourceVolumeDataCount} volumes copied)."
+            );
+        }
+    }
+
+    private function rebaseIncomingDocumentRoot(ModelsUser $from, ModelsUser $to, string $incomingDir): void
+    {
+        if (!str_starts_with(self::sourceDocumentRoot($from), "/{$from->domain}/")) {
+            return;
+        }
+
+        $this->moveAccountDirectory(
+            rtrim($incomingDir, '/') . '/' . $from->domain,
+            rtrim($incomingDir, '/') . '/' . $to->domain,
+        );
+    }
+
+    private function rebaseDocumentRoot(
+        Project $destProject,
+        ModelsUser $source,
+        ModelsUser $dest,
+        DomainModel $domain,
+    ): void {
+        $sourceRoot = self::sourceDocumentRoot($source);
+        $rebased = self::rebasedDocumentRoot($sourceRoot, $source->domain, $dest->domain);
+
+        if ($rebased !== $sourceRoot) {
+            $home = rtrim($destProject->homeDirPath(), '/');
+            $this->moveAccountDirectory($home . '/' . $source->domain, $home . '/' . $dest->domain);
+            $destProject->fixPermissions();
+        }
+
+        $domain->setDocumentRoot($rebased);
+        $domain->save();
+    }
+
+    private static function sourceDocumentRoot(ModelsUser $user): string
+    {
+        return $user->getMainDomain()?->getDocumentRoot() ?? "/{$user->domain}/public_html";
+    }
+
+    public static function rebasedDocumentRoot(string $documentRoot, string $sourceDomain, string $destDomain): string
+    {
+        $prefix = "/{$sourceDomain}/";
+        if (!str_starts_with($documentRoot, $prefix)) {
+            return $documentRoot;
+        }
+
+        return "/{$destDomain}/" . substr($documentRoot, strlen($prefix));
+    }
+
+    /**
+     * Move one directory inside an account home, as root and without following
+     * a symlink the source account planted: -T, plus a refusal when either end
+     * is a link or the destination already exists.
+     */
+    public function moveAccountDirectory(string $from, string $to): void
+    {
+        if (!$this->pathExistsAsRoot($from) && !$this->pathIsSymlinkAsRoot($from)) {
+            return;
+        }
+
+        if ($this->pathIsSymlinkAsRoot($from) || !$this->pathIsDirectoryAsRoot($from)) {
+            throw new \RuntimeException("Refusing to move '{$from}': it is not a directory.");
+        }
+
+        if ($this->pathExistsAsRoot($to) || $this->pathIsSymlinkAsRoot($to)) {
+            throw new \RuntimeException("Refusing to move over existing '{$to}'.");
+        }
+
+        $this->runPushProcess(['sudo', 'mv', '-T', $from, $to], "Failed to move '{$from}' to '{$to}'");
+    }
+
+    private static function isDind(ModelsUser $user): bool
+    {
+        return $user->hasGitProject() || $user->getTemplate() === 'dind';
+    }
+
+    private function databaseCopier(): DatabaseCopier
+    {
+        return new DatabaseCopier($this->system->mysql());
+    }
+
+    private function pathIsSymlinkAsRoot(string $path): bool
+    {
+        return $this->system->runProcess(['sudo', 'test', '-L', $path])->isSuccessful();
+    }
+
+    private function cleanupPath(string $path): void
+    {
+        if (!$this->pathExistsAsRoot($path) && !$this->pathIsSymlinkAsRoot($path)) {
+            return;
+        }
+
+        $this->runPushProcess(['sudo', 'rm', '-rf', $path], "Failed to remove '{$path}'");
+    }
+
+    private function cloneOrCopy(
+        ModelsUser $source,
+        ModelsUser $dest,
+        bool $asStaging,
+        bool $copyDatabases = true,
+        ?callable $log = null,
+    ): ?DatabaseCopyResult {
         $sourceProject = $this->system->project($source);
         $destProject = $this->system->project($dest);
         $srcPaused = false;
@@ -198,13 +409,15 @@ class Projects
             try {
                 $destProject->copyHomeDirFrom($sourceProject);
                 $destProject->copyProjectConfigFrom($sourceProject);
-                $this->prepareVolumes($destProject);
-                $srcCount = $this->countVolumeDataDirs($sourceProject);
-                $copied = $destProject->copyVolumeDataFrom($sourceProject);
-                if ($srcCount > 0 && $copied !== $srcCount) {
-                    throw new \RuntimeException(
-                        "Failed to copy DinD volume data from source ({$copied} of {$srcCount} volumes copied)."
-                    );
+                if ($copyDatabases) {
+                    $this->prepareVolumes($destProject);
+                    $srcCount = $this->countVolumeDataDirs($sourceProject);
+                    $copied = $destProject->copyVolumeDataFrom($sourceProject);
+                    if ($srcCount > 0 && $copied !== $srcCount) {
+                        throw new \RuntimeException(
+                            "Failed to copy DinD volume data from source ({$copied} of {$srcCount} volumes copied)."
+                        );
+                    }
                 }
             } finally {
                 if ($srcPaused) {
@@ -229,6 +442,19 @@ class Projects
             if ($domainModel === null) {
                 throw new \RuntimeException('Destination has no domain row.');
             }
+            $isDindDest = self::isDind($dest);
+            if (!$isDindDest) {
+                $this->rebaseDocumentRoot($destProject, $source, $dest, $domainModel);
+            }
+            $databaseResult = null;
+            if ($copyDatabases && !$isDindDest) {
+                $databaseResult = $this->databaseCopier()->copyProjectDatabases(
+                    $source,
+                    $dest,
+                    $log ?? static function (string $line): void {
+                    }
+                );
+            }
             $destProject->syncGeneratedProxyRules();
             $this->system->project($dest)->domain($domainModel)->create();
 
@@ -249,6 +475,8 @@ class Projects
                 $dest->mergeAsyncStatus(['staging' => 'completed']);
             }
             $dest->save();
+
+            return $databaseResult;
         } catch (\Throwable $e) {
             if ($srcPaused) {
                 try {
@@ -309,9 +537,9 @@ class Projects
         }
     }
 
-    public static function assertCanCreate(ModelsUser $source): void
+    public static function assertCanCreate(ModelsUser $source, ?string $destPrefix = null): void
     {
-        $problems = self::createProblems($source);
+        $problems = self::createProblems($source, $destPrefix);
         if ($problems !== []) {
             throw new \RuntimeException($problems[0]['message'], 422);
         }
@@ -343,28 +571,92 @@ class Projects
     }
 
     /**
-     * @return list<array{field: string, message: string}>
+     * @return list<array{field: string, code: string, message: string}>
      */
-    public static function createProblems(ModelsUser $source): array
+    public static function createProblems(ModelsUser $source, ?string $destPrefix = null): array
     {
         $problems = [];
         if ($source->status === 'pending') {
             $problems[] = [
                 'field'   => 'project',
+                'code'    => 'project_pending',
                 'message' => "Project '{$source->username}' is pending.",
             ];
         }
         if ($source->isStaging()) {
             $problems[] = [
                 'field'   => 'project',
+                'code'    => 'project_is_staging',
                 'message' => "Project '{$source->username}' is a staging project and cannot create staging.",
             ];
         }
         if ($source->exists && $source->stagingUser()->exists()) {
             $problems[] = [
                 'field'   => 'project',
+                'code'    => 'project_has_staging',
                 'message' => 'Project already has a staging.',
             ];
+        }
+
+        if ($destPrefix !== null) {
+            $problems = [...$problems, ...self::databaseNameProblems($source, $destPrefix, 'new_username')];
+        }
+
+        return $problems;
+    }
+
+    /**
+     * Refuse a copy whose database or user names would not fit the destination
+     * prefix, before any account or database is created.
+     */
+    public static function assertDatabaseNamesFit(ModelsUser $source, string $destPrefix): void
+    {
+        $problems = self::databaseNameProblems($source, $destPrefix, 'new_username');
+        if ($problems !== []) {
+            throw ProblemException::of($problems);
+        }
+    }
+
+    /**
+     * @return list<array{field: string, code: string, message: string}>
+     */
+    private static function databaseNameProblems(ModelsUser $source, string $destPrefix, string $field): array
+    {
+        if (!$source->exists) {
+            return [];
+        }
+
+        $sourcePrefix = $source->getMysqlPrefix();
+        $problems = [];
+
+        foreach ($source->mysqlDatabases as $row) {
+            $name = $row->database;
+            $mapped = DatabaseCopier::mapName($name, $sourcePrefix, $destPrefix);
+            if (!Mysql::isValidDatabaseName($name)) {
+                $problems[] = [
+                    'field'   => $field,
+                    'code'    => 'database_name_unsupported',
+                    'message' => "Database '{$name}' is outside the name grammar the engine can copy.",
+                ];
+            } elseif (strlen($mapped) > 64) {
+                $problems[] = [
+                    'field'   => $field,
+                    'code'    => 'database_name_too_long',
+                    'message' => "Database '{$name}' maps to '{$mapped}', longer than 64 characters.",
+                ];
+            }
+        }
+
+        foreach ($source->mysqlUsers as $row) {
+            $name = $row->user;
+            $mapped = DatabaseCopier::mapName($name, $sourcePrefix, $destPrefix);
+            if (strlen($mapped) > 32) {
+                $problems[] = [
+                    'field'   => $field,
+                    'code'    => 'database_user_name_too_long',
+                    'message' => "MySQL user '{$name}' maps to '{$mapped}', longer than 32 characters.",
+                ];
+            }
         }
 
         return $problems;
@@ -379,7 +671,7 @@ class Projects
     }
 
     /**
-     * @return list<array{field: string, message: string}>
+     * @return list<array{field: string, code: string, message: string}>
      */
     public static function pushProblems(ModelsUser $from, ModelsUser $to): array
     {
@@ -389,24 +681,28 @@ class Projects
             $right = $to->getTemplate() ?? 'null';
             $problems[] = [
                 'field'   => 'target',
+                'code'    => 'target_template_mismatch',
                 'message' => "Projects '{$from->username}' ({$left}) and '{$to->username}' ({$right}) have different templates.",
             ];
         }
         if ($from->status === 'pending') {
             $problems[] = [
                 'field'   => 'project',
+                'code'    => 'project_pending',
                 'message' => "Project '{$from->username}' is pending.",
             ];
         }
         if ($to->status === 'pending') {
             $problems[] = [
                 'field'   => 'target',
+                'code'    => 'target_pending',
                 'message' => "Project '{$to->username}' is pending.",
             ];
         }
         if ((int) $from->id === (int) $to->id) {
             $problems[] = [
                 'field'   => 'target',
+                'code'    => 'target_same_project',
                 'message' => 'Cannot push to the same project.',
             ];
         }
@@ -415,11 +711,12 @@ class Projects
         if (!$paired) {
             $problems[] = [
                 'field'   => 'target',
+                'code'    => 'target_not_staging_pair',
                 'message' => "Projects '{$from->username}' and '{$to->username}' are not a staging pair.",
             ];
         }
 
-        return $problems;
+        return [...$problems, ...self::databaseNameProblems($from, $to->getMysqlPrefix(), 'target')];
     }
 
     private function pauseAppForCopy(Project $project): void
@@ -563,7 +860,7 @@ class Projects
         bool $isDindDest,
     ): void {
         $required = 0;
-        $skipHomeEntries = ['.incoming', '.pre-push'];
+        $skipHomeEntries = ['.incoming', '.pre-push', '.pre-push-db'];
         if ($isDindDest) {
             $skipHomeEntries[] = 'docker';
         }
@@ -647,7 +944,7 @@ class Projects
 
         foreach (preg_split('/\R/', trim($listProcess->getOutput())) ?: [] as $entry) {
             $entry = trim($entry);
-            if ($entry === '' || in_array($entry, ['docker', '.incoming', '.pre-push'], true)) {
+            if ($entry === '' || in_array($entry, ['docker', '.incoming', '.pre-push', '.pre-push-db'], true)) {
                 continue;
             }
             $this->runPushProcess(
@@ -695,7 +992,7 @@ class Projects
         }
     }
 
-    private function cleanupPushSuccess(string $prePushDir, string $incomingDir): void
+    private function cleanupPushSuccess(string $prePushDir, string $incomingDir, string $rollbackDir): void
     {
         if ($this->pathIsDirectoryAsRoot($prePushDir)
             || $this->pathExistsAsRoot($prePushDir)) {
@@ -706,5 +1003,6 @@ class Projects
         }
 
         $this->cleanupIncomingDir($incomingDir);
+        $this->cleanupPath($rollbackDir);
     }
 }

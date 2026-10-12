@@ -35,6 +35,12 @@ class StagingController extends Controller
             properties: [
                 new OA\Property(property: 'new_username', type: 'string', nullable: true),
                 new OA\Property(property: 'domain', type: 'string', nullable: true),
+                new OA\Property(
+                    property: 'copy_databases',
+                    description: 'Copy the source project\'s MySQL databases under the destination prefix. Defaults to true.',
+                    type: 'boolean',
+                    nullable: true,
+                ),
             ],
         )),
         tags: ['Projects'],
@@ -59,9 +65,10 @@ class StagingController extends Controller
             throw $e;
         }
 
-        /** @var array{new_username?: ?string, domain?: ?string} $params */
+        /** @var array{new_username?: ?string, domain?: ?string, copy_databases?: ?bool} $params */
         $params = $request->validated();
         $system = new System();
+        $copyDatabases = $params['copy_databases'] ?? true;
 
         $newUsername = !empty($params['new_username']) ? $params['new_username'] : null;
         if ($newUsername === null) {
@@ -116,6 +123,8 @@ class StagingController extends Controller
         // A staging copy keeps the source's memory limit, which must still fit this host.
         ProjectMemory::assertFits(ProjectMemory::resolve($source->getMemoryLimit()));
 
+        Projects::assertDatabaseNamesFit($source, $newUsername . '_');
+
         $dest = $source->makePendingStaging($newUsername, $destDomain);
 
         // The destination account is deleted on a failed copy (see
@@ -131,9 +140,10 @@ class StagingController extends Controller
                 'dest' => $dest->username,
                 'domain' => $destDomain,
                 'action' => 'staging',
+                'copy_databases' => $copyDatabases,
             ],
         );
-        CreateStaging::dispatch($dest->username, (int) $dest->getKey())->attachTask($task);
+        CreateStaging::dispatch($dest->username, (int) $dest->getKey(), $copyDatabases)->attachTask($task);
 
         return (new UserResource($dest->loadMissing(['liveUser', 'stagingUser'])))
             ->additional(['task_id' => $task->id])
@@ -155,6 +165,18 @@ class StagingController extends Controller
             required: ['target'],
             properties: [
                 new OA\Property(property: 'target', type: 'string'),
+                new OA\Property(
+                    property: 'files',
+                    description: 'Replace the target home directory with the source files. Defaults to true.',
+                    type: 'boolean',
+                    nullable: true,
+                ),
+                new OA\Property(
+                    property: 'databases',
+                    description: 'Replace the target MySQL databases with the source data. Defaults to true.',
+                    type: 'boolean',
+                    nullable: true,
+                ),
             ],
         )),
         tags: ['Projects'],
@@ -170,9 +192,11 @@ class StagingController extends Controller
     {
         $from = $this->projectOr404($username);
 
-        /** @var array{target: string} */
+        /** @var array{target: string, files?: ?bool, databases?: ?bool} */
         $params = $request->validated();
         $to = $this->projectOr404($params['target']);
+        $files = $params['files'] ?? true;
+        $databases = $params['databases'] ?? true;
 
         try {
             Projects::assertIdle($from);
@@ -199,9 +223,11 @@ class StagingController extends Controller
                 'action' => 'push',
                 'source' => $from->username,
                 'target' => $to->username,
+                'files' => $files,
+                'databases' => $databases,
             ],
         );
-        PushState::dispatch($from->username, $to->username)->attachTask($task);
+        PushState::dispatch($from->username, $to->username, $files, $databases)->attachTask($task);
 
         return (new UserResource($to->loadMissing(['liveUser', 'stagingUser'])))
             ->additional(['task_id' => $task->id])

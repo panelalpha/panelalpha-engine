@@ -29,8 +29,11 @@ class CreateStaging implements ShouldQueue
     /** The destination's row; null on a job queued before it was recorded. */
     public ?int $destId = null;
 
-    public function __construct(public string $destUsername, ?int $destId = null)
-    {
+    public function __construct(
+        public string $destUsername,
+        ?int $destId = null,
+        public bool $copyDatabases = true,
+    ) {
         $this->destId = $destId;
         $this->onQueue('default');
     }
@@ -45,7 +48,17 @@ class CreateStaging implements ShouldQueue
                 throw new \RuntimeException("Staging '{$this->destUsername}' has no live parent.");
             }
 
-            (new System())->projects()->copy($source->username, $dest->username);
+            $result = (new System())->projects()->copy(
+                $source->username,
+                $dest->username,
+                $this->copyDatabases,
+                fn (string $line) => $this->logTask($line),
+            );
+
+            $this->task()?->mergeDetails([
+                'databases' => $result?->databasePairs() ?? [],
+                'warnings' => $result?->warnings ?? [],
+            ]);
         });
     }
 
