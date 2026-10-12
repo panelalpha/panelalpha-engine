@@ -2,13 +2,17 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\LowercasesInput;
 use App\Models\User;
+use App\Rules\DomainName;
 use App\System\Projects;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Validator;
 
 class ProjectStagingRequest extends FormRequest
 {
+    use LowercasesInput;
+
     public function authorize(): bool
     {
         return true;
@@ -16,31 +20,21 @@ class ProjectStagingRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        if ($this->has('domain')) {
-            $this->merge(['domain' => strtolower($this->domain)]);
-        }
-        if ($this->has('new_username')) {
-            $this->merge(['new_username' => strtolower($this->new_username)]);
-        }
+        $this->lowercaseInput('domain', 'new_username');
     }
 
     public function rules(): array
     {
         return [
             'new_username' => 'sometimes|nullable|string|alpha_num:ascii|regex:/^[a-z]{1}/|lowercase|between:3,15',
-            'domain' => 'sometimes|nullable|string|regex:/^(?!:\/\/)(?=.{1,255}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i',
+            'domain' => 'sometimes|nullable|string|regex:' . DomainName::REGEX,
         ];
     }
 
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator): void {
-            $username = $this->route('username');
-            if (!is_string($username) || $username === '') {
-                return;
-            }
-
-            $source = User::findByUsername($username);
+            $source = $this->sourceProject();
             if ($source === null) {
                 return;
             }
@@ -51,9 +45,11 @@ class ProjectStagingRequest extends FormRequest
         });
     }
 
-    public static function assertNotPending(User $user): void
+    private function sourceProject(): ?User
     {
-        Projects::assertNotPending($user);
+        $username = $this->route('username');
+
+        return is_string($username) && $username !== '' ? User::findByUsername($username) : null;
     }
 
     public static function assertCanCreate(User $source): void

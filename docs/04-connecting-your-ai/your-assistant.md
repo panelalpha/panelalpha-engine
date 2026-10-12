@@ -61,7 +61,7 @@ These settings live in `/opt/panelalpha/shared-hosting/.env-core`. If you edit t
 | Value | What the assistant can do |
 |---|---|
 | `readonly` | Look at what is switched on, change nothing. Inspecting a repository still works. The tools that hand out a password or a login (`system_exim_config_get`, `app_credentials_get`) are not offered. |
-| `modify` | Create and change things, but not delete them. |
+| `modify` | Create and change things, and blocks only DELETE routes. It is **not** a "no destructive actions" setting: the write tools that are not plain creations (`ssh_run`, `wp_cli_run`, `backup_restore`, `file_write`, `system_update`, `firewall_disable`, `project_rebuild`) still run. |
 | `full` | Everything, including deletion. **This is the default.** |
 
 ```bash

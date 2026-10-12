@@ -128,7 +128,7 @@ class GitController extends Controller
             new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'path', description: 'Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'branch', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
-            new OA\Parameter(name: 'limit', in: 'query', required: false, schema: new OA\Schema(type: 'integer', minimum: 1)),
+            new OA\Parameter(name: 'limit', in: 'query', required: false, schema: new OA\Schema(type: 'integer', minimum: 1, maximum: GitActions::MAX_COMMITS)),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Commit list', content: new OA\JsonContent(
@@ -418,7 +418,6 @@ class GitController extends Controller
         return $this->queuedOrDone($git, $user, ProjectRebuild::REVERT, $params, fn () => $git->revert($user, $params));
     }
 
-    /** The action's data, or the git layer's refusal with the status it carries. */
     #[OA\Post(
         path: '/projects/{username}/git/deploy-key',
         description: 'Create the project\'s SSH deploy key, or return the one it has: `public_key` is the line '
@@ -506,6 +505,7 @@ class GitController extends Controller
         return $this->respond($run);
     }
 
+    /** The action's data, or the git layer's refusal with the status it carries. */
     private function respond(callable $action): JsonResponse
     {
         try {

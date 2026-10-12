@@ -19,7 +19,7 @@ class TenantEgressGuardServiceTest extends TestCase
     {
         $model = new \App\Models\User();
         $model->username = 'acme';
-        $model->details = ['UID' => 1234];
+        $model->details = ['UID' => 1234, 'GID' => 1234];
 
         $written = [];
         $filesystem = $this->createStub(System\Filesystem::class);

@@ -72,7 +72,7 @@ class SftpAccountUpdateTool extends ApiTool
         return [
             'name' => $schema->string()->required(),
             'sftpUser' => $schema->string()->required(),
-            'auth_method' => $schema->string()->description('One of: password, public_key. Example: password.')->required(),
+            'auth_method' => $schema->string()->description('Comma-separated list of "password" and/or "public_key". Each method listed requires its credential below; a method left out is turned off. Example: password.')->required(),
             'password' => $schema->string(),
             'public_key' => $schema->string(),
         ];

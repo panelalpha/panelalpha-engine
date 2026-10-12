@@ -73,8 +73,8 @@ class FtpAccountUpdateTool extends ApiTool
             'name' => $schema->string()->required(),
             'ftpUser' => $schema->string()->description('Example: ftpuser1@example.com.')->required(),
             'password' => $schema->string(),
-            'unlimited_quota' => $schema->boolean(),
-            'quota' => $schema->integer(),
+            'unlimited_quota' => $schema->boolean()->description('Send true, or send quota: 0, for an account with no quota of its own.'),
+            'quota' => $schema->integer()->description('Quota in MB. 0 is unlimited, as pure-ftpd enforces it.'),
         ];
     }
 }

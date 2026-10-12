@@ -26,6 +26,9 @@ class ToolPolicy
     /**
      * Verbs each permission mode permits. A read is allowed in every mode, and
      * so is an operation that only reads — see {@see readsOnly()}.
+     *
+     * `modify` removes DELETE routes only, not every `IsDestructive` tool: the
+     * generator marks every write that way, so excluding them would empty it.
      */
     private const MODE_VERBS = [
         self::MODE_READONLY => ['GET'],
@@ -35,11 +38,15 @@ class ToolPolicy
 
     /**
      * Reads that hand out a live credential. They change nothing, but a
-     * readonly client may look, not log in, so these start at modify.
+     * readonly client may look, not log in, so these start at modify:
+     * smarthost passwords and tokens, the admin login generated for the
+     * deployed app, and files such as docker-compose.panelalpha.yml that hold
+     * the app's database password.
      */
     public const CREDENTIAL_TOOLS = [
-        'system_exim_config_get',  // smarthost SMTP/SES/Mailchannels passwords, SendGrid token
-        'app_credentials_get',     // the admin login the engine generated for the deployed app
+        'system_exim_config_get',
+        'app_credentials_get',
+        'file_download',
     ];
 
     /**
@@ -62,37 +69,42 @@ class ToolPolicy
         $regex = $this->regex();
         $mode = $this->mode();
 
-        $everyToolset = $toolsets === [] || in_array('all', $toolsets, true);
-
         $kept = [];
-
         foreach ($tools as $class) {
             $name = $this->nameOf($class);
 
-            $enabled = $everyToolset
-                || in_array($this->toolsetOf($class), $toolsets, true)
-                || in_array($name, $allowed, true);
-
-            if (!$enabled) {
-                continue;
+            if (
+                $this->enabled($class, $name, $toolsets, $allowed)
+                && $this->permittedBy($mode, $class)
+                && !$this->denied($name, $denied, $regex)
+            ) {
+                $kept[] = $class;
             }
-
-            if (!$this->permittedBy($mode, $class)) {
-                continue;
-            }
-
-            if ($this->matchesAny($name, $denied)) {
-                continue;
-            }
-
-            if ($regex !== null && preg_match($regex, $name) === 1) {
-                continue;
-            }
-
-            $kept[] = $class;
         }
 
         return $kept;
+    }
+
+    /**
+     * @param class-string<Tool> $class
+     * @param array<int, string> $toolsets
+     * @param array<int, string> $allowed
+     */
+    private function enabled(string $class, string $name, array $toolsets, array $allowed): bool
+    {
+        return $toolsets === []
+            || in_array('all', $toolsets, true)
+            || in_array($this->toolsetOf($class), $toolsets, true)
+            || in_array($name, $allowed, true);
+    }
+
+    /**
+     * @param array<int, string> $denied
+     */
+    private function denied(string $name, array $denied, ?string $regex): bool
+    {
+        return $this->matchesAny($name, $denied)
+            || ($regex !== null && preg_match($regex, $name) === 1);
     }
 
     /**
@@ -126,8 +138,8 @@ class ToolPolicy
     /**
      * The group a tool belongs to: the namespace segment it sits in, which for
      * the generated tools is the OpenAPI tag their endpoint is documented
-     * under. Hand-written tools live directly under App\Mcp\Tools and are
-     * grouped as "engine".
+     * under (`Api\Projects\ProjectListTool` is `projects`). Hand-written tools
+     * live directly under App\Mcp\Tools and are grouped as "engine".
      *
      * @param class-string<Tool> $class
      */
@@ -136,8 +148,6 @@ class ToolPolicy
         $relative = Str::after($class, 'App\\Mcp\\Tools\\');
         $segments = explode('\\', $relative);
 
-        // ["Api", "Projects", "ProjectListTool"] -> projects;
-        // ["ProjectListSummaryTool"] -> engine
         return count($segments) >= 3
             ? strtolower($segments[count($segments) - 2])
             : 'engine';
@@ -165,30 +175,28 @@ class ToolPolicy
     }
 
     /**
-     * Whether a tool only reads, whatever verb it uses.
-     *
-     * The verb is the right default and stays it: everything else that POSTs
-     * to this API creates something. The exceptions are the operations where
-     * POST is only how a body gets sent — a git token has no business in a
-     * query string — and the call reads, answers and leaves the server as it
-     * found it. Those carry `#[IsReadOnly]`, written onto the generated class
-     * from the short explicit list in
+     * Whether a tool only reads, whatever verb it uses. Besides GET, that is an
+     * operation that POSTs only to send a body (a git token has no business in a
+     * query string): it carries `#[IsReadOnly]`, written at generation time from
      * {@see \App\Console\Commands\Mcp\GenerateApiToolsCommand::READ_ONLY_OPERATIONS}.
-     * So this is a declaration made per operation at generation time, not a
-     * guess made from a tool's name at runtime.
      *
      * @param class-string<Tool> $class
      */
     public function readsOnly(string $class): bool
     {
-        if ($this->verbOf($class) === 'GET') {
-            return true;
-        }
+        return $this->verbOf($class) === 'GET' || $this->declaresReadOnly($class);
+    }
 
+    /**
+     * An unreadable annotation counts as a write, so it never widens what a mode allows.
+     *
+     * @param class-string<Tool> $class
+     */
+    private function declaresReadOnly(string $class): bool
+    {
         try {
             return ((new $class())->annotations()['readOnlyHint'] ?? false) === true;
         } catch (Throwable $e) {
-            // An unreadable annotation must not widen what a mode allows.
             Log::warning('Could not read the annotations of an MCP tool; treating it as a write.', [
                 'tool' => $class,
                 'error' => $e->getMessage(),
@@ -232,6 +240,9 @@ class ToolPolicy
     }
 
     /**
+     * A read is allowed in every mode, so a read-only POST is admitted by readonly
+     * rather than being filtered out for the verb it had to use.
+     *
      * @param class-string<Tool> $class
      */
     private function permittedBy(string $mode, string $class): bool
@@ -240,12 +251,11 @@ class ToolPolicy
             return $mode !== self::MODE_READONLY;
         }
 
-        // A read is allowed in every mode, so a read-only POST is admitted by
-        // readonly rather than being filtered out for the verb it had to use.
         return $this->readsOnly($class)
             || in_array($this->verbOf($class), self::MODE_VERBS[$mode], true);
     }
 
+    /** An unknown mode falls back to readonly, so a bad setting never grants more than intended. */
     public function mode(): string
     {
         $mode = strtolower(trim((string)($this->config['permission_mode'] ?? self::MODE_FULL)));
@@ -256,7 +266,6 @@ class ToolPolicy
                 'expected' => array_keys(self::MODE_VERBS),
             ]);
 
-            // An unreadable setting must not silently grant more than intended.
             return self::MODE_READONLY;
         }
 
@@ -287,11 +296,7 @@ class ToolPolicy
 
         $pattern = '/' . str_replace('/', '\\/', $raw) . '/i';
 
-        try {
-            if (@preg_match($pattern, '') === false) {
-                throw new \RuntimeException('invalid pattern');
-            }
-        } catch (Throwable) {
+        if (!self::compiles($pattern)) {
             Log::warning('MCP_DENIED_TOOLS_REGEX is not a valid regular expression and was ignored.', [
                 'pattern' => $raw,
             ]);
@@ -300,6 +305,15 @@ class ToolPolicy
         }
 
         return $pattern;
+    }
+
+    private static function compiles(string $pattern): bool
+    {
+        try {
+            return @preg_match($pattern, '') !== false;
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     /**

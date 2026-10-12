@@ -1,1 +1,1 @@
-FROM atmoz/sftp:debian
+FROM atmoz/sftp:debian@sha256:f308cffe27242286d1e93a548dc5a581223b963e9b044d9e452594ef30dd05bd

@@ -133,15 +133,25 @@ class BackupContainerController extends Controller
          */
         $validated = $request->validated();
 
-        if (array_key_exists('name', $validated)) {
-            $container->name = $validated['name'];
+        foreach (['name', 'driver', 'location'] as $field) {
+            if (array_key_exists($field, $validated)) {
+                $container->{$field} = $validated[$field];
+            }
         }
-        if (array_key_exists('driver', $validated)) {
-            $container->driver = $validated['driver'];
-        }
-        if (array_key_exists('location', $validated)) {
-            $container->location = $validated['location'];
-        }
+        $this->applyCredentials($container, $validated, $request);
+
+        $container->save();
+
+        return new BackupContainerResource($container);
+    }
+
+    /**
+     * Sent credentials are normalised for the container's driver; a switch to `local` without any drops the old ones.
+     *
+     * @param array{driver?: string, credentials?: ?array} $validated
+     */
+    private function applyCredentials(BackupContainer $container, array $validated, BackupContainerUpdateRequest $request): void
+    {
         if (array_key_exists('credentials', $validated)) {
             $container->credentials = $request->normalizeCredentials(
                 $container->driver,
@@ -150,22 +160,35 @@ class BackupContainerController extends Controller
         } elseif (array_key_exists('driver', $validated) && $validated['driver'] === 'local') {
             $container->credentials = null;
         }
-
-        $container->save();
-
-        return new BackupContainerResource($container);
     }
 
     #[OA\Delete(
         path: '/backup-containers/{id}',
         summary: 'Delete a backup container',
+        description: 'A store that still holds backups is refused with 409 unless `delete_backups` is set, which removes the backups with the store (as an asynchronous task, answered 202 with a task_id).',
         security: [['bearerAuth' => []]],
         tags: ['Backup Containers'],
-        parameters: [new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+        parameters: [
+            new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
+            new OA\Parameter(
+                name: 'delete_backups',
+                in: 'query',
+                required: false,
+                schema: new OA\Schema(type: 'boolean'),
+                description: 'Delete the store even though it holds backups, removing them too.',
+                x: ['mcp-description' => 'Set to remove the store and its backups together; without it a non-empty store is refused with 409.'],
+            ),
+        ],
         responses: [
             new OA\Response(response: 200, description: 'Backup container deleted', content: new OA\JsonContent(ref: '#/components/schemas/BackupContainer')),
+            new OA\Response(response: 202, description: 'Deletion of the container and its backups started', content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(property: 'data', type: 'object'),
+                    new OA\Property(property: 'task_id', type: 'string'),
+                ],
+            )),
             new OA\Response(response: 404, description: 'Not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: 'Container has backups', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 409, description: 'Container has backups and delete_backups was not set', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     public function destroy(int $id, Request $request): BackupContainerResource|JsonResponse
@@ -173,30 +196,35 @@ class BackupContainerController extends Controller
         $container = BackupContainer::findOrFail($id);
         $deleteBackups = filter_var($request->query('delete_backups'), FILTER_VALIDATE_BOOL);
 
-        if ($container->backups()->exists()) {
-            if (!$deleteBackups) {
-                return new JsonResponse([
-                    'message' => 'Cannot delete backup container while backups exist',
-                ], 409);
-            }
+        if (!$container->backups()->exists()) {
+            $container->delete();
 
-            $task = Task::start(
-                jobType: DeleteBackupContainer::class,
-                queue: 'default',
-                username: null,
-                details: ['container_id' => $container->id, 'action' => 'delete_container'],
-            );
-            DeleteBackupContainer::dispatch($container->id)->attachTask($task);
-
+            return new BackupContainerResource($container);
+        }
+        if (!$deleteBackups) {
             return new JsonResponse([
-                'data' => (new BackupContainerResource($container))->toArray($request),
-                'task_id' => $task->id,
-            ], 202);
+                'message' => 'Cannot delete backup container while backups exist. Pass delete_backups to remove them with the container.',
+            ], 409);
         }
 
-        $container->delete();
+        return $this->deleteWithBackups($container, $request);
+    }
 
-        return new BackupContainerResource($container);
+    /** Removes the container and its backups in a background task, answered 202 with its id. */
+    private function deleteWithBackups(BackupContainer $container, Request $request): JsonResponse
+    {
+        $task = Task::start(
+            jobType: DeleteBackupContainer::class,
+            queue: 'default',
+            username: null,
+            details: ['container_id' => $container->id, 'action' => 'delete_container'],
+        );
+        DeleteBackupContainer::dispatch($container->id)->attachTask($task);
+
+        return new JsonResponse([
+            'data' => (new BackupContainerResource($container))->toArray($request),
+            'task_id' => $task->id,
+        ], 202);
     }
 
     #[OA\Post(

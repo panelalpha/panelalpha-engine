@@ -111,6 +111,55 @@ class ActivityLogRedactionTest extends TestCase
         $this->assertSame('https://github.com/acme/shop.git', $redacted['url']);
     }
 
+    /**
+     * A failed tool call echoes the caller's own values in its error text, and
+     * GET /api/mcp-activity-logs serves it. The model scrubs it so the MCP
+     * middleware and POST /api/mcp-activity-logs are both covered.
+     */
+    public function test_the_stored_error_message_is_scrubbed(): void
+    {
+        $log = new McpActivityLog([
+            'error_message' => 'Downloading https://user:token@host/file.zip answered HTTP 401.',
+        ]);
+
+        $this->assertSame(
+            'Downloading https://[redacted]@host/file.zip answered HTTP 401.',
+            $log->error_message
+        );
+        $this->assertStringNotContainsString('token@', (string) $log->error_message);
+    }
+
+    /** A token in a query string survived both the URL and the suffix guards. */
+    public function test_secret_query_parameters_are_masked_in_both_fields(): void
+    {
+        $log = new McpActivityLog([
+            'input' => ['git_repo' => 'https://host/repo.git?private_token=abc123&ref=main'],
+            'error_message' => 'Cloning https://host/repo.git?private_token=abc123 failed.',
+        ]);
+
+        $this->assertSame(
+            'https://host/repo.git?private_token=[redacted]&ref=main',
+            $log->input['git_repo']
+        );
+        $this->assertSame(
+            'Cloning https://host/repo.git?private_token=[redacted] failed.',
+            $log->error_message
+        );
+    }
+
+    /** A presigned URL carries its credential in a long signature parameter. */
+    public function test_presigned_signatures_are_masked(): void
+    {
+        $log = new McpActivityLog([
+            'error_message' => 'GET https://bucket.s3.amazonaws.com/k?X-Amz-Signature=deadbeefdeadbeefdeadbeefdeadbeef&X-Amz-Credential=AKIA answered 403.',
+        ]);
+
+        $this->assertSame(
+            'GET https://bucket.s3.amazonaws.com/k?X-Amz-Signature=[redacted]&X-Amz-Credential=[redacted] answered 403.',
+            $log->error_message
+        );
+    }
+
     /** The mutator is the one every writer goes through. */
     public function test_the_stored_input_is_the_redacted_one(): void
     {

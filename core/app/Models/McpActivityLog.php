@@ -28,8 +28,7 @@ class McpActivityLog extends Model
      * Matched as suffixes, not exact names: the credential arguments across the
      * tool surface are `password` and `git_token` but also `admin_password`,
      * `sendgrid_api_token`, `mailchannels_password`, `amazon_ses_smtp_password`
-     * and `smtp_password`. An exact-name list silently missed those two whole
-     * families, so anything *ending* in one of these is redacted.
+     * and `smtp_password`, so anything *ending* in one of these is redacted.
      *
      * These rows are readable through GET /api/mcp-activity-logs, so storing a
      * credential verbatim would put it in plaintext behind an ordinary read
@@ -73,6 +72,27 @@ class McpActivityLog extends Model
 
     public const REDACTED = '[redacted]';
 
+    /** Query-string parameters whose value is a credential, in a URL a tool echoes back. */
+    private const SECRET_QUERY_PARAMS = [
+        'private_token',
+        'token',
+        'access_token',
+        'api_token',
+        'api_key',
+        'apikey',
+        'key',
+        'password',
+        'signature',
+        'sig',
+        'x-amz-signature',
+        'x-amz-credential',
+        'x-amz-security-token',
+        'awsaccesskeyid',
+    ];
+
+    /** Masked only at 16+ characters: a real signature is long, a short `sig=` usually is not one. */
+    private const SIGNATURE_QUERY_PARAMS = ['signature', 'sig', 'x-amz-signature'];
+
     /**
      * Strip credentials on the way in, so no writer can forget to. Applies to
      * the MCP middleware and to the panel's POST /api/mcp-activity-logs alike.
@@ -82,6 +102,14 @@ class McpActivityLog extends Model
         $this->attributes['input'] = $value === null
             ? null
             : json_encode(is_array($value) ? self::redact($value) : $value);
+    }
+
+    /** A failed call's error text can echo a caller's URL, credentials included. */
+    public function setErrorMessageAttribute(mixed $value): void
+    {
+        $this->attributes['error_message'] = $value === null
+            ? null
+            : self::scrubString((string) $value);
     }
 
     /**
@@ -95,22 +123,23 @@ class McpActivityLog extends Model
         $out = [];
 
         foreach ($input as $key => $value) {
-            $name = is_string($key) ? strtolower($key) : null;
-
-            if ($name !== null && self::isSecretKey($name)) {
-                $out[$key] = self::REDACTED;
-            } elseif ($name !== null && in_array($name, self::REDACT_VALUES_UNDER, true)) {
-                $out[$key] = self::redactValues($value);
-            } elseif ($name !== null && in_array($name, self::SUMMARISE_KEYS, true)) {
-                $out[$key] = self::summarise($value);
-            } elseif (is_array($value)) {
-                $out[$key] = self::redact($value);
-            } else {
-                $out[$key] = is_string($value) ? self::scrubString($value) : $value;
-            }
+            $out[$key] = self::redactEntry(is_string($key) ? strtolower($key) : null, $value);
         }
 
         return $out;
+    }
+
+    /** One argument, by its lowercased name (null for a list index). */
+    private static function redactEntry(?string $name, mixed $value): mixed
+    {
+        return match (true) {
+            $name !== null && self::isSecretKey($name) => self::REDACTED,
+            $name !== null && in_array($name, self::REDACT_VALUES_UNDER, true) => self::redactValues($value),
+            $name !== null && in_array($name, self::SUMMARISE_KEYS, true) => self::summarise($value),
+            is_array($value) => self::redact($value),
+            is_string($value) => self::scrubString($value),
+            default => $value,
+        };
     }
 
     public static function isSecretKey(string $key): bool
@@ -152,7 +181,23 @@ class McpActivityLog extends Model
             return self::REDACTED;
         }
 
-        return (string) preg_replace('#([a-z][a-z0-9+.-]*://)[^\s/@]+@#i', '$1' . self::REDACTED . '@', $value);
+        $value = (string) preg_replace('#([a-z][a-z0-9+.-]*://)[^\s/@]+@#i', '$1' . self::REDACTED . '@', $value);
+
+        return self::maskSecretQueryParams($value);
+    }
+
+    /** `?private_token=abc&x=1` -> `?private_token=[redacted]&x=1`. */
+    private static function maskSecretQueryParams(string $value): string
+    {
+        foreach (self::SECRET_QUERY_PARAMS as $param) {
+            $pattern = in_array($param, self::SIGNATURE_QUERY_PARAMS, true)
+                ? '/([?&]' . preg_quote($param, '/') . '=)[A-Za-z0-9%._~+\/-]{16,}/i'
+                : '/([?&]' . preg_quote($param, '/') . '=)[^&\s"\']+/i';
+
+            $value = (string) preg_replace($pattern, '$1' . self::REDACTED, $value);
+        }
+
+        return $value;
     }
 
     public function token(): BelongsTo

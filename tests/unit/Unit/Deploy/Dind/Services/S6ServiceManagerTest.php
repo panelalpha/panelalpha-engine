@@ -54,6 +54,12 @@ class S6ServiceManagerTest extends TestCase
         S6ServiceManager::applyArgv('x; rm -rf /');
     }
 
+    public function test_a_name_with_a_trailing_newline_is_refused(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        S6ServiceManager::applyArgv("app\n");
+    }
+
     private function assertValidSh(string $script): void
     {
         exec('sh -n -c ' . escapeshellarg($script) . ' 2>&1', $out, $code);

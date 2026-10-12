@@ -4,6 +4,9 @@ namespace Tests\Unit\Http;
 
 use App\Http\Requests\DomainUpdateRequest;
 use App\Http\Requests\FtpAccountStoreRequest;
+use App\Http\Requests\MysqlDatabaseStoreRequest;
+use App\Http\Requests\MysqlUserRenameRequest;
+use App\Http\Requests\MysqlUserStoreRequest;
 use App\Http\Requests\SftpAccountStoreRequest;
 use App\Http\Requests\UserUpdateRequest;
 use Illuminate\Foundation\Http\FormRequest;
@@ -148,6 +151,24 @@ class RequestGrammarTest extends TestCase
         $errors = $this->errors(new DomainUpdateRequest(), ['redirect_url' => 'https://www.example.com/shop?a=1&b=2#top']);
 
         $this->assertArrayNotHasKey('redirect_url', $errors);
+    }
+
+    /** MCP skips TrimStrings, so a bare `$` let one trailing newline through. */
+    #[DataProvider('namedFields')]
+    public function test_a_name_with_a_trailing_newline_is_refused(string $request, string $field): void
+    {
+        $this->assertArrayNotHasKey($field, $this->errors(new $request(), [$field => 'acme_1']));
+        $this->assertArrayHasKey($field, $this->errors(new $request(), [$field => "acme_1\n"]));
+    }
+
+    public static function namedFields(): array
+    {
+        return [
+            'database' => [MysqlDatabaseStoreRequest::class, 'name'],
+            'database user' => [MysqlUserStoreRequest::class, 'name'],
+            'database user rename' => [MysqlUserRenameRequest::class, 'name'],
+            'sftp account' => [SftpAccountStoreRequest::class, 'username'],
+        ];
     }
 
     /** @return array<string, mixed> */

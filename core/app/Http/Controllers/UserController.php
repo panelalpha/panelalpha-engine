@@ -6,6 +6,7 @@ use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\DeployBusyException;
 use App\Exceptions\ProblemException;
 use App\Exceptions\ProjectBusyException;
+use App\Http\Controllers\Concerns\StreamsNdjson;
 use App\Http\Requests\DeployPlanInput;
 use App\Http\Requests\RecipeChoiceInput;
 use App\Http\Requests\UserCloneRequest;
@@ -48,6 +49,8 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class UserController extends Controller
 {
+    use StreamsNdjson;
+
     /** How a create answers with what it found in the repository before cloning it. */
     private const INSPECTION_DOC = "A public github.com repository with no git_token is inspected from its "
         . "file list before anything is created, as POST /source/inspect does, in seconds. It never "
@@ -76,7 +79,6 @@ class UserController extends Controller
         ],
     )]
     /**
-     * @param Request $request
      * @return UserCollection
      */
     public function index(Request $request)
@@ -282,11 +284,7 @@ class UserController extends Controller
     )]
     public function storeAsync(UserStoreRequest $request, ProjectCreator $creator): JsonResponse
     {
-        // Reject before provision so a stream-oriented client does not leave
-        // an account with no matching HTTP response shape.
-        if ($request->headers->has('X-Deploy-Stream')) {
-            abort(400, 'X-Deploy-Stream is not supported on POST /projects; use POST /users for a synchronous create.');
-        }
+        $this->refuseDeployStreamOnQueuedCreate($request);
 
         $task = $creator->queue(self::newProjectInput($request));
 
@@ -342,12 +340,12 @@ class UserController extends Controller
                 new OA\Property(property: 'memory_limit', type: 'integer', example: 2048, description: 'MB. Omitted: memory_budget.default_project_mb, the RAM of the server less what is kept for the engine. Refused when larger than memory_budget.max_project_mb in GET /metrics/current', x: ['mcp-description' => 'MB. Default: the server\'s RAM less the engine\'s share, which is also the most allowed.']),
                 new OA\Property(property: 'cpu_limit', type: 'number', format: 'float', example: 1.0, nullable: true),
                 new OA\Property(property: 'bandwidth_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'mysql_databases_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'ftp_accounts_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'sftp_accounts_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'addon_domains_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'subdomains_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'inodes_limit', type: 'integer', nullable: true),
+                new OA\Property(property: 'mysql_databases_limit', type: 'integer', nullable: true, description: '-1 for unlimited'),
+                new OA\Property(property: 'ftp_accounts_limit', type: 'integer', nullable: true, description: '-1 for unlimited'),
+                new OA\Property(property: 'sftp_accounts_limit', type: 'integer', nullable: true, description: '-1 for unlimited'),
+                new OA\Property(property: 'addon_domains_limit', type: 'integer', nullable: true, description: '-1 for unlimited'),
+                new OA\Property(property: 'subdomains_limit', type: 'integer', nullable: true, description: '-1 for unlimited'),
+                new OA\Property(property: 'inodes_limit', type: 'integer', nullable: true, description: '-1 for unlimited'),
                 new OA\Property(property: 'dedicated_ipv4', type: 'boolean', example: false),
                 new OA\Property(property: 'dedicated_ipv6', type: 'boolean', example: false),
                 new OA\Property(
@@ -442,8 +440,6 @@ class UserController extends Controller
     )]
     public function store(UserStoreRequest $request, ProjectCreator $creator): JsonResponse|StreamedResponse
     {
-        // Validate the streaming opt-in up front so an unknown value never
-        // leaves a half-created account behind.
         $streamDeploy = $this->wantsDeployStream($request);
 
         $user = $creator->provisionForDeploy(self::newProjectInput($request));
@@ -460,6 +456,17 @@ class UserController extends Controller
         $creator->deploy($user, $deployLogger);
 
         return self::withInspection((new UserResource($user))->response(), $creator);
+    }
+
+    /**
+     * Refused before provisioning, so a stream-oriented client does not leave an account behind
+     * with no matching HTTP response shape.
+     */
+    private function refuseDeployStreamOnQueuedCreate(Request $request): void
+    {
+        if ($request->headers->has('X-Deploy-Stream')) {
+            abort(400, 'X-Deploy-Stream is not supported on POST /projects; use POST /users for a synchronous create.');
+        }
     }
 
     /**
@@ -491,13 +498,9 @@ class UserController extends Controller
     }
 
     /**
-     * An archive cannot replace a project that deploys from git.
-     *
-     * The deploy treated the uploaded tree as the repository's checkout -- its
-     * recipe, its app config, its HEAD -- found no .git, and failed only after
-     * the archive had already replaced ~/project. A deploy-managed repository
-     * cannot be disconnected either, so say what can be done instead, before
-     * anything is touched.
+     * An archive cannot replace a project that deploys from git: the deploy would fail for want of
+     * .git only after the archive replaced ~/project, and a deploy-managed repository cannot be
+     * disconnected, so this says what can be done instead, before anything is touched.
      */
     private static function refuseArchiveOnGitProject(User $user): void
     {
@@ -516,7 +519,8 @@ class UserController extends Controller
 
     /**
      * Opt-in NDJSON streaming of the deploy log, negotiated via the
-     * X-Deploy-Stream request header. Unknown values are rejected.
+     * X-Deploy-Stream request header. Unknown values are rejected, before
+     * anything is created.
      */
     private function wantsDeployStream(Request $request): bool
     {
@@ -543,90 +547,101 @@ class UserController extends Controller
      */
     private function respondWithDeployStream(\Closure $pipeline, ?DeployLogger $deployLogger, ?callable $userFrame = null): StreamedResponse
     {
-        ignore_user_abort(true);
-        set_time_limit(0);
+        return self::ndjsonResponse(function () use ($pipeline, $deployLogger, $userFrame) {
+            self::dropOutputBuffers();
+            $this->runStreamedPipeline($pipeline, $deployLogger);
+            self::emitFrame(self::closingFrame($deployLogger?->readLatest(), $userFrame));
+        }, ['X-Deploy-Stream-Accepted' => 'ndjson']);
+    }
 
-        return response()->stream(function () use ($pipeline, $deployLogger, $userFrame) {
-            // Under PHPUnit, TestResponse::streamedContent() owns a buffer.
-            if (!app()->runningUnitTests()) {
-                while (ob_get_level() > 0) {
-                    ob_end_clean();
-                }
-            }
-            $emit = static function (array $frame): void {
-                echo json_encode($frame, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
-                flush();
-            };
+    /** @param array<string, mixed> $frame */
+    private static function emitFrame(array $frame): void
+    {
+        echo json_encode($frame, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
+        flush();
+    }
 
-            // Lines written before the stream opened (e.g. the initial
-            // "Deploy started" entry) ride along in the start frame so the
-            // consumer's offsets still line up with the log file.
-            $backlog = $deployLogger !== null ? $deployLogger->read(0) : ['lines' => []];
-            $latest = $deployLogger?->readLatest();
+    /**
+     * Emits the start frame and runs the pipeline with its log teed into the stream. Lines written
+     * before the stream opened (the "Deploy started" entry) ride along in the start frame, so the
+     * consumer's offsets still line up with the log file.
+     */
+    private function runStreamedPipeline(\Closure $pipeline, ?DeployLogger $deployLogger): void
+    {
+        $backlog = $deployLogger !== null ? $deployLogger->read(0) : ['lines' => []];
+        $latest = $deployLogger?->readLatest();
 
-            DeployLogger::streamTo($emit);
-            try {
-                $emit([
-                    'type' => 'start',
-                    'id' => $latest['id'] ?? null,
-                    'started_at' => $latest['started_at'] ?? null,
-                    'lines' => $backlog['lines'],
-                ]);
-                $pipeline();
-            } catch (\Throwable $e) {
-                // Expected: ValidationException after the pipeline finished the
-                // log (failed/cancelled). Unexpected: close the log here.
-                $latest = $deployLogger?->readLatest();
-                if (($latest['status'] ?? null) === DeployLogger::STATUS_RUNNING) {
-                    $deployLogger?->recordFailureOutput($e->getMessage());
-                    $deployLogger?->finish(
-                        DeployLogger::STATUS_FAILED,
-                        DeployFailureExplainer::explain($e->getMessage()) ?? $e->getMessage()
-                    );
-                }
-                if (!($e instanceof ValidationException)) {
-                    Log::error("Streamed deploy failed: {$e->getMessage()}");
-                }
-            } finally {
-                DeployLogger::stopStreaming();
-            }
+        DeployLogger::streamTo(self::emitFrame(...));
+        try {
+            self::emitFrame([
+                'type' => 'start',
+                'id' => $latest['id'] ?? null,
+                'started_at' => $latest['started_at'] ?? null,
+                'lines' => $backlog['lines'],
+            ]);
+            $pipeline();
+        } catch (\Throwable $e) {
+            self::closeLogAfterFailure($deployLogger, $e);
+        } finally {
+            DeployLogger::stopStreaming();
+        }
+    }
 
-            $latest = $deployLogger?->readLatest();
-            $status = $latest['status'] ?? null;
-            // Zip accounts leave the logger running after preparing; do not
-            // emit finish or the wizard treats the placeholder as deployed.
-            if ($status === DeployLogger::STATUS_RUNNING) {
-                $emit([
-                    'type' => 'continue',
-                    'status' => $status,
-                    'stage' => $latest['stage'] ?? null,
-                    'stages' => $latest['stages'] ?? [],
-                ]);
+    /**
+     * A ValidationException is expected once the pipeline has finished the log as failed or
+     * cancelled; a log still running is closed as failed here, and anything else is logged.
+     */
+    private static function closeLogAfterFailure(?DeployLogger $deployLogger, \Throwable $e): void
+    {
+        $latest = $deployLogger?->readLatest();
+        if (($latest['status'] ?? null) === DeployLogger::STATUS_RUNNING) {
+            $deployLogger?->recordFailureOutput($e->getMessage());
+            $deployLogger?->finish(
+                DeployLogger::STATUS_FAILED,
+                DeployFailureExplainer::explain($e->getMessage()) ?? $e->getMessage()
+            );
+        }
+        if (!($e instanceof ValidationException)) {
+            Log::error("Streamed deploy failed: {$e->getMessage()}");
+        }
+    }
 
-                return;
-            }
-            $frame = [
-                'type' => 'finish',
+    /**
+     * The last frame: `continue` while the log still runs (an archive account leaves it running after
+     * preparing, and a finish would make the wizard treat the placeholder as deployed), otherwise
+     * `finish` with the terminal status and, on success, the user data.
+     *
+     * @param array<string, mixed>|null $latest
+     * @return array<string, mixed>
+     */
+    private static function closingFrame(?array $latest, ?callable $userFrame): array
+    {
+        $status = $latest['status'] ?? null;
+        if ($status === DeployLogger::STATUS_RUNNING) {
+            return [
+                'type' => 'continue',
                 'status' => $status,
                 'stage' => $latest['stage'] ?? null,
                 'stages' => $latest['stages'] ?? [],
-                'error' => $latest['error'] ?? null,
-                'finished_at' => $latest['finished_at'] ?? null,
-                'problem' => $latest['problem'] ?? null,
             ];
-            if (
-                $userFrame !== null
-                && in_array($frame['status'], [DeployLogger::STATUS_SUCCESS, DeployLogger::STATUS_PARTIAL], true)
-            ) {
-                $frame['user'] = $userFrame();
-            }
-            $emit($frame);
-        }, 200, [
-            'Content-Type' => 'application/x-ndjson',
-            'X-Accel-Buffering' => 'no',
-            'Cache-Control' => 'no-cache',
-            'X-Deploy-Stream-Accepted' => 'ndjson',
-        ]);
+        }
+        $frame = [
+            'type' => 'finish',
+            'status' => $status,
+            'stage' => $latest['stage'] ?? null,
+            'stages' => $latest['stages'] ?? [],
+            'error' => $latest['error'] ?? null,
+            'finished_at' => $latest['finished_at'] ?? null,
+            'problem' => $latest['problem'] ?? null,
+        ];
+        if (
+            $userFrame !== null
+            && in_array($frame['status'], [DeployLogger::STATUS_SUCCESS, DeployLogger::STATUS_PARTIAL], true)
+        ) {
+            $frame['user'] = $userFrame();
+        }
+
+        return $frame;
     }
 
     #[OA\Post(
@@ -754,7 +769,8 @@ class UserController extends Controller
     /**
      * Queue the redeploy and answer 202 with its task; or, when the client
      * asked for the stream, run it here and stream its log. Runs while no
-     * other deploy of the project can be queued or started.
+     * other deploy of the project can be queued or started. The env_vars are
+     * resolved before anything starts, so a vault reference they cannot use is still a 422.
      *
      * @param ?\Closure(): array<string, string> $envVars the env_vars to store, null to leave them
      */
@@ -768,21 +784,8 @@ class UserController extends Controller
         bool $stream,
         ?\Closure $envVars,
     ): JsonResponse|StreamedResponse {
-        // Resolved before anything starts, so a vault reference it cannot use is still a 422.
         $env = $envVars !== null ? $envVars() : null;
-
-        try {
-            $deployLogger = $stream ? $rebuild->openLog($user, $action) : null;
-        } catch (DeployAlreadyRunningException) {
-            // A deploy with no task took the lock since the check: answered as the check would.
-            throw new DeployBusyException($user->username, null);
-        }
-        if ($stream && $deployLogger === null) {
-            abort(new JsonResponse([
-                'message' => 'The deploy log could not be opened, so there is nothing to stream. '
-                    . 'Try again, or leave out X-Deploy-Stream to queue the deploy.',
-            ], 503));
-        }
+        $deployLogger = $stream ? $this->openStreamLog($rebuild, $user, $action) : null;
 
         if ($env !== null) {
             $user->setDetails(['env_vars' => $env]);
@@ -803,6 +806,27 @@ class UserController extends Controller
         $task = $rebuild->queue($user, $action, $zipPath, $plan, $recipe);
 
         return TaskResource::make($task)->response()->setStatusCode(202);
+    }
+
+    /**
+     * The log a streamed redeploy writes to. A deploy with no task that took the lock since the
+     * idle check is answered as the check would have; a log that cannot be opened is a 503.
+     */
+    private function openStreamLog(ProjectRebuild $rebuild, User $user, string $action): DeployLogger
+    {
+        try {
+            $deployLogger = $rebuild->openLog($user, $action);
+        } catch (DeployAlreadyRunningException) {
+            throw new DeployBusyException($user->username, null);
+        }
+        if ($deployLogger === null) {
+            abort(new JsonResponse([
+                'message' => 'The deploy log could not be opened, so there is nothing to stream. '
+                    . 'Try again, or leave out X-Deploy-Stream to queue the deploy.',
+            ], 503));
+        }
+
+        return $deployLogger;
     }
 
     #[OA\Post(
@@ -960,8 +984,46 @@ class UserController extends Controller
 
         $system = new System();
 
-        // ── Resolve new username ─────────────────────────────────────────────
-        $newUsername = !empty($params['new_username']) ? $params['new_username'] : null;
+        $newUsername = $this->cloneUsername($srcUser, $params['new_username'] ?? null, $system);
+        $cloneDomain = $this->cloneDomainName($srcUser, $params['domain'] ?? null);
+        $this->assertMemoryLimitFits($srcUser);
+        $newDetails = $srcUser->detailsForCopiedProject($newUsername);
+        $domainAliases = $this->wwwAliasIfFree($cloneDomain);
+
+        /** @var User */
+        $cloneUser = User::make([
+            'username' => $newUsername,
+            'domain'   => $cloneDomain,
+            'email'    => $srcUser->email,
+            'details'  => $newDetails,
+        ]);
+
+        if ($cloneUser->project()->hostingExists()) {
+            throw ValidationException::withMessages([
+                'new_username' => 'Username not available.',
+            ]);
+        }
+
+        $cloneDomainModel = $this->unsavedMainDomain($cloneDomain, $domainAliases);
+
+        $cloneUser->save();
+        $cloneDomainModel->user_id = $cloneUser->id;
+        $cloneDomainModel->save();
+
+        try {
+            $system->projects()->clone($srcUser->username, $cloneUser->username);
+            $cloneUser = $cloneUser->refresh();
+        } catch (\Exception $e) {
+            $this->cloneFailed($cloneUser, $e);
+        }
+
+        return new UserResource($cloneUser);
+    }
+
+    /** @throws ValidationException when no free name can be generated, or the name is taken */
+    private function cloneUsername(User $srcUser, ?string $requested, System $system): string
+    {
+        $newUsername = !empty($requested) ? $requested : null;
         if ($newUsername === null) {
             $newUsername = Helper::generateCloneUsername($srcUser->username);
             if ($newUsername === null) {
@@ -982,11 +1044,19 @@ class UserController extends Controller
             ]);
         }
 
-        // ── Resolve clone domain ─────────────────────────────────────────────
-        $cloneDomain = !empty($params['domain']) ? $params['domain'] : null;
+        return $newUsername;
+    }
+
+    /**
+     * The requested domain without `www.`, or a generated staging domain.
+     *
+     * @throws ValidationException when none can be generated, or the domain is taken
+     */
+    private function cloneDomainName(User $srcUser, ?string $requested): string
+    {
+        $cloneDomain = !empty($requested) ? $requested : null;
         if ($cloneDomain === null) {
-            $srcDomain = $srcUser->domain;
-            $cloneDomain = Helper::generateCloneDomain($srcDomain);
+            $cloneDomain = Helper::generateCloneDomain($srcUser->domain);
             if ($cloneDomain === null) {
                 throw ValidationException::withMessages([
                     'domain' => 'Could not generate an available staging domain for the clone.',
@@ -1002,78 +1072,57 @@ class UserController extends Controller
             ]);
         }
 
-        // A clone keeps the source's memory limit, which must still fit this host.
+        return $cloneDomain;
+    }
+
+    /** A clone keeps the source's memory limit, which must still fit this host. */
+    private function assertMemoryLimitFits(User $srcUser): void
+    {
         ProjectMemory::assertFits(ProjectMemory::resolve($srcUser->getMemoryLimit()));
+    }
 
-        // ── Copy resource limits, settings and frozen deploy snapshot ────────
-        $newDetails = $srcUser->detailsForCopiedProject($newUsername);
-
-        // ── Build domain details ─────────────────────────────────────────────
+    /** @return list<string> the www alias, when it would answer and nothing holds it yet */
+    private function wwwAliasIfFree(string $cloneDomain): array
+    {
         $wwwAliasAvailable = DomainPlan::wwwAliasWouldAnswer($cloneDomain)
             && !Domain::domainOrAliasExists('www.' . $cloneDomain);
-        $domainAliases = $wwwAliasAvailable ? ['www.' . $cloneDomain] : [];
 
-        // ── Create model instances (not yet persisted) ───────────────────────
-        /** @var User */
-        $cloneUser = User::make([
-            'username' => $newUsername,
-            'domain'   => $cloneDomain,
-            'email'    => $srcUser->email,
-            'details'  => $newDetails,
-        ]);
+        return $wwwAliasAvailable ? ['www.' . $cloneDomain] : [];
+    }
 
-        if ($cloneUser->project()->hostingExists()) {
-            throw ValidationException::withMessages([
-                'new_username' => 'Username not available.',
-            ]);
-        }
-
-        /** @var Domain */
-        $cloneDomainModel = Domain::make([
-            'user_id' => null, // filled after user save
+    /**
+     * The clone's main domain; its user_id is set once the user is saved.
+     *
+     * @param list<string> $aliases
+     */
+    private function unsavedMainDomain(string $cloneDomain, array $aliases): Domain
+    {
+        return Domain::make([
+            'user_id' => null,
             'domain'  => $cloneDomain,
             'type'    => 'main',
             'details' => [
                 'document_root'     => "/{$cloneDomain}/public_html",
                 'redirect_enabled'  => false,
                 'redirect_url'      => null,
-                'aliases'           => $domainAliases,
+                'aliases'           => $aliases,
             ],
         ]);
+    }
 
-        // ── Persist + provision ──────────────────────────────────────────────
-        $cloneUser->save();
-        $cloneDomainModel->user_id = $cloneUser->id;
-        $cloneDomainModel->save();
-
+    /** Destroys the half-made clone, best-effort, and reports the failure as a deploy problem. */
+    private function cloneFailed(User $cloneUser, \Exception $e): never
+    {
         try {
-            $system->projects()->clone($srcUser->username, $cloneUser->username);
-            $cloneUser = $cloneUser->refresh();
-        } catch (\RuntimeException $e) {
-            try {
-                $cloneUser->refresh()->project()->destroy();
-            } catch (\Throwable $ignored) {
-            }
-            $match = DeployFailureExplainer::match($e->getMessage());
-            throw ProblemException::deploy(
-                $match['rule'] ?? 'clone_failed',
-                $match['message'] ?? $e->getMessage(),
-                null
-            );
-        } catch (\Exception $e) {
-            try {
-                $cloneUser->refresh()->project()->destroy();
-            } catch (\Throwable $ignored) {
-            }
-            $match = DeployFailureExplainer::match($e->getMessage());
-            throw ProblemException::deploy(
-                $match['rule'] ?? 'clone_failed',
-                $match['message'] ?? $e->getMessage(),
-                null
-            );
+            $cloneUser->refresh()->project()->destroy();
+        } catch (\Throwable) {
         }
-
-        return new UserResource($cloneUser);
+        $match = DeployFailureExplainer::match($e->getMessage());
+        throw ProblemException::deploy(
+            $match['rule'] ?? 'clone_failed',
+            $match['message'] ?? $e->getMessage(),
+            null
+        );
     }
 
     #[OA\Post(
@@ -1093,7 +1142,6 @@ class UserController extends Controller
         ],
     )]
     /**
-     * @param UserVerifyNewUsernameRequest $request
      * @return JsonResponse
      */
     public function verifyNewUsername(UserVerifyNewUsernameRequest $request)
@@ -1154,16 +1202,18 @@ class UserController extends Controller
             properties: [
                 new OA\Property(property: 'domain', type: 'string', nullable: true),
                 new OA\Property(property: 'email', type: 'string', format: 'email', nullable: true),
-                new OA\Property(property: 'disk_space_limit', type: 'integer', nullable: true),
+                new OA\Property(property: 'disk_space_limit', type: 'integer', nullable: true, description: 'MB, -1 for unlimited; null clears the limit', x: ['mcp-nullable' => true]),
                 new OA\Property(property: 'memory_limit', type: 'integer', description: 'MB. Can be changed, not removed. Refused when larger than memory_budget.max_project_mb in GET /metrics/current'),
-                new OA\Property(property: 'cpu_limit', type: 'number', format: 'float', nullable: true),
-                new OA\Property(property: 'bandwidth_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'mysql_databases_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'ftp_accounts_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'sftp_accounts_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'addon_domains_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'subdomains_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'inodes_limit', type: 'integer', nullable: true),
+                new OA\Property(property: 'cpu_limit', type: 'number', format: 'float', nullable: true, description: 'null clears the limit', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'device_read_bps', type: 'integer', nullable: true, description: '-1 or null for unlimited', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'device_write_bps', type: 'integer', nullable: true, description: '-1 or null for unlimited', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'bandwidth_limit', type: 'integer', nullable: true, description: 'null clears the limit', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'mysql_databases_limit', type: 'integer', nullable: true, description: '-1 or null for unlimited', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'ftp_accounts_limit', type: 'integer', nullable: true, description: '-1 or null for unlimited', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'sftp_accounts_limit', type: 'integer', nullable: true, description: '-1 or null for unlimited', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'addon_domains_limit', type: 'integer', nullable: true, description: '-1 or null for unlimited', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'subdomains_limit', type: 'integer', nullable: true, description: '-1 or null for unlimited', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'inodes_limit', type: 'integer', nullable: true, description: '-1 or null for unlimited', x: ['mcp-nullable' => true]),
             ],
         )),
         responses: [
@@ -1174,7 +1224,6 @@ class UserController extends Controller
     )]
     /**
      * @param string $username
-     * @param UserUpdateRequest $request
      * @return UserResource
      */
     public function update($username, UserUpdateRequest $request)
@@ -1206,25 +1255,55 @@ class UserController extends Controller
         if (array_key_exists('email', $params)) {
             $user->email = $params['email'];
         }
-        foreach ([...ResourceLimit::keys(), 'php_fpm_pool_settings', 'lsphp_settings', 'redis_config'] as $key) {
-            if (array_key_exists($key, $params)) {
-                $user->setDetails([$key => $params[$key]]);
-            }
-        }
+        $this->applyResourceLimits($user, $params);
+        $this->applyServiceSettings($user, $params);
 
         if (array_key_exists('domain', $params)) {
             MainDomainRename::apply($user, (string) $params['domain']);
         }
 
         $user->save();
+        $this->applyMemoryLimitNow($user, $params);
 
-        // Applied now, not at the next rebuild: the account keeps running.
+        return new UserResource($user);
+    }
+
+    /**
+     * Stored as the console stores them: -1 is "no limit", and an explicit null clears the limit.
+     *
+     * @param array<string, mixed> $params
+     */
+    private function applyResourceLimits(User $user, array $params): void
+    {
+        foreach (ResourceLimit::all() as $limit) {
+            if (array_key_exists($limit->key, $params)) {
+                $raw = $params[$limit->key];
+                $user->setDetails([$limit->key => $raw === null ? null : $limit->normalize($raw)]);
+            }
+        }
+    }
+
+    /** @param array<string, mixed> $params */
+    private function applyServiceSettings(User $user, array $params): void
+    {
+        foreach (['php_fpm_pool_settings', 'lsphp_settings', 'redis_config'] as $key) {
+            if (array_key_exists($key, $params)) {
+                $user->setDetails([$key => $params[$key]]);
+            }
+        }
+    }
+
+    /**
+     * A new memory limit is applied to the running account at once, not at the next rebuild.
+     *
+     * @param array<string, mixed> $params
+     */
+    private function applyMemoryLimitNow(User $user, array $params): void
+    {
         $runtime = $user->project()->runtime();
         if (array_key_exists('memory_limit', $params) && $runtime instanceof Dind) {
             $runtime->applyMemoryLimit();
         }
-
-        return new UserResource($user);
     }
 
     #[OA\Put(
@@ -1246,9 +1325,26 @@ class UserController extends Controller
         $user->save();
 
         $system = new System();
+        $this->rotatePhpMyAdminSsoPassword($system, $user);
         $reloaded = $system->rebuildDomains();
 
         return (new UserResource($user))->additional(['reload_pending' => !$reloaded]);
+    }
+
+    /**
+     * An open phpMyAdmin session works through any domain's /phpmyadmin, so a new SSO password cuts
+     * it off; the next token sets a fresh one. Best-effort: a failure is only logged.
+     */
+    private function rotatePhpMyAdminSsoPassword(System $system, User $user): void
+    {
+        try {
+            $sso = 'sso_' . $user->username;
+            if ($system->mysql()->users()->userExists($sso)) {
+                $system->mysql()->users()->changeUserPassword($sso, Str::random(27));
+            }
+        } catch (\Throwable $e) {
+            Log::warning("Could not rotate the phpMyAdmin SSO password of {$user->username}: " . $e->getMessage());
+        }
     }
 
     #[OA\Put(
@@ -1294,11 +1390,17 @@ class UserController extends Controller
     public function destroy($username)
     {
         $user = $this->projectOr404($username);
+        $this->deleteProject($user);
 
+        return new UserResource($user);
+    }
+
+    /** A busy project is a refusal, answered 409 and not logged: nothing failed. Any other failure is logged and rethrown. */
+    private function deleteProject(User $user): void
+    {
         try {
             (new ProjectDeleter())->delete($user);
         } catch (ProjectBusyException $e) {
-            // A refusal, answered 409; nothing failed.
             throw $e;
         } catch (\Exception $e) {
             Log::warning(
@@ -1307,8 +1409,5 @@ class UserController extends Controller
             );
             throw $e;
         }
-
-        return new UserResource($user);
     }
-
 }

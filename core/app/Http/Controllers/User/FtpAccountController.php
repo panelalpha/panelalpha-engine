@@ -56,8 +56,8 @@ class FtpAccountController extends Controller
                 new OA\Property(property: 'domain', type: 'string', example: 'example.com'),
                 new OA\Property(property: 'password', type: 'string', format: 'password'),
                 new OA\Property(property: 'directory', type: 'string', nullable: true, example: '/public_html'),
-                new OA\Property(property: 'unlimited_quota', type: 'boolean', example: true),
-                new OA\Property(property: 'quota', type: 'integer', nullable: true, example: 1024, description: 'Quota in MB'),
+                new OA\Property(property: 'unlimited_quota', type: 'boolean', example: true, description: 'Send true, or omit quota, for an account with no quota of its own.'),
+                new OA\Property(property: 'quota', type: 'integer', nullable: true, example: 1024, description: 'Quota in MB. Omit it, or send 0, for an unlimited account: pure-ftpd reads a 0 max size as no limit.'),
             ],
         )),
         responses: [
@@ -149,8 +149,8 @@ class FtpAccountController extends Controller
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             properties: [
                 new OA\Property(property: 'password', type: 'string', format: 'password', nullable: true),
-                new OA\Property(property: 'unlimited_quota', type: 'boolean'),
-                new OA\Property(property: 'quota', type: 'integer', nullable: true),
+                new OA\Property(property: 'unlimited_quota', type: 'boolean', description: 'Send true, or send quota: 0, for an account with no quota of its own.'),
+                new OA\Property(property: 'quota', type: 'integer', nullable: true, description: 'Quota in MB. 0 is unlimited, as pure-ftpd enforces it.'),
             ],
         )),
         responses: [

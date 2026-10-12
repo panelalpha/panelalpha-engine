@@ -51,7 +51,7 @@ class DindAccountRuntimeTest extends TestCase
     {
         $model = new \App\Models\User();
         $model->username = 'acme';
-        $model->details = ['UID' => 1234];
+        $model->details = ['UID' => 1234, 'GID' => 1234];
 
         $dind = $this->createStub(\App\System\Project\Dind::class);
         $dind->method('userModel')->willReturn($model);

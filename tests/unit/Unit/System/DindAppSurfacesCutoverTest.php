@@ -58,12 +58,14 @@ final class DindAppSurfacesCutoverTest extends TestCase
             if (preg_match('/Lib\\\\Apis\\\\System\\\\User\\\\Project\\\\Git/', $contents) === 1) {
                 $hits[] = $relative;
             }
-            if (!str_contains($contents, 'App\\System\\Project\\Git\\Ref')) {
-                $hits[] = $relative . ' (missing System Ref import)';
+            if (!str_contains($contents, 'use ChecksGitRefName;')) {
+                $hits[] = $relative . ' (not checking the ref name with ChecksGitRefName)';
             }
         }
 
         $this->assertSame([], $hits, implode("\n", $hits));
+        $check = file_get_contents(dirname($root) . DIRECTORY_SEPARATOR . 'Concerns' . DIRECTORY_SEPARATOR . 'ChecksGitRefName.php');
+        $this->assertStringContainsString('App\\System\\Project\\Git\\Ref', (string) $check);
     }
 
     public function test_cloudflare_integration_does_not_use_lib_system_or_connect(): void

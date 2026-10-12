@@ -28,7 +28,7 @@ class DindEntrypointInitScriptsTest extends TestCase
         // stubbing and the test exercises the same accessors production does.
         $model = new \App\Models\User();
         $model->username = 'acme';
-        $model->details = ['UID' => 1234];
+        $model->details = ['UID' => 1234, 'GID' => 1234];
 
         $dind = $this->createStub(\App\System\Project\Dind::class);
         $dind->method('userModel')->willReturn($model);

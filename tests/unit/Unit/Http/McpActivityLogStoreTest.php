@@ -79,4 +79,27 @@ class McpActivityLogStoreTest extends TestCase
         $this->assertSame('someone-else', $row->token_name);
         $this->assertSame(['env_vars' => ['APP_KEY' => McpActivityLog::REDACTED]], $row->input);
     }
+
+    /**
+     * The endpoint takes a free-form `error_message` from the panel, and a
+     * failed tool's error echoes the caller's own URL. It reaches the row only
+     * scrubbed -- the model does it, so there is no path around it.
+     */
+    public function test_the_posted_error_message_is_scrubbed_before_it_is_stored(): void
+    {
+        $request = Request::create('/api/mcp-activity-logs', 'POST', [
+            'token_name' => 'panel',
+            'tool_name' => 'file_upload',
+            'status' => 'error',
+            'error_message' => 'Downloading https://user:token@host/f.zip answered HTTP 401.',
+        ]);
+
+        $response = (new McpActivityLogController())->store($request);
+
+        $this->assertSame(201, $response->getStatusCode());
+        $this->assertSame(
+            'Downloading https://[redacted]@host/f.zip answered HTTP 401.',
+            McpActivityLog::firstOrFail()->error_message
+        );
+    }
 }

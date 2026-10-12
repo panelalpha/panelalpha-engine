@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Rules\DateRangeSpan;
 use Illuminate\Foundation\Http\FormRequest;
 
 class VisitorsBreakdownRequest extends FormRequest
@@ -35,7 +36,7 @@ class VisitorsBreakdownRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'start' => 'required|date_format:Y-m-d',
+            'start' => ['required', 'date_format:Y-m-d', new DateRangeSpan('end')],
             'end' => 'required|date_format:Y-m-d|after_or_equal:start',
             'dimension' => 'required|in:' . implode(',', self::DIMENSIONS),
         ];

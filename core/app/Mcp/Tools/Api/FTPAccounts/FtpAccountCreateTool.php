@@ -75,8 +75,8 @@ class FtpAccountCreateTool extends ApiTool
             'domain' => $schema->string()->description('Example: example.com.')->required(),
             'password' => $schema->string()->required(),
             'directory' => $schema->string()->description('Example: /public_html.'),
-            'unlimited_quota' => $schema->boolean(),
-            'quota' => $schema->integer()->description('Quota in MB'),
+            'unlimited_quota' => $schema->boolean()->description('Send true, or omit quota, for an account with no quota of its own.'),
+            'quota' => $schema->integer()->description('Quota in MB. Omit it, or send 0, for an unlimited account: pure-ftpd reads a 0 max size as no limit.'),
         ];
     }
 }

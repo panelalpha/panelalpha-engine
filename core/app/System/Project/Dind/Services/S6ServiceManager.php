@@ -45,13 +45,19 @@ final class S6ServiceManager implements ServiceManager
         $system = $this->project->system();
         $dir = $this->project->projectDirPath() . '/' . self::SERVICES_DIR . '/' . self::name($service);
 
-        // s6-envdir needs the dir even when it is empty.
-        $system->exec(['sudo', 'rm', '-rf', $dir . '/env']);
-        $system->exec(['sudo', 'mkdir', '-p', $dir . '/env']);
+        $this->recreateEmptyEnvDir($dir . '/env');
         foreach ($env as $name => $value) {
             $system->filesystem()->filePutContents($dir . '/env/' . self::name($name), $value . "\n", null, '600');
         }
         $system->exec($enabled ? ['sudo', 'rm', '-f', $dir . '/down'] : ['sudo', 'touch', $dir . '/down']);
+    }
+
+    /** s6-envdir needs the dir even when there are no variables. */
+    private function recreateEmptyEnvDir(string $envDir): void
+    {
+        $system = $this->project->system();
+        $system->exec(['sudo', 'rm', '-rf', $envDir]);
+        $system->exec(['sudo', 'mkdir', '-p', $envDir]);
     }
 
     public function apply(string $service): void
@@ -69,7 +75,7 @@ final class S6ServiceManager implements ServiceManager
     {
         $name = self::name($service);
         $src = self::SOURCE_DIR . '/' . $name;
-        $dst = self::SCAN_DIR . '/' . $name;
+        $dst = self::scanDirOf($name);
         $scan = self::SCAN_DIR;
 
         return ['sh', '-c', <<<SH
@@ -87,17 +93,17 @@ final class S6ServiceManager implements ServiceManager
             SH];
     }
 
+    /** Kills what has not stopped after 30s, as supervisord's stopwaitsecs did. */
     public function stopArgv(string $service): array
     {
-        $dir = self::SCAN_DIR . '/' . self::name($service);
+        $dir = self::scanDirOf($service);
 
-        // Kill what has not stopped after 30s, as supervisord did after its stopwaitsecs.
         return ['sh', '-c', "s6-svc -wd -T 30000 -d {$dir} || { s6-svc -k {$dir}; s6-svc -wd -T 10000 -d {$dir}; }"];
     }
 
     public function startArgv(string $service): array
     {
-        return ['s6-svc', '-u', self::SCAN_DIR . '/' . self::name($service)];
+        return ['s6-svc', '-u', self::scanDirOf($service)];
     }
 
     public function signalArgv(string $service, string $signal): array
@@ -107,13 +113,18 @@ final class S6ServiceManager implements ServiceManager
             throw new InvalidArgumentException("s6-svc cannot send {$signal}.");
         }
 
-        return ['s6-svc', $flag, self::SCAN_DIR . '/' . self::name($service)];
+        return ['s6-svc', $flag, self::scanDirOf($service)];
+    }
+
+    private static function scanDirOf(string $service): string
+    {
+        return self::SCAN_DIR . '/' . self::name($service);
     }
 
     /** Service and variable names go into paths and shell text unquoted. */
     private static function name(string $name): string
     {
-        if (preg_match('/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/', $name) !== 1) {
+        if (preg_match('/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/D', $name) !== 1) {
             throw new InvalidArgumentException("Not a service or variable name: {$name}");
         }
 

@@ -92,7 +92,7 @@ class UsageCommandsTest extends TestCase
             'username' => 'alice',
             'domain' => 'alice.test',
             'status' => 'active',
-            'details' => ['bandwidth_limit' => 10],
+            'details' => ['bandwidth_limit' => 10, 'UID' => 1001, 'GID' => 1001],
         ]);
         Domain::query()->create(['user_id' => $user->id, 'domain' => 'example.com', 'type' => 'main']);
         Domain::query()->create(['user_id' => $user->id, 'domain' => 'other.com', 'type' => 'addon']);

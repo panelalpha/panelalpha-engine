@@ -271,6 +271,12 @@ class S6ServiceManagerTest extends TestCase
         S6ServiceManager::restartScriptFor('x; rm -rf /');
     }
 
+    public function test_a_name_with_a_trailing_newline_is_refused(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        S6ServiceManager::restartScriptFor("php-fpm\n");
+    }
+
     private function alive(int $pid): bool
     {
         usleep(200000);

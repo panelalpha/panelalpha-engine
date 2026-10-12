@@ -29,6 +29,7 @@ class ApiToolNullArgumentTest extends TestCase
         Route::post('/api/test-mcp/null-echo', fn (HttpRequest $r) => response()->json([
             'keys' => array_keys($r->all()),
             'json_keys' => array_keys((array)$r->json()->all()),
+            'values' => $r->all(),
         ]));
     }
 
@@ -45,6 +46,22 @@ class ApiToolNullArgumentTest extends TestCase
         $data = $this->callTool(['zip_path' => '/a.zip']);
 
         $this->assertSame(['zip_path'], $data['keys']);
+    }
+
+    public function test_an_explicit_null_on_a_non_nullable_argument_becomes_the_default(): void
+    {
+        // A null the schema does not admit is an omitted argument, not a value:
+        // project_create {template: null} must still send dind (engine#802).
+        $this->assertSame(['template' => 'dind'], $this->callToolWithDefaults(['template' => null])['values']);
+        // Omitted behaves the same way.
+        $this->assertSame(['template' => 'dind'], $this->callToolWithDefaults([])['values']);
+    }
+
+    public function test_an_explicit_null_on_a_nullable_argument_still_reaches_the_api(): void
+    {
+        $data = $this->callToolWithDefaults(['env_vars' => null, 'template' => null]);
+
+        $this->assertSame(['env_vars' => null, 'template' => 'dind'], $data['values']);
     }
 
     public function test_the_tools_whose_api_gives_null_a_meaning_admit_it(): void
@@ -113,6 +130,45 @@ class ApiToolNullArgumentTest extends TestCase
                 return [
                     'env_vars' => $schema->object()->nullable(),
                     'zip_path' => $schema->string(),
+                ];
+            }
+        };
+
+        /** @var Response $response */
+        $response = $tool->handle(new Request($arguments));
+
+        return json_decode((string)$response->content(), true)['data'];
+    }
+
+    /** A tool with a default on a non-nullable argument and a nullable one beside it. */
+    private function callToolWithDefaults(array $arguments): array
+    {
+        $tool = new class extends ApiTool {
+            protected function method(): string
+            {
+                return 'POST';
+            }
+
+            protected function path(): string
+            {
+                return '/test-mcp/null-echo';
+            }
+
+            protected function bodyParams(): array
+            {
+                return ['env_vars', 'template'];
+            }
+
+            protected function defaults(): array
+            {
+                return ['template' => 'dind'];
+            }
+
+            public function schema(JsonSchema $schema): array
+            {
+                return [
+                    'env_vars' => $schema->object()->nullable(),
+                    'template' => $schema->string(),
                 ];
             }
         };

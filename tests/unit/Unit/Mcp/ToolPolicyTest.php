@@ -9,8 +9,15 @@ use App\Mcp\Tools\Api\Domains\DomainListTool;
 use App\Mcp\Tools\Api\Projects\ProjectDeleteTool;
 use App\Mcp\Tools\Api\Projects\ProjectCreateTool;
 use App\Mcp\Tools\Api\Projects\ProjectListTool;
+use App\Mcp\Tools\Api\Projects\ProjectRebuildTool;
 use App\Mcp\Tools\Api\Projects\ProjectUpdateTool;
+use App\Mcp\Tools\Api\Backups\BackupRestoreTool;
+use App\Mcp\Tools\Api\Files\FileWriteTool;
+use App\Mcp\Tools\Api\SSH\SshRunTool;
+use App\Mcp\Tools\Api\System\SystemUpdateTool;
+use App\Mcp\Tools\Api\WPCLI\WpCliRunTool;
 use App\Mcp\Tools\Api\ServerMetrics\MetricsCurrentTool;
+use App\Mcp\Tools\Api\Files\FileDownloadTool;
 use App\Mcp\Tools\MetricsLatestTool;
 use App\Mcp\Tools\ProjectListSummaryTool;
 use Laravel\Mcp\Server\Tools\ToolSearch;
@@ -142,6 +149,29 @@ class ToolPolicyTest extends TestCase
         $this->assertContains('project_create', $names);
         $this->assertContains('project_update', $names);
         $this->assertNotContains('project_delete', $names);
+    }
+
+    /**
+     * `modify` removes DELETE routes and nothing else: the generator marks
+     * every write `IsDestructive`, so these destructive-but-not-DELETE tools
+     * are still allowed, and the mode must be described as what it is.
+     */
+    public function test_modify_allows_destructive_writes_that_are_not_deletes(): void
+    {
+        $policy = new ToolPolicy(['toolsets' => 'all', 'permission_mode' => 'modify']);
+
+        foreach ([
+            ProjectRebuildTool::class,
+            SshRunTool::class,
+            WpCliRunTool::class,
+            BackupRestoreTool::class,
+            FileWriteTool::class,
+            SystemUpdateTool::class,
+        ] as $class) {
+            $this->assertTrue($policy->permits($class), $policy->nameOf($class) . ' is still allowed by modify');
+        }
+
+        $this->assertFalse($policy->permits(ProjectDeleteTool::class), 'DELETE routes are what modify removes');
     }
 
     public function test_denied_tools_accept_wildcards(): void
@@ -285,6 +315,9 @@ class ToolPolicyTest extends TestCase
 
     private const CREDENTIAL_READS = [
         SystemEximConfigGetTool::class,
+        // A GET that returns any file in the home, including the generated
+        // docker-compose.panelalpha.yml with the app's DB password.
+        FileDownloadTool::class,
     ];
 
     /**

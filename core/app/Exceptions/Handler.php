@@ -24,19 +24,16 @@ class Handler extends ExceptionHandler
      *
      * @var array<class-string<\Throwable>, \Psr\Log\LogLevel::*>
      */
-    protected $levels = [
-        //
-    ];
+    protected $levels = [];
 
     /**
-     * A list of the exception types that are not reported.
+     * Exception types that are not reported: each is a 409 the client is told
+     * how to act on (a busy project, a deploy already queued), not a fault.
      *
      * @var array<int, class-string<\Throwable>>
      */
     protected $dontReport = [
-        // A delete refused while a job works on the project: answered 409, nothing failed.
         ProjectBusyException::class,
-        // A 409 the client is told how to act on, not a fault.
         DeployBusyException::class,
     ];
 
@@ -58,47 +55,56 @@ class Handler extends ExceptionHandler
      */
     public function register()
     {
-        // Laravel's own message names the model class (`No query results for
-        // model [App\Models\BackupContainer] 5`); say what was missing instead.
-        $this->map(ModelNotFoundException::class, function (ModelNotFoundException $e) {
-            // The API calls a User a project.
-            $model = $e->getModel();
-            $what = match (true) {
-                $model === null => '',
-                $model === User::class => 'Project ',
-                default => ucfirst(Str::snake(class_basename($model), ' ')) . ' ',
-            };
+        $this->map(ModelNotFoundException::class, fn (ModelNotFoundException $e) => self::modelNotFound($e));
+        $this->renderConflictsAs409();
+        $this->renderable(fn (DockerErrorException $e) => self::dockerError($e));
+    }
 
-            return new NotFoundHttpException($what === '' ? 'Not found' : $what . 'not found', $e);
-        });
+    /**
+     * Name what was missing instead of Laravel's model class; the API calls a User a project.
+     */
+    private static function modelNotFound(ModelNotFoundException $e): NotFoundHttpException
+    {
+        $model = $e->getModel();
+        $what = match (true) {
+            $model === null => '',
+            $model === User::class => 'Project ',
+            default => ucfirst(Str::snake(class_basename($model), ' ')) . ' ',
+        };
 
-        // A deploy lock conflict is a domain condition, not a server fault:
-        // DeployLogger raises it from HTTP, queue and CLI alike, and only the
-        // HTTP boundary knows it should read as 409.
-        $this->renderable(function (DeployAlreadyRunningException $e) {
-            return new JsonResponse(['message' => $e->getMessage()], 409);
-        });
+        return new NotFoundHttpException($what === '' ? 'Not found' : $what . 'not found', $e);
+    }
 
-        // The same for a delete refused while something works on the project.
-        $this->renderable(function (ProjectBusyException $e) {
-            return new JsonResponse(['message' => $e->getMessage()], 409);
-        });
+    /**
+     * A deploy lock conflict or a busy project is a domain condition raised from
+     * HTTP, queue and CLI alike; only the HTTP boundary knows it reads as 409.
+     */
+    private function renderConflictsAs409(): void
+    {
+        $this->renderable(fn (DeployAlreadyRunningException $e) => self::conflict($e->getMessage()));
+        $this->renderable(fn (MissingLinuxUserException $e) => self::conflict($e->getMessage()));
+        $this->renderable(fn (ProjectBusyException $e) => self::conflict($e->getMessage()));
+        $this->renderable(fn (DeployBusyException $e) => self::conflict($e->getMessage(), ['task_id' => $e->task?->id]));
+    }
 
-        $this->renderable(function (DeployBusyException $e) {
-            return new JsonResponse(['message' => $e->getMessage(), 'task_id' => $e->task?->id], 409);
-        });
+    /**
+     * @param array<string, mixed> $extra
+     */
+    private static function conflict(string $message, array $extra = []): JsonResponse
+    {
+        return new JsonResponse(['message' => $message] + $extra, 409);
+    }
 
-        // Rendered, not reported: this decides the response, so it belongs on
-        // the same hook as the handler above. Registering it as a *report*
-        // callback meant the exception was never logged and the 422 came out of
-        // an abort() thrown from inside the reporting pipeline.
-        $this->renderable(function (DockerErrorException $e) {
-            $message = Str::betweenFirst($e->getMessage(), "Error response from daemon: ", "\n")
-                ?: $e->getMessage();
+    /**
+     * Rendered rather than reported, since it decides the response: the daemon's
+     * own message, 503 for a stopped or restarting container (retryable), else 422.
+     */
+    private static function dockerError(DockerErrorException $e): JsonResponse
+    {
+        $message = Str::betweenFirst($e->getMessage(), "Error response from daemon: ", "\n")
+            ?: $e->getMessage();
 
-            // A stopped or restarting container is retryable, not a bad request.
-            return new JsonResponse(['message' => $message], $e->isContainerUnavailable() ? 503 : 422);
-        });
+        return new JsonResponse(['message' => $message], $e->isContainerUnavailable() ? 503 : 422);
     }
 
     /**
@@ -148,6 +154,8 @@ class Handler extends ExceptionHandler
      * `errors` keeps its shape exactly -- every existing client reads it, and
      * a form has no use for a slug. What is added is the half a program
      * needs: a field, a stable code, and whatever context the failure carried.
+     * A ProblemException brings its own problems; any other failure gets one per
+     * message with what was expected.
      *
      * @return JsonResponse
      */
@@ -156,8 +164,6 @@ class Handler extends ExceptionHandler
         /** @var JsonResponse $response */
         $response = parent::invalidJson($request, $exception);
 
-        // Every 422 carries problems[]: a ProblemException brings its own, any
-        // other validation failure gets one per message with what was expected.
         $problems = $exception instanceof ProblemException && $exception->problems !== []
             ? $exception->problems
             : RuleExpectation::problems($exception->validator);

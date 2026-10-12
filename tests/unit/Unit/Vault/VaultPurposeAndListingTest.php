@@ -6,6 +6,7 @@ use App\Http\Controllers\SecretVaultController;
 use App\Models\SecretVaultEntry;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 
 /**
  * The inventory: what a caller can learn about stored secrets without being
@@ -136,6 +137,19 @@ class VaultPurposeAndListingTest extends VaultTestCase
      * @param array<string, mixed> $input
      * @return array<string, mixed>
      */
+    /** MCP skips TrimStrings, so a bare `$` let one trailing newline through. */
+    public function test_a_type_with_a_trailing_newline_is_refused(): void
+    {
+        foreach (['mint' => fn () => $this->mint(['type' => "git_token\n"]), 'list' => fn () => $this->list(['type' => "git_token\n"])] as $what => $call) {
+            try {
+                $call();
+                $this->fail("{$what} took a type with a trailing newline");
+            } catch (ValidationException $e) {
+                $this->assertArrayHasKey('type', $e->errors(), $what);
+            }
+        }
+    }
+
     private function mint(array $input): array
     {
         $request = Request::create('/api/vault/secrets', 'POST', $input);

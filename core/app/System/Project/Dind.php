@@ -49,6 +49,9 @@ use Symfony\Component\Yaml\Yaml;
  */
 class Dind implements DeployableDindProject, Runtime
 {
+    /** Long enough for a busy daemon to answer, short enough to retry soon. */
+    private const DAEMON_PROBE_TIMEOUT_SECONDS = 20;
+
     private ?AccountTemplate $accountTemplate = null;
     private ?OuterLifecycle $outerLifecycle = null;
     private ?Paths $paths = null;
@@ -162,7 +165,7 @@ class Dind implements DeployableDindProject, Runtime
         return $this->engineAccount ??= new EngineAccount(
             $model->username,
             $this->homeDirPath(),
-            ($model->getUid() ?? 33) . ':' . ($model->getGid() ?? 33),
+            implode(':', $model->linuxIds()),
             $this->composeFilePath(),
         );
     }
@@ -188,7 +191,7 @@ class Dind implements DeployableDindProject, Runtime
     }
 
     /**
-     * Read paths under ~/project via the host System API (Lib Dind::files()).
+     * Read paths under ~/project via the host System API.
      * Home-scoped file operations live on the Project aggregate ({@see \App\System\Project::fileManager()}).
      */
     public function projectTree(): ProjectFiles
@@ -327,7 +330,7 @@ class Dind implements DeployableDindProject, Runtime
 
     public function applyProjectEnvVars(?string $composePath = null): void
     {
-        $this->projectEnvironment()->apply($composePath);
+        $this->environment()->apply($composePath);
     }
 
     /** The project's private registry logins, held only while a deploy pulls and builds. */
@@ -345,11 +348,6 @@ class Dind implements DeployableDindProject, Runtime
     private function prepareFromSource(): PrepareFromSource
     {
         return $this->prepareFromSource ??= new PrepareFromSource($this);
-    }
-
-    private function projectEnvironment(): ProjectEnvironment
-    {
-        return $this->projectEnvironment ??= new ProjectEnvironment($this);
     }
 
     public function networking(): Networking
@@ -462,10 +460,8 @@ class Dind implements DeployableDindProject, Runtime
     }
 
     /**
-     * An app config's `files/` and entrypoint override write where they say,
-     * even over a file the repository tracks (the ADR-0001 exception, D4) —
-     * but never silently: each such path gets a deploy-log line, so a client
-     * wondering why `git status` shows a change can find out why.
+     * Logs each tracked file an app config overwrites (the ADR-0001 exception, D4),
+     * so a client can tell why `git status` shows a change.
      *
      * @param list<string> $relativePaths checkout-relative
      */
@@ -476,22 +472,31 @@ class Dind implements DeployableDindProject, Runtime
             return;
         }
 
+        foreach ($this->trackedAmong($relativePaths) as $path) {
+            $logger->info("App config overwrites tracked file {$path}");
+        }
+    }
+
+    /**
+     * Which of the paths the checkout tracks; none when there is no repository or git fails.
+     *
+     * @param list<string> $relativePaths
+     * @return list<string>
+     */
+    private function trackedAmong(array $relativePaths): array
+    {
         $git = new GitRepository($this);
         if (!$git->hasRepository()) {
-            return;
+            return [];
         }
 
         try {
-            $tracked = $git->trackedAmong(array_values(array_unique(array_map(
+            return $git->trackedAmong(array_values(array_unique(array_map(
                 static fn (string $path): string => ltrim($path, '/'),
                 $relativePaths
             ))));
         } catch (\Throwable) {
-            return;
-        }
-
-        foreach ($tracked as $path) {
-            $logger->info("App config overwrites tracked file {$path}");
+            return [];
         }
     }
 
@@ -543,28 +548,8 @@ class Dind implements DeployableDindProject, Runtime
     }
 
     /**
-     * Wait until the account's inner Docker daemon answers.
-     *
-     * A DinD account has *two* things to wait for and the inherited no-op only
-     * ever named the wrong one. The account container starting is what
-     * `docker compose ps` reports, and it is up in about three seconds; the
-     * nested `dockerd` behind it takes a moment longer, and in that moment
-     * `/var/run/docker.sock` does not exist at all. Every command that needs
-     * the inner daemon fails on the way through that window -- with
-     * `failed to connect to the docker API at unix:///var/run/docker.sock`,
-     * which reads as a broken daemon rather than as "too early".
-     *
-     * The socket appears 5-6s after the container starts, and the deploy path
-     * is slow enough (preparing, os user, dirs, quota) not to notice.
-     * `Projects::copy()` is not: it copies the home dir and prepares volumes
-     * five seconds in, inside the window. Every staging copy of a
-     * DinD project failed there and the job deleted the destination account, so
-     * the whole feature was unusable.
-     *
-     * Deliberately silent and deliberately bounded. It runs on paths that have
-     * no deploy log to write into, and the caller's own error is a better
-     * message than this one could invent; giving up after the tries are
-     * exhausted leaves the command to fail with whatever it has to say.
+     * Waits, silently and bounded, until the account's inner dockerd answers: its socket appears
+     * seconds after the container starts. On giving up, the caller's own command reports the failure.
      */
     public function awaitReady(int $tries = 12, int $intervalSeconds = 5): void
     {
@@ -580,12 +565,8 @@ class Dind implements DeployableDindProject, Runtime
     }
 
     /**
-     * Whether the account's inner daemon answers, asked in a way that is an
-     * answer rather than an exception even when the socket is absent.
-     *
-     * `docker info` and not `test -S /var/run/docker.sock`: the socket file
-     * exists before the daemon behind it can serve a request, and it is the
-     * request that the failing commands actually make.
+     * Whether the inner daemon serves a request (`docker info`): its socket file exists before it can.
+     * Never throws, even when the socket is absent.
      */
     private function innerDockerIsUp(): bool
     {
@@ -595,19 +576,16 @@ class Dind implements DeployableDindProject, Runtime
                 [],
                 self::DAEMON_PROBE_TIMEOUT_SECONDS
             );
-        } catch (\Throwable $e) {
+        } catch (\Throwable) {
             return false;
         }
 
         return $process->isSuccessful();
     }
 
-    /** Long enough for a busy daemon to answer, short enough to retry soon. */
-    private const DAEMON_PROBE_TIMEOUT_SECONDS = 20;
-
+    /** False without an outer compose file: nothing to ask about until recreateOuterCompose() writes it back. */
     public function isRunning(): bool
     {
-        // No outer compose file, nothing running to ask about; recreateOuterCompose() writes it back.
         if (!$this->exists()) {
             return false;
         }
@@ -625,33 +603,36 @@ class Dind implements DeployableDindProject, Runtime
 
     public function buildIfMissing(): void
     {
-        $image = null;
-        try {
-            /** @var mixed */
-            $parsed = Yaml::parseFile($this->composeFilePath());
-            if (
-                is_array($parsed)
-                && is_array($parsed['services'] ?? null)
-                && is_array($parsed['services']['dind'] ?? null)
-                && is_string($parsed['services']['dind']['image'] ?? null)
-            ) {
-                $image = $parsed['services']['dind']['image'];
-            }
-        } catch (\Exception $e) {
-        }
-        $imageEscaped = escapeshellarg($image);
-        $pathEscaped = escapeshellarg($this->composeFilePath());
-        if ($image) {
-            $this->system()->exec(
-                "sudo docker image inspect {$imageEscaped} >/dev/null 2>&1"
-                    . " || sudo docker compose -f {$pathEscaped} pull"
-                    . " || sudo docker compose -f {$pathEscaped} build"
-            );
+        $image = $this->outerImage();
+        if (!$image) {
+            $this->build();
 
             return;
         }
 
-        $this->build();
+        $imageEscaped = escapeshellarg($image);
+        $pathEscaped = escapeshellarg($this->composeFilePath());
+        $this->system()->exec(
+            "sudo docker image inspect {$imageEscaped} >/dev/null 2>&1"
+                . " || sudo docker compose -f {$pathEscaped} pull"
+                . " || sudo docker compose -f {$pathEscaped} build"
+        );
+    }
+
+    /** The image the outer compose file names for the dind service, if it can be read. */
+    private function outerImage(): ?string
+    {
+        try {
+            $parsed = Yaml::parseFile($this->composeFilePath());
+        } catch (\Exception) {
+            return null;
+        }
+
+        $image = is_array($parsed) && is_array($parsed['services'] ?? null) && is_array($parsed['services']['dind'] ?? null)
+            ? $parsed['services']['dind']['image'] ?? null
+            : null;
+
+        return is_string($image) ? $image : null;
     }
 
     public function createDomainConfig(DomainModel $domain): void
@@ -676,13 +657,8 @@ class Dind implements DeployableDindProject, Runtime
     }
 
     /**
-     * Each script is replaced by renaming a temp file over it,
-     * never by removing everything up front and writing the real names back
-     * in -- a tenant who still has entrypoint.d mounted read-write could
-     * otherwise put a symlink where a name briefly did not exist and have
-     * this write through it. Names this account no longer needs (e.g. the
-     * egress guard once it is off) are cleared with a plain unlink, which
-     * never opens whatever is there.
+     * Each script is replaced by renaming a temp file over it, so a tenant with entrypoint.d mounted
+     * read-write cannot plant a symlink in a gap; the egress guard's service keeps it applied after boot.
      */
     public function setupEntrypointInitScripts(): void
     {
@@ -693,13 +669,22 @@ class Dind implements DeployableDindProject, Runtime
         foreach ($scriptFiles as $name => $script) {
             $fs->writeFileReplacingPath("{$dir}/{$name}", $script);
         }
+        $this->unlinkUnusedInitScripts($dir, $scriptFiles);
+        $this->services()->configure(TenantEgressGuard::SERVICE, isset($scriptFiles[TenantEgressGuard::FILE]));
+    }
+
+    /**
+     * A plain unlink, which never opens whatever a tenant left at the name.
+     *
+     * @param array<string, string> $scriptFiles
+     */
+    private function unlinkUnusedInitScripts(string $dir, array $scriptFiles): void
+    {
         foreach (['useradd.sh', TenantEgressGuard::FILE] as $name) {
             if (!isset($scriptFiles[$name])) {
                 $this->system()->runProcess("sudo rm -f {$dir}/{$name}");
             }
         }
-        // The guard runs once at boot from entrypoint.d; its service keeps it applied.
-        $this->services()->configure(TenantEgressGuard::SERVICE, isset($scriptFiles[TenantEgressGuard::FILE]));
     }
 
     public function daemonJsonPath(): string
@@ -719,12 +704,7 @@ class Dind implements DeployableDindProject, Runtime
     }
 
     /**
-     * For an account whose compose already bind-mounts daemon.json: a rename
-     * would swap in a new inode the mount would not show until the container
-     * is recreated, so this writes the existing file's content in place
-     * instead. Refuses when the path is a symlink -- the mount
-     * itself is read-only, so only an account from before it existed could
-     * still have one there.
+     * Writes daemon.json in place, as a bind mount would not see a renamed-in inode; refuses a symlink.
      *
      * @return bool whether it wrote
      */

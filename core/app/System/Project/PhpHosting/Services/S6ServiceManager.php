@@ -23,11 +23,8 @@ final class S6ServiceManager implements ServiceManager
     public const SCAN_DIR = '/run/service';
 
     /**
-     * s6 starts each service in a session of its own, and the run file notes
-     * which. A master that dies hard (kill -9, a crash) leaves its workers
-     * holding the port, so no restart could bind it: finish kills what is
-     * left of the session. A session, not a process group: runuser (lsphp)
-     * puts its child in a group of its own. The images may have no procps.
+     * The run file notes its session id, and finish kills what is left of that session, so workers of a
+     * master that died hard cannot keep holding the port. A session, not a group: runuser (lsphp) makes its own.
      */
     private const RUN_PREFIX = "#!/bin/bash\necho \$\$ > sid\n";
 
@@ -66,26 +63,39 @@ final class S6ServiceManager implements ServiceManager
      */
     public function write(array $services): void
     {
-        $system = $this->project->system();
-        $projectDir = $this->project->project()->projectDirPath();
-        $dir = $projectDir . '/' . self::SERVICES_DIR;
-        $templateDir = $system->projectFilesTemplateDirPath($this->project->userModel()->getTemplate()) . '/' . self::SERVICES_DIR;
+        $dir = $this->project->project()->projectDirPath() . '/' . self::SERVICES_DIR;
 
         $wanted = [];
         foreach ($services as $service) {
-            $name = self::name($service->name);
-            $wanted[] = $name;
-            $system->filesystem()->filePutContents("{$dir}/{$name}/run", self::RUN_PREFIX . "{$service->command}\n", null, '755');
-            $system->filesystem()->filePutContents("{$dir}/{$name}/finish", self::FINISH, null, '755');
+            $wanted[] = $this->writeService($dir, self::name($service->name), $service->command);
         }
+        $this->removeServicesNotIn($dir, $wanted);
+
+        RunnerServiceManager::removeLayout($this->project);
+    }
+
+    private function writeService(string $dir, string $name, string $command): string
+    {
+        $filesystem = $this->project->system()->filesystem();
+        $filesystem->filePutContents("{$dir}/{$name}/run", self::RUN_PREFIX . "{$command}\n", null, '755');
+        $filesystem->filePutContents("{$dir}/{$name}/finish", self::FINISH, null, '755');
+
+        return $name;
+    }
+
+    /**
+     * @param list<string> $wanted
+     */
+    private function removeServicesNotIn(string $dir, array $wanted): void
+    {
+        $system = $this->project->system();
+        $templateDir = $system->projectFilesTemplateDirPath($this->project->userModel()->getTemplate()) . '/' . self::SERVICES_DIR;
         foreach (glob($dir . '/*', GLOB_ONLYDIR) ?: [] as $path) {
             $name = basename($path);
             if (!in_array($name, $wanted, true) && !is_dir("{$templateDir}/{$name}")) {
                 $system->exec(['sudo', 'rm', '-rf', $path]);
             }
         }
-
-        RunnerServiceManager::removeLayout($this->project);
     }
 
     public function sync(): void
@@ -110,27 +120,43 @@ final class S6ServiceManager implements ServiceManager
     }
 
     /**
-     * Inside the account: bring the scan dir in line with services/. A new
-     * service is started; one that is gone is stopped and retired (hidden
-     * first, as s6-svscan ignores dot-names, then removed once its supervisor
-     * has let go). s6-svscan stops that supervisor asynchronously, so sync
-     * waits up to 5s in all for it; a dir still supervised then is left to the
-     * next sync. A changed run file takes effect at the service's next
-     * restart, as with the runner's `sync`.
+     * Inside the account: bring the scan dir in line with services/. A changed run file
+     * takes effect at the service's next restart.
      */
     public static function syncScript(): string
+    {
+        return implode("\n", [
+            'set -e',
+            self::copyServicesScript(),
+            self::retireRemovedServicesScript(),
+            self::startServicesScript(),
+            self::removeRetiredServicesScript(),
+            'true',
+        ]);
+    }
+
+    private static function copyServicesScript(): string
     {
         $src = self::SOURCE_DIR;
         $scan = self::SCAN_DIR;
 
         return <<<SH
-            set -e
             for d in {$src}/*/; do
               [ -d "\$d" ] || continue
               n=\$(basename "\$d")
               mkdir -p {$scan}/\$n
               cp -a "\$d." {$scan}/\$n/
             done
+            SH;
+    }
+
+    /** Stops a service gone from services/ and hides its dir, as s6-svscan ignores dot-names. */
+    private static function retireRemovedServicesScript(): string
+    {
+        $src = self::SOURCE_DIR;
+        $scan = self::SCAN_DIR;
+
+        return <<<SH
             for d in {$scan}/*/; do
               [ -d "\$d" ] || continue
               n=\$(basename "\$d")
@@ -139,12 +165,33 @@ final class S6ServiceManager implements ServiceManager
               mv "\$d" {$scan}/.retired-\$n-\$\$
             done
             s6-svscanctl -an {$scan}
+            SH;
+    }
+
+    private static function startServicesScript(): string
+    {
+        $src = self::SOURCE_DIR;
+        $scan = self::SCAN_DIR;
+
+        return <<<SH
             for d in {$src}/*/; do
               [ -d "\$d" ] || continue
               n=\$(basename "\$d")
               i=0; until s6-svok {$scan}/\$n || [ \$i -ge 50 ]; do sleep 0.1; i=\$((i+1)); done
               s6-svc -u {$scan}/\$n
             done
+            SH;
+    }
+
+    /**
+     * s6-svscan lets go of a retired supervisor asynchronously: waits up to 5s, then removes
+     * the dirs no longer supervised and leaves the rest to the next sync.
+     */
+    private static function removeRetiredServicesScript(): string
+    {
+        $scan = self::SCAN_DIR;
+
+        return <<<SH
             i=0
             while [ \$i -lt 50 ]; do
               up=0
@@ -157,15 +204,12 @@ final class S6ServiceManager implements ServiceManager
             for d in {$scan}/.retired-*/; do
               [ -d "\$d" ] && ! s6-svok "\$d" && rm -rf "\$d"
             done
-            true
             SH;
     }
 
     /**
-     * Inside the account: restart $service with its current run file, or
-     * start it if it is not running yet. Exits EXIT_NOT_MANAGED when services/
-     * has no such service. Killed if it has not stopped after 10s, as the
-     * runner did.
+     * Inside the account: restart $service with its current run file, or start it; killed if not stopped
+     * after 10s. Exits EXIT_NOT_MANAGED when services/ has no such service.
      */
     public static function restartScriptFor(string $service): string
     {
@@ -190,7 +234,7 @@ final class S6ServiceManager implements ServiceManager
     /** Service names go into paths and shell text unquoted. */
     private static function name(string $name): string
     {
-        if (preg_match('/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/', $name) !== 1) {
+        if (preg_match('/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/D', $name) !== 1) {
             throw new InvalidArgumentException("Not a service name: {$name}");
         }
 

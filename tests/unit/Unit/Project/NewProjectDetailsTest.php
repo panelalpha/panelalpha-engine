@@ -70,6 +70,25 @@ class NewProjectDetailsTest extends TestCase
         $this->assertSame(900, $details['inodes_limit']);
     }
 
+    /**
+     * -1 is the "unlimited" sentinel on every count limit, as on the console;
+     * ResourceLimit::normalize() stores it as null everywhere but
+     * disk_space_limit, which keeps -1.
+     */
+    public function test_a_minus_one_count_limit_is_stored_as_no_limit(): void
+    {
+        $details = $this->build([
+            'mysql_databases_limit' => -1,
+            'inodes_limit' => -1,
+            'device_read_bps' => -1,
+        ]);
+
+        $this->assertNull($details['mysql_databases_limit']);
+        $this->assertNull($details['inodes_limit']);
+        $this->assertNull($details['device_read_bps']);
+        $this->assertSame(-1, $details['disk_space_limit']);
+    }
+
     public function test_the_dedicated_ip_flags_are_always_booleans(): void
     {
         $off = $this->build();

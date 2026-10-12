@@ -3,6 +3,7 @@
 namespace Tests\Unit\Http;
 
 use App\Http\Middleware\Authenticate;
+use App\Http\Middleware\TrimStrings;
 use App\Models\Setting;
 use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
@@ -60,6 +61,15 @@ class DomainMailDnsHttpTest extends TestCase
         $this->getJson('/api/projects/alice/domains/other.example.test/mail-dns')->assertNotFound();
         $this->getJson('/api/projects/nobody/domains/shop.example.test/mail-dns')->assertNotFound();
         $this->getJson('/api/projects/alice/domains/shop.example.test/mail-dns?dkim_selector=a%20b')
+            ->assertUnprocessable()->assertJsonValidationErrors('dkim_selector');
+    }
+
+    /** As MCP sends it: no TrimStrings to take the newline off first. */
+    public function test_a_selector_with_a_trailing_newline_is_refused(): void
+    {
+        $this->withoutMiddleware(TrimStrings::class);
+
+        $this->getJson('/api/projects/alice/domains/shop.example.test/mail-dns?dkim_selector=s1%0A')
             ->assertUnprocessable()->assertJsonValidationErrors('dkim_selector');
     }
 }

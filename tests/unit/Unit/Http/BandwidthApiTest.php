@@ -246,7 +246,7 @@ class BandwidthApiTest extends TestCase
             'email' => 'alice@example.com',
             'name' => 'Alice',
             'status' => 'active',
-            'details' => $details,
+            'details' => $details + ['UID' => 1001, 'GID' => 1001],
         ]);
         Domain::query()->create([
             'user_id' => $user->id,
