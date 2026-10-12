@@ -199,6 +199,7 @@ $projectRoutes = function (): void {
     Route::get('/{username}/mysql/databases/{dbname}', [DatabaseController::class, 'show']);
     Route::post('/{username}/mysql/databases', [DatabaseController::class, 'store']);
     Route::delete('/{username}/mysql/databases/{dbname}', [DatabaseController::class, 'destroy']);
+    Route::put('/{username}/mysql/databases/{dbname}/rename', [DatabaseController::class, 'rename']);
 
     Route::get('/{username}/mysql/users', [MysqlUserController::class, 'index']);
     Route::get('/{username}/mysql/users/{dbuser}', [MysqlUserController::class, 'show']);

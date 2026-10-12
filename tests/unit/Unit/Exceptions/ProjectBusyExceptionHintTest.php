@@ -6,6 +6,7 @@ use App\Exceptions\ProjectBusyException;
 use App\Jobs\CreateBackup;
 use App\Jobs\PushState;
 use App\Jobs\RebuildProject;
+use App\Jobs\RenameMysqlDatabase;
 use App\Models\Task;
 use PHPUnit\Framework\TestCase;
 
@@ -33,6 +34,13 @@ class ProjectBusyExceptionHintTest extends TestCase
         $message = ProjectBusyException::taskRunning('alice', $this->task(PushState::class, Task::STATUS_RUNNING))->getMessage();
 
         $this->assertSame("Project 'alice' is busy: push task 36 is running. Wait for it to finish.", $message);
+    }
+
+    public function test_a_running_database_rename_is_named_and_waited_for(): void
+    {
+        $message = ProjectBusyException::taskRunning('alice', $this->task(RenameMysqlDatabase::class, Task::STATUS_RUNNING))->getMessage();
+
+        $this->assertSame("Project 'alice' is busy: database rename task 36 is running. Wait for it to finish.", $message);
     }
 
     private function task(string $jobType, string $status): Task

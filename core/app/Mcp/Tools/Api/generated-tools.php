@@ -154,6 +154,7 @@ return [
     \App\Mcp\Tools\Api\MySQLDatabases\MysqlDatabaseCreateTool::class,
     \App\Mcp\Tools\Api\MySQLDatabases\MysqlDatabaseDeleteTool::class,
     \App\Mcp\Tools\Api\MySQLDatabases\MysqlDatabaseGetTool::class,
+    \App\Mcp\Tools\Api\MySQLDatabases\MysqlDatabaseRenameTool::class,
     \App\Mcp\Tools\Api\MySQLServer\PhpmyadminSsoTokenCreateTool::class,
     \App\Mcp\Tools\Api\MySQLPrivileges\MysqlPrivilegesRevokeTool::class,
     \App\Mcp\Tools\Api\MySQLPrivileges\MysqlPrivilegesGetTool::class,

@@ -135,6 +135,7 @@ return [
     'POST /projects/{username}/mysql/databases' => 'mysql_database_create',
     'GET /projects/{username}/mysql/databases/{dbname}' => 'mysql_database_get',
     'DELETE /projects/{username}/mysql/databases/{dbname}' => 'mysql_database_delete',
+    'PUT /projects/{username}/mysql/databases/{dbname}/rename' => 'mysql_database_rename',
     'GET /projects/{username}/mysql/users' => 'mysql_user_list',
     'POST /projects/{username}/mysql/users' => 'mysql_user_create',
     'GET /projects/{username}/mysql/users/{dbuser}' => 'mysql_user_get',

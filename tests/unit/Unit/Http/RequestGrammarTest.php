@@ -5,6 +5,7 @@ namespace Tests\Unit\Http;
 use App\Http\Requests\DomainUpdateRequest;
 use App\Http\Requests\EnvVarsUpdateRequest;
 use App\Http\Requests\FtpAccountStoreRequest;
+use App\Http\Requests\MysqlDatabaseRenameRequest;
 use App\Http\Requests\MysqlDatabaseStoreRequest;
 use App\Http\Requests\MysqlUserRenameRequest;
 use App\Http\Requests\MysqlUserStoreRequest;
@@ -166,6 +167,7 @@ class RequestGrammarTest extends TestCase
     {
         return [
             'database' => [MysqlDatabaseStoreRequest::class, 'name'],
+            'database rename' => [MysqlDatabaseRenameRequest::class, 'name'],
             'database user' => [MysqlUserStoreRequest::class, 'name'],
             'database user rename' => [MysqlUserRenameRequest::class, 'name'],
             'sftp account' => [SftpAccountStoreRequest::class, 'username'],

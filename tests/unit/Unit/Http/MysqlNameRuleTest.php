@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Http;
 
+use App\Http\Requests\MysqlDatabaseRenameRequest;
 use App\Http\Requests\MysqlDatabaseStoreRequest;
 use App\Http\Requests\MysqlUserRenameRequest;
 use App\Http\Requests\MysqlUserStoreRequest;
@@ -37,6 +38,7 @@ class MysqlNameRuleTest extends TestCase
     {
         return [
             'database' => [MysqlDatabaseStoreRequest::class, 'Database name'],
+            'database rename' => [MysqlDatabaseRenameRequest::class, 'Database name'],
             'database user' => [MysqlUserStoreRequest::class, 'MySQL user name'],
             'database user rename' => [MysqlUserRenameRequest::class, 'MySQL user name'],
         ];

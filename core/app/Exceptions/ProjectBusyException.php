@@ -9,6 +9,7 @@ use App\Jobs\ApplyEnvVars;
 use App\Jobs\DeployProject;
 use App\Jobs\PushState;
 use App\Jobs\RebuildProject;
+use App\Jobs\RenameMysqlDatabase;
 use App\Jobs\RestoreBackup;
 use App\Lib\Deploy\DeployLog\DeployLock;
 use App\Lib\Project\ProjectRebuild;
@@ -104,6 +105,7 @@ class ProjectBusyException extends \RuntimeException
             },
             CreateStaging::class => 'staging copy',
             PushState::class => 'push',
+            RenameMysqlDatabase::class => 'database rename',
             CreateBackup::class => 'backup',
             ApplyEnvVars::class => 'environment change',
             RestoreBackup::class => 'restore',

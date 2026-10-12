@@ -82,6 +82,7 @@ class GenerateApiToolsCommand extends Command
         ],
         'POST /projects/{username}/mysql/databases' => ['name' => 'dbname'],
         'POST /projects/{username}/mysql/users' => ['name' => 'dbuser'],
+        'PUT /projects/{username}/mysql/databases/{dbname}/rename' => ['name' => 'new_dbname'],
         'PUT /projects/{username}/mysql/users/{dbuser}/rename' => ['name' => 'new_dbuser'],
         // A bug report names the project it is about in its body, and the API
         // spells that `project` because next to `title` and `contact` a bare
