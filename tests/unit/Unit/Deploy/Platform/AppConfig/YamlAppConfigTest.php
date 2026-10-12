@@ -177,8 +177,52 @@ class YamlAppConfigTest extends TestCase
     public function test_an_unknown_git_history_is_refused(): void
     {
         $this->expectException(ManifestException::class);
-        $this->expectExceptionMessageMatches("/'git' must be/");
+        $this->expectExceptionMessageMatches("/'git' takes history/");
         AppConfig::fromYaml("git:\n  history: deep\n");
+    }
+
+    /** A repository with private submodules it does not need names the ones it does. */
+    public function test_git_submodules_name_the_only_ones_fetched(): void
+    {
+        $this->assertSame(
+            ['packages/client-area', 'vendor/lib'],
+            AppConfig::fromYaml("git:\n  submodules: [packages/client-area/, vendor/lib, vendor/lib]\n")?->gitSubmodules()
+        );
+        $this->assertSame([], AppConfig::fromYaml("git:\n  submodules: []\n")?->gitSubmodules());
+        $this->assertNull(AppConfig::fromYaml("git:\n  history: full\n")?->gitSubmodules());
+        $this->assertNull(AppConfig::fromYaml("description: Demo\nprepare: 'true'\n")?->gitSubmodules());
+    }
+
+    public function test_git_takes_submodules_with_or_without_history(): void
+    {
+        $both = AppConfig::fromYaml("git:\n  history: full\n  submodules: [lib]\n");
+        $this->assertTrue($both?->fullGitHistory());
+        $this->assertSame(['lib'], $both?->gitSubmodules());
+        $this->assertFalse(AppConfig::fromYaml("git:\n  submodules: [lib]\n")?->fullGitHistory());
+    }
+
+    public function test_a_submodule_path_outside_the_repository_is_refused(): void
+    {
+        foreach (['/etc', '../other', 'lib/../../x', '-c', "''", '[lib]', '7'] as $entry) {
+            try {
+                AppConfig::fromYaml("git:\n  submodules: [{$entry}]\n");
+                $this->fail("accepted: {$entry}");
+            } catch (ManifestException $e) {
+                $this->assertStringContainsString("'git.submodules' entries must be paths", $e->getMessage());
+            }
+        }
+    }
+
+    public function test_a_malformed_git_block_is_refused(): void
+    {
+        foreach (["git: {}\n", "git:\n  submodules: lib\n", "git:\n  depth: 1\n", "git: full\n"] as $yaml) {
+            try {
+                AppConfig::fromYaml($yaml);
+                $this->fail("accepted: {$yaml}");
+            } catch (ManifestException $e) {
+                $this->assertMatchesRegularExpression("/'git' takes history|'git.submodules' must be a list/", $e->getMessage());
+            }
+        }
     }
 
     /** An app that installs itself at first start needs longer than the deploy probe. */

@@ -2,6 +2,8 @@
 
 namespace App\System\Project\Dind\Source;
 
+use App\Exceptions\DeployCancelledException;
+use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\Platform\ManifestException;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Models\User as ModelsUser;
@@ -76,7 +78,7 @@ class GitRepository extends WorkTree
             $logger?->info('Fetching the full history and tags (the recipe sets git: {history: full})');
             $this->rethrowingGitFailure(fn () => $this->fetchFullHistory($gitToken));
         }
-        $this->fetchSubmodules($gitToken);
+        $this->fetchSubmodules($gitRepo, $gitToken);
     }
 
     private function cloningMessage(string $gitRepo, ?string $branch): string
@@ -167,24 +169,48 @@ class GitRepository extends WorkTree
         }
     }
 
-    private function fetchSubmodules(?string $gitToken): void
+    /**
+     * The submodules the checkout records, or the ones the app config names. One that
+     * cannot be fetched fails the deploy: a build without it fails later, on a missing
+     * file that says nothing about the submodule.
+     */
+    public function fetchSubmodules(string $gitRepo, ?string $gitToken): void
     {
+        if (!is_file($this->absolutePath . '/.gitmodules')) {
+            return;
+        }
         $logger = $this->project->shell()->logger();
+        $paths = $this->wantedSubmodules($gitRepo);
+        if ($paths !== null && $paths !== []) {
+            $logger?->info('Fetching only the submodules the app config names: ' . implode(', ', $paths));
+        }
 
         try {
-            if (!$this->initSubmodules($gitToken)) {
+            if (!$this->initSubmodules($gitToken, $paths)) {
                 return;
             }
+        } catch (DeployCancelledException $e) {
+            throw $e;
         } catch (\Throwable $e) {
-            $logger?->warn(
-                'Some submodules could not be fetched, so parts of this repository are missing: '
-                . GitUrl::sanitize($e->getMessage())
-            );
-
-            return;
+            throw new \RuntimeException(DeployFailureExplainer::SUBMODULE_FAILURE . ': ' . GitUrl::sanitize($e->getMessage()), 0, $e);
         }
 
         $logger?->ok('Submodules fetched');
+    }
+
+    /**
+     * `git: {submodules: [...]}`; null for every one. A malformed app config reads as
+     * every one, and is reported by the preparation that follows.
+     *
+     * @return ?list<string>
+     */
+    private function wantedSubmodules(string $gitRepo): ?array
+    {
+        try {
+            return $this->project->appConfig($gitRepo)?->gitSubmodules();
+        } catch (ManifestException) {
+            return null;
+        }
     }
 
     protected function user(): ModelsUser

@@ -103,6 +103,9 @@ Instead of asking for a pull each time, you can have your git host redeploy the 
 **The clone failed with "repository not found".**
 The URL is wrong, or the repository is private and no token was saved. Check the URL is `https://` with no username in it. For a private repository, ask the assistant to send the paste page again.
 
+**The deploy failed with "The repository's submodules could not be fetched".**
+The engine fetches the repository's submodules with the same token on every deploy, including after a pull or a push. A private submodule on another account or forge needs a token that can read it too. If the application does not need that submodule, the repository's `.panelalpha/panelalpha.yaml` can name the ones it does: `git: {submodules: [path/to/one]}`.
+
 **The deploy picked the wrong kind of application.**
 The identifying file is often not at the top of the repository: [What your repository needs](../07-supported-projects/what-your-repo-needs.md).
 

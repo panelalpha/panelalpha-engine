@@ -62,6 +62,7 @@ final class AppConfig
      * @param list<PlatformCommand> $commands
      * @param array<string, array<string, mixed>> $requires
      * @param array<string, string> $env
+     * @param ?list<string> $gitSubmodules
      */
     private function __construct(
         private readonly ?string $preCheck,
@@ -79,6 +80,7 @@ final class AppConfig
         private readonly bool $fullGitHistory = false,
         private readonly ?string $portScheme = null,
         private readonly ?int $startPeriod = null,
+        private readonly ?array $gitSubmodules = null,
     ) {
     }
 
@@ -140,6 +142,7 @@ final class AppConfig
             $config?->fullGitHistory() ?? false,
             $config?->portScheme(),
             $config?->startPeriod(),
+            $config?->gitSubmodules(),
         );
     }
 
@@ -190,6 +193,7 @@ final class AppConfig
             self::readGitHistory($raw) === self::GIT_HISTORY_FULL,
             self::readPortScheme($raw),
             self::readStartPeriod($raw),
+            self::readGitSubmodules($raw),
         );
     }
 
@@ -228,6 +232,7 @@ final class AppConfig
             $config?->fullGitHistory() ?? false,
             $config?->portScheme(),
             $config?->startPeriod(),
+            $config?->gitSubmodules(),
         );
 
         return $appConfig->isEmpty() ? null : $appConfig;
@@ -269,7 +274,8 @@ final class AppConfig
             && $this->credentials === null
             && !$this->fullGitHistory
             && $this->portScheme === null
-            && $this->startPeriod === null;
+            && $this->startPeriod === null
+            && $this->gitSubmodules === null;
     }
 
     /**
@@ -437,6 +443,18 @@ final class AppConfig
         return $this->startPeriod;
     }
 
+    /**
+     * `git: {submodules: [...]}`: the only submodules the deploy fetches, by path, each
+     * with its own submodules. Null fetches every one the repository declares; an
+     * empty list fetches none.
+     *
+     * @return ?list<string>
+     */
+    public function gitSubmodules(): ?array
+    {
+        return $this->gitSubmodules;
+    }
+
     // -- YAML reading ------------------------------------------------------
 
     /**
@@ -544,17 +562,51 @@ final class AppConfig
         if ($git === null) {
             return self::GIT_HISTORY_SHALLOW;
         }
-        $history = is_array($git) ? ($git['history'] ?? null) : null;
-        if (!is_array($git) || array_diff(array_keys($git), ['history']) !== []
+        $history = is_array($git) ? ($git['history'] ?? self::GIT_HISTORY_SHALLOW) : null;
+        if (!is_array($git) || $git === [] || array_diff(array_keys($git), ['history', 'submodules']) !== []
             || !in_array($history, [self::GIT_HISTORY_FULL, self::GIT_HISTORY_SHALLOW], true)
         ) {
             throw new ManifestException(
-                self::YAML_FILENAME . ": 'git' must be {history: " . self::GIT_HISTORY_FULL
-                . '} or {history: ' . self::GIT_HISTORY_SHALLOW . '}'
+                self::YAML_FILENAME . ": 'git' takes history (" . self::GIT_HISTORY_FULL . ' or '
+                . self::GIT_HISTORY_SHALLOW . ') and submodules (a list of paths)'
             );
         }
 
         return $history;
+    }
+
+    /**
+     * @param array<string, mixed> $raw
+     * @return ?list<string>
+     */
+    private static function readGitSubmodules(array $raw): ?array
+    {
+        $git = $raw['git'] ?? null;
+        if (!is_array($git) || !array_key_exists('submodules', $git)) {
+            return null;
+        }
+        $paths = $git['submodules'];
+        if (!is_array($paths) || !array_is_list($paths)) {
+            throw new ManifestException(self::YAML_FILENAME . ": 'git.submodules' must be a list of submodule paths");
+        }
+
+        return array_values(array_unique(array_map(self::submodulePath(...), $paths)));
+    }
+
+    /** A path inside the repository, as `.gitmodules` names it: relative, and not climbing out. */
+    private static function submodulePath(mixed $path): string
+    {
+        $clean = is_string($path) ? rtrim(trim($path), '/') : '';
+        if ($clean === '' || str_starts_with($clean, '/') || str_starts_with($clean, '-')
+            || in_array('..', explode('/', $clean), true)
+        ) {
+            throw new ManifestException(
+                self::YAML_FILENAME . ": 'git.submodules' entries must be paths inside the repository, got "
+                . json_encode($path)
+            );
+        }
+
+        return $clean;
     }
 
     /** @param array<string, mixed> $raw */

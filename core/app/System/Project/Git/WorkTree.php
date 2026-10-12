@@ -262,19 +262,20 @@ abstract class WorkTree
     }
 
     /**
-     * Fetch the submodules a freshly cloned checkout declares, at depth 1 like the clone.
-     * Run after the clone rather than with `--recurse-submodules`, so a private or
-     * slow submodule costs the submodules and not the deploy. Not optional for a
+     * Fetch the submodules the checkout declares, at the commits it records, at depth 1
+     * like the clone. Run after the clone and again after every change of the checkout,
+     * so a pull that moves a submodule pointer deploys the new commit. Not optional for a
      * repository that vendors its dependencies so (nextcloud/server's `3rdparty`).
      *
-     * @return bool whether submodules were declared (not whether they all came down)
+     * @param ?list<string> $paths only these submodules (and theirs, recursively); null for every one
+     * @return bool whether submodules were declared and asked for (not whether they all came down)
      * @throws GitException when the checkout has no repository at all
      */
-    public function initSubmodules(?string $token = null): bool
+    public function initSubmodules(?string $token = null, ?array $paths = null): bool
     {
         $this->requireRepository();
 
-        if (!is_file($this->absolutePath . '/.gitmodules')) {
+        if (!is_file($this->absolutePath . '/.gitmodules') || $paths === []) {
             return false;
         }
 
@@ -283,6 +284,7 @@ abstract class WorkTree
             '-c', 'safe.directory=' . $this->absolutePath,
             '-C', $this->absolutePath,
             'submodule', 'update', '--init', '--recursive', '--depth=1',
+            ...($paths === null ? [] : ['--', ...$paths]),
         ], $token);
 
         return true;

@@ -216,6 +216,7 @@ final class DindDeployMechanics implements DeployMechanics
     public function reprepareApplicationFromCheckout(): void
     {
         $this->keepCheckoutReadable();
+        $this->fetchSubmodulesOfCheckout();
         $this->dind->prepareFromSources();
         $this->excludeEngineArtifacts();
     }
@@ -235,6 +236,16 @@ final class DindDeployMechanics implements DeployMechanics
         (new AccountMapping($this->dind))->ensureMapped();
         (new ServingImages($this->dind))->remember();
         (new RoutingSnapshot($this->dind))->take();
+    }
+
+    /** A pull, a branch change or a push moves the checkout, and with it the submodule commits it records. */
+    private function fetchSubmodulesOfCheckout(): void
+    {
+        $user = $this->user();
+        if (!$user->hasGitProject()) {
+            return;
+        }
+        (new GitRepository($this->dind))->fetchSubmodules((string) $user->getGitRepo(), $user->getGitToken());
     }
 
     /** A pull or an archive builds on a copy; the running app keeps the tree it was deployed from. */

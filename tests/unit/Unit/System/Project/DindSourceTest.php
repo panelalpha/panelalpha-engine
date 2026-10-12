@@ -97,7 +97,7 @@ class DindSourceTest extends TestCase
         $this->assertStringContainsString('Cloning repository', $source);
         $this->assertStringContainsString('Repository cloned', $source);
         $this->assertStringContainsString('Submodules fetched', $source);
-        $this->assertStringContainsString('Some submodules could not be fetched, so parts of this repository are missing', $source);
+        $this->assertStringContainsString('DeployFailureExplainer::SUBMODULE_FAILURE', $source);
     }
 
     /**

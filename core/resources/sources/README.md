@@ -207,7 +207,7 @@ Seed only when the application has no user yet, so a password changed in the app
 
 ---
 
-### The clone's depth (`git`)
+### The clone's depth and submodules (`git`)
 
 A deploy clones the repository at depth 1: one branch, no history, no tags. A build that stamps its version from tags (`git describe --tags`, goreleaser, setuptools-scm, a Makefile's `$(shell git describe)`) then fails with `fatal: No names found, cannot describe anything`. For such a repository:
 
@@ -217,6 +217,15 @@ git:
 ```
 
 After the clone the engine fetches the whole history of the branch and every tag (`git fetch --unshallow --tags`), on every deploy. It works from the engine's per-repository directory and from a repository's own `.panelalpha/`. Leave it out for every other repository: the full history of a large project is tens of megabytes and many seconds.
+
+Submodules come down after the clone and again on every redeploy (a pull, a branch change, a push), at the commits the checkout records, so a pull that moves a submodule pointer deploys the new commit. A submodule that cannot be fetched (a private one the project's git token cannot read, a commit that is gone) fails the deploy as `submodule-fetch-failed`. When the application needs only some of them, name those:
+
+```yaml
+git:
+  submodules: [packages/client-area]   # default: every submodule; [] fetches none
+```
+
+Each path is fetched with its own submodules. The paths are the ones `.gitmodules` names, relative to the repository.
 
 ---
 
