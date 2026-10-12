@@ -251,7 +251,7 @@ seed_config_dirs() {
     cp -Rn templates/config/sftp/. config/sftp/
     cp templates/config/sftp/{entrypoint.sh,sync-logins.sh} config/sftp/
     cp -Rn templates/config/logrotate/. config/logrotate/
-    cp templates/config/logrotate/{apache,nginx,nginx-proxy}.conf config/logrotate/
+    cp templates/config/logrotate/{apache,nginx,nginx-proxy,php}.conf config/logrotate/
     cp -Rn templates/config/exim/. config/exim/
     cp -Rn templates/config/modsecurity/. config/modsecurity/
 }

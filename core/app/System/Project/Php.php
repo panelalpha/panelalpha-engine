@@ -4,6 +4,8 @@ namespace App\System\Project;
 
 use App\Models\Domain;
 use App\System\Project as UserProject;
+use App\System\Project\PhpHosting;
+use App\System\Project\PhpHosting\PhpErrorLogConfig;
 use App\System\Project\PhpHosting\PhpHandlerNotRunning;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
@@ -49,6 +51,7 @@ class Php
      */
     public function updateCustomIniSettings(string $phpVersion, array $settings): void
     {
+        $this->applyPhpErrorLogConfig();
         file_put_contents($this->customIniFilePath($phpVersion), $this->encodeIniMap($settings));
         $this->restartPhpHandler($phpVersion);
     }
@@ -206,6 +209,18 @@ class Php
                 'project' => 'Custom PHP INI settings apply only to PHP hosting projects. '
                     . 'A dind project runs PHP from its own image; set php.ini there.',
             ]);
+        }
+    }
+
+    /**
+     * A settings change re-renders the error-log directives too, so a project
+     * that predates them picks them up without a separate command.
+     */
+    private function applyPhpErrorLogConfig(): void
+    {
+        $runtime = $this->project->runtime();
+        if ($runtime instanceof PhpHosting) {
+            (new PhpErrorLogConfig())->apply($runtime);
         }
     }
 

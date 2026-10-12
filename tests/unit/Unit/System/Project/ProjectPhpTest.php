@@ -157,6 +157,9 @@ class ProjectPhpTest extends TestCase
             /** @var list<array<int, string>> */
             public array $processJournal = [];
 
+            /** @var list<array<int, string>> */
+            public array $execJournal = [];
+
             public function __construct(
                 private string $engineRoot,
             ) {
@@ -170,6 +173,13 @@ class ProjectPhpTest extends TestCase
             public function homesDirPath(): string
             {
                 return $this->engineRoot . '/home';
+            }
+
+            public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
+            {
+                $this->execJournal[] = (array) $cmd;
+
+                return '';
             }
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): \Symfony\Component\Process\Process

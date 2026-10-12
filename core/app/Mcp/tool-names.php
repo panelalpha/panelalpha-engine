@@ -204,6 +204,7 @@ return [
     'GET /php/available-versions' => 'php_version_list',
     'GET /projects/{username}/php/custom-ini-settings' => 'php_ini_get',
     'PUT /projects/{username}/php/custom-ini-settings' => 'php_ini_set',
+    'GET /projects/{username}/php/error-log' => 'php_error_log_get',
 
     // Containers. The project action drives every service in the project's
     // compose stack; the service action drives one of them.

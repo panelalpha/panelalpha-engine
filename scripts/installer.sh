@@ -1143,7 +1143,7 @@ prepare_config_files() {
     mkdir -p /opt/panelalpha/shared-hosting/config/logrotate
     cp -Rn /opt/panelalpha/shared-hosting/templates/config/logrotate/. /opt/panelalpha/shared-hosting/config/logrotate/.
     # Their postrotate reopens the webserver's logs: engine code, not host state.
-    cp /opt/panelalpha/shared-hosting/templates/config/logrotate/{apache,nginx,nginx-proxy}.conf /opt/panelalpha/shared-hosting/config/logrotate/
+    cp /opt/panelalpha/shared-hosting/templates/config/logrotate/{apache,nginx,nginx-proxy,php}.conf /opt/panelalpha/shared-hosting/config/logrotate/
     mkdir -p /opt/panelalpha/shared-hosting/config/exim
     mkdir -p /opt/panelalpha/shared-hosting/logs/exim
     cp -Rn /opt/panelalpha/shared-hosting/templates/config/exim/. /opt/panelalpha/shared-hosting/config/exim/.
@@ -1438,6 +1438,9 @@ EOF
     # live. Already-moved and stopped ones are left alone, and one that cannot
     # move keeps working where it is, so it never fails the update.
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan project:network:move --all || true
+    # PHP errors reach a project's own file only once its ini and pool carry the
+    # directives; accounts from before that are rewritten here.
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan projects:php-config:refresh --all || true
     # Exim listens on docker0's gateway, which differs per host (bip, or a
     # 172.17 clash), and relays for pash-tenants; both are read from Docker.
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan system:exim:rebuild --networks || true

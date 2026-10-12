@@ -1,4 +1,4 @@
-import { type ApiListResponse, type ApiResponse, type PhpVersion } from '@/types';
+import { type ApiListResponse, type ApiResponse, type PhpErrorLog, type PhpVersion } from '@/types';
 import { DomainsApi } from './domains.api';
 
 export class PhpApi extends DomainsApi {
@@ -41,6 +41,26 @@ export class PhpApi extends DomainsApi {
       data: { php_version: version, settings },
     });
     await this.assertStatus(response, 204);
+  }
+
+  async getPhpErrorLog(
+    username: string,
+    params: { lines?: number; since?: string; domain?: string } = {}
+  ): Promise<ApiResponse<PhpErrorLog>> {
+    const query = new URLSearchParams();
+    if (params.lines !== undefined) {
+      query.set('lines', String(params.lines));
+    }
+    if (params.since !== undefined) {
+      query.set('since', params.since);
+    }
+    if (params.domain !== undefined) {
+      query.set('domain', params.domain);
+    }
+    const suffix = query.size > 0 ? `?${query.toString()}` : '';
+    const response = await this.api.get(`projects/${username}/php/error-log${suffix}`);
+    await this.assertStatus(response, 200);
+    return response.json();
   }
 
   async getDomainPhpDirectives(domain: string): Promise<ApiResponse<Record<string, string>>> {

@@ -34,12 +34,25 @@ class WebserverLogrotateTest extends TestCase
         }
     }
 
+    public function test_the_php_error_log_is_capped_and_truncated_in_place(): void
+    {
+        $root = dirname(base_path());
+        $conf = (string) file_get_contents("{$root}/templates/config/logrotate/php.conf");
+
+        // copytruncate: the account's worker owns the file and logrotate runs
+        // as root, so a created replacement would not be writable by it.
+        $this->assertStringContainsString('/opt/panelalpha/shared-hosting/users/*/log/php/*.log', $conf);
+        $this->assertMatchesRegularExpression('/^\s*size 10M$/m', $conf);
+        $this->assertMatchesRegularExpression('/^\s*rotate 3$/m', $conf);
+        $this->assertMatchesRegularExpression('/^\s*copytruncate$/m', $conf);
+    }
+
     public function test_install_refreshes_the_webserver_logrotate_files_on_existing_hosts(): void
     {
         $root = dirname(base_path());
         foreach (['scripts/installer.sh', 'scripts/bootstrap-from-source.sh'] as $script) {
             $this->assertMatchesRegularExpression(
-                '#^\s*cp \S*templates/config/logrotate/\{apache,nginx,nginx-proxy\}\.conf \S*config/logrotate/$#m',
+                '#^\s*cp \S*templates/config/logrotate/\{apache,nginx,nginx-proxy,php\}\.conf \S*config/logrotate/$#m',
                 (string) file_get_contents("{$root}/{$script}"),
                 $script
             );

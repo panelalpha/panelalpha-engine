@@ -37,7 +37,7 @@ class DomainLogFileCommand extends Command
             return 0;
         }
 
-        $source = $logFiles->pathOrFail($filename, $all);
+        $source = $logFiles->readablePathOrFail($filename, $all);
 
         return $this->streamFile($source, is_string($out) && $out !== '' ? $out : null);
     }

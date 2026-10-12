@@ -4,9 +4,11 @@ namespace App\Http\Controllers\User\Domain;
 
 use App\Http\Controllers\Controller;
 use App\Lib\Domains\DomainLogFiles;
+use App\System as EngineSystem;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\File\Exception\FileNotFoundException;
 use OpenApi\Attributes as OA;
 
 class LogFileController extends Controller
@@ -33,14 +35,14 @@ class LogFileController extends Controller
      * @param string $domain
      * @return JsonResponse
      */
-    public function index(Request $request, $username, $domain)
+    public function index(Request $request, $username, $domain, EngineSystem $system)
     {
         $params = $request->validate([
             'all_webservers' => 'nullable',
         ]);
 
         $user = $this->projectOr404($username);
-        $logFiles = DomainLogFiles::find($user, $domain) ?? abort(404, 'Not found');
+        $logFiles = DomainLogFiles::find($user, $domain, $system) ?? abort(404, 'Not found');
 
         return new JsonResponse(['data' => $logFiles->list(!empty($params['all_webservers']))]);
     }
@@ -67,17 +69,22 @@ class LogFileController extends Controller
      * @param string $filename
      * @return BinaryFileResponse
      */
-    public function download(Request $request, $username, $domain, $filename)
+    public function download(Request $request, $username, $domain, $filename, EngineSystem $system)
     {
         $params = $request->validate([
             'all_webservers' => 'nullable',
         ]);
 
         $user = $this->projectOr404($username);
-        $logFiles = DomainLogFiles::find($user, $domain) ?? abort(404, 'Not found');
-        $path = $logFiles->path($filename, !empty($params['all_webservers'])) ?? abort(404, 'Not found');
+        $logFiles = DomainLogFiles::find($user, $domain, $system) ?? abort(404, 'Not found');
+        $path = $logFiles->readablePath($filename, !empty($params['all_webservers'])) ?? abort(404, 'Not found');
 
-        /** @var BinaryFileResponse */
-        return response()->download($path);
+        try {
+            /** @var BinaryFileResponse */
+            return response()->download($path, $filename);
+        } catch (FileNotFoundException) {
+            // The file was swapped for a link after the listing: the wrapper refuses it.
+            abort(404, 'Not found');
+        }
     }
 }

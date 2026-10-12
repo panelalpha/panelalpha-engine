@@ -174,6 +174,7 @@ return [
     \App\Mcp\Tools\Api\Projects\ProjectPasswordSetTool::class,
     \App\Mcp\Tools\Api\PHP\PhpIniGetTool::class,
     \App\Mcp\Tools\Api\PHP\PhpIniSetTool::class,
+    \App\Mcp\Tools\Api\PHP\PhpErrorLogGetTool::class,
     \App\Mcp\Tools\Api\Projects\ProjectPushTool::class,
     \App\Mcp\Tools\Api\Projects\ProjectPushDiffTool::class,
     \App\Mcp\Tools\Api\Projects\ProjectRebuildTool::class,

@@ -455,6 +455,28 @@ class FileAndSshCommandsTest extends TestCase
         ]);
     }
 
+    public function test_domain_log_refuses_a_symlinked_php_error_log(): void
+    {
+        $this->needsRealPaths();
+        $user = User::findByUsername('phpdemo');
+        $domain = new Domain();
+        $domain->domain = 'phpdemo.test';
+        $domain->user_id = $user->id;
+        $domain->type = 'main';
+        $domain->save();
+
+        $dir = EnginePaths::ENGINE_DIR . '/users/phpdemo/log/php';
+        mkdir($dir, 0777, true);
+        $this->cleanup[] = EnginePaths::ENGINE_DIR . '/users/phpdemo';
+        $outside = EnginePaths::ENGINE_DIR . '/users/phpdemo/outside-secret.txt';
+        file_put_contents($outside, "root secret\n");
+        symlink($outside, $dir . '/php_error.log');
+
+        $this->assertFails(NotFoundException::class, "Log file 'php_error.log' not found for domain 'phpdemo.test'.\n", 'project:domain:log', [
+            'project' => 'phpdemo', 'domain' => 'phpdemo.test', 'filename' => 'php_error.log', '--all-webservers' => true,
+        ]);
+    }
+
     // --- modsec:log:show ---
 
     public function test_modsec_with_no_audit_logs(): void

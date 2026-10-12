@@ -269,6 +269,7 @@ $projectRoutes = function (): void {
 
     Route::get('/{username}/php/custom-ini-settings', [UserPhpController::class, 'listCustomIniSettings']);
     Route::put('/{username}/php/custom-ini-settings', [UserPhpController::class, 'updateCustomIniSettings']);
+    Route::get('/{username}/php/error-log', [UserPhpController::class, 'errorLog']);
 
     Route::get('/{username}/containers', [ContainerController::class, 'index']);
     Route::post('/{username}/containers/action', [ContainerController::class, 'projectAction']);

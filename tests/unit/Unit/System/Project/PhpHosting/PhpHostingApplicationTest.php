@@ -65,8 +65,9 @@ class PhpHostingApplicationTest extends TestCase
             ['display_errors' => '1', 'log_errors' => '1'],
             $app->getCustomIniSettings('8.3')
         );
-        $this->assertNotEmpty($system->processJournal);
-        $this->assertStringContainsString('php-fpm8.3', implode(' ', $system->processJournal[0]));
+        $journal = $system->processJournal;
+        $this->assertNotEmpty($journal);
+        $this->assertStringContainsString('php-fpm8.3', implode(' ', end($journal)));
     }
 
     public function test_restart_php_handler_uses_fpm_entrypoint_runner(): void

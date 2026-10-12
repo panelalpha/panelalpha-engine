@@ -21,6 +21,8 @@ final class EnvironmentSetup
 
         $system->exec("sudo chown -R www-data:www-data {$projectDir}");
 
+        (new PhpErrorLogConfig())->apply($project);
+
         $this->setupCrontabFile($project);
     }
 

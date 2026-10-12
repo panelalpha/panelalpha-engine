@@ -5,6 +5,8 @@ namespace App\System\Project;
 use App\Integrations\Statistics\Statistics;
 use App\Integrations\Tunnels\TunnelManager;
 use App\Lib\HttpAcmeChallengeStore;
+use App\Lib\Project\AccountFile;
+use App\Lib\Project\PhpErrorLog;
 use App\Lib\Ssl\CertificateFacts;
 use App\Lib\Ssl\CertificateStatus;
 use App\Lib\Ssl\EngineCertificate;
@@ -386,13 +388,35 @@ class Domain implements IssuableDomain
      */
     public function listWebserverLogFiles(): array
     {
-        $files = array_merge($this->hostWebserverLogFiles(), $this->apacheLogFiles());
+        $files = array_merge($this->hostWebserverLogFiles(), $this->apacheLogFiles(), $this->phpErrorLogFiles());
 
         usort($files, function (array $a, array $b): int {
             return (int)$b['mtime'] - (int)$a['mtime'];
         });
 
         return $files;
+    }
+
+    /**
+     * The PHP handlers write one error log for the whole project; it is
+     * offered beside the webserver logs so the existing download serves it.
+     *
+     * @return list<array{file: string, path: string, mtime: int, size: int}>
+     */
+    private function phpErrorLogFiles(): array
+    {
+        $path = $this->projectDirPath() . '/log/php/' . PhpErrorLog::FILE_NAME;
+        $stat = AccountFile::ownedRegular($path, $this->userModel()->getUid());
+        if ($stat === null) {
+            return [];
+        }
+
+        return [[
+            'file' => PhpErrorLog::FILE_NAME,
+            'path' => $path,
+            'mtime' => (int) $stat['mtime'],
+            'size' => (int) $stat['size'],
+        ]];
     }
 
     /**

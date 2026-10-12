@@ -39,7 +39,11 @@ export {
   sslCertificateListSchema,
   sslCertificateSchema,
 } from './domain.schemas';
-export { customIniSettingsResponseSchema, domainPhpDirectivesResponseSchema } from './php.schemas';
+export {
+  customIniSettingsResponseSchema,
+  domainPhpDirectivesResponseSchema,
+  phpErrorLogResponseSchema,
+} from './php.schemas';
 export {
   deployHookCreateResponseSchema,
   deployHookDeliverySchema,

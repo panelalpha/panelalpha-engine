@@ -12,7 +12,6 @@ use App\Lib\Deploy\Health\CheckRunner;
 use App\Lib\Deploy\Health\HealthCheck;
 use App\Lib\Deploy\Health\ProbedResponse;
 use App\Lib\Deploy\Platform\PlatformManifest;
-use App\Lib\Deploy\Port\PortMapping;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -1176,23 +1175,7 @@ SH;
      */
     private function appServices(): ?array
     {
-        $port = $this->dind->userModel()->getAppPort();
-        try {
-            $compose = $port === null ? null : ComposeYaml::parseFile($this->dind->userAppComposeFileToRun());
-        } catch (\Throwable) {
-            return null;
-        }
-        $names = [];
-        foreach (is_array($compose['services'] ?? null) ? $compose['services'] : [] as $name => $service) {
-            foreach (is_array($service) && is_array($service['ports'] ?? null) ? $service['ports'] : [] as $entry) {
-                if (PortMapping::parse($entry)?->hostPort === $port) {
-                    $names[] = (string) $name;
-                    break;
-                }
-            }
-        }
-
-        return $names === [] ? null : $names;
+        return AppPortServices::names($this->dind);
     }
 
     /** `docker inspect` of the stack in {@see INSPECT_FORMAT}; null when it could not be asked. */
