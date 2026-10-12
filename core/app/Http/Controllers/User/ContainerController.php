@@ -5,6 +5,7 @@ namespace App\Http\Controllers\User;
 use App\Exceptions\ProblemException;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Concerns\StreamsNdjson;
+use App\OpenApi\ApiDefinitions;
 use App\System;
 use App\System\Project\Dind;
 use App\System\Project\Dind\ContainerOperations;
@@ -101,6 +102,7 @@ class ContainerController extends Controller
                     new OA\Property(property: 'stderr', type: 'string'),
                 ],
             )),
+            new OA\Response(response: 409, description: ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
         ],
     )]
     public function projectAction(string $username, Request $request): JsonResponse
@@ -140,6 +142,7 @@ class ContainerController extends Controller
                     new OA\Property(property: 'stdout', type: 'string'),
                 ],
             )),
+            new OA\Response(response: 409, description: ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]

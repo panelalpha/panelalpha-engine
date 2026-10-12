@@ -102,6 +102,37 @@ use OpenApi\Attributes as OA;
     ],
     type: 'object',
 )]
+#[OA\Schema(
+    schema: 'ProjectConflictResponse',
+    description: 'A project busy with another job, or one protected from API and MCP tokens.',
+    properties: [
+        new OA\Property(property: 'message', type: 'string'),
+        new OA\Property(
+            property: 'task_id',
+            description: 'The queued or running task to follow; null when the work was not started as one.',
+            type: 'integer',
+            nullable: true,
+        ),
+        new OA\Property(
+            property: 'problems',
+            description: 'Present for a refusal about the state of a project, such as a source it cannot take.',
+            type: 'array',
+            nullable: true,
+            items: new OA\Items(type: 'object'),
+        ),
+        new OA\Property(
+            property: 'code',
+            description: 'Present when the project is protected: `project_protected`.',
+            type: 'string',
+            nullable: true,
+            example: 'project_protected',
+        ),
+    ],
+    type: 'object',
+)]
 class ApiDefinitions
 {
+    /** The 409 an operation refused for a protected project answers with, shared by all of them. */
+    public const PROTECTED_RESPONSE = 'The project is protected: an API or MCP token may not delete, stop or '
+        . 'redeploy it (`code: project_protected`)';
 }

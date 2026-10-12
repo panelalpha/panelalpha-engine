@@ -17,6 +17,7 @@ use App\Lib\Git\DeployKey;
 use App\Lib\Git\GitActions;
 use App\Lib\Project\ProjectRebuild;
 use App\Models\User;
+use App\OpenApi\ApiDefinitions;
 use App\System\Project\Git\Exception as GitException;
 use Illuminate\Http\JsonResponse;
 use OpenApi\Attributes as OA;
@@ -37,7 +38,7 @@ class GitController extends Controller
 
     private const QUEUED_RESPONSE = 'Deploy-managed checkout: the change and the rebuild are queued; `data` is the task to follow';
 
-    private const BUSY_RESPONSE = 'A deploy of this project is already queued or running';
+    private const BUSY_RESPONSE = 'A deploy of this project is already queued or running. ' . ApiDefinitions::PROTECTED_RESPONSE;
 
     private const GIT_ERROR_RESPONSE = 'Git failed, e.g. the remote could not be read';
 
@@ -240,12 +241,7 @@ class GitController extends Controller
             )),
             new OA\Response(response: 400, description: self::GIT_ERROR_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: self::BUSY_RESPONSE, content: new OA\JsonContent(
-                properties: [
-                    new OA\Property(property: 'message', type: 'string'),
-                    new OA\Property(property: 'task_id', type: 'integer', nullable: true),
-                ],
-            )),
+            new OA\Response(response: 409, description: self::BUSY_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
             new OA\Response(response: 503, description: self::LOCK_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
@@ -322,12 +318,7 @@ class GitController extends Controller
             )),
             new OA\Response(response: 400, description: self::GIT_ERROR_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: self::BUSY_RESPONSE, content: new OA\JsonContent(
-                properties: [
-                    new OA\Property(property: 'message', type: 'string'),
-                    new OA\Property(property: 'task_id', type: 'integer', nullable: true),
-                ],
-            )),
+            new OA\Response(response: 409, description: self::BUSY_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
             new OA\Response(response: 503, description: self::LOCK_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
@@ -399,12 +390,7 @@ class GitController extends Controller
             )),
             new OA\Response(response: 400, description: self::GIT_ERROR_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: self::BUSY_RESPONSE, content: new OA\JsonContent(
-                properties: [
-                    new OA\Property(property: 'message', type: 'string'),
-                    new OA\Property(property: 'task_id', type: 'integer', nullable: true),
-                ],
-            )),
+            new OA\Response(response: 409, description: self::BUSY_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
             new OA\Response(response: 503, description: self::LOCK_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],

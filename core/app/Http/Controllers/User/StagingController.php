@@ -18,6 +18,7 @@ use App\Lib\Helper;
 use App\Models\Domain;
 use App\Models\Task;
 use App\Models\User;
+use App\OpenApi\ApiDefinitions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -203,7 +204,7 @@ class StagingController extends Controller
         responses: [
             new OA\Response(response: 202, description: 'Push accepted', content: new OA\JsonContent(ref: '#/components/schemas/User')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: 'Project busy (staging or push in progress)', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 409, description: 'Project busy (staging or push in progress). ' . ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]

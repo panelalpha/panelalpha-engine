@@ -18,6 +18,7 @@ use App\Models\Domain;
 use App\Models\Ipv4NatMap;
 use App\Models\Setting;
 use App\Models\User;
+use App\OpenApi\ApiDefinitions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -364,6 +365,7 @@ class DomainController extends Controller
         responses: [
             new OA\Response(response: 200, description: 'Domain deleted', content: new OA\JsonContent(ref: '#/components/schemas/Domain')),
             new OA\Response(response: 404, description: 'Not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 409, description: ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'The domain is the main domain, or has subdomains', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]

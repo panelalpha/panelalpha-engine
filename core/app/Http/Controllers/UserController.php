@@ -43,6 +43,7 @@ use App\Models\Domain;
 use App\Models\Setting;
 use App\System\Project\Dind;
 use App\Models\User;
+use App\OpenApi\ApiDefinitions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -737,12 +738,7 @@ class UserController extends Controller
             )),
             new OA\Response(response: 400, description: 'Unsupported X-Deploy-Stream value'),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: 'A deploy of this project is already queued or running', content: new OA\JsonContent(
-                properties: [
-                    new OA\Property(property: 'message', type: 'string'),
-                    new OA\Property(property: 'task_id', type: 'integer', nullable: true),
-                ],
-            )),
+            new OA\Response(response: 409, description: 'A deploy of this project is already queued or running. ' . ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
             new OA\Response(response: 503, description: 'The project could not be locked to start the deploy, or, with X-Deploy-Stream: ndjson, its deploy log could not be opened to stream from'),
         ],
@@ -918,12 +914,7 @@ class UserController extends Controller
             )),
             new OA\Response(response: 400, description: 'Unsupported X-Deploy-Stream value'),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: 'A deploy of this project is already queued or running', content: new OA\JsonContent(
-                properties: [
-                    new OA\Property(property: 'message', type: 'string'),
-                    new OA\Property(property: 'task_id', type: 'integer', nullable: true),
-                ],
-            )),
+            new OA\Response(response: 409, description: 'A deploy of this project is already queued or running. ' . ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
             new OA\Response(response: 503, description: 'The project could not be locked to start the deploy, or, with X-Deploy-Stream: ndjson, its deploy log could not be opened to stream from'),
         ],
@@ -1031,13 +1022,7 @@ class UserController extends Controller
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: 'A deploy of this project is already queued or running (message and task_id), or the project cannot take a source (problems: source_already_attached, project_not_eligible)', content: new OA\JsonContent(
-                properties: [
-                    new OA\Property(property: 'message', type: 'string'),
-                    new OA\Property(property: 'task_id', type: 'integer', nullable: true),
-                    new OA\Property(property: 'problems', type: 'array', items: new OA\Items(type: 'object')),
-                ],
-            )),
+            new OA\Response(response: 409, description: 'A deploy of this project is already queued or running (message and task_id), or the project cannot take a source (problems: source_already_attached, project_not_eligible). ' . ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
             new OA\Response(response: 503, description: 'The project could not be locked to start the attach'),
         ],
@@ -1342,6 +1327,7 @@ class UserController extends Controller
         responses: [
             new OA\Response(response: 200, description: 'Updated project', content: new OA\JsonContent(ref: '#/components/schemas/User')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 409, description: ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error; domain_taken when the domain is already on this engine', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
@@ -1438,6 +1424,7 @@ class UserController extends Controller
         responses: [
             new OA\Response(response: 200, description: 'Project suspended', content: new OA\JsonContent(ref: '#/components/schemas/User')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 409, description: ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
         ],
     )]
     public function suspend(string $username): UserResource
@@ -1503,7 +1490,7 @@ class UserController extends Controller
         responses: [
             new OA\Response(response: 200, description: 'Project deleted', content: new OA\JsonContent(ref: '#/components/schemas/User')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: 'Project busy: a task, deploy or push is working on it', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 409, description: 'Project busy: a task, deploy or push is working on it. ' . ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
         ],
     )]
     /**

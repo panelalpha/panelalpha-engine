@@ -12,6 +12,7 @@ use App\Lib\Deploy\EnvVarOverrides;
 use App\Lib\Project\ProjectRebuild;
 use App\Models\Task;
 use App\Models\User;
+use App\OpenApi\ApiDefinitions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use OpenApi\Attributes as OA;
@@ -110,12 +111,7 @@ class EnvVarsController extends Controller
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: 'A deploy or env var apply of this project is already queued or running', content: new OA\JsonContent(
-                properties: [
-                    new OA\Property(property: 'message', type: 'string'),
-                    new OA\Property(property: 'task_id', type: 'integer', nullable: true),
-                ],
-            )),
+            new OA\Response(response: 409, description: 'A deploy or env var apply of this project is already queued or running. ' . ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error, or the project is not a container project', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
