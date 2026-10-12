@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Project\Dind;
 
+use App\Lib\Deploy\DeployLog\DeployLock;
 use App\System;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AccountMapping;
@@ -27,6 +28,12 @@ class AccountMappingTest extends TestCase
     private array $owners = [];
 
     private int $awaited = 0;
+
+    /** what a plain `compose up` of the account throws, if anything */
+    private ?\Throwable $upError = null;
+
+    /** What starting a stopped container sysbox forgot answers. */
+    private const START_REFUSED = "Error response from daemon: failed to create task for container: failed to create shim task: OCI runtime create failed: container_linux.go:439: starting container process caused: process_linux.go:608: container init caused: rootfs_linux.go:76: setting up rootfs mounts caused: open etc/docker/daemon.json: permission denied\n";
 
     protected function setUp(): void
     {
@@ -92,7 +99,7 @@ class AccountMappingTest extends TestCase
     public function test_an_unmapped_account_is_recreated_awaited_and_asked_again(): void
     {
         Log::spy();
-        $this->owners = ['65534', '0'];
+        $this->owners = ['65534', '65534', '0'];
 
         $this->assertTrue((new AccountMapping($this->project()))->ensureMapped());
 
@@ -101,15 +108,54 @@ class AccountMappingTest extends TestCase
             $this->recreates()
         );
         $this->assertSame(1, $this->awaited);
-        $this->assertCount(2, $this->probes());
+        $this->assertCount(3, $this->probes());
         Log::shouldHaveReceived('warning')->withArgs(
             static fn (string $message): bool => $message === 'alice: ' . AccountMapping::RECREATED
         );
     }
 
+    public function test_an_account_mapped_while_the_lock_was_waited_for_is_left_alone(): void
+    {
+        $this->owners = ['65534', '0'];
+
+        $this->assertFalse((new AccountMapping($this->project()))->ensureMapped());
+
+        $this->assertSame([], $this->recreates());
+        $this->assertCount(2, $this->probes(), 'asked again under the lock before recreating');
+    }
+
+    public function test_an_account_another_process_is_repairing_is_left_to_it(): void
+    {
+        $this->owners = ['65534'];
+        $held = $this->holdLockAsAnotherProcess();
+
+        try {
+            $this->assertFalse((new AccountMapping($this->project()))->ensureMapped());
+        } finally {
+            flock($held, LOCK_UN);
+            fclose($held);
+        }
+
+        $this->assertSame([], $this->recreates());
+    }
+
+    public function test_a_deploy_holding_the_account_lock_still_repairs_the_mapping(): void
+    {
+        $lock = DeployLock::acquireFor('alice');
+        $this->owners = ['65534', '0'];
+
+        try {
+            $this->assertTrue((new AccountMapping($this->project()))->ensureMapped());
+        } finally {
+            $lock->release();
+        }
+
+        $this->assertCount(1, $this->recreates());
+    }
+
     public function test_still_unmapped_after_recreating_is_an_error(): void
     {
-        $this->owners = ['65534', '65534'];
+        $this->owners = ['65534', '65534', '65534'];
 
         try {
             (new AccountMapping($this->project()))->ensureMapped();
@@ -131,13 +177,73 @@ class AccountMappingTest extends TestCase
 
     public function test_up_brings_the_account_up_then_heals_it(): void
     {
-        $this->owners = ['65534', '0'];
+        $this->owners = ['65534', '65534', '0'];
 
         (new OuterLifecycle($this->project()))->up();
 
         $ups = array_values(array_filter($this->commands, static fn (array $c): bool => in_array('up', $c, true)));
         $this->assertSame(['sudo', 'docker', 'compose', '-f', self::COMPOSE, 'up', '-d', '--remove-orphans'], $ups[0]);
         $this->assertContains('--force-recreate', $ups[1]);
+    }
+
+    public function test_up_recreates_a_container_whose_start_sysbox_refused(): void
+    {
+        $this->upError = new \RuntimeException(self::START_REFUSED);
+        $this->owners = ['0'];
+
+        (new OuterLifecycle($this->project()))->up();
+
+        $this->assertSame(
+            [['sudo', 'docker', 'compose', '-f', self::COMPOSE, 'up', '-d', '--remove-orphans', '--force-recreate']],
+            $this->recreates()
+        );
+        $this->assertSame(1, $this->awaited);
+        $this->assertCount(1, $this->probes(), 'asked once, after the new container is up');
+    }
+
+    public function test_up_fails_as_before_on_any_other_start_error(): void
+    {
+        $this->upError = new \RuntimeException('Error response from daemon: OCI runtime create failed: bind mount through procfd: not a directory');
+
+        $this->expectExceptionMessage('not a directory');
+        try {
+            (new OuterLifecycle($this->project()))->up();
+        } finally {
+            $this->assertSame([], $this->recreates());
+        }
+    }
+
+    public function test_a_privileged_account_whose_start_fails_is_not_recreated(): void
+    {
+        config(['env.DIND_RUNTIME' => 'privileged']);
+        $this->upError = new \RuntimeException(self::START_REFUSED);
+
+        $this->expectExceptionMessage('permission denied');
+        try {
+            (new OuterLifecycle($this->project()))->up();
+        } finally {
+            $this->assertSame([], $this->recreates());
+        }
+    }
+
+    public function test_only_a_permission_refusal_from_the_runtime_is_a_start_refusal(): void
+    {
+        $this->assertTrue(AccountMapping::isStartRefusal(self::START_REFUSED));
+        $this->assertTrue(AccountMapping::isStartRefusal('OCI runtime create failed: setting up rootfs mounts caused: lstat .//etc/docker/daemon.json: permission denied'));
+        $this->assertFalse(AccountMapping::isStartRefusal(''));
+        $this->assertFalse(AccountMapping::isStartRefusal('open /var/run/docker.sock: permission denied'));
+        $this->assertFalse(AccountMapping::isStartRefusal('OCI runtime create failed: bind mount through procfd of /x -> etc/docker/daemon.json: not a directory'));
+    }
+
+    /** @return resource */
+    private function holdLockAsAnotherProcess()
+    {
+        $directory = $this->storage . '/logs/deploy/alice';
+        mkdir($directory, 0777, true);
+        $held = fopen($directory . '/.deploy.lock', 'c');
+        flock($held, LOCK_EX | LOCK_NB);
+
+        return $held;
     }
 
     /** @return list<list<string>> */
@@ -154,12 +260,12 @@ class AccountMappingTest extends TestCase
 
     private function project(): Dind
     {
-        $system = new class ($this->commands, $this->owners) extends System {
+        $system = new class ($this->commands, $this->owners, $this->upError) extends System {
             /**
              * @param list<list<string>> $commands
              * @param list<string|\Throwable> $owners
              */
-            public function __construct(private array &$commands, private array &$owners)
+            public function __construct(private array &$commands, private array &$owners, private ?\Throwable &$upError)
             {
             }
 
@@ -174,6 +280,9 @@ class AccountMappingTest extends TestCase
                     }
 
                     return $owner;
+                }
+                if (array_slice($argv, -3) === ['up', '-d', '--remove-orphans'] && $this->upError !== null) {
+                    throw $this->upError;
                 }
 
                 return '';

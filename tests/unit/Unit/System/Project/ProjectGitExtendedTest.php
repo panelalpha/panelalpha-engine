@@ -265,35 +265,6 @@ public function test_status_reports_dirty_tree_and_sanitized_remote_url(): void
         $this->assertSame(['main'], array_column($git->branches(), 'name'));
     }
 
-    public function test_configure_safe_directory_adds_once(): void
-    {
-        $model = new ModelsUser();
-        $model->username = 'alice';
-        $absolute = '/home/alice/project';
-        $runner = new FakeGitRunner();
-        $runner->stdout = [
-            'config --global --get-all safe.directory' => '',
-            'config --global --add safe.directory' => '',
-        ];
-        $git = $this->testable($model, 'project', $runner, $absolute);
-
-        $git->configureSafeDirectory();
-
-        $joined = array_map(fn (array $cmd) => implode(' ', $cmd), $runner->commands);
-        $this->assertTrue($this->commandsContain($joined, 'config --global --add safe.directory'));
-        $this->assertTrue($this->commandsContain($joined, $absolute));
-
-        $runner2 = new FakeGitRunner();
-        $runner2->stdout = [
-            'config --global --get-all safe.directory' => $absolute . "\n",
-        ];
-        $git2 = $this->testable($model, 'project', $runner2, $absolute);
-        $git2->configureSafeDirectory();
-
-        $joined2 = array_map(fn (array $cmd) => implode(' ', $cmd), $runner2->commands);
-        $this->assertFalse($this->commandsContain($joined2, 'config --global --add'));
-    }
-
     public function test_revert_with_no_commits_on_head_throws(): void
     {
         $model = new ModelsUser();
@@ -800,22 +771,28 @@ public function test_push_when_clean_and_ahead_pushes_without_commit(): void
         $this->assertArrayNotHasKey('nothing_to_push', $status);
     }
 
-public function test_push_on_deploy_managed_path_pushes_when_ahead(): void
-    {
-        $model = $this->deployManagedUser();
-        $runner = new FakeGitRunner();
-        $runner->stdout = $this->connectedRepoStdout([
-            'status --porcelain' => '',
-            'rev-list --count @{upstream}..HEAD' => "2\n",
-        ]);
-        $git = $this->testable($model, 'project', $runner);
+/** The documented refusal: a deploy-managed checkout is not pushed by hand (engine#820). */
+public function test_push_on_deploy_managed_path_is_refused(): void
+{
+    $model = $this->deployManagedUser();
+    $runner = new FakeGitRunner();
+    $runner->stdout = $this->connectedRepoStdout([
+        'status --porcelain' => " M foo\n",
+        'rev-list --count @{upstream}..HEAD' => "2\n",
+    ]);
+    $git = $this->testable($model, 'project', $runner);
 
-        $status = $git->push();
-
-        $joined = array_map(fn (array $cmd) => implode(' ', $cmd), $runner->commands);
-        $this->assertTrue($this->commandsContain($joined, 'push origin'));
-        $this->assertArrayNotHasKey('nothing_to_push', $status);
+    try {
+        $git->push();
+        $this->fail('Expected GitException');
+    } catch (\App\System\Project\Git\Exception $e) {
+        $this->assertSame('Git is managed by deploy.', $e->getMessage());
     }
+
+    $joined = array_map(fn (array $cmd) => implode(' ', $cmd), $runner->commands);
+    $this->assertFalse($this->commandsContain($joined, 'push origin'), 'nothing was pushed');
+    $this->assertFalse($this->commandsContain($joined, 'commit -m'), 'and nothing was committed');
+}
 
     public function test_revert_on_deploy_managed_path_resets_hard(): void
     {

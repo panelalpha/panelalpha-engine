@@ -16,7 +16,9 @@ use Tests\TestCase;
 
 /**
  * `project:mapping:check` over a host where alice runs unmapped, bob mapped,
- * carol privileged and dave is stopped.
+ * carol privileged and dave is stopped; of the stopped ones erin failed to
+ * start on an unmapped image, frank was stopped by hand, gina is privileged
+ * and hank failed for another reason.
  */
 class CheckAccountMappingCommandTest extends TestCase
 {
@@ -39,7 +41,7 @@ class CheckAccountMappingCommandTest extends TestCase
         foreach (['2014_10_12_000000_create_users_table.php', '2025_09_29_121922_add_status_to_users_table.php'] as $migration) {
             (require base_path('database/migrations/' . $migration))->up();
         }
-        foreach (['alice', 'bob', 'carol', 'dave'] as $name) {
+        foreach (['alice', 'bob', 'carol', 'dave', 'erin', 'frank', 'gina', 'hank'] as $name) {
             User::create(['username' => $name, 'domain' => $name . '.example.test', 'details' => ['template' => 'dind']]);
         }
     }
@@ -51,18 +53,21 @@ class CheckAccountMappingCommandTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_only_the_unmapped_sysbox_account_is_recreated(): void
+    public function test_only_the_unmapped_sysbox_accounts_are_recreated(): void
     {
         $host = $this->host();
 
-        Artisan::call('project:mapping:check');
+        $exit = Artisan::call('project:mapping:check');
         $output = Artisan::output();
 
-        $this->assertSame(['alice'], $host->recreated());
-        $this->assertSame(['alice', 'alice', 'bob'], $host->probed(), 'carol is privileged, dave stopped, ghost no project');
+        $this->assertSame(0, $exit);
+        $this->assertSame(['alice', 'erin'], $host->recreated(), 'frank stopped by hand, gina privileged, hank failed otherwise');
+        $this->assertSame(['alice', 'alice', 'alice', 'bob', 'erin'], $host->probed(), 'carol is privileged, dave stopped, ghost no project');
         $this->assertStringContainsString('alice: image unmapped, recreated the account container', $output);
-        $this->assertStringContainsString('Checked 2 running account(s): 1 unmapped, 1 recreated.', $output);
+        $this->assertStringContainsString('erin: start failed on an unmapped image, recreated the account container', $output);
+        $this->assertStringContainsString('Checked 2 running account(s): 1 unmapped, 1 stopped by a failed start, 2 recreated.', $output);
         $this->assertDirectoryDoesNotExist($this->root . '/storage/logs/deploy/alice', 'the lock directory it made is gone');
+        $this->assertDirectoryDoesNotExist($this->root . '/storage/logs/deploy/erin');
     }
 
     public function test_dry_run_only_reports(): void
@@ -74,7 +79,8 @@ class CheckAccountMappingCommandTest extends TestCase
 
         $this->assertSame([], $host->recreated());
         $this->assertStringContainsString('alice: image unmapped, would recreate the account container', $output);
-        $this->assertStringContainsString('Checked 2 running account(s): 1 unmapped, 0 recreated.', $output);
+        $this->assertStringContainsString('erin: start failed on an unmapped image, would recreate the account container', $output);
+        $this->assertStringContainsString('Checked 2 running account(s): 1 unmapped, 1 stopped by a failed start, 0 recreated.', $output);
     }
 
     public function test_an_account_a_deploy_holds_is_left_to_that_deploy(): void
@@ -88,7 +94,7 @@ class CheckAccountMappingCommandTest extends TestCase
             $lock->release();
         }
 
-        $this->assertSame([], $host->recreated());
+        $this->assertSame(['erin'], $host->recreated());
         $this->assertStringContainsString('left to the deploy or sweep holding its deploy lock', Artisan::output());
     }
 
@@ -113,7 +119,7 @@ class CheckAccountMappingCommandTest extends TestCase
             public array $calls = [];
 
             /** @var array<string, list<string>> */
-            private array $owners = ['alice' => ['65534', '0'], 'bob' => ['0'], 'carol' => ['65534'], 'dave' => ['65534']];
+            private array $owners = ['alice' => ['65534', '65534', '0'], 'bob' => ['0'], 'carol' => ['65534'], 'dave' => ['65534'], 'erin' => ['0']];
 
             public function __construct(private string $root)
             {
@@ -146,7 +152,18 @@ class CheckAccountMappingCommandTest extends TestCase
                 $this->calls[] = $argv;
                 $output = '';
                 if (array_slice($argv, 0, 3) === ['sudo', 'docker', 'ps']) {
-                    $output = "a1\nb2\nc3\ng4\n";
+                    $output = in_array('-a', $argv, true) ? "e5\nf6\ng7\nh8\n" : "a1\nb2\nc3\ng4\n";
+                } elseif (array_slice($argv, 0, 3) === ['sudo', 'docker', 'inspect'] && in_array('e5', $argv, true)) {
+                    // What a start of a container sysbox forgot leaves in State.Error.
+                    $refused = json_encode('failed to create task for container: failed to create shim task: OCI runtime create failed: '
+                        . 'container_linux.go:439: starting container process caused: process_linux.go:608: container init caused: '
+                        . 'rootfs_linux.go:76: setting up rootfs mounts caused: open etc/docker/daemon.json: permission denied');
+                    $other = json_encode('failed to create task for container: failed to create shim task: OCI runtime create failed: '
+                        . 'bind mount through procfd of /home/hank/daemon.json -> etc/docker/daemon.json: not a directory');
+                    $output = "/erin\tsysbox-runc\t{$this->projectDirPath('erin')}\t{$refused}\n"
+                        . "/frank\tsysbox-runc\t{$this->projectDirPath('frank')}\t\"\"\n"
+                        . "/gina\trunc\t{$this->projectDirPath('gina')}\t{$refused}\n"
+                        . "/hank\tsysbox-runc\t{$this->projectDirPath('hank')}\t{$other}\n";
                 } elseif (array_slice($argv, 0, 3) === ['sudo', 'docker', 'inspect']) {
                     $output = "/alice\tsysbox-runc\t{$this->projectDirPath('alice')}\n"
                         . "/bob\tsysbox-runc\t{$this->projectDirPath('bob')}\n"

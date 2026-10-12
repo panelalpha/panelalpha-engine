@@ -98,7 +98,18 @@ class DindSourceTest extends TestCase
         $this->assertStringContainsString('Repository cloned', $source);
         $this->assertStringContainsString('Submodules fetched', $source);
         $this->assertStringContainsString('Some submodules could not be fetched, so parts of this repository are missing', $source);
-        $this->assertStringContainsString('allowUntrustedGitDirectory', $source);
+    }
+
+    /**
+     * The account's home is root-owned, so `git config --global` as the account
+     * could never lock ~/.gitconfig: it only warned, twice per deploy. Every
+     * engine git command passes `-c safe.directory` instead.
+     */
+    public function test_a_deploy_never_writes_the_accounts_global_git_config(): void
+    {
+        foreach (['System/Project/Dind/Source/GitRepository.php', 'System/Project/Git/WorkTree.php', 'System/Project/Dind/PrepareFromSource.php'] as $file) {
+            $this->assertStringNotContainsString("'--global'", (string) file_get_contents($this->coreAppRoot . '/' . $file), $file);
+        }
     }
 
     private function dind(ModelsUser $model): Dind

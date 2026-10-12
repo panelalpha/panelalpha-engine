@@ -42,7 +42,8 @@ class DindHookProjectEnvTest extends TestCase
         $run = $this->commandContaining('su');
         $this->assertStringContainsString("'hook-env' '{$envFile}' 'bash' '-c' 'exec bash \"\$0\" 1>&2' '/home/alice/.panelalpha-precheck.sh'", end($run));
         foreach ($this->commands as $cmd) {
-            $this->assertStringNotContainsString('abc', implode(' ', $cmd), 'no value in any argv');
+            // The `$` keeps the random hex file names from matching by chance.
+            $this->assertStringNotContainsString('$10$abc', implode(' ', $cmd), 'no value in any argv');
         }
         $this->assertSame(['rm', '-f', $envFile], array_slice($this->commandContaining('rm'), -3));
     }

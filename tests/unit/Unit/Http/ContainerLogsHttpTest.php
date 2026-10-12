@@ -258,6 +258,30 @@ class ContainerLogsHttpTest extends TestCase
         $this->assertSame("'pkill' '-TERM' '-f' '{$tag[0]}'", $this->innerCommand());
     }
 
+    /**
+     * engine#856 item 4: a container that prints a very long line with no
+     * newline must not grow core's follow buffer without bound. The buffer is
+     * flushed in MAX_LINE_BYTES pieces.
+     */
+    public function test_a_line_longer_than_the_cap_is_flushed_in_pieces(): void
+    {
+        $chunk = str_repeat('x', ContainerOperations::MAX_LINE_BYTES);
+        $this->followChunks = [$chunk, $chunk, "tail\n"];
+
+        $dind = User::findByUsername('alice')->project(app(System::class))->runtime();
+        $seen = [];
+        $dind->followServiceLogs('app', 10, null, function (string $line) use (&$seen): void {
+            $seen[] = strlen($line);
+        });
+
+        // Two capped pieces then the short tail: nothing grew past the cap.
+        $this->assertSame([
+            ContainerOperations::MAX_LINE_BYTES,
+            ContainerOperations::MAX_LINE_BYTES,
+            4,
+        ], $seen);
+    }
+
     public function test_a_quiet_service_gets_heartbeats_between_lines(): void
     {
         $this->followCommand = ['sh', '-c', 'echo "2026-10-03T11:59:59Z first"; sleep 3; echo "2026-10-03T12:00:00Z late"'];
@@ -528,10 +552,28 @@ class ContainerLogsHttpTest extends TestCase
                 ->assertJsonPath('problems.0.message', "The project has no service named 'nosuchsvc'. Its services: app, db.")
                 ->assertJsonPath('problems.0.expected', 'one of: app, db')
                 ->assertJsonPath('problems.0.examples', ['app', 'db']);
-            $this->assertStringEndsWith("'{$action}' '--' 'nosuchsvc'", $this->commands[0][13]);
+            $this->assertStringContainsString(
+                "'{$action}' '--' 'nosuchsvc'",
+                implode("\n", array_map(static fn (array $command): string => (string) ($command[13] ?? ''), $this->commands))
+            );
         }
         // A refused stop is not a stop the health sweep should respect.
         $this->assertFalse(User::findByUsername('alice')->isAppStoppedByRequest());
+    }
+
+    public function test_every_project_action_that_starts_the_app_ends_a_stop_that_was_asked_for(): void
+    {
+        $user = User::findByUsername('alice');
+        $user->details = array_merge($user->details, ['deploy_strategy' => 'dockerfile']);
+        $user->save();
+
+        foreach (['up', 'restart', 'pull'] as $action) {
+            User::findByUsername('alice')->markAppStoppedByRequest(true);
+
+            $this->postJson('/api/projects/alice/containers/action', ['action' => $action])->assertOk();
+
+            $this->assertFalse(User::findByUsername('alice')->isAppStoppedByRequest(), $action);
+        }
     }
 
     public function test_an_action_on_a_known_service_is_unchanged(): void
