@@ -17,9 +17,11 @@ use App\Http\Requests\Files\MoveContentsRequest;
 use App\Http\Requests\Files\MvRequest;
 use App\Http\Requests\Files\PutContentsRequest;
 use App\Http\Requests\Files\StatRequest;
+use App\Http\Requests\Files\ThumbnailRequest;
 use App\Http\Requests\Files\UploadRequest;
 use App\Http\Requests\Files\ZipRequest;
 use App\System as EngineSystem;
+use App\Lib\Project\FileThumbnail;
 use App\Lib\Project\ProjectFiles;
 use App\Lib\Net\EgressRefusedException;
 use App\System\Project\FileManager;
@@ -28,6 +30,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\UploadedFile;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\File\Exception\FileNotFoundException;
+use Symfony\Component\HttpFoundation\Response;
 use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 
@@ -731,6 +734,64 @@ class FileController extends Controller
                 'message' => 'Invalid path',
             ], 404);
         }
+    }
+
+    #[OA\Get(
+        path: '/projects/{username}/files/thumbnail',
+        summary: 'Get a webp thumbnail of an image file',
+        description: 'Resizes a png, jpeg, gif or webp file into a cached webp thumbnail for the file-manager grid. '
+            . 'Supports every project kind. Refuses a file that is not one of those formats by content with '
+            . '`unsupported_image`, and one larger than 50 MB or 50 megapixels with `image_too_large`. Binary: '
+            . 'no MCP tool.',
+        // A tool answers with JSON; this returns image bytes. file_download covers MCP file reads.
+        x: ['mcp-hide' => true],
+        security: [['bearerAuth' => []]],
+        tags: ['Files'],
+        parameters: [
+            new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'path', in: 'query', required: true, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'width', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: ThumbnailRequest::DEFAULT_WIDTH, minimum: ThumbnailRequest::MIN_SIZE, maximum: ThumbnailRequest::MAX_SIZE)),
+            new OA\Parameter(name: 'height', in: 'query', required: false, description: 'Defaults to width.', schema: new OA\Schema(type: 'integer', default: ThumbnailRequest::DEFAULT_WIDTH, minimum: ThumbnailRequest::MIN_SIZE, maximum: ThumbnailRequest::MAX_SIZE)),
+            new OA\Parameter(name: 'fit', in: 'query', required: false, schema: new OA\Schema(type: 'string', enum: ThumbnailRequest::FITS, default: 'cover')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Webp thumbnail (binary)', content: new OA\MediaType(mediaType: 'image/webp', schema: new OA\Schema(type: 'string', format: 'binary'))),
+            new OA\Response(response: 304, description: 'The thumbnail is unchanged; the ETag matched If-None-Match'),
+            new OA\Response(response: 404, description: 'File not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'Not a supported image, or too large', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+        ],
+    )]
+    public function thumbnail(string $username, ThumbnailRequest $request, EngineSystem $system): Response
+    {
+        $user = $this->projectOr404($username);
+
+        /** @var array{path: string, width: int, height: int, fit: string} $params */
+        $params = $request->validated();
+        $path = $user->project($system)->resolvePath($params['path']);
+        $width = (int) $params['width'];
+        $height = (int) $params['height'];
+        $thumbnails = new FileThumbnail($system);
+
+        $etag = $thumbnails->etag($user, $path, $width, $height, $params['fit']);
+        if ($etag === null) {
+            return new JsonResponse(['message' => 'Invalid path'], 404);
+        }
+
+        $response = new Response('', 200, [
+            'Content-Type' => 'image/webp',
+            'Cache-Control' => 'private, max-age=86400',
+        ]);
+        $response->setEtag($etag);
+        if ($response->isNotModified($request)) {
+            return $response;
+        }
+
+        $body = $thumbnails->render($user, $path, $width, $height, $params['fit']);
+        if ($body === null) {
+            return new JsonResponse(['message' => 'Invalid path'], 404);
+        }
+
+        return $response->setContent($body);
     }
 
     #[OA\Put(
