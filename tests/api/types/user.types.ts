@@ -121,6 +121,15 @@ export interface CreateUserRequest {
   recipe?: string | null;
 }
 
+export interface AttachSourceRequest {
+  git_repo: string;
+  git_branch?: string | null;
+  git_token?: string | null;
+  env_vars?: Record<string, string | null> | null;
+  stages?: Record<string, unknown> | null;
+  recipe?: string | null;
+}
+
 export interface UpdateUserRequest {
   domain?: string;
   email?: string;

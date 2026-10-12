@@ -177,6 +177,7 @@ return [
     \App\Mcp\Tools\Api\SFTPAccounts\SftpAccountCreateTool::class,
     \App\Mcp\Tools\Api\SFTPAccounts\SftpAccountDeleteTool::class,
     \App\Mcp\Tools\Api\SFTPAccounts\SftpAccountUpdateTool::class,
+    \App\Mcp\Tools\Api\Projects\ProjectSourceAttachTool::class,
     \App\Mcp\Tools\Api\SSH\SshRunTool::class,
     \App\Mcp\Tools\Api\Projects\ProjectStagingTool::class,
     \App\Mcp\Tools\Api\Projects\ProjectSuspendTool::class,

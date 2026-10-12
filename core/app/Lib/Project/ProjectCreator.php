@@ -161,10 +161,9 @@ class ProjectCreator
 
         $params = self::namedParams($input);
         self::assertRequestChecksPass($params, $input->nameField);
-        $params = self::withVaultResolved($params, $input);
+        $params = self::resolvedSource($params, $input);
 
         if (!empty($params['git_repo'])) {
-            self::assertRepositoryReachable($params);
             $this->inspection = self::inspectRepository($params, $input);
         }
 
@@ -280,6 +279,24 @@ class ProjectCreator
     }
 
     /**
+     * The source a deploy will clone: its `vault:` references read for this
+     * project, and the remote checked before anything is created or changed.
+     *
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     * @throws ProblemException
+     */
+    public static function resolvedSource(array $params, NewProjectInput $input): array
+    {
+        $params = self::withVaultResolved($params, $input);
+        if (!empty($params['git_repo'])) {
+            self::assertRepositoryReachable($params);
+        }
+
+        return $params;
+    }
+
+    /**
      * Vault references are read once the name is known to be free, so an entry is assigned to
      * this project, and before the allocator spends a label on a create that would fail here.
      * The project stores the secrets themselves; nothing reads the vault on its behalf later.
@@ -312,7 +329,7 @@ class ProjectCreator
         if ($refused !== null) {
             throw ProblemException::one('git_repo', 'host_refused', $refused);
         }
-        $probe = (new GitRemoteProbe())->problem(
+        $probe = app(GitRemoteProbe::class)->problem(
             'git_repo',
             $params['git_repo'],
             $params['git_token'],

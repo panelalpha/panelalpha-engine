@@ -7,6 +7,7 @@ use App\Jobs\DeployProject;
 use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
+use App\Lib\Deploy\Source\GitRemoteProbe;
 use App\Lib\Project\CreateInspection;
 use App\Lib\Project\CreateInspector;
 use App\Models\Domain;
@@ -273,5 +274,61 @@ class ProjectCreateHttpTest extends TestCase
         $response->assertStatus(202);
         $this->assertNull($response->json('data.inspection'));
         $this->assertArrayHasKey('inspection', (array) $response->json('data'));
+    }
+
+    /**
+     * The remote probe is resolved from the container, so a test can answer for
+     * it: the same probe an attach runs through.
+     */
+    public function test_the_create_probes_the_repository_through_the_container(): void
+    {
+        $asked = new \ArrayObject();
+        $this->app->instance(GitRemoteProbe::class, new class ($asked) extends GitRemoteProbe {
+            public function __construct(private readonly \ArrayObject $asked)
+            {
+            }
+
+            public function problem(
+                string $repoField,
+                string $repoUrl,
+                ?string $token,
+                string $tokenField = 'git_token',
+                ?string $branch = null,
+                string $branchField = 'git_branch'
+            ): ?array {
+                $this->asked[] = [$repoField, $repoUrl, $branch];
+
+                return null;
+            }
+        });
+        $this->app->instance(CreateInspector::class, new class extends CreateInspector {
+            public function __construct()
+            {
+            }
+
+            public function inspect(
+                string $repoUrl,
+                ?string $branch = null,
+                ?string $token = null,
+                ?string $recipe = null,
+                ?DeployPlan $plan = null
+            ): CreateInspection {
+                return CreateInspection::skipped('the test does not read the repository.');
+            }
+        });
+
+        $response = $this->postJson('/api/projects', [
+            'name' => 'probed',
+            'domain' => 'probed.example.test',
+            'tunnel' => 'none',
+            'git_repo' => 'https://github.com/octocat/Hello-World.git',
+            'git_branch' => 'main',
+        ]);
+
+        $response->assertStatus(202);
+        $this->assertSame(
+            [['git_repo', 'https://github.com/octocat/Hello-World.git', 'main']],
+            $asked->getArrayCopy()
+        );
     }
 }

@@ -112,25 +112,55 @@ final class NewProjectRules
                 'in:' . implode(',', DomainPlan::TUNNELS),
                 self::onlineTunnelServesTheDomain($domain),
             ],
-            'git_repo' => ['nullable', 'string', 'max:' . GitRepoInput::MAX_LENGTH, new GitRepositoryUrl()],
-            'git_branch' => [
-                'string',
-                'nullable',
-                'max:255',
-                self::validRefName(),
-            ],
-            'git_token' => [
-                'nullable',
-                'string',
-                'max:' . GitTokenInput::MAX_LENGTH,
-                new GitAccessToken(),
-            ],
-            'env_vars' => 'array|nullable|max:200',
-            'env_vars.*' => 'string|nullable|max:8192',
+            'git_repo' => ['nullable', ...self::gitRepositoryRules()],
+            'git_branch' => self::gitBranchRules(),
+            'git_token' => self::gitTokenRules(),
+            ...self::envVarRules(),
             'password' => 'string|nullable|min:1|max:255',
             'stages' => 'array|nullable',
             'recipe' => 'string|nullable|max:64',
         ];
+    }
+
+    /**
+     * The repository URL grammar, without the `nullable` or `required` the
+     * caller decides: a create may omit it, an attach may not.
+     *
+     * @return array<int, mixed>
+     */
+    public static function gitRepositoryRules(): array
+    {
+        return ['string', 'max:' . GitRepoInput::MAX_LENGTH, new GitRepositoryUrl()];
+    }
+
+    /**
+     * A branch or tag name in the repository.
+     *
+     * @return array<int, mixed>
+     */
+    public static function gitBranchRules(): array
+    {
+        return ['string', 'nullable', 'max:255', self::validRefName()];
+    }
+
+    /**
+     * An HTTPS token, or a `vault:` reference to one.
+     *
+     * @return array<int, mixed>
+     */
+    public static function gitTokenRules(): array
+    {
+        return ['nullable', 'string', 'max:' . GitTokenInput::MAX_LENGTH, new GitAccessToken()];
+    }
+
+    /**
+     * The env override field, as every deploy endpoint declares it.
+     *
+     * @return array<string, mixed>
+     */
+    public static function envVarRules(): array
+    {
+        return ['env_vars' => 'array|nullable|max:200', 'env_vars.*' => 'string|nullable|max:8192'];
     }
 
     /**

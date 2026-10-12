@@ -43,6 +43,8 @@ class ProjectRebuild
 
     public const DEPLOY_ARCHIVE = 'deploy_archive';
 
+    public const ATTACH_SOURCE = 'attach_source';
+
     public const GIT_PULL = 'git_pull';
 
     public const CHANGE_BRANCH = 'change_branch';
@@ -246,6 +248,12 @@ class ProjectRebuild
         }
         if (in_array($action, self::GIT_ACTIONS, true)) {
             return $this->changeCheckout($user, $action, $logger, $git);
+        }
+
+        if ($action === self::ATTACH_SOURCE) {
+            $this->rebuild($user, $logger, null);
+
+            return [];
         }
 
         $this->rebuild($user, $logger, $zipPath);

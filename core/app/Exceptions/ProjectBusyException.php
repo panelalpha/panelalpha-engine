@@ -95,6 +95,7 @@ class ProjectBusyException extends \RuntimeException
             DeployProject::class => 'deploy',
             RebuildProject::class => match ($task->details['action'] ?? null) {
                 ProjectRebuild::DEPLOY_ARCHIVE => 'archive deploy',
+                ProjectRebuild::ATTACH_SOURCE => 'source attach',
                 ProjectRebuild::GIT_PULL => 'git pull',
                 ProjectRebuild::CHANGE_BRANCH => 'branch change',
                 ProjectRebuild::REVERT => 'git revert',

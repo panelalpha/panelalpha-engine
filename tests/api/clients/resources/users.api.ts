@@ -3,6 +3,7 @@
 import {
   type ApiListResponse,
   type ApiResponse,
+  type AttachSourceRequest,
   type CreateUserRequest,
   type TaskSnapshot,
   type UpdateUserRequest,
@@ -242,6 +243,24 @@ export class UsersApi extends EngineApiBase {
     data: { zip_path?: string; env_vars?: Record<string, string | null> }
   ): Promise<{ status: number; body: any }> {
     const response = await this.api.post(`projects/${username}/deploy-archive`, { data });
+    return this.rawCall(response);
+  }
+
+  /**
+   * POST /projects/{username}/source answers 202 with a task. Polls it until
+   * it is terminal and throws unless it completed; see rebuildUser().
+   */
+  async attachSource(username: string, data: AttachSourceRequest): Promise<TaskSnapshot> {
+    const response = await this.api.post(`projects/${username}/source`, { data });
+    await this.assertStatus(response, 202);
+    return this.followDeployTask(await response.json(), `POST /projects/${username}/source`);
+  }
+
+  async attachSourceRaw(
+    username: string,
+    data: Record<string, unknown>
+  ): Promise<{ status: number; body: any }> {
+    const response = await this.api.post(`projects/${username}/source`, { data });
     return this.rawCall(response);
   }
 

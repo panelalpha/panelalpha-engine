@@ -47,6 +47,7 @@ return [
     'POST /projects/{username}/push' => 'project_push',
     'POST /projects/{username}/deploy-archive' => 'project_deploy_archive',
     'POST /projects/{username}/rebuild' => 'project_rebuild',
+    'POST /projects/{username}/source' => 'project_source_attach',
     'PUT /projects/{username}/suspend' => 'project_suspend',
     'PUT /projects/{username}/unsuspend' => 'project_unsuspend',
     'PUT /projects/{username}/password' => 'project_password_set',

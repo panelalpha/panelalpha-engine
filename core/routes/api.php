@@ -125,6 +125,7 @@ $projectRoutes = function (): void {
     Route::get('/all', [UserController::class, 'listAll']);
     Route::post('/verify-new-username', [UserController::class, 'verifyNewUsername']);
     Route::post('/{username}/rebuild', [UserController::class, 'rebuild']);
+    Route::post('/{username}/source', [UserController::class, 'attachSource']);
     Route::post('/{username}/deploy-archive', [UserController::class, 'deployArchive']);
     Route::post('/{username}/clone', [UserController::class, 'clone']);
     Route::post('/{username}/staging', [StagingController::class, 'staging']);

@@ -8,6 +8,7 @@ use App\Exceptions\ProblemException;
 use App\Exceptions\ProjectBusyException;
 use App\Http\Controllers\Concerns\StreamsNdjson;
 use App\Http\Requests\DeployPlanInput;
+use App\Http\Requests\ProjectSourceAttachRequest;
 use App\Http\Requests\RecipeChoiceInput;
 use App\Http\Requests\UserCloneRequest;
 use App\Lib\Host\ProjectMemory;
@@ -26,10 +27,12 @@ use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Lib\Deploy\Source\GitUrl;
+use App\Lib\Project\CreateInspection;
 use App\Lib\Project\NewProjectInput;
 use App\Lib\Project\ProjectDeleter;
 use App\Lib\Project\ProjectCreator;
 use App\Lib\Project\ProjectRebuild;
+use App\Lib\Project\SourceAttacher;
 use App\Lib\Domains\DomainPlan;
 use App\Lib\Domains\MainDomainRename;
 use App\Lib\Limits\ResourceLimit;
@@ -286,9 +289,9 @@ class UserController extends Controller
     {
         $this->refuseDeployStreamOnQueuedCreate($request);
 
-        $task = $creator->queue(self::newProjectInput($request));
+        $task = $creator->queue(self::newProjectInput($request, $request->nameField()));
 
-        return self::withInspection(TaskResource::make($task)->response(), $creator)->setStatusCode(202);
+        return self::withInspection(TaskResource::make($task)->response(), $creator->inspection())->setStatusCode(202);
     }
 
     #[OA\Post(
@@ -442,7 +445,7 @@ class UserController extends Controller
     {
         $streamDeploy = $this->wantsDeployStream($request);
 
-        $user = $creator->provisionForDeploy(self::newProjectInput($request));
+        $user = $creator->provisionForDeploy(self::newProjectInput($request, $request->nameField()));
         $deployLogger = $creator->startDeployLog($user);
 
         if ($deployLogger !== null && $streamDeploy) {
@@ -455,7 +458,7 @@ class UserController extends Controller
 
         $creator->deploy($user, $deployLogger);
 
-        return self::withInspection((new UserResource($user))->response(), $creator);
+        return self::withInspection((new UserResource($user))->response(), $creator->inspection());
     }
 
     /**
@@ -471,13 +474,13 @@ class UserController extends Controller
 
     /**
      * `data.inspection`: what the inspection before the clone found, or null
-     * when it did not run. Only a create carries it.
+     * when it did not run. A create and a source attach carry it.
      */
-    private static function withInspection(JsonResponse $response, ProjectCreator $creator): JsonResponse
+    private static function withInspection(JsonResponse $response, ?CreateInspection $inspection): JsonResponse
     {
         $payload = $response->getData(true);
         if (is_array($payload) && is_array($payload['data'] ?? null)) {
-            $payload['data']['inspection'] = $creator->inspection()?->toResponse();
+            $payload['data']['inspection'] = $inspection?->toResponse();
             $response->setData($payload);
         }
 
@@ -485,11 +488,11 @@ class UserController extends Controller
     }
 
     /** The create as ProjectCreator takes it: validated fields, plus the raw ones it reads itself. */
-    private static function newProjectInput(UserStoreRequest $request): NewProjectInput
+    private static function newProjectInput(Request $request, string $nameField): NewProjectInput
     {
         return new NewProjectInput(
             $request->validated(),
-            $request->nameField(),
+            $nameField,
             $request->input('git_token'),
             $request->input('env_vars'),
             $request->input(DeployPlanInput::FIELD),
@@ -944,6 +947,103 @@ class UserController extends Controller
 
         return $rebuild->whileIdle($user, fn () => $this->startRedeploy(
             $rebuild, $user, ProjectRebuild::DEPLOY_ARCHIVE, $params['zip_path'], $plan, $recipe, $stream, $envVars
+        ));
+    }
+
+    #[OA\Post(
+        path: '/projects/{username}/source',
+        summary: 'Attach a git source to a project that has none',
+        description: 'Gives a project created before its source was known the repository it deploys from, and '
+            . 'deploys it. Only a dind project (`template: dind`) that carries no git_repo and has not produced '
+            . 'an application yet is accepted: the account a source-less create leaves waiting for files. A '
+            . 'classic shared-hosting project, and a dind project that already runs an application, are refused '
+            . 'with 409 problems[{field: git_repo, code: project_not_eligible}] -- converting a classic account '
+            . 'to dind is not supported, and an existing application is not replaced. A project that already has '
+            . 'a git_repo is refused with 409 problems[{field: git_repo, code: source_already_attached}]. The '
+            . 'repository is read as POST /projects reads it: vault references resolved, private, loopback and '
+            . 'reserved addresses refused, and the remote probed for the branch. The source is stored and the '
+            . 'deploy runs in a queue job; the answer is 202 with a task (`details.action: attach_source`, '
+            . '`details.git_repo`). Follow it as a create. While a deploy of this project is queued or running '
+            . 'the answer is 409 with that deploy\'s `task_id`. A clone or build failure leaves the project dind '
+            . 'with the source attached and a failed deploy, which POST /projects/{username}/rebuild retries.',
+        x: ['mcp-description' => 'Gives a dind project created without a source the git_repo it deploys from, and '
+            . 'deploys it. Answers at once with a task `id`: follow it with task_get until completed, failed or '
+            . 'cancelled; a failure is in details.error and details.problems. Refuses a project that already has a '
+            . 'git_repo, a classic project, and a dind project already running an application.'],
+        security: [['bearerAuth' => []]],
+        tags: ['Projects'],
+        parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
+        requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
+            required: ['git_repo'],
+            properties: [
+                new OA\Property(
+                    property: 'git_repo',
+                    type: 'string',
+                    example: 'https://github.com/owner/repo.git',
+                    description: 'HTTPS clone URL, the same rule POST /projects applies. A schemeless '
+                        . 'github.com/owner/repo is accepted and has the scheme filled in.',
+                ),
+                new OA\Property(property: 'git_branch', type: 'string', nullable: true, description: 'Branch or tag to deploy; omitted, the remote default branch.'),
+                new OA\Property(
+                    property: 'git_token',
+                    type: 'string',
+                    nullable: true,
+                    description: 'Optional HTTPS token injected at clone time. A `vault:<id>` from vault_secret_create '
+                        . 'is accepted here in place of the literal token. Never logged or returned.',
+                ),
+                new OA\Property(
+                    property: 'env_vars',
+                    type: 'object',
+                    nullable: true,
+                    additionalProperties: new OA\AdditionalProperties(type: 'string'),
+                    description: 'Optional KEY=value overrides, merged onto the ones the project already carries. '
+                        . 'An empty value removes that key; null clears them all.',
+                ),
+                new OA\Property(
+                    property: 'recipe',
+                    type: 'string',
+                    nullable: true,
+                    description: 'Deploy with this recipe instead of the one detection picks. This deploy only.',
+                    example: 'php',
+                ),
+                new OA\Property(
+                    property: 'stages',
+                    type: 'object',
+                    nullable: true,
+                    description: 'Commands this deploy runs, per stage. This deploy only.',
+                ),
+            ],
+        )),
+        responses: [
+            new OA\Response(response: 202, description: 'Source stored; deploy queued. `data` is the task to follow, with `data.inspection` as a create returns it.', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', type: 'object')],
+            )),
+            new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 409, description: 'A deploy of this project is already queued or running (message and task_id), or the project cannot take a source (problems: source_already_attached, project_not_eligible)', content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(property: 'message', type: 'string'),
+                    new OA\Property(property: 'task_id', type: 'integer', nullable: true),
+                    new OA\Property(property: 'problems', type: 'array', items: new OA\Items(type: 'object')),
+                ],
+            )),
+            new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 503, description: 'The project could not be locked to start the attach'),
+        ],
+    )]
+    public function attachSource(
+        string $username,
+        ProjectSourceAttachRequest $request,
+        SourceAttacher $attacher,
+        ProjectRebuild $rebuild,
+    ): JsonResponse {
+        $user = $this->projectOr404($username);
+        $plan = DeployPlanInput::parse($request->input(DeployPlanInput::FIELD));
+        $recipe = RecipeChoiceInput::parse($request->input(RecipeChoiceInput::FIELD));
+        $input = self::newProjectInput($request, 'username');
+
+        return $rebuild->whileIdle($user, fn (): JsonResponse => self::withInspection(
+            TaskResource::make($attacher->attach($user, $input, $plan, $recipe))->response()->setStatusCode(202),
+            $attacher->inspection(),
         ));
     }
 
