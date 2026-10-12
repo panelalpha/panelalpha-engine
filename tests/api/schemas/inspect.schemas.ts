@@ -150,3 +150,18 @@ export const appHealthSchema = z
     checks: z.array(appHealthCheckSchema),
   })
   .passthrough();
+
+/** `POST /source/refs`: a remote's branches and tags, without cloning it. */
+export const sourceRefsSchema = z
+  .object({
+    repository: z.string(),
+    default_branch: z.string().nullable(),
+    branches: z.array(z.string()),
+    tags: z.array(z.string()),
+    truncated: z.boolean(),
+  })
+  .passthrough();
+
+export const sourceRefsResponseSchema = z.object({
+  data: sourceRefsSchema,
+});

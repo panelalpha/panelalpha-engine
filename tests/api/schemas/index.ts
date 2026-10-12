@@ -90,6 +90,8 @@ export {
   inspectReportResponseSchema,
   inspectReportSchema,
   inspectSourceSchema,
+  sourceRefsResponseSchema,
+  sourceRefsSchema,
   sshCommandResultSchema,
   sslConfigResponseSchema,
   sslConfigSchema,

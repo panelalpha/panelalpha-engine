@@ -64,6 +64,8 @@ return [
     // Not tied to a project: it reads a repository, a path or an account's
     // files and reports what would be deployed.
     'POST /source/inspect' => 'source_inspect',
+    // The branches and tags of a remote, before any project exists.
+    'POST /source/refs' => 'source_refs',
     // The same report for a project that already has files, plus the snapshot
     // its last deploy froze and where the two now disagree. One verb for both
     // questions: source_inspect takes a repository, project_inspect takes an

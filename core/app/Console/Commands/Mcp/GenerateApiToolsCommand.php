@@ -47,6 +47,9 @@ class GenerateApiToolsCommand extends Command
         // Clones into a temp directory it deletes again, and reports what it
         // read. Nothing is deployed and no account is touched.
         'POST /source/inspect',
+        // Lists a remote's branches and tags over ls-remote. Creates nothing
+        // and touches no account.
+        'POST /source/refs',
         // Answers whether a name is free. POST only because the name travels
         // in a body; it reserves nothing and writes nothing, and calling it a
         // write hid it from read-only clients and made every caller ask

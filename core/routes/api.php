@@ -43,6 +43,7 @@ use App\Http\Controllers\McpActivityLogController;
 use App\Http\Controllers\ServerMetricsController;
 use App\Http\Controllers\SecretVaultController;
 use App\Http\Controllers\SourceInspectionController;
+use App\Http\Controllers\SourceRefsController;
 use App\Http\Controllers\TaskController;
 use App\Http\Controllers\User\SftpAccountController;
 use App\Http\Controllers\UserController;
@@ -329,6 +330,9 @@ Route::delete('/proxy-rules/{id}', [ProxyRuleController::class, 'destroy']);
 // Reads an application without deploying it: a repository URL, a directory on
 // this server, or an existing project's files.
 Route::post('/source/inspect', [SourceInspectionController::class, 'inspect']);
+
+// The branches and tags of a remote, for a branch picker before a project exists.
+Route::post('/source/refs', [SourceRefsController::class, 'refs']);
 
 Route::get('/php/available-versions', [PhpController::class, 'listAvailableVersions']);
 Route::get('/domains/{domain}/php-version', [DomainController::class, 'getPhpVersion']);

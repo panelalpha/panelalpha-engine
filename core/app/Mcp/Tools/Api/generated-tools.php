@@ -192,6 +192,7 @@ return [
     \App\Mcp\Tools\Api\ProxyRules\ProxyRuleGetTool::class,
     \App\Mcp\Tools\Api\ProxyRules\ProxyRuleUpdateTool::class,
     \App\Mcp\Tools\Api\Deploy\SourceInspectTool::class,
+    \App\Mcp\Tools\Api\Deploy\SourceRefsTool::class,
     \App\Mcp\Tools\Api\System\SystemWebserverChangeTool::class,
     \App\Mcp\Tools\Api\System\SystemEngineCertRequestTool::class,
     \App\Mcp\Tools\Api\System\SystemEximConfigGetTool::class,

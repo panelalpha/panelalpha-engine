@@ -10,6 +10,20 @@ export interface InspectSourceRequest {
   recipe?: string;
 }
 
+export interface SourceRefsRequest {
+  repository: string;
+  git_token?: string;
+  limit?: number;
+}
+
+export interface SourceRefs {
+  repository: string;
+  default_branch: string | null;
+  branches: string[];
+  tags: string[];
+  truncated: boolean;
+}
+
 export interface InspectCandidate {
   id: string;
   [key: string]: unknown;
