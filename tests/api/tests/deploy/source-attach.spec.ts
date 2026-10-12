@@ -137,7 +137,7 @@ test.describe('attach a git source to an existing project', () => {
     });
     await expectStatus(privateAddress, 422);
     expect(JSON.stringify(privateAddress.body), 'the refused address is named').toContain(
-      'git_repo_private_address'
+      'host_refused'
     );
   });
 });

@@ -209,7 +209,7 @@ class ProjectSourceAttachHttpTest extends TestCase
 
         $response->assertStatus(422);
         $response->assertJsonPath('problems.0.field', 'git_repo');
-        $response->assertJsonPath('problems.0.code', 'git_repo_private_address');
+        $response->assertJsonPath('problems.0.code', 'host_refused');
         Queue::assertNothingPushed();
     }
 
