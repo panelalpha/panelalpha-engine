@@ -37,6 +37,10 @@ rm -rf /run/service
 mkdir -p /run/service
 cp -a /etc/s6/core/. /run/service/
 php /var/www/html/artisan system:queue-workers:sync
+# A restart SIGKILLs the unsupervised `schedule:run`, leaving its
+# withoutOverlapping() mutexes in the persistent file cache; clear them so an
+# interrupted command runs on the next tick instead of being skipped.
+php /var/www/html/artisan schedule:clear-cache >/dev/null 2>&1 || true
 # nginx.conf believes forwarded headers on :80 from the loopback and from the
 # bridge gateway -- the host webserver's /panelalpha-sso hop -- and nothing
 # else. The gateway differs per host, so it is read here from the default

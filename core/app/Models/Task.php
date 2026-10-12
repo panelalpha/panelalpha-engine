@@ -40,6 +40,9 @@ class Task extends Model
         \App\Jobs\RebuildProject::class,
     ];
 
+    /** The message a refused `since` answers with, on the API and over MCP. */
+    public const SINCE_EXPECTED = 'since must be unix seconds or an ISO-8601 datetime';
+
     protected $fillable = [
         'job_id',
         'username',
@@ -191,6 +194,18 @@ class Task extends Model
         return Carbon::parse((string) $since);
     }
 
+    /** Whether {@see parseSince()} can read this; Carbon throws on anything else. */
+    public static function isSince(int|string|null $since): bool
+    {
+        try {
+            self::parseSince($since);
+
+            return true;
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
     public function isTerminal(): bool
     {
         return in_array($this->status, self::TERMINAL_STATUSES, true);
@@ -209,6 +224,8 @@ class Task extends Model
     }
 
     /**
+     * Merging `details` from this copy is safe: nothing else writes a queued task's details.
+     *
      * @param array<string, mixed> $details merged into `details` by the same write
      */
     public function markRunning(?string $jobId = null, array $details = []): bool
@@ -218,7 +235,6 @@ class Task extends Model
             $values['job_id'] = $jobId;
         }
         if ($details !== []) {
-            // Written only while the row is queued, and nothing else writes a queued task's details.
             $values['details'] = $this->castAttributeAsJson('details', array_merge($this->details ?? [], $details));
         }
 
@@ -257,44 +273,49 @@ class Task extends Model
 
     public function markCompleted(): bool
     {
-        if ($this->isTerminal()) {
-            return false;
-        }
-
-        $this->status = self::STATUS_COMPLETED;
-        $this->completed_at = now();
-        $this->save();
-
-        return true;
+        return $this->settle(['status' => self::STATUS_COMPLETED, 'completed_at' => now()]);
     }
 
     public function markFailed(string $error): bool
     {
-        if ($this->isTerminal()) {
-            return false;
-        }
-
         $details = $this->details ?? [];
         $details['error'] = $error;
-        $this->details = $details;
-        $this->status = self::STATUS_FAILED;
-        $this->failed_at = now();
-        $this->save();
 
-        return true;
+        return $this->settle([
+            'status' => self::STATUS_FAILED,
+            'failed_at' => now(),
+            'details' => $this->castAttributeAsJson('details', $details),
+        ]);
     }
 
     public function markCancelled(): bool
     {
+        return $this->settle(['status' => self::STATUS_CANCELLED, 'cancelled_at' => now()]);
+    }
+
+    /**
+     * The first terminal write wins, decided by a conditional update on the
+     * row: a cancel and a finishing worker may each hold a running copy.
+     * `details` set in memory (the reconciler does) is written by the same update.
+     *
+     * @param array<string, mixed> $values
+     */
+    private function settle(array $values): bool
+    {
         if ($this->isTerminal()) {
             return false;
         }
+        if (!array_key_exists('details', $values) && $this->isDirty('details')) {
+            $values['details'] = $this->castAttributeAsJson('details', $this->details);
+        }
 
-        $this->status = self::STATUS_CANCELLED;
-        $this->cancelled_at = now();
-        $this->save();
+        $moved = static::query()
+            ->whereKey($this->getKey())
+            ->whereNotIn('status', self::TERMINAL_STATUSES)
+            ->update($values) === 1;
+        $this->refresh();
 
-        return true;
+        return $moved;
     }
 
     public function setPid(?int $pid, ?string $startTime): void

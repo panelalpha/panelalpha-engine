@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Lib\DeployHook\DeliveryRunner;
 use App\Models\HookDelivery;
+use App\Support\JobBudget;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -24,7 +25,7 @@ class RunHookDelivery implements ShouldQueue
     public int $tries = 1;
 
     /** The same ceiling a manual deploy has. */
-    public int $timeout = 7200;
+    public int $timeout = JobBudget::SECONDS;
 
     public function __construct(public int $deliveryId)
     {

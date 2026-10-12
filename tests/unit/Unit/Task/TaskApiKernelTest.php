@@ -148,6 +148,31 @@ class TaskApiKernelTest extends SqliteTaskTestCase
         $response->assertJsonPath('message', 'Not found');
     }
 
+    public function test_an_unparseable_since_is_422_on_both_log_endpoints(): void
+    {
+        $task = Task::start(jobType: 'App\\Jobs\\RebuildJob', queue: 'default');
+
+        $this->getJson('/api/tasks/' . $task->id . '/logs?since=abc')
+            ->assertStatus(422)
+            ->assertJsonPath('message', Task::SINCE_EXPECTED);
+
+        // The stream validates before its 200 and its callback, so it is a plain
+        // 422 too, not an empty or cut-off stream.
+        $this->get('/api/tasks/' . $task->id . '/logs/stream?since=abc')
+            ->assertStatus(422)
+            ->assertJsonPath('message', Task::SINCE_EXPECTED);
+    }
+
+    public function test_a_parseable_since_still_pages_and_streams(): void
+    {
+        $task = Task::start(jobType: 'App\\Jobs\\RebuildJob', queue: 'default');
+        $task->markCompleted();
+        TaskLog::create(['task_id' => $task->id, 'log' => 'line']);
+
+        $this->getJson('/api/tasks/' . $task->id . '/logs?since=2026-01-01T00:00:00Z')->assertStatus(200);
+        $this->get('/api/tasks/' . $task->id . '/logs/stream?since=2026-01-01T00:00:00Z')->assertStatus(200);
+    }
+
     public function test_get_logs_stream_emits_ndjson_and_finish_for_terminal_task(): void
     {
         $task = Task::start(jobType: 'App\\Jobs\\RebuildJob', queue: 'default');

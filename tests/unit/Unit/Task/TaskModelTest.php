@@ -159,6 +159,37 @@ class TaskModelTest extends SqliteTaskTestCase
         $this->assertSame(['error' => 'boom'], $task->refresh()->details);
     }
 
+    /** engine#794: the first terminal write wins, not the last one to save. */
+    public function test_a_terminal_write_on_a_stale_copy_loses_to_the_first(): void
+    {
+        $task = Task::start(jobType: 'App\\Jobs\\RebuildJob', queue: 'default');
+        $task->markRunning('h-1');
+        // A cancel and a worker finish both read the task as running.
+        $cancelCopy = Task::findOrFail($task->id);
+        $workerCopy = Task::findOrFail($task->id);
+
+        $this->assertTrue($workerCopy->markCompleted());
+        // The cancel's copy is stale: its write must not overwrite the completed row.
+        $this->assertFalse($cancelCopy->markCancelled());
+
+        $task->refresh();
+        $this->assertSame(Task::STATUS_COMPLETED, $task->status);
+        $this->assertNotNull($task->completed_at);
+        $this->assertNull($task->cancelled_at, 'both terminal timestamps are never set');
+    }
+
+    public function test_a_details_write_survives_the_terminal_settle(): void
+    {
+        $task = Task::start(jobType: 'App\\Jobs\\RebuildJob', queue: 'default');
+        $task->markRunning('h-1');
+        $task->details = ['reconciled' => 'stopped without finishing'];
+
+        $this->assertTrue($task->markCancelled());
+
+        $this->assertSame('stopped without finishing', $task->refresh()->details['reconciled']);
+        $this->assertSame(Task::STATUS_CANCELLED, $task->status);
+    }
+
     public function test_set_pid_null_clears_both_columns(): void
     {
         $task = Task::start(jobType: 'App\\Jobs\\RebuildJob', queue: 'default');

@@ -5,9 +5,13 @@ namespace Tests\Unit\Project;
 use App\Exceptions\NotFoundException;
 use App\Jobs\CreateStaging;
 use App\Jobs\DeployProject;
+use App\Jobs\RebuildProject;
+use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Project\ProjectRebuild;
 use App\Models\Task;
 use App\Models\User;
 use App\System\Project\Deployment\RollBackProject;
+use Illuminate\Support\Facades\Queue;
 use ReflectionMethod;
 use ReflectionProperty;
 use Tests\Support\InMemoryDatabase;
@@ -69,6 +73,43 @@ class QueuedJobProjectByIdTest extends TestCase
         $this->assertSame($user->id, $lookup->invoke(new DeployProject('alice'))->id);
         // A job queued before the id existed unserializes with it unset.
         $this->assertTrue((new ReflectionProperty(DeployProject::class, 'userId'))->hasDefaultValue());
+    }
+
+    public function test_a_rebuild_never_rebuilds_a_newer_project_that_took_the_name(): void
+    {
+        [$oldId, $newer] = $this->nameTakenOver('alice');
+        $task = $this->task(RebuildProject::class, 'alice');
+        $this->app->instance(ProjectRebuild::class, new class extends ProjectRebuild {
+            public function openLog(User $user, string $action): ?DeployLogger
+            {
+                throw new \LogicException('rebuilt a newer project');
+            }
+        });
+
+        (new RebuildProject('alice', userId: $oldId))->attachTask($task)->handle(app(ProjectRebuild::class));
+
+        $this->assertSame(Task::STATUS_CANCELLED, $task->refresh()->status, 'as for a project simply deleted');
+        $this->assertTrue(User::query()->whereKey($newer->id)->exists());
+    }
+
+    public function test_a_rebuild_finds_its_project_by_id_and_a_payload_without_one_by_name(): void
+    {
+        $user = $this->makeUser('alice');
+        $lookup = new ReflectionMethod(RebuildProject::class, 'project');
+
+        $this->assertSame($user->id, $lookup->invoke(new RebuildProject('alice', userId: (int) $user->id))?->id);
+        $this->assertSame($user->id, $lookup->invoke(new RebuildProject('alice'))?->id);
+        $this->assertTrue((new ReflectionProperty(RebuildProject::class, 'userId'))->hasDefaultValue());
+    }
+
+    public function test_a_queued_rebuild_carries_the_project_id(): void
+    {
+        Queue::fake();
+        $user = $this->makeUser('alice');
+
+        (new ProjectRebuild())->queue($user, ProjectRebuild::REBUILD, null, null, null);
+
+        Queue::assertPushed(RebuildProject::class, static fn (RebuildProject $job): bool => $job->userId === (int) $user->id);
     }
 
     public function test_a_staging_copy_never_copies_into_a_newer_project_that_took_the_name(): void

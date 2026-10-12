@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Exceptions\NotFoundException;
 use App\Jobs\Concerns\AttachTask;
 use App\Models\User;
+use App\Support\JobBudget;
 use App\System;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -23,7 +24,7 @@ class CreateStaging implements ShouldQueue
 
     public int $tries = 1;
 
-    public int $timeout = 7200;
+    public int $timeout = JobBudget::SECONDS;
 
     /** The destination's row; null on a job queued before it was recorded. */
     public ?int $destId = null;
@@ -48,11 +49,12 @@ class CreateStaging implements ShouldQueue
         });
     }
 
+    /**
+     * The task is marked first: it is the only trace of this failure that
+     * outlives the destination's deletion below.
+     */
     public function failed(\Throwable $e): void
     {
-        // The task record is the only trace of this failure that outlives
-        // the account deletion below -- mark it before anything else, unless
-        // runTask() already did (isTerminal guards against clobbering that).
         $task = $this->task();
         if ($task !== null && !$task->isTerminal()) {
             $this->markFailed($e);
@@ -63,20 +65,35 @@ class CreateStaging implements ShouldQueue
             return;
         }
 
+        $this->markStagingFailed($dest, $e);
+        $this->resumeSourceAfterCopy($dest);
+        $this->destroyDestination($dest);
+    }
+
+    private function markStagingFailed(User $dest, \Throwable $e): void
+    {
         try {
             $dest->markStagingFailed($e->getMessage());
         } catch (\Throwable $mark) {
             Log::error('Could not mark staging failed', ['dest' => $this->destUsername, 'exception' => $mark]);
         }
+    }
 
+    private function resumeSourceAfterCopy(User $dest): void
+    {
         $source = $dest->liveUser;
-        if ($source !== null) {
-            try {
-                (new System())->project($source)->copyVolumesForClone()?->resumeAfterCopy();
-            } catch (\Throwable $ignored) {
-            }
+        if ($source === null) {
+            return;
         }
 
+        try {
+            (new System())->project($source)->copyVolumesForClone()?->resumeAfterCopy();
+        } catch (\Throwable $ignored) {
+        }
+    }
+
+    private function destroyDestination(User $dest): void
+    {
         try {
             $dest->project()->destroy();
         } catch (\Throwable $cleanup) {

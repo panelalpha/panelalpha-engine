@@ -95,6 +95,34 @@ class DeadWorkerQueueRowTest extends TestCase
         $this->assertNotNull(User::findByUsername('stg267'));
     }
 
+    /** Cancelled after the worker died: terminal already, so only the row is left to drop. */
+    public function test_a_task_cancelled_after_its_worker_died_leaves_no_row_to_fail(): void
+    {
+        $task = $this->reservedStagingJob('stg750');
+        $this->assertTrue($task->markCancelled());
+
+        $this->assertSame([], TaskReconciler::reconcile(false, 120), 'nothing to retire');
+
+        $this->assertSame(0, DB::table('jobs')->count(), 'the reserved row went all the same');
+        $this->makeUser('stg750', ['template' => 'dind']);
+        $this->aDayLaterAWorkerRuns();
+        $this->assertSame([], $this->failed, 'failed() never ran');
+        $this->assertNotNull(User::findByUsername('stg750'));
+    }
+
+    public function test_a_cancelled_task_whose_worker_lives_keeps_its_row(): void
+    {
+        $task = $this->reservedStagingJob('stg750live');
+        $pid = getmypid();
+        $task->details = [Task::WORKER => ['pid' => $pid, 'start' => \App\Lib\Deploy\DeployLog\ProcessIdentity::startTime($pid)]];
+        $task->save();
+        $task->markCancelled();
+
+        TaskReconciler::reconcile(false, 120);
+
+        $this->assertSame(1, DB::table('jobs')->count(), 'its worker is still stopping it');
+    }
+
     /** A live worker keeps its row: it deletes the row itself when the job ends. */
     public function test_a_live_workers_row_is_left_alone(): void
     {

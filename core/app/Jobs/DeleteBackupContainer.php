@@ -6,6 +6,7 @@ use App\Jobs\Concerns\AttachTask;
 use App\Models\Backup as BackupRecord;
 use App\Models\BackupContainer;
 use App\Models\User;
+use App\Support\JobBudget;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -24,7 +25,7 @@ class DeleteBackupContainer implements ShouldQueue
 
     public int $tries = 1;
 
-    public int $timeout = 7200;
+    public int $timeout = JobBudget::SECONDS;
 
     public function __construct(public int $containerId)
     {
@@ -42,22 +43,8 @@ class DeleteBackupContainer implements ShouldQueue
                 return;
             }
 
-            $backups = $container->backups()->with('container')->get();
-            foreach ($backups as $backup) {
-                $user = User::query()->find($backup->user_id);
-                if ($user === null) {
-                    throw new RuntimeException("Backup {$backup->id} has no owning user");
-                }
-
-                $backupId = $backup->id;
-                $user->project()->backup($backup)->delete();
-
-                if (BackupRecord::query()->find($backupId) !== null) {
-                    $leftover = BackupRecord::query()->find($backupId);
-                    throw new RuntimeException(
-                        $leftover?->error ?? "Failed to delete backup {$backupId}",
-                    );
-                }
+            foreach ($container->backups()->with('container')->get() as $backup) {
+                $this->deleteBackup($backup);
             }
 
             $container->refresh();
@@ -74,6 +61,22 @@ class DeleteBackupContainer implements ShouldQueue
         $task = $this->task();
         if ($task !== null && !$task->isTerminal()) {
             $this->markFailed($e ?? new RuntimeException('Delete backup container job failed'));
+        }
+    }
+
+    private function deleteBackup(BackupRecord $backup): void
+    {
+        $user = User::query()->find($backup->user_id);
+        if ($user === null) {
+            throw new RuntimeException("Backup {$backup->id} has no owning user");
+        }
+
+        $backupId = $backup->id;
+        $user->project()->backup($backup)->delete();
+
+        $leftover = BackupRecord::query()->find($backupId);
+        if ($leftover !== null) {
+            throw new RuntimeException($leftover->error ?? "Failed to delete backup {$backupId}");
         }
     }
 }

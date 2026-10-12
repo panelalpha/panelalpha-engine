@@ -5,70 +5,118 @@ namespace App\Lib\Task;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\ProcessIdentity;
 use App\Models\Task;
+use App\Models\User;
+use Illuminate\Support\Facades\Log;
 
 class TaskCanceller
 {
     /** @var callable */
     private $isStillRunning;
 
+    /** @var callable */
+    private $cancelDeploy;
+
     /**
      * @param null|callable(mixed, mixed): bool $isStillRunning
+     * @param null|callable(Task): void $cancelDeploy
      */
-    public function __construct(private ProcessTreeKiller $killer, mixed $isStillRunning = null)
+    public function __construct(private ProcessTreeKiller $killer, mixed $isStillRunning = null, mixed $cancelDeploy = null)
     {
         $this->isStillRunning = $isStillRunning ?? [ProcessIdentity::class, 'isStillRunning'];
+        $this->cancelDeploy = $cancelDeploy ?? [self::class, 'tearDownHalfStartedApp'];
     }
 
     /**
+     * Marks the task cancelled and stops its process, when it has one. A task the worker
+     * finished since it was read cannot be marked, and is answered like a terminal one.
+     *
      * @return array{cancelled: bool, message?: string}
      */
     public function cancel(Task $task): array
     {
         if ($task->isTerminal()) {
-            return [
-                'cancelled' => false,
-                'message' => 'Task cannot be cancelled',
-            ];
+            return self::refused('Task cannot be cancelled');
         }
 
         $wasRunning = $task->status === Task::STATUS_RUNNING;
-        $task->markCancelled();
 
-        // The deploy subprocess pid comes from the deploy log, not from
-        // `tasks.pid`: only the streaming deploy writes that column, so for
-        // every other job the log is where a pid exists at all.
-        // `requestCancel()` already returns it -- it reads latest.json, where
-        // `Shell::streamProcess()` recorded it -- and this used to discard the
-        // return value and test the never-populated `$task->pid` instead, so
-        // cancelling a deploy never killed anything.
-        //
-        // Note the log pid is deliberately not corroborated with
-        // `pid_start_time`: a *running* deploy has no recorded start time to
-        // check against, and the window this opens is the same one
-        // `requestCancel()` already accepted when it wrote the status.
-        //
-        // Only the deploy this task is running. A queued task runs none, and
-        // the account's latest log may be another's: a deploy started without
-        // a task, or a create's log still waiting for its files.
-        $pid = null;
-        $log = $wasRunning ? TaskReconciler::deployLogOf($task) : null;
-        if ($log !== null && ($log['status'] ?? null) === DeployLogger::STATUS_RUNNING) {
-            $pid = DeployLogger::requestCancel((string) $task->username)['pid'];
+        if ($wasRunning && self::cannotBeStopped($task)) {
+            return self::refused('This task is already running and cannot be stopped; wait for it to finish.');
         }
 
-        // Fall back to the task's own pid for the job types that do set it,
-        // still checking the recorded start time so a reused pid is never
-        // signalled.
-        if ($pid === null && $task->pid !== null
-            && ($this->isStillRunning)($task->pid, $task->pid_start_time)) {
-            $pid = $task->pid;
+        if (!$task->markCancelled()) {
+            return self::refused('Task cannot be cancelled');
         }
 
+        $pid = $this->deployPid($task, $wasRunning) ?? $this->ownPid($task);
         if (is_int($pid) && $pid > 0) {
             $this->killer->kill($pid);
         }
 
+        if ($wasRunning && $task->isDeploy()) {
+            ($this->cancelDeploy)($task);
+        }
+
         return ['cancelled' => true];
+    }
+
+    /**
+     * Best-effort teardown of what a cancelled deploy had already started: it
+     * never destroys the account, so a failure is only logged.
+     */
+    private static function tearDownHalfStartedApp(Task $task): void
+    {
+        try {
+            $user = is_string($task->username) ? User::findByUsername($task->username) : null;
+            $user?->project()->cancelRunningDeploy();
+        } catch (\Throwable $e) {
+            Log::warning("Deploy cancel cleanup failed for {$task->username}: {$e->getMessage()}");
+        }
+    }
+
+    /**
+     * @return array{cancelled: false, message: string}
+     */
+    private static function refused(string $message): array
+    {
+        return [
+            'cancelled' => false,
+            'message' => $message,
+        ];
+    }
+
+    /**
+     * Nothing can stop a running job without a pid (backup, restore, staging, push):
+     * marking it cancelled would hide its real outcome.
+     */
+    private static function cannotBeStopped(Task $task): bool
+    {
+        return !$task->isDeploy() && $task->pid === null;
+    }
+
+    /**
+     * The pid of the deploy this task is running, from its log: only the streaming deploy
+     * writes `tasks.pid`. Not corroborated with `pid_start_time`, which a running deploy has
+     * not recorded. A queued task runs none, and the account's latest log may be another's.
+     */
+    private function deployPid(Task $task, bool $wasRunning): ?int
+    {
+        $log = $wasRunning ? TaskReconciler::deployLogOf($task) : null;
+        if ($log === null || ($log['status'] ?? null) !== DeployLogger::STATUS_RUNNING) {
+            return null;
+        }
+
+        return DeployLogger::requestCancel((string) $task->username)['pid'];
+    }
+
+    /** The task's own pid, while its recorded start time still matches, so a reused pid is never signalled. */
+    private function ownPid(Task $task): ?int
+    {
+        if ($task->pid !== null && ($this->isStillRunning)($task->pid, $task->pid_start_time)) {
+            return $task->pid;
+        }
+
+        return null;
     }
 
     /**

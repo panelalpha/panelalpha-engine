@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Concerns\StreamsNdjson;
 use App\Http\Resources\TaskLogCollection;
 use App\Http\Resources\TaskLogResource;
 use App\Http\Resources\TaskResource;
 use App\System;
+use App\Lib\Task\LogStreamLimiter;
 use App\Lib\Task\ProcessTreeKiller;
 use App\Lib\Task\TaskCanceller;
 use App\Models\Task;
@@ -16,8 +18,37 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class TaskController extends Controller
 {
+    use StreamsNdjson;
+
     /** Silence after which the log stream checks that its reader is still there. */
     public const STREAM_HEARTBEAT_SECONDS = 2;
+
+    private float $lastFrameAt = 0.0;
+
+    private function taskOr404(int $id): Task
+    {
+        $task = Task::find($id);
+        if (!$task) {
+            abort(new JsonResponse(['message' => 'Not found'], 404));
+        }
+
+        return $task;
+    }
+
+    /** The `since` filter, or a 422. An array counts as no filter. */
+    private function since(Request $request): int|string|null
+    {
+        $since = $request->query('since');
+        if (is_array($since)) {
+            return null;
+        }
+
+        if (!Task::isSince($since)) {
+            abort(new JsonResponse(['message' => Task::SINCE_EXPECTED], 422));
+        }
+
+        return $since;
+    }
 
     #[OA\Get(
         path: '/tasks/{id}',
@@ -39,10 +70,7 @@ class TaskController extends Controller
     )]
     public function show(int $id): TaskResource|JsonResponse
     {
-        $task = Task::find($id);
-        if (!$task) {
-            abort(new JsonResponse(['message' => 'Not found'], 404));
-        }
+        $task = $this->taskOr404($id);
 
         return new TaskResource($task);
     }
@@ -84,14 +112,11 @@ class TaskController extends Controller
     )]
     public function logs(int $id, Request $request): TaskLogCollection|JsonResponse
     {
-        $task = Task::find($id);
-        if (!$task) {
-            abort(new JsonResponse(['message' => 'Not found'], 404));
-        }
+        $task = $this->taskOr404($id);
 
         $afterId = max(0, (int) $request->query('after_id', 0));
-        $since = $request->query('since');
-        $page = $task->logsPage($afterId, is_array($since) ? null : $since);
+        $since = $this->since($request);
+        $page = $task->logsPage($afterId, $since);
         $nextAfterId = $page->isEmpty() ? $afterId : (int) $page->last()->id;
 
         return new TaskLogCollection($page, $task->status, $nextAfterId);
@@ -127,93 +152,127 @@ class TaskController extends Controller
             new OA\Response(response: 404, description: 'Task not found', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'message', type: 'string')],
             )),
+            new OA\Response(response: 503, description: 'All log stream slots are in use', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'message', type: 'string')],
+            )),
         ],
     )]
     public function streamLogs(int $id, Request $request): StreamedResponse|JsonResponse
     {
-        $task = Task::find($id);
-        if (!$task) {
-            abort(new JsonResponse(['message' => 'Not found'], 404));
+        $task = $this->taskOr404($id);
+
+        $slot = LogStreamLimiter::acquire();
+        if ($slot === null) {
+            return $this->tooManyStreams();
         }
 
         $afterId = max(0, (int) $request->query('after_id', 0));
-        $since = $request->query('since');
-        if (is_array($since)) {
-            $since = null;
-        }
+        $since = $this->since($request);
 
-        ignore_user_abort(true);
-        set_time_limit(0);
+        return $this->ndjsonStream($task, $afterId, $since, $slot);
+    }
 
-        return response()->stream(function () use ($task, $afterId, $since) {
-            // Production: drain FPM/proxy buffers so each NDJSON line flushes.
-            // Under PHPUnit, TestResponse::streamedContent() owns a buffer —
-            // wiping it makes the capture fail and marks the test risky.
-            if (!app()->runningUnitTests()) {
-                while (ob_get_level() > 0) {
-                    ob_end_clean();
-                }
+    /** A stream holds a worker for the task's whole life, so streams are capped and log followers cannot take every worker. */
+    private function tooManyStreams(): JsonResponse
+    {
+        return new JsonResponse(['message' => LogStreamLimiter::MESSAGE], 503, ['Retry-After' => 5]);
+    }
+
+    /**
+     * The streamed response, which frees its limiter slot when it ends. Anything that can refuse the
+     * request must run before this: a throw inside the callback comes after the 200 headers.
+     *
+     * @param resource $slot
+     */
+    private function ndjsonStream(Task $task, int $afterId, int|string|null $since, $slot): StreamedResponse
+    {
+        return self::ndjsonResponse(function () use ($task, $afterId, $since, $slot) {
+            try {
+                $this->streamTaskLogs($task, $afterId, $since);
+            } finally {
+                LogStreamLimiter::release($slot);
+            }
+        });
+    }
+
+    /**
+     * The NDJSON frames a log stream emits, until the task is terminal and no
+     * further lines remain. Once a line gives an id cursor the `since` filter is
+     * dropped, so lines sharing that second are not fetched again.
+     */
+    private function streamTaskLogs(Task $task, int $afterId, int|string|null $since): void
+    {
+        $this->dropOutputBuffers();
+        $this->lastFrameAt = microtime(true);
+        $cursor = $afterId;
+        $sinceCursor = $since;
+
+        while (!connection_aborted()) {
+            $task->refresh();
+            $page = $task->logsPage($cursor, $sinceCursor);
+
+            $lastId = $this->emitLogLines($page);
+            if ($lastId !== null) {
+                $cursor = $lastId;
+                $sinceCursor = null;
             }
 
-            $lastWrite = microtime(true);
-            $emit = static function (array $frame) use (&$lastWrite): void {
-                echo json_encode($frame, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
-                if (!app()->runningUnitTests()) {
-                    flush();
-                }
-                $lastWrite = microtime(true);
-            };
-
-            $cursor = $afterId;
-            $sinceCursor = $since;
-
-            while (true) {
-                if (connection_aborted()) {
-                    return;
-                }
-
-                $task->refresh();
-                $page = $task->logsPage($cursor, $sinceCursor);
-
-                foreach ($page as $row) {
-                    $parsed = TaskLogResource::parsePayload($row->log);
-                    $emit([
-                        'id' => $row->id,
-                        'log' => $parsed['msg'],
-                        'level' => $parsed['level'],
-                        'stage' => $parsed['stage'],
-                        'created_at' => optional($row->created_at)?->toIso8601String(),
-                    ]);
-                    $cursor = (int) $row->id;
-                    // Once we have an id cursor, drop the time filter so rows
-                    // that share the same second are not re-fetched.
-                    $sinceCursor = null;
-                }
-
-                if ($task->isTerminal() && $page->isEmpty()) {
-                    $emit([
+            if ($page->isEmpty()) {
+                if ($task->isTerminal()) {
+                    $this->emitFrame([
                         'type' => 'finish',
                         'status' => $task->status,
                     ]);
 
                     return;
                 }
-
-                if ($page->isEmpty()) {
-                    // PHP learns the client left only when a write fails, so a
-                    // quiet task gets heartbeats; otherwise this worker stays
-                    // busy until the task logs again.
-                    if (microtime(true) - $lastWrite >= self::STREAM_HEARTBEAT_SECONDS) {
-                        $emit(['type' => 'heartbeat']);
-                    }
-                    usleep(200000);
-                }
+                $this->waitQuietly();
             }
-        }, 200, [
-            'Content-Type' => 'application/x-ndjson',
-            'X-Accel-Buffering' => 'no',
-            'Cache-Control' => 'no-cache',
-        ]);
+        }
+    }
+
+    /**
+     * @param iterable<\App\Models\TaskLog> $page
+     * @return ?int the id of the last line emitted, null when there was none
+     */
+    private function emitLogLines(iterable $page): ?int
+    {
+        $lastId = null;
+        foreach ($page as $row) {
+            $parsed = TaskLogResource::parsePayload($row->log);
+            $this->emitFrame([
+                'id' => $row->id,
+                'log' => $parsed['msg'],
+                'level' => $parsed['level'],
+                'stage' => $parsed['stage'],
+                'created_at' => optional($row->created_at)?->toIso8601String(),
+            ]);
+            $lastId = (int) $row->id;
+        }
+
+        return $lastId;
+    }
+
+    /**
+     * PHP learns the client left only when a write fails, so a quiet task gets heartbeats;
+     * otherwise this worker stays busy until the task logs again.
+     */
+    private function waitQuietly(): void
+    {
+        if (microtime(true) - $this->lastFrameAt >= self::STREAM_HEARTBEAT_SECONDS) {
+            $this->emitFrame(['type' => 'heartbeat']);
+        }
+        usleep(200000);
+    }
+
+    /** @param array<string, mixed> $frame */
+    private function emitFrame(array $frame): void
+    {
+        echo json_encode($frame, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
+        if (!app()->runningUnitTests()) {
+            flush();
+        }
+        $this->lastFrameAt = microtime(true);
     }
 
     #[OA\Post(
@@ -238,10 +297,7 @@ class TaskController extends Controller
     )]
     public function cancel(int $id): JsonResponse
     {
-        $task = Task::find($id);
-        if (!$task) {
-            abort(new JsonResponse(['message' => 'Not found'], 404));
-        }
+        $task = $this->taskOr404($id);
 
         $canceller = new TaskCanceller(new ProcessTreeKiller(new System()));
         $result = $canceller->cancel($task);

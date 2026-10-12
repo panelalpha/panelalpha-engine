@@ -41,7 +41,7 @@ class QueueWorkers
         # `pae configure queue`, not this file directly; it is overwritten.
         cd /var/www/html || exit 1
         exec env HOME=/var/www USER=www-data s6-setuidgid www-data \
-            php artisan queue:work database --queue=default --sleep=1 --tries=1 --timeout=86500 \
+            php artisan queue:work database --queue=default --sleep=1 --tries=1 --timeout=%d \
             --memory=256 --max-jobs=20 --max-time=3600 2>&1
 
         SH;
@@ -78,19 +78,19 @@ class QueueWorkers
             return null;
         }
 
-        $up = 0;
-        foreach (self::serviceDirs($scanDir) as $dir) {
-            try {
-                $state = (new Process(['s6-svstat', '-o', 'up', $dir]))->mustRun()->getOutput();
-            } catch (Throwable) {
-                continue;
-            }
-            if (trim($state) === 'true') {
-                $up++;
-            }
+        return count(array_filter(self::serviceDirs($scanDir), self::isUp(...)));
+    }
+
+    /** Whether s6 reports the service up; a service it cannot be asked about is not. */
+    private static function isUp(string $dir): bool
+    {
+        try {
+            $state = (new Process(['s6-svstat', '-o', 'up', $dir]))->mustRun()->getOutput();
+        } catch (Throwable) {
+            return false;
         }
 
-        return $up;
+        return trim($state) === 'true';
     }
 
     /** @return string|null an error, or null when $count is fine */
@@ -106,7 +106,7 @@ class QueueWorkers
     /** The `run` script every worker service gets. */
     public static function runScript(): string
     {
-        return self::RUN_SCRIPT;
+        return sprintf(self::RUN_SCRIPT, JobBudget::WORKER_SECONDS);
     }
 
     /**
@@ -135,27 +135,36 @@ class QueueWorkers
     public static function writeServices(int $count, string $scanDir): void
     {
         for ($i = 1; $i <= $count; $i++) {
-            $dir = $scanDir . '/' . self::PREFIX . $i;
-            if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
-                throw new RuntimeException("Could not create {$dir}.");
-            }
-            if (file_put_contents($dir . '/run', self::RUN_SCRIPT, LOCK_EX) === false || !chmod($dir . '/run', 0755)) {
-                throw new RuntimeException("Could not write {$dir}/run.");
-            }
+            self::writeService($scanDir . '/' . self::PREFIX . $i);
         }
 
-        // Retire a worker by hiding its directory: s6-svscan ignores dot-names,
-        // so the next rescan stops it, and its supervisor still has the
-        // directory to write into while the current job finishes.
         foreach (self::serviceDirs($scanDir) as $dir) {
-            $number = (int) substr(basename($dir), strlen(self::PREFIX));
-            if ($number > $count) {
-                // Unique, so a worker retired again never lands on one still finishing a job.
-                $retired = $scanDir . '/.' . basename($dir) . '-' . bin2hex(random_bytes(4));
-                if (!rename($dir, $retired)) {
-                    throw new RuntimeException("Could not retire {$dir}.");
-                }
+            if ((int) substr(basename($dir), strlen(self::PREFIX)) > $count) {
+                self::retire($dir, $scanDir);
             }
+        }
+    }
+
+    private static function writeService(string $dir): void
+    {
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            throw new RuntimeException("Could not create {$dir}.");
+        }
+        if (file_put_contents($dir . '/run', self::runScript(), LOCK_EX) === false || !chmod($dir . '/run', 0755)) {
+            throw new RuntimeException("Could not write {$dir}/run.");
+        }
+    }
+
+    /**
+     * Hide the worker's directory under a unique dot-name: s6-svscan ignores it,
+     * so the next rescan stops the worker while its supervisor can still write
+     * there until the current job finishes, and a later retirement never collides.
+     */
+    private static function retire(string $dir, string $scanDir): void
+    {
+        $retired = $scanDir . '/.' . basename($dir) . '-' . bin2hex(random_bytes(4));
+        if (!rename($dir, $retired)) {
+            throw new RuntimeException("Could not retire {$dir}.");
         }
     }
 
@@ -183,7 +192,10 @@ class QueueWorkers
         return $dirs;
     }
 
-    /** -a picks up new directories, -n stops the supervisors of removed ones. */
+    /**
+     * -a picks up new directories, -n stops the supervisors of removed ones. A
+     * failure is ignored: the directories are written and the next s6-svscan start reads them.
+     */
     private static function rescan(string $scanDir): void
     {
         if (!is_dir($scanDir . '/.s6-svscan')) {
@@ -192,7 +204,6 @@ class QueueWorkers
         try {
             (new Process(['s6-svscanctl', '-an', $scanDir]))->run();
         } catch (Throwable) {
-            // The directories are written; the next s6-svscan start reads them.
         }
     }
 

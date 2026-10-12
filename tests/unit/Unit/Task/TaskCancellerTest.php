@@ -56,6 +56,46 @@ class TaskCancellerTest extends SqliteTaskTestCase
         $this->assertSame(Task::STATUS_RUNNING, $running->refresh()->status);
     }
 
+    /** engine#794: a cancel racing a finishing task must not report success. */
+    public function test_a_cancel_that_loses_to_a_finishing_worker_is_refused(): void
+    {
+        $task = Task::start(jobType: 'App\\Jobs\\RebuildJob', queue: 'default');
+        $task->markRunning('h-1');
+        $cancelCopy = Task::findOrFail($task->id);
+        // The worker finishes it after the controller read it as running.
+        $task->markCompleted();
+
+        $killer = Mockery::mock(ProcessTreeKiller::class);
+        $killer->shouldNotReceive('kill');
+
+        $result = (new TaskCanceller($killer))->cancel($cancelCopy);
+
+        $this->assertFalse($result['cancelled']);
+        $this->assertSame(Task::STATUS_COMPLETED, $cancelCopy->refresh()->status);
+        $this->assertNull($cancelCopy->cancelled_at);
+    }
+
+    /**
+     * engine#793: a running backup/restore/staging job sets no pid and checks
+     * for cancellation nowhere, so it cannot be stopped. Marking it cancelled
+     * answered 200 while nothing was killed and the job ran to the end.
+     */
+    public function test_cancelling_a_running_non_deploy_job_is_refused(): void
+    {
+        $task = Task::start(jobType: \App\Jobs\CreateBackup::class, queue: 'default');
+        $task->markRunning('h-1');
+
+        $killer = Mockery::mock(ProcessTreeKiller::class);
+        $killer->shouldNotReceive('kill');
+
+        $result = (new TaskCanceller($killer))->cancel($task);
+
+        $this->assertFalse($result['cancelled']);
+        $this->assertStringContainsString('cannot be stopped', $result['message']);
+        $this->assertSame(Task::STATUS_RUNNING, $task->refresh()->status);
+        $this->assertNull($task->cancelled_at);
+    }
+
     public function test_cancel_does_not_kill_when_pid_is_no_longer_the_same_process(): void
     {
         $task = Task::start(jobType: 'App\\Jobs\\RebuildJob', queue: 'default');
@@ -85,6 +125,38 @@ class TaskCancellerTest extends SqliteTaskTestCase
 
         $this->assertTrue($result['cancelled']);
         $this->assertSame(Task::STATUS_CANCELLED, $task->refresh()->status);
+    }
+
+    /** A deploy the task API cancels leaves what it started behind unless its app stack is torn down. */
+    public function test_cancelling_a_running_deploy_tears_down_its_half_started_app(): void
+    {
+        $task = Task::start(jobType: RebuildProject::class, queue: 'default', username: $this->username());
+        $task->markRunning('h-1');
+        $task->setPid(4242, '99');
+        $killer = Mockery::mock(ProcessTreeKiller::class);
+        $killer->shouldReceive('kill')->once()->with(4242);
+        $torn = [];
+        $canceller = new TaskCanceller($killer, fn () => true, function (Task $cancelled) use (&$torn): void {
+            $torn[] = $cancelled->id;
+        });
+
+        $result = $canceller->cancel($task);
+
+        $this->assertTrue($result['cancelled']);
+        $this->assertSame([$task->id], $torn);
+    }
+
+    /** A queued deploy started nothing, so cancelling it tears nothing down. */
+    public function test_cancelling_a_queued_deploy_tears_down_nothing(): void
+    {
+        $task = Task::start(jobType: RebuildProject::class, queue: 'default', username: $this->username());
+        $torn = [];
+        $canceller = new TaskCanceller($this->noKill(), fn () => true, function () use (&$torn): void {
+            $torn[] = 'called';
+        });
+
+        $this->assertTrue($canceller->cancel($task)['cancelled']);
+        $this->assertSame([], $torn);
     }
 
     /** @var list<string> */

@@ -13,19 +13,34 @@ use Throwable;
 class Kernel extends ConsoleKernel
 {
     /**
+     * `withoutOverlapping()` expiry in minutes, per cadence. Laravel's default
+     * is 1440, and a `schedule:run` killed by a core restart never releases its
+     * mutex, so a stale one should cost a run or two rather than a day.
+     */
+    private const MUTEX_MINUTE = 5;
+
+    private const MUTEX_FIVE_MINUTES = 5;
+
+    private const MUTEX_HOURLY = 50;
+
+    private const MUTEX_SIX_HOURS = 300;
+
+    private const MUTEX_DAILY = 720;
+
+    private const MUTEX_WEEKLY = 1000;
+
+    /**
      * @return void
      */
     public function bootstrap()
     {
         parent::bootstrap();
 
-        // prevent blade cached views persmission issues when running command as root
-        if (App::runningInConsole() && function_exists('posix_geteuid') && posix_geteuid() === 0) {
-            $compiledPath = (string)Config::get('view.compiled');
-            Config::set('view.compiled', $compiledPath . '/console');
+        if (App::runningInConsole() && self::effectiveUid() === 0) {
+            $this->separateRootViewCache();
         }
 
-        if (RootConsoleOwnership::applies(App::runningInConsole(), function_exists('posix_geteuid') ? posix_geteuid() : -1, App::runningUnitTests())) {
+        if (RootConsoleOwnership::applies(App::runningInConsole(), self::effectiveUid(), App::runningUnitTests())) {
             RootConsoleOwnership::register();
         }
     }
@@ -43,91 +58,101 @@ class Kernel extends ConsoleKernel
     }
 
     /**
-     * Define the application's command schedule.
+     * Define the application's command schedule. Registration order is the
+     * order in which commands due in the same minute run.
      *
-     * @param  \Illuminate\Console\Scheduling\Schedule  $schedule
      * @return void
      */
     protected function schedule(Schedule $schedule)
     {
-        // $schedule->command('inspire')->hourly();
-        $schedule->command('metrics:prune')->daily();
-        $schedule->command('deploy:log:prune')->monthly();
-        // Task rows are job handles; their lines are a poll buffer, not the
-        // deploy archive (that is deploy:log:prune). Keep 50 newest terminal
-        // deploys per project and 10 of every other job type; drop dim and
-        // cap the tail. The job already trims on finish — this sweep is
-        // keep-N plus a safety net. Daily because one deploy writes thousands
-        // of dim lines if that trim is skipped.
-        $schedule->command('task:prune')->daily()->withoutOverlapping();
-        // A task row outlives its job when the job's process dies mid-run -- a
-        // host reboot, an OOM kill, a worker restart -- and nothing writes the
-        // terminal status that would release a poller, because the writer is
-        // what died. `task:prune` cannot help (it skips non-terminal rows by
-        // design). Every minute, so a client polling GET /tasks/{id} gets an
-        // answer rather than waiting out its own timeout; the two-minute grace
-        // period keeps it from racing a deploy that has just started.
-        $schedule->command('task:reconcile --older-than=120')->everyMinute()->withoutOverlapping();
-        // A redeploy killed halfway can leave traffic on its second app
-        // generation and the old checkout moved aside. Only touches an
-        // account whose deploy lock is free.
-        $schedule->command('deploy:generations:sweep')->everyMinute()->withoutOverlapping();
-        $schedule->command('acme:challenge:prune')->hourly();
-        // Expired vault entries hold ciphertext nobody can use anymore, but
-        // a secret that stopped working should not outlive its usefulness on
-        // disk either. Hourly, with a built-in grace hour, so a status check
-        // on a just-expired ref still says `expired` rather than vanishing.
-        $schedule->command('vault:purge')->hourly();
-        // Spent and expired SSO tokens; an unredeemed app token still holds a
-        // live session cookie.
+        $this->scheduleLogPruning($schedule);
+        $this->scheduleInterruptedWorkRecovery($schedule);
+        $this->scheduleExpiredSecretPurges($schedule);
+        $this->scheduleCertificateRenewal($schedule);
+        $this->scheduleHostDiskUpkeep($schedule);
+        $this->scheduleMonitoring($schedule);
+    }
+
+    /** The uid commands run as, or -1 when POSIX functions are unavailable. */
+    private static function effectiveUid(): int
+    {
+        return function_exists('posix_geteuid') ? posix_geteuid() : -1;
+    }
+
+    /** Compile root's Blade views apart, so files it writes never block the web user's own. */
+    private function separateRootViewCache(): void
+    {
+        $compiledPath = (string)Config::get('view.compiled');
+        Config::set('view.compiled', $compiledPath . '/console');
+    }
+
+    /**
+     * Metrics, the deploy log archive, and task rows. Task lines are a poll
+     * buffer, not the deploy archive: keep the newest 50 deploys per project and
+     * 10 of every other job; daily, since one untrimmed deploy writes thousands of lines.
+     */
+    private function scheduleLogPruning(Schedule $schedule): void
+    {
+        $schedule->command('metrics:prune')->daily()->withoutOverlapping(self::MUTEX_DAILY);
+        $schedule->command('deploy:log:prune')->monthly()->withoutOverlapping(self::MUTEX_WEEKLY);
+        $schedule->command('task:prune')->daily()->withoutOverlapping(self::MUTEX_DAILY);
+    }
+
+    /**
+     * Every minute, finish what a dead process left behind: a task row nobody
+     * will mark terminal (after a two-minute grace, so a starting deploy is not
+     * raced) and a redeploy halfway between app generations (only when its deploy lock is free).
+     */
+    private function scheduleInterruptedWorkRecovery(Schedule $schedule): void
+    {
+        $schedule->command('task:reconcile --older-than=120')->everyMinute()->withoutOverlapping(self::MUTEX_MINUTE);
+        $schedule->command('deploy:generations:sweep')->everyMinute()->withoutOverlapping(self::MUTEX_MINUTE);
+    }
+
+    /**
+     * Hourly removal of ACME challenges, expired vault entries (after a grace
+     * hour, so a status check still says `expired`) and spent or expired SSO
+     * tokens, since an unredeemed app token still holds a live session cookie.
+     */
+    private function scheduleExpiredSecretPurges(Schedule $schedule): void
+    {
+        $schedule->command('acme:challenge:prune')->hourly()->withoutOverlapping(self::MUTEX_HOURLY);
+        $schedule->command('vault:purge')->hourly()->withoutOverlapping(self::MUTEX_HOURLY);
         $schedule->command('model:prune', [
             '--model' => [\App\Models\AppSsoToken::class, \App\Models\MysqlSsoToken::class],
-        ])->hourly();
-        // Renewals are exempt from Let's Encrypt's new-certificate rate
-        // limit, and a certificate nobody renews is an outage with a 90-day
-        // fuse. Off-peak, and never two at once.
-        $schedule->command('ssl:project-cert:renew')->dailyAt('03:10')->withoutOverlapping();
-        // Base images get pruned by disk-pressure reclaim and by account
-        // teardown. Rebuild them off-hours so the cost never lands on a
-        // customer deploy. --refresh also rebuilds and re-pulls what is there,
-        // one image at a time, and republishes it to the cache registry, so
-        // what accounts pull is never more than a week old.
-        $schedule->command('system:image:prewarm --refresh')->weeklyOn(0, '03:30')->withoutOverlapping();
-        // Host build caches are worth nothing to a project that is not
-        // deploying -- nothing mounts them into a running application -- and
-        // until this ran, nothing ever reclaimed them from one that had
-        // stopped. Daily and off-hours: the window is 24h, so a project that
-        // deploys daily keeps its caches and everything else pays the install
-        // it would have paid anyway.
-        $schedule->command('deploy:cache:prune')->dailyAt('04:15')->withoutOverlapping();
-        // Host base images outside the prewarm catalogue, and host build
-        // cache, were otherwise only reclaimed by the weekly prewarm, images
-        // only under pressure. The image half defers while any deploy is in
-        // flight, so it runs hourly and does real work once per 20h window:
-        // on a busy host a single daily slot almost always found a deploy.
-        $schedule->command('system:image:prune --due-after=20h')->hourly()->withoutOverlapping();
-        // Caps host build cache and frees disk once free space runs low,
-        // instead of waiting for the next prune or refusing a deploy.
-        $schedule->command('system:disk:guard')->everyFiveMinutes()->withoutOverlapping();
-        // Deploy telemetry is written to a spool during a deploy and sent from
-        // here: QUEUE_CONNECTION is `sync`, so a dispatched job would put a
-        // network round trip inside the customer's deploy request.
-        $schedule->command('telemetry:ship')->everyFiveMinutes()->withoutOverlapping();
-        // An account started again after a sysbox restart or a host crash runs
-        // with its image unmapped and every inner compose failing; this also
-        // catches it within five minutes of a boot.
-        $schedule->command('project:mapping:check')->everyFiveMinutes()->withoutOverlapping();
-        // A deploy report says an install worked. Nothing said the site
-        // stopped working afterwards -- a database that went away, files
-        // deleted over SFTP -- so an application could serve the engine's own
-        // placeholder for a month with a green deploy behind it. Six-hourly
-        // because the probe is a container round trip per account and none of
-        // these failures is minute-sensitive; it exits immediately when
-        // telemetry is off, since an install that does not report has nothing
-        // to gain from paying for the sweep.
-        $schedule->command('project:health:report')->everySixHours()->withoutOverlapping();
-        // Host access logs into AWStats text databases.
-        $schedule->command('stats:update')->daily()->withoutOverlapping();
+        ])->hourly()->withoutOverlapping(self::MUTEX_HOURLY);
+    }
+
+    /** Renewals are exempt from Let's Encrypt's new-certificate rate limit; off-peak, never two at once. */
+    private function scheduleCertificateRenewal(Schedule $schedule): void
+    {
+        $schedule->command('ssl:project-cert:renew')->dailyAt('03:10')->withoutOverlapping(self::MUTEX_DAILY);
+    }
+
+    /**
+     * Rebuild base images off-hours so no customer deploy pays for it, and free
+     * host disk: build caches of projects idle for 24h, images outside the
+     * catalogue (hourly, as it defers while a deploy runs) and, when space runs low, more.
+     */
+    private function scheduleHostDiskUpkeep(Schedule $schedule): void
+    {
+        $schedule->command('system:image:prewarm --refresh')->weeklyOn(0, '03:30')->withoutOverlapping(self::MUTEX_WEEKLY);
+        $schedule->command('deploy:cache:prune')->dailyAt('04:15')->withoutOverlapping(self::MUTEX_DAILY);
+        $schedule->command('system:image:prune --due-after=20h')->hourly()->withoutOverlapping(self::MUTEX_HOURLY);
+        $schedule->command('system:disk:guard')->everyFiveMinutes()->withoutOverlapping(self::MUTEX_FIVE_MINUTES);
+    }
+
+    /**
+     * Ship spooled telemetry (QUEUE_CONNECTION is `sync`, so a queued job would
+     * sit inside the deploy request), repair accounts sysbox unmapped, sweep
+     * application health, and update the AWStats databases.
+     */
+    private function scheduleMonitoring(Schedule $schedule): void
+    {
+        $schedule->command('telemetry:ship')->everyFiveMinutes()->withoutOverlapping(self::MUTEX_FIVE_MINUTES);
+        $schedule->command('project:mapping:check')->everyFiveMinutes()->withoutOverlapping(self::MUTEX_FIVE_MINUTES);
+        $schedule->command('project:health:report')->everySixHours()->withoutOverlapping(self::MUTEX_SIX_HOURS);
+        $schedule->command('stats:update')->daily()->withoutOverlapping(self::MUTEX_DAILY);
     }
 
     /**
