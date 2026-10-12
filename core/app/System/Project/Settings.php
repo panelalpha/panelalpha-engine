@@ -19,11 +19,19 @@ class Settings
     /** Container paths kept on named volumes across deploys, comma-separated. */
     public const string KEY_PERSIST_PATHS = 'persist-paths';
 
+    /**
+     * While on, an API or MCP token may not delete, stop or redeploy the
+     * project; only the operator's own `pae` commands can. Read-only over the
+     * API, so a token cannot clear the flag that refuses it.
+     */
+    public const string KEY_PROTECTED = User::DETAIL_PROTECTED;
+
     /** @var list<string> */
     public const array KEYS = [
         self::KEY_CLOUDFLARE_API_TOKEN,
         self::KEY_REGISTRY_AUTH,
         self::KEY_PERSIST_PATHS,
+        self::KEY_PROTECTED,
     ];
 
     /** @var list<string> */
@@ -113,6 +121,7 @@ class Settings
             self::KEY_CLOUDFLARE_API_TOKEN => $this->setCloudflareApiToken($projectUser, $value),
             self::KEY_REGISTRY_AUTH => $this->setRegistryAuth($projectUser, $value),
             self::KEY_PERSIST_PATHS => $this->setPersistPaths($projectUser, $value),
+            self::KEY_PROTECTED => $this->setProtected($projectUser, $value),
             default => throw new \InvalidArgumentException("No setter for '{$key}'."),
         };
     }
@@ -135,6 +144,12 @@ class Settings
 
         if ($key === self::KEY_REGISTRY_AUTH || $key === self::KEY_PERSIST_PATHS) {
             $this->forgetDetail($projectUser, str_replace('-', '_', $key));
+
+            return;
+        }
+
+        if ($key === self::KEY_PROTECTED) {
+            $this->forgetDetail($projectUser, self::KEY_PROTECTED);
 
             return;
         }
@@ -170,6 +185,21 @@ class Settings
         $projectUser->save();
 
         return ['message' => 'Registry logins saved for: ' . implode(', ', $auth->hosts()) . '.'];
+    }
+
+    /**
+     * @return array{message: string}
+     */
+    private function setProtected(User $projectUser, string $value): array
+    {
+        if (strtolower(trim($value)) !== User::PROTECTED_ON) {
+            throw new \InvalidArgumentException("protected takes only 'on'; unset it to turn protection off.");
+        }
+
+        $projectUser->setDetails([self::KEY_PROTECTED => User::PROTECTED_ON]);
+        $projectUser->save();
+
+        return ['message' => "Project '{$projectUser->username}' is protected from API and MCP tokens: they can no longer delete, stop or redeploy it."];
     }
 
     /**
@@ -273,6 +303,10 @@ class Settings
             $paths = $this->project->model()->getPersistPaths();
 
             return $paths === [] ? null : implode(',', $paths);
+        }
+
+        if ($key === self::KEY_PROTECTED) {
+            return $this->project->model()->isProtected() ? User::PROTECTED_ON : null;
         }
 
         return null;

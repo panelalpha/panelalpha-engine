@@ -96,6 +96,12 @@ class User extends Authenticatable
     public const UNREADABLE_SECRETS_REMEDY = 'Set each one again: env_vars, git_update_credentials for a Git '
         . 'token, the cloudflare-api-token or registry-auth setting, or the site password.';
 
+    /** The `details` key of the `protected` project setting. */
+    public const string DETAIL_PROTECTED = 'protected';
+
+    /** The only value that key stores; absent means the project is not protected. */
+    public const string PROTECTED_ON = 'on';
+
     protected $fillable = [
         'username',
         'domain',
@@ -1072,6 +1078,15 @@ class User extends Authenticatable
         $paths = $this->getDetails()['persist_paths'] ?? null;
 
         return is_array($paths) ? array_values(array_filter($paths, 'is_string')) : [];
+    }
+
+    /**
+     * Whether the `protected` setting is on: API and MCP tokens may no longer
+     * delete, stop or redeploy this project.
+     */
+    public function isProtected(): bool
+    {
+        return ($this->getDetails()[self::DETAIL_PROTECTED] ?? null) === self::PROTECTED_ON;
     }
 
     /** A details value that is a non-empty string once trimmed, else null. */

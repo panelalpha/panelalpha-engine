@@ -3,6 +3,8 @@
 namespace App\Http\Middleware;
 
 use App\Auth\ApiSurface;
+use App\Auth\ProjectFields;
+use App\Auth\RequestToken;
 use App\Auth\TokenAbilities;
 use App\Mcp\Tools\Api\ApiTool;
 use App\Models\Domain;
@@ -27,22 +29,9 @@ use Illuminate\Http\Request;
  */
 class EnsureTokenMayUseApi
 {
-    /**
-     * Operations that also name a project in the body or the query, and the
-     * field it is in. A scoped token must have every project it names in
-     * scope, not only the one the URL does: `POST /{alice}/push {"target":"bob"}`
-     * would otherwise write alice's state into bob.
-     *
-     * @var array<string, list<string>>
-     */
-    private const PROJECT_FIELDS = [
-        'POST /projects/{username}/push' => ['target'],
-        'GET /tasks' => ['username'],
-    ];
-
     public function handle(Request $request, Closure $next): mixed
     {
-        $token = $this->tokenOf($request);
+        $token = RequestToken::of($request);
 
         if (!$token instanceof PersonalAccessToken) {
             return $next($request);
@@ -137,7 +126,7 @@ class EnsureTokenMayUseApi
      */
     private function namedProjectRefusal(Request $request, array $scope, ?string $operation): ?string
     {
-        foreach (self::PROJECT_FIELDS[$operation] ?? [] as $field) {
+        foreach (ProjectFields::named($operation) as $field) {
             $value = $request->input($field);
 
             if (is_string($value) && $value !== '' && !in_array($value, $scope, true)) {
@@ -197,21 +186,6 @@ class EnsureTokenMayUseApi
             implode(', ', $scope),
             $operation ?? 'this route'
         );
-    }
-
-    /**
-     * A caller with no token API has no token to limit: the CLI dispatches
-     * routes in-process as a plain authenticatable, not a token-bearing Admin.
-     */
-    private function tokenOf(Request $request): ?PersonalAccessToken
-    {
-        $user = $request->user();
-
-        $token = $user !== null && method_exists($user, 'currentAccessToken')
-            ? $user->currentAccessToken()
-            : null;
-
-        return $token instanceof PersonalAccessToken ? $token : null;
     }
 
     private function refuse(string $message): JsonResponse

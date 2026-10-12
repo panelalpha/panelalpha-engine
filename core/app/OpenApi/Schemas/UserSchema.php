@@ -12,6 +12,14 @@ use OpenApi\Attributes as OA;
         new OA\Property(property: 'domain', type: 'string', example: 'johndoe.example.com'),
         new OA\Property(property: 'email', type: 'string', format: 'email', example: 'john@example.com', nullable: true),
         new OA\Property(property: 'status', type: 'string', example: 'active', enum: ['active', 'suspended']),
+        new OA\Property(
+            property: 'protected',
+            description: 'While true, an API or MCP token may not delete, stop or redeploy this project; only the '
+                . 'operator\'s own commands can. The setting itself is read-only over the API, and is set with '
+                . '`pae project:settings:set protected on --project=<username>`.',
+            type: 'boolean',
+            example: false,
+        ),
         new OA\Property(property: 'config', type: 'object', nullable: true),
         new OA\Property(property: 'details', type: 'object', nullable: true),
         new OA\Property(

@@ -30,6 +30,7 @@ class UserResource extends JsonResource
             'name' => $user->name,
             'email' => $user->email,
             'status' => $user->status,
+            'protected' => $user->isProtected(),
             'staging_of' => $user->relationLoaded('liveUser')
                 ? ($user->liveUser?->username)
                 : null,
@@ -93,6 +94,7 @@ class UserResource extends JsonResource
             $details['site_password_hash'],
             $details['site_password_enabled'],
             $details['site_password_version'],
+            $details[User::DETAIL_PROTECTED],
         );
 
         $details['password_protection'] = $passwordProtected;
