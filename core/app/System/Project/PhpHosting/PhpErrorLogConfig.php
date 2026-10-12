@@ -2,6 +2,7 @@
 
 namespace App\System\Project\PhpHosting;
 
+use App\Lib\Project\PhpErrorLog;
 use App\System\Project\PhpHosting;
 
 /**
@@ -38,6 +39,7 @@ final class PhpErrorLogConfig
         }
 
         $this->ensureLogDir($project, "{$projectDir}/log/php");
+        $this->ensureLogFile($project, "{$projectDir}/log/php");
     }
 
     /**
@@ -80,5 +82,35 @@ final class PhpErrorLogConfig
             $system->exec(['sudo', 'chown', $owner, $dir]);
         }
         $system->exec(['sudo', 'chmod', '755', $dir]);
+    }
+
+    /**
+     * FPM's master creates the file as root, which the account's worker cannot
+     * append to and the API must refuse to read. Create it as the account, or
+     * hand an existing regular file over; a link is unlinked, never followed,
+     * and chown uses -h so the name is changed, not its target.
+     */
+    private function ensureLogFile(PhpHosting $project, string $dir): void
+    {
+        $system = $project->system();
+        $owner = $project->userModel()->getChownString();
+        if ($owner === null) {
+            return;
+        }
+
+        $file = $dir . '/' . PhpErrorLog::FILE_NAME;
+
+        if (is_link($file)) {
+            $system->exec(['sudo', 'rm', '-f', '--', $file]);
+        }
+        if (file_exists($file) && !is_file($file)) {
+            return;
+        }
+        if (!is_file($file)) {
+            $system->exec(['sudo', 'touch', '--', $file]);
+        }
+
+        $system->exec(['sudo', 'chown', '-h', $owner, $file]);
+        $system->exec(['sudo', 'chmod', '664', $file]);
     }
 }

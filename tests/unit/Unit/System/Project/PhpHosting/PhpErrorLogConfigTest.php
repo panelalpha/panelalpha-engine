@@ -77,6 +77,83 @@ class PhpErrorLogConfigTest extends TestCase
         $this->assertContains(['sudo', 'mkdir', '-p', $this->root . '/engine/users/alice/log/php'], $system->commands);
     }
 
+    public function test_the_error_log_file_is_created_owned_by_the_account(): void
+    {
+        $this->account('8.3', "max_execution_time = 600\n", "[www]\n");
+        [$system, $project] = $this->hostingProject();
+
+        (new PhpErrorLogConfig())->apply($project);
+
+        $file = $this->logFile();
+        $this->assertContains(['sudo', 'touch', '--', $file], $system->commands);
+        $this->assertContains(['sudo', 'chown', '-h', '1001:1001', $file], $system->commands);
+        $this->assertContains(['sudo', 'chmod', '664', $file], $system->commands);
+    }
+
+    public function test_a_symlinked_error_log_is_removed_and_recreated(): void
+    {
+        $this->account('8.3', "max_execution_time = 600\n", "[www]\n");
+        mkdir($this->root . '/engine/users/alice/log/php', 0777, true);
+        symlink($this->root . '/engine/users/alice/log/missing.txt', $this->logFile());
+
+        [$system, $project] = $this->hostingProject();
+        (new PhpErrorLogConfig())->apply($project);
+
+        $file = $this->logFile();
+        $this->assertContains(['sudo', 'rm', '-f', '--', $file], $system->commands);
+        $this->assertContains(['sudo', 'touch', '--', $file], $system->commands);
+        $this->assertContains(['sudo', 'chown', '-h', '1001:1001', $file], $system->commands);
+        $this->assertContains(['sudo', 'chmod', '664', $file], $system->commands);
+    }
+
+    public function test_a_symlink_to_an_existing_file_is_still_removed(): void
+    {
+        $this->account('8.3', "max_execution_time = 600\n", "[www]\n");
+        mkdir($this->root . '/engine/users/alice/log/php', 0777, true);
+        file_put_contents($this->root . '/engine/users/alice/log/secret.txt', "root secret\n");
+        symlink($this->root . '/engine/users/alice/log/secret.txt', $this->logFile());
+
+        [$system, $project] = $this->hostingProject();
+        (new PhpErrorLogConfig())->apply($project);
+
+        $this->assertContains(['sudo', 'rm', '-f', '--', $this->logFile()], $system->commands);
+        $this->assertSame("root secret\n", file_get_contents($this->root . '/engine/users/alice/log/secret.txt'));
+    }
+
+    public function test_an_existing_regular_log_file_is_kept_and_reowned(): void
+    {
+        $this->account('8.3', "max_execution_time = 600\n", "[www]\n");
+        mkdir($this->root . '/engine/users/alice/log/php', 0777, true);
+        file_put_contents($this->logFile(), "kept\n");
+
+        [$system, $project] = $this->hostingProject();
+        (new PhpErrorLogConfig())->apply($project);
+
+        $this->assertNotContains(['sudo', 'rm', '-f', '--', $this->logFile()], $system->commands);
+        $this->assertNotContains(['sudo', 'touch', '--', $this->logFile()], $system->commands);
+        $this->assertContains(['sudo', 'chown', '-h', '1001:1001', $this->logFile()], $system->commands);
+        $this->assertSame("kept\n", file_get_contents($this->logFile()));
+    }
+
+    public function test_a_directory_named_like_the_log_is_refused(): void
+    {
+        $this->account('8.3', "max_execution_time = 600\n", "[www]\n");
+        mkdir($this->root . '/engine/users/alice/log/php/php_error.log', 0777, true);
+
+        [$system, $project] = $this->hostingProject();
+        (new PhpErrorLogConfig())->apply($project);
+
+        $file = $this->logFile();
+        $this->assertNotContains(['sudo', 'touch', '--', $file], $system->commands);
+        $this->assertNotContains(['sudo', 'chown', '-h', '1001:1001', $file], $system->commands);
+        $this->assertNotContains(['sudo', 'chmod', '664', $file], $system->commands);
+    }
+
+    private function logFile(): string
+    {
+        return $this->root . '/engine/users/alice/log/php/php_error.log';
+    }
+
     private function account(string $version, string $ini, string $pool): void
     {
         $dir = $this->root . "/engine/users/alice/php/{$version}";
