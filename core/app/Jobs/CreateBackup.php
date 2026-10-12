@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Exceptions\DeployAlreadyRunningException;
 use App\Jobs\Concerns\AttachTask;
+use App\Lib\Project\BackupRetention;
 use App\Models\Backup as BackupRecord;
 use App\Models\User;
 use App\Support\JobBudget;
@@ -49,6 +50,8 @@ class CreateBackup implements ShouldQueue
             if ($record->backupStatus() === 'failed') {
                 throw new RuntimeException($record->error ?? 'Backup failed');
             }
+
+            app(BackupRetention::class)->prune($record);
         });
     }
 

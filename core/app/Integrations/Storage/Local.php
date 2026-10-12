@@ -70,6 +70,12 @@ final class Local extends AbstractStorage
         return $stream;
     }
 
+    /** The absolute path an object key resolves to, for serving a local object as a file response. */
+    public function path(string $key): string
+    {
+        return $this->resolveKey($key);
+    }
+
     public function delete(string $key): void
     {
         $path = $this->resolveKey($key);

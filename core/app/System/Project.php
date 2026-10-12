@@ -78,6 +78,12 @@ class Project
         return $this->runtime->kind();
     }
 
+    /** A DinD runtime: the `dind` template or any git project, whatever its template. */
+    public function runsInDind(): bool
+    {
+        return $this->runtime instanceof Dind;
+    }
+
     public function runtime(): Runtime
     {
         return $this->runtime;

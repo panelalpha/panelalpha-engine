@@ -330,6 +330,10 @@ return [
     'GET /projects/{username}/backups' => 'backup_list',
     'POST /projects/{username}/backups' => 'backup_create',
     'GET /projects/{username}/backups/{id}' => 'backup_get',
+    'GET /projects/{username}/backups/{id}/items/{item}/download' => 'backup_item_download',
     'POST /projects/{username}/backups/{id}/restore' => 'backup_restore',
     'DELETE /projects/{username}/backups/{id}' => 'backup_delete',
+    'GET /projects/{username}/backup-schedule' => 'backup_schedule_get',
+    'PUT /projects/{username}/backup-schedule' => 'backup_schedule_set',
+    'DELETE /projects/{username}/backup-schedule' => 'backup_schedule_delete',
 ];

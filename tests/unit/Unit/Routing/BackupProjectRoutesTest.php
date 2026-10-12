@@ -44,8 +44,33 @@ class BackupProjectRoutesTest extends TestCase
         $this->assertArrayHasKey('GET /{username}/backups', $routes);
         $this->assertArrayHasKey('POST /{username}/backups', $routes);
         $this->assertArrayHasKey('GET /{username}/backups/{id}', $routes);
+        $this->assertArrayHasKey('GET /{username}/backups/{id}/items/{item}/download', $routes);
         $this->assertArrayHasKey('POST /{username}/backups/{id}/restore', $routes);
         $this->assertArrayHasKey('DELETE /{username}/backups/{id}', $routes);
-        $this->assertCount(5, $routes);
+        $this->assertCount(6, $routes);
+    }
+
+    public function test_project_backup_schedule_routes_are_registered(): void
+    {
+        $routes = [];
+
+        foreach (RouteFacade::getRoutes() as $route) {
+            $uri = $route->uri();
+            if (!str_starts_with($uri, 'api/projects/') || !str_contains($uri, '/backup-schedule')) {
+                continue;
+            }
+
+            $tail = substr($uri, strlen('api/projects'));
+            foreach ($route->methods() as $verb) {
+                if ($verb !== 'HEAD') {
+                    $routes["{$verb} {$tail}"] = $route;
+                }
+            }
+        }
+
+        $this->assertArrayHasKey('GET /{username}/backup-schedule', $routes);
+        $this->assertArrayHasKey('PUT /{username}/backup-schedule', $routes);
+        $this->assertArrayHasKey('DELETE /{username}/backup-schedule', $routes);
+        $this->assertCount(3, $routes);
     }
 }

@@ -35,6 +35,7 @@ class RestoreBackup implements ShouldQueue
         public int $backupId,
         public array $only = [],
         public array $exclude = [],
+        public bool $deleteExistingFiles = true,
     ) {
         $this->onQueue('default');
     }
@@ -90,7 +91,7 @@ class RestoreBackup implements ShouldQueue
     private function runRestore(User $user, BackupRecord $record): void
     {
         try {
-            $user->project()->backup($record)->restore($this->only, $this->exclude);
+            $user->project()->backup($record)->restore($this->only, $this->exclude, $this->deleteExistingFiles);
         } catch (DeployAlreadyRunningException $e) {
             $this->recordFailure($record, $e->getMessage());
 

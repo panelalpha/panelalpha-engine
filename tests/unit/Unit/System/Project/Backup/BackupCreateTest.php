@@ -65,6 +65,9 @@ class BackupCreateTest extends TestCase
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             $table->string('username')->index();
             $table->foreignId('container_id')->constrained('backup_containers')->restrictOnDelete();
+            $table->string('kind')->default('manual');
+            $table->string('note')->nullable();
+            $table->json('contents')->nullable();
             $table->json('async_status')->nullable();
             $table->json('restore_details')->nullable();
             $table->text('error')->nullable();
@@ -114,27 +117,34 @@ class BackupCreateTest extends TestCase
         $this->project($alice)->backup($record);
     }
 
-    public function test_non_dind_template_is_not_supported(): void
+    public function test_classic_project_backs_up_the_home_and_every_database(): void
     {
         $user = $this->makeUser('alice', template: 'default');
         $container = $this->makeContainer();
         $storage = new FakeStorage();
-        $project = $this->project($user);
-        $record = BackupRecord::prepare($user, $container, 'artisan');
-        $backup = new BackupDouble($project, $record, $storage);
+        $backup = $this->createBackup($user, $container, $storage);
 
-        try {
-            $backup->run();
-            $this->fail('Expected RuntimeException was not thrown.');
-        } catch (\RuntimeException $e) {
-            $this->assertSame('not supported', $e->getMessage());
-        }
+        $record = $backup->model()->fresh(['items']);
 
-        $record->refresh();
-        $this->assertSame('failed', $record->backupStatus());
-        $this->assertSame('not supported', $record->error);
+        $this->assertSame('completed', $record->backupStatus());
+        $this->assertNull($record->error);
+        $this->assertSame('manual', $record->kind);
+        $this->assertSame(['files' => true, 'databases' => true], $record->contents);
+        $this->assertContains('tarHome', $backup->calls);
         $this->assertNotContains('composeStop', $backup->calls);
-        $this->assertSame(1, BackupRecord::query()->count());
+        $this->assertNotContains('tarVolume', $backup->calls);
+
+        $paths = $record->items()->orderBy('remote_path')->pluck('remote_path')->all();
+        $this->assertSame([
+            'alice/1/database-alice_app.sql.gz',
+            'alice/1/home.tar.gz',
+        ], $paths);
+
+        $filesItem = $record->items->first(
+            static fn (BackupItem $item): bool => ($item->details['type'] ?? null) === 'files',
+        );
+        $this->assertNotNull($filesItem);
+        $this->assertSame('home', $filesItem->details['scope']);
     }
 
     public function test_happy_path_creates_backup_with_items(): void
@@ -229,6 +239,57 @@ class BackupCreateTest extends TestCase
         foreach ($paths as $path) {
             $this->assertStringStartsWith('backups/alice/' . $backup->model()->id . '/', $path);
         }
+    }
+
+    public function test_classic_backup_contents_select_items(): void
+    {
+        $user = $this->makeUser('alice', template: 'default');
+        $container = $this->makeContainer();
+        $storage = new FakeStorage();
+        $project = $this->project($user);
+
+        $databasesOnly = BackupRecord::prepare($user, $container, 'artisan', ['files' => false, 'databases' => true]);
+        try {
+            (new BackupDouble($project, $databasesOnly, $storage))->run();
+        } catch (\Throwable) {
+        }
+        $this->assertSame(
+            ['alice/' . $databasesOnly->id . '/database-alice_app.sql.gz'],
+            $databasesOnly->fresh()->items()->orderBy('remote_path')->pluck('remote_path')->all(),
+        );
+
+        $filesOnly = BackupRecord::prepare($user, $container, 'artisan', ['files' => true, 'databases' => false]);
+        try {
+            (new BackupDouble($project, $filesOnly, $storage))->run();
+        } catch (\Throwable) {
+        }
+        $this->assertSame(
+            ['alice/' . $filesOnly->id . '/home.tar.gz'],
+            $filesOnly->fresh()->items()->orderBy('remote_path')->pluck('remote_path')->all(),
+        );
+    }
+
+    public function test_classic_backup_names_a_hyphenated_database_file(): void
+    {
+        $user = $this->makeUser('alice', template: 'default');
+        $container = $this->makeContainer();
+        $storage = new FakeStorage();
+        $record = BackupRecord::prepare($user, $container, 'artisan');
+        $backup = new BackupDouble(
+            $this->project($user),
+            $record,
+            $storage,
+            [['name' => 'dbdata', 'docker_name' => 'proj_dbdata']],
+            ['alice_my-db'],
+        );
+
+        try {
+            $backup->run();
+        } catch (\Throwable) {
+        }
+
+        $paths = $record->fresh()->items()->orderBy('remote_path')->pluck('remote_path')->all();
+        $this->assertContains('alice/' . $record->id . '/database-alice_my-db.sql.gz', $paths);
     }
 
     private function createBackup(User $user, BackupContainer $container, FakeStorage $storage): BackupDouble

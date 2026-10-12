@@ -19,6 +19,7 @@ class BackupRestoreRequest extends FormRequest
     {
         return [
             'confirm' => ['required', 'boolean', 'accepted'],
+            'delete_existing_files' => ['sometimes', 'boolean'],
             'only' => ['sometimes', 'array'],
             'only.files' => ['sometimes', 'boolean'],
             'only.volumes' => ['sometimes', 'array'],
@@ -52,6 +53,11 @@ class BackupRestoreRequest extends FormRequest
                 $validator->errors()->add('only', 'Cannot combine include and exclude');
             }
         });
+    }
+
+    public function deleteExistingFiles(): bool
+    {
+        return $this->boolean('delete_existing_files', true);
     }
 
     /**

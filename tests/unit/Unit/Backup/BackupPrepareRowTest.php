@@ -52,6 +52,9 @@ class BackupPrepareRowTest extends TestCase
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             $table->string('username')->index();
             $table->foreignId('container_id')->constrained('backup_containers')->restrictOnDelete();
+            $table->string('kind')->default('manual');
+            $table->string('note')->nullable();
+            $table->json('contents')->nullable();
             $table->json('async_status')->nullable();
             $table->json('restore_details')->nullable();
             $table->text('error')->nullable();
@@ -69,8 +72,23 @@ class BackupPrepareRowTest extends TestCase
         $this->assertInstanceOf(BackupRecord::class, $record);
         $this->assertSame('pending', $record->backupStatus());
         $this->assertSame('api', $record->async_status['source'] ?? null);
+        $this->assertSame('manual', $record->kind);
         $this->assertNull($record->error);
         $this->assertSame(1, BackupRecord::query()->count());
+    }
+
+    public function test_prepare_takes_the_kind_explicitly(): void
+    {
+        $user = $this->makeUser('alice');
+        $container = $this->makeContainer();
+
+        $scheduled = BackupRecord::prepare($user, $container, 'api', [], null, 'scheduled');
+        $manual = BackupRecord::prepare($user, $container, 'schedule');
+
+        $this->assertSame('scheduled', $scheduled->kind);
+        $this->assertSame('api', $scheduled->async_status['source'] ?? null);
+        $this->assertSame('manual', $manual->kind);
+        $this->assertSame('schedule', $manual->async_status['source'] ?? null);
     }
 
     private function makeUser(string $username): User

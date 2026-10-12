@@ -49,6 +49,7 @@ class BackupRestoreTool extends ApiTool
             'confirm',
             'only',
             'exclude',
+            'delete_existing_files',
         ];
     }
 
@@ -73,6 +74,7 @@ class BackupRestoreTool extends ApiTool
             'confirm' => $schema->boolean()->required(),
             'only' => $schema->object(),
             'exclude' => $schema->object(),
+            'delete_existing_files' => $schema->boolean()->description('Default true: swap the home for the restored copy. False extracts over the existing tree.'),
         ];
     }
 }

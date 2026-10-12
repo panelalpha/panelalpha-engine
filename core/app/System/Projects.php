@@ -10,6 +10,7 @@ use App\Models\User as ModelsUser;
 use App\System as EngineSystem;
 use App\System\Project\Dind;
 use App\System\Project\Dind\Paths;
+use App\System\Project\HomeSwap;
 use App\System\Services\Mysql;
 use App\System\Services\Mysql\DatabaseCopier;
 use App\System\Services\Mysql\DatabaseCopyResult;
@@ -928,57 +929,12 @@ class Projects
         string $incomingDir,
         string $prePushDir
     ): void {
-        $this->runPushProcess(
-            ['sudo', 'mkdir', '-p', $prePushDir],
-            'Failed to create .pre-push directory'
+        (new HomeSwap($this->system, rtrim($toHome, '/'), self::PROCESS_TIMEOUT_SECONDS))->swap(
+            $incomingDir,
+            $prePushDir,
+            ['docker', '.incoming', '.pre-push', '.pre-push-db'],
+            'push swap',
         );
-
-        $listProcess = $this->system->runProcess(
-            ['sudo', 'ls', '-A', $toHome],
-            [],
-            self::PROCESS_TIMEOUT_SECONDS
-        );
-        if (!$listProcess->isSuccessful()) {
-            throw new \RuntimeException('Failed to list target home before push swap.');
-        }
-
-        foreach (preg_split('/\R/', trim($listProcess->getOutput())) ?: [] as $entry) {
-            $entry = trim($entry);
-            if ($entry === '' || in_array($entry, ['docker', '.incoming', '.pre-push', '.pre-push-db'], true)) {
-                continue;
-            }
-            $this->runPushProcess(
-                ['sudo', 'mv', $toHome . '/' . $entry, $prePushDir . '/'],
-                "Failed to move '{$entry}' aside before push swap"
-            );
-        }
-
-        $incomingList = $this->system->runProcess(
-            ['sudo', 'ls', '-A', $incomingDir],
-            [],
-            self::PROCESS_TIMEOUT_SECONDS
-        );
-        if (!$incomingList->isSuccessful()) {
-            throw new \RuntimeException('Failed to list .incoming directory before push swap.');
-        }
-
-        foreach (preg_split('/\R/', trim($incomingList->getOutput())) ?: [] as $entry) {
-            $entry = trim($entry);
-            if ($entry === '') {
-                continue;
-            }
-            $this->runPushProcess(
-                ['sudo', 'mv', $incomingDir . '/' . $entry, $toHome . '/'],
-                "Failed to move incoming '{$entry}' into target home"
-            );
-        }
-
-        if ($this->pathIsDirectoryAsRoot($incomingDir)) {
-            $this->runPushProcess(
-                ['sudo', 'rmdir', $incomingDir],
-                'Failed to remove empty .incoming directory after swap'
-            );
-        }
     }
 
     private function cleanupIncomingDir(string $incomingDir): void

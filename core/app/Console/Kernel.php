@@ -72,6 +72,7 @@ class Kernel extends ConsoleKernel
         $this->scheduleCertificateRenewal($schedule);
         $this->scheduleHostDiskUpkeep($schedule);
         $this->scheduleMonitoring($schedule);
+        $this->scheduleAutomaticBackups($schedule);
     }
 
     /** The uid commands run as, or -1 when POSIX functions are unavailable. */
@@ -138,6 +139,12 @@ class Kernel extends ConsoleKernel
     private function scheduleCertificateRenewal(Schedule $schedule): void
     {
         $schedule->command('ssl:project-cert:renew')->dailyAt('03:10')->withoutOverlapping(self::MUTEX_DAILY);
+    }
+
+    /** Automatic project backups: the command runs the schedules that are due, so a minute is the resolution. */
+    private function scheduleAutomaticBackups(Schedule $schedule): void
+    {
+        $schedule->command('backups:run-scheduled')->everyMinute()->withoutOverlapping(self::MUTEX_MINUTE);
     }
 
     /**

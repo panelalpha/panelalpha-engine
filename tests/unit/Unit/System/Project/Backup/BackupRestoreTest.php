@@ -5,7 +5,6 @@ namespace Tests\Unit\System\Project\Backup;
 use App\Lib\Deploy\DeployLog\DeployLock;
 use App\Models\Backup as BackupRecord;
 use App\Models\BackupContainer;
-use App\Models\BackupItem;
 use App\Models\User;
 use App\System;
 use App\System\Filesystem;
@@ -63,6 +62,9 @@ class BackupRestoreTest extends TestCase
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             $table->string('username')->index();
             $table->foreignId('container_id')->constrained('backup_containers')->restrictOnDelete();
+            $table->string('kind')->default('manual');
+            $table->string('note')->nullable();
+            $table->json('contents')->nullable();
             $table->json('async_status')->nullable();
             $table->json('restore_details')->nullable();
             $table->text('error')->nullable();
@@ -86,22 +88,77 @@ class BackupRestoreTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_non_dind_template_is_not_supported(): void
+    public function test_classic_restore_swaps_the_home_and_restores_databases(): void
     {
         $user = $this->makeUser('alice', template: 'default');
         $container = $this->makeContainer();
         $storage = new FakeStorage();
-        $backup = $this->seedCompletedBackup($user, $container);
-        $double = new BackupDouble($this->project($user), $backup, $storage);
+        $created = $this->makeCompletedBackup($user, $container, $storage);
+        $backup = $created->model()->fresh(['items']);
 
-        try {
-            $double->restore();
-            $this->fail('Expected RuntimeException was not thrown.');
-        } catch (\RuntimeException $e) {
-            $this->assertSame('not supported', $e->getMessage());
-        }
+        $restore = new BackupDouble($this->project($user), $backup, $storage);
+        $restore->restore();
 
-        $this->assertNotContains('composeStop', $double->calls);
+        $backup->refresh();
+        $this->assertSame('completed', $backup->restoreStatus());
+        $this->assertNull($backup->error);
+        $this->assertTrue($this->hostCallsContain($restore->calls, 'extractHomeArchive:'));
+        $this->assertContains('swapHome:.restore-' . $backup->id . ':.pre-restore-' . $backup->id, $restore->calls);
+        $this->assertContains('discardHomeAside:.pre-restore-' . $backup->id, $restore->calls);
+        $this->assertContains('restoreDatabase:alice_app', $restore->calls);
+        $this->assertNotContains('composeStop', $restore->calls);
+    }
+
+    public function test_classic_restore_without_deleting_existing_files_extracts_over_the_home(): void
+    {
+        $user = $this->makeUser('alice', template: 'default');
+        $container = $this->makeContainer();
+        $storage = new FakeStorage();
+        $created = $this->makeCompletedBackup($user, $container, $storage);
+        $backup = $created->model()->fresh(['items']);
+
+        $restore = new BackupDouble($this->project($user), $backup, $storage);
+        $restore->restore([], [], false);
+
+        $this->assertSame('completed', $backup->fresh()->restoreStatus());
+        $this->assertContains('extractOverHome', $restore->calls);
+        $this->assertFalse($this->hostCallsContain($restore->calls, 'extractHomeArchive:'));
+        $this->assertFalse($this->hostCallsContain($restore->calls, 'swapHome:'));
+    }
+
+    public function test_classic_restore_rolls_the_home_back_when_the_swap_fails(): void
+    {
+        $user = $this->makeUser('alice', template: 'default');
+        $container = $this->makeContainer();
+        $storage = new FakeStorage();
+        $created = $this->makeCompletedBackup($user, $container, $storage);
+        $backup = $created->model()->fresh(['items']);
+
+        $restore = new BackupDouble($this->project($user), $backup, $storage, swapHomeThrows: true);
+        $restore->restore();
+
+        $backup->refresh();
+        $this->assertSame('failed', $backup->restoreStatus());
+        $this->assertStringContainsString('home swap failed', (string) $backup->error);
+        $this->assertContains('rollbackHome:.restore-' . $backup->id . ':.pre-restore-' . $backup->id, $restore->calls);
+        $this->assertNotContains('discardHomeAside:.pre-restore-' . $backup->id, $restore->calls);
+    }
+
+    public function test_classic_restore_of_only_databases_leaves_files_alone(): void
+    {
+        $user = $this->makeUser('alice', template: 'default');
+        $container = $this->makeContainer();
+        $storage = new FakeStorage();
+        $created = $this->makeCompletedBackup($user, $container, $storage);
+        $backup = $created->model()->fresh(['items']);
+
+        $restore = new BackupDouble($this->project($user), $backup, $storage);
+        $restore->restore(['files' => false, 'volumes' => [], 'databases' => ['alice_app']]);
+
+        $this->assertSame('completed', $backup->fresh()->restoreStatus());
+        $this->assertContains('restoreDatabase:alice_app', $restore->calls);
+        $this->assertFalse($this->hostCallsContain($restore->calls, 'extractHomeArchive:'));
+        $this->assertFalse($this->hostCallsContain($restore->calls, 'extractOverHome'));
     }
 
     public function test_incomplete_backup_cannot_restore(): void
@@ -332,29 +389,6 @@ class BackupRestoreTest extends TestCase
         }
 
         return $backup;
-    }
-
-    private function seedCompletedBackup(User $user, BackupContainer $container): BackupRecord
-    {
-        $backup = new BackupRecord();
-        $backup->user_id = $user->id;
-        $backup->username = $user->username;
-        $backup->container_id = $container->id;
-        $backup->async_status = ['backup' => 'completed'];
-        $backup->save();
-
-        $item = new BackupItem();
-        $item->backup_id = $backup->id;
-        $item->remote_path = $user->username . '/' . $backup->id . '/files.tar.gz';
-        $item->size_bytes = 1024;
-        $item->details = [
-            'type' => 'files',
-            'name' => 'files',
-            'sha256' => hash('sha256', 'stub'),
-        ];
-        $item->save();
-
-        return $backup->fresh(['items']);
     }
 
     private function project(User $user): Project

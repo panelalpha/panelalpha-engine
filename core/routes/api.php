@@ -29,6 +29,7 @@ use App\Http\Controllers\User\MysqlController;
 use App\Http\Controllers\User\StagingController;
 use App\Http\Controllers\User\PhpController as UserPhpController;
 use App\Http\Controllers\User\BackupController;
+use App\Http\Controllers\User\BackupScheduleController;
 use App\Http\Controllers\User\AppCredentialsController;
 use App\Http\Controllers\User\AppHealthController;
 use App\Http\Controllers\User\AppUserController;
@@ -180,8 +181,13 @@ $projectRoutes = function (): void {
     Route::get('/{username}/backups', [BackupController::class, 'index']);
     Route::post('/{username}/backups', [BackupController::class, 'store']);
     Route::get('/{username}/backups/{id}', [BackupController::class, 'show']);
+    Route::get('/{username}/backups/{id}/items/{item}/download', [BackupController::class, 'download']);
     Route::post('/{username}/backups/{id}/restore', [BackupController::class, 'restore']);
     Route::delete('/{username}/backups/{id}', [BackupController::class, 'destroy']);
+
+    Route::get('/{username}/backup-schedule', [BackupScheduleController::class, 'show']);
+    Route::put('/{username}/backup-schedule', [BackupScheduleController::class, 'update']);
+    Route::delete('/{username}/backup-schedule', [BackupScheduleController::class, 'destroy']);
 
     Route::get('/{username}/ftp-accounts', [FtpAccountController::class, 'index']);
     Route::post('/{username}/ftp-accounts', [FtpAccountController::class, 'store']);

@@ -61,6 +61,9 @@ class BackupDeleteTest extends TestCase
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             $table->string('username')->index();
             $table->foreignId('container_id')->constrained('backup_containers')->restrictOnDelete();
+            $table->string('kind')->default('manual');
+            $table->string('note')->nullable();
+            $table->json('contents')->nullable();
             $table->json('async_status')->nullable();
             $table->json('restore_details')->nullable();
             $table->text('error')->nullable();

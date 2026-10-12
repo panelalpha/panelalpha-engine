@@ -196,6 +196,13 @@ class BackupContainerController extends Controller
         $container = BackupContainer::findOrFail($id);
         $deleteBackups = filter_var($request->query('delete_backups'), FILTER_VALIDATE_BOOL);
 
+        if ($container->schedules()->exists()) {
+            return new JsonResponse([
+                'message' => 'Cannot delete backup container while a backup schedule uses it.',
+                'code' => 'container_in_use',
+            ], 409);
+        }
+
         if (!$container->backups()->exists()) {
             $container->delete();
 

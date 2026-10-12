@@ -30,6 +30,7 @@ final class BackupDouble extends Backup
         private bool $restoreVolumeThrows = false,
         /** Called from composeStop(), to observe state during the stopped window. */
         private mixed $onComposeStop = null,
+        private bool $swapHomeThrows = false,
     ) {
         parent::__construct($project, $record);
     }
@@ -104,6 +105,60 @@ final class BackupDouble extends Backup
     {
         $this->calls[] = 'tarProject';
         $this->writeStubFile($dest);
+    }
+
+    protected function tarHome(string $dest): void
+    {
+        $this->calls[] = 'tarHome';
+        $this->writeStubFile($dest);
+    }
+
+    protected function extractHomeArchive(string $archivePath, string $targetDir): void
+    {
+        $this->calls[] = 'extractHomeArchive:' . $targetDir;
+    }
+
+    protected function extractOverHome(string $archivePath): void
+    {
+        $this->calls[] = 'extractOverHome';
+    }
+
+    protected function removeHomeEntry(string $entry): void
+    {
+        $this->calls[] = 'removeHomeEntry:' . $entry;
+    }
+
+    protected function swapHome(string $incomingDir, string $asideDir, array $skipEntries): void
+    {
+        $this->calls[] = 'swapHome:' . $incomingDir . ':' . $asideDir;
+        if ($this->swapHomeThrows) {
+            throw new \RuntimeException('home swap failed');
+        }
+    }
+
+    protected function rollbackHome(string $incomingDir, string $asideDir, array $skipEntries): void
+    {
+        $this->calls[] = 'rollbackHome:' . $incomingDir . ':' . $asideDir;
+    }
+
+    protected function discardHomeAside(string $asideDir): void
+    {
+        $this->calls[] = 'discardHomeAside:' . $asideDir;
+    }
+
+    protected function databaseExists(string $name): bool
+    {
+        return true;
+    }
+
+    protected function databaseRowExists(string $name): bool
+    {
+        return true;
+    }
+
+    protected function createDatabase(string $name): void
+    {
+        $this->calls[] = 'createDatabase:' . $name;
     }
 
     protected function extractProjectArchive(string $archivePath, string $incomingDir): void

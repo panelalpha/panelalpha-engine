@@ -1,13 +1,16 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import { type APIResponse } from '@playwright/test';
 import {
   type ApiListResponse,
   type ApiResponse,
   type BackupContainer,
   type BackupRecord,
+  type BackupSchedule,
   type CreateBackupContainerRequest,
   type CreateProjectBackupRequest,
   type RestoreBackupRequest,
+  type SetBackupScheduleRequest,
   type UpdateBackupContainerRequest,
 } from '@/types';
 import { EngineApiBase } from '../engine-api-base';
@@ -82,14 +85,24 @@ export class BackupsApi extends EngineApiBase {
     return this.rawCall(response);
   }
 
-  async listProjectBackups(username: string): Promise<ApiListResponse<BackupRecord>> {
-    const response = await this.api.get(`projects/${username}/backups`);
+  async listProjectBackups(
+    username: string,
+    kind?: 'manual' | 'scheduled'
+  ): Promise<ApiListResponse<BackupRecord>> {
+    const response = await this.api.get(
+      `projects/${username}/backups${kind ? `?kind=${kind}` : ''}`
+    );
     await this.assertStatus(response, 200);
     return response.json();
   }
 
-  async listProjectBackupsRaw(username: string): Promise<{ status: number; body: any }> {
-    const response = await this.api.get(`projects/${username}/backups`);
+  async listProjectBackupsRaw(
+    username: string,
+    kind?: 'manual' | 'scheduled'
+  ): Promise<{ status: number; body: any }> {
+    const response = await this.api.get(
+      `projects/${username}/backups${kind ? `?kind=${kind}` : ''}`
+    );
     return this.rawCall(response);
   }
 
@@ -151,6 +164,48 @@ export class BackupsApi extends EngineApiBase {
     id: number
   ): Promise<{ status: number; body: any }> {
     const response = await this.api.delete(`projects/${username}/backups/${id}`);
+    return this.rawCall(response);
+  }
+
+  /** The item download is a streamed binary, so the raw Playwright response is returned. */
+  async downloadProjectBackupItemRaw(
+    username: string,
+    backupId: number,
+    itemId: number
+  ): Promise<APIResponse> {
+    return this.api.get(`projects/${username}/backups/${backupId}/items/${itemId}/download`);
+  }
+
+  async getBackupSchedule(username: string): Promise<ApiResponse<BackupSchedule | null>> {
+    const response = await this.api.get(`projects/${username}/backup-schedule`);
+    await this.assertStatus(response, 200);
+    return response.json();
+  }
+
+  async getBackupScheduleRaw(username: string): Promise<{ status: number; body: any }> {
+    const response = await this.api.get(`projects/${username}/backup-schedule`);
+    return this.rawCall(response);
+  }
+
+  async setBackupSchedule(
+    username: string,
+    data: SetBackupScheduleRequest
+  ): Promise<ApiResponse<BackupSchedule>> {
+    const response = await this.api.put(`projects/${username}/backup-schedule`, { data });
+    await this.assertStatus(response, 200);
+    return response.json();
+  }
+
+  async setBackupScheduleRaw(
+    username: string,
+    data: Partial<SetBackupScheduleRequest>
+  ): Promise<{ status: number; body: any }> {
+    const response = await this.api.put(`projects/${username}/backup-schedule`, { data });
+    return this.rawCall(response);
+  }
+
+  async deleteBackupSchedule(username: string): Promise<{ status: number; body: any }> {
+    const response = await this.api.delete(`projects/${username}/backup-schedule`);
     return this.rawCall(response);
   }
 }

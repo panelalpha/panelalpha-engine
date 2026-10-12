@@ -8,6 +8,7 @@ use App\Lib\DeployHook\Coalescing;
 use App\Models\Backup as BackupRecord;
 use App\Models\BackupContainer;
 use App\Models\BackupItem;
+use App\Models\MysqlDatabase;
 use App\Support\JobBudget;
 use App\System\Project as UserProject;
 use App\System\Project\Dind;
@@ -55,12 +56,6 @@ class Backup
         $container = $this->requireContainer();
         $storage = $this->resolveStorage($container);
 
-        if ($this->project->model()->getTemplate() !== 'dind') {
-            $this->saveBackupStatus('failed', 'not supported');
-
-            throw new \RuntimeException('not supported');
-        }
-
         $lock = DeployLock::acquireFor($this->project->username(), DeployLock::HOLDER_BACKUP);
 
         try {
@@ -70,10 +65,14 @@ class Backup
 
             $this->saveBackupStatus('running');
 
-            $this->withComposeStopped(
-                $record->id,
-                fn (string $stagingDir) => $this->snapshotAndUpload($stagingDir, $container, $storage),
-            );
+            if ($this->project->runsInDind()) {
+                $this->withComposeStopped(
+                    $record->id,
+                    fn (string $stagingDir) => $this->snapshotAndUpload($stagingDir, $container, $storage),
+                );
+            } else {
+                $this->snapshotClassicAndUpload($container, $storage);
+            }
 
             $this->saveBackupStatus('completed');
         } catch (Throwable $e) {
@@ -91,11 +90,26 @@ class Backup
         $this->uploadSnapshot($container, $storage, $stagingDir);
     }
 
+    private function snapshotClassicAndUpload(BackupContainer $container, BackupStorage $storage): void
+    {
+        $stagingDir = $this->stagingDir($this->record->username, $this->record->id);
+        $this->ensureDirectory($stagingDir);
+
+        try {
+            $this->writeSnapshot($stagingDir);
+            $this->uploadSnapshot($container, $storage, $stagingDir);
+        } finally {
+            $this->cleanStagingDir($stagingDir);
+        }
+    }
+
     private function writeSnapshot(string $stagingDir): void
     {
         foreach ($this->snapshotManifest($stagingDir) as $file) {
             match ($file['type']) {
-                'files' => $this->tarProject($file['path']),
+                'files' => ($file['scope'] ?? null) === 'home'
+                    ? $this->tarHome($file['path'])
+                    : $this->tarProject($file['path']),
                 'volume' => $this->tarVolume($file['docker_name'], $file['path']),
                 'database' => $this->dumpDatabase($file['name'], $file['path']),
             };
@@ -113,12 +127,8 @@ class Backup
     }
 
     /** Holds the deploy lock as run() does, so no rebuild lands between the two moves of swapProject(). */
-    public function restore(array $only = [], array $exclude = []): void
+    public function restore(array $only = [], array $exclude = [], bool $deleteExistingFiles = true): void
     {
-        if ($this->project->model()->getTemplate() !== 'dind') {
-            throw new \RuntimeException('not supported');
-        }
-
         $this->record->loadMissing(['container', 'items']);
         if ($this->record->backupStatus() !== 'completed' || $this->record->items->isEmpty()) {
             throw new \RuntimeException('Backup is not complete');
@@ -131,10 +141,18 @@ class Backup
         $lock = DeployLock::acquireFor($this->project->username(), DeployLock::HOLDER_RESTORE);
 
         try {
-            $this->record->restore_details = ['only' => $only, 'exclude' => $exclude];
+            $this->record->restore_details = [
+                'only' => $only,
+                'exclude' => $exclude,
+                'delete_existing_files' => $deleteExistingFiles,
+            ];
             $this->saveRestoreStatus('running');
 
-            $this->restoreBackup($only, $exclude);
+            if ($this->project->runsInDind()) {
+                $this->restoreBackup($only, $exclude);
+            } else {
+                $this->restoreClassic($only, $exclude, $deleteExistingFiles);
+            }
         } finally {
             $this->releaseDeployLock($lock);
         }
@@ -219,6 +237,104 @@ class Backup
         } catch (Throwable $e) {
             $this->saveRestoreStatus('failed', $e->getMessage());
         }
+    }
+
+    /** Classic restore: no stack to stop, the databases come back through MariaDB and the home is swapped or overwritten. */
+    private function restoreClassic(array $only, array $exclude, bool $deleteExistingFiles): void
+    {
+        $record = $this->record;
+        $storage = $this->resolveStorage($this->requireContainer());
+        $this->rollbackFailed = false;
+        $stagingDir = $this->stagingDir($record->username, $record->id);
+
+        try {
+            $selectedItems = $this->restorableItems($only, $exclude);
+
+            $this->project->system()->filesystem()->assertFreeSpace(
+                $this->sumSelectedBytes($selectedItems),
+            );
+            $this->ensureDirectory($stagingDir);
+
+            $stagedPaths = $this->downloadSelectedItems($selectedItems, $storage, $stagingDir);
+
+            $filesItem = $this->findItemByType($selectedItems, 'files');
+            if ($filesItem !== null) {
+                $this->restoreClassicFiles($stagedPaths[$filesItem->id], $deleteExistingFiles);
+            }
+
+            $this->restoreClassicDatabases($selectedItems, $stagedPaths);
+
+            $this->saveRestoreStatus('completed');
+        } catch (Throwable $e) {
+            $this->saveRestoreStatus('failed', $e->getMessage());
+        } finally {
+            $this->cleanStagingDir($stagingDir);
+        }
+    }
+
+    private function restoreClassicFiles(string $archivePath, bool $deleteExistingFiles): void
+    {
+        if (!$deleteExistingFiles) {
+            $this->extractOverHome($archivePath);
+            $this->project->fixPermissions();
+
+            return;
+        }
+
+        $incoming = '.restore-' . $this->record->id;
+        $aside = '.pre-restore-' . $this->record->id;
+        $skip = [$incoming, $aside];
+
+        $this->removeHomeEntry($incoming);
+        $this->removeHomeEntry($aside);
+        $this->extractHomeArchive($archivePath, $this->userPath($incoming));
+
+        try {
+            $this->swapHome($incoming, $aside, $skip);
+        } catch (Throwable $e) {
+            $this->attemptRollback(fn () => $this->rollbackHome($incoming, $aside, $skip));
+
+            throw $this->restoreFailure($e);
+        }
+
+        $this->discardHomeAside($aside);
+        $this->project->fixPermissions();
+    }
+
+    /**
+     * @param Collection<int, BackupItem> $selectedItems
+     * @param array<int, string> $stagedPaths
+     */
+    private function restoreClassicDatabases(Collection $selectedItems, array $stagedPaths): void
+    {
+        foreach ($selectedItems as $item) {
+            if (($item->details['type'] ?? null) !== 'database') {
+                continue;
+            }
+
+            $name = (string) ($item->details['name'] ?? '');
+            $this->ensureDatabaseRow($name);
+            $this->restoreDatabase($name, $stagedPaths[$item->id]);
+        }
+    }
+
+    /** A database dropped since the backup is recreated, without grants, so its data can come back. */
+    private function ensureDatabaseRow(string $name): void
+    {
+        if ($this->databaseRowExists($name)) {
+            return;
+        }
+
+        $model = $this->project->model();
+        Log::warning('Restoring a backup database whose row no longer exists', [
+            'username' => $this->project->username(),
+            'database' => $name,
+        ]);
+
+        if (!$this->databaseExists($name)) {
+            $this->createDatabase($name);
+        }
+        MysqlDatabase::create(['user_id' => $model->id, 'database' => $name]);
     }
 
     /**
@@ -447,8 +563,13 @@ class Backup
     private function estimateRequiredBytes(): int
     {
         $estimate = 1024 * 1024 * 1024;
+        if (!$this->record->includeDatabases()) {
+            return $estimate;
+        }
 
-        return $estimate + (count($this->namedVolumes()) + count($this->databaseNames())) * (100 * 1024 * 1024);
+        $volumes = $this->project->runsInDind() ? count($this->namedVolumes()) : 0;
+
+        return $estimate + ($volumes + count($this->databaseNames())) * (100 * 1024 * 1024);
     }
 
     // --- filters ---
@@ -529,27 +650,43 @@ class Backup
     // --- transfer ---
 
     /**
-     * @return list<array{path: string, file: string, type: string, name: string, docker_name?: string}>
+     * @return list<array{path: string, file: string, type: string, name: string, scope?: string, docker_name?: string}>
      */
     private function snapshotManifest(string $stagingDir): array
     {
-        $files = [
-            [
-                'path' => $stagingDir . 'files.tar.gz',
-                'file' => 'files.tar.gz',
-                'type' => 'files',
-                'name' => 'files',
-            ],
-        ];
+        $files = [];
 
-        foreach ($this->namedVolumes() as $volume) {
-            $files[] = [
-                'path' => $stagingDir . 'volume-' . $volume['name'] . '.tar.gz',
-                'file' => 'volume-' . $volume['name'] . '.tar.gz',
-                'type' => 'volume',
-                'name' => $volume['name'],
-                'docker_name' => $volume['docker_name'],
-            ];
+        if ($this->record->includeFiles()) {
+            $files[] = $this->project->runsInDind()
+                ? [
+                    'path' => $stagingDir . 'files.tar.gz',
+                    'file' => 'files.tar.gz',
+                    'type' => 'files',
+                    'name' => 'files',
+                ]
+                : [
+                    'path' => $stagingDir . 'home.tar.gz',
+                    'file' => 'home.tar.gz',
+                    'type' => 'files',
+                    'name' => 'home',
+                    'scope' => 'home',
+                ];
+        }
+
+        if (!$this->record->includeDatabases()) {
+            return $files;
+        }
+
+        if ($this->project->runsInDind()) {
+            foreach ($this->namedVolumes() as $volume) {
+                $files[] = [
+                    'path' => $stagingDir . 'volume-' . $volume['name'] . '.tar.gz',
+                    'file' => 'volume-' . $volume['name'] . '.tar.gz',
+                    'type' => 'volume',
+                    'name' => $volume['name'],
+                    'docker_name' => $volume['docker_name'],
+                ];
+            }
         }
 
         foreach ($this->databaseNames() as $database) {
@@ -602,7 +739,7 @@ class Backup
     }
 
     /**
-     * @param array{type: string, name: string, docker_name?: string} $file
+     * @param array{type: string, name: string, scope?: string, docker_name?: string} $file
      */
     private function saveItem(string $key, int $sizeBytes, array $file, string $sha256): void
     {
@@ -613,6 +750,9 @@ class Backup
         ];
         if (isset($file['docker_name'])) {
             $details['docker_name'] = $file['docker_name'];
+        }
+        if (isset($file['scope'])) {
+            $details['scope'] = $file['scope'];
         }
 
         $item = new BackupItem();
@@ -911,6 +1051,123 @@ class Backup
             $dest,
             'project',
         ], [], JobBudget::COMMAND_SECONDS);
+    }
+
+    /** The whole home, preserving ownership, with the push and restore scratch directories left out. */
+    protected function tarHome(string $dest): void
+    {
+        $home = rtrim($this->project->homeDirPath(), '/');
+        $this->project->system()->execOnHost([
+            'tar',
+            '-C',
+            $home,
+            '-czf',
+            $dest,
+            '--exclude=./.incoming',
+            '--exclude=./.pre-push',
+            '--exclude=./.pre-push-db',
+            '.',
+        ], [], JobBudget::COMMAND_SECONDS);
+    }
+
+    /**
+     * The home root is root-owned (Project::createHomeDirectory chowns it root:root), so the
+     * scratch directory is created by root. A leftover from an earlier failed run is removed
+     * first without following it, so a stale symlink cannot become the extraction target.
+     */
+    protected function extractHomeArchive(string $archivePath, string $targetDir): void
+    {
+        $this->project->system()->execOnHost(['mkdir', '-p', $targetDir]);
+        $this->project->system()->execOnHost(
+            ['tar', '-xzf', $archivePath, '-C', $targetDir],
+            [],
+            JobBudget::COMMAND_SECONDS,
+        );
+    }
+
+    /**
+     * delete_existing_files=false extracts over the live home as root. GNU tar replaces a
+     * symlinked directory or file with the archived entry, so nothing is written through a link.
+     */
+    protected function extractOverHome(string $archivePath): void
+    {
+        $this->project->system()->execOnHost(
+            ['tar', '-xzf', $archivePath, '-C', rtrim($this->project->homeDirPath(), '/')],
+            [],
+            JobBudget::COMMAND_SECONDS,
+        );
+    }
+
+    /** Remove a pre-existing scratch entry, link or not, without following a symlink at it. */
+    protected function removeHomeEntry(string $entry): void
+    {
+        $this->project->system()->execOnHost(
+            ['rm', '-rf', '--', $this->userPath($entry)],
+            [],
+            JobBudget::COMMAND_SECONDS,
+        );
+    }
+
+    /**
+     * @param list<string> $skipEntries
+     */
+    protected function swapHome(string $incomingDir, string $asideDir, array $skipEntries): void
+    {
+        $this->homeSwap()->swap(
+            $this->userPath($incomingDir),
+            $this->userPath($asideDir),
+            $skipEntries,
+            'restore',
+        );
+    }
+
+    /**
+     * @param list<string> $skipEntries
+     */
+    protected function rollbackHome(string $incomingDir, string $asideDir, array $skipEntries): void
+    {
+        $this->homeSwap()->rollback(
+            $this->userPath($incomingDir),
+            $this->userPath($asideDir),
+            $skipEntries,
+            'restore',
+        );
+    }
+
+    protected function discardHomeAside(string $asideDir): void
+    {
+        $this->project->system()->execOnHost(
+            ['rm', '-rf', '--', $this->userPath($asideDir)],
+            [],
+            JobBudget::COMMAND_SECONDS,
+        );
+    }
+
+    protected function databaseExists(string $name): bool
+    {
+        return $this->project->system()->mysql()->databases()->databaseExists($name);
+    }
+
+    protected function databaseRowExists(string $name): bool
+    {
+        $model = $this->project->model();
+        $model->loadMissing('mysqlDatabases');
+
+        return $model->mysqlDatabases->contains('database', $name);
+    }
+
+    protected function createDatabase(string $name): void
+    {
+        $this->project->system()->mysql()->databases()->createDatabase($name);
+    }
+
+    private function homeSwap(): HomeSwap
+    {
+        return new HomeSwap(
+            $this->project->system(),
+            rtrim($this->project->homeDirPath(), '/'),
+            JobBudget::COMMAND_SECONDS,
+        );
     }
 
     /**

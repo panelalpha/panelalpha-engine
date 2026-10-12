@@ -9,12 +9,12 @@ test.describe('project backups validation', () => {
   const shared = sharedProject('simple');
   test.afterAll(() => shared.dispose());
 
-  test('a PHP account cannot be backed up', async ({ api }) => {
+  test('a PHP account is no longer refused: a missing store is 404', async ({ api }) => {
     const user = await shared.get();
     const response = await api.createProjectBackupRaw(user.username, { container: 'missing' });
-    await expectStatus(response, 422);
-    expect(JSON.stringify(response.body), 'the refusal says backups are not supported').toMatch(
-      /not supported/i
+    await expectStatus(response, 404);
+    expect(JSON.stringify(response.body), 'the refusal says the store is unknown').toMatch(
+      /container not found/i
     );
   });
 

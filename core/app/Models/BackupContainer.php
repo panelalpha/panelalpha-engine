@@ -60,6 +60,11 @@ class BackupContainer extends Model
         return $this->hasMany(Backup::class, 'container_id');
     }
 
+    public function schedules(): HasMany
+    {
+        return $this->hasMany(BackupSchedule::class, 'container_id');
+    }
+
     public function storage(): BackupStorage
     {
         return match ($this->driver) {
