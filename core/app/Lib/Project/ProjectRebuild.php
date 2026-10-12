@@ -17,6 +17,7 @@ use App\Lib\Deploy\DeployLog\LogStorage;
 use App\Lib\Deploy\DeployLog\FailureOutput;
 use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\PlatformStage;
+use App\Lib\Deploy\Source\GitUrl;
 use App\Lib\Deploy\Source\UploadedArchive;
 use App\Lib\Domains\PublicUrl;
 use App\Lib\Git\GitActions;
@@ -184,6 +185,36 @@ class ProjectRebuild
      *
      * @throws ValidationException
      */
+    /** An archive deploy replaces ~/project, which only a container project has. */
+    public static function refuseArchiveOnClassicProject(User $user): void
+    {
+        if ($user->getTemplate() !== 'dind') {
+            throw ValidationException::withMessages([
+                'zip_path' => 'Archive deploy is only supported for dind users.',
+            ]);
+        }
+    }
+
+    /**
+     * An archive cannot replace a project that deploys from git: the deploy would fail for want of
+     * .git only after the archive replaced ~/project, and a deploy-managed repository cannot be
+     * disconnected, so this says what can be done instead, before anything is touched.
+     */
+    public static function refuseArchiveOnGitProject(User $user): void
+    {
+        if (!$user->hasGitProject()) {
+            return;
+        }
+
+        throw ProblemException::one(
+            'zip_path',
+            'archive_on_git_project',
+            "Project '{$user->username}' deploys from its git repository, so an archive cannot replace it. "
+            . 'Push the change to the repository and rebuild, or deploy the archive into a project created without a repository.',
+            ['git_repo' => GitUrl::sanitize((string) $user->getGitRepo())]
+        );
+    }
+
     public function assertArchive(User $user, string $zipPath): void
     {
         try {

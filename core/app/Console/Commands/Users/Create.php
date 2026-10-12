@@ -2,11 +2,11 @@
 
 namespace App\Console\Commands\Users;
 
+use App\Console\Commands\Concerns\FollowsDeployLog;
+use App\Console\Commands\Concerns\ParsesEnvVarOptions;
 use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\DockerErrorException;
 use App\Http\Resources\UserResource;
-use App\Lib\Deploy\DeployLog\DeployLineFormat;
-use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Source\GitRepoInput;
 use App\Lib\Domains\PublicUrl;
 use App\Lib\Project\NewProjectInput;
@@ -16,8 +16,6 @@ use App\Models\Setting;
 use App\Models\User;
 use Illuminate\Console\Command;
 use Illuminate\Validation\ValidationException;
-use Symfony\Component\Console\Output\ConsoleOutputInterface;
-use Symfony\Component\Console\Output\OutputInterface;
 
 /**
  * The CLI twin of POST /users, and what the one-line installer
@@ -32,6 +30,9 @@ use Symfony\Component\Console\Output\OutputInterface;
  */
 class Create extends Command
 {
+    use FollowsDeployLog;
+    use ParsesEnvVarOptions;
+
     /** The plural spellings the other project commands answer to. */
     protected $aliases = ['projects:create', 'users:create'];
 
@@ -73,7 +74,7 @@ class Create extends Command
             $params['git_repo'] = GitRepoInput::expandShorthand($repo, self::shorthandHost());
         }
 
-        $envVars = $this->envVars();
+        $envVars = $this->envVarOptions();
         if ($envVars === null) {
             return 1;
         }
@@ -106,7 +107,7 @@ class Create extends Command
 
             throw $e;
         } finally {
-            DeployLogger::stopStreaming();
+            $this->stopFollowingDeployLog();
         }
 
         return $this->report($this->created($user, $creator), $creator);
@@ -153,56 +154,6 @@ class Create extends Command
     }
 
     /**
-     * Print each deploy log line as the pipeline writes it. `--verbose` adds
-     * the dim subprocess output, which is the build's own stdout and runs to
-     * thousands of lines.
-     *
-     * Under `--json` the log goes to stderr, so a caller that captures stdout
-     * -- installer.sh does -- still gets nothing but the JSON, while whoever
-     * is watching the terminal sees the deploy happen.
-     */
-    private function followDeployLog(): void
-    {
-        if ($this->option('quiet-deploy')) {
-            return;
-        }
-
-        $out = $this->deployOutput();
-        $verbose = $this->output->isVerbose();
-        // The first line is written before any frame reaches us, so the clock
-        // starts at the first thing we see rather than at the deploy's own
-        // start -- close enough, and it never shows a negative elapsed time.
-        $startedAt = 0;
-
-        DeployLogger::streamTo(function (array $frame) use ($out, &$startedAt, $verbose): void {
-            // `stage` frames carry no message of their own and no timestamp;
-            // the heading comes from the log line that accompanies them, so
-            // this reads exactly like the same deploy read back from disk.
-            if (($frame['type'] ?? null) !== 'line') {
-                return;
-            }
-            if ($startedAt === 0) {
-                $startedAt = (int) ($frame['ts'] ?? time());
-            }
-
-            $line = DeployLineFormat::line($frame, $startedAt, $verbose);
-            if ($line !== null) {
-                $out->writeln($line);
-            }
-        });
-    }
-
-    /** stderr under --json, so stdout carries the JSON and nothing else. */
-    private function deployOutput(): OutputInterface
-    {
-        $out = $this->output->getOutput();
-
-        return $this->option('json') && $out instanceof ConsoleOutputInterface
-            ? $out->getErrorOutput()
-            : $out;
-    }
-
-    /**
      * The forge a bare `owner/repo` is taken to mean. GitHub unless an
      * operator says otherwise: `pae settings:set default_git_host gitlab.com`.
      * A full URL never consults this.
@@ -212,36 +163,6 @@ class Create extends Command
         $host = Setting::get('default_git_host');
 
         return is_string($host) && trim($host) !== '' ? $host : null;
-    }
-
-    /**
-     * --env-var KEY=VALUE, repeatable; `--env` is Laravel's own option and
-     * cannot be taken. Null when one is malformed: a mistyped override is
-     * worth an error rather than a project deployed without the variable it
-     * was supposed to carry.
-     *
-     * @return ?array<string, string>
-     */
-    private function envVars(): ?array
-    {
-        /** @var array<int, string> $pairs */
-        $pairs = (array) $this->option('env-var');
-        $vars = [];
-        foreach ($pairs as $pair) {
-            if (!str_contains($pair, '=')) {
-                $this->error("--env-var expects KEY=VALUE, got: {$pair}");
-                return null;
-            }
-            [$key, $value] = explode('=', $pair, 2);
-            $key = trim($key);
-            if ($key === '') {
-                $this->error("--env-var expects KEY=VALUE, got: {$pair}");
-                return null;
-            }
-            $vars[$key] = $value;
-        }
-
-        return $vars;
     }
 
     /** The created project, as JSON or as the two lines an installer prints. */

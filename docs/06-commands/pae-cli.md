@@ -96,6 +96,16 @@ pae project:create --repo=https://github.com/org/private-app --git-token=<token>
 
 `--branch` picks a branch, tag, or commit. `--project` and `--domain` set the name and hostname when you do not want them generated. `--env-var=KEY=VALUE` can be repeated.
 
+Deploy a local archive into a project that was created without a repository:
+
+```bash
+pae project:deploy-archive --project={project} --file=/opt/panelalpha/app.tar.gz
+```
+
+What this does: puts the archive into the project, deploys it in this command, and removes the archive again. `.zip`, `.tar.gz` and `.tgz` are accepted. `pae` runs inside the engine's container, so the file must be somewhere that container can read; anything under `/opt/panelalpha` is. A project that deploys from a repository refuses an archive: push the change and rebuild instead.
+
+What you should see: the deploy log while it runs, then `Deployed <file> to <project>.` The command exits non-zero when the deploy fails. `--recipe`, `--env-var=KEY=VALUE` and `--quiet-deploy` work as they do for `project:create`.
+
 The usual way to deploy is to ask your assistant: [Connecting with Git](../05-capabilities/connecting-with-git.md).
 
 More project commands:

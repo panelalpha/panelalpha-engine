@@ -3,9 +3,8 @@
 namespace Tests\Unit;
 
 use App\Exceptions\ProblemException;
-use App\Http\Controllers\UserController;
+use App\Lib\Project\ProjectRebuild;
 use App\Models\User;
-use ReflectionMethod;
 use Tests\TestCase;
 
 /**
@@ -17,7 +16,7 @@ class ArchiveOnGitProjectTest extends TestCase
 {
     private function refuse(User $user): void
     {
-        (new ReflectionMethod(UserController::class, 'refuseArchiveOnGitProject'))->invoke(null, $user);
+        ProjectRebuild::refuseArchiveOnGitProject($user);
     }
 
     private function user(?string $repo): User
@@ -57,7 +56,7 @@ class ArchiveOnGitProjectTest extends TestCase
         foreach (['public function deployArchive(', 'public function rebuild(string $username'] as $entry) {
             $body = substr($source, (int) strpos($source, $entry));
             $body = substr($body, 0, (int) strpos($body, '$this->startRedeploy('));
-            $refuse = strpos($body, 'self::refuseArchiveOnGitProject($user)');
+            $refuse = strpos($body, 'ProjectRebuild::refuseArchiveOnGitProject($user)');
             $work = strpos($body, 'EnvVarOverrides::applyIncoming(');
 
             $this->assertNotFalse($refuse, "{$entry} does not refuse an archive into a git project");

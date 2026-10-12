@@ -28,7 +28,6 @@ use App\Lib\Deploy\EnvVarOverrides;
 use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
-use App\Lib\Deploy\Source\GitUrl;
 use App\Lib\Project\CreateInspection;
 use App\Lib\Project\NewProjectInput;
 use App\Lib\Project\ProjectDeleter;
@@ -514,26 +513,6 @@ class UserController extends Controller
     }
 
     /**
-     * An archive cannot replace a project that deploys from git: the deploy would fail for want of
-     * .git only after the archive replaced ~/project, and a deploy-managed repository cannot be
-     * disconnected, so this says what can be done instead, before anything is touched.
-     */
-    private static function refuseArchiveOnGitProject(User $user): void
-    {
-        if (!$user->hasGitProject()) {
-            return;
-        }
-
-        throw ProblemException::one(
-            'zip_path',
-            'archive_on_git_project',
-            "Project '{$user->username}' deploys from its git repository, so an archive cannot replace it. "
-            . 'Push the change to the repository and rebuild, or deploy the archive into a project created without a repository.',
-            ['git_repo' => GitUrl::sanitize((string) $user->getGitRepo())]
-        );
-    }
-
-    /**
      * Opt-in NDJSON streaming of the deploy log, negotiated via the
      * X-Deploy-Stream request header. Unknown values are rejected, before
      * anything is created.
@@ -757,7 +736,7 @@ class UserController extends Controller
         ]);
         $zipPath = ($params['zip_path'] ?? '') !== '' ? $params['zip_path'] : null;
         if ($zipPath !== null) {
-            self::refuseArchiveOnGitProject($user);
+            ProjectRebuild::refuseArchiveOnGitProject($user);
         }
         $plan = DeployPlanInput::parse($request->input(DeployPlanInput::FIELD));
         $recipe = RecipeChoiceInput::parse($request->input(RecipeChoiceInput::FIELD));
@@ -922,11 +901,7 @@ class UserController extends Controller
     public function deployArchive(string $username, Request $request, ProjectRebuild $rebuild): JsonResponse|StreamedResponse
     {
         $user = $this->projectOr404($username);
-        if ($user->getTemplate() !== 'dind') {
-            throw ValidationException::withMessages([
-                'zip_path' => 'Archive deploy is only supported for dind users.',
-            ]);
-        }
+        ProjectRebuild::refuseArchiveOnClassicProject($user);
 
         /** @var array{zip_path: string, env_vars?: array<string, string>} $params */
         $params = $request->validate([
@@ -936,7 +911,7 @@ class UserController extends Controller
             'stages' => 'array|nullable',
             'recipe' => 'string|nullable|max:64',
         ]);
-        self::refuseArchiveOnGitProject($user);
+        ProjectRebuild::refuseArchiveOnGitProject($user);
         $plan = DeployPlanInput::parse($request->input(DeployPlanInput::FIELD));
         $recipe = RecipeChoiceInput::parse($request->input(RecipeChoiceInput::FIELD));
         $rebuild->assertArchive($user, $params['zip_path']);
