@@ -84,4 +84,52 @@ test.describe('move contents, fetch and chmod', () => {
       await cleanup.finish();
     }
   });
+
+  test('fetch refuses an internal address and a redirect to one', async ({ api, userFactory }) => {
+    const user = await userFactory.createSimpleUser();
+    const dir = getDomainBasePath(user.domain);
+
+    const cleanup = new CleanupSteps();
+    try {
+      for (const url of [
+        'http://127.0.0.1/',
+        'http://169.254.169.254/latest/meta-data/',
+        'http://[::1]/',
+        'http://10.0.0.5/',
+      ]) {
+        const response = await api.fetchFileRaw(user.username, {
+          url,
+          path: dir,
+          filename: 'internal.txt',
+        });
+        await expectStatus(response, 422);
+        const body = response.body as { problems?: { field?: string; code?: string }[] };
+        expect(body.problems?.[0]?.field, url).toBe('url');
+        expect(body.problems?.[0]?.code, url).toBe('host_refused');
+      }
+      expect((await api.fileExists(user.username, `${dir}/internal.txt`)).exists).toBe(false);
+
+      const redirected = await api.fetchFileRaw(user.username, {
+        url: 'https://httpbin.org/redirect-to?url=http%3A%2F%2F127.0.0.1%2F',
+        path: dir,
+        filename: 'redirected.txt',
+      });
+      await expectStatus(redirected, 422);
+      const redirectBody = redirected.body as {
+        problems?: { field?: string; code?: string }[];
+      };
+      expect(redirectBody.problems?.[0]?.field).toBe('url');
+      expect(redirectBody.problems?.[0]?.code).toBe('host_refused');
+      expect((await api.fileExists(user.username, `${dir}/redirected.txt`)).exists).toBe(false);
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
+    } finally {
+      await cleanup.run(`remove ${dir}/internal.txt and ${dir}/redirected.txt`, async () => {
+        await api.removeFile(user.username, `${dir}/internal.txt`);
+        await api.removeFile(user.username, `${dir}/redirected.txt`);
+      });
+      await cleanup.finish();
+    }
+  });
 });

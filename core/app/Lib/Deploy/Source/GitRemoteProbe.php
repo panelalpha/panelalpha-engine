@@ -102,17 +102,15 @@ class GitRemoteProbe
         $askPass = null;
 
         try {
-            $command = ['git', '-c', 'credential.helper=', '-c', 'core.askpass=',
-                'ls-remote', '--heads', '--', $repoUrl];
-            if ($branch !== null) {
-                // Tags too, since the clone's --branch takes one; HEAD for the default.
-                $command = ['git', '-c', 'credential.helper=', '-c', 'core.askpass=',
-                    'ls-remote', '--symref', '--', $repoUrl, 'HEAD', 'refs/heads/*', 'refs/tags/*'];
-            }
+            $command = $branch !== null
+                ? ['git', '-c', 'credential.helper=', '-c', 'core.askpass=', 'ls-remote', '--symref',
+                    '--', $repoUrl, 'HEAD', 'refs/heads/*', 'refs/tags/*']
+                : ['git', '-c', 'credential.helper=', '-c', 'core.askpass=', 'ls-remote', '--heads', '--', $repoUrl];
+            $command = GitUrl::withoutRedirects($command);
 
             if ($hasToken) {
                 $workspace = $this->makeWorkspace();
-                $askPass = $workspace === null ? null : $this->writeAskPass($workspace, (string) $token);
+                $askPass = $workspace === null ? null : $this->writeAskPass($workspace, (string) $token, $repoUrl);
                 if ($askPass === null) {
                     return GitProbeResult::unchecked();
                 }
@@ -344,10 +342,10 @@ class GitRemoteProbe
         return @mkdir($dir, 0700) ? $dir : null;
     }
 
-    private function writeAskPass(string $workspace, string $token): ?string
+    private function writeAskPass(string $workspace, string $token, string $repoUrl): ?string
     {
         $path = $workspace . '/askpass.sh';
-        $written = file_put_contents($path, GitUrl::askPassScript($token), LOCK_EX);
+        $written = file_put_contents($path, GitUrl::askPassScript($token, GitUrl::hostOf($repoUrl)), LOCK_EX);
 
         return $written === false || !chmod($path, 0700) ? null : $path;
     }

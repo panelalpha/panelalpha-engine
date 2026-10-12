@@ -28,6 +28,21 @@ test.describe('source inspect', () => {
     await expectStatus(await api.inspectSourceRaw({ source: '/no/such/directory' }), 422);
   });
 
+  test('a source on an internal address is refused', async ({ api }) => {
+    for (const source of [
+      'http://127.0.0.1/x.git',
+      'http://169.254.169.254/x.git',
+      'http://[::1]/x.git',
+      'http://10.0.0.5/x.git',
+    ]) {
+      const response = await api.inspectSourceRaw({ source, type: 'git' });
+      await expectStatus(response, 422);
+      const body = response.body as { problems?: { field?: string; code?: string }[] };
+      expect(body.problems?.[0]?.field, source).toBe('source');
+      expect(body.problems?.[0]?.code, source).toBe('host_refused');
+    }
+  });
+
   test('a public git repository inspects without deploying', async ({ api }) => {
     test.setTimeout(Timeouts.deploy);
     const report = await api.inspectSource({

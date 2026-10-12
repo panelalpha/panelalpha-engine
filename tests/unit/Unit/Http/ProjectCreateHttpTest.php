@@ -186,12 +186,11 @@ class ProjectCreateHttpTest extends TestCase
             $this->postJson($uri, ['username' => 'fresh', 'domain' => 'fresh.example.test', 'git_repo' => 'http://10.10.0.25:18660/r7.git'])
                 ->assertStatus(422)
                 ->assertJsonPath('problems.0.field', 'git_repo')
-                ->assertJsonPath('problems.0.code', 'git_repo_private_address')
-                ->assertJsonPath('problems.0.message', '10.10.0.25 is a private, loopback, link-local or reserved address. '
-                    . "A project's network does not reach those, so the clone would fail. Use a repository on a public address.");
+                ->assertJsonPath('problems.0.code', 'host_refused')
+                ->assertJsonPath('problems.0.message', '10.10.0.25 is an address this engine does not fetch from.');
             $this->postJson($uri, ['username' => 'fresh', 'domain' => 'fresh.example.test', 'git_repo' => 'http://localhost/acme/app.git'])
                 ->assertStatus(422)
-                ->assertJsonPath('problems.0.code', 'git_repo_private_address');
+                ->assertJsonPath('problems.0.code', 'host_refused');
         }
         $this->assertNothingCreated();
     }

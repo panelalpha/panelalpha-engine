@@ -3,16 +3,20 @@
 namespace App\Lib\Http;
 
 use App\Lib\Deploy\Dind\TenantNetwork;
-use InvalidArgumentException;
+use App\Lib\Net\EgressRefusedException;
+use App\Lib\Net\ResolvedTarget;
+use Symfony\Component\HttpFoundation\IpUtils;
 
 /**
- * A guard for URLs core is about to download, so a file-upload token cannot
- * read what core reaches over HTTP: the metadata service, the cache registry,
+ * A guard for URLs core is about to fetch, so a caller-supplied URL cannot
+ * reach what core reaches over HTTP: the metadata service, the cache registry,
  * sites-phpmyadmin, host services.
  *
- * The rule is the tenant network's plus its IPv6 side. A host is refused when
- * *any* of its A/AAAA records is internal, so a rebind mixing a public and an
- * internal address does not get through. Callers pin the checked address
+ * The rule is the tenant network's plus its IPv6 side, minus the private ranges
+ * when the operator allows them ({@see config('egress.allow_private')}) and the
+ * allow-listed names ({@see config('egress.allow_hosts')}). A host is refused
+ * when *any* of its A/AAAA records is internal, so a rebind mixing a public and
+ * an internal address does not get through. Callers pin the checked address
  * ({@see pin}) and re-check every redirect hop.
  */
 final class OutboundUrl
@@ -23,18 +27,30 @@ final class OutboundUrl
     /** Largest download either one accepts, in bytes. */
     public const MAX_DOWNLOAD_BYTES = 2147483648;
 
-    /** The IPv6 counterparts of TenantNetwork::REFUSED_RANGES, as network and prefix length. */
+    /** The schemes the engine fetches over. */
+    public const DEFAULT_SCHEMES = ['https', 'http'];
+
+    /** The IPv4 side of what EGRESS_ALLOW_PRIVATE may allow, as network and prefix length. */
+    private const PRIVATE_IPV4_RANGES = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'];
+
+    /** The IPv6 counterparts of TenantNetwork::REFUSED_RANGES: network, prefix length, private. */
     private const REFUSED_IPV6_RANGES = [
-        'loopback' => ['::1', 128],
-        'unspecified' => ['::', 128],
-        'IPv4-mapped' => ['::ffff:0:0', 96],
-        'unique local' => ['fc00::', 7],
-        'link local' => ['fe80::', 10],
-        'multicast' => ['ff00::', 8],
+        'loopback' => ['::1', 128, false],
+        'unspecified' => ['::', 128, false],
+        'IPv4-mapped' => ['::ffff:0:0', 96, false],
+        'unique local' => ['fc00::', 7, true],
+        'link local' => ['fe80::', 10, false],
+        'multicast' => ['ff00::', 8, false],
     ];
 
     /** @var (callable(string): list<string>)|null a resolver a test can substitute for DNS */
     private static $resolver = null;
+
+    /** @var ?bool a policy a test can substitute for config('egress.allow_private') */
+    private static ?bool $allowPrivateForTests = null;
+
+    /** @var ?list<string> a policy a test can substitute for config('egress.allow_hosts') */
+    private static ?array $allowHostsForTests = null;
 
     /**
      * @param (callable(string): list<string>)|null $resolver
@@ -45,24 +61,94 @@ final class OutboundUrl
     }
 
     /**
-     * @throws InvalidArgumentException when the scheme is not http(s), the host is
-     *         missing, or the host resolves to an address core must not contact
+     * @param ?bool $allowPrivate null restores the configured policy
+     * @param ?list<string> $allowHosts null restores the configured policy
      */
-    public static function assertAllowed(string $url): void
+    public static function setPolicyForTests(?bool $allowPrivate, ?array $allowHosts): void
     {
-        self::checkedAddresses($url);
+        self::$allowPrivateForTests = $allowPrivate;
+        self::$allowHostsForTests = $allowHosts;
+    }
+
+    /** Whether an operator allows the engine to fetch private (RFC1918 and ULA) addresses. */
+    public static function allowsPrivate(): bool
+    {
+        if (self::$allowPrivateForTests !== null) {
+            return self::$allowPrivateForTests;
+        }
+
+        return (bool) self::configured('allow_private', false);
+    }
+
+    /** Whether this host name is on the operator's allow list; a literal address never is. */
+    public static function allowsHost(string $host): bool
+    {
+        $host = strtolower(trim($host, '[]'));
+        if ($host === '' || filter_var($host, FILTER_VALIDATE_IP) !== false) {
+            return false;
+        }
+
+        foreach (self::$allowHostsForTests ?? self::configuredHosts() as $allowed) {
+            if (strtolower(trim($allowed, '[]')) === $host) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param list<string> $schemes
+     * @throws EgressRefusedException when the scheme is not one of $schemes, the host is
+     *         missing, or the host resolves to an address the engine must not contact
+     */
+    public static function assertAllowed(string $url, array $schemes = self::DEFAULT_SCHEMES): ResolvedTarget
+    {
+        return self::target($url, $schemes);
     }
 
     /** Whether a URL would be allowed, without throwing. */
-    public static function isAllowed(string $url): bool
+    public static function isAllowed(string $url, array $schemes = self::DEFAULT_SCHEMES): bool
     {
         try {
-            self::assertAllowed($url);
+            self::target($url, $schemes);
 
             return true;
-        } catch (InvalidArgumentException) {
+        } catch (\InvalidArgumentException) {
             return false;
         }
+    }
+
+    /**
+     * The checked target of $url: its host, port and every address it resolved
+     * to. The address list is empty when the host is a literal or allow-listed.
+     *
+     * @param list<string> $schemes
+     * @throws EgressRefusedException
+     */
+    public static function target(string $url, array $schemes = self::DEFAULT_SCHEMES): ResolvedTarget
+    {
+        [$host, $port] = self::parse($url, $schemes);
+        if (self::allowsHost($host)) {
+            return new ResolvedTarget($url, $host, $port, []);
+        }
+
+        $addresses = self::checkedAddresses($host);
+
+        return new ResolvedTarget($url, $host, $port, $addresses);
+    }
+
+    /**
+     * A `curl --resolve host:port:address` value pinning the connection to an
+     * address checked here, or null for a literal address. Pinning the checked
+     * answer keeps a rebinding DNS server from answering differently next time.
+     *
+     * @param list<string> $schemes
+     * @throws EgressRefusedException when the host is refused or does not resolve
+     */
+    public static function pin(string $url, array $schemes = self::DEFAULT_SCHEMES): ?string
+    {
+        return self::target($url, $schemes)->pin();
     }
 
     /**
@@ -102,37 +188,16 @@ final class OutboundUrl
     }
 
     /**
-     * A `curl --resolve host:port:address` value pinning the connection to an
-     * address checked here, or null for a literal address. Pinning the checked
-     * answer keeps a rebinding DNS server from answering differently next time.
-     *
-     * @throws InvalidArgumentException when the host is refused or does not resolve
-     */
-    public static function pin(string $url): ?string
-    {
-        $addresses = self::checkedAddresses($url);
-        if ($addresses === null) {
-            return null;
-        }
-
-        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
-        $host = trim((string) parse_url($url, PHP_URL_HOST), '[]');
-        $address = $addresses[0];
-        if (str_contains($address, ':')) {
-            $address = '[' . $address . ']';
-        }
-        $port = parse_url($url, PHP_URL_PORT) ?: ($scheme === 'https' ? 443 : 80);
-
-        return "{$host}:{$port}:{$address}";
-    }
-
-    /**
      * The first address core must not contact: the host itself when it is a
      * literal, else the first such record it resolves to. Null when none is.
      */
     public static function refusedAddressOf(string $host): ?string
     {
         $host = trim($host, '[]');
+        if (self::allowsHost($host)) {
+            return null;
+        }
+
         if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
             return self::refusesAddress($host) ? $host : null;
         }
@@ -140,88 +205,39 @@ final class OutboundUrl
         return self::firstRefused(self::resolve($host));
     }
 
-    /**
-     * Every address the URL's host resolves to, each checked; null when the
-     * host is a literal address (checked too, nothing to resolve).
-     *
-     * @return ?non-empty-list<string>
-     * @throws InvalidArgumentException
-     */
-    private static function checkedAddresses(string $url): ?array
-    {
-        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
-        $host = (string) parse_url($url, PHP_URL_HOST);
-        if (!in_array($scheme, ['http', 'https'], true) || $host === '') {
-            throw new InvalidArgumentException('The URL must be http:// or https:// with a host.');
-        }
-
-        $host = trim($host, '[]');
-        if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
-            if (self::refusesAddress($host)) {
-                throw self::refusal($host);
-            }
-
-            return null;
-        }
-
-        return self::resolvedAndChecked($host);
-    }
-
-    /**
-     * @return non-empty-list<string>
-     * @throws InvalidArgumentException
-     */
-    private static function resolvedAndChecked(string $host): array
-    {
-        $addresses = self::resolve($host);
-        if ($addresses === []) {
-            throw new InvalidArgumentException("The host {$host} could not be resolved.");
-        }
-        $refused = self::firstRefused($addresses);
-        if ($refused !== null) {
-            throw self::refusal($refused);
-        }
-
-        return $addresses;
-    }
-
-    /** @param list<string> $addresses */
-    private static function firstRefused(array $addresses): ?string
-    {
-        foreach ($addresses as $address) {
-            if (self::refusesAddress($address)) {
-                return $address;
-            }
-        }
-
-        return null;
-    }
-
     /** IPv4 goes through {@see TenantNetwork::refuses()}; IPv6 mirrors its ranges. */
     public static function refusesAddress(string $address): bool
     {
         $address = trim($address, '[]');
+        $allowPrivate = self::allowsPrivate();
 
         if (filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false) {
+            if ($allowPrivate && IpUtils::checkIp($address, self::PRIVATE_IPV4_RANGES)) {
+                return false;
+            }
+
             return TenantNetwork::refuses($address);
         }
 
         if (filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false) {
-            return self::refusesIpv6($address);
+            return self::refusesIpv6($address, $allowPrivate);
         }
 
         return true;
     }
 
     /** IPv4-mapped is refused whole: it is how an IPv4 metadata address is often written. */
-    private static function refusesIpv6(string $address): bool
+    private static function refusesIpv6(string $address, bool $allowPrivate): bool
     {
         $packed = @inet_pton($address);
         if ($packed === false || strlen($packed) !== 16) {
             return true;
         }
 
-        foreach (self::REFUSED_IPV6_RANGES as [$network, $bits]) {
+        foreach (self::REFUSED_IPV6_RANGES as [$network, $bits, $private]) {
+            if ($private && $allowPrivate) {
+                continue;
+            }
             if (self::inRange($packed, (string) inet_pton($network), $bits)) {
                 return true;
             }
@@ -248,12 +264,108 @@ final class OutboundUrl
         return (ord($address[$bytes]) & $mask) === (ord($network[$bytes]) & $mask);
     }
 
-    private static function refusal(string $address): InvalidArgumentException
+    /**
+     * The host and effective port of a URL, or a refusal when it has no host or
+     * a scheme the engine does not fetch over.
+     *
+     * @param list<string> $schemes
+     * @return array{0: string, 1: int}
+     * @throws EgressRefusedException
+     */
+    private static function parse(string $url, array $schemes): array
     {
-        return new InvalidArgumentException(
-            "The URL resolves to {$address}, a private, loopback, link-local or reserved address. "
-            . 'The engine does not fetch those.'
-        );
+        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+        $host = (string) parse_url($url, PHP_URL_HOST);
+        if (!in_array($scheme, $schemes, true) || $host === '') {
+            throw new EgressRefusedException(
+                'The URL scheme must be one of ' . implode(', ', $schemes) . ', and it must name a host.'
+            );
+        }
+
+        $host = trim($host, '[]');
+        $port = (int) (parse_url($url, PHP_URL_PORT) ?: ($scheme === 'https' ? 443 : 80));
+
+        return [$host, $port];
+    }
+
+    /**
+     * Every address $host resolves to, each checked; empty when it is a literal
+     * address (checked too, nothing to resolve).
+     *
+     * @return list<string>
+     * @throws EgressRefusedException
+     */
+    private static function checkedAddresses(string $host): array
+    {
+        if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
+            if (self::refusesAddress($host)) {
+                throw self::refusal($host);
+            }
+
+            return [];
+        }
+
+        return self::resolvedAndChecked($host);
+    }
+
+    /**
+     * @return non-empty-list<string>
+     * @throws EgressRefusedException
+     */
+    private static function resolvedAndChecked(string $host): array
+    {
+        $addresses = self::resolve($host);
+        if ($addresses === []) {
+            throw new \InvalidArgumentException("The host {$host} could not be resolved.");
+        }
+        $refused = self::firstRefused($addresses);
+        if ($refused !== null) {
+            throw self::refusal($refused, $host);
+        }
+
+        return $addresses;
+    }
+
+    /** @param list<string> $addresses */
+    private static function firstRefused(array $addresses): ?string
+    {
+        foreach ($addresses as $address) {
+            if (self::refusesAddress($address)) {
+                return $address;
+            }
+        }
+
+        return null;
+    }
+
+    private static function refusal(string $address, ?string $host = null): EgressRefusedException
+    {
+        $where = $host === null || $host === $address
+            ? "{$address} is an address this engine does not fetch from."
+            : "{$host} resolves to {$address}, which this engine does not fetch from.";
+
+        return new EgressRefusedException($where . ' Set EGRESS_ALLOW_PRIVATE=true to allow a private address.');
+    }
+
+    /** A comma list from config, tolerant of a bare PHPUnit run with no booted application. */
+    private static function configuredHosts(): array
+    {
+        $value = self::configured('allow_hosts', []);
+
+        return is_array($value) ? array_values(array_filter($value, static fn (mixed $h): bool => is_string($h))) : [];
+    }
+
+    private static function configured(string $key, mixed $default): mixed
+    {
+        if (!function_exists('config')) {
+            return $default;
+        }
+
+        try {
+            return config('egress.' . $key, $default) ?? $default;
+        } catch (\Throwable) {
+            return $default;
+        }
     }
 
     /** Resolve a possibly-relative Location against the URL it came from. */

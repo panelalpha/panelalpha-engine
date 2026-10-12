@@ -310,7 +310,7 @@ class ProjectCreator
     {
         $refused = self::refusedRepositoryAddress($params['git_repo']);
         if ($refused !== null) {
-            throw ProblemException::one('git_repo', 'git_repo_private_address', $refused);
+            throw ProblemException::one('git_repo', 'host_refused', $refused);
         }
         $probe = (new GitRemoteProbe())->problem(
             'git_repo',

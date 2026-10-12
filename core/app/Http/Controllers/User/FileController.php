@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\User;
 
 use App\Exceptions\NotFoundException;
+use App\Exceptions\ProblemException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\FileExistsRequest;
 use App\Http\Requests\FileRemoveRequest;
@@ -19,6 +20,7 @@ use App\Http\Requests\Files\UploadRequest;
 use App\Http\Requests\Files\ZipRequest;
 use App\System as EngineSystem;
 use App\Lib\Project\ProjectFiles;
+use App\Lib\Net\EgressRefusedException;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\UploadedFile;
@@ -319,6 +321,10 @@ class FileController extends Controller
 
     #[OA\Post(
         path: '/projects/{username}/files/fetch',
+        description: 'Download an http(s) URL into the project as the account. The engine fetches it from core, '
+            . 'so it refuses a URL whose host resolves to an internal address (loopback, link-local, a private or '
+            . 'reserved range, the Docker and tenant networks) or that redirects to one. The refusal is 422 with '
+            . '`problems[{field: url, code: host_refused}]`; RFC1918/ULA are allowed only with `EGRESS_ALLOW_PRIVATE=true`.',
         summary: 'Fetch an http or https URL into the project',
         security: [['bearerAuth' => []]],
         tags: ['Files'],
@@ -333,9 +339,11 @@ class FileController extends Controller
         )),
         responses: [
             new OA\Response(response: 200, description: 'File fetched', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse')),
+            new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'Validation error or a refused destination host', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function fetch(string $username, FetchRequest $request): JsonResponse
+    public function fetch(string $username, FetchRequest $request, EngineSystem $system): JsonResponse
     {
         $user = $this->projectOr404($username);
 
@@ -347,11 +355,13 @@ class FileController extends Controller
          * }
          */
         $params = $request->validated();
-        $path = $user->project()->resolvePath($params['path']);
+        $path = $user->project($system)->resolvePath($params['path']);
 
-        $fileMan = $user->project()->fileManager();
+        $fileMan = $user->project($system)->fileManager();
         try {
             $fileMan->fetch($params['url'], $path, $params['filename'] ?? null);
+        } catch (EgressRefusedException $e) {
+            throw ProblemException::one('url', EgressRefusedException::CODE, $e->getMessage());
         } catch (\Exception $e) {
             return new JsonResponse([
                 'message' => $e->getMessage(),

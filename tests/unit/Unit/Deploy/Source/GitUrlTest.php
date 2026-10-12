@@ -39,6 +39,105 @@ class GitUrlTest extends TestCase
         GitUrl::askPassScript('  ');
     }
 
+    /**
+     * A repository whose .gitmodules names another host must not receive the
+     * token the parent clone was given.
+     */
+    public function test_the_askpass_helper_answers_only_its_repository_host(): void
+    {
+        $token = 's3cret';
+        $path = tempnam(sys_get_temp_dir(), 'git-askpass-host-');
+        $this->assertNotFalse($path);
+        file_put_contents($path, GitUrl::askPassScript($token, 'github.com'));
+        chmod($path, 0700);
+
+        try {
+            $same = new Process([$path, "Password for 'https://git@github.com':"]);
+            $same->mustRun();
+            $this->assertSame($token, $same->getOutput());
+
+            foreach (["Password for 'https://evil.example':", "Password for 'https://git@github.com.evil.example':"] as $prompt) {
+                $other = new Process([$path, $prompt]);
+                $other->run();
+                $this->assertNotSame(0, $other->getExitCode(), $prompt);
+                $this->assertSame('', $other->getOutput(), $prompt);
+            }
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    /** Without a host the helper answers any prompt, the behaviour before host scoping. */
+    public function test_a_hostless_askpass_helper_still_answers(): void
+    {
+        $path = tempnam(sys_get_temp_dir(), 'git-askpass-any-');
+        $this->assertNotFalse($path);
+        file_put_contents($path, GitUrl::askPassScript('token'));
+        chmod($path, 0700);
+
+        try {
+            $process = new Process([$path, "Password for 'https://anywhere.example':"]);
+            $process->mustRun();
+            $this->assertSame('token', $process->getOutput());
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    #[DataProvider('gitHostProvider')]
+    public function test_it_reads_the_host_of_a_remote(string $url, ?string $host): void
+    {
+        $this->assertSame($host, GitUrl::hostOf($url));
+    }
+
+    public static function gitHostProvider(): array
+    {
+        return [
+            'https' => ['https://github.com/o/r.git', 'github.com'],
+            'https with port' => ['https://git.example.com:8443/o/r.git', 'git.example.com'],
+            'scp-style' => ['git@github.com:o/r.git', 'github.com'],
+            'ssh scheme' => ['ssh://git@git.example.com:2222/o/r.git', 'git.example.com'],
+            'schemeless' => ['github.com/o/r', null],
+            'empty' => ['', null],
+        ];
+    }
+
+    #[DataProvider('redirectProvider')]
+    public function test_it_reads_the_url_a_git_redirect_was_refused(string $output, ?string $expected): void
+    {
+        $this->assertSame($expected, GitUrl::redirectedTo($output));
+    }
+
+    public static function redirectProvider(): array
+    {
+        return [
+            'url base' => [
+                "fatal: unable to update url base from redirection:\n"
+                . "  asked for: https://example.com/o/r.git/info/refs?service=git-upload-pack\n"
+                . "   redirect: https://evil.example/o/r.git/info/refs?service=git-upload-pack",
+                'https://evil.example/o/r.git',
+            ],
+            'redirecting to' => ["fatal: redirecting to 'https://evil.example/o/r.git'", 'https://evil.example/o/r.git'],
+            'not a redirect' => ['fatal: repository not found', null],
+            'authentication' => ['fatal: Authentication failed for https://example.com/o/r.git/', null],
+        ];
+    }
+
+    public function test_the_network_command_is_pinned_and_does_not_follow_redirects(): void
+    {
+        $command = GitUrl::withResolve(
+            GitUrl::withoutRedirects(['git', '-C', '/p', 'fetch', 'origin']),
+            'files.example.com:443:93.184.216.34'
+        );
+
+        $this->assertSame(
+            ['git', '-c', 'http.curloptResolve=files.example.com:443:93.184.216.34', '-c', 'http.followRedirects=false',
+                '-C', '/p', 'fetch', 'origin'],
+            $command
+        );
+        $this->assertSame(['git', 'fetch'], GitUrl::withResolve(['git', 'fetch'], null));
+    }
+
     public function test_sanitize_strips_credentials(): void
     {
         $this->assertSame(

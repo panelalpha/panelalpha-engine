@@ -152,7 +152,9 @@ class GitController extends Controller
             . '`token` is a PAT (never logged). Set `repair` to re-adopt a missing .git. On a `deploy` '
             . 'account without repair this only keeps origin in sync and persists metadata — it does '
             . 'not clone from scratch. An SSH `repo_url` (`git@host:owner/repo.git`) needs the project\'s '
-            . 'deploy key (POST /projects/{username}/git/deploy-key) added to the repository first.',
+            . 'deploy key (POST /projects/{username}/git/deploy-key) added to the repository first. A `repo_url` '
+            . 'whose host resolves to an internal address is refused 422 with `problems[{field: repo_url, '
+            . 'code: host_refused}]`; anything that is not a URL (`file://`, `ext::`) fails validation first.',
         summary: 'Connect a directory to a git remote',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(

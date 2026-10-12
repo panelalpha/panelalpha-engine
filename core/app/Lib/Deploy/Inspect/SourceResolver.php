@@ -5,6 +5,7 @@ namespace App\Lib\Deploy\Inspect;
 use App\Lib\Deploy\Source\GitRepoInput;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Lib\Deploy\Source\RepositoryAddress;
+use App\Lib\Http\OutboundUrl;
 use Symfony\Component\Process\Process;
 
 /**
@@ -184,13 +185,13 @@ final class SourceResolver
     {
         $root = $this->makeTempDir();
         $target = $root . '/repo';
-        $command = self::cloneCommand($repoUrl, $branch, $target);
 
         $askPass = null;
         try {
+            $command = self::cloneCommand($repoUrl, $branch, $target);
             if ($token !== null) {
                 $askPass = $root . '/askpass.sh';
-                self::writeAskPass($askPass, $token);
+                self::writeAskPass($askPass, $token, $repoUrl);
                 $command = GitUrl::withAskPass($command, $askPass);
             }
 
@@ -198,7 +199,9 @@ final class SourceResolver
             $this->initSubmodules($target, $askPass);
         } catch (\Throwable $e) {
             (new ResolvedSource(self::TYPE_GIT, $repoUrl, $root, [], $root))->release();
-            throw $e;
+            throw $e instanceof \InvalidArgumentException
+                ? new InspectException('Could not clone the repository: ' . $e->getMessage(), 0, $e)
+                : $e;
         } finally {
             if ($askPass !== null) {
                 @unlink($askPass);
@@ -222,15 +225,15 @@ final class SourceResolver
         $command[] = $repoUrl;
         $command[] = $target;
 
-        return $command;
+        return GitUrl::withResolve($command, OutboundUrl::pin($repoUrl));
     }
 
     /**
      * @throws InspectException
      */
-    private static function writeAskPass(string $askPass, string $token): void
+    private static function writeAskPass(string $askPass, string $token, string $repoUrl): void
     {
-        if (file_put_contents($askPass, GitUrl::askPassScript($token), LOCK_EX) === false
+        if (file_put_contents($askPass, GitUrl::askPassScript($token, GitUrl::hostOf($repoUrl)), LOCK_EX) === false
             || !chmod($askPass, 0700)
         ) {
             throw new InspectException('Could not prepare the Git credential helper.');
@@ -664,7 +667,17 @@ final class SourceResolver
         }
 
         if (!$process->isSuccessful()) {
-            $message = self::reason($process->getErrorOutput() ?: $process->getOutput(), $redact);
+            $output = $process->getErrorOutput() ?: $process->getOutput();
+            $redirect = GitUrl::redirectedTo($output);
+            if ($redirect !== null) {
+                throw InspectException::ofProblem([
+                    'field' => 'source',
+                    'code' => 'redirect_not_followed',
+                    'message' => "The repository redirects to {$redirect}. This engine does not follow Git "
+                        . "redirects; use {$redirect} instead.",
+                ]);
+            }
+            $message = self::reason($output, $redact);
             throw new InspectException($failure . ($message === '' ? '.' : ': ' . $message));
         }
     }

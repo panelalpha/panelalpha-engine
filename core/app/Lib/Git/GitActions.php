@@ -10,6 +10,7 @@ use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Source\GitRepoInput;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Lib\DeployHook\DeployHooks;
+use App\Lib\Net\EgressGuard;
 use App\Jobs\DeployProject;
 use App\Lib\Project\ProjectRebuild;
 use App\Models\Task;
@@ -77,6 +78,7 @@ class GitActions
         $this->refuseWhileCreating($user);
 
         $this->assertSshRemoteUsable($user, (string) ($params['repo_url'] ?? ''));
+        $this->assertRemoteAllowed((string) ($params['repo_url'] ?? ''));
 
         return $this->run($user, $params['path'] ?? null, fn (Git $git) => $git->connect(
             $params['repo_url'] ?? '',
@@ -164,6 +166,29 @@ class GitActions
     public function deployKey(User $user, array $params): array
     {
         return app(DeployKey::class)->ensure($user, isset($params['host']) ? (string) $params['host'] : null);
+    }
+
+    /**
+     * The connect runs `git ls-remote` and `git fetch` on the host, whose
+     * network reaches the metadata service and internal services. A host the
+     * egress guard refuses is a 422 before anything is connected.
+     *
+     * @throws ProblemException
+     */
+    private function assertRemoteAllowed(string $repoUrl): void
+    {
+        if ($repoUrl === '' || GitRepoInput::isSsh($repoUrl)) {
+            return;
+        }
+
+        try {
+            $problem = EgressGuard::problem('repo_url', $repoUrl);
+        } catch (\InvalidArgumentException) {
+            return;
+        }
+        if ($problem !== null) {
+            throw ProblemException::of([$problem]);
+        }
     }
 
     /**

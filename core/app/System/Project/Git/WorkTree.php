@@ -1672,13 +1672,14 @@ abstract class WorkTree
         $sshFiles = [];
 
         try {
-            $cmd = GitUrl::withoutPrompts($gitCommand);
+            $command = $this->outboundCommand($gitCommand);
+            $cmd = GitUrl::withoutPrompts($command);
             if ($token !== null && $token !== '') {
-                $askPass = $this->installAskPass($system, $token, $gitCommand);
-                $cmd = GitUrl::withAskPass($gitCommand, $askPass);
+                $askPass = $this->installAskPass($system, $token, $command);
+                $cmd = GitUrl::withAskPass($command, $askPass);
             }
             if ($key !== null) {
-                $sshFiles = $this->installSshKey($system, $key['private_key'], $gitCommand);
+                $sshFiles = $this->installSshKey($system, $key['private_key'], $command);
                 $cmd = GitUrl::withSshKey($cmd, $sshFiles[0], $sshFiles[1]);
             }
 
@@ -1690,6 +1691,45 @@ abstract class WorkTree
                 }
             }
         }
+    }
+
+    /**
+     * A remote command with redirects off, or the command unchanged when it
+     * does not talk to a remote. A redirecting remote must be refused rather
+     * than silently lead the connection to another host.
+     *
+     * @param list<string> $gitCommand
+     * @return list<string>
+     */
+    private function outboundCommand(array $gitCommand): array
+    {
+        return self::talksToRemote($gitCommand)
+            ? GitUrl::withoutRedirects($gitCommand)
+            : $gitCommand;
+    }
+
+    /**
+     * The repository URL a command talks to: an http(s) URL in its argv, else
+     * the checkout's stored remote, for the askpass helper's host.
+     *
+     * @param list<string> $gitCommand
+     */
+    private function remoteUrl(array $gitCommand): ?string
+    {
+        foreach ($gitCommand as $arg) {
+            if (str_starts_with($arg, 'http://') || str_starts_with($arg, 'https://')) {
+                return $arg;
+            }
+        }
+
+        try {
+            $siteGit = $this->user()->getSiteGit($this->pathKey);
+            $stored = $siteGit['repo_url'] ?? $this->user()->getGitRepo();
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return is_string($stored) && $stored !== '' ? $stored : null;
     }
 
     /** @param list<string> $gitCommand */
@@ -1808,7 +1848,10 @@ abstract class WorkTree
         $chown = $this->user()->getChownString() ?: $this->user()->username;
 
         try {
-            $temp = self::credentialTempFile(GitUrl::askPassScript($token), 'pa-git-askpass-');
+            $host = self::talksToRemote($gitCommand)
+                ? GitUrl::hostOf((string) $this->remoteUrl($gitCommand))
+                : null;
+            $temp = self::credentialTempFile(GitUrl::askPassScript($token, $host), 'pa-git-askpass-');
             $this->installCredentialFile($system, $temp, $path, '0700');
             $system->exec(['sudo', 'chown', $chown, $path]);
         } catch (\Throwable $e) {

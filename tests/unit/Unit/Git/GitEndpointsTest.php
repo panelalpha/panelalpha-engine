@@ -191,6 +191,24 @@ class GitEndpointsTest extends DeployHookTestCase
         $this->assertSame('ghp_x', $user->fresh()->getDetails()['git_token']);
     }
 
+    public function test_connect_refuses_a_repository_the_egress_guard_will_not_fetch(): void
+    {
+        $this->user('main');
+        $this->withoutRepository();
+
+        foreach (['http://127.0.0.1/x.git', 'http://169.254.169.254/x.git'] as $url) {
+            $this->postJson(self::URL . '/connect', ['repo_url' => $url, 'branch' => 'main'])
+                ->assertStatus(422)
+                ->assertJsonPath('problems.0.field', 'repo_url')
+                ->assertJsonPath('problems.0.code', 'host_refused');
+        }
+        foreach (['file:///etc/passwd', 'ext::sh -c id'] as $url) {
+            $this->postJson(self::URL . '/connect', ['repo_url' => $url, 'branch' => 'main'])
+                ->assertStatus(422);
+        }
+        $this->assertSame([], $this->calls());
+    }
+
     public function test_a_change_while_the_project_is_being_created_is_a_409(): void
     {
         $this->siteGitUser();

@@ -32,7 +32,7 @@ final class RepositoryAddress
 
         return [
             'field' => $field,
-            'code' => $field . '_private_address',
+            'code' => 'host_refused',
             'message' => self::message($host, $refused),
             'expected' => 'a repository on a public address',
             'examples' => ['https://github.com/owner/repo.git'],
@@ -72,13 +72,17 @@ final class RepositoryAddress
         return $ssh === null ? null : self::unbracket(preg_replace('/^\[([^\]]+)\].*$/', '$1', $ssh) ?? $ssh);
     }
 
+    /**
+     * The address is the one place the problem is reported; a `host` that is
+     * itself the address is named, not said to resolve to itself.
+     */
     private static function message(string $host, string $address): string
     {
         $isLiteral = filter_var($host, FILTER_VALIDATE_IP) !== false;
-        $resolved = $isLiteral ? "{$host} is" : "{$host} resolves to {$address},";
 
-        return $resolved . ' a private, loopback, link-local or reserved address. A project\'s network '
-            . 'does not reach those, so the clone would fail. Use a repository on a public address.';
+        return $isLiteral
+            ? "{$address} is an address this engine does not fetch from."
+            : "{$host} resolves to {$address}, which this engine does not fetch from.";
     }
 
     private static function unbracket(string $host): string

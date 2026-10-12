@@ -34,16 +34,37 @@ class GitUrl
         }
     }
 
-    public static function askPassScript(string $token): string
+    public static function askPassScript(string $token, ?string $host = null): string
     {
         if (trim($token) === '') {
             throw new \InvalidArgumentException('Git token must not be empty.');
         }
 
         return rtrim(
-            Template::named('script/git-askpass')->render(['encoded_token' => base64_encode($token)]),
+            Template::named('script/git-askpass')->render([
+                'encoded_token' => base64_encode($token),
+                'host' => self::restrictedHost($host),
+            ]),
             "\n"
         );
+    }
+
+    /**
+     * The host a token helper must see to answer, or '' to answer any host.
+     * A host that cannot be quoted into the helper is refused rather than
+     * written into it unescaped.
+     */
+    private static function restrictedHost(?string $host): string
+    {
+        $host = strtolower(trim((string) $host));
+        if ($host === '') {
+            return '';
+        }
+        if (preg_match('/\A[a-z0-9.\-\[\]:]+\z/', $host) !== 1) {
+            throw new \InvalidArgumentException('Invalid Git repository host.');
+        }
+
+        return $host;
     }
 
     /**
@@ -105,11 +126,90 @@ class GitUrl
      */
     public static function overHttp11(array $command): array
     {
+        return self::afterGit($command, ['-c', 'http.version=HTTP/1.1']);
+    }
+
+    /**
+     * $command with redirects disabled: a remote that answers 3xx must be
+     * refused rather than silently lead the connection to another host.
+     *
+     * @param list<string> $command
+     * @return list<string>
+     */
+    public static function withoutRedirects(array $command): array
+    {
+        return self::afterGit($command, ['-c', 'http.followRedirects=false']);
+    }
+
+    /**
+     * $command pinned to a checked address (git >= 2.37): the connection uses
+     * the address the guard checked rather than a second lookup.
+     *
+     * @param list<string> $command
+     * @return list<string>
+     */
+    public static function withResolve(array $command, ?string $pin): array
+    {
+        return $pin === null || $pin === ''
+            ? $command
+            : self::afterGit($command, ['-c', 'http.curloptResolve=' . $pin]);
+    }
+
+    /**
+     * The host of a Git remote, https or scp-style, or null when it names none.
+     */
+    public static function hostOf(string $repoUrl): ?string
+    {
+        $url = trim($repoUrl);
+        if ($url === '') {
+            return null;
+        }
+        if (preg_match('#\A(?:[^@/\s]+@)?([^:/\s]+):(?!//)(?:.*)\z#', $url, $m) === 1) {
+            return strtolower(trim($m[1], '[]'));
+        }
+
+        $host = parse_url($url, PHP_URL_HOST);
+
+        return is_string($host) && $host !== '' ? strtolower(trim($host, '[]')) : null;
+    }
+
+    /**
+     * The URL git refused to redirect to, from its error output, or null when
+     * the failure was not a redirect. The `/info/refs` suffix the fetch used is
+     * stripped, so the caller can offer the repository URL itself.
+     */
+    public static function redirectedTo(string $output): ?string
+    {
+        if (stripos($output, 'redirect') === false) {
+            return null;
+        }
+        if (preg_match('/^\s*redirect:\s*(\S+)/mi', $output, $m) === 1) {
+            return self::repositoryFromRedirect(trim($m[1]));
+        }
+        if (preg_match('/redirecting to [\'"<]?([^\s\'">]+)/i', $output, $m) === 1) {
+            return self::repositoryFromRedirect(trim($m[1]));
+        }
+
+        return null;
+    }
+
+    private static function repositoryFromRedirect(string $url): string
+    {
+        return (string) preg_replace('#/info/refs\?.*\z#', '', $url);
+    }
+
+    /**
+     * @param list<string> $command
+     * @param list<string> $options
+     * @return list<string>
+     */
+    private static function afterGit(array $command, array $options): array
+    {
         $git = array_search('git', $command, true);
         if ($git === false) {
             return $command;
         }
-        array_splice($command, $git + 1, 0, ['-c', 'http.version=HTTP/1.1']);
+        array_splice($command, $git + 1, 0, $options);
 
         return $command;
     }

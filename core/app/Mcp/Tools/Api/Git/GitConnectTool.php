@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Connect a directory to a git remote
 
-    Connect a directory to a git remote. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. Body `repo_url` and `branch` are required. Optional `token` is a PAT (never logged). Set `repair` to re-adopt a missing .git. On a `deploy` account without repair this only keeps origin in sync and persists metadata — it does not clone from scratch. An SSH `repo_url` (`git@host:owner/repo.git`) needs the project's deploy key (POST /projects/{username}/git/deploy-key) added to the repository first.
+    Connect a directory to a git remote. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. Body `repo_url` and `branch` are required. Optional `token` is a PAT (never logged). Set `repair` to re-adopt a missing .git. On a `deploy` account without repair this only keeps origin in sync and persists metadata — it does not clone from scratch. An SSH `repo_url` (`git@host:owner/repo.git`) needs the project's deploy key (POST /projects/{username}/git/deploy-key) added to the repository first. A `repo_url` whose host resolves to an internal address is refused 422 with `problems[{field: repo_url, code: host_refused}]`; anything that is not a URL (`file://`, `ext::`) fails validation first.
     MARKDOWN)]
 #[IsDestructive]
 class GitConnectTool extends ApiTool

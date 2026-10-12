@@ -39,7 +39,7 @@ class RepositoryAddressTest extends TestCase
     public function test_a_repository_on_a_private_address_is_refused(string $repo): void
     {
         $this->assertTrue(RepositoryAddress::refused($repo), $repo);
-        $this->assertSame('source_private_address', RepositoryAddress::problem($repo)['code'] ?? null);
+        $this->assertSame('host_refused', RepositoryAddress::problem($repo)['code'] ?? null);
     }
 
     /** A host with only an AAAA record is refused, which IPv4-only missed. */

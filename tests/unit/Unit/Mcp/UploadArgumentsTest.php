@@ -124,7 +124,7 @@ class UploadArgumentsTest extends TestCase
     public function test_only_http_and_https_urls_are_fetched(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('http:// or https://');
+        $this->expectExceptionMessage('The URL scheme must be one of https, http');
 
         UploadArguments::resolve(['file_url' => 'file:///etc/passwd'], ['file'], fn () => null);
     }
@@ -169,7 +169,7 @@ class UploadArgumentsTest extends TestCase
             });
             $this->fail('the internal URL was not refused');
         } catch (InvalidArgumentException $e) {
-            $this->assertStringContainsString('private, loopback, link-local or reserved', $e->getMessage());
+            $this->assertStringContainsString('does not fetch from', $e->getMessage());
         } finally {
             \App\Lib\Http\OutboundUrl::setResolverForTests(null);
         }
