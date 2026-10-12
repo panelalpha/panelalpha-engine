@@ -120,6 +120,16 @@ export class UsersApi extends EngineApiBase {
   }
 
   /**
+   * DELETE /projects/{username} without the busy-project retry: whatever the
+   * engine answers comes straight back, which is what a protected project's
+   * 409 refusal needs.
+   */
+  async deleteUserRaw(username: string): Promise<{ status: number; body: any }> {
+    const response = await this.api.delete(`projects/${username}`);
+    return this.rawCall(response);
+  }
+
+  /**
    * Deletes a project in cleanup, where it may never have been created: a 404
    * is fine. Throws when the project is still there afterwards, so a cleanup
    * that did not happen is not silent.

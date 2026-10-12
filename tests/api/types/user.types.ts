@@ -59,6 +59,8 @@ export interface User {
   email: string | null;
   email_verified_at: string | null;
   status: 'active' | 'suspended' | 'pending';
+  /** While true, an API or MCP token may not delete, stop or redeploy this project. */
+  protected: boolean;
   staging?: string | null;
   staging_of?: string | null;
   created_at: string;
