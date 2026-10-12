@@ -35,6 +35,7 @@ class Handler extends ExceptionHandler
     protected $dontReport = [
         ProjectBusyException::class,
         DeployBusyException::class,
+        TunnelHostnameUnavailableException::class,
     ];
 
     /**
@@ -78,6 +79,8 @@ class Handler extends ExceptionHandler
     /**
      * A deploy lock conflict or a busy project is a domain condition raised from
      * HTTP, queue and CLI alike; only the HTTP boundary knows it reads as 409.
+     * A name the engine could not allocate carries its stable code beside the
+     * message, since a client's next move differs from a busy project's.
      */
     private function renderConflictsAs409(): void
     {
@@ -85,6 +88,10 @@ class Handler extends ExceptionHandler
         $this->renderable(fn (MissingLinuxUserException $e) => self::conflict($e->getMessage()));
         $this->renderable(fn (ProjectBusyException $e) => self::conflict($e->getMessage()));
         $this->renderable(fn (DeployBusyException $e) => self::conflict($e->getMessage(), ['task_id' => $e->task?->id]));
+        $this->renderable(fn (TunnelHostnameUnavailableException $e) => self::conflict(
+            $e->getMessage(),
+            ['code' => TunnelHostnameUnavailableException::CODE]
+        ));
     }
 
     /**

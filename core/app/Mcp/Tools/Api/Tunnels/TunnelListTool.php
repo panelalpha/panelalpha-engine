@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     List a domain's public tunnel hostnames
 
-    List the tunnels attached to one domain.
+    Every tunnel the domain answers to. A tunnel whose engine lifetime (`valid_until`) has passed is omitted, whether or not the engine has removed it yet, so a client never serves an address past its lifetime. `valid_until` is the lifetime this engine was asked to enforce with `ttl_minutes`; it is null for a tunnel the engine does not expire, even one the proxy gave its own expiry in `details.valid_until`. `purpose` comes back top-level too.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

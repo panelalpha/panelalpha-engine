@@ -68,6 +68,7 @@ class Kernel extends ConsoleKernel
         $this->scheduleLogPruning($schedule);
         $this->scheduleInterruptedWorkRecovery($schedule);
         $this->scheduleExpiredSecretPurges($schedule);
+        $this->scheduleTunnelExpiry($schedule);
         $this->scheduleCertificateRenewal($schedule);
         $this->scheduleHostDiskUpkeep($schedule);
         $this->scheduleMonitoring($schedule);
@@ -121,6 +122,16 @@ class Kernel extends ConsoleKernel
         $schedule->command('model:prune', [
             '--model' => [\App\Models\AppSsoToken::class, \App\Models\MysqlSsoToken::class],
         ])->hourly()->withoutOverlapping(self::MUTEX_HOURLY);
+    }
+
+    /**
+     * A tunnel carries a lifetime; a request never serves one past it, and this
+     * removes its registration and the domain's answer to it. Frequent enough
+     * that a preview's day is honoured to within a few minutes.
+     */
+    private function scheduleTunnelExpiry(Schedule $schedule): void
+    {
+        $schedule->command('tunnels:expire')->everyFiveMinutes()->withoutOverlapping(self::MUTEX_FIVE_MINUTES);
     }
 
     /** Renewals are exempt from Let's Encrypt's new-certificate rate limit; off-peak, never two at once. */

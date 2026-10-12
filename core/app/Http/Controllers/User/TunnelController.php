@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\User;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\TunnelStoreRequest;
 use App\Http\Resources\TunnelCollection;
 use App\Http\Resources\TunnelResource;
 use App\Integrations\Tunnels\TunnelManager;
@@ -12,7 +13,7 @@ use App\Models\Domain;
 use App\Models\Tunnel;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 
@@ -28,6 +29,11 @@ class TunnelController extends Controller
     #[OA\Get(
         path: '/projects/{username}/domains/{domain}/tunnels',
         summary: "List a domain's public tunnel hostnames",
+        description: 'Every tunnel the domain answers to. A tunnel whose engine lifetime (`valid_until`) '
+            . 'has passed is omitted, whether or not the engine has removed it yet, so a client never serves '
+            . 'an address past its lifetime. `valid_until` is the lifetime this engine was asked to enforce '
+            . 'with `ttl_minutes`; it is null for a tunnel the engine does not expire, even one the proxy '
+            . 'gave its own expiry in `details.valid_until`. `purpose` comes back top-level too.',
         security: [['bearerAuth' => []]],
         tags: ['Tunnels'],
         parameters: [
@@ -42,15 +48,22 @@ class TunnelController extends Controller
         ],
     )]
     /**
-     * List the tunnels attached to one domain.
+     * List the tunnels attached to one domain, without the ones whose lifetime
+     * has passed. The expiry job removes those rows within minutes; hiding them
+     * here keeps a client from serving an address the job has not reached yet.
      */
     public function index(string $username, string $domain): TunnelCollection
     {
         [, $domainModel] = $this->resolve($username, $domain);
 
-        return new TunnelCollection(
-            Tunnel::query()->where('domain_id', $domainModel->id)->orderBy('hostname')->get()
-        );
+        $tunnels = Tunnel::query()
+            ->where('domain_id', $domainModel->id)
+            ->orderBy('hostname')
+            ->get()
+            ->filter(static fn (Tunnel $tunnel): bool => !$tunnel->isExpired())
+            ->values();
+
+        return new TunnelCollection($tunnels);
     }
 
     #[OA\Post(
@@ -69,7 +82,15 @@ class TunnelController extends Controller
             . 'the fleet, so a name in use is refused; deleting the tunnel releases it again. `cloudflare` '
             . 'puts a CNAME in a zone the project\'s own '
             . 'API token controls, so it fits a custom domain; set the token first with PUT '
-            . '/projects/{username}/settings/cloudflare-api-token.',
+            . '/projects/{username}/settings/cloudflare-api-token. Omit `hostname` with the `panelalpha` '
+            . 'provider and the engine allocates a free `preview-<8 random [a-z0-9]>` label under '
+            . 'panelalpha.online; it draws a new label when one is taken, and answers 409 '
+            . '`tunnel_hostname_unavailable` when five labels in a row are. `purpose` separates a '
+            . 'long-lived address (`default`) from one a preview opens (`preview`); `ttl_minutes` gives '
+            . 'either a lifetime the engine enforces -- returned as `valid_until`, and stored under '
+            . '`details.expires_at` -- 24 hours for a `preview` tunnel that does not name one. The proxy\'s '
+            . 'own `details.valid_until` is a separate value the engine does not act on. An expired tunnel '
+            . 'is removed by the engine and never returned by GET.',
         security: [['bearerAuth' => []]],
         tags: ['Tunnels'],
         parameters: [
@@ -77,14 +98,14 @@ class TunnelController extends Controller
             new OA\Parameter(name: 'domain', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
         ],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
-            required: ['hostname'],
             properties: [
                 new OA\Property(
                     property: 'hostname',
                     type: 'string',
                     description: 'The public hostname to attach. For the panelalpha provider it must be a '
                         . 'single label under panelalpha.online: the name of the domain it is attached to, '
-                        . 'or a sibling of it such as `api-<name>.panelalpha.online`.',
+                        . 'or a sibling of it such as `api-<name>.panelalpha.online`. Omit it with '
+                        . 'panelalpha and the engine allocates a `preview-<8>` label. Required for cloudflare.',
                     example: 'my-shop.panelalpha.online'
                 ),
                 new OA\Property(
@@ -94,33 +115,54 @@ class TunnelController extends Controller
                     description: 'Defaults to panelalpha.',
                     example: 'panelalpha'
                 ),
+                new OA\Property(
+                    property: 'purpose',
+                    type: 'string',
+                    enum: ['default', 'preview'],
+                    description: 'What the address is for. Defaults to default.',
+                    example: 'preview'
+                ),
+                new OA\Property(
+                    property: 'ttl_minutes',
+                    type: 'integer',
+                    description: 'Minutes until the engine removes the tunnel. Omit it and a preview '
+                        . 'tunnel lasts 1440 minutes (24 h); a default tunnel then never expires.',
+                    minimum: 5,
+                    maximum: 43200,
+                    example: 1440
+                ),
             ],
         )),
         responses: [
             new OA\Response(response: 201, description: 'Tunnel created', content: new OA\JsonContent(ref: '#/components/schemas/Tunnel')),
             new OA\Response(response: 404, description: 'Not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 409, description: 'No free preview hostname was allocated', content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(property: 'message', type: 'string'),
+                    new OA\Property(property: 'code', type: 'string', example: 'tunnel_hostname_unavailable'),
+                ],
+            )),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     /**
      * Attach a public tunnel hostname to a domain.
      */
-    public function store(string $username, string $domain, Request $request): JsonResponse
+    public function store(string $username, string $domain, TunnelStoreRequest $request): JsonResponse
     {
         [$user, $domainModel] = $this->resolve($username, $domain);
 
-        $validated = $request->validate([
-            'hostname' => ['required', 'string', 'max:253'],
-            'provider' => ['sometimes', 'string', 'in:' . implode(',', Tunnel::PROVIDERS)],
-        ]);
-
-        $hostname = (string) $validated['hostname'];
+        $validated = $request->validated();
         $provider = (string) ($validated['provider'] ?? Tunnel::PROVIDER_PANELALPHA);
+        $purpose = (string) ($validated['purpose'] ?? Tunnel::PURPOSE_DEFAULT);
+        $hostname = trim((string) ($validated['hostname'] ?? ''));
+        $ttlMinutes = isset($validated['ttl_minutes']) ? (int) $validated['ttl_minutes'] : null;
+        $expiresAt = $this->expiresAt($purpose, $ttlMinutes);
 
         try {
-            // The same two calls the console command makes, in the same order.
-            TunnelManager::assertCreatable($user, $domainModel, $hostname, $provider);
-            $tunnel = TunnelManager::createTunnel($user, $domainModel, $hostname, $provider);
+            $tunnel = $hostname === ''
+                ? TunnelManager::createAllocatedTunnel($user, $domainModel, $purpose, $expiresAt)
+                : TunnelManager::createTunnel($user, $domainModel, $hostname, $provider, $purpose, $expiresAt);
         } catch (CloudflareException | PanelAlphaException $e) {
             // A refused hostname or an unusable provider is the caller's input,
             // not a server fault.
@@ -128,6 +170,19 @@ class TunnelController extends Controller
         }
 
         return (new TunnelResource($tunnel))->response()->setStatusCode(201);
+    }
+
+    /**
+     * The engine lifetime the request asked for, or null for one that never
+     * expires. A preview tunnel with no explicit ttl gets the default day.
+     */
+    private function expiresAt(string $purpose, ?int $ttlMinutes): ?Carbon
+    {
+        if ($ttlMinutes === null && $purpose !== Tunnel::PURPOSE_PREVIEW) {
+            return null;
+        }
+
+        return now()->utc()->addMinutes($ttlMinutes ?? Tunnel::DEFAULT_PREVIEW_TTL_MINUTES);
     }
 
     #[OA\Delete(
@@ -168,7 +223,7 @@ class TunnelController extends Controller
         }
 
         try {
-            TunnelManager::deleteTunnel($user, $tunnel);
+            TunnelManager::removeTunnel($user, $tunnel);
         } catch (CloudflareException | PanelAlphaException $e) {
             throw ValidationException::withMessages(['hostname' => $e->getMessage()]);
         }

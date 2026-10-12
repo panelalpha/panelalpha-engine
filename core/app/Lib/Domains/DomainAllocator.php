@@ -240,11 +240,11 @@ class DomainAllocator
     }
 
     /**
-     * Whether the proxy refused the label because someone else has it, as
-     * opposed to refusing to talk to us at all. The first is a reason to try
-     * another name; the second is a reason to stop trying this zone.
+     * Whether a refusal means the label is taken -- locally or at the proxy --
+     * as opposed to a proxy that will not talk to us at all. The first is a
+     * reason to try another name; the second is a reason to stop trying.
      */
-    private static function nameIsTaken(string $message): bool
+    public static function nameIsTaken(string $message): bool
     {
         return preg_match('/not available|already (in use|exists|taken|registered)|duplicate|taken/i', $message) === 1;
     }

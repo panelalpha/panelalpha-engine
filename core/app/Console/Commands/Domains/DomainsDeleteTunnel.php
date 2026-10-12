@@ -104,7 +104,7 @@ class DomainsDeleteTunnel extends Command
         }
 
         try {
-            TunnelManager::deleteTunnel($user, $tunnel);
+            TunnelManager::removeTunnel($user, $tunnel);
         } catch (CloudflareException | PanelAlphaException $e) {
             $this->error($e->getMessage());
             return 1;
