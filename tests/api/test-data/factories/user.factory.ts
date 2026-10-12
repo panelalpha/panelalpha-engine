@@ -48,9 +48,13 @@ export interface CreateUserOptions {
   deployTimeout?: number;
 }
 
-/** Insist on `*.panelalpha.online` and always delete the project afterwards. */
-export const ONLINE_DEPLOY_USER = {
-  tunnel: 'panelalpha',
+/**
+ * Deploy a real application the way an operator would: let the engine name the
+ * project through DomainPlan -- `panelalpha.online` when the host has a public
+ * address, its `panelalpha.direct` name otherwise -- and always delete it
+ * afterwards, so an allocated public name is never kept.
+ */
+export const APPLICATION_DEPLOY_USER = {
   preserveOnFailure: false,
 } as const satisfies CreateUserOptions;
 

@@ -2,6 +2,16 @@ import { z } from 'zod';
 
 const nullableString = z.string().nullable();
 
+/** A stored rule the firewall would refuse to load; `id` is null when the API lists no such rule. */
+export const firewallRefusedRuleSchema = z.strictObject({
+  id: z
+    .string()
+    .regex(/^[0-9a-f]{12}$/)
+    .nullable(),
+  rule: z.string().min(1),
+  error: z.string(),
+});
+
 /** GET /firewall/status. `enabled` is null when the firewall could not be read. */
 export const firewallStatusSchema = z.strictObject({
   provider: z.string().min(1),
@@ -10,6 +20,7 @@ export const firewallStatusSchema = z.strictObject({
   default_incoming: nullableString,
   default_outgoing: nullableString,
   error: nullableString,
+  refused_rules: z.array(firewallRefusedRuleSchema),
 });
 
 export const firewallStatusResponseSchema = z.object({ data: firewallStatusSchema });

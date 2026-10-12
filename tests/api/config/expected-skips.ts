@@ -162,10 +162,10 @@ export const EXPECTED_SKIPS: readonly ExpectedSkip[] = [
     why: 'phpMyAdmin is an optional component.',
   },
   {
-    id: 'panelalpha-online-not-allocated',
-    match: /^PanelAlpha Online was not allocated \(/,
+    id: 'no-resolvable-site-name',
+    match: /^No resolvable site name was allocated \(/,
     category: 'environment',
-    why: 'The engine has no PanelAlpha Online label for this project.',
+    why: 'The host has no IPv4 address on record, so the engine named the project .local.',
   },
   {
     id: 'ipam-unavailable',

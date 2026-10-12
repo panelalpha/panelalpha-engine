@@ -1,4 +1,11 @@
 /** GET /firewall/status. `enabled` is null when the firewall could not be read; see `error`. */
+/** A stored rule the firewall would refuse to load; `id` is null when the API lists no such rule. */
+export interface FirewallRefusedRule {
+  id: string | null;
+  rule: string;
+  error: string;
+}
+
 export interface FirewallStatus {
   provider: string;
   enabled: boolean | null;
@@ -6,6 +13,7 @@ export interface FirewallStatus {
   default_incoming: string | null;
   default_outgoing: string | null;
   error: string | null;
+  refused_rules: FirewallRefusedRule[];
 }
 
 export type FirewallAction = 'allow' | 'deny';

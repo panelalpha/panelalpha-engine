@@ -10,9 +10,17 @@ import type { ConfigSection, ResourceSection, Snapshot } from '@/scripts/lib/lea
 const list = <T>(data: T[]) => Promise.resolve({ data });
 const one = <T>(data: T) => Promise.resolve({ data });
 
+interface FirewallRuleRow {
+  id: number;
+  action: string;
+  source: string | null;
+  comment: string | null;
+}
+
 interface World {
   projects: string[];
   proxyRules: { id: number; username?: string }[];
+  firewallRules: FirewallRuleRow[];
   modsecMode: string;
   smtpPassword: string;
   failing: string[];
@@ -60,7 +68,17 @@ function fakeApi(world: World): EngineApi {
       ),
     listSubnets: () => Promise.resolve({ data: [], meta: {} }),
     listAssignedIps: () => list([]),
-    listFirewallRules: () => list([]),
+    listFirewallRules: () =>
+      list(
+        world.firewallRules.map((rule) => ({
+          ...rule,
+          scope: 'host',
+          direction: 'in',
+          protocol: 'tcp',
+          port: '22',
+          managed: false,
+        }))
+      ),
     listTrustedAddresses: () => list([]),
     getFirewallStatus: () =>
       one({ enabled: true, default_incoming: 'deny', default_outgoing: 'allow' }),
@@ -79,6 +97,7 @@ function fakeApi(world: World): EngineApi {
 const baseWorld = (overrides: Partial<World> = {}): World => ({
   projects: [],
   proxyRules: [],
+  firewallRules: [],
   modsecMode: 'DetectionOnly',
   smtpPassword: 'hunter2-planted',
   failing: [],
@@ -173,6 +192,37 @@ test.describe('compareSnapshots', () => {
     expect(result.allowed.map((a) => `${a.section}/${a.key}`)).toEqual(
       expect.arrayContaining(['projects/pw5e7a0001', 'proxy-rules/3'])
     );
+  });
+
+  test('a fail2ban ban made during the run is allowed, not a leak', async () => {
+    const ban = {
+      id: 7,
+      action: 'deny',
+      source: '203.0.113.50',
+      comment: 'by Fail2Ban after 5 attempts against sshd',
+    };
+    const result = compareSnapshots(await snap(), await snap({ firewallRules: [ban] }), {
+      allow: allowNone,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.allowed.map((a) => `${a.section}/${a.key}`)).toEqual(['firewall-rules/7']);
+  });
+
+  test('a firewall rule that is not a ban is still a leak', async () => {
+    const rules = [
+      { id: 8, action: 'allow', source: '203.0.113.51', comment: 'by Fail2Ban lookalike' },
+      { id: 9, action: 'deny', source: null, comment: 'by Fail2Ban lookalike' },
+      { id: 10, action: 'deny', source: '203.0.113.52', comment: 'left by a test' },
+    ];
+    const result = compareSnapshots(await snap(), await snap({ firewallRules: rules }), {
+      allow: allowNone,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.leaks.map((l) => `${l.section}/${l.key}`)).toEqual([
+      'firewall-rules/8',
+      'firewall-rules/9',
+      'firewall-rules/10',
+    ]);
   });
 
   test('items gone after the run are listed as removed and do not fail', async () => {

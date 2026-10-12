@@ -22,7 +22,7 @@ import {
   stagingUserPayload,
   waitUntilStagingActive,
 } from '@/helpers/staging-helpers';
-import { skipUnless, skipUnlessOnline } from '@/helpers/test-helpers';
+import { skipUnless, skipUnlessResolvableSite } from '@/helpers/test-helpers';
 import {
   deployHookCreateResponseSchema,
   deployHookRotateResponseSchema,
@@ -30,8 +30,8 @@ import {
 } from '@/schemas';
 import { validateParsedApiResponse } from '@/helpers/validate-parsed-response';
 import { fetchSite, waitForSiteHttpReady } from '@/helpers/webserver-helpers';
-import { onlineLabel } from '@/config/site-domain';
-import { ONLINE_DEPLOY_USER } from '@/test-data/factories';
+import { projectNameResolves } from '@/config/site-domain';
+import { APPLICATION_DEPLOY_USER } from '@/test-data/factories';
 
 /**
  * Once-per-run checks that the catalogue does not repeat for every application:
@@ -109,9 +109,8 @@ test.describe('around a deployed application', () => {
   });
 
   test('a working copy can be created and pushed back', async ({ api, userFactory }) => {
-    const user = await userFactory.createDindUser(ONLINE_DEPLOY_USER);
+    const user = await userFactory.createDindUser(APPLICATION_DEPLOY_USER);
     skipUnless(user, 'DinD is not available on this engine.');
-    skipUnlessOnline(user.domain);
     const username = user.username;
     let stagingUsername: string | undefined;
 
@@ -172,7 +171,7 @@ test.describe('around a deployed application', () => {
     const store = await api.createBackupContainer({
       name,
       driver: 'local',
-      location: `/var/tmp/${name}`,
+      location: `/opt/panelalpha/backups/${name}`,
     });
 
     try {
@@ -260,9 +259,8 @@ test.describe('around a deployed application', () => {
   });
 
   test('a site that lost its front page is reported as missing', async ({ api, userFactory }) => {
-    const user = await userFactory.createDindUser(ONLINE_DEPLOY_USER);
+    const user = await userFactory.createDindUser(APPLICATION_DEPLOY_USER);
     skipUnless(user, 'DinD is not available on this engine.');
-    skipUnlessOnline(user.domain);
 
     const failures: Error[] = [];
     await collectingFailure(failures, 'an archive deploy without a zip is refused', async () => {
@@ -321,7 +319,7 @@ test.describe('around a deployed application', () => {
     anonymousRequest,
     userFactory,
   }) => {
-    const user = await userFactory.createDeployedUser(ONLINE_DEPLOY_USER);
+    const user = await userFactory.createDeployedUser(APPLICATION_DEPLOY_USER);
     skipUnless(user, 'Could not create a git-deployed user on this engine.');
 
     const failures: Error[] = [];
@@ -474,8 +472,8 @@ test.describe('around a deployed application', () => {
       }
     );
 
-    // The hook scenario never needed an allocated online name; only this one does.
-    if (onlineLabel(user.domain)) {
+    // The hook scenario never needs the name; only this one fetches the site.
+    if (projectNameResolves(user.domain)) {
       await collectingFailure(
         failures,
         'stopping and starting the containers takes the site down and back',
@@ -519,7 +517,7 @@ test.describe('around a deployed application', () => {
     } else {
       test.info().annotations.push({
         type: 'skipped step',
-        description: `stopping and starting the containers: PanelAlpha Online was not allocated (${user.domain}).`,
+        description: `stopping and starting the containers: no resolvable site name was allocated (${user.domain}).`,
       });
     }
 
@@ -532,8 +530,8 @@ test.describe('around a deployed application', () => {
     wordpressFactory,
     anonymousRequest,
   }) => {
-    const credentials = await userFactory.createUser(ONLINE_DEPLOY_USER);
-    skipUnlessOnline(credentials.domain);
+    const credentials = await userFactory.createUser(APPLICATION_DEPLOY_USER);
+    skipUnlessResolvableSite(credentials.domain);
     const wordpress = await wordpressFactory.installWordPress(credentials);
 
     const installed = await api.executeWpCliCommand(credentials.username, [

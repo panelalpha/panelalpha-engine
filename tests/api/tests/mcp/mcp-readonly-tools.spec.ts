@@ -57,7 +57,8 @@ const NOT_SMOKE_CALLABLE: Record<string, string> = {
  * message keeps this narrow: any other error is still a failure.
  */
 const NOT_APPLICABLE_TO_PROJECT = [
-  /only available for dind users/i,
+  // 403 for a classic project; the older wording is kept for older engines.
+  /works? only on container projects|only available for dind users/i,
   /no git repository at path/i,
   // git_deploy_hook_show on a project that never had a hook set up: an honest
   // 404, and creating one is a write this smoke must not make.

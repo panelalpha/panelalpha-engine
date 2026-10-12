@@ -1,6 +1,7 @@
 import { expect, test } from '@/fixtures/test-options';
 import { configuredGitRepo } from '@/helpers/deploy-helpers';
 import { expectOneOf } from '@/helpers/expect-one-of';
+import { taskIdFromBody, waitForTask } from '@/helpers/task-helpers';
 import { skipUnless } from '@/helpers/test-helpers';
 import { expectStatus } from '@/helpers/expect-status';
 import { Timeouts } from '@/config/timeouts';
@@ -46,7 +47,8 @@ test.describe('git API', () => {
       await expectStatus(connected, 200);
       const payload = (connected.body as { data?: GitStatus }).data;
       skipUnless(payload, 'git/connect returned no status payload.');
-      expect(payload.managed_by, 'the connected account is managed by site_git').toBe('site_git');
+      // A DinD project connected with git_connect is deployed from git (engine#817).
+      expect(payload.managed_by, 'the connected project is deploy-managed').toBe('deploy');
       expect(payload.connected, 'the connect response says connected').toBe(true);
       return payload;
     });
@@ -57,16 +59,28 @@ test.describe('git API', () => {
         expect(fetched.data.connected, 'the stored status says connected').toBe(true);
       });
 
+      // Deploy-managed: a pull or revert is queued with its rebuild (202) and
+      // holds the project until it ends, so each one is followed to the end.
+      const settled = async (response: { status: number; body: unknown }): Promise<void> => {
+        const id = response.status === 202 ? taskIdFromBody(response.body) : undefined;
+        if (id !== undefined) {
+          await waitForTask(api, id);
+        }
+      };
+
       await test.step('pull, then browse and revert when it succeeded', async () => {
         const pulled = await api.gitPullRaw(user.username, { strategy: 'force' });
-        expectOneOf(pulled.status, [200, 422]);
+        expectOneOf(pulled.status, [200, 202, 422]);
+        await settled(pulled);
 
-        if (pulled.status === 200) {
+        if (pulled.status !== 422) {
           const branches = await api.gitBranches(user.username);
           expect(Array.isArray(branches.data), 'branches is an array').toBe(true);
           const commits = await api.gitCommits(user.username, { limit: 5 });
           expect(Array.isArray(commits.data), 'commits is an array').toBe(true);
-          await expectStatus(await api.gitRevertRaw(user.username), 200);
+          const reverted = await api.gitRevertRaw(user.username);
+          expectOneOf(reverted.status, [200, 202]);
+          await settled(reverted);
           const credentials = await api.gitUpdateCredentials(user.username, {});
           expect(credentials.data.connected, 'still connected after updating credentials').toBe(
             true

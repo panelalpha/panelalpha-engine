@@ -10,10 +10,10 @@ import { expectOneOf } from '@/helpers/expect-one-of';
 import { inspectGitBranch, inspectPlatform, inspectStrategy } from '@/helpers/inspect-helpers';
 import { redactAndTruncate } from '@/helpers/redact';
 import { waitForCondition } from '@/helpers/retry';
-import { skipUnless, skipUnlessOnline } from '@/helpers/test-helpers';
+import { skipUnless, skipUnlessResolvableSite } from '@/helpers/test-helpers';
 import { validateParsedApiResponse } from '@/helpers/validate-parsed-response';
 import { fetchSite } from '@/helpers/webserver-helpers';
-import { ONLINE_DEPLOY_USER } from '@/test-data/factories';
+import { APPLICATION_DEPLOY_USER } from '@/test-data/factories';
 import { selectedSupportedApps, type SupportedApp } from '@/test-data/static/supported-apps';
 import type { EngineApi } from '@/clients/engine-api';
 
@@ -61,17 +61,21 @@ test.describe('supported applications', () => {
 
       const user = await phases.run('create', () =>
         userFactory.createDeployedUser({
-          ...ONLINE_DEPLOY_USER,
+          ...APPLICATION_DEPLOY_USER,
           git_repo: app.repo,
           git_branch: branch,
           deployTimeout: Timeouts.supportedAppDeploy,
         })
       );
       skipUnless(user, 'Could not create a git-deployed project on this engine.');
-      skipUnlessOnline(user.domain);
+      skipUnlessResolvableSite(user.domain);
 
       const shown = await api.getUser(user.username);
       expect(shown.data.details.template).toBe('dind');
+      testInfo.annotations.push({
+        type: 'domain',
+        description: `${user.domain} (${shown.data.details.domain?.source ?? 'unknown'})`,
+      });
 
       const createTask = userFactory.createTaskOf(user.username)?.task;
       const queued = msBetween(createTask?.queued_at, createTask?.started_at);

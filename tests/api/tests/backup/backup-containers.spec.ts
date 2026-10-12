@@ -6,7 +6,7 @@ import { expectStatus } from '@/helpers/expect-status';
 test.describe('backup stores', () => {
   test('a local store is created, tested, updated and deleted', async ({ api }) => {
     const name = `pa-api-${rand('bk')}`;
-    const location = `/var/tmp/${name}`;
+    const location = `/opt/panelalpha/backups/${name}`;
     const created = await api.createBackupContainer({
       name,
       driver: 'local',
@@ -58,11 +58,12 @@ test.describe('backup stores', () => {
   });
 
   test('a store whose location cannot be written fails its test', async ({ api }) => {
-    // /proc takes no new directories, so the probe cannot create the root (Local.php ensureWritableDirectory).
+    // Allowed (under /opt/panelalpha, engine#809) but not creatable: its parent is a
+    // regular file, so the probe cannot create the root (Local.php ensureWritableDirectory).
     const created = await api.createBackupContainer({
       name: `pa-api-${rand('ro')}`,
       driver: 'local',
-      location: `/proc/pa-api-${rand('ro')}`,
+      location: `/opt/panelalpha/shared-hosting/docker-compose.yml/pa-api-${rand('ro')}`,
     });
     try {
       const probed = await api.testBackupContainerRaw(created.data.id);

@@ -34,6 +34,8 @@ export const systemInfoSchema = z
         finished_at: z.number().nullable().optional(),
         pid: z.number().nullable().optional(),
         exit_code: z.number().nullable().optional(),
+        failed: z.boolean().optional(),
+        reason: z.string().nullable().optional(),
         from_version: z.string().nullable().optional(),
         to_version: z.string().nullable().optional(),
       })

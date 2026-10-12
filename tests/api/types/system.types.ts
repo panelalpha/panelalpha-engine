@@ -37,6 +37,8 @@ export interface SystemChangeStatus {
   finished_at?: number | null;
   pid?: number | null;
   exit_code?: number | null;
+  failed?: boolean;
+  reason?: string | null;
   tail_stdout?: string | null;
   tail_stderr?: string | null;
   from_version?: string | null;

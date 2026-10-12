@@ -53,6 +53,7 @@ test.describe('Firewall', () => {
     expect(status.version).toBeTruthy();
     expect(status.default_incoming).toBeTruthy();
     expect(status.default_outgoing).toBeTruthy();
+    expect(status.refused_rules, 'stored rules the firewall would not load').toEqual([]);
   });
 
   test('the rules listing has unique ids', async ({ api }) => {

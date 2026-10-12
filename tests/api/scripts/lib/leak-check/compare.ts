@@ -9,6 +9,7 @@ import type {
   Removed,
   Section,
   Snapshot,
+  SnapshotItem,
 } from './types';
 
 export interface CompareOptions {
@@ -30,13 +31,13 @@ function allowReason(
   allow: AllowList,
   section: string,
   key: string,
-  owner: string | undefined
+  item: SnapshotItem | undefined
 ): string | undefined {
-  const entry = allow.entries.find((candidate) => matchesEntry(candidate, section, key));
+  const entry = allow.entries.find((candidate) => matchesEntry(candidate, section, key, item));
   if (entry) {
     return entry.reason;
   }
-  const user = owner ?? (section === 'projects' ? key : undefined);
+  const user = item?.owner ?? (section === 'projects' ? key : undefined);
   if (user !== undefined && allow.users.includes(user)) {
     return `owned by the shared setup project ${user}`;
   }
@@ -95,7 +96,7 @@ export function compareSnapshots(
         if (key in was.items) {
           continue;
         }
-        const reason = allowReason(options.allow, name, key, item.owner);
+        const reason = allowReason(options.allow, name, key, item);
         if (reason) {
           allowed.push({ section: name, key, reason });
         } else {
