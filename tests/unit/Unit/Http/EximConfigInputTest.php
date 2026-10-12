@@ -6,7 +6,9 @@ use App\Http\Middleware\Authenticate;
 use App\Mcp\Tools\Api\System\SystemEximConfigSetTool;
 use App\Mcp\Tools\Api\System\SystemTestEmailSendTool;
 use App\Models\Setting;
+use App\Rules\EximSecret;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
 use Laravel\Mcp\Request as McpRequest;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\InMemoryDatabase;
@@ -63,7 +65,33 @@ class EximConfigInputTest extends TestCase
             // Senders are rewritten to `<local>_at_<domain>@<sender_domain>`.
             'sender domain that is an IPv4 address' => ['sender_domain', '192.0.2.10'],
             'sender domain that is an IPv6 address' => ['sender_domain', '2001:db8::1'],
+            // passwd.client is written verbatim (engine#790); a line break there
+            // would start a second `*:user:pass` entry.
+            'smtp_password with a newline' => ['smtp_password', "secret\n*:evil:evil"],
+            'smtp_username with a newline' => ['smtp_username', "user\n*:evil:evil"],
+            'sendgrid token with a newline' => ['sendgrid_api_token', "sg-token\nx"],
+            'smtp_password with a null byte' => ['smtp_password', "secret\0x"],
         ];
+    }
+
+    /**
+     * `&`, `<`, `>`, `"` and `'` are ordinary characters in a secret and must
+     * be accepted (engine#790). The rule only refuses line breaks and NUL,
+     * which would inject a second passwd.client entry.
+     */
+    public function test_a_password_with_html_specials_passes_the_secret_rule(): void
+    {
+        foreach (["p&ss'1<>\"x", 'a&b', 'a<b>c', "a'b\"c", 'plain-secret'] as $value) {
+            $validator = Validator::make(
+                ['smtp_password' => $value],
+                ['smtp_password' => ['string', 'nullable', new EximSecret()]],
+            );
+
+            $this->assertFalse(
+                $validator->fails(),
+                "refused " . json_encode($value) . ': ' . json_encode($validator->errors()->all()),
+            );
+        }
     }
 
     #[DataProvider('badValues')]
@@ -112,6 +140,31 @@ class EximConfigInputTest extends TestCase
 
             $this->assertSame(['smtp_implicit_tls'], array_keys($errors), json_encode($override));
         }
+    }
+
+    /**
+     * A save merges into the stored config: a field that is not sent keeps its
+     * value (a partial PUT, or the MCP tool before it exposed the passwords,
+     * used to erase every stored mail password), while one sent as null clears
+     * it.
+     */
+    public function test_a_save_merges_into_the_stored_config(): void
+    {
+        Setting::set('exim', json_encode([
+            'smarthost_provider' => 'smtp',
+            'smtp_host' => 'smtp.example.com',
+            'smtp_password' => 'stored-secret',
+        ]));
+
+        Setting::updateEximConfig(['smtp_port' => '2525']);
+
+        $config = Setting::getEximConfig();
+        $this->assertSame('stored-secret', $config['smtp_password'], 'an unsent password is kept');
+        $this->assertSame('smtp.example.com', $config['smtp_host'], 'an unsent host is kept');
+        $this->assertSame('2525', $config['smtp_port']);
+
+        Setting::updateEximConfig(['smtp_password' => null]);
+        $this->assertSame('', Setting::getEximConfig()['smtp_password'], 'a null clears it');
     }
 
     /** Exim::sendTestEmail() refuses what FILTER_VALIDATE_EMAIL refuses; that used to be its exception, a 500. */

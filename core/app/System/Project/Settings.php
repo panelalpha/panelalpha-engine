@@ -6,6 +6,7 @@ use App\Integrations\Tunnels\Cloudflare;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Lib\Deploy\Dind\RegistryAuth;
 use App\Models\Tunnel;
+use App\Models\User;
 use App\System\Project as UserProject;
 
 class Settings
@@ -108,37 +109,12 @@ class Settings
 
         $projectUser = $this->project->model();
 
-        if ($key === self::KEY_CLOUDFLARE_API_TOKEN) {
-            Cloudflare::assertDinD($projectUser);
-            $account = Cloudflare::setApiToken($projectUser, $value);
-
-            return [
-                'message' => 'Cloudflare API token saved.',
-                'account_id' => $account['account_id'],
-                'account_name' => $account['account_name'],
-            ];
-        }
-
-        if ($key === self::KEY_REGISTRY_AUTH) {
-            $auth = RegistryAuth::parse($value);
-            if ($auth->isEmpty()) {
-                throw new \InvalidArgumentException("registry-auth needs at least one 'host username token' line.");
-            }
-            $projectUser->setDetails(['registry_auth' => trim($value)]);
-            $projectUser->save();
-
-            return ['message' => 'Registry logins saved for: ' . implode(', ', $auth->hosts()) . '.'];
-        }
-
-        if ($key === self::KEY_PERSIST_PATHS) {
-            $paths = self::persistPaths($value);
-            $projectUser->setDetails(['persist_paths' => $paths]);
-            $projectUser->save();
-
-            return ['message' => 'Kept across deploys from the next one: ' . implode(', ', $paths) . '.'];
-        }
-
-        throw new \InvalidArgumentException("No setter for '{$key}'.");
+        return match ($key) {
+            self::KEY_CLOUDFLARE_API_TOKEN => $this->setCloudflareApiToken($projectUser, $value),
+            self::KEY_REGISTRY_AUTH => $this->setRegistryAuth($projectUser, $value),
+            self::KEY_PERSIST_PATHS => $this->setPersistPaths($projectUser, $value),
+            default => throw new \InvalidArgumentException("No setter for '{$key}'."),
+        };
     }
 
     /**
@@ -152,32 +128,98 @@ class Settings
         $projectUser = $this->project->model();
 
         if ($key === self::KEY_CLOUDFLARE_API_TOKEN) {
-            if (Tunnel::projectHasCloudflareTunnels($projectUser) && !$force) {
-                throw new CloudflareException(
-                    "Project '{$projectUser->username}' still has Cloudflare tunnel hostname(s). "
-                    . 'Delete them first, or pass --force to tear down Cloudflare tunnels and clear the token.'
-                );
-            }
-
-            if (Tunnel::projectHasCloudflareTunnels($projectUser) || $projectUser->getCloudflareTunnelId() !== null) {
-                Cloudflare::teardownProject($projectUser);
-            } else {
-                Cloudflare::clearConnectorState($projectUser);
-            }
+            $this->unsetCloudflareApiToken($projectUser, $force);
 
             return;
         }
 
         if ($key === self::KEY_REGISTRY_AUTH || $key === self::KEY_PERSIST_PATHS) {
-            $details = $projectUser->getDetails();
-            unset($details[str_replace('-', '_', $key)]);
-            $projectUser->details = $details;
-            $projectUser->save();
+            $this->forgetDetail($projectUser, str_replace('-', '_', $key));
 
             return;
         }
 
         throw new \InvalidArgumentException("No unsetter for '{$key}'.");
+    }
+
+    /**
+     * @return array{message: string, account_id: string, account_name: string}
+     */
+    private function setCloudflareApiToken(User $projectUser, string $value): array
+    {
+        Cloudflare::assertDinD($projectUser);
+        $account = Cloudflare::setApiToken($projectUser, $value);
+
+        return [
+            'message' => 'Cloudflare API token saved.',
+            'account_id' => $account['account_id'],
+            'account_name' => $account['account_name'],
+        ];
+    }
+
+    /**
+     * @return array{message: string}
+     */
+    private function setRegistryAuth(User $projectUser, string $value): array
+    {
+        $auth = RegistryAuth::parse($value);
+        if ($auth->isEmpty()) {
+            throw new \InvalidArgumentException("registry-auth needs at least one 'host username token' line.");
+        }
+        $projectUser->setDetails(['registry_auth' => trim($value)]);
+        $projectUser->save();
+
+        return ['message' => 'Registry logins saved for: ' . implode(', ', $auth->hosts()) . '.'];
+    }
+
+    /**
+     * @return array{message: string}
+     */
+    private function setPersistPaths(User $projectUser, string $value): array
+    {
+        $requested = self::persistPaths($value);
+        $paths = self::storedPathsFirst($projectUser->getPersistPaths(), $requested);
+        $projectUser->setDetails(['persist_paths' => $paths]);
+        $projectUser->save();
+
+        return ['message' => 'Kept across deploys from the next one: ' . implode(', ', $paths) . '.'];
+    }
+
+    /**
+     * Paths already kept stay first: GeneratedCompose::volumeNamesFor() gives a
+     * slug's legacy volume to the first path that claims it.
+     *
+     * @param list<string> $stored
+     * @param list<string> $paths
+     * @return list<string>
+     */
+    private static function storedPathsFirst(array $stored, array $paths): array
+    {
+        return array_values(array_merge(array_intersect($stored, $paths), array_diff($paths, $stored)));
+    }
+
+    private function unsetCloudflareApiToken(User $projectUser, bool $force): void
+    {
+        if (Tunnel::projectHasCloudflareTunnels($projectUser) && !$force) {
+            throw new CloudflareException(
+                "Project '{$projectUser->username}' still has Cloudflare tunnel hostname(s). "
+                . 'Delete them first, or pass --force to tear down Cloudflare tunnels and clear the token.'
+            );
+        }
+
+        if (Tunnel::projectHasCloudflareTunnels($projectUser) || $projectUser->getCloudflareTunnelId() !== null) {
+            Cloudflare::teardownProject($projectUser);
+        } else {
+            Cloudflare::clearConnectorState($projectUser);
+        }
+    }
+
+    private function forgetDetail(User $projectUser, string $detailKey): void
+    {
+        $details = $projectUser->getDetails();
+        unset($details[$detailKey]);
+        $projectUser->details = $details;
+        $projectUser->save();
     }
 
     /**
@@ -194,14 +236,7 @@ class Settings
             if ($path === '') {
                 continue;
             }
-            $normal = '/' . trim((string) preg_replace('#/+#', '/', $path), '/');
-            if (!str_starts_with($path, '/') || $normal === '/'
-                || preg_match('#^(/[A-Za-z0-9._@+-]+)+$#', $normal) !== 1
-                || preg_match('#/\.\.?(/|$)#', $normal) === 1) {
-                throw new \InvalidArgumentException(
-                    "persist-paths: '{$path}' is not an absolute path inside the container (e.g. /app/storage)."
-                );
-            }
+            $normal = self::normalizePersistPath($path);
             $paths[$normal] = $normal;
         }
         if ($paths === []) {
@@ -209,6 +244,21 @@ class Settings
         }
 
         return array_values($paths);
+    }
+
+    /** Collapses repeated and trailing slashes; refuses a relative path, `/`, odd characters and `.`/`..` segments. */
+    private static function normalizePersistPath(string $path): string
+    {
+        $normal = '/' . trim((string) preg_replace('#/+#', '/', $path), '/');
+        if (!str_starts_with($path, '/') || $normal === '/'
+            || preg_match('#^(/[A-Za-z0-9._@+-]+)+$#', $normal) !== 1
+            || preg_match('#/\.\.?(/|$)#', $normal) === 1) {
+            throw new \InvalidArgumentException(
+                "persist-paths: '{$path}' is not an absolute path inside the container (e.g. /app/storage)."
+            );
+        }
+
+        return $normal;
     }
 
     private function storedValue(string $key): ?string

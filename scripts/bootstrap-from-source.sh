@@ -20,12 +20,9 @@ set -euo pipefail
 ENGINE_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 COMPOSER_IMAGE='ghcr.io/panelalpha/engine-composer:v2.0.1'
 
-# Tagged with the engine version, not a build date, so the tag moves whenever
-# core/composer.json's PHP constraint does -- an unpublished tag does not pull
-# and Dockerfile-composer is built instead. This stays as the second guard, for
-# a published tag whose PHP is older than core asks for: `composer install`
-# would abort on every platform requirement and leave no vendor/ at all. The
-# pull is still preferred, but only kept when its PHP satisfies the constraint.
+# The composer image, built from dockerfiles/Dockerfile-composer when no tag is
+# published or the published one's PHP is older than core's composer.json asks
+# for: `composer install` would then abort and leave no vendor/ at all.
 resolve_composer_image() {
     local want image_php
     want=$(sed -n 's/.*"php"[[:space:]]*:[[:space:]]*"[^0-9]*\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' "$1/composer.json" | head -1)
@@ -34,8 +31,7 @@ resolve_composer_image() {
 
     if [ -n "$want" ] && docker image inspect "$COMPOSER_IMAGE" >/dev/null 2>&1; then
         image_php=$(docker run --rm "$COMPOSER_IMAGE" php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;' 2>/dev/null || echo 0)
-        # sort -V puts the lower version first; if that is not $want the image is older.
-        if [ "$(printf '%s\n%s\n' "$want" "$image_php" | sort -V | head -1)" != "$want" ]; then
+        if [ "$(lowest_version "$want" "$image_php")" != "$want" ]; then
             echo ">>> $COMPOSER_IMAGE ships PHP ${image_php}, core requires >= ${want} -- building from dockerfiles/Dockerfile-composer" >&2
             COMPOSER_IMAGE='panelalpha/engine-composer:local'
             docker build --tag "$COMPOSER_IMAGE" - <"$2/dockerfiles/Dockerfile-composer"
@@ -46,6 +42,8 @@ resolve_composer_image() {
     docker image inspect "$COMPOSER_IMAGE" >/dev/null 2>&1 ||
         docker build --tag "$COMPOSER_IMAGE" - <"$2/dockerfiles/Dockerfile-composer"
 }
+
+lowest_version() { printf '%s\n%s\n' "$1" "$2" | sort -V | head -1; }
 
 PUBLIC_IP=''
 CERT_DOMAIN=''
@@ -61,61 +59,57 @@ SET_PROFILES=0
 DIND_RUNTIME=''
 DOCKER_NETWORK_MTU=1500
 
-while [ $# -gt 0 ]; do
-    case "$1" in
-    --ip) PUBLIC_IP="$2"; shift 2 ;;
-    --domain) CERT_DOMAIN="$2"; shift 2 ;;
-    --no-sysbox) INSTALL_SYSBOX=0; shift ;;
-    --no-docker-install) INSTALL_DOCKER=0; shift ;;
-    --composer) FORCE_COMPOSER=1; shift ;;
-    --keep-resolved) KEEP_RESOLVED=1; shift ;;
-    --no-hardening) HARDEN=0; shift ;;
-    --no-quota) QUOTA=0; shift ;;
-    --services) SERVICES="$2"; shift 2 ;;
-    --profiles) PROFILES="$2"; SET_PROFILES=1; shift 2 ;;
-    --core-only) PROFILES=''; SET_PROFILES=1; shift ;;
-    --dind-runtime) DIND_RUNTIME="$2"; shift 2 ;;
-    --mtu) DOCKER_NETWORK_MTU="$2"; shift 2 ;;
-    -h | --help) sed -n '2,15p' "$0"; exit 0 ;;
-    *) echo "Unknown option: $1" >&2; exit 1 ;;
-    esac
-done
+parse_args() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+        --ip) PUBLIC_IP="$2"; shift 2 ;;
+        --domain) CERT_DOMAIN="$2"; shift 2 ;;
+        --no-sysbox) INSTALL_SYSBOX=0; shift ;;
+        --no-docker-install) INSTALL_DOCKER=0; shift ;;
+        --composer) FORCE_COMPOSER=1; shift ;;
+        --keep-resolved) KEEP_RESOLVED=1; shift ;;
+        --no-hardening) HARDEN=0; shift ;;
+        --no-quota) QUOTA=0; shift ;;
+        --services) SERVICES="$2"; shift 2 ;;
+        --profiles) PROFILES="$2"; SET_PROFILES=1; shift 2 ;;
+        --core-only) PROFILES=''; SET_PROFILES=1; shift ;;
+        --dind-runtime) DIND_RUNTIME="$2"; shift 2 ;;
+        --mtu) DOCKER_NETWORK_MTU="$2"; shift 2 ;;
+        -h | --help) sed -n '2,15p' "$0"; exit 0 ;;
+        *) echo "Unknown option: $1" >&2; exit 1 ;;
+        esac
+    done
+}
 
 green='\e[32m'; yellow='\e[33m'; plain='\e[39m'
 step() { echo -e "${green}>>> $1${plain}"; }
 warn() { echo -e "${yellow}>>> $1${plain}"; }
 
-[ "$EUID" -eq 0 ] || { echo "Run as root." >&2; exit 1; }
-cd "$ENGINE_DIR"
-
 rand() { tr -dc 'a-zA-Z0-9' </dev/urandom | head -c "${1:-12}"; }
 
-# ---------------------------------------------------------------- prerequisites
-step "Checking prerequisites"
-. /etc/os-release
-case "${ID:-}" in
-debian | ubuntu) : ;;
-*) warn "Untested distribution '${ID:-unknown}' — the stack expects Debian 12/13 or Ubuntu 22.04/24.04" ;;
-esac
+core_artisan() { docker compose exec -T core php artisan "$@"; }
 
-MISSING=()
-command -v openssl >/dev/null || MISSING+=(openssl)
-command -v ssh-keygen >/dev/null || MISSING+=(openssh-client)
-command -v curl >/dev/null || MISSING+=(curl)
-command -v rsync >/dev/null || MISSING+=(rsync)
-command -v ipcalc >/dev/null || MISSING+=(ipcalc)
-# As in installer.sh: its nftables.service stays disabled.
-command -v nft >/dev/null || MISSING+=(nftables)
-# As in installer.sh: the engine queues its background webserver reloads with `at`.
-command -v at >/dev/null || MISSING+=(at)
-[ "$QUOTA" != 1 ] || command -v setquota >/dev/null || MISSING+=(quota)
-if [ ${#MISSING[@]} -gt 0 ]; then
-    step "Installing ${MISSING[*]}"
-    DEBIAN_FRONTEND=noninteractive apt-get update -y
-    DEBIAN_FRONTEND=noninteractive apt-get install -y "${MISSING[@]}"
-fi
+# nftables as in installer.sh (its service stays disabled); `at` queues the
+# engine's background webserver reloads.
+install_missing_tools() {
+    MISSING=()
+    command -v openssl >/dev/null || MISSING+=(openssl)
+    command -v ssh-keygen >/dev/null || MISSING+=(openssh-client)
+    command -v curl >/dev/null || MISSING+=(curl)
+    command -v rsync >/dev/null || MISSING+=(rsync)
+    command -v ipcalc >/dev/null || MISSING+=(ipcalc)
+    command -v nft >/dev/null || MISSING+=(nftables)
+    command -v at >/dev/null || MISSING+=(at)
+    [ "$QUOTA" != 1 ] || command -v setquota >/dev/null || MISSING+=(quota)
+    if [ ${#MISSING[@]} -gt 0 ]; then
+        step "Installing ${MISSING[*]}"
+        DEBIAN_FRONTEND=noninteractive apt-get update -y
+        DEBIAN_FRONTEND=noninteractive apt-get install -y "${MISSING[@]}"
+    fi
+}
 
-if ! command -v docker >/dev/null; then
+install_docker() {
+    command -v docker >/dev/null && return 0
     [ "$INSTALL_DOCKER" = 1 ] || { echo "Docker is not installed (and --no-docker-install was given)." >&2; exit 1; }
     step "Installing Docker engine"
     export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
@@ -127,168 +121,182 @@ if ! command -v docker >/dev/null; then
         >/etc/apt/sources.list.d/docker.list
     apt-get update -y
     apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-fi
-docker compose version >/dev/null 2>&1 || { echo "The docker compose plugin is missing." >&2; exit 1; }
+}
 
-if [ -z "$PUBLIC_IP" ]; then
-    PUBLIC_IP=$(ip route get 8.8.8.8 | sed -n '/src/{s/.*src *\([^ ]*\).*/\1/p;q}')
-fi
-[ -n "$PUBLIC_IP" ] || { echo "Could not determine the host IP — pass --ip ADDR." >&2; exit 1; }
-step "Using host address ${PUBLIC_IP}"
-
-# ------------------------------------------------------------------- env files
-step "Preparing .env and .env-core"
-cp -n .env.example .env
-cp -n .env-core.example .env-core
-bash scripts/secure-env-core.sh "$PWD/.env-core"
-grep -q '^USERS_MYSQL_ROOT_PASSWORD=.\+' .env ||
-    sed -i "s/^USERS_MYSQL_ROOT_PASSWORD=.*/USERS_MYSQL_ROOT_PASSWORD=$(rand)/" .env
-# Append when the line is absent rather than only rewriting one that exists:
-# `sed s#^APP_URL=.*#...#` matches nothing on a .env-core without the key and
-# fails silently, which leaves APP_URL unset. Laravel then falls back to
-# http://localhost, and the engine reports its own certificate as
-# domain_mismatch -- the certificate is fine, the name it is compared against
-# is not. Same shape as DIND_RUNTIME below.
-if grep -q '^APP_URL=' .env-core; then
-    grep -q '^APP_URL=.\+' .env-core ||
-        sed -i "s#^APP_URL=.*#APP_URL=https://${PUBLIC_IP}:2011#" .env-core
-else
-    [ -z "$(tail -c1 .env-core)" ] || echo "" >>.env-core
-    echo "APP_URL=https://${PUBLIC_IP}:2011" >>.env-core
-fi
-# Before the stack starts: queue workers keep whatever APP_KEY they booted with, so a
-# key written after `up` never reaches them until core restarts.
-if ! grep -q '^APP_KEY=.\+' .env-core; then
-    APP_KEY="base64:$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
-    if grep -q '^APP_KEY=' .env-core; then
-        sed -i "s|^APP_KEY=.*|APP_KEY=${APP_KEY}|" .env-core
-    else
-        [ -z "$(tail -c1 .env-core)" ] || echo "" >>.env-core
-        echo "APP_KEY=${APP_KEY}" >>.env-core
+resolve_public_ip() {
+    if [ -z "$PUBLIC_IP" ]; then
+        PUBLIC_IP=$(ip route get 8.8.8.8 | sed -n '/src/{s/.*src *\([^ ]*\).*/\1/p;q}')
     fi
-fi
-# APP_UID identifies this install to Connect and monitoring. Kept once set; an
-# exported APP_UID is used instead of a generated one.
-if ! grep -q '^APP_UID=[^"'"'"' ]' .env-core; then
+    [ -n "$PUBLIC_IP" ] || { echo "Could not determine the host IP — pass --ip ADDR." >&2; exit 1; }
+    step "Using host address ${PUBLIC_IP}"
+}
+
+check_prerequisites() {
+    step "Checking prerequisites"
+    . /etc/os-release
+    case "${ID:-}" in
+    debian | ubuntu) : ;;
+    *) warn "Untested distribution '${ID:-unknown}' — the stack expects Debian 12/13 or Ubuntu 22.04/24.04" ;;
+    esac
+    install_missing_tools
+    install_docker
+    docker compose version >/dev/null 2>&1 || { echo "The docker compose plugin is missing." >&2; exit 1; }
+    resolve_public_ip
+}
+
+# A line appended to <file> starts a line of its own.
+append_env_line() { # <file> <line>
+    [ -z "$(tail -c1 "$1")" ] || echo "" >>"$1"
+    echo "$2" >>"$1"
+}
+
+# <key>=<value> in <file>, replacing the key's line or appending one; <delim> is
+# the sed delimiter.
+set_env_value() { # <file> <key> <value> <delim>
+    if grep -q "^$2=" "$1"; then
+        sed -i "s$4^$2=.*$4$2=$3$4" "$1"
+    else
+        append_env_line "$1" "$2=$3"
+    fi
+}
+
+# APP_URL is appended when absent: Laravel would fall back to http://localhost,
+# and the engine report its own certificate as domain_mismatch.
+set_app_url() {
+    grep -q '^APP_URL=.\+' .env-core ||
+        set_env_value .env-core APP_URL "https://${PUBLIC_IP}:2011" '#'
+}
+
+# Before the stack starts: queue workers keep the APP_KEY they booted with.
+set_app_key() {
+    grep -q '^APP_KEY=.\+' .env-core && return 0
+    APP_KEY="base64:$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
+    set_env_value .env-core APP_KEY "$APP_KEY" '|'
+}
+
+# APP_UID identifies this install to Connect and monitoring: kept once set, and
+# an exported APP_UID is used instead of a generated one.
+set_app_uid() {
+    grep -q '^APP_UID=[^"'"'"' ]' .env-core && return 0
     APP_UID="${APP_UID:-$(cat /proc/sys/kernel/random/uuid)}"
     [[ "$APP_UID" =~ ^[A-Za-z0-9._:-]{1,128}$ ]] || { echo "APP_UID must be 1-128 of A-Z a-z 0-9 . _ : -" >&2; exit 1; }
-    if grep -q '^APP_UID=' .env-core; then
-        sed -i "s|^APP_UID=.*|APP_UID=${APP_UID}|" .env-core
-    else
-        [ -z "$(tail -c1 .env-core)" ] || echo "" >>.env-core
-        echo "APP_UID=${APP_UID}" >>.env-core
-    fi
-fi
+    set_env_value .env-core APP_UID "$APP_UID" '|'
+}
 
-# Optional services sit behind compose profiles; see .env.example for the list.
-# --core-only (empty) leaves just the control plane: core (which also serves
-# :2011). Untouched, .env.example's default of 'full' gives the whole stack.
-if [ "$SET_PROFILES" = 1 ]; then
-    if grep -q '^COMPOSE_PROFILES=' .env; then
-        sed -i "s#^COMPOSE_PROFILES=.*#COMPOSE_PROFILES=${PROFILES}#" .env
-    else
-        [ -z "$(tail -c1 .env)" ] || echo "" >>.env
-        echo "COMPOSE_PROFILES=${PROFILES}" >>.env
+# Optional services sit behind compose profiles (.env.example lists them):
+# --core-only leaves just core, and an untouched .env gets the whole stack.
+set_compose_profiles() {
+    if [ "$SET_PROFILES" = 1 ]; then
+        set_env_value .env COMPOSE_PROFILES "$PROFILES" '#'
+        step "Compose profiles: ${PROFILES:-<none> (control plane only)}"
+    elif ! grep -q '^COMPOSE_PROFILES=' .env; then
+        append_env_line .env "COMPOSE_PROFILES=full"
     fi
-    step "Compose profiles: ${PROFILES:-<none> (control plane only)}"
-elif ! grep -q '^COMPOSE_PROFILES=' .env; then
-    [ -z "$(tail -c1 .env)" ] || echo "" >>.env
-    echo "COMPOSE_PROFILES=full" >>.env
-fi
-# How account containers are isolated. Empty leaves the application default
-# (sysbox); 'privileged' is for an engine that is itself inside a sysbox
-# container, where sysbox-in-sysbox is unsupported.
-if [ -n "$DIND_RUNTIME" ]; then
-    if grep -q '^DIND_RUNTIME=' .env-core; then
-        sed -i "s#^DIND_RUNTIME=.*#DIND_RUNTIME=${DIND_RUNTIME}#" .env-core
-    else
-        [ -z "$(tail -c1 .env-core)" ] || echo "" >>.env-core
-        echo "DIND_RUNTIME=${DIND_RUNTIME}" >>.env-core
-    fi
+}
+
+# How account containers are isolated: empty keeps the default (sysbox);
+# 'privileged' is for an engine itself inside sysbox, which cannot nest.
+set_dind_runtime() {
+    [ -n "$DIND_RUNTIME" ] || return 0
+    set_env_value .env-core DIND_RUNTIME "$DIND_RUNTIME" '#'
     step "Account containers will use DIND_RUNTIME=${DIND_RUNTIME}"
-fi
+}
 
-# --------------------------------------------------------- writable app storage
-# Both of these are excluded from the upload: core/storage is host state, and
-# core/bootstrap/cache is a cache the engine rewrites. On a fresh host neither
-# exists, and the first thing that needs them is composer install below — its
-# post-autoload-dump hook runs `artisan package:discover`, which aborts with
-# "The /app/bootstrap/cache directory must be present and writable". That
-# happened under `set -e`, so the bootstrap died before the stack ever started
-# and left a host with Docker, a vendor tree and no engine. entrypoint-core.sh
-# creates the storage subdirectories inside the container, but never
-# bootstrap/cache, and it runs long after composer does. Create both here, and
-# the subdirectories entrypoint-core.sh expects while we are at it.
-step "Creating the Laravel storage tree"
-mkdir -p core/storage/framework/{sessions,views,cache} core/storage/logs \
-    core/bootstrap/cache
-# Owned by www-data, which is uid 33 in the core image, because the host bind
-# mount preserves these numeric owners into the container and it is www-data —
-# not root — that runs artisan there. A root-owned cache is writable by the
-# chown at the end of this script, but that comes after the migrations, which
-# is too late for the very first `php artisan` to succeed.
-chown -R 33:33 core/storage core/bootstrap/cache 2>/dev/null ||
-    warn "Could not chown core/storage and core/bootstrap/cache to www-data"
+prepare_env_files() {
+    step "Preparing .env and .env-core"
+    cp -n .env.example .env
+    cp -n .env-core.example .env-core
+    bash scripts/secure-env-core.sh "$PWD/.env-core"
+    grep -q '^USERS_MYSQL_ROOT_PASSWORD=.\+' .env ||
+        sed -i "s/^USERS_MYSQL_ROOT_PASSWORD=.*/USERS_MYSQL_ROOT_PASSWORD=$(rand)/" .env
+    set_app_url
+    set_app_key
+    set_app_uid
+    set_compose_profiles
+    set_dind_runtime
+}
 
-# ------------------------------------------------- compose include + config dirs
-# docker-compose.yml opens with `include: docker-compose.yml-webserver`, and that
-# file is gitignored — without it compose cannot even parse the project.
-step "Seeding config files from templates/"
-cp -n docker-compose.yml-nginx-proxy docker-compose.yml-webserver
-bash scripts/refresh-webserver-image.sh "$PWD" || warn "Could not bring the webserver image tag up to date"
+# The upload leaves out core/storage and core/bootstrap/cache, and composer's
+# package:discover aborts without them. Owned by www-data (uid 33 in the core
+# image), which runs artisan there, before the first `php artisan`.
+create_storage_tree() {
+    step "Creating the Laravel storage tree"
+    mkdir -p core/storage/framework/{sessions,views,cache} core/storage/logs \
+        core/bootstrap/cache
+    chown -R 33:33 core/storage core/bootstrap/cache 2>/dev/null ||
+        warn "Could not chown core/storage and core/bootstrap/cache to www-data"
+}
 
-mkdir -p webserver-config/{apache,nginx,nginx-proxy}/vhosts \
-    webserver-config/{litespeed,openlitespeed}-admin \
-    webserver-logs/{apache,nginx,nginx-proxy,litespeed,openlitespeed} \
-    logs/{litespeed,exim,modsecurity} \
-    config/{pure-ftpd,sftp,logrotate,exim,modsecurity}
-cp -Rn templates/webserver-config/. webserver-config/
-cp -Rn templates/config/pure-ftpd/. config/pure-ftpd/
-chmod +x config/pure-ftpd/entrypoint.sh
-# As in installer.sh: without a password database pure-ftpd logs no failed login.
-mkdir -p pureftpd
-touch pureftpd/pureftpd.passwd
-cp -Rn templates/config/sftp/. config/sftp/
-# Scripts are engine code, not host state: -n would keep the installed copy.
-cp templates/config/sftp/{entrypoint.sh,sync-logins.sh} config/sftp/
-cp -Rn templates/config/logrotate/. config/logrotate/
-# Their postrotate reopens the webserver's logs: engine code, not host state.
-cp templates/config/logrotate/{apache,nginx,nginx-proxy}.conf config/logrotate/
-cp -Rn templates/config/exim/. config/exim/
-cp -Rn templates/config/modsecurity/. config/modsecurity/
-[ -f config/sftp/ssh_host_ed25519_key ] ||
-    ssh-keygen -t ed25519 -N '' -f config/sftp/ssh_host_ed25519_key </dev/null
-[ -f config/sftp/ssh_host_rsa_key ] ||
-    ssh-keygen -t rsa -b 4096 -N '' -f config/sftp/ssh_host_rsa_key </dev/null
+# docker-compose.yml includes the gitignored docker-compose.yml-webserver, so
+# compose cannot parse the project without it.
+seed_compose_include() {
+    cp -n docker-compose.yml-nginx-proxy docker-compose.yml-webserver
+    bash scripts/refresh-webserver-image.sh "$PWD" || warn "Could not bring the webserver image tag up to date"
+}
 
-# -------------------------------------------------------------------------- TLS
-# The address has to appear in the SAN list, not just the CN: Node and Go both
-# verify the URL host against the SAN and reject a CN-only certificate.
-if [ ! -f crt/server.cert ]; then
+# Host state is copied without overwriting (-n); the scripts and logrotate
+# files are engine code and always copied. pure-ftpd logs no failed login
+# without a password database.
+seed_config_dirs() {
+    mkdir -p webserver-config/{apache,nginx,nginx-proxy}/vhosts \
+        webserver-config/{litespeed,openlitespeed}-admin \
+        webserver-logs/{apache,nginx,nginx-proxy,litespeed,openlitespeed} \
+        logs/{litespeed,exim,modsecurity} \
+        config/{pure-ftpd,sftp,logrotate,exim,modsecurity}
+    cp -Rn templates/webserver-config/. webserver-config/
+    cp -Rn templates/config/pure-ftpd/. config/pure-ftpd/
+    chmod +x config/pure-ftpd/entrypoint.sh
+    mkdir -p pureftpd
+    touch pureftpd/pureftpd.passwd
+    cp -Rn templates/config/sftp/. config/sftp/
+    cp templates/config/sftp/{entrypoint.sh,sync-logins.sh} config/sftp/
+    cp -Rn templates/config/logrotate/. config/logrotate/
+    cp templates/config/logrotate/{apache,nginx,nginx-proxy}.conf config/logrotate/
+    cp -Rn templates/config/exim/. config/exim/
+    cp -Rn templates/config/modsecurity/. config/modsecurity/
+}
+
+generate_sftp_host_keys() {
+    [ -f config/sftp/ssh_host_ed25519_key ] ||
+        ssh-keygen -t ed25519 -N '' -f config/sftp/ssh_host_ed25519_key </dev/null
+    [ -f config/sftp/ssh_host_rsa_key ] ||
+        ssh-keygen -t rsa -b 4096 -N '' -f config/sftp/ssh_host_rsa_key </dev/null
+}
+
+seed_config_files() {
+    step "Seeding config files from templates/"
+    seed_compose_include
+    seed_config_dirs
+    generate_sftp_host_keys
+}
+
+# The address goes in the SAN list, not only the CN: Node and Go reject a
+# CN-only certificate.
+generate_self_signed_cert() {
+    [ ! -f crt/server.cert ] || return 0
     step "Generating a self-signed certificate for ${PUBLIC_IP}"
     mkdir -p crt
     openssl req -new -x509 -days 365 -nodes \
         -out crt/server.cert -keyout crt/server.key \
         -subj "/C=US/ST=ST/L=L/O=O/OU=Org/CN=${PUBLIC_IP}" \
         -addext "subjectAltName=IP:${PUBLIC_IP},IP:127.0.0.1,DNS:localhost"
-fi
-
-# ---------------------------------------------------------------------- network
-# Trusted-proxy list for the nginx real-IP config; harmless offline.
-bash scripts/update-cloudflare-ips.sh || warn "Could not refresh the Cloudflare IP list"
-
-docker network inspect pash-default-network >/dev/null 2>&1 || {
-    step "Creating pash-default-network"
-    bash scripts/ensure-docker-network.sh "${DOCKER_NETWORK_MTU}"
 }
-# The accounts' network; sites-db and the registries join it.
-DOCKER_NETWORK_MTU="${DOCKER_NETWORK_MTU}" bash scripts/tenant-network-firewall.sh --create --restart-docker \
-    || warn "Could not create the tenant network"
-# Closed from boot until core binds it, not only from when core starts.
-bash scripts/tenant-network-firewall.sh --install-units \
-    || warn "Could not install the tenant network's boot units"
 
-# ----------------------------------------------------------------------- vendor
+# The Cloudflare list is nginx's trusted proxies (harmless offline);
+# pash-tenants is the accounts' network, closed from boot until core binds it.
+prepare_networks() {
+    bash scripts/update-cloudflare-ips.sh || warn "Could not refresh the Cloudflare IP list"
+
+    docker network inspect pash-default-network >/dev/null 2>&1 || {
+        step "Creating pash-default-network"
+        bash scripts/ensure-docker-network.sh "${DOCKER_NETWORK_MTU}"
+    }
+    DOCKER_NETWORK_MTU="${DOCKER_NETWORK_MTU}" bash scripts/tenant-network-firewall.sh --create --restart-docker \
+        || warn "Could not create the tenant network"
+    bash scripts/tenant-network-firewall.sh --install-units \
+        || warn "Could not install the tenant network's boot units"
+}
+
 # The upload excludes core/vendor, so a redeploy that brings a new composer.lock
 # must install again. The stamp records the lock the vendor tree was built from.
 COMPOSER_LOCK_STAMP=core/vendor/.pa-composer-lock
@@ -296,41 +304,41 @@ composer_needed() {
     [ "$FORCE_COMPOSER" = 1 ] || [ ! -d core/vendor ] ||
         [ "$(cat "$COMPOSER_LOCK_STAMP" 2>/dev/null)" != "$(sha256sum core/composer.lock | cut -d' ' -f1)" ]
 }
-if composer_needed; then
+
+install_composer_dependencies() {
+    composer_needed || return 0
     step "Installing composer dependencies"
     resolve_composer_image "${ENGINE_DIR}/core" "${ENGINE_DIR}"
     docker run --rm -v "${ENGINE_DIR}/core:/app" -w /app "$COMPOSER_IMAGE" composer install
     sha256sum core/composer.lock | cut -d' ' -f1 >"$COMPOSER_LOCK_STAMP"
-fi
+}
 
-# --------------------------------------------------------------------- the stack
-# Bare `docker compose` (no -f) so a docker-compose.override.yml applies, the
-# same way scripts/pae.sh sees it.
-#
-# dns-proxy publishes 127.0.0.54:53/udp, which is precisely where
-# systemd-resolved's proxy stub listens (systemd >= 247), so the port has to be
-# free before `up`. This used to decide whether to free it by asking
-# `docker compose config --services` for a service named dns-proxy. Two things
-# are wrong with that:
-#
-#   * The service is `sites-dns` and always has been inside docker-compose.yml;
-#     `dns-proxy` is its container hostname. Nothing matched, so the branch that
-#     disables systemd-resolved was dead code and the stack came up with
-#     resolved still holding 127.0.0.54:53.
-#   * `docker compose config` is not a read-only probe. Compose logs "network X
-#     was found but has incorrect label ... declared as external" and creates
-#     the missing external networks, and on a fresh host it has to pull the
-#     images' metadata first. Run before the DNS check with nothing else on the
-#     host, that is slow enough that the check reads a timeout/empty output as
-#     "no dns-proxy here" — which is the one case where the resolver must be
-#     disabled, and the warning it printed in that case said the opposite:
-#     "dns-proxy is not in the enabled compose profiles".
-#
-# installer.sh takes the other route and disables resolved unconditionally
-# (disable_systemd_resolved, before harden_host and before `up`, for the same
-# reason). Do the same, minus the profile question it does not have to ask.
-if grep -q '^COMPOSE_PROFILES=' .env &&
-    grep -qE '^COMPOSE_PROFILES=(.*,)?(hosting|full)(,.*)?$' .env; then
+dns_proxy_enabled() {
+    grep -q '^COMPOSE_PROFILES=' .env &&
+        grep -qE '^COMPOSE_PROFILES=(.*,)?(hosting|full)(,.*)?$' .env
+}
+
+# Whether /etc/resolv.conf leads to systemd-resolved: it names the stub, or is a
+# link left dangling by stopping it, or one into /run/systemd/resolve/, which
+# the next boot removes. Any other resolver an operator set up is left alone.
+resolv_conf_uses_resolved() {
+    grep -q '^[[:space:]]*nameserver[[:space:]]\+127\.0\.0\.53' /etc/resolv.conf 2>/dev/null ||
+        { [ -L /etc/resolv.conf ] && [ ! -e /etc/resolv.conf ]; } ||
+        { [ -L /etc/resolv.conf ] && readlink -f /etc/resolv.conf | grep -q '^/run/systemd/resolve/'; }
+}
+
+# With systemd-resolved stopped, a resolv.conf that leads to it resolves nothing,
+# for the host and every container that inherited the file.
+repoint_resolv_conf() {
+    resolv_conf_uses_resolved || return 0
+    step "Repointing /etc/resolv.conf away from the resolved stub"
+    cp -a /etc/resolv.conf /etc/resolv.conf.backup
+    rm -f /etc/resolv.conf
+    printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' >/etc/resolv.conf
+}
+
+# Masked, not only stopped: socket activation could bring it back before `up`.
+release_resolved_stub() {
     if [ "$KEEP_RESOLVED" = 1 ]; then
         warn "--keep-resolved given — leaving systemd-resolved on 127.0.0.54:53; dns-proxy will not start"
     elif ! systemctl list-unit-files systemd-resolved.service >/dev/null 2>&1; then
@@ -339,260 +347,278 @@ if grep -q '^COMPOSE_PROFILES=' .env &&
         ! systemctl is-active systemd-resolved >/dev/null 2>&1; then
         step "systemd-resolved already disabled"
     else
-        # Mask rather than stop: stopping alone loses the race, because
-        # systemd-resolved binds 127.0.0.54 through its proxy stub and a socket
-        # activation or a socket unit can bring it back between here and `up`.
         step "Disabling systemd-resolved (the DNS proxy needs 127.0.0.54:53)"
         systemctl stop systemd-resolved || true
         systemctl disable systemd-resolved || true
         systemctl mask systemd-resolved || true
-
-        # Only here, and only for the stub. This repoint is the second half of
-        # stopping systemd-resolved: 127.0.0.53 is the address that just went
-        # away, so leaving resolv.conf pointed at it would leave the host — and
-        # every container that inherited the file — resolving nothing.
-        #
-        # It belongs inside this branch rather than beside the chain. Run after
-        # `--keep-resolved`, after "no systemd-resolved" and after "already
-        # disabled", it rewrites a resolver this script just promised not to
-        # touch, on a host that may never have had systemd-resolved at all.
-        #
-        # And the test has to name the stub. `[ -L /etc/resolv.conf ]` is true
-        # of *any* symlink: resolvconf, NetworkManager and netplan all ship one,
-        # and a host pointed at an internal or split-horizon resolver would have
-        # been handed 1.1.1.1 and lost every internal name.
-        #
-        # Two shapes count, and only these two: the file still *says*
-        # 127.0.0.53 (grep follows the symlink, so this covers the usual
-        # `/etc/resolv.conf -> ../run/systemd/resolve/stub-resolv.conf`), or the
-        # symlink now dangles because stopping resolved took its target away --
-        # `-L` is true of the link while `-e` follows it, so the pair is exactly
-        # "a link pointing at nothing".
-        #
-        # A third shape is resolved's own file at the link's end: Debian 12's
-        # cloud image links /run/systemd/resolve/resolv.conf, which names real
-        # servers now and is gone after the next boot, leaving no DNS at all.
-        if grep -q '^[[:space:]]*nameserver[[:space:]]\+127\.0\.0\.53' /etc/resolv.conf 2>/dev/null ||
-            { [ -L /etc/resolv.conf ] && [ ! -e /etc/resolv.conf ]; } ||
-            { [ -L /etc/resolv.conf ] && readlink -f /etc/resolv.conf | grep -q '^/run/systemd/resolve/'; }; then
-            step "Repointing /etc/resolv.conf away from the resolved stub"
-            cp -a /etc/resolv.conf /etc/resolv.conf.backup
-            rm -f /etc/resolv.conf
-            printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' >/etc/resolv.conf
-        fi
+        repoint_resolv_conf
     fi
-    # And if something else holds the port anyway (a leftover dns-proxy
-    # container, or a second resolver), say so before `up` rather than letting
-    # it surface as a bind failure in the middle of the container roll-out.
-    if ss -H -lun 2>/dev/null | awk '{print $4}' | grep -q '^127\.0\.0\.54:53$'; then
-        HOLDER=$(ss -H -lunp 2>/dev/null | grep '127\.0\.0\.54:53' | head -1)
-        case "$HOLDER" in
-        *docker*) step "127.0.0.54:53 is held by a running dns-proxy container — fine" ;;
-        *) warn "Something still holds 127.0.0.54:53 — dns-proxy may fail to start: ${HOLDER}" ;;
-        esac
-    fi
-else
-    step "dns-proxy is not in the enabled compose profiles — leaving the host resolver alone"
-fi
+}
 
-# core and cron carry image tags that are not always published to ghcr — the tag is bumped
-# in-repo when the runtime changes (babc60c's PHP 8.1 -> 8.3 move) and only pushed at
-# release. `up` does fall back to the build section on a failed pull, but doing it here
-# keeps the "not found" noise out of the startup step. The layer cache makes re-runs cheap.
-step "Ensuring the core images exist"
-# Only services that exist: naming one that does not made `docker compose
-# build` exit "no such service", and under `set -e` that aborted the whole bootstrap here --
-# skipping the stack start, the migrations and pae-artisan, while the rsync
-# above had already put the new source on the host. An engine left in that
-# state runs new code against an unmigrated database and never rereads
-# .env-core, which is what made it report APP_URL as http://localhost.
-#
-# Warn rather than abort if a service is missing or unbuildable: this step is
-# a prefetch that keeps "not found" noise out of the startup step, and `up`
-# falls back to the build section on its own. It is not worth the whole
-# deploy.
-for svc in core; do
-    docker compose config --services 2>/dev/null | grep -qx "$svc" || {
-        warn "No compose service '$svc' — skipping its image"
-        continue
+# The listener on 127.0.0.54:53 as `ss -lunp` shows it, or nothing. One snapshot,
+# so a holder that exits mid-check reads as no holder instead of failing the pipe.
+dns_port_holder() {
+    ss -H -lunp 2>/dev/null | awk '$4 == "127.0.0.54:53" && !seen { print; seen = 1 }'
+}
+
+# Anything else on the port (a leftover dns-proxy container, a second resolver)
+# is said before `up`, not left to surface as a bind failure mid-rollout.
+report_dns_port_holder() {
+    local holder
+    holder=$(dns_port_holder) || return 0
+    [ -n "$holder" ] || return 0
+    case "$holder" in
+    *docker*) step "127.0.0.54:53 is held by a running dns-proxy container — fine" ;;
+    *) warn "Something still holds 127.0.0.54:53 — dns-proxy may fail to start: ${holder}" ;;
+    esac
+}
+
+# dns-proxy (the sites-dns service) publishes 127.0.0.54:53/udp, where
+# systemd-resolved's proxy stub listens, so the port is freed before `up`, as
+# installer.sh does. Bare `docker compose`, so an override file applies.
+free_dns_proxy_port() {
+    if ! dns_proxy_enabled; then
+        step "dns-proxy is not in the enabled compose profiles — leaving the host resolver alone"
+        return 0
+    fi
+    release_resolved_stub
+    report_dns_port_holder
+}
+
+# A prefetch that keeps "not found" noise out of the startup step, as core's tag
+# is pushed only at release; `up` builds on its own, so nothing here is fatal.
+ensure_service_image() { # <service>
+    docker compose config --services 2>/dev/null | grep -qx "$1" || {
+        warn "No compose service '$1' — skipping its image"
+        return 0
     }
-    docker compose pull --quiet "$svc" >/dev/null 2>&1 && continue
-    warn "No published image for '$svc' — building from dockerfiles/Dockerfile-core"
-    docker compose build "$svc" || warn "Could not build '$svc'; 'up' will try again"
-done
+    docker compose pull --quiet "$1" >/dev/null 2>&1 && return 0
+    warn "No published image for '$1' — building from dockerfiles/Dockerfile-core"
+    docker compose build "$1" || warn "Could not build '$1'; 'up' will try again"
+}
 
-# Installing Sysbox restarts Docker, and install-sysbox.sh brings the stack back up
-# through container-manager.sh as it does so. It therefore has to run *after* the
-# images are built and the DNS port is free, or that implicit `up` fails on both.
-# Only tenant projects need it (the dind account template asks for sysbox by
-# default), but without it every deploy fails, so it is on by default. The one
-# case where skipping it is correct is an engine that itself runs inside a
-# sysbox container, where sysbox-in-sysbox is unsupported — set
-# DIND_RUNTIME=privileged in .env-core there so accounts ask for privilege
-# instead.
-if [ "$INSTALL_SYSBOX" = 1 ]; then
-    step "Installing/checking the Sysbox runtime"
-    bash scripts/install-sysbox.sh || warn "Sysbox install failed — tenant projects will not start"
-else
-    if grep -q '^DIND_RUNTIME=privileged' .env-core 2>/dev/null; then
+ensure_core_images() {
+    step "Ensuring the core images exist"
+    ensure_service_image core
+}
+
+# Installing Sysbox restarts Docker and brings the stack up, so it runs once the
+# images exist and the DNS port is free. Every tenant deploy needs it, unless the
+# engine itself runs inside sysbox: DIND_RUNTIME=privileged there.
+install_sysbox() {
+    if [ "$INSTALL_SYSBOX" = 1 ]; then
+        step "Installing/checking the Sysbox runtime"
+        bash scripts/install-sysbox.sh || warn "Sysbox install failed — tenant projects will not start"
+    elif grep -q '^DIND_RUNTIME=privileged' .env-core 2>/dev/null; then
         warn "Skipping Sysbox — DIND_RUNTIME=privileged, so accounts run privileged instead"
     else
         warn "Skipping Sysbox — tenant projects will not start (set DIND_RUNTIME=privileged if the engine is itself inside sysbox)"
     fi
-fi
+}
 
-# ------------------------------------------------------------------- hardening
-# installer.sh's harden_host. On by default so a source install reaches the same end
-# state as a packaged one — the API test suite exercises the firewall, so an engine
-# without it is not a complete engine. --no-hardening skips the lot.
-#
-# Before the stack, not after: on a host still running CSF, firewall.sh moves it to
-# ufw and CSF's uninstaller flushes the whole iptables ruleset, dropping the chains
-# the Docker daemon installs at start, so the daemon has to be restarted — and with
-# the stack up that takes every container down with it. It needs .env, the compose
-# bridge and docker0, so this is the earliest point it can run.
-if [ "$HARDEN" = 1 ]; then
+# installer.sh's harden_host, on by default: the API tests exercise the firewall.
+# Before the stack: moving a host off CSF flushes Docker's chains, and the Docker
+# restart that puts them back would take every container down with it. The build
+# network is created then, while Docker's chains are fresh.
+harden_host() {
+    [ "$HARDEN" = 1 ] || return 0
     step "Applying host configuration (sysctl, monit, firewall)"
     bash scripts/configure-sysctl.sh || warn "sysctl configuration failed"
     bash scripts/configure-monit.sh || warn "monit configuration failed"
     bash scripts/firewall.sh --install || warn "Firewall setup failed"
     service docker restart || warn "Could not restart Docker"
-    # As in installer.sh: the build network, while Docker's chains are fresh.
     bash scripts/build-network-firewall.sh --create panelalpha-build || warn "Could not create the build network"
     bash scripts/tenant-network-firewall.sh --create --restart-docker || warn "Could not apply the tenant network firewall"
-fi
-
-# Same as installer.sh: without it no project disk limit is enforced.
-if [ "$QUOTA" = 1 ]; then
-    step "Turning on filesystem quota for /home"
-    bash scripts/configure-quota.sh || warn "Could not turn on filesystem quota; project disk limits will not be enforced"
-else
-    warn "Skipping filesystem quota (--no-quota): project disk limits will not be enforced"
-fi
-
-# Same as installer.sh: lxcfs gives each account its own /proc/meminfo, loadavg and CPUs.
-step "Setting up lxcfs"
-bash scripts/configure-lxcfs.sh || warn "lxcfs is not running; accounts will see the host's memory, CPUs and load in /proc"
-
-# Same as installer.sh: host profiles that attach by path also confine tenant binaries.
-step "Disabling the host's path-attached AppArmor profiles"
-bash scripts/configure-apparmor.sh || warn "Could not disable the host's path-attached AppArmor profiles; tenant binaries at those paths stay confined"
-
-step "Starting the stack"
-# As in installer.sh: sites-db and the registries join pash-tenants.
-docker network inspect pash-tenants >/dev/null 2>&1 || {
-    echo "The accounts' network pash-tenants could not be created; the tenant-network-firewall messages above say why." >&2
-    exit 1
 }
-# A host that ran the old stack still has dockerhub-mirror on registry-proxy's port.
-bash scripts/retire-dockerhub-mirror.sh .env
-# shellcheck disable=SC2086
-docker compose up -d $SERVICES
 
-step "Waiting for the database"
-until docker compose exec -T core php artisan system:database:test | grep -q "Test successful"; do
-    echo "  still waiting..."
-    sleep 5
-done
-
-step "Running migrations"
-docker compose exec -T core php artisan migrate --force
-
-step "Moving accounts onto the tenant network"
-# As in installer.sh: live, and never fails the bootstrap.
-docker compose exec -T core php artisan project:network:move --all || warn "Some accounts could not be moved onto the tenant network"
-
-step "Pointing Exim at this host's Docker addresses"
-docker compose exec -T core php artisan system:exim:rebuild --networks || warn "Exim's listen addresses could not be updated"
-
-IP_WAS_SET=0
-if ! docker compose exec -T core php artisan settings:exists default_ipv4 >/dev/null 2>&1; then
-    docker compose exec -T core php artisan settings:set default_ipv4 "$PUBLIC_IP"
-    IP_WAS_SET=1
-fi
-if ! docker compose exec -T core php artisan settings:exists default_ipv6 >/dev/null 2>&1; then
-    IPV6=$(ip route get to 2001:db8:: 2>/dev/null | grep -m 1 -o 'src [0-9a-f:]*' | cut -d ' ' -f 2 || true)
-    docker compose exec -T core php artisan settings:set default_ipv6 "${IPV6:-}" || true
-fi
-
-# Setting default_ipv4 switches generated vhosts from a wildcard listen to an explicit
-# `listen 10.x.x.x:80/443`. nginx cannot make that change on a reload — binding the
-# specific address fails with EADDRINUSE against its own wildcard socket — so the
-# webserver keeps serving the old config and every tenant vhost 502s until it restarts.
-# Render first, as installer.sh's render_webserver_config does: a restart alone boots
-# the shipped wildcard nginx.conf again, and the first project hits the bind failure.
-if [ "$IP_WAS_SET" = 1 ]; then
-    step "Rendering the webserver config for ${PUBLIC_IP}"
-    docker compose exec -T core php artisan system:domain:rebuild || warn "Could not rebuild the webserver configuration"
-    step "Restarting the webserver to pick up the address-specific vhosts"
-    docker compose restart sites-http
-else
-    # An update can ship a new webserver config (new includes, a new image's modules);
-    # render it now rather than at the next domain change. The reload restarts the
-    # webserver itself if the listen addresses changed.
-    step "Rendering the webserver config"
-    docker compose exec -T core php artisan system:domain:rebuild || warn "Could not rebuild the webserver configuration"
-fi
-
-# SFTP-as-root uploads leave root-owned files where php-fpm needs to write.
-chown -R www-data:www-data core/bootstrap/cache core/storage 2>/dev/null || true
-
-step "Installing the pae command"
-bash scripts/pae-command.sh register || warn "Could not install the pae command"
-
-# ------------------------------------------------------- certificate and prewarm
-if [ "$HARDEN" = 1 ]; then
-    if ! ipcalc "$PUBLIC_IP" | grep -q 'Private Internet'; then
-        # Same rule as installer.sh: with no name asked for, the address is the
-        # name. The .panelalpha.direct default spends a weekly allowance every
-        # engine shares, so a domain certificate is only requested for --domain
-        # or a cert_domain already set (a re-run must not drop an existing name).
-        [ -n "$CERT_DOMAIN" ] ||
-            CERT_DOMAIN=$(docker compose exec -T core php artisan settings:get cert_domain 2>/dev/null | tr -d '\r' | tail -n 1)
-        if [ -z "$CERT_DOMAIN" ]; then
-            step "Requesting a Let's Encrypt certificate for ${PUBLIC_IP}"
-            bash scripts/letsencrypt-request-ip-cert.sh "$PUBLIC_IP" --install ||
-                warn "Let's Encrypt IP request failed — staying on the self-signed cert"
-        else
-            step "Requesting a Let's Encrypt certificate for ${PUBLIC_IP} (kept as the fallback)"
-            bash scripts/letsencrypt-request-ip-cert.sh "$PUBLIC_IP" || warn "Let's Encrypt IP request failed"
-            step "Requesting a Let's Encrypt certificate for ${CERT_DOMAIN}"
-            bash scripts/letsencrypt-request-cert.sh --domain "$CERT_DOMAIN" --ip "$PUBLIC_IP" ||
-                warn "Let's Encrypt request for ${CERT_DOMAIN} failed — staying on the current cert"
-        fi
+# As installer.sh: quota enforces project disk limits, lxcfs gives each account
+# its own /proc, and path-attached AppArmor profiles would confine tenant binaries.
+configure_account_isolation() {
+    if [ "$QUOTA" = 1 ]; then
+        step "Turning on filesystem quota for /home"
+        bash scripts/configure-quota.sh || warn "Could not turn on filesystem quota; project disk limits will not be enforced"
     else
-        warn "${PUBLIC_IP} is private — staying on the self-signed certificate"
+        warn "Skipping filesystem quota (--no-quota): project disk limits will not be enforced"
     fi
 
-    # Builds the shared PHP base images in the background: without this the ~150s
-    # per PHP minor is paid by whichever customer deploys that minor first.
+    step "Setting up lxcfs"
+    bash scripts/configure-lxcfs.sh || warn "lxcfs is not running; accounts will see the host's memory, CPUs and load in /proc"
+
+    step "Disabling the host's path-attached AppArmor profiles"
+    bash scripts/configure-apparmor.sh || warn "Could not disable the host's path-attached AppArmor profiles; tenant binaries at those paths stay confined"
+}
+
+# sites-db and the registries join pash-tenants; a host that ran the old stack
+# still has dockerhub-mirror on registry-proxy's port.
+start_stack() {
+    step "Starting the stack"
+    docker network inspect pash-tenants >/dev/null 2>&1 || {
+        echo "The accounts' network pash-tenants could not be created; the tenant-network-firewall messages above say why." >&2
+        exit 1
+    }
+    bash scripts/retire-dockerhub-mirror.sh .env
+    # shellcheck disable=SC2086
+    docker compose up -d $SERVICES
+}
+
+wait_for_database() {
+    step "Waiting for the database"
+    until core_artisan system:database:test | grep -q "Test successful"; do
+        echo "  still waiting..."
+        sleep 5
+    done
+}
+
+# Moving accounts is live, as in installer.sh, and never fails the bootstrap.
+update_core_state() {
+    step "Running migrations"
+    core_artisan migrate --force
+
+    step "Moving accounts onto the tenant network"
+    core_artisan project:network:move --all || warn "Some accounts could not be moved onto the tenant network"
+
+    step "Pointing Exim at this host's Docker addresses"
+    core_artisan system:exim:rebuild --networks || warn "Exim's listen addresses could not be updated"
+}
+
+IP_WAS_SET=0
+record_host_addresses() {
+    if ! core_artisan settings:exists default_ipv4 >/dev/null 2>&1; then
+        core_artisan settings:set default_ipv4 "$PUBLIC_IP"
+        IP_WAS_SET=1
+    fi
+    if ! core_artisan settings:exists default_ipv6 >/dev/null 2>&1; then
+        IPV6=$(ip route get to 2001:db8:: 2>/dev/null | grep -m 1 -o 'src [0-9a-f:]*' | cut -d ' ' -f 2 || true)
+        core_artisan settings:set default_ipv6 "${IPV6:-}" || true
+    fi
+}
+
+# A first default_ipv4 moves the vhosts from a wildcard listen to the address,
+# which nginx cannot take on a reload: rendered, then restarted. Otherwise
+# rendered, as an update can ship a new config, and the reload restarts the
+# webserver itself if its listen addresses changed.
+render_webserver_config() {
+    if [ "$IP_WAS_SET" = 1 ]; then
+        step "Rendering the webserver config for ${PUBLIC_IP}"
+        core_artisan system:domain:rebuild || warn "Could not rebuild the webserver configuration"
+        step "Restarting the webserver to pick up the address-specific vhosts"
+        docker compose restart sites-http
+    else
+        step "Rendering the webserver config"
+        core_artisan system:domain:rebuild || warn "Could not rebuild the webserver configuration"
+    fi
+}
+
+# SFTP-as-root uploads leave root-owned files where php-fpm needs to write.
+restore_core_ownership() {
+    chown -R www-data:www-data core/bootstrap/cache core/storage 2>/dev/null || true
+}
+
+install_pae_command() {
+    step "Installing the pae command"
+    bash scripts/pae-command.sh register || warn "Could not install the pae command"
+}
+
+# As installer.sh: with no name asked for, the address is the name. A domain
+# certificate only for --domain or a cert_domain already set: the
+# .panelalpha.direct default spends a weekly allowance every engine shares.
+request_certificates() {
+    if ipcalc "$PUBLIC_IP" | grep -q 'Private Internet'; then
+        warn "${PUBLIC_IP} is private — staying on the self-signed certificate"
+        return 0
+    fi
+    [ -n "$CERT_DOMAIN" ] ||
+        CERT_DOMAIN=$(core_artisan settings:get cert_domain 2>/dev/null | tr -d '\r' | tail -n 1)
+    if [ -z "$CERT_DOMAIN" ]; then
+        step "Requesting a Let's Encrypt certificate for ${PUBLIC_IP}"
+        bash scripts/letsencrypt-request-ip-cert.sh "$PUBLIC_IP" --install ||
+            warn "Let's Encrypt IP request failed — staying on the self-signed cert"
+    else
+        step "Requesting a Let's Encrypt certificate for ${PUBLIC_IP} (kept as the fallback)"
+        bash scripts/letsencrypt-request-ip-cert.sh "$PUBLIC_IP" || warn "Let's Encrypt IP request failed"
+        step "Requesting a Let's Encrypt certificate for ${CERT_DOMAIN}"
+        bash scripts/letsencrypt-request-cert.sh --domain "$CERT_DOMAIN" --ip "$PUBLIC_IP" ||
+            warn "Let's Encrypt request for ${CERT_DOMAIN} failed — staying on the current cert"
+    fi
+}
+
+# The prewarm builds the shared PHP base images in the background, or the first
+# customer to deploy each PHP minor pays ~150 s for it.
+certificate_and_prewarm() {
+    if [ "$HARDEN" != 1 ]; then
+        warn "Skipped sysctl/monit/firewall/prewarm (--no-hardening) — firewall API tests will fail"
+        return 0
+    fi
+    request_certificates
     bash scripts/prewarm-images.sh || warn "Could not start image prewarm"
-else
-    warn "Skipped sysctl/monit/firewall/prewarm (--no-hardening) — firewall API tests will fail"
-fi
+}
 
 # Tokens survive a redeploy, so count them rather than assume a fresh engine.
 # Fails when the list cannot be read; prints 0 for an empty one.
 existing_tokens() {
     local list
-    list=$(docker compose exec -T core php artisan api:token:list 2>/dev/null) || return 1
+    list=$(core_artisan api:token:list 2>/dev/null) || return 1
     printf '%s\n' "$list" | tr -d '\r' | grep -cE '^\| +[0-9]+ +\|' || true
 }
 
-echo
-step "Engine is up."
-echo "  API URL: https://${PUBLIC_IP}:2011/api"
-echo "  MCP URL: https://${PUBLIC_IP}:2011/mcp"
-echo
-if ! tokens=$(existing_tokens); then
-    echo "Mint tokens when you need them ('pae', or 'pae-artisan'):"
-elif [ "$tokens" -gt 0 ]; then
-    echo "${tokens} token(s) already exist ('pae api:token:list'); mint another when you need one ('pae', or 'pae-artisan'):"
-else
-    echo "No tokens exist yet — mint them when you need them ('pae', or 'pae-artisan'):"
-fi
-echo "  pae api:token:create default"
-echo "  pae mcp:token:create default   # prints the registration command for every MCP client"
-echo
-echo "The certificate is self-signed; clients need it explicitly:"
-echo "  curl --cacert ${ENGINE_DIR}/crt/server.cert https://${PUBLIC_IP}:2011/api/projects"
+# From the certificate :2011 serves, not from what this run requested: a re-run
+# keeps an earlier Let's Encrypt one, and a request can fail.
+served_cert_note() { # <cert file> <address>
+    if openssl verify -untrusted "$1" -verify_ip "$2" "$1" >/dev/null 2>&1; then
+        echo "The certificate is publicly trusted for $2; clients need nothing extra."
+    elif openssl verify -untrusted "$1" "$1" >/dev/null 2>&1; then
+        echo "The certificate is publicly trusted, but not for $2; connect by the name it is issued for."
+    else
+        echo "The certificate is self-signed; clients need it explicitly:"
+        echo "  curl --cacert $1 https://$2:2011/api/projects"
+    fi
+}
+
+print_token_hint() {
+    if ! tokens=$(existing_tokens); then
+        echo "Mint tokens when you need them ('pae', or 'pae-artisan'):"
+    elif [ "$tokens" -gt 0 ]; then
+        echo "${tokens} token(s) already exist ('pae api:token:list'); mint another when you need one ('pae', or 'pae-artisan'):"
+    else
+        echo "No tokens exist yet — mint them when you need them ('pae', or 'pae-artisan'):"
+    fi
+}
+
+print_summary() {
+    echo
+    step "Engine is up."
+    echo "  API URL: https://${PUBLIC_IP}:2011/api"
+    echo "  MCP URL: https://${PUBLIC_IP}:2011/mcp"
+    echo
+    print_token_hint
+    echo "  pae api:token:create default"
+    echo "  pae mcp:token:create default   # prints the registration command for every MCP client"
+    echo
+    served_cert_note "${ENGINE_DIR}/crt/server.cert" "$PUBLIC_IP"
+}
+
+parse_args "$@"
+[ "$EUID" -eq 0 ] || { echo "Run as root." >&2; exit 1; }
+cd "$ENGINE_DIR"
+
+check_prerequisites
+prepare_env_files
+create_storage_tree
+seed_config_files
+generate_self_signed_cert
+prepare_networks
+install_composer_dependencies
+free_dns_proxy_port
+ensure_core_images
+install_sysbox
+harden_host
+configure_account_isolation
+start_stack
+wait_for_database
+update_core_state
+record_host_addresses
+render_webserver_config
+restore_core_ownership
+install_pae_command
+certificate_and_prewarm
+print_summary

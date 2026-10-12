@@ -42,7 +42,8 @@ class ChangeWebserverWebserverTest extends TestCase
         file_put_contents("{$latest}/stderr", "warn\n");
         file_put_contents("{$latest}/from_version", 'nginx');
         file_put_contents("{$latest}/to_version", 'litespeed');
-        touch($latest, 1_700_000_000);
+        touch($latest, 1_800_000_000);
+        touch("{$latest}/pid", 1_700_000_000);
         touch("{$latest}/exit_code", 1_700_000_100);
 
         $info = $this->systemWithLogRoot($this->logRoot)->webserver()->getLatestChangeWebserverInfo();
@@ -59,6 +60,20 @@ class ChangeWebserverWebserverTest extends TestCase
         $this->assertSame('litespeed', $info['to_version']);
         // The fixture is read through a mapped filesystem; the path reported is the host's.
         $this->assertSame('/opt/panelalpha/log/change-webserver/latest', $info['logs_path']);
+    }
+
+    /** The run directory's own time moves as files are written into it; the pid file's does not. */
+    public function test_started_at_is_null_when_the_run_left_no_pid(): void
+    {
+        $latest = $this->logRoot . '/latest';
+        mkdir($latest, 0777, true);
+        file_put_contents("{$latest}/exit_code", "0\n");
+        touch($latest, 1_800_000_000);
+
+        $info = $this->systemWithLogRoot($this->logRoot)->webserver()->getLatestChangeWebserverInfo();
+
+        $this->assertNotNull($info);
+        $this->assertNull($info['started_at']);
     }
 
     public function test_run_change_webserver_script_without_serial(): void

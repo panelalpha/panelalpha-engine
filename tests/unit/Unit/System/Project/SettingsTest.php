@@ -152,6 +152,18 @@ class SettingsTest extends TestCase
         $this->assertFalse($row['secret']);
     }
 
+    public function test_a_path_already_kept_stays_first_so_it_keeps_its_volume(): void
+    {
+        // `/app/storage-logs` folds onto `/app/storage/logs`'s legacy volume
+        // name; written first, it would take that volume and its data.
+        $user = $this->userWithToken(null);
+        $user->method('getPersistPaths')->willReturn(['/app/storage/logs']);
+        $user->expects($this->once())->method('setDetails')
+            ->with(['persist_paths' => ['/app/storage/logs', '/app/storage-logs']]);
+
+        (new Settings($this->projectFor($user)))->set(Settings::KEY_PERSIST_PATHS, '/app/storage-logs,/app/storage/logs');
+    }
+
     public function test_project_aggregate_declares_settings(): void
     {
         $source = file_get_contents($this->coreAppRoot . '/System/Project.php');

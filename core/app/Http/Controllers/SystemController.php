@@ -10,9 +10,11 @@ use App\Lib\Ssl\EngineCertificate;
 use App\Lib\Ssl\EngineCertificateRequest;
 use App\Lib\Ssl\Issuers;
 use App\Lib\Ssl\SharedZones;
+use App\Lib\Vault\RequestVault;
 use App\Models\Ipv4NatMap;
 use App\Models\Setting;
 use App\Models\User;
+use App\Rules\EximSecret;
 use App\Rules\UpstreamHost;
 use App\System;
 use App\System\AccountContainers;
@@ -40,10 +42,7 @@ class SystemController extends Controller
     {
         $system = new System();
         $webserver = $system->webserver();
-
-        // The URL a client should use: APP_URL, which the certificate scripts
-        // keep on the name the served certificate was issued for.
-        $url = rtrim((string) config('app.url'), '/');
+        $url = self::engineUrl();
 
         $data = [
             'version' => config('system.version'),
@@ -51,22 +50,8 @@ class SystemController extends Controller
             'api_url' => $url !== '' ? $url . '/api' : null,
             'mcp_url' => $url !== '' ? $url . '/mcp' : null,
             'cert_domain' => Setting::get('cert_domain'),
-            // What :2011 is actually presenting, which is not always what
-            // cert_domain says: that setting records the last *domain*
-            // certificate issued, and a fresh install serves one for the
-            // host's address instead. Read rather than assumed, the same way
-            // a project reports its own in details.ssl.
             'served_certificate' => self::servedCertificate($url),
-            // Where a project lands when it is created without a domain of
-            // its own: <name>.<sites_base_domain>. Reported because a caller
-            // cannot build that name -- or know whether the sites on it can
-            // hold a real certificate -- without it.
-            'sites_base_domain' => $base = Setting::get('default_wildcard_domain'),
-            'sites_certificates' => [
-                'issuer' => Issuers::configured()->id(),
-                'shared_zone' => $base === null || SharedZones::covers((string) $base),
-                'shared_zone_issuance' => Issuers::sharedZoneIssuanceAllowed(),
-            ],
+            ...self::sitesDomain(),
             'default_ipv4' => Setting::get('default_ipv4'),
             'default_ipv6' => Setting::get('default_ipv6'),
             'ipv4_nat_mode' => Ipv4NatMap::isNatModeEnabled(),
@@ -74,21 +59,63 @@ class SystemController extends Controller
             'webserver' => $webserver->getDetails(),
             'latest_webserver_change' => $system->getLatestChangeWebserverInfo(),
             'latest_update' => $system->getLatestUpdateInfo(),
-            // Why new projects stopped getting panelalpha.online names, e.g. a
-            // used-up site quota; null once a label is sold again.
-            'panelalpha_online' => [
-                'last_error' => DomainAllocator::lastOnlineError(),
-            ],
-            // Projects holding secrets this APP_KEY cannot decrypt.
+            'panelalpha_online' => self::panelalphaOnline(),
             'unreadable_secrets' => self::unreadableSecrets(User::query()->cursor()),
-            // Reported only: the operator removes them, the engine never does.
-            'orphan_account_containers' => (new AccountContainers($system))
-                ->orphanReport(User::query()->pluck('username')),
+            'orphan_account_containers' => self::orphanAccountContainers($system),
         ];
 
         return new JsonResponse([
             'data' => $data,
         ]);
+    }
+
+    /** The URL a client should use: APP_URL, which the certificate scripts keep on the name the served certificate was issued for. */
+    private static function engineUrl(): string
+    {
+        return rtrim((string) config('app.url'), '/');
+    }
+
+    /**
+     * Where a project created without a domain of its own lands (<name>.<sites_base_domain>), and whether
+     * sites there can hold a real certificate: a caller cannot know either without it.
+     *
+     * @return array{sites_base_domain: mixed, sites_certificates: array{issuer: string, shared_zone: bool, shared_zone_issuance: bool}}
+     */
+    private static function sitesDomain(): array
+    {
+        $base = Setting::get('default_wildcard_domain');
+
+        return [
+            'sites_base_domain' => $base,
+            'sites_certificates' => [
+                'issuer' => Issuers::configured()->id(),
+                'shared_zone' => $base === null || SharedZones::covers((string) $base),
+                'shared_zone_issuance' => Issuers::sharedZoneIssuanceAllowed(),
+            ],
+        ];
+    }
+
+    /**
+     * Why new projects stopped getting panelalpha.online names, e.g. a used-up site quota; null once a label is sold again.
+     *
+     * @return array{last_error: ?array<string, mixed>}
+     */
+    private static function panelalphaOnline(): array
+    {
+        return [
+            'last_error' => DomainAllocator::lastOnlineError(),
+        ];
+    }
+
+    /**
+     * Account containers no project owns. Reported only: the operator removes them, the engine never does.
+     *
+     * @return array{count: int, containers: list<array<string, string>>, warning: ?string}
+     */
+    private static function orphanAccountContainers(System $system): array
+    {
+        return (new AccountContainers($system))
+            ->orphanReport(User::query()->pluck('username'));
     }
 
     /**
@@ -125,7 +152,9 @@ class SystemController extends Controller
      * serves a certificate for its address, and one whose domain request
      * failed serves the address certificate while `cert_domain` still holds
      * the name that was wanted. Reporting the file rather than the setting is
-     * the difference between saying what was served and what was intended.
+     * the difference between saying what was served and what was intended, and
+     * after a dry run it is what says nothing was installed. The status is
+     * judged against the host clients connect to.
      *
      * @return array<string, mixed>|null null when there is no readable
      *         certificate on disk at all
@@ -142,12 +171,10 @@ class SystemController extends Controller
             return null;
         }
 
-        // The name a client actually connects to, which is what the
-        // certificate has to cover for any of this to be worth reporting.
-        $host = (string) (parse_url($url, PHP_URL_HOST) ?: '');
+        $connectedHost = (string) (parse_url($url, PHP_URL_HOST) ?: '');
 
         return ['names' => $facts['domains']]
-            + CertificateStatus::of($facts, $host);
+            + CertificateStatus::of($facts, $connectedHost);
     }
 
     #[OA\Get(
@@ -228,18 +255,12 @@ class SystemController extends Controller
         ]);
 
         if (array_key_exists('sites_base_domain', $params)) {
-            $base = strtolower(trim((string) $params['sites_base_domain'], " \t\n\r\0\x0B."));
-            if ($base !== '' && !SharedZones::isPubliclyIssuable($base)) {
-                throw ValidationException::withMessages([
-                    'sites_base_domain' => "{$base} is not a hostname sites can be named under.",
-                ]);
-            }
-            Setting::set('default_wildcard_domain', $base);
+            self::saveSitesBaseDomain((string) $params['sites_base_domain']);
         }
 
         foreach (['issuer' => 'ssl_issuer', 'acme_directory_url' => 'acme_directory_url', 'acme_email' => 'acme_email'] as $field => $setting) {
             if (array_key_exists($field, $params)) {
-                Setting::set($setting, trim((string) $params[$field]));
+                self::setOrForget($setting, trim((string) $params[$field]));
             }
         }
 
@@ -250,7 +271,34 @@ class SystemController extends Controller
         return new JsonResponse(['data' => self::sslConfig()]);
     }
 
+    /** @throws ValidationException when the name cannot carry publicly issued certificates */
+    private static function saveSitesBaseDomain(string $requested): void
+    {
+        $base = strtolower(trim($requested, " \t\n\r\0\x0B."));
+        if ($base !== '' && !SharedZones::isPubliclyIssuable($base)) {
+            throw ValidationException::withMessages([
+                'sites_base_domain' => "{$base} is not a hostname sites can be named under.",
+            ]);
+        }
+        self::setOrForget('default_wildcard_domain', $base);
+    }
+
+    /** An emptied value removes the setting, so it reads back as null rather than "". */
+    private static function setOrForget(string $setting, string $value): void
+    {
+        if ($value === '') {
+            Setting::forget($setting);
+
+            return;
+        }
+        Setting::set($setting, $value);
+    }
+
     /**
+     * `shared_zone` is true while the sites sit on a zone every engine issues under: a cost for the
+     * operator to weigh, not a refusal. `shared_zone_issuance` says whether this engine will issue
+     * there; it is off by default, since spending an allowance the whole fleet draws on is a decision.
+     *
      * @return array<string, mixed>
      */
     private static function sslConfig(): array
@@ -260,12 +308,7 @@ class SystemController extends Controller
         return [
             'issuer' => Issuers::configured()->id(),
             'sites_base_domain' => $base !== null && $base !== '' ? $base : null,
-            // True while the sites sit on a zone every engine issues under.
-            // Not a refusal -- a cost, and the operator's to weigh.
             'shared_zone' => $base === null || $base === '' || SharedZones::covers((string) $base),
-            // Whether this engine will actually issue on such a zone. Off by
-            // default: spending an allowance the whole fleet draws on is a
-            // decision, not a consequence of turning `issuer` on.
             'shared_zone_issuance' => Issuers::sharedZoneIssuanceAllowed(),
             'acme_directory_url' => Issuers::directoryUrl(),
             'acme_email' => Issuers::email(),
@@ -314,13 +357,6 @@ class SystemController extends Controller
             'dry_run' => 'boolean|nullable',
         ]);
 
-        $flags = [];
-        foreach (['staging' => 'staging', 'force_renewal' => 'force-renewal', 'skip_dns_check' => 'skip-dns-check', 'dry_run' => 'dry-run'] as $field => $flag) {
-            if (!empty($params[$field])) {
-                $flags[] = $flag;
-            }
-        }
-
         $result = EngineCertificateRequest::run(
             new System(),
             [
@@ -328,10 +364,10 @@ class SystemController extends Controller
                 'email' => isset($params['email']) ? (string) $params['email'] : null,
                 'ip' => isset($params['ip']) ? (string) $params['ip'] : null,
             ],
-            $flags
+            self::certificateFlags($params)
         );
 
-        $url = rtrim((string) config('app.url'), '/');
+        $url = self::engineUrl();
 
         if (!$result['successful']) {
             throw ValidationException::withMessages([
@@ -344,12 +380,26 @@ class SystemController extends Controller
             'data' => [
                 'cert_domain' => $result['cert_domain'],
                 'url' => $url !== '' ? $url : null,
-                // Read off the file rather than assumed: on a dry run nothing
-                // was installed, and this is what says so.
                 'served_certificate' => self::servedCertificate($url),
                 'output' => $result['output'],
             ],
         ]);
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     * @return list<string> the certificate script's flags the request switched on
+     */
+    private static function certificateFlags(array $params): array
+    {
+        $flags = [];
+        foreach (['staging' => 'staging', 'force_renewal' => 'force-renewal', 'skip_dns_check' => 'skip-dns-check', 'dry_run' => 'dry-run'] as $field => $flag) {
+            if (!empty($params[$field])) {
+                $flags[] = $flag;
+            }
+        }
+
+        return $flags;
     }
 
     #[OA\Put(
@@ -362,8 +412,9 @@ class SystemController extends Controller
         )),
         responses: [
             new OA\Response(response: 200, description: 'Update initiated', content: new OA\JsonContent(
-                properties: [new OA\Property(property: 'data', type: 'object')],
+                properties: [new OA\Property(property: 'data', ref: '#/components/schemas/EngineUpdateRun')],
             )),
+            new OA\Response(response: 409, description: 'An update is already running', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     public function update(Request $request): JsonResponse
@@ -381,12 +432,12 @@ class SystemController extends Controller
             $licenseKey = $params['license_key'];
         }
 
-        $system = new System();
+        $system = app(System::class);
 
         if ($system->isUpdateScriptRunning()) {
-            throw ValidationException::withMessages([
-                'Update script is already running',
-            ]);
+            return new JsonResponse([
+                'message' => 'Update script is already running',
+            ], 409);
         }
 
         $system->runUpdateScript($licenseKey);
@@ -405,12 +456,19 @@ class SystemController extends Controller
         tags: ['System'],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             required: ['new_webserver'],
-            properties: [new OA\Property(property: 'new_webserver', type: 'string', enum: ['nginx', 'nginx-proxy', 'apache', 'litespeed', 'openlitespeed'])],
+            properties: [new OA\Property(
+                property: 'new_webserver',
+                type: 'string',
+                enum: ['nginx-proxy'],
+                description: 'Only nginx-proxy can be selected on this engine: every other webserver is temporarily refused because only nginx-proxy works with DinD projects.',
+                x: ['mcp-description' => 'Only nginx-proxy is accepted on this engine; every other webserver is temporarily refused.'],
+            )],
         )),
         responses: [
             new OA\Response(response: 200, description: 'Webserver change initiated', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
+            new OA\Response(response: 422, description: 'Any webserver other than nginx-proxy is temporarily refused', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function changeWebserver(Request $request): JsonResponse
@@ -426,35 +484,8 @@ class SystemController extends Controller
             'serial_number' => 'nullable|string',
         ]);
 
-        if (!in_array($params['new_webserver'], [
-            'nginx',
-            'nginx-proxy',
-            'apache',
-            'litespeed',
-            'openlitespeed',
-        ])) {
-            throw ValidationException::withMessages([
-                'new_webserver' => 'Invalid value',
-            ]);
-        }
-
-        // Temporary: only nginx-proxy works correctly with DinD projects.
-        if ($params['new_webserver'] !== 'nginx-proxy') {
-            throw ValidationException::withMessages([
-                'new_webserver' => 'Switching the webserver away from nginx-proxy is temporarily disabled. Only nginx-proxy is supported right now (required for DinD projects).',
-            ]);
-        }
-
-        $serialNumber = null;
-        if (!empty($params['serial_number']) && trim($params['serial_number']) !== '') {
-            $serialNumber = trim($params['serial_number']);
-        }
-
-        if ($serialNumber !== null && $params['new_webserver'] !== 'litespeed') {
-            throw ValidationException::withMessages([
-                'serial_number' => 'Serial number is only supported when switching to LiteSpeed',
-            ]);
-        }
+        self::assertWebserverChoice($params['new_webserver']);
+        $serialNumber = self::serialNumberFor($params['new_webserver'], $params['serial_number'] ?? null);
 
         $system = new System();
 
@@ -477,9 +508,51 @@ class SystemController extends Controller
         ]);
     }
 
+    /**
+     * Only nginx-proxy is accepted for now, being the one webserver that works with DinD projects.
+     *
+     * @throws ValidationException
+     */
+    private static function assertWebserverChoice(string $webserver): void
+    {
+        if (!in_array($webserver, [
+            'nginx',
+            'nginx-proxy',
+            'apache',
+            'litespeed',
+            'openlitespeed',
+        ])) {
+            throw ValidationException::withMessages([
+                'new_webserver' => 'Invalid value',
+            ]);
+        }
+
+        if ($webserver !== 'nginx-proxy') {
+            throw ValidationException::withMessages([
+                'new_webserver' => 'Switching the webserver away from nginx-proxy is temporarily disabled. Only nginx-proxy is supported right now (required for DinD projects).',
+            ]);
+        }
+    }
+
+    /** @throws ValidationException when a serial number is sent for anything but LiteSpeed */
+    private static function serialNumberFor(string $webserver, ?string $serialNumber): ?string
+    {
+        $serialNumber = !empty($serialNumber) && trim($serialNumber) !== '' ? trim($serialNumber) : null;
+
+        if ($serialNumber !== null && $webserver !== 'litespeed') {
+            throw ValidationException::withMessages([
+                'serial_number' => 'Serial number is only supported when switching to LiteSpeed',
+            ]);
+        }
+
+        return $serialNumber;
+    }
+
     #[OA\Put(
         path: '/system/reset-webserver-panel-password',
         summary: 'Reset the webserver panel password',
+        description: 'LiteSpeed and OpenLiteSpeed only. On the nginx-proxy webserver every engine runs today this answers 422, because only (Open)LiteSpeed implements a panel password.',
+        x: ['mcp-description' => '(Open)LiteSpeed only; answers 422 on nginx-proxy.'],
         security: [['bearerAuth' => []]],
         tags: ['System'],
         responses: [
@@ -513,6 +586,8 @@ class SystemController extends Controller
     #[OA\Put(
         path: '/system/webserver-config',
         summary: 'Update webserver configuration',
+        description: 'LiteSpeed and OpenLiteSpeed only. On the nginx-proxy webserver every engine runs today this answers 422, because only (Open)LiteSpeed implements a panel config.',
+        x: ['mcp-description' => '(Open)LiteSpeed only; answers 422 on nginx-proxy.'],
         security: [['bearerAuth' => []]],
         tags: ['System'],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
@@ -578,12 +653,21 @@ class SystemController extends Controller
         security: [['bearerAuth' => []]],
         tags: ['System'],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
+            description: 'Fields are merged into the stored config; one that is absent keeps its value, one sent as null or "" clears it.',
             properties: [
                 new OA\Property(property: 'smarthost_provider', type: 'string', nullable: true),
                 new OA\Property(property: 'sendgrid_api_token', type: 'string', nullable: true),
+                new OA\Property(property: 'mailchannels_username', type: 'string', nullable: true),
+                new OA\Property(property: 'mailchannels_password', type: 'string', nullable: true),
+                new OA\Property(property: 'amazon_ses_smtp_endpoint', type: 'string', nullable: true),
+                new OA\Property(property: 'amazon_ses_starttls_port', type: 'string', nullable: true),
+                new OA\Property(property: 'amazon_ses_smtp_username', type: 'string', nullable: true),
+                new OA\Property(property: 'amazon_ses_smtp_password', type: 'string', nullable: true),
                 new OA\Property(property: 'smtp_host', type: 'string', nullable: true),
                 new OA\Property(property: 'smtp_port', type: 'string', nullable: true),
                 new OA\Property(property: 'smtp_username', type: 'string', nullable: true),
+                new OA\Property(property: 'smtp_password', type: 'string', nullable: true),
+                new OA\Property(property: 'smtp_implicit_tls', type: 'boolean', nullable: true),
                 new OA\Property(property: 'sender_domain', type: 'string', nullable: true),
             ],
         )),
@@ -597,6 +681,7 @@ class SystemController extends Controller
     public function updateEximConfig(Request $request): JsonResponse
     {
         self::withoutTrailingDots($request);
+        $request->merge(self::resolveEximSecrets($request->only(self::EXIM_SECRET_FIELDS)));
         $params = $request->validate(self::eximConfigRules());
 
         $system = new System();
@@ -609,40 +694,66 @@ class SystemController extends Controller
     }
 
     /**
+     * The mail credentials, which may be a `vault:<id>`.
+     *
+     * @var list<string>
+     */
+    private const EXIM_SECRET_FIELDS = [
+        'sendgrid_api_token',
+        'mailchannels_username',
+        'mailchannels_password',
+        'amazon_ses_smtp_username',
+        'amazon_ses_smtp_password',
+        'smtp_username',
+        'smtp_password',
+    ];
+
+    /**
+     * Resolves `vault:<id>` mail credentials. Runs before validation, so EximSecret checks the secret that reaches passwd.client.
+     *
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
+    private static function resolveEximSecrets(array $params): array
+    {
+        foreach (self::EXIM_SECRET_FIELDS as $field) {
+            if (array_key_exists($field, $params)) {
+                $params[$field] = RequestVault::resolve($field, $params[$field], null);
+            }
+        }
+
+        return $params;
+    }
+
+    /**
      * What the Exim config takes, saved by PUT /system/exim-config and by a
      * test email's `config`. Hosts, ports and the sender domain end up in
      * update-exim4.conf.conf, which update-exim4.conf pastes into a sed
-     * expression: a `|` there broke the apply with a raw sed error.
+     * expression: a `|` there broke the apply with a raw sed error. `smtp_host`
+     * takes no port, since smtp_port is appended to it as `::<port>`.
      *
      * @return array<string, mixed>
      */
     private static function eximConfigRules(string $prefix = ''): array
     {
         $host = ['string', 'nullable', new UpstreamHost()];
-        // digits_between: `integer` alone takes " 587" and "587\n", which MCP
-        // passes through untrimmed. `integer` stays so `between` compares the number.
-        $port = 'string|nullable|digits_between:1,5|integer|between:1,65535';
+        $port = self::EXIM_PORT_RULE;
+        $secret = ['string', 'nullable', new EximSecret()];
         $rules = [
             'smarthost_provider' => 'string|nullable',
-            'sendgrid_api_token' => 'string|nullable',
-            'mailchannels_username' => 'string|nullable',
-            'mailchannels_password' => 'string|nullable',
+            'sendgrid_api_token' => $secret,
+            'mailchannels_username' => $secret,
+            'mailchannels_password' => $secret,
             'amazon_ses_smtp_endpoint' => $host,
             'amazon_ses_starttls_port' => $port,
-            'amazon_ses_smtp_username' => 'string|nullable',
-            'amazon_ses_smtp_password' => 'string|nullable',
-            // A port here would land in the address: smtp_port is appended as `::<port>`.
+            'amazon_ses_smtp_username' => $secret,
+            'amazon_ses_smtp_password' => $secret,
             'smtp_host' => $host,
             'smtp_port' => $port,
-            'smtp_username' => 'string|nullable',
-            'smtp_password' => 'string|nullable',
+            'smtp_username' => $secret,
+            'smtp_password' => $secret,
             'smtp_implicit_tls' => 'boolean|nullable',
-            // The domain senders are rewritten to: an address is not one.
-            'sender_domain' => [...$host, static function (string $attribute, mixed $value, \Closure $fail): void {
-                if (is_string($value) && filter_var($value, FILTER_VALIDATE_IP) !== false) {
-                    $fail('The :attribute must be a domain name, not an IP address.');
-                }
-            }],
+            'sender_domain' => [...$host, self::senderDomainIsNotAnAddress(...)],
         ];
 
         $prefixed = [];
@@ -651,6 +762,20 @@ class SystemController extends Controller
         }
 
         return $prefixed;
+    }
+
+    /**
+     * `digits_between` refuses " 587" and "587\n", which `integer` alone takes and MCP passes
+     * through untrimmed; `integer` stays so `between` compares the number.
+     */
+    private const EXIM_PORT_RULE = 'string|nullable|digits_between:1,5|integer|between:1,65535';
+
+    /** Senders are rewritten to this domain, and an IP address is not one. */
+    private static function senderDomainIsNotAnAddress(string $attribute, mixed $value, \Closure $fail): void
+    {
+        if (is_string($value) && filter_var($value, FILTER_VALIDATE_IP) !== false) {
+            $fail('The :attribute must be a domain name, not an IP address.');
+        }
     }
 
     /**
@@ -675,14 +800,15 @@ class SystemController extends Controller
     #[OA\Post(
         path: '/system/exim-send-test-email',
         summary: 'Send a test email via Exim',
-        description: 'exit_code 0 only means Exim accepted the message. status says what happened to it: delivered, deferred (still queued; Exim retries it), failed (bounced), not_sent (Exim did not take it) or unknown; reason is the Exim log line for a deferral or a bounce.',
+        description: 'exit_code 0 only means Exim accepted the message. status says what happened to it: delivered, deferred (still queued; Exim retries it), failed (bounced), not_sent (Exim did not take it) or unknown; reason is the Exim log line for a deferral or a bounce. '
+            . 'A `config` sent here is merged into the stored mail config and the Exim config rebuilt before the send, so it is not a throwaway: omit `config` to test the settings already stored, or expect the host\'s mail to run on what you send.',
         security: [['bearerAuth' => []]],
         tags: ['System'],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             required: ['email'],
             properties: [
                 new OA\Property(property: 'email', type: 'string', format: 'email'),
-                new OA\Property(property: 'config', type: 'object', nullable: true),
+                new OA\Property(property: 'config', type: 'object', nullable: true, description: 'Merged into the stored mail config and applied (Exim rebuilt) before the send; a field left out keeps its stored value.'),
             ],
         )),
         responses: [
@@ -695,6 +821,9 @@ class SystemController extends Controller
     public function sendTestEmail(Request $request): JsonResponse
     {
         self::withoutTrailingDots($request, 'config');
+        if (is_array($request->input('config'))) {
+            $request->merge(['config' => self::resolveEximSecrets($request->input('config'))]);
+        }
         /**
          * @var array{
          *   email: string,
@@ -702,26 +831,33 @@ class SystemController extends Controller
          * } $params
          */
         $params = $request->validate([
-            // Goes into the message's To: header, where a line break adds headers. Checked
-            // as Exim::sendTestEmail() checks it, so a refusal is a 422, not its exception.
-            'email' => 'required|string|email:rfc,filter|max:254',
+            'email' => self::TEST_EMAIL_RULE,
             ...self::eximConfigRules('config.'),
         ]);
 
         $system = new System();
-        // `config` is documented nullable and only `email` is required, so a
-        // caller that just wants to send a test email through the settings
-        // already stored must not be met with an undefined-key error.
-        if (is_array($params['config'] ?? null)) {
-            Setting::updateEximConfig($params['config']);
-            $system->exim()->rebuildEximConfig();
-        }
+        self::applyTestEmailConfig($system, $params['config'] ?? null);
 
         $result = $system->exim()->sendTestEmail($params['email']);
 
         return new JsonResponse([
             'data' => $result
         ]);
+    }
+
+    /**
+     * The address goes into the message's To: header, where a line break adds headers. It is checked
+     * as Exim::sendTestEmail() checks it, so a refusal is a 422, not that method's exception.
+     */
+    private const TEST_EMAIL_RULE = 'required|string|email:rfc,filter|max:254';
+
+    /** `config` is optional: without it the test email goes out through the settings already stored. */
+    private static function applyTestEmailConfig(System $system, mixed $config): void
+    {
+        if (is_array($config)) {
+            Setting::updateEximConfig($config);
+            $system->exim()->rebuildEximConfig();
+        }
     }
 
     public function updateNetworkConfig(Request $request): JsonResponse

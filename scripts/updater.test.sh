@@ -80,7 +80,7 @@ run() {
     mkdir -p "$TMP/run-$name" "$TMP/state-$name"
     rm -f "$TMP/args"
     PATH="$TMP/bin:$PATH" TMPDIR="$TMP/run-$name" FAKE_SITE="$TMP/site" FAKE_STATE="$TMP/state-$name" \
-        FAKE_ARGS="$TMP/args" bash "$SCRIPT_DIR/updater.sh" "$@" >/dev/null 2>&1
+        FAKE_ARGS="$TMP/args" bash "$SCRIPT_DIR/updater.sh" "$@" >/dev/null 2>"$TMP/stderr-$name"
 }
 left() { find "$TMP/run-$1" -mindepth 1 | wc -l; }
 
@@ -104,9 +104,31 @@ run planted -f --background
 check "a get.sh left in TMPDIR is not run" "absent" "$([[ -e "$TMP/planted-ran" ]] && echo ran || echo absent)"
 check "the downloaded installer ran instead" "--no-tui --background" "$(cat "$TMP/args" 2>/dev/null)"
 
+# The bootstrap's own fetch of get.sh would follow a redirect to plain http.
 FAKE_CURL_FAIL_ONCE=get.sh run nogetsh -f --background
-check "without get.sh beside it the bootstrap fetches its own" "0" "$?"
-check "and the update still runs" "--no-tui --background" "$(cat "$TMP/args" 2>/dev/null)"
+check "a failed get.sh download exits 1" "1" "$?"
+check "and runs no installer" "absent" "$([[ -e "$TMP/args" ]] && echo ran || echo absent)"
+check "and leaves nothing" "0" "$(left nogetsh)"
+
+for flag in --package-host --version; do
+    run "novalue$flag" -f "$flag"
+    check "$flag without a value exits 1" "1" "$?"
+    check "$flag without a value says so" "[ERROR] $flag requires a value" "$(cat "$TMP/stderr-novalue$flag")"
+    check "$flag without a value runs no installer" "absent" "$([[ -e "$TMP/args" ]] && echo ran || echo absent)"
+done
+
+run packagehost -f --package-host example.com --background
+check "--package-host with a value is accepted and dropped" "--no-tui --background" "$(cat "$TMP/args" 2>/dev/null)"
+
+# Every fetch refuses anything but https, a redirect included.
+cat >"$TMP/bin/curl" <<'EOF'
+#!/bin/bash
+[[ " $* " == *" --proto =https "* ]] || exit 1
+url=${!#}
+cp "$FAKE_SITE/${url##*/}" "${@: -2:1}"
+EOF
+run https -f --background
+check "every download is https-only" "--no-tui --background" "$(cat "$TMP/args" 2>/dev/null)"
 
 echo
 echo "$PASS passed, $FAIL failed"

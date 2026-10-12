@@ -83,6 +83,54 @@ class EximRebuildTest extends TestCase
         $this->assertStringNotContainsString('exec -T mail', $reloadCmd);
     }
 
+    /**
+     * passwd.client is plain text, not HTML: `{{ }}` used to escape the secret,
+     * so Exim sent `p&amp;ss&#039;1` and the smarthost rejected the login while
+     * the settings API reported success (engine#790).
+     */
+    public function test_a_password_with_html_specials_is_written_byte_for_byte(): void
+    {
+        $system = $this->recordingSystem();
+        $exim = $this->eximWithConfig($system, [
+            'smarthost_provider' => 'smtp',
+            'smtp_host' => 'smtp.example.net',
+            'smtp_port' => '587',
+            'smtp_username' => 'user&co',
+            'smtp_password' => "p&ss'1<>\"x",
+            'sender_domain' => 'mail.example.net',
+        ]);
+
+        $exim->rebuildEximConfig();
+
+        $passwd = file_get_contents($this->tmpRoot . '/config/exim/passwd.client');
+        $this->assertSame("*:user&co:p&ss'1<>\"x\n", $passwd);
+        $this->assertStringNotContainsString('&amp;', $passwd);
+        $this->assertStringNotContainsString('&#039;', $passwd);
+        $this->assertStringNotContainsString('&lt;', $passwd);
+        $this->assertStringNotContainsString('&gt;', $passwd);
+        $this->assertStringNotContainsString('&quot;', $passwd);
+    }
+
+    /** Docker leaves a directory where a bind-mounted file was missing; writing into it is not a rebuild. */
+    public function test_a_config_path_that_is_a_directory_fails_the_rebuild(): void
+    {
+        $system = $this->recordingSystem();
+        $exim = $this->eximWithConfig($system, ['sender_domain' => 'example.com']);
+        $path = $this->tmpRoot . '/config/exim/passwd.client';
+        mkdir($path);
+
+        $failure = null;
+        try {
+            $exim->rebuildEximConfig();
+        } catch (\RuntimeException $e) {
+            $failure = $e->getMessage();
+        }
+
+        $this->assertSame("Cannot write the Exim config {$path}: it is a directory, not a file.", $failure);
+        $this->assertSame(['.', '..'], scandir($path), 'nothing was written into the directory');
+        $this->assertNotContains('update-exim4.conf', $system->journal, 'the half-written config was not applied');
+    }
+
     public function test_rebuild_smtp_with_implicit_tls_sets_smarthost_and_transport(): void
     {
         $system = $this->recordingSystem();
@@ -316,7 +364,7 @@ class EximRebuildTest extends TestCase
         );
         file_put_contents(
             $dir . '/exim-passwd.blade.php',
-            "*:{{ \$username }}:{{ \$password }}\n"
+            "*:{!! \$username !!}:{!! \$password !!}\n"
         );
         file_put_contents(
             $dir . '/exim-rewrite.blade.php',
@@ -418,6 +466,12 @@ class EximRebuildTest extends TestCase
                         return $contents;
                     }
 
+                    public function directoryExists(string $path): bool
+                    {
+                        return is_dir($path);
+                    }
+
+                    /** Writes as `cp` does: into a directory found at the path. */
                     public function filePutContents(
                         string $path,
                         string $contents,
@@ -428,7 +482,7 @@ class EximRebuildTest extends TestCase
                         if (!is_dir($dir)) {
                             mkdir($dir, 0777, true);
                         }
-                        file_put_contents($path, $contents);
+                        file_put_contents(is_dir($path) ? $path . '/tmp_copy' : $path, $contents);
                     }
                 };
             }

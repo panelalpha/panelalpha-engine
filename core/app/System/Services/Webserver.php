@@ -212,6 +212,9 @@ class Webserver implements WebserverInterface
     }
 
     /**
+     * `started_at` is the mtime of `pid` -- the one file a run writes once, at
+     * its start; the `latest` symlink's own time moves whenever it is re-pointed.
+     *
      * @return ?array{
      *   started_at: ?int,
      *   finished_at: ?int,
@@ -252,7 +255,7 @@ class Webserver implements WebserverInterface
         }
 
         return [
-            'started_at' => $fs->mtime($latestLink),
+            'started_at' => $fs->mtime($pidFile),
             'finished_at' => $fs->mtime($exitCodeFile),
             'pid' => (is_numeric($pid) ? (int)$pid : null),
             'exit_code' => (is_numeric($exitCode) ? (int)$exitCode : null),

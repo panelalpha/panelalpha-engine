@@ -4,6 +4,7 @@ namespace App\Console\Commands\System;
 
 use App\System;
 use Illuminate\Console\Command;
+use Throwable;
 
 class RebuildEximConfig extends Command
 {
@@ -15,18 +16,25 @@ class RebuildEximConfig extends Command
 
     protected $description = 'Recreate configuration files for exim4 from database.';
 
+    /**
+     * Any failure leaves the listen/relay addresses stale, so it exits non-zero
+     * for the caller (bootstrap-from-source.sh) to see.
+     */
     public function handle(): int
     {
         try {
-            $system = new System();
+            $system = app(System::class);
             if ($this->option('networks')) {
                 $system->exim()->rebuildNetworks();
             } else {
                 $system->exim()->rebuildEximConfig();
             }
-        } catch (\Exception $e) {
+        } catch (Throwable $e) {
             $this->error($e->getMessage());
+
+            return self::FAILURE;
         }
-        return 0;
+
+        return self::SUCCESS;
     }
 }
