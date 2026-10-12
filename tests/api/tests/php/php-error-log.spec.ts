@@ -62,7 +62,7 @@ test.describe('PHP error log', () => {
       .toBe(true);
   });
 
-  test('a fresh project has no log file and answers the empty shape', async ({
+  test('a fresh project has an empty log file and answers the empty shape', async ({
     api,
     userFactory,
   }) => {
@@ -73,10 +73,10 @@ test.describe('PHP error log', () => {
       phpErrorLogResponseSchema
     ).data;
 
-    expect(log.file).toBeNull();
+    expect(log.file, 'the log is created empty for the account').toBe('php_error.log');
     expect(log.lines).toEqual([]);
     expect(log.size).toBe(0);
-    expect(log.mtime).toBeNull();
+    expect(log.mtime).not.toBeNull();
     expect(log.truncated).toBe(false);
   });
 
