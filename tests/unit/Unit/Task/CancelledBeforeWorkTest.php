@@ -3,15 +3,17 @@
 namespace Tests\Unit\Task;
 
 use App\Jobs\CreateStaging;
+use App\Jobs\PushState;
 use App\Models\Task;
 use App\Models\User;
+use App\System\Projects;
 use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
 
 /**
- * A staging copy marks its pending destination running before it is queued. A
- * task cancelled while queued runs no work, so the job itself must settle that
- * mark, or the destination stays pending and running for good.
+ * A push or staging copy marks its target running before it is queued. A task
+ * cancelled while queued runs no work, so the job itself must settle that mark,
+ * or the target stays busy for every later push, staging copy and delete.
  */
 class CancelledBeforeWorkTest extends TestCase
 {
@@ -24,6 +26,45 @@ class CancelledBeforeWorkTest extends TestCase
     {
         parent::setUp();
         $this->bootInMemoryDatabase();
+    }
+
+    public function test_a_push_cancelled_while_queued_leaves_its_target_idle(): void
+    {
+        [$from, $to] = $this->pushPair(['push' => 'running', 'source' => 'api']);
+        $task = $this->cancelledTask(PushState::class, $to->username);
+
+        (new PushState($from->username, $to->username))->attachTask($task)->handle();
+
+        $to->refresh();
+        $this->assertSame('failed', $to->asyncStatus()['push']);
+        $this->assertSame('api', $to->asyncStatus()['source']);
+        $this->assertSame(PushState::CANCELLED_BEFORE_START, $to->getDetails()['error']);
+        $this->assertSame(Task::STATUS_CANCELLED, $task->refresh()->status);
+        Projects::assertIdle($to);
+        $this->assertArrayNotHasKey('push', $from->refresh()->asyncStatus());
+    }
+
+    public function test_a_cancelled_push_leaves_a_target_no_longer_marked_running_alone(): void
+    {
+        [$from, $to] = $this->pushPair(['push' => 'completed']);
+        $task = $this->cancelledTask(PushState::class, $to->username);
+
+        (new PushState($from->username, $to->username))->attachTask($task)->handle();
+
+        $to->refresh();
+        $this->assertSame('completed', $to->asyncStatus()['push']);
+        $this->assertArrayNotHasKey('error', $to->getDetails());
+    }
+
+    public function test_a_cancelled_push_whose_target_is_gone_does_nothing(): void
+    {
+        [$from, $to] = $this->pushPair(['push' => 'running']);
+        $task = $this->cancelledTask(PushState::class, $to->username);
+        $to->delete();
+
+        (new PushState($from->username, $to->username))->attachTask($task)->handle();
+
+        $this->assertSame(Task::STATUS_CANCELLED, $task->refresh()->status);
     }
 
     public function test_a_staging_copy_cancelled_while_queued_removes_its_pending_destination(): void
@@ -62,6 +103,21 @@ class CancelledBeforeWorkTest extends TestCase
 
         $this->assertSame([], $this->destroyed);
     }
+
+    /**
+     * @param array<string, string> $async
+     * @return array{0: User, 1: User}
+     */
+    private function pushPair(array $async): array
+    {
+        $from = $this->makeUser('cancelpush-live', ['template' => 'dind']);
+        $to = $this->makeUser('cancelpush-stg', ['template' => 'dind', 'async_status' => $async]);
+        $to->staging = $from->id;
+        $to->save();
+
+        return [$from->refresh(), $to->refresh()];
+    }
+
     private function pendingStaging(string $status): User
     {
         $live = $this->makeUser('cancelstg-live', ['template' => 'dind']);

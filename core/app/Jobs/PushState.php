@@ -21,6 +21,8 @@ class PushState implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
+    public const string CANCELLED_BEFORE_START = 'Push cancelled before it started.';
+
     public int $tries = 1;
 
     public int $timeout = JobBudget::SECONDS;
@@ -59,6 +61,23 @@ class PushState implements ShouldQueue
         });
     }
 
+    /**
+     * Nothing was paused or copied yet: only the target's push flag, set when
+     * the push was accepted, is settled so the target is no longer busy.
+     */
+    protected function cancelledBeforeWork(): void
+    {
+        $to = User::findByUsername($this->toUsername);
+        if ($to !== null && $this->pushStillRunning($to)) {
+            $this->markPushFailed($to, self::CANCELLED_BEFORE_START);
+        }
+    }
+
+    private function pushStillRunning(User $to): bool
+    {
+        return ($to->asyncStatus()['push'] ?? null) === 'running';
+    }
+
     public function failed(\Throwable $e): void
     {
         $task = $this->task();
@@ -71,7 +90,7 @@ class PushState implements ShouldQueue
         $system = new System();
 
         if ($to !== null) {
-            $this->markPushFailed($to, $e);
+            $this->markPushFailed($to, $e->getMessage());
             $this->removeIncoming($system, $to);
         }
 
@@ -79,10 +98,10 @@ class PushState implements ShouldQueue
         $this->resumeAfterCopy($system, $to);
     }
 
-    private function markPushFailed(User $to, \Throwable $e): void
+    private function markPushFailed(User $to, string $error): void
     {
         $to->mergeAsyncStatus(['push' => 'failed']);
-        $to->setDetails(['error' => $e->getMessage()]);
+        $to->setDetails(['error' => $error]);
         $to->save();
     }
 
