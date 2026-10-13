@@ -22,6 +22,8 @@ class CreateStaging implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
+    public const string CANCELLED_BEFORE_START = 'Staging copy cancelled before it started.';
+
     public int $tries = 1;
 
     public int $timeout = JobBudget::SECONDS;
@@ -63,6 +65,21 @@ class CreateStaging implements ShouldQueue
     }
 
     /**
+     * The copy never began: the pending destination it was queued for is
+     * removed as after a failure, and nothing on the source was paused.
+     */
+    protected function cancelledBeforeWork(): void
+    {
+        $dest = $this->destination();
+        if ($dest === null || $dest->status !== 'pending') {
+            return;
+        }
+
+        $this->markStagingFailed($dest, self::CANCELLED_BEFORE_START);
+        $this->destroyDestination($dest);
+    }
+
+    /**
      * The task is marked first: it is the only trace of this failure that
      * outlives the destination's deletion below.
      */
@@ -78,15 +95,15 @@ class CreateStaging implements ShouldQueue
             return;
         }
 
-        $this->markStagingFailed($dest, $e);
+        $this->markStagingFailed($dest, $e->getMessage());
         $this->resumeSourceAfterCopy($dest);
         $this->destroyDestination($dest);
     }
 
-    private function markStagingFailed(User $dest, \Throwable $e): void
+    private function markStagingFailed(User $dest, string $error): void
     {
         try {
-            $dest->markStagingFailed($e->getMessage());
+            $dest->markStagingFailed($error);
         } catch (\Throwable $mark) {
             Log::error('Could not mark staging failed', ['dest' => $this->destUsername, 'exception' => $mark]);
         }
@@ -105,7 +122,7 @@ class CreateStaging implements ShouldQueue
         }
     }
 
-    private function destroyDestination(User $dest): void
+    protected function destroyDestination(User $dest): void
     {
         try {
             $dest->project()->destroy();
