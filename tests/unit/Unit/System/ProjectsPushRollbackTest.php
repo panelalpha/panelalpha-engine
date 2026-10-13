@@ -69,6 +69,51 @@ class ProjectsPushRollbackTest extends TestCase
         $this->pushFails($record, 'start exploded');
 
         $this->assertSame([['live_wp', $this->rollbackDir() . '/live_wp.sql.gz']], $record->restores);
+        $this->assertDirectoryDoesNotExist($this->rollbackDir());
+        $this->assertSame('start exploded', User::findByUsernameOrFail('live')->getDetails()['error'] ?? null);
+    }
+
+    public function test_a_failed_restore_keeps_the_rollback_dumps_and_says_so(): void
+    {
+        $record = $this->recorder(failStart: true, failRestore: true);
+        $this->stagingPair();
+
+        $e = $this->pushFails($record, 'start exploded');
+
+        $this->assertFileExists($this->rollbackDir() . '/live_wp.sql.gz');
+        $this->assertStringContainsString("failed: restoring database 'live_wp'", $e->getMessage());
+        $this->assertStringContainsString('kept in ' . $this->rollbackDir(), $e->getMessage());
+        $live = User::findByUsernameOrFail('live');
+        $this->assertSame('failed', $live->getDetails()['async_status']['push'] ?? null);
+        $this->assertSame($e->getMessage(), $live->getDetails()['error'] ?? null);
+    }
+
+    public function test_a_failed_table_restore_keeps_the_rollback_dumps_and_says_so(): void
+    {
+        $record = $this->recorder(failRestore: true, failCopyOf: 'wp_options');
+        $this->stagingPair();
+
+        $e = $this->pushFails($record, 'copy exploded', [
+            ['database' => 'stg_wp', 'name' => 'wp_posts'],
+            ['database' => 'stg_wp', 'name' => 'wp_options'],
+        ]);
+
+        $this->assertFileExists($this->rollbackDir() . '/live_wp.wp_posts.sql.gz');
+        $this->assertStringContainsString("restoring table 'live_wp.wp_posts'", $e->getMessage());
+        $this->assertStringContainsString('kept in ' . $this->rollbackDir(), $e->getMessage());
+    }
+
+    public function test_kept_rollback_dumps_refuse_the_next_push_and_stay(): void
+    {
+        $record = $this->recorder();
+        $this->stagingPair();
+        mkdir($this->rollbackDir());
+        file_put_contents($this->rollbackDir() . '/live_wp.sql.gz', 'only copy');
+
+        $this->pushFails($record, 'restore or remove them before pushing again');
+
+        $this->assertSame('only copy', file_get_contents($this->rollbackDir() . '/live_wp.sql.gz'));
+        $this->assertSame([], $record->scripts);
     }
 
     /**

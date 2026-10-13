@@ -2,6 +2,7 @@
 
 namespace App\System\Services\Mysql;
 
+use App\Exceptions\RollbackIncompleteException;
 use App\Lib\Deploy\Credentials\AppCredentials;
 use App\Models\MysqlDatabase;
 use App\Models\MysqlUser;
@@ -155,7 +156,8 @@ class DatabaseCopier
      * database. A target database the project does not own is created first.
      * The target's own copy of a replaced table is dumped before it is touched,
      * so a failure part way through restores what it already replaced, and a
-     * failure in a later stage restores the whole selection.
+     * failure in a later stage restores the whole selection. A restore that
+     * fails too surfaces as a RollbackIncompleteException naming what it left.
      *
      * @param list<array{database: string, name: string}> $tables
      */
@@ -179,13 +181,13 @@ class DatabaseCopier
                 $createdTables,
             );
         } catch (\Throwable $e) {
-            $this->restoreTables(new TableReplacement(
+            $failures = $this->restoreTables(new TableReplacement(
                 new DatabaseCopyResult(),
                 $rollbacks,
                 $createdDatabases,
                 $createdTables,
             ));
-            throw $e;
+            throw $failures === [] ? $e : new RollbackIncompleteException($e, $failures);
         }
 
         return new TableReplacement($result, $rollbacks, $createdDatabases, $createdTables);
@@ -228,12 +230,17 @@ class DatabaseCopier
         return new DatabaseCopyResult($databases, warnings: $warnings);
     }
 
-    public function restoreTables(TableReplacement $replacement): void
+    /**
+     * @return list<string> every step that could not be undone
+     */
+    public function restoreTables(TableReplacement $replacement): array
     {
+        $failures = [];
         foreach ($replacement->rollbacks as $entry) {
             try {
                 $this->mysql->restoreFromGzip($entry['database'], $entry['dump']);
             } catch (\Throwable $e) {
+                $failures[] = "restoring table '{$entry['database']}.{$entry['table']}'";
                 Log::warning(
                     "Push rollback failed for table '{$entry['database']}.{$entry['table']}': " . $e->getMessage()
                 );
@@ -244,6 +251,7 @@ class DatabaseCopier
             try {
                 $this->dropTable($entry['database'], $entry['table']);
             } catch (\Throwable $e) {
+                $failures[] = "dropping created table '{$entry['database']}.{$entry['table']}'";
                 Log::warning(
                     "Push cleanup failed for table '{$entry['database']}.{$entry['table']}': " . $e->getMessage()
                 );
@@ -256,9 +264,12 @@ class DatabaseCopier
                     $this->mysql->databases()->deleteDatabase($database);
                 }
             } catch (\Throwable $e) {
+                $failures[] = "dropping created database '{$database}'";
                 Log::warning("Push cleanup failed for database '{$database}': " . $e->getMessage());
             }
         }
+
+        return $failures;
     }
 
     /**

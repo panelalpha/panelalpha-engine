@@ -3,6 +3,7 @@
 namespace App\System;
 
 use App\Exceptions\ProblemException;
+use App\Exceptions\RollbackIncompleteException;
 use App\Lib\Deploy\DetectAppPort;
 use App\Models\Domain as DomainModel;
 use App\Models\MysqlDatabase;
@@ -15,6 +16,7 @@ use App\System\Services\Mysql;
 use App\System\Services\Mysql\DatabaseCopier;
 use App\System\Services\Mysql\DatabaseCopyResult;
 use App\System\Services\Mysql\DefinerMap;
+use App\System\Services\Mysql\TableReplacement;
 use App\System\Services\Mysql\Tables;
 use Illuminate\Support\Facades\Log;
 
@@ -75,11 +77,19 @@ class Projects
         $createdDatabases = [];
         $tableReplacement = null;
         $result = new DatabaseCopyResult();
+        $keptRollbacks = $this->pathExistsAsRoot($rollbackDir) || $this->pathIsSymlinkAsRoot($rollbackDir);
 
         try {
             if ($this->pathIsDirectoryAsRoot($prePushDir)) {
                 throw new \RuntimeException(
                     'Incomplete previous push (.pre-push present); refuse to continue.'
+                );
+            }
+
+            if ($keptRollbacks) {
+                throw new \RuntimeException(
+                    'A previous push left the target\'s database rollback dumps in .pre-push-db; '
+                    . 'restore or remove them before pushing again.'
                 );
             }
 
@@ -132,25 +142,54 @@ class Projects
 
             return $result;
         } catch (\Throwable $e) {
-            if ($tableReplacement !== null) {
-                $this->databaseCopier()->restoreTables($tableReplacement);
-            }
-            $this->restorePushDatabases($rollbacks, $createdDatabases, $to);
+            $unrestored = [
+                ...$this->restorePushTables($e, $tableReplacement),
+                ...$this->restorePushDatabases($rollbacks, $createdDatabases, $to),
+            ];
             $this->cleanupIncomingDir($incomingDir);
             $this->resumeBoth($fromProject, $toProject);
-            $this->cleanupPath($rollbackDir);
-
-            $details = $to->getDetails();
-            if (($details['async_status']['push'] ?? null) !== 'failed') {
-                $this->markPushFailed($to, $e->getMessage());
+            if ($unrestored === [] && !$keptRollbacks) {
+                $this->cleanupPath($rollbackDir);
             }
 
-            if ($e instanceof \RuntimeException) {
-                throw $e;
-            }
-
-            throw new \RuntimeException($e->getMessage(), 0, $e);
+            throw $this->failPush($to, $e, $unrestored, $rollbackDir);
         }
+    }
+
+    /**
+     * @return list<string> every step that could not be undone
+     */
+    private function restorePushTables(\Throwable $e, ?TableReplacement $replacement): array
+    {
+        if ($replacement !== null) {
+            return $this->databaseCopier()->restoreTables($replacement);
+        }
+
+        return $e instanceof RollbackIncompleteException ? $e->failures : [];
+    }
+
+    /**
+     * A push whose rollback failed keeps its dumps, and its error says where
+     * they are and what was not restored, so the target can be restored by hand.
+     *
+     * @param list<string> $unrestored
+     */
+    private function failPush(ModelsUser $to, \Throwable $e, array $unrestored, string $rollbackDir): \RuntimeException
+    {
+        if ($unrestored !== []) {
+            $error = $e->getMessage() . ' The target was not fully restored (failed: ' . implode(', ', $unrestored)
+                . "); its rollback dumps are kept in {$rollbackDir}.";
+            $this->markPushFailed($to, $error);
+
+            return new \RuntimeException($error, 0, $e);
+        }
+
+        $details = $to->getDetails();
+        if (($details['async_status']['push'] ?? null) !== 'failed') {
+            $this->markPushFailed($to, $e->getMessage());
+        }
+
+        return $e instanceof \RuntimeException ? $e : new \RuntimeException($e->getMessage(), 0, $e);
     }
 
     /**
@@ -205,14 +244,17 @@ class Projects
     /**
      * @param array<string, string> $rollbacks
      * @param list<string>          $created
+     * @return list<string> every step that could not be undone
      */
-    private function restorePushDatabases(array $rollbacks, array $created, ModelsUser $to): void
+    private function restorePushDatabases(array $rollbacks, array $created, ModelsUser $to): array
     {
         $mysql = $this->system->mysql();
+        $failures = [];
         foreach ($rollbacks as $database => $dump) {
             try {
                 $mysql->restoreFromGzip($database, $dump);
             } catch (\Throwable $e) {
+                $failures[] = "restoring database '{$database}'";
                 Log::warning("Push rollback failed for database '{$database}': " . $e->getMessage());
             }
         }
@@ -224,9 +266,12 @@ class Projects
                 }
                 $to->mysqlDatabases()->where('database', $database)->delete();
             } catch (\Throwable $e) {
+                $failures[] = "dropping created database '{$database}'";
                 Log::warning("Push cleanup failed for database '{$database}': " . $e->getMessage());
             }
         }
+
+        return $failures;
     }
 
     private function startTargetAfterPush(ModelsUser $to, Project $toProject): void

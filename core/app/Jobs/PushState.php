@@ -109,7 +109,7 @@ class PushState implements ShouldQueue
     {
         try {
             $home = rtrim($system->project($to)->homeDirPath(), '/');
-            $system->runProcess(['sudo', 'rm', '-rf', $home . '/.incoming', $home . '/.pre-push-db']);
+            $system->runProcess(['sudo', 'rm', '-rf', $home . '/.incoming']);
         } catch (\Throwable $cleanup) {
             Log::warning('PushState failed cleanup could not remove .incoming', [
                 'target'    => $this->toUsername,
