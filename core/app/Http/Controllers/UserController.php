@@ -1284,6 +1284,9 @@ class UserController extends Controller
     #[OA\Put(
         path: '/projects/{username}',
         summary: 'Update a project',
+        description: 'A token limited to some projects may change `domain` and `email` only. The resource '
+            . 'limits and the PHP-FPM, LSPHP and Redis settings are the operator\'s: sending any of them '
+            . 'with such a token is refused with 403, naming the fields.',
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -1307,6 +1310,7 @@ class UserController extends Controller
         )),
         responses: [
             new OA\Response(response: 200, description: 'Updated project', content: new OA\JsonContent(ref: '#/components/schemas/User')),
+            new OA\Response(response: 403, description: ApiDefinitions::OPERATOR_ONLY_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 409, description: ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error; domain_taken when the domain is already on this engine', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
@@ -1399,11 +1403,13 @@ class UserController extends Controller
     #[OA\Put(
         path: '/projects/{username}/suspend',
         summary: 'Suspend a project',
+        description: 'Only an unscoped token may call this: a token limited to some projects is refused with 403, even on its own project.',
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
         responses: [
             new OA\Response(response: 200, description: 'Project suspended', content: new OA\JsonContent(ref: '#/components/schemas/User')),
+            new OA\Response(response: 403, description: ApiDefinitions::OPERATOR_ONLY_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 409, description: ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
         ],
@@ -1441,11 +1447,13 @@ class UserController extends Controller
     #[OA\Put(
         path: '/projects/{username}/unsuspend',
         summary: 'Unsuspend a project',
+        description: 'Only an unscoped token may call this: a token limited to some projects is refused with 403, even on its own project.',
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
         responses: [
             new OA\Response(response: 200, description: 'Project unsuspended', content: new OA\JsonContent(ref: '#/components/schemas/User')),
+            new OA\Response(response: 403, description: ApiDefinitions::OPERATOR_ONLY_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]

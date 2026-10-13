@@ -2,6 +2,7 @@
 
 namespace App\Auth;
 
+use App\Lib\Limits\ResourceLimit;
 use App\Mcp\ToolPolicy;
 use App\Mcp\Tools\Api\ApiTool;
 use App\Models\PersonalAccessToken;
@@ -56,6 +57,21 @@ class TokenAbilities
         'GET /system/info',
         'POST /source/inspect',
     ];
+
+    /**
+     * Operations on a project that are the operator's, not the project's: a
+     * project-scoped token reaches its project, never these.
+     */
+    private const OPERATOR_ROUTES = [
+        'PUT /projects/{username}/suspend',
+        'PUT /projects/{username}/unsuspend',
+    ];
+
+    /** The project update, whose limits and runtime sizing are the operator's. */
+    private const PROJECT_UPDATE = 'PUT /projects/{username}';
+
+    /** The runtime sizing the project update takes beside the resource limits. */
+    private const RUNTIME_SIZING = ['php_fpm_pool_settings', 'lsphp_settings', 'redis_config'];
 
     /** Hand-written tools that answer a project list and are filtered in their own class. */
     private const PROJECT_SCOPE_TOOLS = ['project_list_summary'];
@@ -204,9 +220,9 @@ class TokenAbilities
     }
 
     /**
-     * Whether a route whose project cannot be read off its own parameters is
-     * reachable at all. A `{username}` or `{domain}` route is decided per call
-     * instead, so this is only asked of the rest.
+     * Whether an operation is reachable at all. Which project a `{username}`
+     * or `{domain}` route reaches is decided per call instead; here it is
+     * refused only when it is the operator's.
      */
     public function mayReachRoute(?string $operation): bool
     {
@@ -215,9 +231,38 @@ class TokenAbilities
         }
 
         return $operation !== null
+            && $this->mayCallOperatorRoute($operation)
             && (str_contains($operation, '{username}')
                 || str_contains($operation, '{domain}')
                 || in_array($operation, self::PROJECT_SCOPE_ROUTES, true));
+    }
+
+    /** Whether this token may call an operation the operator owns. Only an unscoped one may. */
+    public function mayCallOperatorRoute(?string $operation): bool
+    {
+        return !$this->isProjectScoped() || !in_array($operation, self::OPERATOR_ROUTES, true);
+    }
+
+    /**
+     * The fields among those a request sends that are the operator's and this
+     * token may not set. None for an unscoped token.
+     *
+     * @param array<int, int|string> $sent
+     * @return list<string>
+     */
+    public function operatorFields(?string $operation, array $sent): array
+    {
+        if (!$this->isProjectScoped() || $operation !== self::PROJECT_UPDATE) {
+            return [];
+        }
+
+        return array_values(array_intersect(self::operatorOwnedUpdateFields(), $sent));
+    }
+
+    /** @return list<string> */
+    private static function operatorOwnedUpdateFields(): array
+    {
+        return [...ResourceLimit::keys(), ...self::RUNTIME_SIZING];
     }
 
     /** A named operation implies the surface it is named on. */

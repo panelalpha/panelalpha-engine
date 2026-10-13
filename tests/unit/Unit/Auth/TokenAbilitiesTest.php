@@ -3,6 +3,7 @@
 namespace Tests\Unit\Auth;
 
 use App\Auth\TokenAbilities;
+use App\Lib\Limits\ResourceLimit;
 use App\Mcp\Servers\EngineServer;
 use App\Mcp\ToolPolicy;
 use App\Mcp\ToolRegistry;
@@ -205,6 +206,52 @@ class TokenAbilitiesTest extends TestCase
         $this->assertTrue($abilities->mayReachRoute('GET /tasks/{id}'));
         $this->assertFalse($abilities->mayReachRoute('GET /firewall/status'));
         $this->assertFalse($abilities->mayReachRoute('POST /projects'));
+    }
+
+    /** Suspending is the operator's, so a scoped assistant is not even offered it. */
+    public function test_a_project_scope_hides_the_operators_project_tools(): void
+    {
+        $names = $this->toolNamesOf(TokenAbilities::build(api: false, mcp: true, projects: ['alice']));
+
+        $this->assertNotContains('project_suspend', $names);
+        $this->assertNotContains('project_unsuspend', $names);
+        $this->assertContains('project_update', $names);
+    }
+
+    public function test_only_an_unscoped_token_may_call_the_operators_routes(): void
+    {
+        $scoped = TokenAbilities::fromList(TokenAbilities::build(api: true, mcp: true, projects: ['alice']));
+        $unscoped = TokenAbilities::fromList(TokenAbilities::build(api: true, mcp: true));
+
+        foreach (['PUT /projects/{username}/suspend', 'PUT /projects/{username}/unsuspend'] as $operation) {
+            $this->assertFalse($scoped->mayCallOperatorRoute($operation), $operation);
+            $this->assertFalse($scoped->mayReachRoute($operation), $operation);
+            $this->assertTrue($unscoped->mayCallOperatorRoute($operation), $operation);
+            $this->assertTrue($unscoped->mayReachRoute($operation), $operation);
+        }
+
+        $this->assertTrue($scoped->mayCallOperatorRoute('PUT /projects/{username}'));
+    }
+
+    /** Every resource limit the update takes, and the runtime sizing beside them. */
+    public function test_a_scoped_token_may_not_set_the_operators_fields(): void
+    {
+        $scoped = TokenAbilities::fromList(TokenAbilities::build(api: true, mcp: false, projects: ['alice']));
+        $owned = [...ResourceLimit::keys(), 'php_fpm_pool_settings', 'lsphp_settings', 'redis_config'];
+
+        $this->assertSame($owned, $scoped->operatorFields('PUT /projects/{username}', [...$owned, 'email', 'domain']));
+        $this->assertSame([], $scoped->operatorFields('PUT /projects/{username}', ['email', 'domain']));
+        $this->assertSame([], $scoped->operatorFields('POST /projects/{username}/rebuild', ['memory_limit']));
+    }
+
+    public function test_an_unscoped_token_may_set_every_field(): void
+    {
+        foreach ([TokenAbilities::build(api: true, mcp: false), ['*']] as $abilities) {
+            $this->assertSame(
+                [],
+                TokenAbilities::fromList($abilities)->operatorFields('PUT /projects/{username}', ResourceLimit::keys())
+            );
+        }
     }
 
     /** @param array<int, string> $abilities */

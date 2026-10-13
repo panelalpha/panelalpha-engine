@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('project_update')]
 #[Description(<<<'MARKDOWN'
     Update a project
+
+    A token limited to some projects may change `domain` and `email` only. The resource limits and the PHP-FPM, LSPHP and Redis settings are the operator's: sending any of them with such a token is refused with 403, naming the fields.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

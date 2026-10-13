@@ -326,6 +326,95 @@ class EnsureTokenMayUseApiTest extends TestCase
         $this->assertSame(200, $this->through($abilities, route: ['POST', 'api/source/inspect'], body: ['source' => 'bob', 'type' => 'project']));
     }
 
+    /** Suspension is the operator's lever on a project, so its own app may not pull it. */
+    public function test_a_scoped_token_may_not_suspend_or_unsuspend_its_own_project(): void
+    {
+        $abilities = TokenAbilities::build(api: true, mcp: false, projects: ['alice']);
+
+        foreach (['suspend', 'unsuspend'] as $action) {
+            $response = $this->dispatched(
+                $abilities,
+                route: ['PUT', 'api/projects/{username}/' . $action],
+                params: ['username' => 'alice'],
+            );
+
+            $this->assertSame(403, $response->getStatusCode(), $action);
+            $this->assertSame(
+                'This token is limited to projects alice; only an unscoped token may call PUT /projects/{username}/' . $action . '.',
+                $response->getData(true)['error'],
+            );
+        }
+    }
+
+    public function test_a_scoped_token_may_still_update_what_its_project_owns(): void
+    {
+        $abilities = TokenAbilities::build(api: true, mcp: false, projects: ['alice']);
+
+        $this->assertSame(200, $this->through(
+            $abilities,
+            route: ['PUT', 'api/projects/{username}'],
+            params: ['username' => 'alice'],
+            body: ['email' => 'alice@example.test', 'domain' => 'alice.example.test'],
+        ));
+    }
+
+    /** A limit cleared with null is as much a change as a raised one. */
+    public function test_a_scoped_token_may_not_change_its_projects_limits(): void
+    {
+        $abilities = TokenAbilities::build(api: true, mcp: false, projects: ['alice']);
+
+        $response = $this->dispatched(
+            $abilities,
+            route: ['PUT', 'api/projects/{username}'],
+            params: ['username' => 'alice'],
+            body: ['email' => 'alice@example.test', 'disk_space_limit' => -1, 'cpu_limit' => null, 'redis_config' => 'maxmemory 4gb'],
+        );
+
+        $this->assertSame(403, $response->getStatusCode());
+        $this->assertSame(
+            'This token is limited to projects alice; only an unscoped token may change '
+                . 'disk_space_limit, cpu_limit, redis_config on PUT /projects/{username}.',
+            $response->getData(true)['error'],
+        );
+    }
+
+    public function test_the_operators_fields_are_refused_on_a_tool_call(): void
+    {
+        $abilities = TokenAbilities::build(api: false, mcp: true, projects: ['alice']);
+
+        $this->assertSame(403, $this->through(
+            $abilities,
+            internal: true,
+            route: ['PUT', 'api/projects/{username}'],
+            params: ['username' => 'alice'],
+            body: ['memory_limit' => 8192],
+        ));
+
+        $this->assertSame(403, $this->through(
+            $abilities,
+            internal: true,
+            route: ['PUT', 'api/projects/{username}/unsuspend'],
+            params: ['username' => 'alice'],
+        ));
+    }
+
+    public function test_an_unscoped_token_may_change_limits_and_suspend(): void
+    {
+        foreach ([TokenAbilities::build(api: true, mcp: false), ['*']] as $abilities) {
+            $this->assertSame(200, $this->through(
+                $abilities,
+                route: ['PUT', 'api/projects/{username}'],
+                params: ['username' => 'bob'],
+                body: ['disk_space_limit' => -1, 'php_fpm_pool_settings' => 'pm = static'],
+            ));
+            $this->assertSame(200, $this->through(
+                $abilities,
+                route: ['PUT', 'api/projects/{username}/unsuspend'],
+                params: ['username' => 'bob'],
+            ));
+        }
+    }
+
     public function test_an_unscoped_token_is_not_project_refused(): void
     {
         $abilities = TokenAbilities::build(api: true, mcp: false);
@@ -342,7 +431,7 @@ class EnsureTokenMayUseApiTest extends TestCase
      * @param array<int, string>               $abilities
      * @param array{0: string, 1: string}|null $route the verb and URI Laravel matched
      * @param array<string, string>            $params
-     * @param array<string, string>            $body
+     * @param array<string, mixed>             $body
      */
     private function through(
         array $abilities,
@@ -358,7 +447,7 @@ class EnsureTokenMayUseApiTest extends TestCase
      * @param array<int, string>               $abilities
      * @param array{0: string, 1: string}|null $route the verb and URI Laravel matched
      * @param array<string, string>            $params
-     * @param array<string, string>            $body
+     * @param array<string, mixed>             $body
      */
     private function dispatched(
         array $abilities,

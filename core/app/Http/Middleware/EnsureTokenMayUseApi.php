@@ -86,7 +86,34 @@ class EnsureTokenMayUseApi
 
         return $this->routeProjectRefusal($request, $scope, $operation)
             ?? $this->namedProjectRefusal($request, $scope, $operation)
+            ?? $this->operatorRefusal($request, $abilities, $scope, $operation)
             ?? $this->globalProjectRefusal($abilities, $scope, $operation);
+    }
+
+    /**
+     * What the operator owns on a project in scope: an operation a scoped
+     * token may not call, or the fields of one it may not set.
+     *
+     * @param array<int, string> $scope
+     */
+    private function operatorRefusal(Request $request, TokenAbilities $abilities, array $scope, ?string $operation): ?string
+    {
+        if (!$abilities->mayCallOperatorRoute($operation)) {
+            return sprintf(
+                'This token is limited to projects %s; only an unscoped token may call %s.',
+                implode(', ', $scope),
+                $operation
+            );
+        }
+
+        $fields = $abilities->operatorFields($operation, array_keys($request->all()));
+
+        return $fields === [] ? null : sprintf(
+            'This token is limited to projects %s; only an unscoped token may change %s on %s.',
+            implode(', ', $scope),
+            implode(', ', $fields),
+            $operation
+        );
     }
 
     /**
