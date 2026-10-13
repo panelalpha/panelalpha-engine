@@ -72,6 +72,12 @@ class DeployFailureExplainer
         return mb_strlen($line) > 320 ? rtrim(mb_substr($line, 0, 320)) . '…' : $line;
     }
 
+    /** A quote ends with a full stop unless it already ends a sentence or was clipped. */
+    private static function sentence(string $quote): string
+    {
+        return preg_match('/[.!?…]$/u', $quote) === 1 ? $quote : $quote . '.';
+    }
+
     /** The line git explained itself in, or the first one when it did not. */
     private static function gitFailureLine(string $output, string $first): string
     {
@@ -312,10 +318,14 @@ class DeployFailureExplainer
             // ({@see DependencyFailure}). Early for the same reason: the quote is another
             // program's output, which rules below could otherwise match.
             'dependency-failed' => [
-                '/^' . preg_quote(DependencyFailure::PREFIX, '/') . '(\S+) did not start \(([^)]*)\)(?:: ([^\n]*))?/m',
+                '/^' . preg_quote(DependencyFailure::PREFIX, '/') . '(\S+) did not start \(([^)]*)\)(?: \[health check: ([^\]\n]*)\])?(?:: ([^\n]*))?/m',
                 static function (array $m): string {
-                    $said = trim($m[3] ?? '');
+                    $probe = trim($m[3] ?? '');
+                    $said = trim($m[4] ?? '');
                     $sentence = "The service {$m[1]} did not start ({$m[2]}), so the application was not started either.";
+                    if ($probe !== '') {
+                        $sentence .= ' Its health check said: ' . self::sentence(self::clip($probe));
+                    }
 
                     return $said === ''
                         ? $sentence . ' The full output is in the deploy log.'

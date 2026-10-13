@@ -115,4 +115,67 @@ class DependencyFailureTest extends TestCase
 
         $this->assertSame('dependency-failed', DeployFailureExplainer::match($stderr)['rule']);
     }
+
+    /** MySQL that started fine but refuses the probe's login: its output has no error line. */
+    private const MYSQL_LOGS = <<<'TXT'
+        2026-10-13T15:36:12.101Z 1 [System] [MY-013577] [InnoDB] InnoDB initialization has ended.
+        2026-10-13T15:36:12.300Z 0 [Warning] [MY-010068] [Server] CA certificate ca.pem is self signed.
+        2026-10-13T15:36:12.301Z 0 [System] [MY-013602] [Server] Channel mysql_main configured to support TLS.
+        2026-10-13T15:36:12.320Z 0 [System] [MY-010931] [Server] /usr/sbin/mysqld: ready for connections. Version: '8.0.46'  socket: '/var/run/mysqld/mysqld.sock'  port: 3306
+        TXT;
+
+    /** `docker inspect --format '{{json .State.Health}}'` of that container. */
+    private const MYSQL_HEALTH = '{"Status":"unhealthy","FailingStreak":30,"Log":['
+        . '{"Start":"2026-10-13T15:39:30Z","End":"2026-10-13T15:39:30Z","ExitCode":0,"Output":""},'
+        . '{"Start":"2026-10-13T15:39:35Z","End":"2026-10-13T15:39:35Z","ExitCode":1,'
+        . '"Output":"ERROR 1045 (28000): Access denied for user \'wordpress\'@\'localhost\' (using password: YES)\n"}]}';
+
+    public function test_the_newest_failing_probe_is_quoted(): void
+    {
+        $this->assertSame(
+            "ERROR 1045 (28000): Access denied for user 'wordpress'@'localhost' (using password: YES)",
+            DependencyFailure::probe(self::MYSQL_HEALTH)
+        );
+    }
+
+    public function test_a_probe_that_timed_out_is_quoted_too(): void
+    {
+        $this->assertSame(
+            'Health check exceeded timeout (5s)',
+            DependencyFailure::probe('{"Status":"unhealthy","Log":[{"ExitCode":-1,"Output":"Health check exceeded timeout (5s)"}]}')
+        );
+    }
+
+    public function test_no_health_log_quotes_nothing(): void
+    {
+        $this->assertSame('', DependencyFailure::probe(''));
+        $this->assertSame('', DependencyFailure::probe('null'));
+        $this->assertSame('', DependencyFailure::probe('{"Status":"healthy","Log":[{"ExitCode":0,"Output":"ok"}]}'));
+    }
+
+    /** The message names the probe's refusal, not only the healthy-looking startup lines. */
+    public function test_an_unhealthy_dependency_leads_with_what_its_health_check_said(): void
+    {
+        $line = DependencyFailure::describe(
+            'project-db-1',
+            'unhealthy',
+            DependencyFailure::cause(self::MYSQL_LOGS),
+            DependencyFailure::probe(self::MYSQL_HEALTH),
+        );
+        $stderr = $line . "\ndependency failed to start: container project-db-1 is unhealthy";
+
+        $message = (string) DeployFailureExplainer::explain(FailureOutput::select($stderr));
+
+        $this->assertStringContainsString('The service project-db-1 did not start (unhealthy)', $message);
+        $this->assertStringContainsString("Its health check said: ERROR 1045 (28000): Access denied for user 'wordpress'@'localhost' (using password: YES). It printed: ", $message);
+        $this->assertStringContainsString('It printed: ', $message);
+        $this->assertSame('dependency-failed', DeployFailureExplainer::match($stderr)['rule']);
+    }
+
+    public function test_a_bracket_in_the_probe_output_cannot_end_its_quote_early(): void
+    {
+        $line = DependencyFailure::describe('project-db-1', 'unhealthy', 'started', 'failed [code 2] here');
+
+        $this->assertSame('error: service project-db-1 did not start (unhealthy) [health check: failed [code 2) here]: started', $line);
+    }
 }

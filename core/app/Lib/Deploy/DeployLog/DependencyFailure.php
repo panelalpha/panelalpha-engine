@@ -86,14 +86,44 @@ final class DependencyFailure
     }
 
     /**
-     * The line that leads the failure output for one failed dependency: its
-     * name and state, then what it printed, folded onto the one line.
+     * What the newest failing health probe printed, from `docker inspect` of
+     * `.State.Health` as JSON: the reason an unhealthy service gives, which its
+     * own output often lacks (a database that started fine but refuses the
+     * probe's login). Empty when there is no failing probe to quote.
      */
-    public static function describe(string $name, string $state, string $cause): string
+    public static function probe(string $healthJson): string
     {
-        $cause = trim((string) preg_replace('/\s+/', ' ', $cause));
+        $health = json_decode($healthJson, true);
+        $log = is_array($health) && is_array($health['Log'] ?? null) ? $health['Log'] : [];
+        foreach (array_reverse($log) as $entry) {
+            $output = is_array($entry) ? trim((string) ($entry['Output'] ?? '')) : '';
+            if (($entry['ExitCode'] ?? 0) !== 0 && $output !== '') {
+                return implode("\n", array_slice(preg_split('/\R/', $output) ?: [], 0, self::CAUSE_LINES));
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * The line that leads the failure output for one failed dependency: its
+     * name and state, what its health check said, then what it printed,
+     * folded onto the one line.
+     */
+    public static function describe(string $name, string $state, string $cause, string $probe = ''): string
+    {
+        $cause = self::oneLine($cause);
+        $probe = str_replace(']', ')', self::oneLine($probe));
         $head = self::PREFIX . "{$name} did not start ({$state})";
+        if ($probe !== '') {
+            $head .= " [health check: {$probe}]";
+        }
 
         return $cause === '' ? $head : $head . ': ' . $cause;
+    }
+
+    private static function oneLine(string $text): string
+    {
+        return trim((string) preg_replace('/\s+/', ' ', $text));
     }
 }

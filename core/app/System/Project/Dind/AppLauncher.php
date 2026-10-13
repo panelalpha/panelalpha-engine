@@ -841,7 +841,8 @@ final class AppLauncher
         $described = [];
         foreach (DependencyFailure::failed($composeOutput) as $failed) {
             $logs = $this->failedDependencyLogs($failed['kind'], $failed['name']);
-            $line = DependencyFailure::describe($failed['name'], $failed['state'], DependencyFailure::cause($logs));
+            $probe = $failed['state'] === 'unhealthy' ? DependencyFailure::probe($this->failedDependencyHealth($failed['name'])) : '';
+            $line = DependencyFailure::describe($failed['name'], $failed['state'], DependencyFailure::cause($logs), $probe);
             $shell->logger()?->info($line);
             $described[] = $line;
         }
@@ -857,6 +858,20 @@ final class AppLauncher
             : $this->project->userAppComposeCommand(['logs', '--tail=' . self::FAILURE_LOG_LINES, '--no-color', $name]);
         try {
             return $this->project->shell()->execAsUserQuiet(array_merge(['sh', '-c', '"$@" 2>&1', 'sh'], $command), [], self::FAILURE_LOG_TIMEOUT_SECONDS);
+        } catch (\Throwable) {
+            return '';
+        }
+    }
+
+    /** The container's `.State.Health` as JSON; empty when it could not be read. */
+    private function failedDependencyHealth(string $container): string
+    {
+        try {
+            return $this->project->shell()->execAsUserQuiet(
+                ['docker', 'inspect', '--format', '{{json .State.Health}}', $container],
+                [],
+                self::FAILURE_LOG_TIMEOUT_SECONDS,
+            );
         } catch (\Throwable) {
             return '';
         }
