@@ -84,6 +84,77 @@ class DatabaseRenamerTest extends TestCase
         $this->assertSame('shop_old', $row->fresh()->database);
     }
 
+    public function test_a_grant_failure_after_a_table_move_moves_the_tables_back_before_the_drop(): void
+    {
+        $record = $this->recorder(
+            tables: ['posts', 'users'],
+            privileges: ['shop_old' => 'ALL PRIVILEGES'],
+            failGrantOn: 'shop_new',
+        );
+        [$user, $row] = $this->projectWithDatabase('shop', 'shop_old', 'shop_user');
+
+        try {
+            $this->renamer($record)->rename($user, $row, 'shop_new');
+            $this->fail('the grant should have failed');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('grant exploded', $e->getMessage());
+        }
+
+        $this->assertSame([
+            ['shop_old', 'shop_new', ['posts', 'users']],
+            ['shop_new', 'shop_old', ['posts', 'users']],
+        ], $record->renamed);
+        $this->assertSame(['rename', 'rename', 'drop shop_new'], $record->order);
+        $this->assertSame(['shop_new'], $record->deleted);
+        $this->assertSame([['shop_user', 'shop_old', 'ALL PRIVILEGES']], $record->grants);
+        $this->assertSame('shop_old', $row->fresh()->database);
+    }
+
+    public function test_tables_that_cannot_move_back_are_kept_in_the_new_database(): void
+    {
+        $record = $this->recorder(
+            tables: ['posts'],
+            privileges: ['shop_old' => 'ALL PRIVILEGES'],
+            failGrantOn: 'shop_new',
+            failRenameBack: true,
+        );
+        [$user, $row] = $this->projectWithDatabase('shop', 'shop_old', 'shop_user');
+
+        try {
+            $this->renamer($record)->rename($user, $row, 'shop_new');
+            $this->fail('the grant should have failed');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('grant exploded', $e->getMessage());
+            $this->assertStringContainsString("are kept in 'shop_new'", $e->getMessage());
+        }
+
+        $this->assertSame([], $record->deleted);
+        $this->assertSame([['shop_user', 'shop_old', 'ALL PRIVILEGES']], $record->grants);
+        $this->assertSame('shop_old', $row->fresh()->database);
+    }
+
+    public function test_a_grant_failure_after_a_dump_copy_drops_the_copy(): void
+    {
+        $record = $this->recorder(
+            tables: ['posts'],
+            beyondTables: true,
+            privileges: ['shop_old' => 'ALL PRIVILEGES'],
+            failGrantOn: 'shop_new',
+        );
+        [$user, $row] = $this->projectWithDatabase('shop', 'shop_old', 'shop_user');
+
+        try {
+            $this->renamer($record)->rename($user, $row, 'shop_new');
+            $this->fail('the grant should have failed');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('grant exploded', $e->getMessage());
+        }
+
+        $this->assertSame([], $record->renamed);
+        $this->assertSame(['shop_new'], $record->deleted);
+        $this->assertSame('shop_old', $row->fresh()->database);
+    }
+
     public function test_an_existing_destination_is_refused_untouched(): void
     {
         $record = $this->recorder(exists: ['shop_new'], privileges: ['shop_old' => 'ALL PRIVILEGES']);
@@ -125,20 +196,25 @@ class DatabaseRenamerTest extends TestCase
         array $privileges = [],
         bool $beyondTables = false,
         bool $failStream = false,
+        ?string $failGrantOn = null,
+        bool $failRenameBack = false,
     ): object {
         return (object) [
-            'tables'       => $tables,
-            'exists'       => $exists,
-            'privileges'   => $privileges,
-            'beyondTables' => $beyondTables,
-            'failStream'   => $failStream,
-            'created'      => [],
-            'deleted'      => [],
-            'renamed'      => [],
-            'copies'       => [],
-            'scripts'      => [],
-            'grants'       => [],
-            'revokes'      => [],
+            'tables'         => $tables,
+            'exists'         => $exists,
+            'privileges'     => $privileges,
+            'beyondTables'   => $beyondTables,
+            'failStream'     => $failStream,
+            'failGrantOn'    => $failGrantOn,
+            'failRenameBack' => $failRenameBack,
+            'order'          => [],
+            'created'        => [],
+            'deleted'        => [],
+            'renamed'        => [],
+            'copies'         => [],
+            'scripts'        => [],
+            'grants'         => [],
+            'revokes'        => [],
         ];
     }
 
@@ -180,6 +256,7 @@ class DatabaseRenamerTest extends TestCase
                     public function deleteDatabase(string $name): void
                     {
                         $this->record->deleted[] = $name;
+                        $this->record->order[] = 'drop ' . $name;
                     }
 
                     public function tables(string $name): array
@@ -197,7 +274,12 @@ class DatabaseRenamerTest extends TestCase
                      */
                     public function renameTables(string $from, string $to, array $tables): void
                     {
+                        if ($this->record->failRenameBack && $this->record->renamed !== []) {
+                            throw new \RuntimeException('rename back exploded');
+                        }
+
                         $this->record->renamed[] = [$from, $to, $tables];
+                        $this->record->order[] = 'rename';
                     }
                 };
             }
@@ -219,6 +301,10 @@ class DatabaseRenamerTest extends TestCase
 
                     public function updatePrivileges(string $user, string $database, string $privileges): void
                     {
+                        if ($database === $this->record->failGrantOn) {
+                            throw new \RuntimeException('grant exploded');
+                        }
+
                         $this->record->grants[] = [$user, $database, $privileges];
                     }
 
