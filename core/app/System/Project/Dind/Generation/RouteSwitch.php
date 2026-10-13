@@ -169,6 +169,9 @@ final class RouteSwitch
      * A rule named after a domain lives in its vhost; any other is written by
      * the full rebuild, which also keeps the firewall open for its port.
      *
+     * A vhost-only change cannot move a listener, so it never restarts the webserver;
+     * the full rebuild can, so it keeps the reload with its restart fallback.
+     *
      * @param list<ProxyRule> $rules
      */
     private function render(array $rules): void
@@ -184,9 +187,10 @@ final class RouteSwitch
             foreach (self::domainsOf($live) as $domain) {
                 $webserver->rebuildDomainConfig($domain);
             }
-        } else {
-            $webserver->rebuildConfig();
+            $webserver->reloadRouting();
+            return;
         }
+        $webserver->rebuildConfig();
         $webserver->reload(false);
     }
 

@@ -88,6 +88,53 @@ class NginxProxyReloadAppliedTest extends TestCase
         Log::shouldHaveReceived('error')->once();
     }
 
+    /**
+     * A routing reload never restarts the webserver, whatever the listener check says.
+     */
+    public function test_a_routing_reload_never_restarts_the_container(): void
+    {
+        Log::spy();
+        $host = $this->host(self::WILDCARD, self::WILDCARD);
+
+        $this->proxy($host)->reloadRouting();
+
+        $this->assertSame(0, $host->restarts);
+        $this->assertSame([], $host->queued);
+        Log::shouldHaveReceived('warning')->once();
+    }
+
+    public function test_a_routing_reload_that_applied_logs_nothing(): void
+    {
+        Log::spy();
+        $host = $this->host(self::BOUND, self::BOUND);
+
+        $this->proxy($host)->reloadRouting();
+
+        $this->assertSame(0, $host->restarts);
+        Log::shouldNotHaveReceived('warning');
+        Log::shouldNotHaveReceived('error');
+    }
+
+    /**
+     * sites-http runs on the host's network: /proc/net/tcp is the whole host's
+     * table, so listeners this config never declared (a docker-proxy, another
+     * webserver) must not read as "the reload did not apply".
+     */
+    public function test_an_unrelated_listener_on_the_host_is_not_a_mismatch(): void
+    {
+        $host = $this->host(self::BOUND, self::BOUND, extra: ['0100007F']);
+
+        $this->assertTrue($this->proxy($host)->listenersMatchConfig());
+    }
+
+    /** The mismatch this exists for: the config moved off the wildcard and nginx stayed on it. */
+    public function test_a_configured_address_that_is_not_bound_is_a_mismatch(): void
+    {
+        $host = $this->host(self::WILDCARD, self::WILDCARD, extra: ['0100007F']);
+
+        $this->assertFalse($this->proxy($host)->listenersMatchConfig());
+    }
+
     private function proxy(EngineSystem $host): NginxProxy
     {
         return new class ($host) extends NginxProxy {
@@ -99,10 +146,12 @@ class NginxProxyReloadAppliedTest extends TestCase
 
     /**
      * A host whose sites-http listens per $before until it is restarted, then per $after.
+     *
+     * @param list<string> $extra addresses of listeners the config never declared
      */
-    private function host(string $before, string $after, bool $refuse = false): EngineSystem
+    private function host(string $before, string $after, bool $refuse = false, array $extra = []): EngineSystem
     {
-        return new class ($this->dir, $before, $after, $refuse) extends System {
+        return new class ($this->dir, $before, $after, $refuse, $extra) extends System {
             public int $restarts = 0;
             /** @var list<bool> */
             public array $queued = [];
@@ -111,7 +160,8 @@ class NginxProxyReloadAppliedTest extends TestCase
                 private string $dir,
                 private string $before,
                 private string $after,
-                private bool $refuse
+                private bool $refuse,
+                private array $extra
             ) {
             }
 
@@ -132,7 +182,7 @@ class NginxProxyReloadAppliedTest extends TestCase
                     return '';
                 }
                 if (is_string($cmd) && str_contains($cmd, '/proc/net/tcp')) {
-                    return self::procNetTcp($this->restarts > 0 ? $this->after : $this->before);
+                    return self::procNetTcp($this->restarts > 0 ? $this->after : $this->before, $this->extra);
                 }
 
                 return '';
@@ -166,16 +216,21 @@ class NginxProxyReloadAppliedTest extends TestCase
                 return $this->refuse;
             }
 
-            private static function procNetTcp(string $state): string
+            private static function procNetTcp(string $state, array $extra = []): string
             {
                 // 10.10.0.44 little-endian is 2C000A0A; ports 80 and 443 are 0050 and 01BB.
                 $addr = $state === 'bound' ? '2C000A0A' : '00000000';
                 $line = '%4d: %s:%s 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 1 1 0 100 0 0 10 0';
 
-                return "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
+                $out = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
                     . sprintf($line, 0, $addr, '0050') . "\n"
                     . sprintf($line, 1, $addr, '01BB') . "\n"
                     . sprintf($line, 2, '0100007F', '1F90') . "\n";
+                foreach ($extra as $i => $address) {
+                    $out .= sprintf($line, $i + 3, $address, '01BB') . "\n";
+                }
+
+                return $out;
             }
         };
     }

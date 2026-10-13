@@ -23,6 +23,8 @@ class RouteSwitchTest extends TestCase
 
     private int $reloads = 0;
 
+    private int $routingReloads = 0;
+
     private int $fullRebuilds = 0;
 
     protected function setUp(): void
@@ -95,13 +97,15 @@ class RouteSwitchTest extends TestCase
         $this->assertSame(8081, ProxyRule::find($admin)->upstream_port, 'a port the swap does not move');
         $this->assertSame(3000, ProxyRule::find($neighbour)->upstream_port, 'another account');
         $this->assertSame(['acme.example.test'], $this->rebuilt);
-        $this->assertSame(1, $this->reloads);
+        $this->assertSame(1, $this->routingReloads);
+        $this->assertSame(0, $this->reloads);
 
         $switch->move([32771 => 3000], $moved);
 
         $this->assertSame(3000, ProxyRule::find($http)->upstream_port);
         $this->assertSame(3000, ProxyRule::find($https)->upstream_port);
-        $this->assertSame(2, $this->reloads);
+        $this->assertSame(2, $this->routingReloads);
+        $this->assertSame(0, $this->reloads);
     }
 
     public function test_moving_back_touches_only_the_rules_it_moved(): void
@@ -155,9 +159,9 @@ class RouteSwitchTest extends TestCase
         $this->assertEqualsCanonicalizing([$site, $http, $tcp], $moved);
         $this->assertSame(32771, ProxyRule::find($http)->upstream_port);
         $this->assertSame(32771, ProxyRule::find($tcp)->upstream_port);
-        // proxy-rule-*.conf and stream.conf are written only by the full rebuild.
         $this->assertSame(1, $this->fullRebuilds);
         $this->assertSame(1, $this->reloads);
+        $this->assertSame(0, $this->routingReloads);
 
         $switch->move([32771 => 3000], $moved);
 
@@ -243,6 +247,9 @@ class RouteSwitchTest extends TestCase
         });
         $webserver->method('reload')->willReturnCallback(function (): void {
             $this->reloads++;
+        });
+        $webserver->method('reloadRouting')->willReturnCallback(function (): void {
+            $this->routingReloads++;
         });
         $webserver->method('rebuildConfig')->willReturnCallback(function (): void {
             $this->fullRebuilds++;

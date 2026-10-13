@@ -152,6 +152,11 @@ class Webserver implements WebserverInterface
         $this->driver()->reload($rebindIpListeners);
     }
 
+    public function reloadRouting(): void
+    {
+        $this->driver()->reloadRouting();
+    }
+
     public function needsIpListenerRebind(): bool
     {
         return $this->driver()->needsIpListenerRebind();

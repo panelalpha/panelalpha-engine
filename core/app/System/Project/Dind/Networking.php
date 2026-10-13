@@ -177,7 +177,7 @@ class Networking
     {
         try {
             $this->project->system()->webserver()->rebuildDomainConfig($domain);
-            $this->project->system()->webserver()->reload(false);
+            $this->project->system()->webserver()->reloadRouting();
         } catch (\Exception $e) {
             Log::warning("Failed to rebuild domain vhost after proxy rules for {$user->username}", [
                 'error' => $e->getMessage(),

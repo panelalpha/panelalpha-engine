@@ -174,14 +174,35 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
     }
 
     /**
+     * Reload for a vhost-only change, which never moves a listener: never restarts the
+     * container, since a restart closes :80/:443 for the whole host; a reload that did not take is logged.
+     */
+    public function reloadRouting(): void
+    {
+        $this->exec("/etc/init.d/nginx reload");
+        $this->ensureReloadApplied(restartIfNeeded: false);
+    }
+
+    /**
      * Restart the webserver when the reload it was just asked for did not take.
      *
      * A reload exits 0 even when the master cannot bind its new listeners and keeps
      * serving the old config; the listeners are the only observable that tells.
+     * A routing-only reload passes false: its config cannot move a listener, so it only logs.
      */
-    private function ensureReloadApplied(): void
+    private function ensureReloadApplied(bool $restartIfNeeded = true): void
     {
         if ($this->listenersSettle()) {
+            return;
+        }
+
+        if (!$restartIfNeeded) {
+            Log::warning(
+                'nginx-proxy routing reload did not apply: the running listeners do not match '
+                . 'the rendered config. Not restarting the webserver, because a routing change '
+                . 'does not alter the listen addresses; the container restart would drop live '
+                . 'connections without addressing the mismatch.'
+            );
             return;
         }
 
@@ -228,8 +249,9 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
     }
 
     /**
-     * Whether nginx listens on IPv4 where the rendered main config says it should;
-     * every vhost derives its addresses from the same list. A check that cannot run reads as matching.
+     * Whether every IPv4 address the rendered main config declares is bound; every vhost
+     * derives its addresses from the same list. A check that cannot run reads as matching.
+     * Extra listeners are fine: with `network_mode: host` /proc/net/tcp is the whole host's table.
      */
     public function listenersMatchConfig(): bool
     {
@@ -245,7 +267,7 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
             if (empty($configured[$port])) {
                 continue;
             }
-            if (($bound[$port] ?? []) !== $configured[$port]) {
+            if (array_diff($configured[$port], $bound[$port] ?? []) !== []) {
                 return false;
             }
         }

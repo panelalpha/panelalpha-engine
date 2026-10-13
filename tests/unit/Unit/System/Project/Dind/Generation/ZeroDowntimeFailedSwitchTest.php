@@ -128,11 +128,13 @@ class ZeroDowntimeFailedSwitchTest extends TestCase
     {
         $webserver = $this->createStub(Webserver::class);
         $webserver->method('getCurrentWebserver')->willReturn(RouteSwitch::WEBSERVER);
-        $webserver->method('reload')->willReturnCallback(function (): void {
+        $failingReload = function (): void {
             if ($this->reloadFails) {
                 throw new \RuntimeException('nginx: [emerg] could not be reloaded');
             }
-        });
+        };
+        $webserver->method('reload')->willReturnCallback($failingReload);
+        $webserver->method('reloadRouting')->willReturnCallback($failingReload);
         $process = $this->createStub(Process::class);
         $process->method('getExitCode')->willReturn(0);
         $system = $this->createStub(System::class);
