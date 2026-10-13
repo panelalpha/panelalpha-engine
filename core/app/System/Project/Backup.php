@@ -275,8 +275,7 @@ class Backup
     private function restoreClassicFiles(string $archivePath, bool $deleteExistingFiles): void
     {
         if (!$deleteExistingFiles) {
-            $this->extractOverHome($archivePath);
-            $this->project->fixPermissions();
+            $this->mergeClassicFiles($archivePath);
 
             return;
         }
@@ -298,6 +297,21 @@ class Backup
         }
 
         $this->discardHomeAside($aside);
+        $this->project->fixPermissions();
+    }
+
+    /** The scratch directory goes whether the merge lands or not; the live home is only ever added to. */
+    private function mergeClassicFiles(string $archivePath): void
+    {
+        $incoming = '.restore-' . $this->record->id;
+
+        $this->removeHomeEntry($incoming);
+        try {
+            $this->mergeIntoHome($archivePath, $incoming);
+        } finally {
+            $this->removeHomeEntry($incoming);
+        }
+
         $this->project->fixPermissions();
     }
 
@@ -1074,10 +1088,12 @@ class Backup
      * The home root is root-owned (Project::createHomeDirectory chowns it root:root), so the
      * scratch directory is created by root. A leftover from an earlier failed run is removed
      * first without following it, so a stale symlink cannot become the extraction target.
+     * It stays closed to the account while root extracts, so no directory tar has already
+     * handed over can be swapped for a link under a later member.
      */
     protected function extractHomeArchive(string $archivePath, string $targetDir): void
     {
-        $this->project->system()->execOnHost(['mkdir', '-p', $targetDir]);
+        $this->project->system()->execOnHost(['mkdir', '-p', '-m', '700', $targetDir]);
         $this->project->system()->execOnHost(
             ['tar', '-xzf', $archivePath, '-C', $targetDir],
             [],
@@ -1086,16 +1102,12 @@ class Backup
     }
 
     /**
-     * delete_existing_files=false extracts over the live home as root. GNU tar replaces a
-     * symlinked directory or file with the archived entry, so nothing is written through a link.
+     * delete_existing_files=false: the live home stays writable by the account's PHP and cron, so
+     * root never extracts into it. The account unpacks and merges the archive. {@see HomeMerge}
      */
-    protected function extractOverHome(string $archivePath): void
+    protected function mergeIntoHome(string $archivePath, string $incomingDir): void
     {
-        $this->project->system()->execOnHost(
-            ['tar', '-xzf', $archivePath, '-C', rtrim($this->project->homeDirPath(), '/')],
-            [],
-            JobBudget::COMMAND_SECONDS,
-        );
+        $this->homeMerge()->merge($archivePath, $this->userPath($incomingDir));
     }
 
     /** Remove a pre-existing scratch entry, link or not, without following a symlink at it. */
@@ -1166,6 +1178,19 @@ class Backup
         return new HomeSwap(
             $this->project->system(),
             rtrim($this->project->homeDirPath(), '/'),
+            JobBudget::COMMAND_SECONDS,
+        );
+    }
+
+    private function homeMerge(): HomeMerge
+    {
+        [$uid, $gid] = $this->project->model()->linuxIds();
+
+        return new HomeMerge(
+            $this->project->system(),
+            rtrim($this->project->homeDirPath(), '/'),
+            (string) $uid,
+            (string) $gid,
             JobBudget::COMMAND_SECONDS,
         );
     }

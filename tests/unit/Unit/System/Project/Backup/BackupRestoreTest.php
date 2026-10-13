@@ -109,7 +109,7 @@ class BackupRestoreTest extends TestCase
         $this->assertNotContains('composeStop', $restore->calls);
     }
 
-    public function test_classic_restore_without_deleting_existing_files_extracts_over_the_home(): void
+    public function test_classic_restore_without_deleting_existing_files_merges_through_a_scratch_directory(): void
     {
         $user = $this->makeUser('alice', template: 'default');
         $container = $this->makeContainer();
@@ -121,9 +121,32 @@ class BackupRestoreTest extends TestCase
         $restore->restore([], [], false);
 
         $this->assertSame('completed', $backup->fresh()->restoreStatus());
-        $this->assertContains('extractOverHome', $restore->calls);
-        $this->assertFalse($this->hostCallsContain($restore->calls, 'extractHomeArchive:'));
-        $this->assertFalse($this->hostCallsContain($restore->calls, 'swapHome:'));
+        $incoming = '.restore-' . $backup->id;
+        $this->assertSame(
+            ['removeHomeEntry:' . $incoming, 'mergeIntoHome:' . $incoming, 'removeHomeEntry:' . $incoming],
+            $this->homeFileCalls($restore->calls),
+        );
+    }
+
+    public function test_a_failed_merge_still_removes_the_scratch_directory(): void
+    {
+        $user = $this->makeUser('alice', template: 'default');
+        $container = $this->makeContainer();
+        $storage = new FakeStorage();
+        $created = $this->makeCompletedBackup($user, $container, $storage);
+        $backup = $created->model()->fresh(['items']);
+
+        $restore = new BackupDouble($this->project($user), $backup, $storage, mergeIntoHomeThrows: true);
+        $restore->restore([], [], false);
+
+        $backup->refresh();
+        $this->assertSame('failed', $backup->restoreStatus());
+        $this->assertStringContainsString('home merge failed', (string) $backup->error);
+        $incoming = '.restore-' . $backup->id;
+        $this->assertSame(
+            ['removeHomeEntry:' . $incoming, 'mergeIntoHome:' . $incoming, 'removeHomeEntry:' . $incoming],
+            $this->homeFileCalls($restore->calls),
+        );
     }
 
     public function test_classic_restore_rolls_the_home_back_when_the_swap_fails(): void
@@ -158,7 +181,7 @@ class BackupRestoreTest extends TestCase
         $this->assertSame('completed', $backup->fresh()->restoreStatus());
         $this->assertContains('restoreDatabase:alice_app', $restore->calls);
         $this->assertFalse($this->hostCallsContain($restore->calls, 'extractHomeArchive:'));
-        $this->assertFalse($this->hostCallsContain($restore->calls, 'extractOverHome'));
+        $this->assertFalse($this->hostCallsContain($restore->calls, 'mergeIntoHome:'));
     }
 
     public function test_incomplete_backup_cannot_restore(): void
@@ -357,6 +380,18 @@ class BackupRestoreTest extends TestCase
         $this->assertContains('rollbackVolume:proj_dbdata', $restore->calls);
         $this->assertContains('rollbackProject:project.pre-restore', $restore->calls);
         $this->assertContains('composeStart', $restore->calls);
+    }
+
+    /**
+     * @param list<string> $calls
+     * @return list<string>
+     */
+    private function homeFileCalls(array $calls): array
+    {
+        return array_values(array_filter(
+            $calls,
+            static fn (string $call): bool => preg_match('/^(removeHomeEntry|mergeIntoHome|extractHomeArchive|swapHome):/', $call) === 1,
+        ));
     }
 
     /**

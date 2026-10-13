@@ -44,16 +44,36 @@ class BackupClassicRestoreSafetyTest extends TestCase
         $backup->exposeRemoveHomeEntry('.restore-9');
         $backup->exposeRemoveHomeEntry('.pre-restore-9');
         $backup->exposeExtractHomeArchive('/var/tmp/home.tar.gz', '/home/alice/.restore-9');
-        $backup->exposeExtractOverHome('/var/tmp/home.tar.gz');
 
         $this->assertSame(['rm', '-rf', '--', '/home/alice/.restore-9'], $recorded[0]);
         $this->assertSame(['rm', '-rf', '--', '/home/alice/.pre-restore-9'], $recorded[1]);
-        $this->assertSame(['mkdir', '-p', '/home/alice/.restore-9'], $recorded[2]);
+        $this->assertSame(['mkdir', '-p', '-m', '700', '/home/alice/.restore-9'], $recorded[2]);
         $this->assertSame(
             ['tar', '-xzf', '/var/tmp/home.tar.gz', '-C', '/home/alice/.restore-9'],
             $recorded[3],
         );
-        $this->assertSame(['tar', '-xzf', '/var/tmp/home.tar.gz', '-C', '/home/alice'], $recorded[4]);
+        $this->assertCount(4, $recorded);
+    }
+
+    public function test_a_merge_restore_never_runs_tar_as_root(): void
+    {
+        $recorded = [];
+        $ran = [];
+        $backup = $this->backup($this->recordingSystem($recorded, $ran));
+
+        $backup->exposeMergeIntoHome('/var/tmp/home.tar.gz', '.restore-9');
+
+        $this->assertSame([], $recorded, 'nothing runs in the host namespaces');
+        foreach ($ran as $argv) {
+            $this->assertFalse(
+                in_array('tar', $argv, true) && !in_array('setpriv', $argv, true),
+                'tar runs only as the account: ' . implode(' ', $argv),
+            );
+        }
+        $this->assertContains(
+            ['sudo', 'chown', self::ACCOUNT_UID . ':' . self::ACCOUNT_GID, '--', '/home/alice/.restore-9'],
+            $ran,
+        );
     }
 
     public function test_a_leftover_restore_symlink_is_removed_before_extraction(): void
@@ -76,24 +96,6 @@ class BackupClassicRestoreSafetyTest extends TestCase
         $this->assertSame([], $this->entries($outside), 'the symlink target received nothing');
         $this->assertFileExists($home . '/.restore-9/x');
         $this->assertSame('restored', file_get_contents($home . '/.restore-9/x'));
-    }
-
-    public function test_extract_over_home_does_not_write_through_a_symlinked_directory(): void
-    {
-        $this->requiresRoot();
-
-        $home = $this->home();
-        $outside = $this->outside();
-        symlink($outside, $home . '/x');
-        $archive = $this->archiveWith('x/evil', 'payload');
-
-        $backup = $this->backup($this->executingSystem());
-
-        $backup->exposeExtractOverHome($archive);
-
-        $this->assertSame([], $this->entries($outside), 'the symlink target received nothing');
-        $this->assertFalse(is_link($home . '/x'), 'the symlink was replaced by the archived directory');
-        $this->assertSame('payload', file_get_contents($home . '/x/evil'));
     }
 
     private function requiresRoot(): void
@@ -165,18 +167,26 @@ class BackupClassicRestoreSafetyTest extends TestCase
     }
 
     /**
-     * @param list<list<string>> $recorded
+     * @param list<list<string>> $recorded commands run in the host namespaces
+     * @param list<list<string>> $ran commands run in the engine container
      */
-    private function recordingSystem(array &$recorded): System
+    private function recordingSystem(array &$recorded, array &$ran = []): System
     {
-        return new class ($recorded) extends System {
+        return new class ($recorded, $ran) extends System {
             /** @var list<list<string>> */
             private array $recorded;
 
-            /** @param list<list<string>> $recorded */
-            public function __construct(array &$recorded)
+            /** @var list<list<string>> */
+            private array $ran;
+
+            /**
+             * @param list<list<string>> $recorded
+             * @param list<list<string>> $ran
+             */
+            public function __construct(array &$recorded, array &$ran)
             {
                 $this->recorded = &$recorded;
+                $this->ran = &$ran;
             }
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
@@ -184,6 +194,18 @@ class BackupClassicRestoreSafetyTest extends TestCase
                 $this->recorded[] = is_array($cmd) ? array_values($cmd) : [$cmd];
 
                 return '';
+            }
+
+            public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                $argv = is_array($cmd) ? array_values($cmd) : [$cmd];
+                $this->ran[] = $argv;
+                $output = ($argv[1] ?? null) === 'ls' ? "public_html\n" : '';
+
+                $process = new Process(['printf', '%s', $output]);
+                $process->run();
+
+                return $process;
             }
         };
     }
@@ -238,9 +260,9 @@ class ExposedBackup extends Backup
         $this->extractHomeArchive($archivePath, $targetDir);
     }
 
-    public function exposeExtractOverHome(string $archivePath): void
+    public function exposeMergeIntoHome(string $archivePath, string $incomingDir): void
     {
-        $this->extractOverHome($archivePath);
+        $this->mergeIntoHome($archivePath, $incomingDir);
     }
 
     public function exposeRemoveHomeEntry(string $entry): void

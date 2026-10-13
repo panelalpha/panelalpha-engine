@@ -31,6 +31,7 @@ final class BackupDouble extends Backup
         /** Called from composeStop(), to observe state during the stopped window. */
         private mixed $onComposeStop = null,
         private bool $swapHomeThrows = false,
+        private bool $mergeIntoHomeThrows = false,
     ) {
         parent::__construct($project, $record);
     }
@@ -118,9 +119,12 @@ final class BackupDouble extends Backup
         $this->calls[] = 'extractHomeArchive:' . $targetDir;
     }
 
-    protected function extractOverHome(string $archivePath): void
+    protected function mergeIntoHome(string $archivePath, string $incomingDir): void
     {
-        $this->calls[] = 'extractOverHome';
+        $this->calls[] = 'mergeIntoHome:' . $incomingDir;
+        if ($this->mergeIntoHomeThrows) {
+            throw new \RuntimeException('home merge failed');
+        }
     }
 
     protected function removeHomeEntry(string $entry): void
