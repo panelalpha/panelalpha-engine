@@ -38,6 +38,7 @@ class DomainAllocator
     public function allocate(string $username, ?string $requested = null, ?string $tunnel = null): AllocatedDomain
     {
         $settings = self::settings();
+        $tunnel = DomainPlan::resolveTunnel($tunnel, $settings);
 
         // Seeded before the walk, because a rung that was never a candidate
         // is invisible to it: on a host with no public address neither
@@ -275,7 +276,7 @@ class DomainAllocator
     }
 
     /**
-     * @return array{sites_base_domain: ?string, cert_domain: ?string, default_ipv4: ?string}
+     * @return array{sites_base_domain: ?string, cert_domain: ?string, default_ipv4: ?string, default_tunnel: ?string}
      */
     private static function settings(): array
     {
@@ -283,6 +284,7 @@ class DomainAllocator
             'sites_base_domain' => Setting::get('default_wildcard_domain'),
             'cert_domain' => Setting::get('cert_domain'),
             'default_ipv4' => Setting::get('default_ipv4'),
+            'default_tunnel' => Setting::get(DomainPlan::SETTING_DEFAULT_TUNNEL),
         ];
     }
 }

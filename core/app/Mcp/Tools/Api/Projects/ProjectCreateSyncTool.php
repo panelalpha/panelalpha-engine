@@ -107,7 +107,7 @@ class ProjectCreateSyncTool extends ApiTool
             'dedicated_ipv4' => $schema->boolean(),
             'dedicated_ipv6' => $schema->boolean(),
             'template' => $schema->string()->description('dind runs the app in containers of its own; the other templates are classic shared hosting. This tool sends dind when it is omitted.'),
-            'tunnel' => $schema->string()->description('panelalpha (default): a free panelalpha.online name with a trusted certificate, tunnel attached in this call. none: `domain` already points at this host. One of: panelalpha, none.'),
+            'tunnel' => $schema->string()->description('Omitted, the Engine setting `default_tunnel` decides: none uses `<name>.<cert_domain>` and registers nothing; panelalpha and an unset setting both use the default ladder (a configured base domain first, a free panelalpha.online name otherwise). An explicit value here wins. One of: panelalpha, none.'),
             'git_repo' => $schema->string()->description('HTTPS clone URL; github.com/owner/repo also works. For an SSH remote, create the project without it, then git_deploy_key_create and git_connect. Example: https://github.com/owner/repo.git.'),
             'git_branch' => $schema->string(),
             'git_token' => $schema->string()->description('Token for a private repository. Prefer a `vault:<id>` from vault_secret_create over the token itself.'),

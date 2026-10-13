@@ -15,6 +15,7 @@ export const systemInfoSchema = z
     php_versions: z.array(z.unknown()).optional(),
     default_ipv4: z.string().nullable().optional(),
     default_ipv6: z.string().nullable().optional(),
+    default_tunnel: z.enum(['panelalpha', 'none']).nullable().optional(),
     ipv4_nat_mode: z.boolean().optional(),
     ipv4_nat_maps: z.array(ipv4NatMapSchema).optional(),
     latest_webserver_change: z

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Exceptions\DockerErrorException;
 use App\Lib\Domains\DomainAllocator;
+use App\Lib\Domains\DomainPlan;
 use App\Lib\Ssl\CertificateFacts;
 use App\Lib\Ssl\CertificateStatus;
 use App\Lib\Ssl\EngineCertificate;
@@ -50,6 +51,7 @@ class SystemController extends Controller
             'api_url' => $url !== '' ? $url . '/api' : null,
             'mcp_url' => $url !== '' ? $url . '/mcp' : null,
             'cert_domain' => Setting::get('cert_domain'),
+            'default_tunnel' => self::defaultTunnel(),
             'served_certificate' => self::servedCertificate($url),
             ...self::sitesDomain(),
             'default_ipv4' => Setting::get('default_ipv4'),
@@ -67,6 +69,12 @@ class SystemController extends Controller
         return new JsonResponse([
             'data' => $data,
         ]);
+    }
+
+    /** The configured default_tunnel, raw; null while unset. Only `none` changes the ladder. */
+    public static function defaultTunnel(): ?string
+    {
+        return Setting::get(DomainPlan::SETTING_DEFAULT_TUNNEL);
     }
 
     /** The URL a client should use: APP_URL, which the certificate scripts keep on the name the served certificate was issued for. */

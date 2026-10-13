@@ -23,6 +23,8 @@ export interface SystemInfo {
   default_ipv4?: string | null;
   default_ipv6?: string | null;
   cert_domain?: string | null;
+  /** What a project created without `tunnel` is published under (setting default_tunnel); null while unset. */
+  default_tunnel?: 'panelalpha' | 'none' | null;
   sites_base_domain?: string | null;
   url?: string | null;
   api_url?: string | null;

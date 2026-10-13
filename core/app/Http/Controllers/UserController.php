@@ -218,15 +218,18 @@ class UserController extends Controller
                     type: 'string',
                     enum: ['panelalpha', 'none'],
                     nullable: true,
-                    description: 'How the domain reaches this host. panelalpha, the default, allocates a '
-                        . 'free label under panelalpha.online, makes it the project domain and attaches '
-                        . 'the tunnel in this one call -- so `domain`, if given at all, must be that same '
-                        . 'name. none means the domain already resolves here, which is true of '
-                        . '<name>.<cert_domain> and of a domain the caller pointed at this host. A '
-                        . 'Cloudflare tunnel is not available here: it needs the project\'s API token, '
-                        . 'which can only be set once the project exists -- create it, PUT '
+                    description: 'How the domain reaches this host. Omitted, the Engine setting '
+                        . '`default_tunnel` decides: `none` keeps the name the domain already resolves on '
+                        . '(`<name>.<cert_domain>` or the configured sites_base_domain) and registers '
+                        . 'nothing at PanelAlpha Online; `panelalpha` and an unset setting both give the '
+                        . 'default ladder, where a configured sites_base_domain comes first and otherwise '
+                        . 'a free label under panelalpha.online is allocated, made the project domain and '
+                        . 'attached in this one call, so `domain`, if given at all, must be that same '
+                        . 'name. GET /system/info reports the setting. A Cloudflare tunnel is not '
+                        . 'available here: it needs the project\'s API token, which can only be set once '
+                        . 'the project exists -- create it, PUT '
                         . '/projects/{username}/settings/cloudflare-api-token, then POST the tunnel.',
-                    x: ['mcp-description' => 'panelalpha (default): a free panelalpha.online name with a trusted certificate, tunnel attached in this call. none: `domain` already points at this host.']
+                    x: ['mcp-description' => 'Omitted, the Engine setting `default_tunnel` decides: none uses `<name>.<cert_domain>` and registers nothing; panelalpha and an unset setting both use the default ladder (a configured base domain first, a free panelalpha.online name otherwise). An explicit value here wins.']
                 ),
                 new OA\Property(
                     property: 'git_repo',
@@ -377,15 +380,18 @@ class UserController extends Controller
                     type: 'string',
                     enum: ['panelalpha', 'none'],
                     nullable: true,
-                    description: 'How the domain reaches this host. panelalpha, the default, allocates a '
-                        . 'free label under panelalpha.online, makes it the project domain and attaches '
-                        . 'the tunnel in this one call -- so `domain`, if given at all, must be that same '
-                        . 'name. none means the domain already resolves here, which is true of '
-                        . '<name>.<cert_domain> and of a domain the caller pointed at this host. A '
-                        . 'Cloudflare tunnel is not available here: it needs the project\'s API token, '
-                        . 'which can only be set once the project exists -- create it, PUT '
+                    description: 'How the domain reaches this host. Omitted, the Engine setting '
+                        . '`default_tunnel` decides: `none` keeps the name the domain already resolves on '
+                        . '(`<name>.<cert_domain>` or the configured sites_base_domain) and registers '
+                        . 'nothing at PanelAlpha Online; `panelalpha` and an unset setting both give the '
+                        . 'default ladder, where a configured sites_base_domain comes first and otherwise '
+                        . 'a free label under panelalpha.online is allocated, made the project domain and '
+                        . 'attached in this one call, so `domain`, if given at all, must be that same '
+                        . 'name. GET /system/info reports the setting. A Cloudflare tunnel is not '
+                        . 'available here: it needs the project\'s API token, which can only be set once '
+                        . 'the project exists -- create it, PUT '
                         . '/projects/{username}/settings/cloudflare-api-token, then POST the tunnel.',
-                    x: ['mcp-description' => 'panelalpha (default): a free panelalpha.online name with a trusted certificate, tunnel attached in this call. none: `domain` already points at this host.']
+                    x: ['mcp-description' => 'Omitted, the Engine setting `default_tunnel` decides: none uses `<name>.<cert_domain>` and registers nothing; panelalpha and an unset setting both use the default ladder (a configured base domain first, a free panelalpha.online name otherwise). An explicit value here wins.']
                 ),
                 new OA\Property(
                     property: 'git_repo',

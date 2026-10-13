@@ -13,6 +13,18 @@ use OpenApi\Attributes as OA;
         new OA\Property(property: 'mcp_url', type: 'string', example: 'https://203-0-113-7.panelalpha.direct:2011/mcp', nullable: true),
         new OA\Property(property: 'cert_domain', type: 'string', example: '203-0-113-7.panelalpha.direct', nullable: true, description: 'The name the served Let\'s Encrypt certificate was issued for (setting cert_domain); null while self-signed'),
         new OA\Property(
+            property: 'default_tunnel',
+            type: 'string',
+            enum: ['panelalpha', 'none'],
+            example: 'panelalpha',
+            nullable: true,
+            description: 'What a project created without `tunnel` is published under (setting default_tunnel). '
+                . '`none` skips PanelAlpha Online and keeps the name the domain already resolves on '
+                . '(`<name>.<cert_domain>` or the configured sites_base_domain). `panelalpha` and null both '
+                . 'mean the default ladder: a configured sites_base_domain first, a free panelalpha.online '
+                . 'label otherwise.',
+        ),
+        new OA\Property(
             property: 'served_certificate',
             type: 'object',
             nullable: true,

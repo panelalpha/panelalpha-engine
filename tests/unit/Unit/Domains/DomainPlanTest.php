@@ -229,4 +229,97 @@ class DomainPlanTest extends TestCase
         $this->assertMatchesRegularExpression('/^shop-[0-9a-f]{4}$/', $first);
         $this->assertNotSame($first, $second, 'labels are one namespace for the whole fleet');
     }
+
+    public function test_default_tunnel_none_takes_the_online_rung_away(): void
+    {
+        $candidates = DomainPlan::candidates('shop', null, null, [
+            'default_tunnel' => DomainPlan::TUNNEL_NONE,
+            'cert_domain' => 'engine.example.com',
+            'default_ipv4' => '203.0.113.7',
+        ]);
+
+        $this->assertSame(
+            [DomainPlan::SOURCE_PANELALPHA_DIRECT, DomainPlan::SOURCE_LOCAL],
+            $this->sources($candidates)
+        );
+        $this->assertSame('shop.engine.example.com', $candidates[0]['domain']);
+        $this->assertSame([null, null], array_column($candidates, 'label'));
+    }
+
+    public function test_default_tunnel_none_leaves_a_configured_base_domain_first(): void
+    {
+        $candidates = DomainPlan::candidates('shop', null, null, [
+            'default_tunnel' => DomainPlan::TUNNEL_NONE,
+            'sites_base_domain' => 'sites.example.com',
+            'default_ipv4' => '203.0.113.7',
+        ]);
+
+        $this->assertSame(DomainPlan::SOURCE_SITES_BASE_DOMAIN, $candidates[0]['source']);
+        $this->assertNotContains(DomainPlan::SOURCE_PANELALPHA_ONLINE, $this->sources($candidates));
+    }
+
+    /**
+     * The setting is a default, not a veto: a caller that names panelalpha gets
+     * the online rung even while `default_tunnel` says none.
+     */
+    public function test_an_explicit_tunnel_outranks_the_default_setting(): void
+    {
+        $settings = [
+            'default_tunnel' => DomainPlan::TUNNEL_NONE,
+            'sites_base_domain' => 'sites.example.com',
+            'default_ipv4' => '203.0.113.7',
+        ];
+
+        $explicit = DomainPlan::candidates('shop', null, DomainPlan::TUNNEL_PANELALPHA, $settings);
+
+        $this->assertSame(DomainPlan::SOURCE_PANELALPHA_ONLINE, $explicit[0]['source']);
+        $this->assertNotNull($explicit[0]['label'], 'a panelalpha tunnel has to be bought');
+    }
+
+    /**
+     * `panelalpha` is the default written down, not an explicit request: with a base
+     * domain configured it still loses to it, exactly as an unset setting does.
+     */
+    public function test_default_tunnel_panelalpha_keeps_the_same_ladder_as_unset(): void
+    {
+        $configured = ['sites_base_domain' => 'sites.example.com', 'default_ipv4' => '203.0.113.7'];
+
+        $unset = DomainPlan::candidates('shop', null, null, $configured);
+        $setting = DomainPlan::candidates('shop', null, null, $configured + ['default_tunnel' => DomainPlan::TUNNEL_PANELALPHA]);
+        $explicit = DomainPlan::candidates('shop', null, DomainPlan::TUNNEL_PANELALPHA, $configured);
+
+        $this->assertSame($this->sources($unset), $this->sources($setting));
+        $this->assertSame(DomainPlan::SOURCE_SITES_BASE_DOMAIN, $setting[0]['source']);
+        $this->assertNotSame(
+            $this->sources($explicit),
+            $this->sources($setting),
+            'the setting is not an explicit panelalpha; only the request can be'
+        );
+    }
+
+    /**
+     * An unset setting is not the same request as an explicit panelalpha: with a
+     * base domain configured, the operator's domain wins. This is the behaviour a
+     * fresh engine has always had, and it must not change when the setting is absent.
+     */
+    public function test_an_unset_setting_keeps_the_ladder_as_it_was(): void
+    {
+        $configured = ['sites_base_domain' => 'sites.example.com', 'default_ipv4' => '203.0.113.7'];
+
+        $before = DomainPlan::candidates('shop', null, null, $configured);
+        $withNullKey = DomainPlan::candidates('shop', null, null, $configured + ['default_tunnel' => null]);
+
+        $this->assertSame($this->sources($before), $this->sources($withNullKey));
+        $this->assertSame(DomainPlan::SOURCE_SITES_BASE_DOMAIN, $before[0]['source']);
+    }
+
+    public function test_an_unknown_setting_value_reads_as_unset(): void
+    {
+        $candidates = DomainPlan::candidates('shop', null, null, [
+            'default_tunnel' => 'cloudflare',
+            'default_ipv4' => '203.0.113.7',
+        ]);
+
+        $this->assertSame(DomainPlan::SOURCE_PANELALPHA_ONLINE, $candidates[0]['source']);
+    }
 }
