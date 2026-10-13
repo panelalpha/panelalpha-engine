@@ -110,10 +110,15 @@ test.describe('tasks', () => {
       expect(typeof taskId, 'push answers with a task_id').toBe('number');
 
       const task = await waitForTask(api, taskId as number);
-      expect(task.action, 'the push task names its action').toBe('push');
-      const details = task.details as { source?: string; target?: string } | undefined;
+      const details = task.details as
+        { action?: string; source?: string; target?: string } | undefined;
+      expect(details?.action, 'the push task names its action under details').toBe('push');
       expect(details?.source).toBe(stagingUsername);
       expect(details?.target).toBe(username);
+
+      const listed = await api.listTasks({ username, action: 'push' });
+      const summary = listed.data.find((row) => row.id === taskId);
+      expect(summary?.action, 'the task summary carries the action at the top level').toBe('push');
 
       const settled = (await api.getUserRaw(username)).body as unknown;
       const phase = stagingPushPhase(settled);

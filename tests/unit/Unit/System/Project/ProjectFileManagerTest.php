@@ -56,7 +56,7 @@ class ProjectFileManagerTest extends TestCase
         $files = $this->fileManager();
 
         $rejected = 0;
-        foreach (['../etc/passwd', "foo\0bar", "foo\x01bar", "foo\x0bbar", "foo\x7fbar"] as $path) {
+        foreach (['../etc/passwd', "foo\0bar", "foo\x01bar", "foo\nbar", "foo\x0bbar", "foo\x7fbar"] as $path) {
             try {
                 $files->resolvePath($path);
                 $this->fail('Expected ValidationException');
@@ -64,7 +64,7 @@ class ProjectFileManagerTest extends TestCase
                 $rejected++;
             }
         }
-        $this->assertSame(5, $rejected);
+        $this->assertSame(6, $rejected);
     }
 
     public function test_aggregate_resolve_path_matches_files_collaborator(): void

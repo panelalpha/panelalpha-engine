@@ -54,6 +54,7 @@ class FileThumbnailHttpTest extends TestCase
         file_put_contents($home . '/drawing.png', self::SVG);
         file_put_contents($home . '/drawing.jpg', self::MVG);
         $this->writeBytes($home . '/misnamed.gif', 'png');
+        $this->writeBytes($home . '/photo.png', 'png');
         file_put_contents($home . '/huge.png', self::hugePng());
         $this->writeSparse($home . '/oversize.jpg', FileThumbnail::MAX_SOURCE_BYTES + 1);
         file_put_contents($this->tmpRoot . '/secret', 'outside the home');
@@ -181,6 +182,22 @@ class FileThumbnailHttpTest extends TestCase
         $thumbnail->clear();
     }
 
+    public function test_a_jpeg_source_encodes_webp_bytes(): void
+    {
+        $response = $this->get($this->url(['path' => 'photo.jpg']));
+
+        $response->assertOk();
+        $this->assertWebp((string) $response->getContent());
+    }
+
+    public function test_a_png_source_encodes_webp_bytes(): void
+    {
+        $response = $this->get($this->url(['path' => 'photo.png']));
+
+        $response->assertOk();
+        $this->assertWebp((string) $response->getContent());
+    }
+
     public function test_a_text_file_named_like_a_jpeg_is_unsupported(): void
     {
         $response = $this->getJson($this->url(['path' => 'notes.jpg']));
@@ -260,6 +277,17 @@ class FileThumbnailHttpTest extends TestCase
     private function url(array $query): string
     {
         return self::ENDPOINT . '?' . http_build_query($query);
+    }
+
+    /**
+     * A webp container: RIFF at the start and the WEBP fourcc at offset 8. The
+     * decode() clone inherits the wand format pinned for reading, so an encoder
+     * that only has setImageFormat('webp') writes the source format instead.
+     */
+    private function assertWebp(string $content): void
+    {
+        $this->assertSame('RIFF', substr($content, 0, 4));
+        $this->assertSame('WEBP', substr($content, 8, 4));
     }
 
     private function decode(string $content): Imagick

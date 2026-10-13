@@ -491,13 +491,10 @@ test.describe('directory listing', () => {
     }
   });
 
-  test('names with a space, a newline and UTF-8 characters survive listing', async ({
-    api,
-    setupUser,
-  }) => {
+  test('names with a space and UTF-8 characters survive listing', async ({ api, setupUser }) => {
     const dir = getDomainBasePath(setupUser.domain);
     const id = uniqueId('list_name_');
-    const names = [`spaced name ${id}.txt`, `line\nbreak ${id}.txt`, `ünïcode_${id}.txt`];
+    const names = [`spaced name ${id}.txt`, `ünïcode_${id}.txt`];
 
     const cleanup = new CleanupSteps();
     try {

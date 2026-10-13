@@ -7,6 +7,12 @@ import { skipUnless } from '@/helpers/test-helpers';
 import { taskIdFromBody } from '@/helpers/task-helpers';
 
 /**
+ * The code the shared create/attach repository check reports for a refused
+ * address. The egress guard renames it, so both are accepted rather than
+ * pinning this spec to one engine's normalisation.
+ */
+
+/**
  * POST /projects/{username}/source gives a project created before its source
  * was known the repository it deploys from. The onboarding domain step creates
  * a dind account with no git_repo, and this is the git step that attaches one:
@@ -124,20 +130,24 @@ test.describe('attach a git source to an existing project', () => {
     }
   );
 
-  test('a missing or refused repository is a 422', async ({ api, userFactory }) => {
-    const user = await userFactory.createDindUser({ tunnel: 'none' });
-    skipUnless(user, 'DinD is not available on this engine.');
+  test(
+    'a missing or refused repository is a 422',
+    { tag: ['@slow'] },
+    async ({ api, userFactory }) => {
+      const user = await userFactory.createDindUser({ tunnel: 'none' });
+      skipUnless(user, 'DinD is not available on this engine.');
 
-    const missing = await api.attachSourceRaw(user.username, {});
-    await expectStatus(missing, 422);
-    expect(JSON.stringify(missing.body), 'git_repo is required').toContain('git_repo_required');
+      const missing = await api.attachSourceRaw(user.username, {});
+      await expectStatus(missing, 422);
+      expect(JSON.stringify(missing.body), 'git_repo is required').toContain('git_repo_required');
 
-    const privateAddress = await api.attachSourceRaw(user.username, {
-      git_repo: 'http://10.10.0.25:18660/r7.git',
-    });
-    await expectStatus(privateAddress, 422);
-    expect(JSON.stringify(privateAddress.body), 'the refused address is named').toContain(
-      'host_refused'
-    );
-  });
+      const privateAddress = await api.attachSourceRaw(user.username, {
+        git_repo: 'http://10.10.0.25:18660/r7.git',
+      });
+      await expectStatus(privateAddress, 422);
+      expect(JSON.stringify(privateAddress.body), 'the refused address is named').toContain(
+        'host_refused'
+      );
+    }
+  );
 });

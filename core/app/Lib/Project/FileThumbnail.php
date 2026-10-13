@@ -157,6 +157,10 @@ final class FileThumbnail
         }
     }
 
+    /**
+     * The clone keeps the wand format pinned for reading, so setImageFormat
+     * alone would encode the source bytes (a png or jpeg "webp").
+     */
     private function thumbnail(Imagick $image, int $width, int $height, string $fit): string
     {
         $image->autoOrient();
@@ -165,6 +169,7 @@ final class FileThumbnail
         } else {
             $image->thumbnailImage($width, $height, true);
         }
+        $image->setFormat('webp');
         $image->setImageFormat('webp');
         $image->setImageCompressionQuality(self::WEBP_QUALITY);
         $image->stripImage();

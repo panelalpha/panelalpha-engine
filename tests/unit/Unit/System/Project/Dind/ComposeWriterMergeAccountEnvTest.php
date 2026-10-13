@@ -54,6 +54,38 @@ class ComposeWriterMergeAccountEnvTest extends TestCase
         $this->assertSame(3000, $environment['PORT']);
     }
 
+    public function test_a_generated_service_without_an_environment_map_gets_one(): void
+    {
+        $path = $this->writeRunFile($this->generatedComposeWithoutEnvironment());
+
+        $changed = $this->dind()->composeWriter()->mergeAccountEnv(['VG_FOO' => 'bar'], []);
+
+        $this->assertTrue($changed);
+        $this->assertSame(['VG_FOO' => 'bar'], $this->environment($path));
+    }
+
+    public function test_a_non_empty_list_environment_is_refused(): void
+    {
+        $path = $this->writeRunFile($this->generatedComposeWithListEnvironment());
+        $before = (string) file_get_contents($path);
+
+        $changed = $this->dind()->composeWriter()->mergeAccountEnv(['VG_FOO' => 'bar'], []);
+
+        $this->assertFalse($changed);
+        $this->assertSame($before, (string) file_get_contents($path));
+    }
+
+    public function test_a_dollar_in_a_value_is_escaped_for_compose(): void
+    {
+        $path = $this->writeRunFile($this->generatedComposeWithoutEnvironment());
+
+        $changed = $this->dind()->composeWriter()->mergeAccountEnv(['PASSWORD' => 'ab$cd'], []);
+
+        $this->assertTrue($changed);
+        $this->assertSame('ab$$cd', $this->environment($path)['PASSWORD']);
+        $this->assertStringContainsString('ab$$cd', (string) file_get_contents($path));
+    }
+
     public function test_a_file_the_repository_owns_is_left_alone(): void
     {
         $path = $this->writeRunFile("services:\n  app:\n    image: nginx:alpine\n    environment:\n      APP_ENV: production\n");
@@ -107,6 +139,31 @@ class ComposeWriterMergeAccountEnvTest extends TestCase
                     'image' => 'nginx:alpine',
                     'labels' => ['panelalpha.generated' => 'framework'],
                     'environment' => $environment,
+                ],
+            ],
+        ], 6, 2);
+    }
+
+    private function generatedComposeWithoutEnvironment(): string
+    {
+        return Yaml::dump([
+            'services' => [
+                'app' => [
+                    'image' => 'nginx:alpine',
+                    'labels' => ['panelalpha.generated' => 'static-bootstrap'],
+                ],
+            ],
+        ], 6, 2);
+    }
+
+    private function generatedComposeWithListEnvironment(): string
+    {
+        return Yaml::dump([
+            'services' => [
+                'app' => [
+                    'image' => 'nginx:alpine',
+                    'labels' => ['panelalpha.generated' => 'framework'],
+                    'environment' => ['FOO=bar', 'BAZ=qux'],
                 ],
             ],
         ], 6, 2);

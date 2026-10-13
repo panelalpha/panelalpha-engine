@@ -100,10 +100,7 @@ class Projects
                 if ($tables === null || $tables === []) {
                     $result = $this->pushDatabases($from, $to, $rollbackDir, $rollbacks, $createdDatabases);
                 } else {
-                    $this->runPushProcess(
-                        ['sudo', 'mkdir', '-p', $rollbackDir],
-                        'Failed to prepare the push database rollback directory'
-                    );
+                    $this->prepareRollbackDir($rollbackDir);
                     $tableReplacement = $this->databaseCopier()->replaceTables($from, $to, $tables, $rollbackDir);
                     $result = $tableReplacement->result;
                 }
@@ -179,10 +176,7 @@ class Projects
             return new DatabaseCopyResult();
         }
 
-        $this->runPushProcess(
-            ['sudo', 'mkdir', '-p', $rollbackDir],
-            'Failed to prepare the push database rollback directory'
-        );
+        $this->prepareRollbackDir($rollbackDir);
 
         $databases = [];
         $warnings = [];
@@ -384,6 +378,40 @@ class Projects
         }
 
         $this->runPushProcess(['sudo', 'rm', '-rf', $path], "Failed to remove '{$path}'");
+    }
+
+    /**
+     * Create a push's rollback directory so the process that writes the dump
+     * (the queue worker, not root) can reach it — and only that process. The
+     * account's home root is root-owned, so it cannot plant a link in its place;
+     * the symlink refusal is here because a copied source account could try.
+     */
+    public function prepareRollbackDir(string $directory): void
+    {
+        if ($this->pathIsSymlinkAsRoot($directory)) {
+            throw new \RuntimeException("Refusing to use '{$directory}': it is a symlink.");
+        }
+
+        $failure = 'Failed to prepare the push database rollback directory';
+        $this->runPushProcess(['sudo', 'mkdir', '-p', $directory], $failure);
+        $this->runPushProcess(['sudo', 'chown', $this->engineProcessUser(), $directory], $failure);
+        $this->runPushProcess(['sudo', 'chmod', '0700', $directory], $failure);
+    }
+
+    /**
+     * The user the non-sudo engine process runs as: the queue worker in
+     * production (www-data), root in the CLI and the test harness.
+     */
+    private function engineProcessUser(): string
+    {
+        if (function_exists('posix_getpwuid') && function_exists('posix_geteuid')) {
+            $entry = posix_getpwuid(posix_geteuid());
+            if (is_array($entry) && is_string($entry['name'] ?? null) && $entry['name'] !== '') {
+                return $entry['name'];
+            }
+        }
+
+        return 'www-data';
     }
 
     private function cloneOrCopy(

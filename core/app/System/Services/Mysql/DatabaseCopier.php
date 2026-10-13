@@ -15,12 +15,30 @@ use Illuminate\Support\Facades\Log;
  */
 class DatabaseCopier
 {
-    /** Plain sed; this tree has no WordPress Database class to borrow the strip from. */
-    private const DEFINER_STRIP = "sed -e 's/DEFINER=`[^`]*`@`[^`]*`//g'";
-
     public function __construct(
         private readonly Mysql $mysql,
     ) {
+    }
+
+    /**
+     * The dump carries the source schema in its triggers, routines and events,
+     * and the source DEFINER, so a copy into another database must rewrite both.
+     *
+     * The schema rewrite is restricted to lines that are not table data: a row
+     * whose text happens to contain `src.` (an email, a host name, a note) must
+     * survive untouched. Extended inserts wrap their rows onto lines starting
+     * with `(`, so both the `INSERT INTO` line and its continuations are skipped.
+     * The DEFINER strip stays global — no data line carries `DEFINER=`.
+     */
+    public static function rewrite(string $from, string $to): string
+    {
+        $pattern = preg_quote($from, '/');
+        $replacement = str_replace(['\\', '&', '/'], ['\\\\', '\\&', '\\/'], $to);
+        $schemaLines = "/^INSERT INTO /!{/^(/!";
+
+        return "sed -e 's/DEFINER=`[^`]*`@`[^`]*`//g'"
+            . " -e '{$schemaLines}s/`{$pattern}`\\./`{$replacement}`./g}'"
+            . " -e '{$schemaLines}s/\\b{$pattern}\\./{$replacement}./g}'";
     }
 
     public static function mapName(string $name, string $fromPrefix, string $toPrefix): string
@@ -366,7 +384,7 @@ class DatabaseCopier
         $dump = 'mariadb-dump --single-transaction --routines --triggers --events -uroot ' . escapeshellarg($from);
         $import = 'mariadb -uroot ' . escapeshellarg($to);
 
-        return 'set -o pipefail; ' . $dump . ' | ' . self::DEFINER_STRIP . ' | ' . $import;
+        return 'set -o pipefail; ' . $dump . ' | ' . self::rewrite($from, $to) . ' | ' . $import;
     }
 
     private function streamTableCopy(string $from, string $to, string $table): string
@@ -375,6 +393,6 @@ class DatabaseCopier
             . escapeshellarg($from) . ' ' . escapeshellarg($table);
         $import = 'mariadb -uroot ' . escapeshellarg($to);
 
-        return 'set -o pipefail; ' . $dump . ' | ' . self::DEFINER_STRIP . ' | ' . $import;
+        return 'set -o pipefail; ' . $dump . ' | ' . self::rewrite($from, $to) . ' | ' . $import;
     }
 }

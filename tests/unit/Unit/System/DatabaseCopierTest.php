@@ -8,6 +8,7 @@ use App\System\Services\Mysql\DatabaseCopier;
 use App\System\Services\Mysql\Databases;
 use App\System\Services\Mysql\Privileges;
 use App\System\Services\Mysql\Users;
+use Symfony\Component\Process\Process;
 use PDO;
 use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
@@ -36,6 +37,48 @@ class DatabaseCopierTest extends TestCase
         $this->assertSame('bob_wp', $copier->mapName('wp', 'alice_', 'bob_'));
     }
 
+    public function test_rewrite_strips_the_definer_and_carries_the_source_schema(): void
+    {
+        $sed = DatabaseCopier::rewrite('alice_wp', 'bob_wp');
+
+        $this->assertStringContainsString("s/DEFINER=`[^`]*`@`[^`]*`//g'", $sed);
+        $this->assertStringContainsString('/^INSERT INTO /!{/^(/!s/`alice_wp`\./`bob_wp`./g}', $sed);
+        $this->assertStringContainsString('/^INSERT INTO /!{/^(/!s/\balice_wp\./bob_wp./g}', $sed);
+    }
+
+    public function test_rewrite_leaves_row_data_untouched_and_rewrites_the_trigger(): void
+    {
+        $dump = implode("\n", [
+            'LOCK TABLES `t` WRITE;',
+            'INSERT INTO `t` VALUES',
+            "(1,'alice_wp.example'),",
+            "(2,'`alice_wp`.x'),",
+            "(3,'plain');",
+            'UNLOCK TABLES;',
+            '/*!50003 CREATE*/ /*!50017 DEFINER=`root`@`localhost`*/ /*!50003 TRIGGER alice_wp.trg BEFORE INSERT ON alice_wp.t FOR EACH ROW SET NEW.v = UPPER(NEW.v) */;;',
+        ]);
+
+        $process = Process::fromShellCommandline(DatabaseCopier::rewrite('alice_wp', 'bob_wp'));
+        $process->setInput($dump);
+        $process->run();
+
+        $this->assertTrue($process->isSuccessful(), $process->getErrorOutput());
+        $out = $process->getOutput();
+        $this->assertStringContainsString("(1,'alice_wp.example')", $out);
+        $this->assertStringContainsString("(2,'`alice_wp`.x')", $out);
+        $this->assertStringContainsString('/*!50017 */', $out);
+        $this->assertStringContainsString('TRIGGER bob_wp.trg', $out);
+        $this->assertStringContainsString('ON bob_wp.t', $out);
+    }
+
+    public function test_rewrite_escapes_a_database_name_for_the_regex(): void
+    {
+        $sed = DatabaseCopier::rewrite('alice-wp', 'bob-wp');
+
+        $this->assertStringContainsString('alice\\-wp', $sed);
+        $this->assertStringNotContainsString('s/\balice-wp\.', $sed);
+    }
+
     public function test_copy_database_streams_a_dump_through_the_definer_strip(): void
     {
         $record = $this->recorder();
@@ -50,6 +93,7 @@ class DatabaseCopierTest extends TestCase
         $this->assertStringContainsString("'alice_wp'", $record->scripts[0]);
         $this->assertStringContainsString("'bob_wp'", $record->scripts[0]);
         $this->assertStringContainsString('DEFINER=', $record->scripts[0]);
+        $this->assertStringContainsString('s/\balice_wp\./bob_wp./g', $record->scripts[0]);
     }
 
     public function test_copy_project_databases_maps_names_and_copies_owned_grants(): void

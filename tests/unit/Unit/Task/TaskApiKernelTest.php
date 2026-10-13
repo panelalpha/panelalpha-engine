@@ -40,6 +40,22 @@ class TaskApiKernelTest extends SqliteTaskTestCase
         $this->assertNotNull($response->json('data.queued_at'));
     }
 
+    public function test_get_keeps_the_action_under_details_not_at_the_top_level(): void
+    {
+        $task = Task::start(
+            jobType: 'App\\Jobs\\PushState',
+            queue: 'default',
+            username: 'acme',
+            details: ['action' => 'push', 'source' => 'live', 'target' => 'acme'],
+        );
+
+        $response = $this->getJson('/api/tasks/' . $task->id);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.details.action', 'push');
+        $this->assertArrayNotHasKey('action', $response->json('data'));
+    }
+
     public function test_get_returns_only_logs_after_cursor_and_caps_page(): void
     {
         $task = Task::start(jobType: 'App\\Jobs\\RebuildJob', queue: 'default');

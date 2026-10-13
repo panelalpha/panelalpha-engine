@@ -1,6 +1,6 @@
 import { expect, test } from '@/fixtures/test-options';
 import { CleanupSteps } from '@/helpers/cleanup-step';
-import { getDomainBasePath } from '@/helpers/file-path-helpers';
+import { getDomainBasePath, removeFileIfPresent } from '@/helpers/file-path-helpers';
 import { uniqueId } from '@/helpers/random';
 import { expectStatus } from '@/helpers/expect-status';
 
@@ -85,7 +85,7 @@ test.describe('move contents, fetch and chmod', () => {
     }
   });
 
-  test('fetch refuses an internal address and a redirect to one', async ({ api, userFactory }) => {
+  test('fetch refuses an internal address', async ({ api, userFactory }) => {
     const user = await userFactory.createSimpleUser();
     const dir = getDomainBasePath(user.domain);
 
@@ -108,26 +108,44 @@ test.describe('move contents, fetch and chmod', () => {
         expect(body.problems?.[0]?.code, url).toBe('host_refused');
       }
       expect((await api.fileExists(user.username, `${dir}/internal.txt`)).exists).toBe(false);
-
-      const redirected = await api.fetchFileRaw(user.username, {
-        url: 'https://httpbin.org/redirect-to?url=http%3A%2F%2F127.0.0.1%2F',
-        path: dir,
-        filename: 'redirected.txt',
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
+    } finally {
+      await cleanup.run(`remove ${dir}/internal.txt`, async () => {
+        await removeFileIfPresent(api, user.username, `${dir}/internal.txt`);
       });
+      await cleanup.finish();
+    }
+  });
+
+  test('fetch refuses a redirect to an internal address', async ({ api, userFactory }) => {
+    const user = await userFactory.createSimpleUser();
+    const dir = getDomainBasePath(user.domain);
+
+    const redirected = await api.fetchFileRaw(user.username, {
+      url: 'https://httpbin.org/redirect-to?url=http%3A%2F%2F127.0.0.1%2F',
+      path: dir,
+      filename: 'redirected.txt',
+    });
+    test.skip(
+      redirected.status === 400 && /returned error: 5\d\d/.test(JSON.stringify(redirected.body)),
+      'The external redirector this case relies on answered a server error.'
+    );
+
+    const cleanup = new CleanupSteps();
+    try {
       await expectStatus(redirected, 422);
-      const redirectBody = redirected.body as {
-        problems?: { field?: string; code?: string }[];
-      };
-      expect(redirectBody.problems?.[0]?.field).toBe('url');
-      expect(redirectBody.problems?.[0]?.code).toBe('host_refused');
+      const body = redirected.body as { problems?: { field?: string; code?: string }[] };
+      expect(body.problems?.[0]?.field).toBe('url');
+      expect(body.problems?.[0]?.code).toBe('host_refused');
       expect((await api.fileExists(user.username, `${dir}/redirected.txt`)).exists).toBe(false);
     } catch (error) {
       cleanup.bodyFailed(error);
       throw error;
     } finally {
-      await cleanup.run(`remove ${dir}/internal.txt and ${dir}/redirected.txt`, async () => {
-        await api.removeFile(user.username, `${dir}/internal.txt`);
-        await api.removeFile(user.username, `${dir}/redirected.txt`);
+      await cleanup.run(`remove ${dir}/redirected.txt`, async () => {
+        await removeFileIfPresent(api, user.username, `${dir}/redirected.txt`);
       });
       await cleanup.finish();
     }

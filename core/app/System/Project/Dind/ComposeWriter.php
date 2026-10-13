@@ -76,8 +76,11 @@ class ComposeWriter
             return false;
         }
         $service = $compose['services'][GeneratedCompose::APP_SERVICE] ?? null;
-        $environment = is_array($service) ? ($service['environment'] ?? null) : null;
-        if (!is_array($environment) || array_is_list($environment)) {
+        if (!is_array($service)) {
+            return false;
+        }
+        $environment = $service['environment'] ?? [];
+        if (!is_array($environment) || self::isListStyleEnvironment($environment)) {
             return false;
         }
         $merged = self::withAccountEnv($environment, $vars, $replaced);
@@ -110,6 +113,18 @@ class ComposeWriter
     }
 
     /**
+     * `environment:` is read as a map of KEY/value pairs. A non-empty list is
+     * the `- KEY=value` form and is not ours to write into; an empty list is
+     * indistinguishable from an absent map after parsing, and is read as one.
+     *
+     * @param array<mixed> $environment
+     */
+    private static function isListStyleEnvironment(array $environment): bool
+    {
+        return $environment !== [] && array_is_list($environment);
+    }
+
+    /**
      * The engine's own variables and the ones that name where the app is
      * published are never the account's to replace.
      *
@@ -128,7 +143,7 @@ class ComposeWriter
         }
         foreach ($vars as $key => $value) {
             if (!ComposeEnvironment::isReserved($key)) {
-                $environment[$key] = $value;
+                $environment[$key] = self::escapedForCompose((string) $value);
             }
         }
 
@@ -157,8 +172,11 @@ class ComposeWriter
             return false;
         }
         $service = $compose['services'][GeneratedCompose::APP_SERVICE] ?? null;
-        $environment = is_array($service) ? ($service['environment'] ?? null) : null;
-        if (!is_array($environment) || array_is_list($environment)) {
+        if (!is_array($service)) {
+            return false;
+        }
+        $environment = $service['environment'] ?? [];
+        if (!is_array($environment) || self::isListStyleEnvironment($environment)) {
             return false;
         }
         $merged = self::withApiAccessEnv($environment, $values);
@@ -195,6 +213,15 @@ class ComposeWriter
         }
 
         return $environment === $before ? null : $environment;
+    }
+
+    /**
+     * Compose interpolates `$` in an `environment:` value, so a literal one the
+     * account set reaches the container only when it is doubled.
+     */
+    private static function escapedForCompose(string $value): string
+    {
+        return str_replace('$', '$$', $value);
     }
 
     /**
