@@ -12,7 +12,8 @@ use PHPUnit\Framework\TestCase;
 /**
  * A restore extracted into a directory root had just created, so the swapped-in
  * ~/project was root-owned and the account could not write into it until the
- * next deploy.
+ * next deploy. Root extracts into a fresh directory closed to the account, and
+ * hands it over only once tar is done.
  */
 class BackupRestoreOwnershipTest extends TestCase
 {
@@ -47,9 +48,11 @@ class BackupRestoreOwnershipTest extends TestCase
 
         $backup->extractForTest('/tmp/files.tar.gz', 'project.incoming');
 
-        $this->assertSame('mkdir', $system->ran[0][0]);
-        $this->assertSame('tar', $system->ran[1][0]);
-        $this->assertSame(['chown', '1002:1003', '/home/alice/project.incoming'], $system->ran[2]);
-        $this->assertCount(3, $system->ran);
+        $this->assertSame(['rm', '-rf', '--', '/home/alice/project.incoming'], $system->ran[0]);
+        $this->assertSame(['mkdir', '-m', '700', '--', '/home/alice/project.incoming'], $system->ran[1]);
+        $this->assertSame('tar', $system->ran[2][0]);
+        $this->assertSame(['chmod', '755', '/home/alice/project.incoming'], $system->ran[3]);
+        $this->assertSame(['chown', '1002:1003', '/home/alice/project.incoming'], $system->ran[4]);
+        $this->assertCount(5, $system->ran);
     }
 }

@@ -1172,12 +1172,15 @@ class Backup
 
     /**
      * --strip-components drops the archived `project` entry, so $incomingDir keeps mkdir's root owner until it
-     * is handed over after tar: root must not extract into a directory the account can plant links in.
+     * is handed over after tar: root must not extract into a directory the account can plant links in. A leftover
+     * from a failed restore was already handed over, so it goes first, and the fresh one stays closed to the
+     * account until tar is done, so no directory tar has already handed over can be swapped for a link.
      */
     protected function extractProjectArchive(string $archivePath, string $incomingDir): void
     {
         $incoming = $this->userPath($incomingDir);
-        $this->project->system()->execOnHost(['mkdir', '-p', $incoming]);
+        $this->project->system()->execOnHost(['rm', '-rf', '--', $incoming], [], JobBudget::COMMAND_SECONDS);
+        $this->project->system()->execOnHost(['mkdir', '-m', '700', '--', $incoming]);
         $this->project->system()->execOnHost([
             'tar',
             '-xzf',
@@ -1186,6 +1189,7 @@ class Backup
             $incoming,
             '--strip-components=1',
         ], [], JobBudget::COMMAND_SECONDS);
+        $this->project->system()->execOnHost(['chmod', '755', $incoming]);
         $owner = $this->project->model()->getChownString();
         if ($owner !== null) {
             $this->project->system()->execOnHost(['chown', $owner, $incoming]);
