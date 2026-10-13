@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Compose;
 
+use App\Lib\Project\ApiAccess;
+
 /**
  * The environment a generated service runs with, in the order its layers
  * outrank one another.
@@ -23,6 +25,11 @@ namespace App\Lib\Deploy\Compose;
  * decides install from upgrade. `HOST`, `HOSTNAME` and `PORT` name the port
  * compose publishes and the health check probes — an account that moved those
  * would get a container nothing can reach and a log that never says why.
+ *
+ * The API address, token and CA the engine hands an allowed project are
+ * reserved too ({@see ApiAccess}) and written last, so whichever route the
+ * project's configuration takes, the engine's own values are the ones that
+ * reach the container.
  *
  * No Laravel dependencies — unit-testable.
  */
@@ -96,6 +103,41 @@ final class ComposeEnvironment
     }
 
     /**
+     * The engine's own API address, token and CA for an allowed project. A
+     * generated compose file is interpolated by Compose, so a `$` in a value is
+     * doubled, which is how Compose is told to keep it.
+     *
+     * @param array<string, mixed> $decision
+     * @param array<string, string> $values
+     * @return array<string, mixed>
+     */
+    public static function withApiAccess(array $decision, array $values): array
+    {
+        if ($values === []) {
+            return $decision;
+        }
+
+        $decision['env'] = array_merge(
+            ComposeValues::stringMap($decision['env'] ?? null),
+            self::escapedForCompose($values)
+        );
+
+        return $decision;
+    }
+
+    /**
+     * Values headed for a compose file's `environment:`, with `$` doubled, which
+     * is how Compose is told to keep it instead of interpolating it.
+     *
+     * @param array<string, string> $values
+     * @return array<string, string>
+     */
+    public static function escapedForCompose(array $values): array
+    {
+        return array_map(static fn (string $value): string => str_replace('$', '$$', $value), $values);
+    }
+
+    /**
      * `${PA_PUBLIC_URL}` / `${PA_PUBLIC_HOST}` in the decision's env resolved,
      * as the compose strategy does for its own file. Written into the
      * generated compose as-is, Compose would interpolate them to ''.
@@ -120,7 +162,8 @@ final class ComposeEnvironment
     public static function isReserved(string $key): bool
     {
         return str_starts_with($key, self::RESERVED_PREFIX)
-            || in_array($key, self::RESERVED, true);
+            || in_array($key, self::RESERVED, true)
+            || in_array($key, ApiAccess::ENV_KEYS, true);
     }
 
     /**

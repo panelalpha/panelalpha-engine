@@ -16,6 +16,7 @@ use App\System\Project\Dind\Strategy\RailpackStrategy;
 use App\System\Project\Dind\Strategy\RubyStrategy;
 use App\System\Project\Dind\Strategy\UserComposeStrategy;
 use App\Lib\Deploy\Compose\ComposeEnvironment;
+use App\Lib\Project\ApiAccess;
 use App\Lib\Deploy\Compose\ComposeOverride;
 use App\Lib\Deploy\Compose\ComposeValues;
 use App\Lib\Deploy\Compose\ComposeYaml;
@@ -99,7 +100,10 @@ class DeployStrategy
     public function composeDecision(array $decision): array
     {
         $decision = ComposeEnvironment::layer(
-            ComposeEnvironment::withInstanceSecret($decision, $this->secrets()->instanceSecret()),
+            ComposeEnvironment::withApiAccess(
+                ComposeEnvironment::withInstanceSecret($decision, $this->secrets()->instanceSecret()),
+                (new ApiAccess($this->dind->system()))->envFor($this->dind->userModel())
+            ),
             $this->appConfig?->env() ?? [],
             $this->secrets()->userEnvVars()
         );

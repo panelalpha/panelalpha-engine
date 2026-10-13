@@ -7,6 +7,7 @@ use App\Lib\Deploy\Compose\ComposeEnvironment;
 use App\Lib\Deploy\Compose\ComposeHarden;
 use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Compose\GeneratedCompose;
+use App\Lib\Project\ApiAccess;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
 use App\Lib\Deploy\Platform\Probes\ProcfileWebProbe;
 use App\Lib\Deploy\Detect\PlaceholderPage;
@@ -129,6 +130,68 @@ class ComposeWriter
             if (!ComposeEnvironment::isReserved($key)) {
                 $environment[$key] = $value;
             }
+        }
+
+        return $environment === $before ? null : $environment;
+    }
+
+    /**
+     * Point the generated run file's `environment:` at the engine's own API
+     * address, token and CA, or take them back out once the project is no longer
+     * allowed. A file the repository owns reads them from `.env.panelalpha`
+     * instead, which the environment rewrite already refreshed.
+     *
+     * @param array<string, string> $values
+     * @return bool whether the run file changed
+     */
+    public function mergeApiAccessEnv(array $values): bool
+    {
+        $path = $this->project->userAppComposeFilePath();
+        $fs = $this->project->system()->filesystem();
+        if (!$fs->fileExists($path)) {
+            return false;
+        }
+        $raw = (string) $fs->fileGetContents($path);
+        $compose = ComposeYaml::parse($raw);
+        if ($compose === null || !self::isEngineGenerated($compose)) {
+            return false;
+        }
+        $service = $compose['services'][GeneratedCompose::APP_SERVICE] ?? null;
+        $environment = is_array($service) ? ($service['environment'] ?? null) : null;
+        if (!is_array($environment) || array_is_list($environment)) {
+            return false;
+        }
+        $merged = self::withApiAccessEnv($environment, $values);
+        if ($merged === null) {
+            return false;
+        }
+        $compose['services'][GeneratedCompose::APP_SERVICE]['environment'] = $merged;
+        $fs->filePutContents(
+            $path,
+            ComposeYaml::dump($compose, $raw, 6, 2),
+            $this->project->userModel()->getChownString(),
+            EngineArtifacts::RUN_COMPOSE_MODE
+        );
+
+        return true;
+    }
+
+    /**
+     * @param array<mixed> $environment
+     * @param array<string, string> $values
+     * @return ?array<mixed> null when nothing changed
+     */
+    private static function withApiAccessEnv(array $environment, array $values): ?array
+    {
+        $before = $environment;
+        $escaped = ComposeEnvironment::escapedForCompose($values);
+        foreach (ApiAccess::ENV_KEYS as $key) {
+            if (!array_key_exists($key, $escaped)) {
+                unset($environment[$key]);
+            }
+        }
+        foreach ($escaped as $key => $value) {
+            $environment[$key] = $value;
         }
 
         return $environment === $before ? null : $environment;

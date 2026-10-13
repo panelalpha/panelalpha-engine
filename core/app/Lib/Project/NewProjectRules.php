@@ -8,6 +8,7 @@ use App\Lib\Domains\DomainPlan;
 use App\Lib\Host\ProjectMemory;
 use App\Rules\AccountMemoryLimit;
 use App\Rules\DomainName;
+use App\Rules\EnvVarKeysNotReserved;
 use App\Rules\GitAccessToken;
 use App\Rules\GitRepositoryUrl;
 use App\Rules\ProjectName;
@@ -160,7 +161,10 @@ final class NewProjectRules
      */
     public static function envVarRules(): array
     {
-        return ['env_vars' => 'array|nullable|max:200', 'env_vars.*' => 'string|nullable|max:8192'];
+        return [
+            'env_vars' => ['array', 'nullable', 'max:200', new EnvVarKeysNotReserved()],
+            'env_vars.*' => 'string|nullable|max:8192',
+        ];
     }
 
     /**

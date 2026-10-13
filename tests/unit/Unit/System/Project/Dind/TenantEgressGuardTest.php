@@ -141,6 +141,60 @@ SH));
         $this->assertContains('-A PA-TENANT-EGRESS -d 172.25.0.9 -p tcp --dport 5000 -j RETURN', $rules);
     }
 
+    /**
+     * The account's own guard has to agree with the host's rule: a project the
+     * engine allowed may reach the API port, and one that may not is still cut off
+     * from it a second time.
+     */
+    /**
+     * Only the port list changing still has to rebuild the chain: that is what a
+     * guard rewritten for a newly allowed account looks like when nothing else
+     * about the account moved. It is in the state, so the next run sees it.
+     */
+    public function test_a_changed_port_list_is_seen_and_rebuilds_the_chain(): void
+    {
+        file_put_contents($this->dir . '/guard.sh', TenantEgressGuard::script(['203.0.113.45'], apiAccess: true));
+
+        $rules = $this->rules($this->guardRun());
+
+        $this->assertContains('-A PA-TENANT-EGRESS -d 203.0.113.45 -p tcp --dport 2011 -j RETURN', $rules);
+        $this->assertContains('-A PA-TENANT-EGRESS -d 203.0.113.45 -j DROP', $rules);
+        $this->assertStringContainsString(
+            'ports=25 80 443 2011',
+            (string) file_get_contents($this->dir . '/state'),
+            'the port list decides a rebuild too'
+        );
+    }
+
+    public function test_an_allowed_account_opens_the_engine_api_port_and_an_unallowed_one_does_not(): void
+    {
+        file_put_contents(
+            $this->dir . '/guard.sh',
+            TenantEgressGuard::script(['203.0.113.45'], apiAccess: true)
+        );
+
+        $rules = $this->rules($this->guardRun());
+        $this->assertContains('-A PA-TENANT-EGRESS -d 203.0.113.45 -p tcp --dport 2011 -j RETURN', $rules);
+        $this->assertContains('-A PA-TENANT-EGRESS -d 203.0.113.45 -j DROP', $rules);
+
+        file_put_contents($this->dir . '/guard.sh', TenantEgressGuard::script(['203.0.113.45']));
+
+        $this->assertNotContains(
+            '-A PA-TENANT-EGRESS -d 203.0.113.45 -p tcp --dport 2011 -j RETURN',
+            $this->rules($this->guardRun())
+        );
+    }
+
+    public function test_the_port_list_is_mail_and_the_sites_unless_the_engine_allows_the_api(): void
+    {
+        $this->assertSame('25 80 443', TenantEgressGuard::HOST_PORTS);
+        $this->assertStringContainsString(
+            'HOST_PORTS="25 80 443 ' . TenantEgressGuard::API_PORT . '"',
+            TenantEgressGuard::script([], apiAccess: true)
+        );
+        $this->assertStringContainsString('HOST_PORTS="25 80 443"', TenantEgressGuard::script([]));
+    }
+
     public function test_it_never_fails_the_account_boot(): void
     {
         file_put_contents($this->dir . '/route', "garbage\n");
@@ -163,6 +217,12 @@ SH));
         $this->assertArrayHasKey('useradd.sh', $scripts);
         $this->assertArrayHasKey(TenantEgressGuard::FILE, $scripts);
         $this->assertStringContainsString('CHAIN=PA-TENANT-EGRESS', $scripts[TenantEgressGuard::FILE]);
+
+        $allowed = $template->entrypointInitScripts(apiAccess: true);
+        $this->assertStringContainsString(
+            'HOST_PORTS="25 80 443 ' . TenantEgressGuard::API_PORT . '"',
+            $allowed[TenantEgressGuard::FILE]
+        );
     }
 
     /** The loop that re-applies it hooks the inner daemon's chain, and runs the file the template renders. */

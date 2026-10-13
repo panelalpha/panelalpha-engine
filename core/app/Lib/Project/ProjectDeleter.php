@@ -6,6 +6,7 @@ use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\ProjectBusyException;
 use App\Jobs\CreateStaging;
 use App\Lib\Deploy\DeployLog\DeployLock;
+use App\Lib\Project\ApiAccess;
 use App\Lib\Task\ProcessTreeKiller;
 use App\Lib\Task\TaskCanceller;
 use App\Lib\Task\TaskReconciler;
@@ -14,6 +15,7 @@ use App\Models\User;
 use App\Support\JobBudget;
 use App\System;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Deleting a project (REST, MCP, `project:delete`) never overlaps a job that
@@ -30,6 +32,8 @@ class ProjectDeleter
 
     private TaskCanceller $canceller;
 
+    private ApiAccess $apiAccess;
+
     /** @var callable(Task): ?bool */
     private $inQueue;
 
@@ -37,10 +41,14 @@ class ProjectDeleter
      * @param null|callable(Task): ?bool $inQueue whether a task's job is still queued or
      *        reserved by a worker; {@see TaskReconciler::queueCheck()} by default
      */
-    public function __construct(?TaskCanceller $canceller = null, ?callable $inQueue = null)
-    {
+    public function __construct(
+        ?TaskCanceller $canceller = null,
+        ?callable $inQueue = null,
+        ?ApiAccess $apiAccess = null,
+    ) {
         $this->canceller = $canceller ?? new TaskCanceller(new ProcessTreeKiller(new System()));
         $this->inQueue = $inQueue ?? TaskReconciler::queueCheck();
+        $this->apiAccess = $apiAccess ?? new ApiAccess();
     }
 
     /**
@@ -61,6 +69,7 @@ class ProjectDeleter
             $this->assertIdle($user);
             $user->project()->assertDeletable();
             $this->cancelQueued($user);
+            $this->releaseApiAccess($user);
             $this->destroy($user);
         } finally {
             $lock->release();
@@ -70,6 +79,20 @@ class ProjectDeleter
     protected function destroy(User $user): void
     {
         $user->project()->destroy();
+    }
+
+    /**
+     * The account is going away, so its Engine API allowance and token go with
+     * it. Nothing is applied: the lock this delete holds is the one an apply
+     * would need, and the next firewall apply drops the rule anyway.
+     */
+    private function releaseApiAccess(User $user): void
+    {
+        try {
+            $this->apiAccess->deny($user, apply: false);
+        } catch (\Throwable $e) {
+            Log::warning("Could not remove the Engine API access of '{$user->username}': " . $e->getMessage());
+        }
     }
 
     /**

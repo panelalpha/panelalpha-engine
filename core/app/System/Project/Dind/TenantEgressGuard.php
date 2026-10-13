@@ -19,10 +19,12 @@ use App\System\ComposeProject;
  *
  * On the account's own network it lets through only the shared MySQL (3306)
  * and the two image registries (5000). On any address of the host itself only
- * mail (25, msmtp's host.docker.internal) and the sites (80/443, cloudflared
- * and hairpin requests to the tenant's own domains). Link-local, which is the
- * cloud metadata address, is refused. Everything else -- the internet, other
- * private networks -- is left as it was.
+ * mail (25, msmtp's host.docker.internal), the sites (80/443, cloudflared and
+ * hairpin requests to the tenant's own domains) and, for a project the engine
+ * allowed to use its API, the Engine API port ({@see API_PORT}) -- a second
+ * layer that has to agree with the host's own rule for that project. Link-local,
+ * which is the cloud metadata address, is refused. Everything else -- the
+ * internet, other private networks -- is left as it was.
  *
  * Rendered into the account's entrypoint.d, so entrypoint.sh runs it at boot,
  * and the account service {@see SERVICE} re-runs it: it has to follow the inner
@@ -51,6 +53,13 @@ final class TenantEgressGuard
     public const HOST_PORTS = '25 80 443';
 
     /**
+     * The Engine API port a project the engine allowed may use on the host. It is
+     * not in {@see HOST_PORTS}: the host's own firewall admits :2011 per allowed
+     * project, and this one rule has to follow that allowance.
+     */
+    public const API_PORT = 2011;
+
+    /**
      * On unless DIND_EGRESS_GUARD=false. Outside a booted application (unit
      * tests) it is on, like the production default.
      */
@@ -76,8 +85,10 @@ final class TenantEgressGuard
      * @param list<string> $hostIps every IPv4 address of the host (bridges,
      *        public, NAT); the default gateway and host.docker.internal are
      *        added in the account itself
+     * @param bool $apiAccess whether this account may use the Engine API, which
+     *        is the host port {@see API_PORT} open in this account
      */
-    public static function script(array $hostIps): string
+    public static function script(array $hostIps, bool $apiAccess = false): string
     {
         $hostIps = array_values(array_filter(
             array_unique($hostIps),
@@ -88,7 +99,7 @@ final class TenantEgressGuard
             '__HOST_IPS__' => implode(' ', $hostIps),
             '__DB_NAMES__' => implode(' ', self::DATABASE_NAMES),
             '__REGISTRY_NAMES__' => implode(' ', self::REGISTRY_NAMES),
-            '__HOST_PORTS__' => self::HOST_PORTS,
+            '__HOST_PORTS__' => trim(self::HOST_PORTS . ($apiAccess ? ' ' . self::API_PORT : '')),
         ];
 
         return strtr(self::TEMPLATE, $vars);
@@ -141,7 +152,8 @@ guard() {
     want="net=$net
 db=$db
 reg=$reg
-host=$host"
+host=$host
+ports=$HOST_PORTS"
     if [ -f "$STATE" ] && [ "$(cat "$STATE")" = "$want" ] && iptables -n -L "$CHAIN" >/dev/null 2>&1; then
         :
     else

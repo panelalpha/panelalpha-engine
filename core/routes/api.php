@@ -45,6 +45,7 @@ use App\Http\Controllers\ServerMetricsController;
 use App\Http\Controllers\SecretVaultController;
 use App\Http\Controllers\SourceInspectionController;
 use App\Http\Controllers\SourceRefsController;
+use App\Http\Controllers\SystemApiAccessController;
 use App\Http\Controllers\TaskController;
 use App\Http\Controllers\User\SftpAccountController;
 use App\Http\Controllers\UserController;
@@ -367,6 +368,10 @@ Route::get('/domains/{domain}', [DomainController::class, 'show']);
 Route::post('/bug-reports', [BugReportController::class, 'store']);
 
 Route::get('/system/info', [SystemController::class, 'info']);
+Route::get('/system/api-access', [SystemApiAccessController::class, 'index']);
+Route::put('/system/api-access/{project}', [SystemApiAccessController::class, 'update']);
+Route::post('/system/api-access/{project}/rotate', [SystemApiAccessController::class, 'rotate']);
+Route::delete('/system/api-access/{project}', [SystemApiAccessController::class, 'destroy']);
 Route::get('/system/ssl-config', [SystemController::class, 'getSslConfig']);
 Route::put('/system/ssl-config', [SystemController::class, 'updateSslConfig']);
 Route::put('/system/engine-certificate', [SystemController::class, 'requestEngineCertificate']);

@@ -5,6 +5,7 @@ namespace App\Http\Requests;
 use App\Http\Requests\Concerns\ReportsProblems;
 use App\Http\Requests\Concerns\ResolvesVaultFields;
 use App\Rules\EnvVarKeys;
+use App\Rules\EnvVarKeysNotReserved;
 use Illuminate\Foundation\Http\FormRequest;
 
 class EnvVarsUpdateRequest extends FormRequest
@@ -28,7 +29,7 @@ class EnvVarsUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'env_vars' => ['present', 'array', 'max:200', new EnvVarKeys()],
+            'env_vars' => ['present', 'array', 'max:200', new EnvVarKeys(), new EnvVarKeysNotReserved()],
             'env_vars.*' => ['string', 'nullable', 'max:8192'],
             'replace' => ['sometimes', 'boolean'],
             'apply' => ['sometimes', 'in:none,recreate'],
@@ -42,7 +43,7 @@ class EnvVarsUpdateRequest extends FormRequest
     {
         return [
             'env_vars' => [
-                'expected' => 'an object of KEY: "value" strings, at most 200; an empty object clears every key with replace',
+                'expected' => 'an object of KEY: "value" strings, at most 200, and no name the engine sets itself; an empty object clears every key with replace',
                 'examples' => ['{"APP_ENV": "production"}'],
             ],
             'env_vars.*' => ['expected' => 'a string of at most 8192 characters, or null to remove the key'],

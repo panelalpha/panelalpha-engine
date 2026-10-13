@@ -13,7 +13,7 @@ use Illuminate\Contracts\Validation\Validator;
  */
 trait ReportsProblems
 {
-    /** @var array<string, ProblemRule> */
+    /** @var array<string, list<ProblemRule>> */
     private array $problemRules = [];
 
     /**
@@ -29,7 +29,7 @@ trait ReportsProblems
         foreach ($rules as $field => $set) {
             foreach (is_array($set) ? $set : [$set] as $rule) {
                 if ($rule instanceof ProblemRule) {
-                    $this->problemRules[$field] = $rule;
+                    $this->problemRules[$field][] = $rule;
                 }
             }
         }
@@ -48,17 +48,33 @@ trait ReportsProblems
         $i = 0;
 
         foreach ($validator->errors()->messages() as $field => $messages) {
-            $rich = ($this->problemRules[$field] ?? null)?->problem();
-
             // One per message, not per field: ProblemException rebuilds
             // `errors` from what it is given.
             foreach ($messages as $message) {
-                $problems[] = ($rich['message'] ?? null) === $message ? $rich : $generic[$i];
+                $problems[] = $this->richProblem($field, $message) ?? $generic[$i];
                 $i++;
             }
         }
 
         throw ProblemException::of($problems);
+    }
+
+    /**
+     * The rule that failed with this message, so its field and code go with it;
+     * a field may carry more than one, and the others report nothing.
+     *
+     * @return ?array<string, mixed>
+     */
+    private function richProblem(string $field, string $message): ?array
+    {
+        foreach ($this->problemRules[$field] ?? [] as $rule) {
+            $problem = $rule->problem();
+            if (($problem['message'] ?? null) === $message) {
+                return $problem;
+            }
+        }
+
+        return null;
     }
 
     /**

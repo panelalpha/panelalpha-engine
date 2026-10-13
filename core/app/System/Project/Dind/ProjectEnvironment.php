@@ -16,6 +16,7 @@ use App\Lib\Deploy\Env\ComposeEnvFiles;
 use App\Lib\Deploy\Env\EnvTemplates;
 use App\Lib\Deploy\EnvFile;
 use App\Lib\Deploy\Platform\Strategies;
+use App\Lib\Project\ApiAccess;
 
 /**
  * The .env files the application is deployed with: `.env.default` is the base the project shipped,
@@ -63,7 +64,11 @@ class ProjectEnvironment
         }
 
         $tracked = $overrides !== [] && $this->envIsTracked();
-        $services = $this->writeEngineValues($tracked ? $overrides + $generated : $generated, $projectDir, $chown);
+        $services = $this->writeEngineValues(
+            (new ApiAccess($this->dind->system()))->envFor($user) + ($tracked ? $overrides + $generated : $generated),
+            $projectDir,
+            $chown
+        );
 
         if ($tracked) {
             $this->keepTrackedEnv($user, $overrides, $services, $projectDir, $chown, $logger);

@@ -25,6 +25,12 @@ final class TenantNetwork
 
     public const FIREWALL_SCRIPT = '/opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh';
 
+    /**
+     * The projects the engine allowed to call its API on :2011, one name per
+     * line; the firewall script reads this path.
+     */
+    public const API_ACCESS_FILE = '/opt/panelalpha/shared-hosting/config/tenant-api-access';
+
     /** What the firewall refuses an account: the script's REFUSED, which a test keeps this equal to. */
     public const REFUSED_RANGES = [
         '0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12',

@@ -67,9 +67,11 @@ final class AccountTemplate
     }
 
     /**
+     * @param bool $apiAccess whether the project may use the Engine API, which
+     *        its own egress guard has to know about
      * @return array<string, string>
      */
-    public function entrypointInitScripts(): array
+    public function entrypointInitScripts(bool $apiAccess = false): array
     {
         $userModel = $this->project->userModel();
         $username = $userModel->username;
@@ -102,7 +104,7 @@ BASH;
 
         $scripts = ['useradd.sh' => $script];
         if (TenantEgressGuard::enabled()) {
-            $scripts[TenantEgressGuard::FILE] = TenantEgressGuard::script($this->hostIpv4Addresses());
+            $scripts[TenantEgressGuard::FILE] = TenantEgressGuard::script($this->hostIpv4Addresses(), $apiAccess);
         }
 
         return $scripts;

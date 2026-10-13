@@ -9,6 +9,7 @@ use App\Http\Resources\EnvVarsResource;
 use App\Http\Resources\TaskResource;
 use App\Jobs\ApplyEnvVars;
 use App\Lib\Deploy\EnvVarOverrides;
+use App\Lib\Project\ApiAccess;
 use App\Lib\Project\ProjectRebuild;
 use App\Models\Task;
 use App\Models\User;
@@ -53,7 +54,7 @@ class EnvVarsController extends Controller
         $this->assertDind($user);
 
         return new EnvVarsResource([
-            'vars' => self::entries($user->getEnvVars(), $request->boolean('reveal')),
+            'vars' => self::entries(ApiAccess::withoutReservedKeys($user->getEnvVars()), $request->boolean('reveal')),
             'applied_keys' => self::appliedKeys($user),
         ]);
     }
@@ -122,7 +123,7 @@ class EnvVarsController extends Controller
 
         /** @var array{env_vars: array<string, string|null>, replace?: bool, apply?: string} $params */
         $params = $request->validated();
-        $current = $user->getEnvVars();
+        $current = ApiAccess::withoutReservedKeys($user->getEnvVars());
         $vars = self::merged($params, $current);
         $apply = $params['apply'] ?? 'recreate';
 

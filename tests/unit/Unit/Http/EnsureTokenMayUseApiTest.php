@@ -209,6 +209,17 @@ class EnsureTokenMayUseApiTest extends TestCase
         $this->assertSame(200, $this->through($abilities, route: ['POST', 'api/source/inspect']));
     }
 
+    public function test_a_project_scoped_token_is_refused_the_api_access_routes(): void
+    {
+        $abilities = TokenAbilities::build(api: true, mcp: false, projects: ['alice']);
+
+        foreach ([['GET', 'api/system/api-access'], ['PUT', 'api/system/api-access/{project}'], ['POST', 'api/system/api-access/{project}/rotate'], ['DELETE', 'api/system/api-access/{project}']] as $route) {
+            $response = $this->dispatched($abilities, route: $route, params: ['project' => 'alice']);
+
+            $this->assertSame(403, $response->getStatusCode(), $route[0] . ' ' . $route[1]);
+        }
+    }
+
     /** A project limit travels with the token, so an MCP tool call is bound by it too. */
     public function test_the_project_scope_is_enforced_on_a_tool_call(): void
     {

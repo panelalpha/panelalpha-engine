@@ -8,6 +8,8 @@
 #   - account to account: dropped (enable_icc=false, and again below),
 #   - to the shared services on this bridge: sites-db 3306 and the two
 #     registries 5000 only, at addresses pinned in docker-compose.yml,
+#   - the engine's own API on :2011, for the projects the engine allowed,
+#     named in config/tenant-api-access, and for no one else,
 #   - anything else private, link-local or reserved: refused, which covers
 #     core, SFTP, the other networks and published ports DNAT turns into them,
 #   - the host itself: mail (25) and the sites (80/443) only,
@@ -62,6 +64,9 @@ done
 NET=pash-tenants
 BRIDGE=br-pa-tenants
 ENV_FILE="${PA_ENV_FILE:-/opt/panelalpha/shared-hosting/.env}"
+# The engine writes the projects it allowed to call its API, one name per
+# line; a missing or empty file admits none.
+API_ACCESS_FILE="${PA_API_ACCESS_FILE:-/opt/panelalpha/shared-hosting/config/tenant-api-access}"
 REFUSED="0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.168.0.0/16 198.18.0.0/15 224.0.0.0/4 240.0.0.0/4"
 
 # The first two octets; docker-compose.yml derives the pinned addresses from it.
@@ -235,6 +240,31 @@ SITES_DB="$prefix.0.2"
 CACHE_REGISTRY="$prefix.0.3"
 REGISTRY_PROXY="$prefix.0.4"
 
+# "name ip" per running member of the network. A stopped container is not a
+# member, so it gets no rule; Docker attaches the rest on its own too.
+member_addresses() {
+    docker network inspect "$NET" -f '{{range .Containers}}{{.Name}} {{.MacAddress}} {{.IPv4Address}}{{"\n"}}{{end}}' |
+        while read -r name mac ip; do
+            [ -n "$name" ] && [ -n "$ip" ] || continue
+            echo "$name ${ip%/*}"
+        done
+}
+
+# The engine's API port, for the accounts the engine allowed. Judged before
+# the private ranges are refused, and by the address Docker gave the container
+# on this bridge: an account cannot announce another's. At boot nothing runs
+# and Docker is not up, so no rule is emitted then.
+api_access_rules() {
+    [ "$BOOT" = 1 ] && return 0
+    [ -f "$API_ACCESS_FILE" ] || return 0
+    allowed=$(sed -e 's/#.*//' -e 's/[[:space:]]//g' "$API_ACCESS_FILE" 2>/dev/null | grep -v '^$')
+    [ -n "$allowed" ] || return 0
+    member_addresses | while read -r name ip; do
+        echo "$allowed" | grep -qxF "$name" || continue
+        echo "-A PA-TENANT-NET -i $BRIDGE -s $ip/32 -p tcp -m conntrack --ctstate DNAT --ctorigdstport 2011 -j ACCEPT"
+    done
+}
+
 exec 9>"${PA_TENANT_LOCK:-/run/pa-tenant-network.lock}"
 flock 9
 
@@ -250,6 +280,7 @@ flock 9
     echo "-A PA-TENANT-NET -o $BRIDGE -d $CACHE_REGISTRY/32 -p tcp --dport 5000 -j ACCEPT"
     echo "-A PA-TENANT-NET -o $BRIDGE -d $REGISTRY_PROXY/32 -p tcp --dport 5000 -j ACCEPT"
     echo "-A PA-TENANT-NET -o $BRIDGE -j DROP"
+    api_access_rules
     for cidr in $REFUSED; do
         echo "-A PA-TENANT-NET -d $cidr -j REJECT --reject-with icmp-net-prohibited"
     done

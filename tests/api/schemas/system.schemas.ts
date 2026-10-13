@@ -100,3 +100,30 @@ export const systemMetricsSchema = z
 export const systemMetricsResponseSchema = z.object({
   data: systemMetricsSchema,
 });
+
+export const apiAccessEntrySchema = z.object({
+  project: z.string(),
+  scope: z.union([z.enum(['self', 'all']), z.array(z.string())]),
+  mcp: z.boolean(),
+  token_id: z.number(),
+  allowed_at: z.string().nullable(),
+  pending_revoke_token_id: z.number().nullable(),
+  warning: z.string().nullable(),
+});
+
+export const apiAccessListResponseSchema = z.object({
+  data: z.array(apiAccessEntrySchema),
+});
+
+export const apiAccessEntryResponseSchema = z.object({
+  data: apiAccessEntrySchema,
+});
+
+export const apiAccessRemovalResponseSchema = z.object({
+  data: z.object({ project: z.string(), removed: z.boolean() }),
+});
+
+export const apiAccessRotationResponseSchema = z.object({
+  data: apiAccessEntrySchema,
+  task_id: z.number(),
+});

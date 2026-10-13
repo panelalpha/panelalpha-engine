@@ -257,6 +257,10 @@ return [
     'POST /bug-reports' => 'bug_report_create',
 
     'GET /system/info' => 'system_info',
+    'GET /system/api-access' => 'system_api_access_list',
+    'PUT /system/api-access/{project}' => 'system_api_access_allow',
+    'POST /system/api-access/{project}/rotate' => 'system_api_access_rotate',
+    'DELETE /system/api-access/{project}' => 'system_api_access_deny',
     'PUT /system/update' => 'system_update',
     'PUT /system/change-webserver' => 'system_webserver_change',
     'PUT /system/webserver-config' => 'system_webserver_config_set',

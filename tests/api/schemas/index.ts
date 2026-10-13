@@ -74,6 +74,11 @@ export {
   currentMetricsSchema,
   historicalMetricsResponseSchema,
   historicalMetricsEntrySchema,
+  apiAccessEntrySchema,
+  apiAccessListResponseSchema,
+  apiAccessEntryResponseSchema,
+  apiAccessRemovalResponseSchema,
+  apiAccessRotationResponseSchema,
 } from './system.schemas';
 export {
   createUserRequestSchema,

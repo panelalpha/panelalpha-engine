@@ -22,6 +22,7 @@ use App\System\Project\Dind\AbstractApplication as DindApplication;
 use App\System\Project\Deployment\DeployableDindProject;
 use App\System\Project\Deployment\DeploymentWorkflow;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
+use App\Lib\Project\ApiAccess;
 use App\System\Project\Dind\ComposeWriter;
 use App\System\Project\Dind\DeployStrategy;
 use App\System\Project\Dind\HostCompile;
@@ -657,12 +658,13 @@ class Dind implements DeployableDindProject, Runtime
     }
 
     /**
-     * Each script is replaced by renaming a temp file over it, so a tenant with entrypoint.d mounted
-     * read-write cannot plant a symlink in a gap; the egress guard's service keeps it applied after boot.
+     * Each script is replaced by renaming a temp file over it, so a tenant with entrypoint.d
+     * mounted read-write cannot plant a symlink in a gap; the egress guard's service keeps it applied
+     * after boot.
      */
     public function setupEntrypointInitScripts(): void
     {
-        $scriptFiles = $this->accountTemplate()->entrypointInitScripts();
+        $scriptFiles = $this->accountTemplate()->entrypointInitScripts(ApiAccess::allows($this->userModel()));
         $dir = $this->projectDirPath() . '/entrypoint.d';
         $fs = $this->system()->filesystem();
         $this->system()->runProcess("sudo mkdir -p {$dir}");
@@ -671,6 +673,28 @@ class Dind implements DeployableDindProject, Runtime
         }
         $this->unlinkUnusedInitScripts($dir, $scriptFiles);
         $this->services()->configure(TenantEgressGuard::SERVICE, isset($scriptFiles[TenantEgressGuard::FILE]));
+    }
+
+    /**
+     * The account's egress guard alone, rewritten when its Engine API allowance
+     * changes; its own service re-applies it within a few seconds. Nothing is
+     * written for an account whose directory is not there yet: the create renders
+     * the same file, from the same allowance.
+     */
+    public function rewriteEgressGuard(): void
+    {
+        if (!TenantEgressGuard::enabled()) {
+            return;
+        }
+        $dir = $this->projectDirPath() . '/entrypoint.d';
+        if (!$this->system()->filesystem()->isDir($dir)) {
+            return;
+        }
+
+        $script = $this->accountTemplate()->entrypointInitScripts(ApiAccess::allows($this->userModel()))[TenantEgressGuard::FILE] ?? null;
+        if ($script !== null) {
+            $this->system()->filesystem()->writeFileReplacingPath("{$dir}/" . TenantEgressGuard::FILE, $script);
+        }
     }
 
     /**

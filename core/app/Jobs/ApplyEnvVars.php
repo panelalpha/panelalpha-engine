@@ -7,6 +7,7 @@ use App\Exceptions\ProblemException;
 use App\Exceptions\TaskCancelledException;
 use App\Jobs\Concerns\AttachTask;
 use App\Lib\Deploy\DeployLog\DeployLock;
+use App\Lib\Project\ApiAccess;
 use App\Models\User;
 use App\Support\JobBudget;
 use App\System;
@@ -43,11 +44,14 @@ class ApplyEnvVars implements ShouldQueue
     /**
      * @param list<string> $replaced the keys the run file was generated with, so the ones
      *        the account no longer sets are taken back out of its `environment:`
+     * @param ?int $revokeTokenId the token this apply replaces, revoked once the
+     *        application is up on the new one
      */
     public function __construct(
         public string $username,
         public array $replaced = [],
         ?int $userId = null,
+        public ?int $revokeTokenId = null,
     ) {
         $this->userId = $userId;
         $this->onQueue('default');
@@ -72,6 +76,8 @@ class ApplyEnvVars implements ShouldQueue
         if ($task !== null && !$task->isTerminal()) {
             $this->markFailed($e ?? new RuntimeException('Apply env vars job failed'));
         }
+
+        (new ApiAccess(app(System::class)))->markPendingFailure($this->username);
     }
 
     /**
@@ -103,13 +109,17 @@ class ApplyEnvVars implements ShouldQueue
 
     private function restartWithEnvironment(Dind $runtime, User $user): void
     {
+        $api = new ApiAccess($runtime->system());
         $runtime->applyProjectEnvVars();
         $runtime->composeWriter()->mergeAccountEnv($user->getEnvVars(), $this->replaced);
+        $runtime->composeWriter()->mergeApiAccessEnv($api->envFor($user));
 
         $result = $runtime->projectAction('up');
         if (($result['exit_code'] ?? 1) !== 0) {
             throw new RuntimeException(self::composeError($result));
         }
+
+        $api->confirmRevocation($this->username, $this->revokeTokenId);
     }
 
     /**

@@ -9,6 +9,7 @@ export * from './firewall.types';
 export * from './exim.types';
 export * from './modsecurity.types';
 export * from './system.types';
+export * from './api-access.types';
 export * from './api.types';
 export * from './lighthouse.types';
 export * from './ip.types';

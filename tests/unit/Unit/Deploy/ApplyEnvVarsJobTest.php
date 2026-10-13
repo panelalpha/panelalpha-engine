@@ -4,6 +4,10 @@ namespace Tests\Unit\Deploy;
 
 use App\Jobs\ApplyEnvVars;
 use App\Lib\Deploy\DeployLog\DeployLock;
+use App\Lib\Project\ApiAccess;
+use App\Models\Admin;
+use App\Models\PersonalAccessToken;
+use App\Models\Setting;
 use App\Models\Task;
 use App\Models\User;
 use App\System;
@@ -14,6 +18,7 @@ use App\System\Project\Runtime;
 use Mockery;
 use RuntimeException;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\RecordingSystem;
 use Tests\TestCase;
 
 /**
@@ -30,6 +35,12 @@ class ApplyEnvVarsJobTest extends TestCase
         $this->bootInMemoryDatabase();
         config(['app.key' => 'base64:' . base64_encode(str_repeat('k', 32))]);
         $this->app->forgetInstance('encrypter');
+    }
+
+    protected function tearDown(): void
+    {
+        Setting::clearRuntimeSettings();
+        parent::tearDown();
     }
 
     public function test_it_rewrites_the_env_and_starts_the_stack(): void
@@ -58,12 +69,14 @@ class ApplyEnvVarsJobTest extends TestCase
 
         $writer = Mockery::mock(ComposeWriter::class);
         $writer->shouldReceive('mergeAccountEnv')->once()->with(['FOO' => 'bar'], []);
+        $writer->shouldReceive('mergeApiAccessEnv')->once()->andReturn(false);
 
         $runtime = Mockery::mock(Dind::class);
         $runtime->shouldReceive('applyProjectEnvVars')->once()->andReturnUsing(function () use ($user): void {
             $this->assertSame(DeployLock::HOLDER_ENV_VARS, DeployLock::heldBy($user->username));
         });
-        $runtime->shouldReceive('composeWriter')->once()->andReturn($writer);
+        $runtime->shouldReceive('composeWriter')->twice()->andReturn($writer);
+        $runtime->shouldReceive('system')->andReturn(new RecordingSystem());
         $runtime->shouldReceive('projectAction')->once()->with('up')->andReturn([
             'stdout' => '',
             'stderr' => '',
@@ -74,6 +87,69 @@ class ApplyEnvVarsJobTest extends TestCase
 
         $this->assertSame(Task::STATUS_COMPLETED, $task->status);
         $this->assertNull(DeployLock::heldBy($user->username), 'the lock is released');
+    }
+
+    /**
+     * A rotation hands the new token to the application first and retires the
+     * old one only once the stack is up on it.
+     */
+    public function test_the_token_this_apply_replaces_is_revoked_once_the_stack_is_up(): void
+    {
+        $user = $this->dindUser([]);
+        $token = $this->mintedToken();
+
+        $task = $this->runJob($user, $this->runtimeExpecting([], [], 0), [], null, (int) $token->getKey());
+
+        $this->assertSame(Task::STATUS_COMPLETED, $task->status);
+        $this->assertNotNull($token->refresh()->revoked_at);
+    }
+
+    /** A failed apply leaves both tokens valid, and the task says what happened. */
+    public function test_the_replaced_token_survives_a_failed_apply(): void
+    {
+        $user = $this->dindUser([]);
+        $token = $this->mintedToken();
+
+        $task = $this->runJob($user, $this->runtimeExpecting([], [], 1), [], 'compose up boom', (int) $token->getKey());
+
+        $this->assertSame(Task::STATUS_FAILED, $task->status);
+        $this->assertNull($token->refresh()->revoked_at);
+    }
+
+    private function mintedToken(): PersonalAccessToken
+    {
+        $token = Admin::rootAccount()->createToken('api-access:test', ['api'])->accessToken;
+        $this->assertInstanceOf(PersonalAccessToken::class, $token);
+
+        return $token;
+    }
+
+    /**
+     * An allowance that records the token a failed replacement left behind has it
+     * revoked -- and the record cleared -- by the apply that finally succeeds.
+     */
+    public function test_a_successful_apply_retires_the_token_an_earlier_failure_left_tracked(): void
+    {
+        $user = $this->dindUser([]);
+        $left = $this->mintedToken();
+        $replaced = $this->mintedToken();
+        $access = new ApiAccess(new RecordingSystem());
+        Setting::set(ApiAccess::SETTING, (string) json_encode([[
+            'project' => $user->username,
+            'scope' => ApiAccess::SCOPE_SELF,
+            'mcp' => false,
+            'token_id' => (int) $replaced->getKey(),
+            'token' => 'stored',
+            'allowed_at' => now()->toIso8601String(),
+            'pending_revoke_token_id' => (int) $left->getKey(),
+        ]]));
+
+        $task = $this->runJob($user, $this->runtimeExpecting([], [], 0), [], null, (int) $replaced->getKey());
+
+        $this->assertSame(Task::STATUS_COMPLETED, $task->status);
+        $this->assertNotNull($left->refresh()->revoked_at, 'the tracked token is retired');
+        $this->assertNotNull($replaced->refresh()->revoked_at, 'and so is the one this apply replaced');
+        $this->assertNull($access->entryFor($user)['pending_revoke_token_id'], 'and nothing is left tracked');
     }
 
     public function test_it_fails_when_the_deploy_lock_is_held(): void
@@ -105,7 +181,7 @@ class ApplyEnvVarsJobTest extends TestCase
         ]);
     }
 
-    private function runJob(User $user, Dind $runtime, array $replaced, ?string $expectedError = null): Task
+    private function runJob(User $user, Dind $runtime, array $replaced, ?string $expectedError = null, ?int $revokeTokenId = null): Task
     {
         $this->bindRuntime($user, $runtime);
 
@@ -113,7 +189,7 @@ class ApplyEnvVarsJobTest extends TestCase
             'action' => 'env_apply',
             'keys' => array_keys($user->getEnvVars()),
         ]);
-        $job = (new ApplyEnvVars($user->username, $replaced, (int) $user->getKey()))->attachTask($task);
+        $job = (new ApplyEnvVars($user->username, $replaced, (int) $user->getKey(), $revokeTokenId))->attachTask($task);
 
         try {
             $job->handle();
@@ -133,10 +209,12 @@ class ApplyEnvVarsJobTest extends TestCase
     {
         $writer = Mockery::mock(ComposeWriter::class);
         $writer->shouldReceive('mergeAccountEnv')->once()->with($vars, $replaced);
+        $writer->shouldReceive('mergeApiAccessEnv')->once()->andReturn(false);
 
         $runtime = Mockery::mock(Dind::class);
         $runtime->shouldReceive('applyProjectEnvVars')->once();
-        $runtime->shouldReceive('composeWriter')->once()->andReturn($writer);
+        $runtime->shouldReceive('composeWriter')->twice()->andReturn($writer);
+        $runtime->shouldReceive('system')->andReturn(new RecordingSystem());
         $runtime->shouldReceive('projectAction')->once()->with('up')->andReturn([
             'stdout' => '',
             'stderr' => $exitCode === 0 ? '' : 'compose up boom',
