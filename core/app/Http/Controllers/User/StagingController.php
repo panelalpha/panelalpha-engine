@@ -275,6 +275,7 @@ class StagingController extends Controller
             new OA\Response(response: 200, description: 'Table differences', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', ref: '#/components/schemas/PushDiff')],
             )),
+            new OA\Response(response: 403, description: ApiDefinitions::OUT_OF_SCOPE_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],

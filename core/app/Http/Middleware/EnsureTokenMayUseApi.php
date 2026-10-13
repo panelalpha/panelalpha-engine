@@ -126,10 +126,8 @@ class EnsureTokenMayUseApi
      */
     private function namedProjectRefusal(Request $request, array $scope, ?string $operation): ?string
     {
-        foreach (ProjectFields::named($operation) as $field) {
-            $value = $request->input($field);
-
-            if (is_string($value) && $value !== '' && !in_array($value, $scope, true)) {
+        foreach (ProjectFields::namedIn($request, $operation) as $username) {
+            if (!in_array($username, $scope, true)) {
                 return $this->outsideScope($scope, $operation);
             }
         }

@@ -17,6 +17,7 @@ use App\Lib\Deploy\Inspect\SourceResolver;
 use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Vault\RequestVault;
 use App\Models\User;
+use App\OpenApi\ApiDefinitions;
 use Illuminate\Http\JsonResponse;
 use OpenApi\Attributes as OA;
 
@@ -49,7 +50,8 @@ class SourceInspectionController extends Controller
             . 'never returned - only the variable names. A project username returns the same '
             . 'report as GET /projects/{username}/inspect, including the `deployment` snapshot '
             . 'its last deploy froze and the `drift` between that and the files on disk - so a '
-            . 'caller that already has a username does not need the other endpoint.',
+            . 'caller that already has a username does not need the other endpoint. A token limited '
+            . 'to some projects may name only those as a project source.',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             required: ['source'],
@@ -111,6 +113,7 @@ class SourceInspectionController extends Controller
             new OA\Response(response: 200, description: 'Inspection result', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
+            new OA\Response(response: 403, description: ApiDefinitions::OUT_OF_SCOPE_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 422, description: 'Source could not be read', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],

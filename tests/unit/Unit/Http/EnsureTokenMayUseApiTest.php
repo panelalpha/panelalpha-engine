@@ -262,6 +262,70 @@ class EnsureTokenMayUseApiTest extends TestCase
         ));
     }
 
+    /** `type: project` reads another account's files, so its `source` is a project the scope must cover. */
+    public function test_a_scoped_token_may_inspect_only_its_own_project_as_a_source(): void
+    {
+        $abilities = TokenAbilities::build(api: true, mcp: false, projects: ['alice']);
+        $route = ['POST', 'api/source/inspect'];
+
+        $this->assertSame(200, $this->through($abilities, route: $route, body: ['source' => 'alice', 'type' => 'project']));
+
+        $response = $this->dispatched($abilities, route: $route, body: ['source' => 'bob', 'type' => 'project']);
+
+        $this->assertSame(403, $response->getStatusCode());
+        $this->assertSame(
+            'This token is limited to projects alice; POST /source/inspect is outside it.',
+            $response->getData(true)['error'],
+        );
+    }
+
+    /** With no `type`, a bare username is classified as a project, exactly as the controller does. */
+    public function test_a_source_that_classifies_as_a_project_is_held_to_the_scope(): void
+    {
+        $abilities = TokenAbilities::build(api: true, mcp: false, projects: ['alice']);
+
+        $this->assertSame(403, $this->through($abilities, route: ['POST', 'api/source/inspect'], body: ['source' => 'bob']));
+    }
+
+    /** A repository is not a project, whatever its path spells. */
+    public function test_a_scoped_token_may_still_inspect_a_repository(): void
+    {
+        $abilities = TokenAbilities::build(api: true, mcp: false, projects: ['alice']);
+        $route = ['POST', 'api/source/inspect'];
+
+        $this->assertSame(200, $this->through($abilities, route: $route, body: ['source' => 'https://github.com/bob/app']));
+        $this->assertSame(200, $this->through($abilities, route: $route, body: ['source' => 'github.com/bob/app']));
+        $this->assertSame(200, $this->through($abilities, route: $route, body: ['source' => 'bob', 'type' => 'git']));
+    }
+
+    public function test_the_inspected_project_is_held_to_the_scope_on_a_tool_call(): void
+    {
+        $abilities = TokenAbilities::build(api: false, mcp: true, projects: ['alice']);
+
+        $this->assertSame(403, $this->through(
+            $abilities,
+            internal: true,
+            route: ['POST', 'api/source/inspect'],
+            body: ['source' => 'bob', 'type' => 'project'],
+        ));
+    }
+
+    public function test_the_push_diff_target_is_held_to_the_scope(): void
+    {
+        $abilities = TokenAbilities::build(api: true, mcp: false, projects: ['alice']);
+        $route = ['GET', 'api/projects/{username}/push/diff'];
+
+        $this->assertSame(200, $this->through($abilities, route: $route, params: ['username' => 'alice'], body: ['target' => 'alice']));
+        $this->assertSame(403, $this->through($abilities, route: $route, params: ['username' => 'alice'], body: ['target' => 'bob']));
+    }
+
+    public function test_an_unscoped_token_may_inspect_any_project(): void
+    {
+        $abilities = TokenAbilities::build(api: true, mcp: false);
+
+        $this->assertSame(200, $this->through($abilities, route: ['POST', 'api/source/inspect'], body: ['source' => 'bob', 'type' => 'project']));
+    }
+
     public function test_an_unscoped_token_is_not_project_refused(): void
     {
         $abilities = TokenAbilities::build(api: true, mcp: false);

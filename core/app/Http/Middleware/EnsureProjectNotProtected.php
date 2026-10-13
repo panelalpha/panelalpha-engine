@@ -98,31 +98,13 @@ class EnsureProjectNotProtected
             return [];
         }
 
-        $fields = ProjectFields::named($operation);
-        if ($fields !== []) {
-            return self::namedTargets($request, $fields);
+        if (ProjectFields::named($operation) !== []) {
+            return ProjectFields::namedIn($request, $operation);
         }
 
         $username = (string) $request->route('username');
 
         return $username === '' ? [] : [$username];
-    }
-
-    /**
-     * @param list<string> $fields
-     * @return list<string>
-     */
-    private static function namedTargets(Request $request, array $fields): array
-    {
-        $names = [];
-        foreach ($fields as $field) {
-            $value = $request->input($field);
-            if (is_string($value) && $value !== '') {
-                $names[] = $value;
-            }
-        }
-
-        return $names;
     }
 
     /**
