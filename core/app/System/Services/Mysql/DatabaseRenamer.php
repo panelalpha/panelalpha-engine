@@ -28,7 +28,7 @@ class DatabaseRenamer
         $grants = $this->grantsOn($user, $oldName);
 
         try {
-            $this->copy($oldName, $newName);
+            $this->copy($oldName, $newName, DefinerMap::between($user, $user));
             $this->moveGrants($grants, $oldName, $newName);
         } catch (\Throwable $e) {
             $this->undo($grants, $oldName, $newName);
@@ -51,10 +51,10 @@ class DatabaseRenamer
      * statement. Anything else -- a view, trigger, routine or event -- cannot,
      * and is streamed over by a dump and an import instead.
      */
-    private function copy(string $from, string $to): void
+    private function copy(string $from, string $to, DefinerMap $definers): void
     {
         if ($this->mysql->databases()->hasObjectsBeyondTables($from)) {
-            $this->copier->copyDatabase($from, $to);
+            $this->copier->copyDatabase($from, $to, $definers);
 
             return;
         }

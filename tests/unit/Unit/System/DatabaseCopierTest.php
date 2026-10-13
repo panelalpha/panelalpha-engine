@@ -6,6 +6,7 @@ use App\Models\User;
 use App\System\Services\Mysql;
 use App\System\Services\Mysql\DatabaseCopier;
 use App\System\Services\Mysql\Databases;
+use App\System\Services\Mysql\DefinerMap;
 use App\System\Services\Mysql\Privileges;
 use App\System\Services\Mysql\Users;
 use Symfony\Component\Process\Process;
@@ -37,13 +38,15 @@ class DatabaseCopierTest extends TestCase
         $this->assertSame('bob_wp', $copier->mapName('wp', 'alice_', 'bob_'));
     }
 
-    public function test_rewrite_strips_the_definer_and_carries_the_source_schema(): void
+    public function test_rewrite_maps_the_definer_and_carries_the_source_schema(): void
     {
-        $sed = DatabaseCopier::rewrite('alice_wp', 'bob_wp');
+        $sed = DatabaseCopier::rewrite('alice_wp', 'bob_wp', $this->definers());
 
-        $this->assertStringContainsString("s/DEFINER=`[^`]*`@`[^`]*`//g'", $sed);
+        $this->assertStringNotContainsString("s/DEFINER=`[^`]*`@`[^`]*`//g'", $sed);
         $this->assertStringContainsString('/^INSERT INTO /!{/^(/!s/`alice_wp`\./`bob_wp`./g}', $sed);
         $this->assertStringContainsString('/^INSERT INTO /!{/^(/!s/\balice_wp\./bob_wp./g}', $sed);
+        $this->assertStringContainsString('s/DEFINER=`alice_wp`@`%`/DEFINER\n`bob_wp`@`%`/g', $sed);
+        $this->assertStringContainsString('/DEFINER=`bob_no.definer`@`%`/g', $sed);
     }
 
     public function test_rewrite_leaves_row_data_untouched_and_rewrites_the_trigger(): void
@@ -58,33 +61,63 @@ class DatabaseCopierTest extends TestCase
             '/*!50003 CREATE*/ /*!50017 DEFINER=`root`@`localhost`*/ /*!50003 TRIGGER alice_wp.trg BEFORE INSERT ON alice_wp.t FOR EACH ROW SET NEW.v = UPPER(NEW.v) */;;',
         ]);
 
-        $process = Process::fromShellCommandline(DatabaseCopier::rewrite('alice_wp', 'bob_wp'));
-        $process->setInput($dump);
-        $process->run();
+        $out = $this->runRewrite($dump);
 
-        $this->assertTrue($process->isSuccessful(), $process->getErrorOutput());
-        $out = $process->getOutput();
         $this->assertStringContainsString("(1,'alice_wp.example')", $out);
         $this->assertStringContainsString("(2,'`alice_wp`.x')", $out);
-        $this->assertStringContainsString('/*!50017 */', $out);
+        $this->assertStringContainsString('/*!50017 DEFINER=`bob_no.definer`@`%`*/', $out);
         $this->assertStringContainsString('TRIGGER bob_wp.trg', $out);
         $this->assertStringContainsString('ON bob_wp.t', $out);
     }
 
+    public function test_rewrite_gives_every_definer_to_a_destination_account_and_never_root(): void
+    {
+        $dump = implode("\n", [
+            'CREATE DEFINER=`alice_wp`@`%` PROCEDURE `p_own`()',
+            'CREATE DEFINER=`root`@`localhost` PROCEDURE `p_root`()',
+            'CREATE DEFINER=`alice_gone`@`%` PROCEDURE `p_gone`()',
+            'CREATE DEFINER=`alice_wp`@`localhost` PROCEDURE `p_other_host`()',
+            'CREATE DEFINER=`we``ird`@`%` FUNCTION `f_odd`() RETURNS int(11)',
+            'CREATE DEFINER=`some_role` PROCEDURE `p_role`()',
+            '/*!50013 DEFINER=`root`@`localhost` SQL SECURITY DEFINER */',
+            "/*!50003 CREATE*/ /*!50017 DEFINER=`root`@`localhost`*/ /*!50003 TRIGGER t BEFORE INSERT ON t FOR EACH ROW SET @x = 'DEFINER=`alice_wp`@`%`' */;;",
+            '/*!50106 CREATE*/ /*!50117 DEFINER=`root`@`%`*/ /*!50106 EVENT `e` ON SCHEDULE EVERY 1 DAY DO DELETE FROM t */ ;;',
+            'INSERT INTO `t` VALUES',
+            "(1,'DEFINER=`root`@`localhost`');",
+        ]);
+
+        $lines = explode("\n", $this->runRewrite($dump));
+
+        $this->assertSame('CREATE DEFINER=`bob_wp`@`%` PROCEDURE `p_own`()', $lines[0]);
+        $this->assertSame('CREATE DEFINER=`bob_no.definer`@`%` PROCEDURE `p_root`()', $lines[1]);
+        $this->assertSame('CREATE DEFINER=`bob_no.definer`@`%` PROCEDURE `p_gone`()', $lines[2]);
+        $this->assertSame('CREATE DEFINER=`bob_no.definer`@`%` PROCEDURE `p_other_host`()', $lines[3]);
+        $this->assertSame('CREATE DEFINER=`bob_no.definer`@`%` FUNCTION `f_odd`() RETURNS int(11)', $lines[4]);
+        $this->assertSame('CREATE DEFINER=`bob_no.definer`@`%` PROCEDURE `p_role`()', $lines[5]);
+        $this->assertSame('/*!50013 DEFINER=`bob_no.definer`@`%` SQL SECURITY DEFINER */', $lines[6]);
+        $this->assertStringStartsWith('/*!50003 CREATE*/ /*!50017 DEFINER=`bob_no.definer`@`%`*/', $lines[7]);
+        $this->assertStringContainsString("SET @x = 'DEFINER=`bob_wp`@`%`'", $lines[7]);
+        $this->assertStringStartsWith('/*!50106 CREATE*/ /*!50117 DEFINER=`bob_no.definer`@`%`*/', $lines[8]);
+        $this->assertSame("(1,'DEFINER=`root`@`localhost`');", $lines[10]);
+        foreach (array_slice($lines, 0, 9) as $line) {
+            $this->assertStringNotContainsString('`root`', $line);
+        }
+    }
+
     public function test_rewrite_escapes_a_database_name_for_the_regex(): void
     {
-        $sed = DatabaseCopier::rewrite('alice-wp', 'bob-wp');
+        $sed = DatabaseCopier::rewrite('alice-wp', 'bob-wp', $this->definers());
 
         $this->assertStringContainsString('alice\\-wp', $sed);
         $this->assertStringNotContainsString('s/\balice-wp\.', $sed);
     }
 
-    public function test_copy_database_streams_a_dump_through_the_definer_strip(): void
+    public function test_copy_database_streams_a_dump_through_the_definer_rewrite(): void
     {
         $record = $this->recorder();
         $copier = new DatabaseCopier($this->mysqlDouble($record));
 
-        $copier->copyDatabase('alice_wp', 'bob_wp');
+        $copier->copyDatabase('alice_wp', 'bob_wp', $this->definers());
 
         $this->assertSame(['bob_wp'], $record->created);
         $this->assertCount(1, $record->scripts);
@@ -92,7 +125,7 @@ class DatabaseCopierTest extends TestCase
         $this->assertStringContainsString('mariadb-dump --single-transaction --routines --triggers --events', $record->scripts[0]);
         $this->assertStringContainsString("'alice_wp'", $record->scripts[0]);
         $this->assertStringContainsString("'bob_wp'", $record->scripts[0]);
-        $this->assertStringContainsString('DEFINER=', $record->scripts[0]);
+        $this->assertStringContainsString('DEFINER=`bob_no.definer`@`%`', $record->scripts[0]);
         $this->assertStringContainsString('s/\balice_wp\./bob_wp./g', $record->scripts[0]);
     }
 
@@ -118,6 +151,7 @@ class DatabaseCopierTest extends TestCase
         $this->assertStringContainsString('someone_else', $result->warnings[0]);
         $this->assertArrayHasKey('bob_wp', $result->passwords);
         $this->assertNotSame('', $result->passwords['bob_wp']);
+        $this->assertStringContainsString('s/DEFINER=`alice_wp`@`%`/DEFINER\n`bob_wp`@`%`/g', $record->scripts[0]);
     }
 
     public function test_replace_database_reapplies_target_grants_on_success(): void
@@ -126,7 +160,7 @@ class DatabaseCopierTest extends TestCase
         $mysql = $this->mysqlDouble($record);
         $target = $this->targetWithDatabaseAndUser('bob', 'bob_wp');
 
-        (new DatabaseCopier($mysql))->replaceDatabase('alice_wp', 'bob_wp', '/tmp/rq-rollback', $target);
+        (new DatabaseCopier($mysql))->replaceDatabase('alice_wp', 'bob_wp', '/tmp/rq-rollback', $target, $this->definers());
 
         $this->assertSame(['/tmp/rq-rollback/bob_wp.sql.gz'], $record->dumps);
         $this->assertSame(['bob_wp'], $record->deleted);
@@ -142,13 +176,29 @@ class DatabaseCopierTest extends TestCase
         $target = $this->targetWithDatabaseAndUser('bob', 'bob_wp');
 
         try {
-            (new DatabaseCopier($mysql))->replaceDatabase('alice_wp', 'bob_wp', '/tmp/rq-rollback', $target);
+            (new DatabaseCopier($mysql))->replaceDatabase('alice_wp', 'bob_wp', '/tmp/rq-rollback', $target, $this->definers());
             $this->fail('the copy should have failed');
         } catch (\RuntimeException $e) {
             $this->assertStringContainsString('copy exploded', $e->getMessage());
         }
 
         $this->assertSame(['/tmp/rq-rollback/bob_wp.sql.gz'], $record->restores);
+    }
+
+    private function definers(): DefinerMap
+    {
+        return DefinerMap::map('alice_', 'bob_', ['alice_wp'], ['bob_wp']);
+    }
+
+    private function runRewrite(string $dump): string
+    {
+        $process = Process::fromShellCommandline(DatabaseCopier::rewrite('alice_wp', 'bob_wp', $this->definers()));
+        $process->setInput($dump);
+        $process->run();
+
+        $this->assertTrue($process->isSuccessful(), $process->getErrorOutput());
+
+        return $process->getOutput();
     }
 
     private function sourceWithDatabaseAndUser(string $name): User

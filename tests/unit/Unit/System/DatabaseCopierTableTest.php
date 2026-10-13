@@ -7,6 +7,7 @@ use App\System\Services\Mysql;
 use App\System\Services\Mysql\DatabaseCopier;
 use App\System\Services\Mysql\DatabaseCopyResult;
 use App\System\Services\Mysql\Databases;
+use App\System\Services\Mysql\DefinerMap;
 use App\System\Services\Mysql\Tables;
 use App\System\Services\Mysql\TableReplacement;
 use PDO;
@@ -23,11 +24,11 @@ class DatabaseCopierTableTest extends TestCase
         $this->bootInMemoryDatabase();
     }
 
-    public function test_copy_table_streams_the_named_table_through_the_definer_strip(): void
+    public function test_copy_table_streams_the_named_table_through_the_definer_rewrite(): void
     {
         $record = $this->recorder();
 
-        $this->copier($record)->copyTable('alice_wp', 'bob_wp', 'wp_posts');
+        $this->copier($record)->copyTable('alice_wp', 'bob_wp', 'wp_posts', DefinerMap::map('alice_', 'bob_', [], []));
 
         $this->assertCount(1, $record->scripts);
         $this->assertStringContainsString(
@@ -35,7 +36,7 @@ class DatabaseCopierTableTest extends TestCase
             $record->scripts[0]
         );
         $this->assertStringNotContainsString('--routines', $record->scripts[0]);
-        $this->assertStringContainsString('DEFINER=', $record->scripts[0]);
+        $this->assertStringContainsString('DEFINER=`bob_no.definer`@`%`', $record->scripts[0]);
         $this->assertStringContainsString("'bob_wp'", $record->scripts[0]);
     }
 
@@ -44,7 +45,12 @@ class DatabaseCopierTableTest extends TestCase
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('Invalid table name');
 
-        $this->copier($this->recorder())->copyTable('alice_wp', 'bob_wp', "wp_posts`; DROP TABLE x");
+        $this->copier($this->recorder())->copyTable(
+            'alice_wp',
+            'bob_wp',
+            "wp_posts`; DROP TABLE x",
+            DefinerMap::map('alice_', 'bob_', [], []),
+        );
     }
 
     public function test_drop_table_quotes_the_identifier(): void
@@ -74,6 +80,25 @@ class DatabaseCopierTableTest extends TestCase
         );
         $this->assertSame([], $replacement->createdTables);
         $this->assertSame([], $replacement->createdDatabases);
+    }
+
+    public function test_replace_tables_gives_triggers_to_the_target_user_the_source_user_maps_to(): void
+    {
+        $record = $this->recorder();
+        $source = $this->userWithDatabase('alice', 'alice_wp');
+        $source->mysqlUsers()->create(['user' => 'alice_wp']);
+        $target = $this->userWithDatabase('bob', 'bob_wp');
+        $target->mysqlUsers()->create(['user' => 'bob_wp']);
+
+        $this->copier($record, ['bob_wp' => ['wp_posts']])->replaceTables(
+            $source,
+            $target,
+            [['database' => 'alice_wp', 'name' => 'wp_posts']],
+            '/tmp/g23-rollback',
+        );
+
+        $this->assertStringContainsString('s/DEFINER=`alice_wp`@`%`/DEFINER\n`bob_wp`@`%`/g', $record->scripts[0]);
+        $this->assertStringContainsString('/DEFINER=`bob_no.definer`@`%`/g', $record->scripts[0]);
     }
 
     public function test_a_failure_on_the_second_table_restores_the_first(): void

@@ -14,6 +14,7 @@ use App\System\Project\HomeSwap;
 use App\System\Services\Mysql;
 use App\System\Services\Mysql\DatabaseCopier;
 use App\System\Services\Mysql\DatabaseCopyResult;
+use App\System\Services\Mysql\DefinerMap;
 use App\System\Services\Mysql\Tables;
 use Illuminate\Support\Facades\Log;
 
@@ -168,6 +169,7 @@ class Projects
         array &$created,
     ): DatabaseCopyResult {
         $copier = $this->databaseCopier();
+        $definers = DefinerMap::between($from, $to);
         $sourcePrefix = $from->getMysqlPrefix();
         $targetPrefix = $to->getMysqlPrefix();
         $owned = $to->mysqlDatabases()->pluck('database')->all();
@@ -185,11 +187,11 @@ class Projects
             $dest = DatabaseCopier::mapName($source, $sourcePrefix, $targetPrefix);
             if (in_array($dest, $owned, true)) {
                 $rollbacks[$dest] = DatabaseCopier::rollbackPath($rollbackDir, $dest);
-                $copier->replaceDatabase($source, $dest, $rollbackDir, $to);
+                $copier->replaceDatabase($source, $dest, $rollbackDir, $to, $definers);
             } else {
                 MysqlDatabase::create(['user_id' => $to->id, 'database' => $dest]);
                 $created[] = $dest;
-                $copier->copyDatabase($source, $dest);
+                $copier->copyDatabase($source, $dest, $definers);
                 $warnings[] = "Created database '{$dest}' without grants: the target does not own that database.";
             }
             $databases[$source] = $dest;

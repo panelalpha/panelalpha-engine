@@ -28,17 +28,25 @@ class DatabaseCopier
      * whose text happens to contain `src.` (an email, a host name, a note) must
      * survive untouched. Extended inserts wrap their rows onto lines starting
      * with `(`, so both the `INSERT INTO` line and its continuations are skipped.
-     * The DEFINER strip stays global — no data line carries `DEFINER=`.
+     * The DEFINER rewrite follows on the same lines: mariadb-dump writes every
+     * DEFINER clause on a CREATE line, never on a data line.
      */
-    public static function rewrite(string $from, string $to): string
+    public static function rewrite(string $from, string $to, DefinerMap $definers): string
     {
         $pattern = preg_quote($from, '/');
         $replacement = str_replace(['\\', '&', '/'], ['\\\\', '\\&', '\\/'], $to);
-        $schemaLines = "/^INSERT INTO /!{/^(/!";
+        $expressions = [
+            "s/`{$pattern}`\\./`{$replacement}`./g",
+            "s/\\b{$pattern}\\./{$replacement}./g",
+            ...$definers->sedExpressions(),
+        ];
 
-        return "sed -e 's/DEFINER=`[^`]*`@`[^`]*`//g'"
-            . " -e '{$schemaLines}s/`{$pattern}`\\./`{$replacement}`./g}'"
-            . " -e '{$schemaLines}s/\\b{$pattern}\\./{$replacement}./g}'";
+        return 'sed' . implode('', array_map(self::onSchemaLines(...), $expressions));
+    }
+
+    private static function onSchemaLines(string $expression): string
+    {
+        return " -e '/^INSERT INTO /!{/^(/!{$expression}}'";
     }
 
     public static function mapName(string $name, string $fromPrefix, string $toPrefix): string
@@ -50,13 +58,13 @@ class DatabaseCopier
         return $toPrefix . $name;
     }
 
-    public function copyDatabase(string $from, string $to): void
+    public function copyDatabase(string $from, string $to, DefinerMap $definers): void
     {
         Mysql::assertDatabaseName($from);
         Mysql::assertDatabaseName($to);
 
         $this->mysql->databases()->createDatabase($to);
-        $this->mysql->runSitesDbScript($this->streamCopy($from, $to), 'database copy failed');
+        $this->mysql->runSitesDbScript($this->streamCopy($from, $to, $definers), 'database copy failed');
     }
 
     /**
@@ -67,7 +75,8 @@ class DatabaseCopier
         $fromPrefix = $source->getMysqlPrefix();
         $toPrefix = $dest->getMysqlPrefix();
 
-        $databases = $this->copyDatabases($source, $dest, $fromPrefix, $toPrefix, $log);
+        $definers = DefinerMap::forProjectCopy($source, $dest);
+        $databases = $this->copyDatabases($source, $dest, $fromPrefix, $toPrefix, $definers, $log);
         $users = [];
         $passwords = [];
         $warnings = [];
@@ -76,15 +85,20 @@ class DatabaseCopier
         return new DatabaseCopyResult($databases, $users, $passwords, $warnings);
     }
 
-    public function replaceDatabase(string $from, string $to, string $rollbackDir, User $target): void
-    {
+    public function replaceDatabase(
+        string $from,
+        string $to,
+        string $rollbackDir,
+        User $target,
+        DefinerMap $definers,
+    ): void {
         $rollback = self::rollbackPath($rollbackDir, $to);
         $this->mysql->dumpToGzip($to, $rollback);
         $grants = $this->targetGrants($target, $to);
 
         try {
             $this->mysql->databases()->deleteDatabase($to);
-            $this->copyDatabase($from, $to);
+            $this->copyDatabase($from, $to, $definers);
         } catch (\Throwable $e) {
             $this->mysql->restoreFromGzip($to, $rollback);
             throw $e;
@@ -97,13 +111,13 @@ class DatabaseCopier
      * One table of $to, dropped and recreated from $from. The caller dumps the
      * target's own copy first, so a failure can put it back.
      */
-    public function copyTable(string $from, string $to, string $table): void
+    public function copyTable(string $from, string $to, string $table, DefinerMap $definers): void
     {
         Mysql::assertDatabaseName($from);
         Mysql::assertDatabaseName($to);
         Mysql::assertTableName($table);
 
-        $this->mysql->runSitesDbScript($this->streamTableCopy($from, $to, $table), 'table copy failed');
+        $this->mysql->runSitesDbScript($this->streamTableCopy($from, $to, $table, $definers), 'table copy failed');
     }
 
     public function dropTable(string $database, string $table): void
@@ -144,6 +158,7 @@ class DatabaseCopier
             $result = $this->replaceSelected(
                 $grouped,
                 $target,
+                DefinerMap::between($source, $target),
                 $rollbackDir,
                 $targetTables,
                 $rollbacks,
@@ -172,6 +187,7 @@ class DatabaseCopier
     private function replaceSelected(
         array $grouped,
         User $target,
+        DefinerMap $definers,
         string $rollbackDir,
         Tables $targetTables,
         array &$rollbacks,
@@ -191,7 +207,7 @@ class DatabaseCopier
             }
 
             foreach ($selections as $selection) {
-                $this->replaceTable($selection, $dest, $rollbackDir, $targetTables, $rollbacks, $createdTables);
+                $this->replaceTable($selection, $dest, $definers, $rollbackDir, $targetTables, $rollbacks, $createdTables);
                 $databases[$selection['database']] = $dest;
             }
         }
@@ -240,6 +256,7 @@ class DatabaseCopier
     private function replaceTable(
         array $selection,
         string $dest,
+        DefinerMap $definers,
         string $rollbackDir,
         Tables $targetTables,
         array &$rollbacks,
@@ -255,7 +272,7 @@ class DatabaseCopier
             $createdTables[] = ['database' => $dest, 'table' => $table];
         }
 
-        $this->copyTable($selection['database'], $dest, $table);
+        $this->copyTable($selection['database'], $dest, $table, $definers);
     }
 
     /**
@@ -289,6 +306,7 @@ class DatabaseCopier
         User $dest,
         string $fromPrefix,
         string $toPrefix,
+        DefinerMap $definers,
         callable $log,
     ): array {
         $databases = [];
@@ -297,7 +315,7 @@ class DatabaseCopier
             $to = self::mapName($from, $fromPrefix, $toPrefix);
             MysqlDatabase::create(['user_id' => $dest->id, 'database' => $to]);
             $log("Copying database {$from} to {$to}");
-            $this->copyDatabase($from, $to);
+            $this->copyDatabase($from, $to, $definers);
             $databases[$from] = $to;
         }
 
@@ -379,20 +397,20 @@ class DatabaseCopier
         }
     }
 
-    private function streamCopy(string $from, string $to): string
+    private function streamCopy(string $from, string $to, DefinerMap $definers): string
     {
         $dump = 'mariadb-dump --single-transaction --routines --triggers --events -uroot ' . escapeshellarg($from);
         $import = 'mariadb -uroot ' . escapeshellarg($to);
 
-        return 'set -o pipefail; ' . $dump . ' | ' . self::rewrite($from, $to) . ' | ' . $import;
+        return 'set -o pipefail; ' . $dump . ' | ' . self::rewrite($from, $to, $definers) . ' | ' . $import;
     }
 
-    private function streamTableCopy(string $from, string $to, string $table): string
+    private function streamTableCopy(string $from, string $to, string $table, DefinerMap $definers): string
     {
         $dump = 'mariadb-dump --single-transaction -uroot '
             . escapeshellarg($from) . ' ' . escapeshellarg($table);
         $import = 'mariadb -uroot ' . escapeshellarg($to);
 
-        return 'set -o pipefail; ' . $dump . ' | ' . self::rewrite($from, $to) . ' | ' . $import;
+        return 'set -o pipefail; ' . $dump . ' | ' . self::rewrite($from, $to, $definers) . ' | ' . $import;
     }
 }

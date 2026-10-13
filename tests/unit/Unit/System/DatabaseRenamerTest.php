@@ -57,6 +57,8 @@ class DatabaseRenamerTest extends TestCase
         $this->assertSame(['shop_old'], $record->deleted);
         $this->assertSame([['shop_user', 'shop_new', 'SELECT, INSERT']], $record->grants);
         $this->assertSame('shop_new', $row->fresh()->database);
+        $this->assertStringContainsString('s/DEFINER=`shop_user`@`%`/DEFINER\n`shop_user`@`%`/g', $record->scripts[0]);
+        $this->assertStringContainsString('/DEFINER=`shop_no.definer`@`%`/g', $record->scripts[0]);
     }
 
     public function test_a_copy_failure_leaves_the_old_database_and_its_grants(): void
