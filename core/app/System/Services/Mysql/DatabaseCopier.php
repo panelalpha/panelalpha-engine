@@ -85,15 +85,28 @@ class DatabaseCopier
         return new DatabaseCopyResult($databases, $users, $passwords, $warnings);
     }
 
+    /**
+     * The target's own copy, dumped before a replace touches it. Returns only
+     * once the dump is complete; a failed dump leaves no file behind.
+     */
+    public function dumpRollback(string $database, string $rollbackDir): string
+    {
+        $rollback = self::rollbackPath($rollbackDir, $database);
+        $this->mysql->dumpToGzip($database, $rollback);
+
+        return $rollback;
+    }
+
+    /**
+     * $rollback is the completed dump of $to that dumpRollback() returned.
+     */
     public function replaceDatabase(
         string $from,
         string $to,
-        string $rollbackDir,
+        string $rollback,
         User $target,
         DefinerMap $definers,
     ): void {
-        $rollback = self::rollbackPath($rollbackDir, $to);
-        $this->mysql->dumpToGzip($to, $rollback);
         $grants = $this->targetGrants($target, $to);
 
         try {

@@ -159,9 +159,12 @@ class DatabaseCopierTest extends TestCase
         $record = $this->recorder(targetPrivileges: ['bob_wp' => 'ALL PRIVILEGES']);
         $mysql = $this->mysqlDouble($record);
         $target = $this->targetWithDatabaseAndUser('bob', 'bob_wp');
+        $copier = new DatabaseCopier($mysql);
 
-        (new DatabaseCopier($mysql))->replaceDatabase('alice_wp', 'bob_wp', '/tmp/rq-rollback', $target, $this->definers());
+        $rollback = $copier->dumpRollback('bob_wp', '/tmp/rq-rollback');
+        $copier->replaceDatabase('alice_wp', 'bob_wp', $rollback, $target, $this->definers());
 
+        $this->assertSame('/tmp/rq-rollback/bob_wp.sql.gz', $rollback);
         $this->assertSame(['/tmp/rq-rollback/bob_wp.sql.gz'], $record->dumps);
         $this->assertSame(['bob_wp'], $record->deleted);
         $this->assertSame(['bob_wp'], $record->created);
@@ -176,7 +179,13 @@ class DatabaseCopierTest extends TestCase
         $target = $this->targetWithDatabaseAndUser('bob', 'bob_wp');
 
         try {
-            (new DatabaseCopier($mysql))->replaceDatabase('alice_wp', 'bob_wp', '/tmp/rq-rollback', $target, $this->definers());
+            (new DatabaseCopier($mysql))->replaceDatabase(
+                'alice_wp',
+                'bob_wp',
+                '/tmp/rq-rollback/bob_wp.sql.gz',
+                $target,
+                $this->definers(),
+            );
             $this->fail('the copy should have failed');
         } catch (\RuntimeException $e) {
             $this->assertStringContainsString('copy exploded', $e->getMessage());

@@ -44,21 +44,30 @@ class MysqlDumpRestoreTest extends TestCase
         $recorded = [];
         $mysql = new Mysql($this->recordingSystem($recorded, successful: true, lastLine: "INSERT INTO `t` VALUES (1"));
 
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('the dump of alice_app is incomplete');
+        try {
+            $mysql->dumpToGzip('alice_app', '/tmp/alice_app.sql.gz');
+            $this->fail('the incomplete dump should have failed');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('the dump of alice_app is incomplete', $e->getMessage());
+        }
 
-        $mysql->dumpToGzip('alice_app', '/tmp/alice_app.sql.gz');
+        $this->assertSame(['bash', '-c', "set -o pipefail; rm -f '/tmp/alice_app.sql.gz'"], $recorded[2]['cmd']);
     }
 
-    public function test_a_failed_dump_fails_the_backup(): void
+    public function test_a_failed_dump_fails_the_backup_and_removes_the_partial_file(): void
     {
         $recorded = [];
         $mysql = new Mysql($this->recordingSystem($recorded, successful: false));
 
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('mysqldump failed: boom');
+        try {
+            $mysql->dumpToGzip('alice_app', '/tmp/alice_app.sql.gz');
+            $this->fail('the dump should have failed');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('mysqldump failed: boom', $e->getMessage());
+        }
 
-        $mysql->dumpToGzip('alice_app', '/tmp/alice_app.sql.gz');
+        $this->assertCount(2, $recorded);
+        $this->assertSame(['bash', '-c', "set -o pipefail; rm -f '/tmp/alice_app.sql.gz'"], $recorded[1]['cmd']);
     }
 
     public function test_the_restore_feeds_the_dump_to_mariadb_in_sites_db(): void

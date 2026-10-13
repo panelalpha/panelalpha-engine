@@ -50,6 +50,10 @@ class Mysql
         return new Tables($this->pdo());
     }
 
+    /**
+     * A dump that fails is removed, so no caller can mistake a partial file for
+     * a rollback or a backup.
+     */
     public function dumpToGzip(string $name, string $dest, ?string $table = null): void
     {
         self::assertDatabaseName($name);
@@ -57,12 +61,25 @@ class Mysql
             self::assertTableName($table);
         }
 
-        $this->runInCore(
-            $this->inSitesDb($this->dumpCommand($name, $table))
-            . ' | gzip -c > ' . escapeshellarg($dest),
-            'mysqldump failed'
-        );
-        $this->assertDumpCompleted($table ?? $name, $dest);
+        try {
+            $this->runInCore(
+                $this->inSitesDb($this->dumpCommand($name, $table))
+                . ' | gzip -c > ' . escapeshellarg($dest),
+                'mysqldump failed'
+            );
+            $this->assertDumpCompleted($table ?? $name, $dest);
+        } catch (\Throwable $e) {
+            $this->discardDump($dest);
+            throw $e;
+        }
+    }
+
+    private function discardDump(string $dest): void
+    {
+        try {
+            $this->runInCore('rm -f ' . escapeshellarg($dest), 'removing a failed dump failed');
+        } catch (\Throwable $ignored) {
+        }
     }
 
     /**

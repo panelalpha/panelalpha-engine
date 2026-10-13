@@ -155,8 +155,10 @@ class Projects
 
     /**
      * The target's own databases, each replaced with the source's data under its
-     * rollback dump. A source database the target does not own is created
-     * without the source's grants and recorded as a warning.
+     * rollback dump. A rollback is recorded only once its dump is complete, so a
+     * failed dump is never replayed into a target it did not touch. A source
+     * database the target does not own is created without the source's grants
+     * and recorded as a warning.
      *
      * @param array<string, string> $rollbacks destination database => rollback dump
      * @param list<string>          $created
@@ -186,8 +188,8 @@ class Projects
             $source = $row->database;
             $dest = DatabaseCopier::mapName($source, $sourcePrefix, $targetPrefix);
             if (in_array($dest, $owned, true)) {
-                $rollbacks[$dest] = DatabaseCopier::rollbackPath($rollbackDir, $dest);
-                $copier->replaceDatabase($source, $dest, $rollbackDir, $to, $definers);
+                $rollbacks[$dest] = $copier->dumpRollback($dest, $rollbackDir);
+                $copier->replaceDatabase($source, $dest, $rollbacks[$dest], $to, $definers);
             } else {
                 MysqlDatabase::create(['user_id' => $to->id, 'database' => $dest]);
                 $created[] = $dest;
