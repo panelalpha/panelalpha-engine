@@ -225,6 +225,7 @@ export const PR_RULES: readonly PrRule[] = [
       'core/app/Jobs/DeleteBackup.php',
       'core/app/Jobs/DeleteBackupContainer.php',
       'core/app/System/Project/Backup.php',
+      'core/app/System/Project/HomeMerge.php',
       'core/app/Integrations/Storage/**',
       'core/app/Console/Commands/Backup/**',
     ],
@@ -403,8 +404,18 @@ export const PR_RULES: readonly PrRule[] = [
       'git/git-deploy-managed',
       'app/*',
       'inspect/*',
+      'env-vars/image-only-compose',
     ],
     checks: true,
+  },
+  {
+    id: 'env-vars',
+    reason: 'project env vars and the overrides a deploy applies from them',
+    paths: [
+      'core/app/Http/Controllers/User/EnvVarsController.php',
+      'core/app/Lib/Deploy/EnvVarOverrides.php',
+    ],
+    specs: ['env-vars/*'],
   },
   {
     id: 'inspect',
@@ -525,6 +536,17 @@ export const PR_RULES: readonly PrRule[] = [
       'core/app/Console/Commands/System/GuardHostDisk.php',
     ],
     specs: ['system/system-info', 'system/metrics', 'health/*'],
+  },
+  {
+    id: 'api-access',
+    reason: 'the Engine API token an app holds for its own project',
+    paths: [
+      'core/app/Http/Controllers/SystemApiAccessController.php',
+      'core/app/Lib/Project/ApiAccess.php',
+      'core/app/Lib/Project/ApiAccessFirewall.php',
+      'core/app/Console/Commands/System/ApiAccess*.php',
+    ],
+    specs: ['system/api-access'],
   },
   {
     id: 'mcp',
