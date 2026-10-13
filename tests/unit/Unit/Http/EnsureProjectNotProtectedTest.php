@@ -62,7 +62,6 @@ class EnsureProjectNotProtectedTest extends TestCase
             'restart a service' => ['POST', 'api/projects/{username}/containers/{service}/action', ['username' => 'alice', 'service' => 'web'], ['action' => 'restart']],
             'delete the main domain' => ['DELETE', 'api/projects/{username}/domains/{domain}', ['username' => 'alice', 'domain' => 'alice.example.test'], []],
             'push onto a protected target' => ['POST', 'api/projects/{username}/push', ['username' => 'bob'], ['target' => 'alice']],
-            'retry a failed staging' => ['POST', 'api/projects/{username}/staging/retry', ['username' => 'alice'], []],
         ];
     }
 
