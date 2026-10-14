@@ -8,6 +8,7 @@ use App\Exceptions\NotFoundException;
 use App\Jobs\DeployProject;
 use App\Models\Admin;
 use App\Models\DeployHook;
+use App\Models\SecretVaultEntry;
 use App\Models\Task;
 use App\Models\User;
 use App\System\Project\Git\CheckoutRedeploy;
@@ -61,6 +62,7 @@ class GitCommandsTest extends DeployHookTestCase
     protected function tearDown(): void
     {
         $this->restoreHost();
+        Schema::dropIfExists('secret_vault_entries');
         Schema::dropIfExists('admins');
 
         parent::tearDown();
@@ -490,15 +492,66 @@ class GitCommandsTest extends DeployHookTestCase
         $this->assertNull($user->fresh()->getSiteGit('public_html')['token']);
     }
 
-    public function test_a_vault_reference_is_stored_as_given(): void
+    public function test_a_vault_reference_is_stored_as_its_secret(): void
     {
         $user = $this->siteGitPublicHtml();
         $this->withoutRepository();
+        $entry = $this->vaultEntry('ghp_from_vault');
 
-        [$exit] = $this->runCommand('git:update-credentials', ['username' => 'alice', '--path' => 'public_html', '--token' => 'vault:12']);
+        [$exit] = $this->runCommand('git:update-credentials', ['username' => 'alice', '--path' => 'public_html', '--token' => $entry->reference()]);
 
         $this->assertSame(0, $exit);
-        $this->assertSame('vault:12', $user->fresh()->getSiteGit('public_html')['token']);
+        $this->assertSame('ghp_from_vault', $user->fresh()->getSiteGit('public_html')['token']);
+        $this->assertSame('alice', $entry->refresh()->project);
+    }
+
+    public function test_an_unknown_vault_reference_is_refused_not_stored(): void
+    {
+        $user = $this->siteGitPublicHtml('old');
+        $this->withoutRepository();
+        $this->vaultEntry('unused');
+
+        foreach (['git:update-credentials' => [], 'git:connect' => ['--repo-url' => self::REPO, '--branch' => 'main']] as $command => $options) {
+            $failure = $this->failureOf($command, ['username' => 'alice', '--path' => 'public_html', '--token' => 'vault:999999'] + $options);
+
+            $this->assertStringContainsString("No vault entry for 'vault:999999'", $failure, $command);
+        }
+        $this->assertSame('old', $user->fresh()->getSiteGit('public_html')['token']);
+    }
+
+    /** A project-scoped `token` entry no project owns yet, with its secret pasted. */
+    private function vaultEntry(string $secret): SecretVaultEntry
+    {
+        if (!Schema::hasTable('secret_vault_entries')) {
+            Schema::create('secret_vault_entries', function ($table) {
+                $table->id();
+                $table->char('ref_hash', 64)->unique();
+                $table->string('type');
+                $table->string('scope', 16)->default(SecretVaultEntry::SCOPE_PROJECT);
+                $table->string('project', 64)->nullable();
+                $table->string('purpose', 255)->nullable();
+                $table->json('verify_with')->nullable();
+                $table->json('verification')->nullable();
+                $table->text('secret_encrypted')->nullable();
+                $table->timestamp('filled_at')->nullable();
+                $table->timestamp('link_expires_at')->nullable();
+                $table->timestamp('expires_at')->nullable();
+                $table->unsignedInteger('use_count')->default(0);
+                $table->timestamp('last_used_at')->nullable();
+                $table->timestamps();
+            });
+        }
+
+        /** @var SecretVaultEntry */
+        $entry = SecretVaultEntry::create([
+            'ref_hash' => SecretVaultEntry::hashRef('ref' . bin2hex(random_bytes(8))),
+            'type' => 'token',
+            'link_expires_at' => now()->addHour(),
+        ]);
+        $entry->setSecret($secret);
+        $entry->save();
+
+        return $entry;
     }
 
     public function test_update_credentials_on_an_unconnected_checkout_is_refused(): void

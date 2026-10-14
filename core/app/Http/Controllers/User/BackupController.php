@@ -18,6 +18,7 @@ use App\Models\Backup as BackupRecord;
 use App\Models\BackupContainer;
 use App\Models\Task;
 use App\Models\User;
+use App\OpenApi\ApiDefinitions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use OpenApi\Attributes as OA;
@@ -161,7 +162,7 @@ class BackupController extends Controller
         responses: [
             new OA\Response(response: 202, description: 'Restore accepted', content: new OA\JsonContent(ref: '#/components/schemas/Backup')),
             new OA\Response(response: 404, description: 'Not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: 'Backup is not completed', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 409, description: 'Backup is not completed. ' . ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]

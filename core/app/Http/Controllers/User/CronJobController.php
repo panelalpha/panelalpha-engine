@@ -18,6 +18,7 @@ class CronJobController extends Controller
     #[OA\Get(
         path: '/projects/{username}/cron-jobs',
         summary: 'List cron jobs of a project',
+        description: 'PHP hosting projects only: a dind account does not run the project crontab, and a dind project answers 422.',
         security: [['bearerAuth' => []]],
         tags: ['Cron Jobs'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -26,6 +27,7 @@ class CronJobController extends Controller
                 properties: [new OA\Property(property: 'data', type: 'array', items: new OA\Items(ref: '#/components/schemas/CronJob'))],
             )),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'A dind project', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     /**
@@ -35,6 +37,7 @@ class CronJobController extends Controller
     public function index($username)
     {
         $user = $this->projectOr404($username);
+        $this->rejectDind($user);
 
         return new CronJobCollection($user->project()->cron()->list());
     }

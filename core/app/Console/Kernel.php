@@ -21,8 +21,6 @@ class Kernel extends ConsoleKernel
 
     private const MUTEX_FIVE_MINUTES = 5;
 
-    private const MUTEX_FIFTEEN_MINUTES = 15;
-
     private const MUTEX_HOURLY = 50;
 
     private const MUTEX_SIX_HOURS = 300;
@@ -30,6 +28,13 @@ class Kernel extends ConsoleKernel
     private const MUTEX_DAILY = 720;
 
     private const MUTEX_WEEKLY = 1000;
+
+    /**
+     * For a command that can outlast its cadence (uploads, prunes, a `du` of every project): an expiry
+     * equal to the cadence let the next tick start a second copy beside a live run. A core restart
+     * clears every mutex anyway, so only a run killed on its own waits this out.
+     */
+    private const MUTEX_LONG_RUNNING = 60;
 
     /**
      * @return void
@@ -159,7 +164,7 @@ class Kernel extends ConsoleKernel
         $schedule->command('system:image:prewarm --refresh')->weeklyOn(0, '03:30')->withoutOverlapping(self::MUTEX_WEEKLY);
         $schedule->command('deploy:cache:prune')->dailyAt('04:15')->withoutOverlapping(self::MUTEX_DAILY);
         $schedule->command('system:image:prune --due-after=20h')->hourly()->withoutOverlapping(self::MUTEX_HOURLY);
-        $schedule->command('system:disk:guard')->everyFiveMinutes()->withoutOverlapping(self::MUTEX_FIVE_MINUTES);
+        $schedule->command('system:disk:guard')->everyFiveMinutes()->withoutOverlapping(self::MUTEX_LONG_RUNNING);
     }
 
     /**
@@ -170,9 +175,9 @@ class Kernel extends ConsoleKernel
      */
     private function scheduleMonitoring(Schedule $schedule): void
     {
-        $schedule->command('telemetry:ship')->everyFiveMinutes()->withoutOverlapping(self::MUTEX_FIVE_MINUTES);
-        $schedule->command('project:mapping:check')->everyFiveMinutes()->withoutOverlapping(self::MUTEX_FIVE_MINUTES);
-        $schedule->command('metrics:projects:disk')->everyFifteenMinutes()->withoutOverlapping(self::MUTEX_FIFTEEN_MINUTES);
+        $schedule->command('telemetry:ship')->everyFiveMinutes()->withoutOverlapping(self::MUTEX_LONG_RUNNING);
+        $schedule->command('project:mapping:check')->everyFiveMinutes()->withoutOverlapping(self::MUTEX_LONG_RUNNING);
+        $schedule->command('metrics:projects:disk')->everyFifteenMinutes()->withoutOverlapping(self::MUTEX_LONG_RUNNING);
         $schedule->command('project:health:report')->everySixHours()->withoutOverlapping(self::MUTEX_SIX_HOURS);
         $schedule->command('stats:update')->daily()->withoutOverlapping(self::MUTEX_DAILY);
     }

@@ -32,11 +32,11 @@ final class GitRefs
             } elseif (preg_match('#^[0-9a-f]{40,64}\s+refs/heads/(\S+)$#', $line, $m) === 1) {
                 $branches[] = $m[1];
             } elseif (preg_match('#^[0-9a-f]{40,64}\s+refs/tags/(\S+?)(\^\{\})?$#', $line, $m) === 1) {
-                $tags[$m[1]] = true;
+                $tags[] = $m[1];
             }
         }
 
-        return new self($default, array_values(array_unique($branches)), array_keys($tags));
+        return new self($default, array_values(array_unique($branches)), array_values(array_unique($tags)));
     }
 
     public function hasBranch(string $branch): bool

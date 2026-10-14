@@ -7,6 +7,7 @@ use App\Models\IpAssigned;
 use App\Models\IpSubnet;
 use App\Models\User;
 use App\System;
+use App\System\Network;
 use Illuminate\Support\Facades\Schema;
 use Symfony\Component\Process\Process;
 use Tests\Support\FakeProcess;
@@ -96,6 +97,49 @@ class IpAssignVerificationTest extends TestCase
         $this->assertSame(1, IpAssigned::query()->count());
     }
 
+    public function test_an_ipv6_address_in_a_non_canonical_spelling_is_assigned_as_the_kernel_prints_it(): void
+    {
+        $user = $this->user('alice');
+        $subnet = IpSubnet::create(['ip' => '2001:db8::', 'mask' => 64, 'family' => 6, 'is_shared' => 0]);
+
+        $this->app->instance(System::class, $this->fakeSystem(interface: ['2001:db8::5/64'], noDefaultRoute: false));
+
+        $response = $this->postJson('/api/ip/assign', [
+            'user_id' => $user->id,
+            'ip_subnet_id' => $subnet->id,
+            'ip_address' => '2001:DB8:0:0::5',
+        ]);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.ip_address', '2001:db8::5');
+        $this->assertSame('2001:db8::5', IpAssigned::query()->value('ip_address'));
+    }
+
+    public function test_an_address_the_check_does_not_find_is_taken_off_the_interface(): void
+    {
+        $user = $this->user('alice');
+        $subnet = IpSubnet::create(['ip' => '192.0.2.0', 'mask' => 29, 'family' => 4, 'is_shared' => 0]);
+        $system = $this->fakeSystem(interface: [], noDefaultRoute: false);
+        $this->app->instance(System::class, $system);
+
+        $this->postJson('/api/ip/assign', [
+            'user_id' => $user->id,
+            'ip_subnet_id' => $subnet->id,
+            'ip_address' => '192.0.2.2',
+        ])->assertStatus(422);
+
+        $removed = array_filter($system->commands, static fn (array $argv): bool => array_slice($argv, 0, 4) === ['ip', 'addr', 'del', '192.0.2.2/29']);
+        $this->assertCount(1, $removed, 'the address is taken off the interface');
+    }
+
+    public function test_addresses_compare_by_value_not_spelling(): void
+    {
+        $this->assertTrue(Network::sameAddress('2001:db8:0:0::5', '2001:db8::5'));
+        $this->assertTrue(Network::sameAddress('2001:DB8::5', '2001:db8::5'));
+        $this->assertFalse(Network::sameAddress('2001:db8::5', '2001:db8::6'));
+        $this->assertTrue(Network::sameAddress('192.0.2.2', '192.0.2.2'));
+    }
+
     /** Network caches the host's default route statically; drop it between tests. */
     private static function forgetCachedDefaultRoutes(): void
     {
@@ -150,7 +194,7 @@ class IpAssignVerificationTest extends TestCase
                 if (str_contains($joined, 'addr show')) {
                     return FakeProcess::ok(
                         "2: eth0: <UP>\n    inet 10.0.0.5/24 scope global eth0\n"
-                        . implode('', array_map(fn (string $cidr): string => "    inet {$cidr} scope global eth0\n", $this->interface))
+                        . implode('', array_map(fn (string $cidr): string => '    inet' . (str_contains($cidr, ':') ? '6' : '') . " {$cidr} scope global eth0\n", $this->interface))
                     );
                 }
 

@@ -44,6 +44,25 @@ class StorageReclaimBestEffortTest extends TestCase
         $this->assertStringContainsString('buildx prune -af', $ran[1]);
     }
 
+    public function test_a_failing_free_space_probe_is_logged_and_the_build_goes_on(): void
+    {
+        $ran = [];
+        $system = $this->createStub(System::class);
+        $system->method('exec')->willReturnCallback(function (string|array $cmd) use (&$ran): string {
+            $line = implode(' ', is_array($cmd) ? $cmd : [$cmd]);
+            if (str_contains($line, 'df -Pk')) {
+                throw new \RuntimeException('The process exceeded the timeout of 60 seconds.');
+            }
+            $ran[] = $line;
+
+            return '';
+        });
+
+        $this->reclaim($system)->reclaimIfNeeded();
+
+        $this->assertSame([], array_values(array_filter($ran, fn (string $line): bool => str_contains($line, 'prune'))));
+    }
+
     private function reclaim(System $system): StorageReclaim
     {
         $dind = $this->createStub(Dind::class);

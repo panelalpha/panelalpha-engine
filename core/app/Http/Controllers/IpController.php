@@ -18,6 +18,7 @@ use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\IpUtils;
@@ -230,13 +231,13 @@ class IpController extends Controller
     {
         if ($mask < 0 || $mask > $maxMask) {
             throw ValidationException::withMessages([
-                "{$label} mask must be between 0 and {$maxMask}.",
+                'mask' => "{$label} mask must be between 0 and {$maxMask}.",
             ]);
         }
         $networkIp = $networkOf($ip, $mask);
         if ($ip !== $networkIp) {
             throw ValidationException::withMessages([
-                "{$label} must be the network address (e.g. " . ($networkIp === null ? $example : ($networkIp . '/' . $mask)) . ').',
+                'ip' => "{$label} must be the network address (e.g. " . ($networkIp === null ? $example : ($networkIp . '/' . $mask)) . ').',
             ]);
         }
     }
@@ -248,7 +249,7 @@ class IpController extends Controller
             'mask' => $mask,
         ])->exists()) {
             throw ValidationException::withMessages([
-                "Subnet {$ip}/{$mask} already exist.",
+                'ip' => "Subnet {$ip}/{$mask} already exist.",
             ]);
         }
     }
@@ -277,6 +278,7 @@ class IpController extends Controller
         parameters: [new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
         responses: [
             new OA\Response(response: 200, description: 'Subnet deleted', content: new OA\JsonContent(ref: '#/components/schemas/IpSubnet')),
+            new OA\Response(response: 409, description: 'The subnet still has assigned IP addresses', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     public function deleteSubnet(int $id): IpSubnetResource
@@ -284,9 +286,7 @@ class IpController extends Controller
         $subnet = IpSubnet::findOrFail($id);
 
         if ($subnet->ipAssigned()->count()) {
-            throw ValidationException::withMessages([
-                'Cannot delete IP subnet with assigned IP addresses',
-            ]);
+            abort(new JsonResponse(['message' => 'Cannot delete IP subnet with assigned IP addresses'], 409));
         }
 
         $subnet->delete();
@@ -348,12 +348,13 @@ class IpController extends Controller
         $params = $request->validated();
         $user = $this->projectFromParams($params);
         $ipSubnet = $this->subnetFromParams($params);
-        $this->assertAssignable($params['ip_address'], $ipSubnet, $user);
+        $address = self::canonicalAddress($params['ip_address']);
+        $this->assertAssignable($address, $ipSubnet, $user);
 
         $ip = IpAssigned::create([
             'user_id' => $user->id,
             'ip_subnet_id' => $params['ip_subnet_id'],
-            'ip_address' => $params['ip_address'],
+            'ip_address' => $address,
         ]);
 
         $system = app(System::class);
@@ -371,7 +372,7 @@ class IpController extends Controller
     {
         if (empty($params['user_id']) && empty($params['username'])) {
             throw ValidationException::withMessages([
-                'user_id or username is required.',
+                'user_id' => 'user_id or username is required.',
             ]);
         }
 
@@ -380,7 +381,7 @@ class IpController extends Controller
             : User::findByUsername($params['username']);
         if (!$user) {
             throw ValidationException::withMessages([
-                'Project not found.',
+                (!empty($params['user_id']) ? 'user_id' : 'username') => 'Project not found.',
             ]);
         }
 
@@ -396,7 +397,7 @@ class IpController extends Controller
         $ipSubnet = IpSubnet::find($params['ip_subnet_id']);
         if (!$ipSubnet) {
             throw ValidationException::withMessages([
-                'IP subnet not found.',
+                'ip_subnet_id' => 'IP subnet not found.',
             ]);
         }
 
@@ -408,7 +409,7 @@ class IpController extends Controller
     {
         if (!IpUtils::checkIp($address, $ipSubnet->getCidr())) {
             throw ValidationException::withMessages([
-                "IP address {$address} is not within the selected subnet {$ipSubnet->getCidr()}.",
+                'ip_address' => "IP address {$address} is not within the selected subnet {$ipSubnet->getCidr()}.",
             ]);
         }
 
@@ -420,13 +421,13 @@ class IpController extends Controller
 
         if ($alreadyAssigned && $alreadyAssigned->user_id == $user->id) {
             throw ValidationException::withMessages([
-                "IP address {$address} is already assigned to the user.",
+                'ip_address' => "IP address {$address} is already assigned to the user.",
             ]);
         }
 
         if (!$ipSubnet->is_shared && $alreadyAssigned) {
             throw ValidationException::withMessages([
-                "IP address {$address} is not shared and it's already assigned.",
+                'ip_address' => "IP address {$address} is not shared and it's already assigned.",
             ]);
         }
     }
@@ -459,12 +460,34 @@ class IpController extends Controller
 
         if (!$applied) {
             $this->rollBack($ip, "IP assignment {$address}");
+            $this->removeUnusedAddress($system, $ip, $ipSubnet);
 
             throw ValidationException::withMessages([
                 'ip_address' => "The host network interface does not carry {$address}/{$ipSubnet->mask} after adding it, "
                     . 'so the assignment was rolled back.',
             ]);
         }
+    }
+
+    /** The spelling the kernel prints, so stored, compared and looked-up addresses agree. */
+    private static function canonicalAddress(string $address): string
+    {
+        $packed = inet_pton($address);
+
+        return $packed === false ? $address : (string) inet_ntop($packed);
+    }
+
+    /** Take back an address the failed assignment added, unless another project on a shared subnet holds it. */
+    private function removeUnusedAddress(System $system, IpAssigned $ip, IpSubnet $ipSubnet): void
+    {
+        if ($this->addressStillUsed($ip, $ipSubnet)) {
+            return;
+        }
+        $this->runOnHostOrWarn(
+            $system,
+            fn (Network $network) => $network->generateIpAddressDelCommand($ip->ip_address, $ipSubnet->mask, $ipSubnet->family),
+            "Could not delete IP address {$ip->ip_address} from network interface",
+        );
     }
 
     /** Undo one record whose host step did not take, best-effort. */
@@ -516,11 +539,11 @@ class IpController extends Controller
         $ip = IpAssigned::query()
             ->where('user_id', $user->id)
             ->where('ip_subnet_id', $params['ip_subnet_id'])
-            ->where('ip_address', $params['ip_address'])
+            ->where('ip_address', self::canonicalAddress($params['ip_address']))
             ->first();
         if (!$ip) {
             throw ValidationException::withMessages([
-                'IP address is not assigned to the user.',
+                'ip_address' => 'IP address is not assigned to the user.',
             ]);
         }
 

@@ -7,6 +7,7 @@ use App\Http\Requests\PhpErrorLogRequest;
 use App\Http\Requests\UserPhpListCustomIniSettingsRequest;
 use App\Http\Requests\UserPhpUpdateCustomIniSettingsRequest;
 use App\Lib\Project\CustomIniSettings;
+use App\Lib\Project\LogTime;
 use App\Lib\Project\PhpErrorLog;
 use App\System as EngineSystem;
 use Illuminate\Http\JsonResponse;
@@ -85,7 +86,7 @@ class PhpController extends Controller
         parameters: [
             new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'lines', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 200, minimum: 1, maximum: 5000)),
-            new OA\Parameter(name: 'since', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'date-time')),
+            new OA\Parameter(name: 'since', description: 'Only lines written after this: ' . LogTime::EXPECTED . '.', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'domain', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
         ],
         responses: [

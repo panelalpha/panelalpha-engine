@@ -58,9 +58,11 @@ class EnsureProjectNotProtectedTest extends TestCase
             'stop the containers' => ['POST', 'api/projects/{username}/containers/action', ['username' => 'alice'], ['action' => 'stop']],
             'bring the containers down' => ['POST', 'api/projects/{username}/containers/action', ['username' => 'alice'], ['action' => 'down']],
             'restart the containers' => ['POST', 'api/projects/{username}/containers/action', ['username' => 'alice'], ['action' => 'restart']],
+            'pull new images' => ['POST', 'api/projects/{username}/containers/action', ['username' => 'alice'], ['action' => 'pull']],
             'stop a service' => ['POST', 'api/projects/{username}/containers/{service}/action', ['username' => 'alice', 'service' => 'web'], ['action' => 'stop']],
             'restart a service' => ['POST', 'api/projects/{username}/containers/{service}/action', ['username' => 'alice', 'service' => 'web'], ['action' => 'restart']],
             'delete the main domain' => ['DELETE', 'api/projects/{username}/domains/{domain}', ['username' => 'alice', 'domain' => 'alice.example.test'], []],
+            'restore a backup' => ['POST', 'api/projects/{username}/backups/{id}/restore', ['username' => 'alice', 'id' => '7'], ['confirm' => 'true']],
             'push onto a protected target' => ['POST', 'api/projects/{username}/push', ['username' => 'bob'], ['target' => 'alice']],
         ];
     }
@@ -117,16 +119,6 @@ class EnsureProjectNotProtectedTest extends TestCase
             'api/projects/{username}/containers/action',
             ['username' => 'alice'],
             ['action' => 'up']
-        )));
-    }
-
-    public function test_a_container_pull_is_allowed(): void
-    {
-        $this->assertSame(200, $this->statusOf($this->request(
-            'POST',
-            'api/projects/{username}/containers/action',
-            ['username' => 'alice'],
-            ['action' => 'pull']
         )));
     }
 

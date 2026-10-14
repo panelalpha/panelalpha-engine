@@ -62,6 +62,27 @@ class ScheduleMutexTest extends TestCase
         }
     }
 
+    /**
+     * An expiry equal to the cadence let the next tick start a second copy
+     * beside a run that was still going: two uploads of one telemetry spool,
+     * two prunes at once.
+     */
+    public function test_a_command_that_can_outlast_its_cadence_keeps_its_mutex_past_it(): void
+    {
+        $long = ['telemetry:ship' => 5, 'system:disk:guard' => 5, 'project:mapping:check' => 5, 'metrics:projects:disk' => 15];
+        $seen = [];
+        foreach ($this->events() as $event) {
+            foreach ($long as $name => $cadence) {
+                if (str_ends_with((string) $event->command, " {$name}")) {
+                    $seen[] = $name;
+                    $this->assertGreaterThanOrEqual($cadence * 4, $event->expiresAt, "{$name} can be started twice");
+                }
+            }
+        }
+
+        $this->assertEqualsCanonicalizing(array_keys($long), $seen);
+    }
+
     public function test_the_entrypoint_clears_the_mutexes_on_start(): void
     {
         $path = __DIR__ . '/../../../../dockerfiles/entrypoint-core.sh';

@@ -10,7 +10,6 @@ use App\Models\Domain;
 use App\Models\Setting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 
 class LighthouseController extends Controller
@@ -49,14 +48,13 @@ class LighthouseController extends Controller
             new OA\Response(response: 200, description: 'Lighthouse report', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
+            new OA\Response(response: 409, description: 'The Lighthouse service is disabled on this engine', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     public function generateReport(Request $request): JsonResponse
     {
         if (!empty(Setting::get('disable-lighthouse'))) {
-            throw ValidationException::withMessages([
-                'lighthouse service is disabled',
-            ]);
+            return new JsonResponse(['message' => 'lighthouse service is disabled'], 409);
         }
 
         /**

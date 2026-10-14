@@ -22,11 +22,16 @@ A backup has to be written somewhere, and that somewhere is called a **store**. 
 If the assistant cannot create a store, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
 A `local` store writes from inside the engine container, so its folder must be
-under a path the engine persists on the host -- `/home`, `/opt/panelalpha` or
-the engine's own storage volume (`/var/www/html/storage`). Anywhere else (a plain `/var/backups`, say) lives in
-the container's writable layer and is lost the next time that container is
-recreated, while the backup rows still point at it; the engine refuses such a
-location when you create the store.
+under one of the three paths the engine persists on the host: `/home`,
+`/opt/panelalpha` or the engine's own storage volume (`/var/www/html/storage`).
+Anywhere else (a plain `/var/backups`, say) lives in the container's writable
+layer and would be lost the next time that container is recreated, while the
+backup rows still point at it, so the engine refuses such a location with a 422
+when you create or change the store.
+
+Keep local stores under `/opt/panelalpha/backups/`. Avoid a folder directly in
+`/home`: every project's home is `/home/<project name>`, so `/home/backups`
+would be the home of a project named `backups`.
 
 ```text
 Create a backup store on this host at /opt/panelalpha/backups.
@@ -78,7 +83,7 @@ The engine will not do it for you. Use `cron` on your VPS to call `pae project:b
 **A local store**
 
 ```text
-Create a backup store called local-test on this host at /var/backups/test.
+Create a backup store called local-test on this host at /opt/panelalpha/backups/test.
 Test that it works, then list the stores.
 ```
 
@@ -96,8 +101,8 @@ Mode: modify. Tools: `backup_container_create` with `driver` s3 and `credentials
 **Change or remove a store**
 
 ```text
-Rename the store local-test to local-main, point it at /var/backups/main, then
-delete the store s3-test.
+Rename the store local-test to local-main, point it at
+/opt/panelalpha/backups/main, then delete the store s3-test.
 ```
 
 Mode: full. Tools: `backup_container_update`, `backup_container_delete`. Check: the changes read back from `backup_container_get`, and the deleted store is gone.

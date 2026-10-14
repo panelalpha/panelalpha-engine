@@ -11,7 +11,6 @@ use App\System;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AppPortServices;
 use App\System\Project\PhpHosting;
-use Illuminate\Support\Carbon;
 
 /**
  * A project's PHP errors. Classic hosting writes them to a file in the
@@ -67,7 +66,7 @@ final class PhpErrorLog
         $logs = $project->getServiceLogs(
             $service,
             $lines,
-            $since === null ? null : Carbon::parse($since)->toRfc3339String(),
+            $since === null ? null : LogTime::instant($since)->toRfc3339String(),
         );
 
         return ['lines' => $this->split($logs), 'file' => null, 'size' => strlen($logs), 'mtime' => null, 'truncated' => false];
@@ -171,7 +170,7 @@ final class PhpErrorLog
             return $lines;
         }
 
-        $threshold = Carbon::parse($since)->getTimestamp();
+        $threshold = LogTime::instant($since)->getTimestamp();
         $kept = [];
         foreach ($lines as $line) {
             $stamp = self::timestampOf($line);

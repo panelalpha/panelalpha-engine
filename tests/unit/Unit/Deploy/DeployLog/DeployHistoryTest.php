@@ -28,6 +28,7 @@ class DeployHistoryTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        config(['app.key' => 'base64:' . base64_encode(str_repeat('k', 32))]);
         $this->bootInMemoryDatabase();
         $this->user = $this->makeUser('dh' . bin2hex(random_bytes(4)), ['template' => 'dind']);
     }

@@ -167,6 +167,27 @@ class EximConfigInputTest extends TestCase
         $this->assertSame('', Setting::getEximConfig()['smtp_password'], 'a null clears it');
     }
 
+    /**
+     * A credential sent as `vault:<id>` is saved resolved, but answered as the
+     * reference: the secret must not land in the caller's transcript.
+     */
+    public function test_a_save_answers_a_vault_credential_as_the_reference_sent(): void
+    {
+        $answer = new \ReflectionMethod(\App\Http\Controllers\SystemController::class, 'eximConfigAnswer');
+
+        $data = $answer->invoke(null, [
+            'smarthost_provider' => 'smtp',
+            'smtp_username' => 'resolved-user',
+            'smtp_password' => 'resolved-secret',
+        ], [
+            'smtp_username' => 'plain-user',
+            'smtp_password' => 'vault:12',
+        ]);
+
+        $this->assertSame(['smarthost_provider' => 'smtp', 'smtp_username' => 'plain-user', 'smtp_password' => 'vault:12'], $data);
+        $this->assertStringNotContainsString('resolved-secret', (string) json_encode($data));
+    }
+
     /** Exim::sendTestEmail() refuses what FILTER_VALIDATE_EMAIL refuses; that used to be its exception, a 500. */
     public function test_a_recipient_the_mail_code_would_refuse_is_a_422(): void
     {

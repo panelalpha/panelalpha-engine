@@ -24,8 +24,11 @@ class EnsureProjectNotProtected
     /** The stable code a refusal carries, beside the message. */
     public const CODE = 'project_protected';
 
-    /** Project-level compose actions that leave the app down or restart it. */
-    private const STOPPING_ACTIONS = ['stop', 'down', 'restart'];
+    /**
+     * Project-level compose actions that leave the app down or restart it. A
+     * pull recreates every service whose image changed.
+     */
+    private const STOPPING_ACTIONS = ['stop', 'down', 'restart', 'pull'];
 
     /** Service-level docker actions that stop the app. */
     private const STOPPING_SERVICE_ACTIONS = ['stop', 'restart'];
@@ -53,6 +56,7 @@ class EnsureProjectNotProtected
         'POST /projects/{username}/containers/{service}/action',
         'DELETE /projects/{username}/domains/{domain}',
         'POST /projects/{username}/push',
+        'POST /projects/{username}/backups/{id}/restore',
     ];
 
     public function handle(Request $request, Closure $next): mixed

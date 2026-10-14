@@ -55,9 +55,9 @@ class FtpAccountController extends Controller
                 new OA\Property(property: 'user', type: 'string', example: 'ftpuser1'),
                 new OA\Property(property: 'domain', type: 'string', example: 'example.com'),
                 new OA\Property(property: 'password', type: 'string', format: 'password'),
-                new OA\Property(property: 'directory', type: 'string', nullable: true, example: '/public_html'),
-                new OA\Property(property: 'unlimited_quota', type: 'boolean', example: true, description: 'Send true, or omit quota, for an account with no quota of its own.'),
-                new OA\Property(property: 'quota', type: 'integer', nullable: true, example: 1024, description: 'Quota in MB. Omit it, or send 0, for an unlimited account: pure-ftpd reads a 0 max size as no limit.'),
+                new OA\Property(property: 'directory', type: 'string', nullable: true, example: '/public_html', description: 'An existing directory inside the project home the account is limited to: /project on a repository-deployed project, /public_html on traditional PHP hosting. Omitted, the account gets the whole home.'),
+                new OA\Property(property: 'unlimited_quota', type: 'boolean', example: true, description: 'Send true, or omit quota, for an account with no quota of its own. It reads back as `details.unlimited_quota: true`; `details.quota` then holds the project\'s disk space limit (-1 when its disk space is unlimited), not 0.'),
+                new OA\Property(property: 'quota', type: 'integer', nullable: true, example: 1024, description: 'Quota in MB, capped at the project\'s disk space limit. Omit it, or send 0, for an account with no quota of its own.'),
             ],
         )),
         responses: [
@@ -149,8 +149,8 @@ class FtpAccountController extends Controller
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             properties: [
                 new OA\Property(property: 'password', type: 'string', format: 'password', nullable: true),
-                new OA\Property(property: 'unlimited_quota', type: 'boolean', description: 'Send true, or send quota: 0, for an account with no quota of its own.'),
-                new OA\Property(property: 'quota', type: 'integer', nullable: true, description: 'Quota in MB. 0 is unlimited, as pure-ftpd enforces it.'),
+                new OA\Property(property: 'unlimited_quota', type: 'boolean', description: 'Send true, or send quota: 0, for an account with no quota of its own. It reads back as `details.unlimited_quota: true`; `details.quota` then holds the project\'s disk space limit (-1 when its disk space is unlimited), not 0.'),
+                new OA\Property(property: 'quota', type: 'integer', nullable: true, description: 'Quota in MB, capped at the project\'s disk space limit. 0 means no quota of its own.'),
             ],
         )),
         responses: [

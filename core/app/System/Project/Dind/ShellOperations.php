@@ -130,6 +130,42 @@ final class ShellOperations
     }
 
     /**
+     * execQuiet() that the deploy's cancel stops at once instead of when the command ends.
+     *
+     * @param list<string> $cmd
+     * @throws DeployCancelledException
+     */
+    public function execQuietUntilCancelled(array $cmd, DeployLogger $logger, int $timeout = 600): string
+    {
+        $logger->throwIfCancelled();
+        $process = $this->project->system()->runProcessWithCallbacks(
+            $this->wrap($cmd),
+            [],
+            $timeout,
+            fn (Process $process) => self::stopOnCancel($process, $logger),
+        );
+        $logger->throwIfCancelled();
+        if (!$process->isSuccessful()) {
+            throw new \Exception($process->getErrorOutput() ?: $process->getOutput());
+        }
+
+        return $process->getOutput();
+    }
+
+    private static function stopOnCancel(Process $process, DeployLogger $logger): void
+    {
+        while ($process->isRunning()) {
+            if ($logger->isCancelled()) {
+                $process->stop(0);
+
+                return;
+            }
+            $process->checkTimeout();
+            usleep(250_000);
+        }
+    }
+
+    /**
      * @param list<string> $cmd
      */
     public function execAsUserQuiet(array $cmd, array $env = [], int $timeout = 600): string

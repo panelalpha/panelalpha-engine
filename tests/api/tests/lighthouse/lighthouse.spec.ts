@@ -8,16 +8,16 @@ import { lighthouseReportResponseSchema } from '@/schemas';
  * and is slow enough to time out under load. The service statuses below are all
  * "the endpoint behaved"; only a 200 is checked for an actual report.
  */
-const SERVICE_STATUSES = [200, 400, 422, 500, 502, 503] as const;
+const SERVICE_STATUSES = [200, 400, 409, 422, 500, 502, 503] as const;
 
 /**
  * The one answer that means "not configured": the `disable-lighthouse` setting
- * makes LighthouseController::generateReport throw a 422 whose message is this.
+ * makes LighthouseController::generateReport answer 409 with this message.
  */
 const DISABLED_MESSAGE = 'lighthouse service is disabled';
 
 function isDisabled(response: { status: number; body: unknown }): boolean {
-  return response.status === 422 && JSON.stringify(response.body ?? '').includes(DISABLED_MESSAGE);
+  return response.status === 409 && JSON.stringify(response.body ?? '').includes(DISABLED_MESSAGE);
 }
 
 test.describe('Lighthouse', () => {
@@ -42,7 +42,9 @@ test.describe('Lighthouse', () => {
   }
 
   test('a request without a url is refused', async ({ api }) => {
-    expectOneOf((await api.generateLighthouseReportRaw({})).status, [400, 422]);
+    const response = await api.generateLighthouseReportRaw({});
+    test.skip(isDisabled(response), 'The Lighthouse service is disabled on this engine.');
+    expectOneOf(response.status, [400, 422]);
   });
 
   test('a returned report matches its schema', async ({ api, setupUser }) => {

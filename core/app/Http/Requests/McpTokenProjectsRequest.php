@@ -17,7 +17,7 @@ class McpTokenProjectsRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'projects' => ['required', 'array', 'max:500'],
+            'projects' => ['present', 'array', 'max:500'],
             'projects.*' => ['string', 'exists:users,username'],
         ];
     }

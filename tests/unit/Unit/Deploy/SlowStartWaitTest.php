@@ -42,7 +42,7 @@ class SlowStartWaitTest extends TestCase
                 return $this->awaitSlowStart($report, SlowStartWaitTest::RUNNING_SNAPSHOT, $logger);
             }
 
-            public function observe(int $timeout = 5, int $attempts = 3, int $delay = 2, bool $waitOnServerError = false): ?array
+            public function observe(int $timeout = 5, int $attempts = 3, int $delay = 2, bool $waitOnServerError = false, ?DeployLogger $deploy = null): ?array
             {
                 $this->observed[] = $attempts;
 
@@ -224,7 +224,7 @@ class SlowStartWaitTest extends TestCase
                 parent::__construct($dind);
             }
 
-            public function observe(int $timeout = 5, int $attempts = 3, int $delay = 2, bool $waitOnServerError = false): ?array
+            public function observe(int $timeout = 5, int $attempts = 3, int $delay = 2, bool $waitOnServerError = false, ?DeployLogger $deploy = null): ?array
             {
                 if ($this->observations++ === 0) {
                     $report = (fn () => self::silentReport())->call(new SlowStartWaitTest('x'));

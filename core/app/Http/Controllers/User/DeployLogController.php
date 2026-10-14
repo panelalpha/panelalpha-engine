@@ -7,6 +7,8 @@ use App\System;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\DeployTimings;
 use App\Lib\Task\ProcessTreeKiller;
+use App\Lib\Task\TaskCanceller;
+use App\Models\Task;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -122,7 +124,8 @@ class DeployLogController extends Controller
 
     #[OA\Post(
         path: '/projects/{username}/deploy-cancel',
-        summary: 'Cancel a running deploy: mark cancelled, kill the subprocess tree, clean up',
+        summary: 'Cancel a running or queued deploy: mark cancelled, kill the subprocess tree, clean up',
+        description: 'A deploy still waiting in the queue has no process yet: its task is cancelled, and the answer names it in `task_id`.',
         security: [['bearerAuth' => []]],
         tags: ['Deploy'],
         parameters: [
@@ -132,7 +135,7 @@ class DeployLogController extends Controller
             new OA\Response(response: 200, description: 'Deploy cancellation requested', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
-            new OA\Response(response: 409, description: 'No running deploy', content: new OA\JsonContent(
+            new OA\Response(response: 409, description: 'No running or queued deploy', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'message', type: 'string')],
             )),
         ],
@@ -143,7 +146,7 @@ class DeployLogController extends Controller
 
         $result = DeployLogger::requestCancel($username);
         if (!$result['cancelled']) {
-            return new JsonResponse(['message' => 'No running deploy to cancel'], 409);
+            return $this->cancelQueuedDeploy($username);
         }
 
         if ($result['pid'] !== null) {
@@ -153,6 +156,27 @@ class DeployLogController extends Controller
         $this->tearDownHalfStartedApp($user, $username);
 
         return new JsonResponse(['data' => ['cancelled' => true]]);
+    }
+
+    /** A deploy waiting in the queue has opened no log yet, so it is cancelled by its task. */
+    private function cancelQueuedDeploy(string $username): JsonResponse
+    {
+        $task = Task::query()
+            ->where('username', $username)
+            ->whereIn('job_type', Task::DEPLOY_JOB_TYPES)
+            ->where('status', Task::STATUS_QUEUED)
+            ->orderByDesc('id')
+            ->first();
+
+        if (!$task instanceof Task) {
+            return new JsonResponse(['message' => 'No running or queued deploy to cancel'], 409);
+        }
+
+        if (!(new TaskCanceller(new ProcessTreeKiller(new System())))->cancelQueued($task)) {
+            return new JsonResponse(['message' => "Deploy task {$task->id} has just started; cancel it again."], 409);
+        }
+
+        return new JsonResponse(['data' => ['cancelled' => true, 'task_id' => $task->id]]);
     }
 
     /**

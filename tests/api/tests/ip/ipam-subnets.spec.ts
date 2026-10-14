@@ -118,7 +118,7 @@ test.describe('IP subnet validation', () => {
       });
 
       const deletion = await api.deleteSubnetRaw(subnetId);
-      await expectStatus(deletion, 422);
+      await expectStatus(deletion, 409);
       expect((deletion.body as { message?: string }).message).toContain('assigned');
     } finally {
       await removeSubnet(api, subnetId);
