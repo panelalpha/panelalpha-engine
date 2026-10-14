@@ -37,13 +37,13 @@ The assistant answers with the sign-in address, the username and the password. I
 
 ## Rebuilding
 
-A rebuild replays the exact plan from the last successful deploy against the current files.
+A rebuild replays the exact plan from the last successful deploy against the current files. On a project connected to git, the current files are a fresh clone of its branch: anything changed in `~/project` on the server is replaced by what the repository holds.
 
 ```text
 Rebuild this project.
 ```
 
-Use it after you change files directly, after you change an environment variable, or when a site has degraded and you want it put back the way it shipped.
+Use it after you change files directly on a project without a repository, after you change an environment variable, or when a site has degraded and you want it put back the way it shipped.
 
 A rebuild runs in the background, and so does deploying an uploaded archive. The engine answers the assistant at once and the assistant follows the deploy until it ends, however long the build takes. Asking again while one is still running is refused and points at the one already under way, so a slow deploy is never started twice.
 

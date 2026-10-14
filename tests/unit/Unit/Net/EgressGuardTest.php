@@ -141,6 +141,40 @@ class EgressGuardTest extends TestCase
         $this->assertFalse(EgressGuard::isAllowed('https://other.internal/o/r.git'));
     }
 
+    /** @return array<string, array{string}> */
+    public static function addressesRefusedEvenWhenAllowListed(): array
+    {
+        return [
+            'loopback' => ['127.0.0.1'],
+            'cloud metadata' => ['169.254.169.254'],
+            'unspecified' => ['0.0.0.0'],
+            'multicast' => ['224.0.0.1'],
+            'reserved 240/4' => ['240.0.0.1'],
+            'ipv6 loopback' => ['::1'],
+            'ipv6 link local' => ['fe80::1'],
+            'ipv4-mapped metadata' => ['::ffff:169.254.169.254'],
+        ];
+    }
+
+    #[DataProvider('addressesRefusedEvenWhenAllowListed')]
+    public function test_an_allow_listed_host_still_refuses_loopback_link_local_and_reserved(string $address): void
+    {
+        OutboundUrl::setResolverForTests(static fn (string $host): array => ['10.0.0.5', $address]);
+        EgressGuard::setPolicyForTests(false, ['git.internal']);
+
+        $this->assertFalse(EgressGuard::isAllowed('https://git.internal/o/r.git'));
+        $this->assertSame($address, OutboundUrl::refusedAddressOf('git.internal'));
+    }
+
+    public function test_an_allow_listed_host_is_pinned_to_its_checked_address(): void
+    {
+        OutboundUrl::setResolverForTests(static fn (string $host): array => ['fd00::5']);
+        EgressGuard::setPolicyForTests(false, ['git.internal']);
+
+        $this->assertSame('git.internal:443:[fd00::5]', EgressGuard::pin('https://git.internal/o/r.git'));
+        $this->assertNull(OutboundUrl::refusedAddressOf('git.internal'));
+    }
+
     public function test_an_allow_listed_name_does_not_allow_a_literal_address(): void
     {
         EgressGuard::setPolicyForTests(false, ['10.0.0.5']);

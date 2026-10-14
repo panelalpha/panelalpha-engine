@@ -67,6 +67,23 @@ class GitUrlTest extends TestCase
         }
     }
 
+    /** Git prompts with the URL as written, and a host name is not case-sensitive. */
+    public function test_the_askpass_helper_answers_its_host_in_any_case(): void
+    {
+        $path = tempnam(sys_get_temp_dir(), 'git-askpass-case-');
+        $this->assertNotFalse($path);
+        file_put_contents($path, GitUrl::askPassScript('token', GitUrl::hostOf('https://GitHub.com/owner/repo')));
+        chmod($path, 0700);
+
+        try {
+            $process = new Process([$path, "Password for 'HTTPS://git@GitHub.COM':"]);
+            $process->mustRun();
+            $this->assertSame('token', $process->getOutput());
+        } finally {
+            @unlink($path);
+        }
+    }
+
     /** Without a host the helper answers any prompt, the behaviour before host scoping. */
     public function test_a_hostless_askpass_helper_still_answers(): void
     {

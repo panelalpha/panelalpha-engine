@@ -84,6 +84,16 @@ class SourceInspectRequestTest extends TestCase
         $this->assertSame('source_unrecognised', $problem['code']);
     }
 
+    /** The 422 must not steer a caller towards the server path the API refuses. */
+    public function test_an_unrecognisable_source_does_not_suggest_a_server_path(): void
+    {
+        $problem = $this->inspectProblem(['source' => 'not a source at all!!']);
+
+        $this->assertStringNotContainsString('path', $problem['message']);
+        $this->assertStringNotContainsString('path', $problem['expected']);
+        $this->assertNotContains('/home/myapp/project', $problem['examples']);
+    }
+
     /** `path` mapped any readable server directory, so the API no longer accepts it. */
     public function test_type_path_is_refused(): void
     {

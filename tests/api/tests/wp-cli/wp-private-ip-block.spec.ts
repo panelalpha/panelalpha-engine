@@ -118,9 +118,9 @@ test.describe('private-IP blocking plugins', () => {
 
     const host = engineIp!.includes(':') ? `[${engineIp!}]` : engineIp!;
     const chain = await followViaEngineIp(
-      async (url) => {
+      async (url, hostHeader) => {
         const response = await fetchSite(anonymousRequest, url, {
-          headers: { Host: setupUser.domain },
+          headers: { Host: hostHeader },
           maxRedirects: 0,
           timeout: 30_000,
         });

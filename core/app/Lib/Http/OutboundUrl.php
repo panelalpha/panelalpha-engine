@@ -13,8 +13,10 @@ use Symfony\Component\HttpFoundation\IpUtils;
  * sites-phpmyadmin, host services.
  *
  * The rule is the tenant network's plus its IPv6 side, minus the private ranges
- * when the operator allows them ({@see config('egress.allow_private')}) and the
- * allow-listed names ({@see config('egress.allow_hosts')}). A host is refused
+ * when the operator allows them ({@see config('egress.allow_private')}). An
+ * allow-listed name ({@see config('egress.allow_hosts')}) skips only the
+ * internal-address check: loopback, link-local, multicast and the reserved
+ * ranges stay refused for it. A host is refused
  * when *any* of its A/AAAA records is internal, so a rebind mixing a public and
  * an internal address does not get through. Callers pin the checked address
  * ({@see pin}) and re-check every redirect hop.
@@ -32,6 +34,11 @@ final class OutboundUrl
 
     /** The IPv4 side of what EGRESS_ALLOW_PRIVATE may allow, as network and prefix length. */
     private const PRIVATE_IPV4_RANGES = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'];
+
+    /** The IPv4 ranges refused even for an allow-listed name: loopback, link-local, multicast, reserved. */
+    private const ALWAYS_REFUSED_IPV4_RANGES = [
+        '0.0.0.0/8', '127.0.0.0/8', '169.254.0.0/16', '192.0.0.0/24', '198.18.0.0/15', '224.0.0.0/4', '240.0.0.0/4',
+    ];
 
     /** The IPv6 counterparts of TenantNetwork::REFUSED_RANGES: network, prefix length, private. */
     private const REFUSED_IPV6_RANGES = [
@@ -121,7 +128,7 @@ final class OutboundUrl
 
     /**
      * The checked target of $url: its host, port and every address it resolved
-     * to. The address list is empty when the host is a literal or allow-listed.
+     * to. The address list is empty when the host is a literal.
      *
      * @param list<string> $schemes
      * @throws EgressRefusedException
@@ -129,13 +136,8 @@ final class OutboundUrl
     public static function target(string $url, array $schemes = self::DEFAULT_SCHEMES): ResolvedTarget
     {
         [$host, $port] = self::parse($url, $schemes);
-        if (self::allowsHost($host)) {
-            return new ResolvedTarget($url, $host, $port, []);
-        }
 
-        $addresses = self::checkedAddresses($host);
-
-        return new ResolvedTarget($url, $host, $port, $addresses);
+        return new ResolvedTarget($url, $host, $port, self::checkedAddresses($host));
     }
 
     /**
@@ -194,15 +196,11 @@ final class OutboundUrl
     public static function refusedAddressOf(string $host): ?string
     {
         $host = trim($host, '[]');
-        if (self::allowsHost($host)) {
-            return null;
-        }
-
         if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
             return self::refusesAddress($host) ? $host : null;
         }
 
-        return self::firstRefused(self::resolve($host));
+        return self::firstRefused(self::resolve($host), self::allowsHost($host));
     }
 
     /** IPv4 goes through {@see TenantNetwork::refuses()}; IPv6 mirrors its ranges. */
@@ -221,6 +219,21 @@ final class OutboundUrl
 
         if (filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false) {
             return self::refusesIpv6($address, $allowPrivate);
+        }
+
+        return true;
+    }
+
+    /** What stays refused for an allow-listed name: everything but the private ranges. */
+    private static function refusesForAllowedHost(string $address): bool
+    {
+        $address = trim($address, '[]');
+        if (filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false) {
+            return IpUtils::checkIp($address, self::ALWAYS_REFUSED_IPV4_RANGES);
+        }
+
+        if (filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false) {
+            return self::refusesIpv6($address, true);
         }
 
         return true;
@@ -290,7 +303,8 @@ final class OutboundUrl
 
     /**
      * Every address $host resolves to, each checked; empty when it is a literal
-     * address (checked too, nothing to resolve).
+     * address (checked too, nothing to resolve). An allow-listed name is
+     * resolved and checked against the narrower rule.
      *
      * @return list<string>
      * @throws EgressRefusedException
@@ -305,32 +319,32 @@ final class OutboundUrl
             return [];
         }
 
-        return self::resolvedAndChecked($host);
+        return self::resolvedAndChecked($host, self::allowsHost($host));
     }
 
     /**
      * @return non-empty-list<string>
      * @throws EgressRefusedException
      */
-    private static function resolvedAndChecked(string $host): array
+    private static function resolvedAndChecked(string $host, bool $allowListed): array
     {
         $addresses = self::resolve($host);
         if ($addresses === []) {
             throw new \InvalidArgumentException("The host {$host} could not be resolved.");
         }
-        $refused = self::firstRefused($addresses);
+        $refused = self::firstRefused($addresses, $allowListed);
         if ($refused !== null) {
-            throw self::refusal($refused, $host);
+            throw self::refusal($refused, $host, $allowListed);
         }
 
         return $addresses;
     }
 
     /** @param list<string> $addresses */
-    private static function firstRefused(array $addresses): ?string
+    private static function firstRefused(array $addresses, bool $allowListed = false): ?string
     {
         foreach ($addresses as $address) {
-            if (self::refusesAddress($address)) {
+            if ($allowListed ? self::refusesForAllowedHost($address) : self::refusesAddress($address)) {
                 return $address;
             }
         }
@@ -338,13 +352,16 @@ final class OutboundUrl
         return null;
     }
 
-    private static function refusal(string $address, ?string $host = null): EgressRefusedException
+    private static function refusal(string $address, ?string $host = null, bool $allowListed = false): EgressRefusedException
     {
         $where = $host === null || $host === $address
             ? "{$address} is an address this engine does not fetch from."
             : "{$host} resolves to {$address}, which this engine does not fetch from.";
+        $hint = $allowListed
+            ? ' EGRESS_ALLOW_HOSTS does not allow loopback, link-local, multicast or reserved addresses.'
+            : ' Set EGRESS_ALLOW_PRIVATE=true to allow a private address.';
 
-        return new EgressRefusedException($where . ' Set EGRESS_ALLOW_PRIVATE=true to allow a private address.');
+        return new EgressRefusedException($where . $hint);
     }
 
     /** A comma list from config, tolerant of a bare PHPUnit run with no booted application. */

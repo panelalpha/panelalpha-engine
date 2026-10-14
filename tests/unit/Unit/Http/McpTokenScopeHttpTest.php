@@ -86,6 +86,29 @@ class McpTokenScopeHttpTest extends TestCase
         $this->assertSame([], $this->getJson('/api/mcp-tokens?project=alice')->json('data'));
     }
 
+    public function test_an_empty_list_scopes_the_token_to_no_project(): void
+    {
+        $id = $this->postJson('/api/mcp-tokens', [
+            'name' => 'Connect AI',
+            'projects' => ['alice'],
+        ])->assertStatus(201)->json('data.id');
+
+        $this->putJson("/api/mcp-tokens/{$id}/projects", ['projects' => []])
+            ->assertStatus(200)
+            ->assertJsonPath('data.projects', []);
+
+        $this->assertSame([], TokenAbilities::of(PersonalAccessToken::findOrFail($id))->projects());
+    }
+
+    public function test_the_scope_update_still_needs_the_projects_field(): void
+    {
+        $id = $this->postJson('/api/mcp-tokens', ['name' => 'Connect AI'])->assertStatus(201)->json('data.id');
+
+        $this->putJson("/api/mcp-tokens/{$id}/projects", [])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('projects');
+    }
+
     public function test_the_activity_log_can_be_filtered_by_project(): void
     {
         $this->postJson('/api/mcp-activity-logs', [

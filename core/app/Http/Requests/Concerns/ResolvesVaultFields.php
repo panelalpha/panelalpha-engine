@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Concerns;
 
 use App\Lib\Vault\RequestVault;
+use App\Models\User;
 
 /**
  * Read a `vault:<id>` in place of a secret field, typed by the field's own name
@@ -18,18 +19,36 @@ trait ResolvesVaultFields
      */
     protected function resolveVaultFields(array $fields): void
     {
-        $project = $this->route('username');
-
-        foreach ($fields as $field) {
-            if ($this->has($field)) {
-                $this->merge([
-                    $field => RequestVault::resolve(
-                        $field,
-                        $this->input($field),
-                        is_string($project) && $project !== '' ? $project : null,
-                    ),
-                ]);
-            }
+        $references = array_filter($fields, fn (string $field): bool => $this->has($field) && self::holdsReference($this->input($field)));
+        if ($references === []) {
+            return;
         }
+
+        $project = $this->existingProject();
+        foreach ($references as $field) {
+            $this->merge([$field => RequestVault::resolve($field, $this->input($field), $project)]);
+        }
+    }
+
+    /** Whether a field's value, or any item of an array field, is a `vault:<id>`. */
+    private static function holdsReference(mixed $value): bool
+    {
+        $values = is_array($value) ? $value : [$value];
+
+        return array_filter($values, RequestVault::isReference(...)) !== [];
+    }
+
+    /**
+     * The route's project when it exists. A name that does not is read as no
+     * project, so a typo cannot claim an unassigned entry before the 404.
+     */
+    private function existingProject(): ?string
+    {
+        $project = $this->route('username');
+        if (!is_string($project) || $project === '') {
+            return null;
+        }
+
+        return User::existsByUsername($project) ? $project : null;
     }
 }

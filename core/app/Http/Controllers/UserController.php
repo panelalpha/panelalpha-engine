@@ -648,8 +648,13 @@ class UserController extends Controller
     #[OA\Post(
         path: '/projects/{username}/rebuild',
         summary: 'Redeploy a project',
-        description: 'Detects, builds and starts the application again from ~/project, after importing '
-            . '`zip_path` into it when given (refused on a project deployed from git). The request is '
+        description: 'Detects, builds and starts the application again. A project deployed from git '
+            . 'is cloned again from the tip of its branch first: the deploy picks up new commits without a '
+            . 'pull, a revert to an older commit is undone, and files written into ~/project since the last '
+            . 'deploy are discarded. Keep such changes in the repository, and data the application writes in '
+            . 'its volumes or a database, which a rebuild keeps. Any other project is built from the files '
+            . 'already in ~/project, after importing `zip_path` into it when given (refused on a project '
+            . 'deployed from git). The request is '
             . 'checked and `env_vars` applied at once; the deploy itself runs in a queue job, and the answer '
             . 'is 202 with a task (`details.action: rebuild`). Poll GET /tasks/{id} until it is completed, '
             . 'failed or cancelled: a failure is on the task as `details.error`, and `details.problems` '
@@ -659,8 +664,10 @@ class UserController extends Controller
             . 'deploy was not started as a task (the CLI, a push); follow GET /projects/{username}/deploy-log '
             . 'then. With X-Deploy-Stream: ndjson the deploy runs in the request instead and its log is '
             . 'streamed as NDJSON.',
-        x: ['mcp-description' => 'Detects, builds and starts the app again from ~/project, importing '
-            . '`zip_path` first when given (refused on a git project). Answers at once with a task `id`: '
+        x: ['mcp-description' => 'Detects, builds and starts the app again. A git project is cloned again '
+            . 'from its branch tip first, so files written into ~/project since the last deploy are lost: '
+            . 'commit them to the repository instead. Any other project builds from the files in ~/project, '
+            . 'importing `zip_path` first when given (refused on a git project). Answers at once with a task `id`: '
             . 'follow it with task_get until completed, failed or cancelled; a failure is in details.error '
             . 'and details.problems. A 409 means a deploy is already running: follow the task_id it names '
             . 'with task_get (task_cancel if it is stuck), or deploy_log_get when task_id is null, instead '

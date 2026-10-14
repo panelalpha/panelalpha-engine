@@ -5,6 +5,7 @@ namespace Tests\Unit\Http;
 use App\Http\Middleware\Authenticate;
 use App\Models\User;
 use App\System;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Symfony\Component\Process\Process;
@@ -98,6 +99,7 @@ class PhpErrorLogHttpTest extends TestCase
 
     protected function tearDown(): void
     {
+        Carbon::setTestNow();
         exec('rm -rf ' . escapeshellarg($this->root));
         parent::tearDown();
     }
@@ -152,6 +154,41 @@ class PhpErrorLogHttpTest extends TestCase
             '[11-Oct-2026 12:00:01 UTC] PHP Warning:  new',
             '#0 /app/index.php(1): foo()',
         ]);
+    }
+
+    /** The same `since` as container_service_logs: a duration counts back from now. */
+    public function test_since_takes_a_duration_back_from_now(): void
+    {
+        Carbon::setTestNow('2026-10-11T12:30:00Z');
+        $this->account();
+        $this->writeLog(
+            "[11-Oct-2026 10:00:01 UTC] PHP Warning:  old\n"
+            . "[11-Oct-2026 12:00:01 UTC] PHP Warning:  new\n"
+        );
+
+        $this->getJson('/api/projects/alice/php/error-log?since=1h')
+            ->assertOk()
+            ->assertJsonPath('data.lines', ['[11-Oct-2026 12:00:01 UTC] PHP Warning:  new']);
+    }
+
+    public function test_a_container_project_passes_a_duration_on_as_the_time_it_names(): void
+    {
+        Carbon::setTestNow('2026-10-11T12:30:00Z');
+        $this->account('dind');
+        $this->dindCompose("services:\n  app:\n    image: test\n");
+
+        $this->getJson('/api/projects/alice/php/error-log?since=1h30m')->assertOk();
+
+        $this->assertStringContainsString("'--since=2026-10-11T11:00:00+00:00'", implode(' ', end($this->commands)));
+    }
+
+    public function test_a_since_that_is_neither_a_date_nor_a_duration_says_what_is_taken(): void
+    {
+        $this->account();
+
+        $this->getJson('/api/projects/alice/php/error-log?since=yesterday')
+            ->assertStatus(422)
+            ->assertJsonPath('errors.since.0', 'The since must be an RFC 3339 time (2026-10-03T12:00:00Z) or a duration back from now (10m, 2h, 1h30m).');
     }
 
     public function test_a_project_without_a_log_file_answers_the_empty_shape(): void

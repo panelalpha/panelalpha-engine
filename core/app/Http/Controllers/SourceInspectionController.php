@@ -24,10 +24,11 @@ use OpenApi\Attributes as OA;
 /**
  * Read an application without deploying it.
  *
- * Four kinds of source answer the same question — what is this, what does it
- * listen on, what does it need — and they are the four a caller actually has:
- * a repository URL, a directory on this server, a hosting project already
- * holding files, and a bare `github.com/owner/repo` somebody pasted.
+ * Three kinds of source answer the same question — what is this, what does it
+ * listen on, what does it need — and they are the three a caller actually has:
+ * a repository URL, a hosting project already holding files, and a bare
+ * `github.com/owner/repo` somebody pasted. A directory on this server is
+ * refused: it would read anything core can.
  *
  * The answer comes from the deploy pipeline's own detection, so it is a
  * prediction of the deploy rather than a second opinion about it. For a
@@ -41,8 +42,8 @@ class SourceInspectionController extends Controller
         path: '/source/inspect',
         summary: 'Inspect an application source and report its stack, ports and services',
         description: 'Detects what an application is without deploying it. The source may be a Git '
-            . 'repository URL, an absolute path on this server, or the username of an existing '
-            . 'project (its files under the account home directory). A public github.com '
+            . 'repository URL or the username of an existing project (its files under the '
+            . 'account home directory); a directory on this server is refused. A public github.com '
             . 'repository is read from its file list and only the files detection reads are '
             . 'fetched; any other Git source, or one that cannot be read that way, is cloned '
             . 'shallow into a temporary directory and removed again. `source.method` says which '
@@ -202,7 +203,7 @@ class SourceInspectionController extends Controller
             throw ProblemException::one(
                 'source',
                 'source_unrecognised',
-                'Could not tell what this source is. Pass `type` as git, path or project.'
+                'Could not tell what this source is. Pass `type` as git or project.'
             );
         }
 

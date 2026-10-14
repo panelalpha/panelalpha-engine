@@ -102,12 +102,32 @@ class GenerationStateTest extends TestCase
         $this->assertFalse(GenerationState::ownedElsewhere(['owner' => GenerationState::owner()]), 'this process');
         $this->assertFalse(GenerationState::ownedElsewhere([]), 'no owner noted');
 
-        $parent = posix_getppid();
-        $alive = ['owner' => ['pid' => $parent, 'start' => \App\Lib\Deploy\DeployLog\ProcessIdentity::startTime($parent), 'at' => time()]];
-        $this->assertTrue(GenerationState::ownedElsewhere($alive));
-        $this->assertFalse(GenerationState::ownedElsewhere($alive, time() + GenerationState::OWNER_GRACE_SECONDS + 1), 'too old to be a pull in progress');
+        $other = $this->startOtherProcess();
+        try {
+            $pid = proc_get_status($other)['pid'];
+            $alive = ['owner' => ['pid' => $pid, 'start' => \App\Lib\Deploy\DeployLog\ProcessIdentity::startTime($pid), 'at' => time()]];
+            $this->assertTrue(GenerationState::ownedElsewhere($alive));
+            $this->assertFalse(GenerationState::ownedElsewhere($alive, time() + GenerationState::OWNER_GRACE_SECONDS + 1), 'too old to be a pull in progress');
 
-        $gone = ['owner' => ['pid' => $parent, 'start' => 'not-its-start-time', 'at' => time()]];
-        $this->assertFalse(GenerationState::ownedElsewhere($gone), 'the pid was reused');
+            $gone = ['owner' => ['pid' => $pid, 'start' => 'not-its-start-time', 'at' => time()]];
+            $this->assertFalse(GenerationState::ownedElsewhere($gone), 'the pid was reused');
+        } finally {
+            proc_terminate($other);
+            proc_close($other);
+        }
+    }
+
+    /**
+     * A live process other than this one. The parent is not one: where PHP is
+     * PID 1 in a container, posix_getppid() is 0.
+     *
+     * @return resource
+     */
+    private function startOtherProcess()
+    {
+        $process = proc_open(['sleep', '30'], [], $pipes);
+        $this->assertIsResource($process, 'could not start a process to own the entry');
+
+        return $process;
     }
 }

@@ -38,7 +38,7 @@ final class EgressGuard
 
     /**
      * A `host:port:address` value pinning the connection to the checked
-     * address, or null for a literal or allow-listed host.
+     * address, or null for a literal address.
      *
      * @param list<string> $schemes
      * @throws EgressRefusedException

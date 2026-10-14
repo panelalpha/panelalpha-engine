@@ -20,26 +20,27 @@ class AppUserController extends Controller
 {
     /**
      * App management is backed by the app config's overrides/app.sh
-     * (legacy panelalpha-app.sh), which only exists for DinD projects.
+     * (legacy panelalpha-app.sh), which only exists for DinD projects. A
+     * classic project is refused in the name of the operation it asked for.
      */
-    private function appManager(string $username): AppManager
+    private function appManager(string $username, string $operation = 'App user management'): AppManager
     {
         $user = $this->projectOr404($username);
         if ($user->getTemplate() !== 'dind') {
-            $this->refuseNonContainerProject();
+            $this->refuseNonContainerProject($operation);
         }
 
         $runtime = $user->project()->runtime();
         if (!$runtime instanceof Dind) {
-            $this->refuseNonContainerProject();
+            $this->refuseNonContainerProject($operation);
         }
 
         return $runtime->apps();
     }
 
-    private function refuseNonContainerProject(): never
+    private function refuseNonContainerProject(string $operation): never
     {
-        abort(new JsonResponse(['message' => 'App user management works only on container projects (template dind).'], 403));
+        abort(new JsonResponse(['message' => "{$operation} works only on container projects (template dind)."], 403));
     }
 
     /**
@@ -217,7 +218,7 @@ class AppUserController extends Controller
     )]
     public function createSsoToken(string $username, string $userId): JsonResponse
     {
-        return $this->callApp(fn () => $this->ssoResponse($username, $this->appManager($username)->ssoCredentials($userId)));
+        return $this->callApp(fn () => $this->ssoResponse($username, $this->appManager($username, 'App single sign-on')->ssoCredentials($userId)));
     }
 
     /**
@@ -328,7 +329,7 @@ class AppUserController extends Controller
     )]
     public function info(string $username): JsonResponse
     {
-        return $this->callApp(fn () => new JsonResponse(['data' => $this->appManager($username)->info()]));
+        return $this->callApp(fn () => new JsonResponse(['data' => $this->appManager($username, 'App info')->info()]));
     }
 
     #[OA\Get(
@@ -345,7 +346,7 @@ class AppUserController extends Controller
     )]
     public function roles(string $username): JsonResponse
     {
-        return $this->callApp(fn () => new JsonResponse(['data' => $this->appManager($username)->listRoles()]));
+        return $this->callApp(fn () => new JsonResponse(['data' => $this->appManager($username, 'App role listing')->listRoles()]));
     }
 
     #[OA\Post(
@@ -382,7 +383,7 @@ class AppUserController extends Controller
         ]);
 
         return $this->callApp(function () use ($username, $validated) {
-            $this->appManager($username)->install(
+            $this->appManager($username, 'App install')->install(
                 $validated['url'],
                 $validated['title'],
                 $validated['admin_user'],

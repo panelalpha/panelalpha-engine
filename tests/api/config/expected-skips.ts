@@ -99,11 +99,25 @@ export const EXPECTED_SKIPS: readonly ExpectedSkip[] = [
     why: 'Needs the LiteSpeed Enterprise webserver.',
   },
   {
+    id: 'engine-tls-private-self-signed',
+    match:
+      /^The engine is addressed at the private IP \S+ and serves its self-signed certificate by design;/,
+    category: 'environment',
+    why: 'A private address cannot get a publicly trusted certificate; run on a host with a public address.',
+  },
+  {
     id: 'firewall-logs-over-loopback',
     match:
       /is this runner's own address: the knock goes over lo, which ufw accepts without logging\./,
     category: 'environment',
     why: 'Run the suite from another machine to exercise firewall logging.',
+  },
+  {
+    id: 'firewall-logs-runner-allowed',
+    match:
+      /^\S+ (?:answered a knock on port \d+ \((?:refused|connected)\), so a rule accepts this runner|sees this runner as \S+, which it accepts on every port) before ufw's default deny/,
+    category: 'environment',
+    why: 'The host lets this runner in (admin-access rule, a ufw allow for its address), so its knock is never refused or logged; run from an address the host does not allow.',
   },
   {
     id: 'firewall-unavailable',
@@ -168,10 +182,33 @@ export const EXPECTED_SKIPS: readonly ExpectedSkip[] = [
     why: 'The host has no IPv4 address on record, so the engine named the project .local.',
   },
   {
+    id: 'panelalpha-online-private-host',
+    match:
+      /^PanelAlpha Online was not offered \(panelalpha_direct: no public IPv4: the host's address is private,/,
+    category: 'environment',
+    why: 'The PanelAlpha Online proxy cannot reach a host on a private address; run on a host with a public IPv4.',
+    max: 3,
+  },
+  {
+    id: 'panelalpha-direct-private-address',
+    match:
+      /^\S+\.panelalpha\.direct resolves to the private address \S+; publicly_resolvable is false there by design\./,
+    category: 'environment',
+    why: 'A panelalpha.direct name for a private address answers on that network only.',
+    max: 1,
+  },
+  {
     id: 'ipam-unavailable',
     match: /^IP management is not available on this engine\./,
     category: 'environment',
     why: 'IP management is an optional module.',
+  },
+  {
+    id: 'ipam-no-ipv6-route',
+    match: /^The host has no default IPv6 route, so the engine refuses IPv6 subnet /,
+    category: 'environment',
+    why: 'An IPv6 subnet needs a host with an IPv6 default route.',
+    max: 2,
   },
   {
     id: 'proxy-rules-unavailable',

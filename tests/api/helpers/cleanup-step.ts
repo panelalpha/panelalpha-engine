@@ -26,6 +26,15 @@ function reasonOf(error: unknown): string {
 }
 
 /**
+ * For teardown outside a test, such as a worker-scoped fixture, where
+ * `test.info()` throws. There is no report to attach to, so a failed step
+ * makes {@link CleanupSteps.finish} throw and fails the teardown.
+ */
+export function workerCleanupInfo(): CleanupTestInfo {
+  return { annotations: [], attach: () => Promise.resolve() };
+}
+
+/**
  * Teardown that cannot fail silently.
  *
  * Restoring shared state (the setup user, the global ModSecurity config) is

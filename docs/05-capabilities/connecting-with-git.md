@@ -116,7 +116,7 @@ List the branches and tags of https://github.com/org/app.
 
 The engine reads the list from the repository without downloading the code, and shows the default branch first. A private repository needs a token. Without one, a private repository and one that does not exist both come back as "authentication failed".
 
-A rebuild without a pull replays the last successful plan against the files already on disk: [How a deploy works](../02-getting-started/how-a-deploy-works.md#deploying-again-later).
+A rebuild of a project connected to git clones its branch again before it builds, so it also deploys the newest commit, and it undoes a revert to an older commit. Anything written into `~/project` since the last deploy is discarded, whether by the file tools, FTP or SSH. A change that must last belongs in the repository. Data the application writes, in its volumes or a database, is kept: [How a deploy works](../02-getting-started/how-a-deploy-works.md#deploying-again-later).
 
 Instead of asking for a pull each time, you can have your git host redeploy the project itself on every push: [Push to deploy](push-to-deploy.md).
 
@@ -293,11 +293,11 @@ Mode: read. Tools: `project_inspect`, `file_write`, `project_inspect`. Check: af
 **Pull, branch, history**
 
 ```text
-On tmemos: show git status, list the branches and the last five commits.
+On tmemos: show git status, list the branches and the recent commits.
 Then switch to the branch release and pull the latest commit.
 ```
 
-Mode: modify. Tools: `git_status`, `git_branches`, `git_commits`, `git_change_branch`, `git_pull`, `task_get`. Check: a deploy clones only the latest commit, so right after it `git_commits` can list fewer than five. `git_status` is called first and says the project is deployed by the engine. Both the branch change and the pull return a task and rebuild the app. A dirty tree or a missing branch is refused.
+Mode: modify. Tools: `git_status`, `git_branches`, `git_commits`, `git_change_branch`, `git_pull`, `task_get`. Check: `git_status` is called first and says the project is deployed by the engine. On a freshly deployed project `git_commits` lists one commit: a deploy clones only the newest one, unless the app config asks for the full history. Both the branch change and the pull return a task and rebuild the app. A dirty tree or a missing branch is refused.
 
 **Go back**
 

@@ -148,8 +148,8 @@ test.describe('change-webserver validation', () => {
 
     // SystemController::changeWebserver :448-476: nginx-proxy passes the checks and
     // runs the change script, answering 200 with the latest change info. The only
-    // other answer is 422 when a change script is already running (:458-462).
-    if (response.status() === 422) {
+    // other answer is 409 when a change script is already running.
+    if (response.status() === 409) {
       expect(JSON.stringify(await response.json())).toContain(
         'Change webserver script is already running'
       );

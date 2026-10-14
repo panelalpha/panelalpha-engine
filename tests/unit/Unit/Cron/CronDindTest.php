@@ -57,6 +57,16 @@ class CronDindTest extends TestCase
             ->assertJsonValidationErrors('command');
     }
 
+    /** The list used to read the crontab and answered 500 before the deploy created the account. */
+    public function test_listing_on_a_dind_project_is_the_same_422_without_reading_the_crontab(): void
+    {
+        $this->user('dind');
+
+        $this->getJson('/api/projects/alice/cron-jobs')
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('command');
+    }
+
     public function test_reloading_cron_on_a_dind_project_runs_nothing(): void
     {
         $system = new class () extends System {

@@ -20,7 +20,7 @@ The assistant can upload a file, write files directly, download a file from an a
 Download https://example.com/plugin.zip into /project on this project.
 ```
 
-The file is saved into a directory that already exists. Only an `http` or `https` address works, and an address that points at the server itself or at a private network is refused. A file over the size limit (2 GB) is not kept: nothing is left behind. This does not deploy the file. On a site deployed from a repository, say "and rebuild" if the running site should pick it up.
+The file is saved into a directory that already exists. Only an `http` or `https` address works, and an address that points at the server itself or at a private network is refused. A file over the size limit (2 GB) is not kept: nothing is left behind. This does not deploy the file. On a site deployed from an archive or from files, say "and rebuild" if the running site should pick it up.
 
 ```text
 List what is in /project on this project.
@@ -41,7 +41,9 @@ Leave files that are already there.
 
 Only the immediate children move. The destination directory has to exist already. If you do not say to leave existing files, a file with the same name is replaced.
 
-**After changing files on a repository-deployed site, rebuild.** The running application does not pick up changed files on its own. It is running the version that was built. Say "and rebuild" as part of the request and it is handled.
+**After changing files on a site deployed from an archive or from files, rebuild.** The running application does not pick up changed files on its own. It is running the version that was built. Say "and rebuild" as part of the request and it is handled.
+
+**A project connected to git is different.** A rebuild clones its branch again, so a file written into `/project` is gone afterwards. Commit the change to the repository and ask for a pull instead. Data the application writes, in its volumes or a database, is kept across rebuilds, and so is what it writes under container paths named in the project's `persist-paths` setting ([CLI commands](../06-commands/pae-cli.md)).
 
 ## FTP and SFTP
 
@@ -52,7 +54,9 @@ Create an FTP account on this project for user ftpuser1 on shop.example.com,
 with directory /project.
 ```
 
-An FTP account needs a password of at least 8 characters, and the engine does not make one up. Do not type it into the chat: the assistant sends a paste page for it. An SFTP account takes a password the same way, or a public key. You get credentials to hand over. Prefer SFTP where the software at the other end supports it - plain FTP sends the password unencrypted. A quota of 0, or no quota, means unlimited.
+The directory must already exist inside the project's home: `/project` on a repository-deployed project, `/public_html` on traditional PHP hosting. A folder that does not exist is refused.
+
+An FTP account needs a password of at least 8 characters, and the engine does not generate one. Do not type it into the chat: the assistant sends a paste page for it, or makes one up and shows it to you. An SFTP account takes a password the same way, or a public key. You get credentials to hand over. Prefer SFTP where the software at the other end supports it - plain FTP sends the password unencrypted.
 
 An SFTP login can only move files. It cannot open a shell, and it sees only that project's files.
 
@@ -71,7 +75,7 @@ To end the sessions of every SFTP account on the project at once, say "all SFTP 
 ## Troubleshooting
 
 **"I uploaded my files and the site did not change."**
-Two possible causes, in order of likelihood. Either the files went to the account's top level rather than into `project/` (or `public_html` on traditional PHP hosting). Or this is a repository-deployed site and it needs a rebuild - the running application is still the previously built version. Traditional PHP hosting, including WordPress in `public_html`, does not need a rebuild after an upload.
+Two possible causes, in order of likelihood. Either the files went to the account's top level rather than into `project/` (or `public_html` on traditional PHP hosting). Or this is a site deployed from an archive or from files and it needs a rebuild - the running application is still the previously built version. On a project connected to git, a rebuild replaces the uploaded files with the repository's, so the change has to go into the repository. Traditional PHP hosting, including WordPress in `public_html`, does not need a rebuild after an upload.
 
 **"Permission denied" on upload.**
 The path is outside the account's home directory, or the account has hit its disk quota. Ask the assistant to check the project's usage against its limits.
@@ -150,30 +154,33 @@ In tshop, write "maintenance" into /project/public/status.txt and rebuild so
 the running site picks it up.
 ```
 
-Mode: modify. Tools: `file_write`, `project_rebuild`, `task_get`. Check: the rebuild is part of the answer on a repository project, and not needed on traditional PHP hosting.
+Mode: modify. Tools: `file_write`, `project_rebuild`, `task_get`. Check: on a project deployed from an archive or from files, the rebuild is part of the answer and the file is served afterwards. On a project connected to git, the assistant says a rebuild clones the repository again and would delete the file, and suggests committing it instead. Traditional PHP hosting needs no rebuild.
 
 **FTP**
 
 ```text
-Give tshop an FTP account ftpuser1 for shop.example.com with directory /project
-and a 50 MB quota. Then raise it to unlimited, change its password, and delete it.
+Give tshop an FTP account ftpuser1 for shop.example.com with directory /project,
+a 50 MB quota and a strong password you generate. Then raise it to unlimited,
+change its password, and delete it.
 ```
 
-Mode: full. Tools: `ftp_account_create`, `ftp_account_list`, `ftp_account_update`, `ftp_account_delete`. Check: the credentials come back once, the quota reads back as set and then as unlimited (0 means unlimited), and the account is gone from the list.
+On traditional PHP hosting, ask for directory /public_html instead: `/project` does not exist there.
+
+Mode: full. Tools: `ftp_account_create`, `ftp_account_list`, `ftp_account_update`, `ftp_account_delete`. Check: a password of at least 8 characters is sent, since the engine makes none up, the credentials come back once, and the quota reads back as 50 and then with `unlimited_quota: true`. An unlimited account's `quota` is not 0: it shows the project's disk space limit, or -1 when that is unlimited. The account is gone from the list at the end.
 
 **SFTP with a password and with a key**
 
 ```text
-Give tshop an SFTP account sftpuser1 with a password. Then change it to key
+Give tshop an SFTP account tshop_sftp1 with a password. Then change it to key
 login using this public key: ssh-ed25519 AAAA...example. Delete it afterwards.
 ```
 
-Mode: full. Tools: `sftp_account_create`, `sftp_account_list`, `sftp_account_update` with `auth_method`, `sftp_account_delete`. Check: the account name starts with the project name, here `tshop_sftpuser1`, since a name without that prefix is refused. After the update the account accepts the key and not the password. Prefer SFTP in the answer over plain FTP.
+Mode: full. Tools: `sftp_account_create`, `sftp_account_list`, `sftp_account_update` with `auth_method`, `sftp_account_delete`. Check: an SFTP account name is the project's name, an underscore and a suffix (`tshop_sftp1`), and any other name is refused. After the update the account accepts the key and not the password. Prefer SFTP in the answer over plain FTP.
 
 **End SFTP sessions**
 
 ```text
-End the open SFTP sessions of sftpuser1 on tshop. Then end every SFTP session on tshop.
+End the open SFTP sessions of tshop_sftp1 on tshop. Then end every SFTP session on tshop.
 ```
 
 Mode: modify. Tools: `sftp_session_kill`, `sftp_session_kill_all`. Check: each answer says how many sessions were open, and a connected client is dropped. The account still exists and can log in again.

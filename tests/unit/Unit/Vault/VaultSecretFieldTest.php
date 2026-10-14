@@ -8,7 +8,10 @@ use App\Http\Requests\MysqlUserStoreRequest;
 use App\Http\Requests\ProjectPasswordSetRequest;
 use App\Http\Requests\SftpAccountUpdateRequest;
 use App\Models\SecretVaultEntry;
+use App\Models\User;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Routing\Route;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use ReflectionMethod;
@@ -20,6 +23,29 @@ use ReflectionMethod;
  */
 class VaultSecretFieldTest extends VaultTestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Schema::connection('sqlite')->create('users', function (Blueprint $table) {
+            $table->id();
+            $table->string('username')->unique();
+            $table->string('domain')->nullable();
+            $table->string('email')->nullable();
+            $table->string('name')->nullable();
+            $table->string('status')->nullable();
+            $table->json('details')->nullable();
+            $table->timestamps();
+        });
+        User::query()->create(['username' => 'shop']);
+    }
+
+    protected function tearDown(): void
+    {
+        Schema::connection('sqlite')->dropIfExists('users');
+        parent::tearDown();
+    }
+
     /** @param class-string $class */
     private function prepared(string $class, array $input, string $project = 'shop'): object
     {
@@ -79,6 +105,32 @@ class VaultSecretFieldTest extends VaultTestCase
         $this->expectException(ValidationException::class);
 
         $this->prepared($class, [$field => 'vault:999999']);
+    }
+
+    public function test_a_project_entry_is_assigned_to_the_project_that_reads_it(): void
+    {
+        [$entry] = $this->projectEntry('password', 'the-site-secret');
+
+        $this->prepared(ProjectPasswordSetRequest::class, ['password' => $entry->reference()]);
+
+        $this->assertSame('shop', $entry->refresh()->project);
+    }
+
+    /**
+     * A reference sent to a project that does not exist answers 404 later; it
+     * must not leave the entry owned by that name, refused to the project it
+     * was meant for.
+     */
+    public function test_a_project_that_does_not_exist_does_not_claim_the_entry(): void
+    {
+        [$entry] = $this->projectEntry('password', 'the-site-secret');
+
+        $this->prepared(ProjectPasswordSetRequest::class, ['password' => $entry->reference()], 'typo');
+        $this->assertNull($entry->refresh()->project);
+
+        $request = $this->prepared(ProjectPasswordSetRequest::class, ['password' => $entry->reference()]);
+        $this->assertSame('the-site-secret', $request->input('password'));
+        $this->assertSame('shop', $entry->refresh()->project);
     }
 
     public function test_a_reference_of_the_wrong_type_is_refused(): void

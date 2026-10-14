@@ -253,12 +253,22 @@ class Network
                 continue;
             }
 
-            if (strtolower($matches[1]) === strtolower($ip) && (int) $matches[2] === $mask) {
+            if (self::sameAddress($matches[1], $ip) && (int) $matches[2] === $mask) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /** The kernel prints the canonical form, so `2001:db8:0:0::5` and `2001:db8::5` are one address. */
+    public static function sameAddress(string $a, string $b): bool
+    {
+        if (filter_var($a, FILTER_VALIDATE_IP) === false || filter_var($b, FILTER_VALIDATE_IP) === false) {
+            return strtolower($a) === strtolower($b);
+        }
+
+        return inet_pton($a) === inet_pton($b);
     }
 
     /**

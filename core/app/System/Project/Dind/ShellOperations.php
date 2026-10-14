@@ -11,6 +11,7 @@ use App\Lib\Deploy\DeployLog\StepWatchdog;
 use App\System;
 use App\System\Project\Dind as DindProject;
 use Illuminate\Support\Str;
+use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\Process;
 
 /**
@@ -25,6 +26,15 @@ final class ShellOperations
 
     /** Root's Docker client config in the account, in the home; see {@see wrap()}. */
     public const DOCKER_CONFIG_DIR = '.panelalpha-docker';
+
+    /** Exit code of a shell command its timeout killed, as coreutils `timeout` reports it. */
+    public const SHELL_TIMED_OUT_EXIT = 124;
+
+    /** Seconds a timed-out shell command gets between SIGTERM and SIGKILL. */
+    private const SHELL_KILL_GRACE = 5;
+
+    /** Seconds the host waits past that grace, so the in-container `timeout` always ends the command first. */
+    private const SHELL_HOST_MARGIN = 10;
 
     /**
      * CPU, in `docker stats` percent (100 = one core), above which a silent
@@ -117,6 +127,42 @@ final class ShellOperations
     public function execQuiet(array $cmd, array $env = [], int $timeout = 600): string
     {
         return $this->project->system()->exec($this->wrap($cmd), $env, $timeout);
+    }
+
+    /**
+     * execQuiet() that the deploy's cancel stops at once instead of when the command ends.
+     *
+     * @param list<string> $cmd
+     * @throws DeployCancelledException
+     */
+    public function execQuietUntilCancelled(array $cmd, DeployLogger $logger, int $timeout = 600): string
+    {
+        $logger->throwIfCancelled();
+        $process = $this->project->system()->runProcessWithCallbacks(
+            $this->wrap($cmd),
+            [],
+            $timeout,
+            fn (Process $process) => self::stopOnCancel($process, $logger),
+        );
+        $logger->throwIfCancelled();
+        if (!$process->isSuccessful()) {
+            throw new \Exception($process->getErrorOutput() ?: $process->getOutput());
+        }
+
+        return $process->getOutput();
+    }
+
+    private static function stopOnCancel(Process $process, DeployLogger $logger): void
+    {
+        while ($process->isRunning()) {
+            if ($logger->isCancelled()) {
+                $process->stop(0);
+
+                return;
+            }
+            $process->checkTimeout();
+            usleep(250_000);
+        }
     }
 
     /**
@@ -301,15 +347,57 @@ final class ShellOperations
         }
     }
 
+    /**
+     * One command line as the account user, reported rather than thrown: a command its
+     * timeout killed is exit code 124 with whatever it printed before.
+     *
+     * @return array{stdout: string, stderr: string, exit_code: int}
+     */
+    public function runShellCommand(string $command, ?string $cwd = null, int $timeout = 300): array
+    {
+        try {
+            $process = $this->runShellAsUser($command, $cwd, $timeout);
+        } catch (ProcessTimedOutException $e) {
+            return self::shellResult($e->getProcess(), self::SHELL_TIMED_OUT_EXIT);
+        }
+
+        return self::shellResult($process, $process->getExitCode() ?? self::SHELL_TIMED_OUT_EXIT);
+    }
+
+    /**
+     * The timeout runs inside the account: killing the exec on the host leaves the
+     * command running there, so the host only waits a little longer as a backstop.
+     */
     public function runShellAsUser(string $command, ?string $cwd = null, int $timeout = 300): Process
     {
         $username = $this->project->username();
 
         return $this->project->system()->runProcess(
-            $this->wrap(['su', '-s', '/bin/bash', '-l', $username, '-c', self::composeShellCommand($command, $cwd)]),
+            $this->wrap(['su', '-s', '/bin/bash', '-l', $username, '-c', self::timedShellCommand(self::composeShellCommand($command, $cwd), $timeout)]),
             [],
-            $timeout
+            $timeout + self::SHELL_KILL_GRACE + self::SHELL_HOST_MARGIN
         );
+    }
+
+    /**
+     * `timeout` signals its whole process group, so background jobs and pipelines
+     * end with the command instead of outliving the request.
+     */
+    public static function timedShellCommand(string $command, int $timeout): string
+    {
+        return 'exec timeout -k ' . self::SHELL_KILL_GRACE . ' ' . $timeout . ' bash -c ' . escapeshellarg($command);
+    }
+
+    /**
+     * @return array{stdout: string, stderr: string, exit_code: int}
+     */
+    private static function shellResult(Process $process, int $exitCode): array
+    {
+        return [
+            'stdout' => $process->getOutput(),
+            'stderr' => $process->getErrorOutput(),
+            'exit_code' => $exitCode,
+        ];
     }
 
     public static function composeShellCommand(string $command, ?string $cwd = null): string

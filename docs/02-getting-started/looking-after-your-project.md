@@ -50,7 +50,7 @@ You can also push live to staging to refresh the test copy with real data. A pro
 Rebuild this project.
 ```
 
-Use this after you push new commits or change files over FTP. A rebuild replays the last successful plan: [How a deploy works](how-a-deploy-works.md). An environment variable does not need one, see below.
+Use this after you push new commits, or change files over FTP on a project that has no repository. A project connected to git is cloned again from its branch on a rebuild, so files changed on the server are lost; commit them to the repository instead. A rebuild replays the last successful plan: [How a deploy works](how-a-deploy-works.md). An environment variable does not need one, see below.
 
 ## Change an environment variable
 

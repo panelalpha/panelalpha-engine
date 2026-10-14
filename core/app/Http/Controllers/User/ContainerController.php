@@ -5,6 +5,7 @@ namespace App\Http\Controllers\User;
 use App\Exceptions\ProblemException;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Concerns\StreamsNdjson;
+use App\Lib\Project\LogTime;
 use App\OpenApi\ApiDefinitions;
 use App\System;
 use App\System\Project\Dind;
@@ -167,13 +168,10 @@ class ContainerController extends Controller
         return $this->actionResponse($dind, $result, $validated['action'] === 'stop');
     }
 
-    /**
-     * Docker's --since/--until: an RFC 3339 time, or a duration back from now.
-     * \z, since $ also matches before a final newline.
-     */
-    private const LOG_TIME = '/^(\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2}))?|(\d+(ms|s|m|h))+)\z/';
+    /** Docker's --since/--until: an RFC 3339 time, or a duration back from now. */
+    private const LOG_TIME = LogTime::PATTERN;
 
-    private const LOG_TIME_EXPECTED = 'an RFC 3339 time (2026-10-03T12:00:00Z) or a duration back from now (10m, 2h, 1h30m)';
+    private const LOG_TIME_EXPECTED = LogTime::EXPECTED;
 
     private const LOG_LINES_EXPECTED = 'a number of lines, at least 1; at most ' . ContainerOperations::MAX_LOG_LINES . ' are returned';
 

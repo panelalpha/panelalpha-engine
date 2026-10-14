@@ -128,6 +128,9 @@ Different certificates. Your site has a good one; the engine itself does not. Se
 **Visitors see a different certificate than the one on the project.**
 Normal when the site is reached through a `panelalpha.online` name or through Cloudflare. HTTPS terminates at that layer, so the project's own certificate is not the one visitors see.
 
+**A certificate request for a `panelalpha.online` name is refused.**
+Visitors to that name already get HTTPS from PanelAlpha Online (see the previous entry), so it rarely needs one of its own. The engine refuses to request one while the engine setting `ssl_shared_zone_issuance` is off, which is the default: `panelalpha.online`, `panelalpha.direct`, `sslip.io` and `nip.io` are each one registered domain shared by every engine, and Let's Encrypt allows 50 new certificates a week per registered domain. To request one anyway, turn it on with `pae settings:set ssl_shared_zone_issuance 1`, or have the assistant call `system_ssl_config_set` with `shared_zone_issuance` true. A domain you own is not affected.
+
 **Anything about Cloudflare tunnels or the Cloudflare token.**
 Covered on the [Cloudflare](cloudflare.md#troubleshooting) page.
 

@@ -44,7 +44,17 @@ export function taskFromBody(body: unknown): TaskSnapshot | undefined {
   return undefined;
 }
 
+/**
+ * The task a 202 answer queued. An answer whose `data` is the project (push,
+ * staging) names the task in a top-level `task_id`, and that wins: the
+ * project's own `id` is not a task id.
+ */
 export function taskIdFromBody(body: unknown): number | undefined {
+  const named =
+    typeof body === 'object' && body !== null ? (body as { task_id?: unknown }).task_id : undefined;
+  if (typeof named === 'number') {
+    return named;
+  }
   const id = taskFromBody(body)?.id;
   return typeof id === 'number' ? id : undefined;
 }

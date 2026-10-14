@@ -29,6 +29,16 @@ class ProjectBusyExceptionHintTest extends TestCase
         $this->assertStringContainsString('Cancel it (POST /tasks/36/cancel)', $rebuild);
     }
 
+    public function test_a_queued_task_is_called_queued_not_running(): void
+    {
+        $message = ProjectBusyException::taskRunning('alice', $this->task(RebuildProject::class, Task::STATUS_QUEUED))->getMessage();
+
+        $this->assertSame(
+            "Project 'alice' is busy: rebuild task 36 is queued. Cancel it (POST /tasks/36/cancel) or wait for it to finish.",
+            $message,
+        );
+    }
+
     public function test_a_running_push_is_named_and_waited_for(): void
     {
         $message = ProjectBusyException::taskRunning('alice', $this->task(PushState::class, Task::STATUS_RUNNING))->getMessage();

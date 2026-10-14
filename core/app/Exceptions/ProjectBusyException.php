@@ -34,7 +34,7 @@ class ProjectBusyException extends \RuntimeException
 
     public static function taskRunning(string $project, Task $task): self
     {
-        $state = "Project '{$project}' is busy: " . self::kind($task) . " task {$task->id} is running.";
+        $state = "Project '{$project}' is busy: " . self::kind($task) . " task {$task->id} is " . self::progress($task) . '.';
 
         if (!self::canBeCancelled($task)) {
             return new self($state, self::WAIT, self::WAIT);
@@ -89,6 +89,11 @@ class ProjectBusyException extends \RuntimeException
     private static function canBeCancelled(Task $task): bool
     {
         return !($task->status === Task::STATUS_RUNNING && !$task->isDeploy() && $task->pid === null);
+    }
+
+    private static function progress(Task $task): string
+    {
+        return $task->status === Task::STATUS_QUEUED ? 'queued' : 'running';
     }
 
     private static function kind(Task $task): string

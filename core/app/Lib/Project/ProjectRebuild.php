@@ -192,7 +192,7 @@ class ProjectRebuild
     {
         if ($user->getTemplate() !== 'dind') {
             throw ValidationException::withMessages([
-                'zip_path' => 'Archive deploy is only supported for dind users.',
+                'zip_path' => 'Archive deploy works only on container projects (template dind).',
             ]);
         }
     }

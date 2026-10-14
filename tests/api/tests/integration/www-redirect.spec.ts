@@ -90,43 +90,46 @@ test.describe('apex to www redirect', () => {
 
     const scheme = httpScheme(settings.apiBaseUrl);
     const wwwDomain = `www.${setupUser.domain}`;
-
-    await test.step('point wp-config at the www host', async () => {
-      const changed = await ensureWwwConfigInWpConfig(
-        api,
-        setupUser.username,
-        setupUser.wpPath,
-        wwwDomain
-      );
-      if (changed) {
-        await delay(WP_CONFIG_PROPAGATION_MS);
-      }
-
-      const wpConfig = registerWpConfigSecrets(
-        await api.getFileContent(setupUser.username, `${setupUser.wpPath}/wp-config.php`)
-      );
-      expect(wpConfig, 'WP_HOME does not point at the www host').toMatch(
-        /define\s*\(\s*['"]WP_HOME['"]\s*,\s*['"][^'"]*www\.[^'"]*['"]/
-      );
-      expect(wpConfig, 'WP_SITEURL does not point at the www host').toMatch(
-        /define\s*\(\s*['"]WP_SITEURL['"]\s*,\s*['"][^'"]*www\.[^'"]*['"]/
-      );
-    });
-
+    const wpConfigPath = `${setupUser.wpPath}/wp-config.php`;
+    const originalWpConfig = registerWpConfigSecrets(
+      await api.getFileContent(setupUser.username, wpConfigPath)
+    );
     const originalDocumentRoot = `/${setupUser.domain}/public_html`;
-
-    await test.step('turn the apex redirect on', async () => {
-      await api.updateDomain(setupUser.username, setupUser.domain, {
-        document_root: originalDocumentRoot,
-        redirect_enabled: true,
-        redirect_url: `${scheme}://${wwwDomain}/`,
-        force_https_redirect: false,
-      });
-      await delay(getWebserverPropagationDelay(slug));
-    });
 
     const cleanup = new CleanupSteps();
     try {
+      await test.step('point wp-config at the www host', async () => {
+        const changed = await ensureWwwConfigInWpConfig(
+          api,
+          setupUser.username,
+          setupUser.wpPath,
+          wwwDomain
+        );
+        if (changed) {
+          await delay(WP_CONFIG_PROPAGATION_MS);
+        }
+
+        const wpConfig = registerWpConfigSecrets(
+          await api.getFileContent(setupUser.username, wpConfigPath)
+        );
+        expect(wpConfig, 'WP_HOME does not point at the www host').toMatch(
+          /define\s*\(\s*['"]WP_HOME['"]\s*,\s*['"][^'"]*www\.[^'"]*['"]/
+        );
+        expect(wpConfig, 'WP_SITEURL does not point at the www host').toMatch(
+          /define\s*\(\s*['"]WP_SITEURL['"]\s*,\s*['"][^'"]*www\.[^'"]*['"]/
+        );
+      });
+
+      await test.step('turn the apex redirect on', async () => {
+        await api.updateDomain(setupUser.username, setupUser.domain, {
+          document_root: originalDocumentRoot,
+          redirect_enabled: true,
+          redirect_url: `${scheme}://${wwwDomain}/`,
+          force_https_redirect: false,
+        });
+        await delay(getWebserverPropagationDelay(slug));
+      });
+
       const paths = [
         ['the home page', '/'],
         ['wp-admin', '/wp-admin/'],
@@ -160,6 +163,15 @@ test.describe('apex to www redirect', () => {
           redirect_enabled: false,
           force_https_redirect: false,
         })
+      );
+      await cleanup.run(
+        'restore wp-config.php on the shared setup user',
+        () => api.putFileContents(setupUser.username, wpConfigPath, originalWpConfig),
+        {
+          verify: async () =>
+            (await api.getFileContent(setupUser.username, wpConfigPath)) === originalWpConfig,
+          describe: () => `${wpConfigPath} still points WordPress at ${wwwDomain}`,
+        }
       );
       await cleanup.finish();
     }

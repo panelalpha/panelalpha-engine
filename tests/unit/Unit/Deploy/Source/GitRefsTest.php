@@ -37,6 +37,16 @@ class GitRefsTest extends TestCase
         $this->assertSame(['v2.0'], $tags);
     }
 
+    /** A numeric tag stays a string, so it is listed as one and found by name. */
+    public function test_a_numeric_tag_stays_a_string(): void
+    {
+        $sha = str_repeat('a', 40);
+        $refs = GitRefs::parse("{$sha}\trefs/tags/2024\n{$sha}\trefs/tags/2024^{}\n{$sha}\trefs/tags/v1\n");
+
+        $this->assertSame(['2024', 'v1'], $refs->tags);
+        $this->assertTrue($refs->hasBranch('2024'));
+    }
+
     public function test_a_branch_or_tag_is_found(): void
     {
         $refs = GitRefs::parse(self::REFS);

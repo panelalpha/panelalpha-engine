@@ -477,6 +477,7 @@ class SystemController extends Controller
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
             new OA\Response(response: 422, description: 'Any webserver other than nginx-proxy is temporarily refused', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 409, description: 'A webserver change is already running', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     public function changeWebserver(Request $request): JsonResponse
@@ -495,12 +496,10 @@ class SystemController extends Controller
         self::assertWebserverChoice($params['new_webserver']);
         $serialNumber = self::serialNumberFor($params['new_webserver'], $params['serial_number'] ?? null);
 
-        $system = new System();
+        $system = app(System::class);
 
         if ($system->isChangeWebserverScriptRunning()) {
-            throw ValidationException::withMessages([
-                'Change webserver script is already running',
-            ]);
+            return new JsonResponse(['message' => 'Change webserver script is already running'], 409);
         }
 
         if ($serialNumber !== null) {
@@ -689,7 +688,8 @@ class SystemController extends Controller
     public function updateEximConfig(Request $request): JsonResponse
     {
         self::withoutTrailingDots($request);
-        $request->merge(self::resolveEximSecrets($request->only(self::EXIM_SECRET_FIELDS)));
+        $sent = $request->only(self::EXIM_SECRET_FIELDS);
+        $request->merge(self::resolveEximSecrets($sent));
         $params = $request->validate(self::eximConfigRules());
 
         $system = new System();
@@ -697,8 +697,21 @@ class SystemController extends Controller
         $system->exim()->rebuildEximConfig();
 
         return new JsonResponse([
-            'data' => $params,
+            'data' => self::eximConfigAnswer($params, $sent),
         ]);
+    }
+
+    /**
+     * The saved fields with each credential as the caller sent it, so a
+     * `vault:<id>` is answered as the reference and never as its secret.
+     *
+     * @param array<string, mixed> $saved
+     * @param array<string, mixed> $sent
+     * @return array<string, mixed>
+     */
+    private static function eximConfigAnswer(array $saved, array $sent): array
+    {
+        return array_replace($saved, array_intersect_key($sent, $saved));
     }
 
     /**

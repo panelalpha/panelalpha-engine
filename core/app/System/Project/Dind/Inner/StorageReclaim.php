@@ -21,14 +21,26 @@ class StorageReclaim
 
     /**
      * Clear the build cache before a heavy build when the account is low on
-     * disk and nothing is running that could be disrupted.
+     * disk and nothing is running that could be disrupted. Best-effort like the
+     * prune itself: a probe that times out or fails is logged and the build goes on.
      */
     public function reclaimIfNeeded(): void
     {
-        if (!$this->canAggressivelyReclaim()) {
+        try {
+            $needed = $this->canAggressivelyReclaim() && $this->isLowOnDiskForBuild();
+        } catch (\Throwable $e) {
+            $this->inner->host()->logWarn('Could not check inner Docker disk before the build: ' . $e->getMessage());
+
             return;
         }
 
+        if ($needed) {
+            $this->reclaim(false);
+        }
+    }
+
+    private function isLowOnDiskForBuild(): bool
+    {
         $shell = $this->inner->dind()->shell();
         $storage = $this->storage();
         $availableBytes = $storage->parseFreeBytes(
@@ -38,11 +50,7 @@ class StorageReclaim
             $shell->execAsUserQuiet($storage->buildCacheProbeArgv(), [], 120)
         );
 
-        if (!DindBuildStorage::shouldReclaimBeforeBuild($availableBytes, $buildCacheBytes, false)) {
-            return;
-        }
-
-        $this->reclaim(false);
+        return DindBuildStorage::shouldReclaimBeforeBuild($availableBytes, $buildCacheBytes, false);
     }
 
     /**

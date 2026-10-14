@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Git;
 
+use App\Lib\Vault\RequestVault;
 use App\Models\User;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Validator;
@@ -79,11 +80,32 @@ trait PrintsGitJson
     private function validated(string $rules, array $input): array
     {
         $request = new $rules();
-        $validator = Validator::make($input, $request->rules());
+        $validator = Validator::make($this->withVaultSecrets($input), $request->rules());
         if (method_exists($request, 'withValidator')) {
             $request->withValidator($validator);
         }
 
         return $validator->validate();
+    }
+
+    /**
+     * The input with a `vault:<id>` token read in its place, as the HTTP
+     * request reads it; an unusable reference is a validation error.
+     *
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>
+     * @throws ValidationException
+     */
+    private function withVaultSecrets(array $input): array
+    {
+        if (!RequestVault::isReference($input['token'] ?? null)) {
+            return $input;
+        }
+
+        $username = (string) $this->argument('username');
+        $project = User::existsByUsername($username) ? $username : null;
+        $input['token'] = RequestVault::resolve('token', $input['token'], $project);
+
+        return $input;
     }
 }

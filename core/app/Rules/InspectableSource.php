@@ -8,11 +8,11 @@ use Closure;
 use Illuminate\Contracts\Validation\DataAwareRule;
 
 /**
- * The `source` of POST /source/inspect: a repository, a path, or a project.
+ * The `source` of POST /source/inspect: a repository or a project.
  *
  * Only the git case is decided here, by the same {@see GitRepoInput} that
- * `git_repo` goes through. A path or project is left to the resolver, which
- * is the only thing that can check them.
+ * `git_repo` goes through. A project, or a path the controller refuses, is
+ * left to the controller.
  */
 final class InspectableSource implements DataAwareRule, ProblemRule
 {
@@ -48,9 +48,9 @@ final class InspectableSource implements DataAwareRule, ProblemRule
                 'field' => $attribute,
                 'code' => $attribute . '_unrecognised',
                 'message' => 'Could not tell what this source is. Pass `' . $this->typeField
-                    . '` as git, path or project.',
-                'expected' => 'a repository URL, an absolute path, or a project name',
-                'examples' => ['https://github.com/owner/repo.git', '/home/myapp/project', 'myapp'],
+                    . '` as git or project.',
+                'expected' => 'a repository URL or a project name',
+                'examples' => ['https://github.com/owner/repo.git', 'myapp'],
             ], $fail);
 
             return;
@@ -66,7 +66,7 @@ final class InspectableSource implements DataAwareRule, ProblemRule
         }
     }
 
-    /** The caller's own `type`, when it is one of the three. */
+    /** The caller's own `type`, when it is one of the accepted ones. */
     public static function declaredType(mixed $declared): ?string
     {
         return is_string($declared) && in_array($declared, SourceResolver::TYPES, true)
