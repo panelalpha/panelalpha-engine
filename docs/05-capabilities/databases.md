@@ -35,7 +35,21 @@ To browse a database in a web interface, ask for a sign-on link. A new install e
 Give me a phpMyAdmin sign-on link for this project.
 ```
 
-You get a URL that logs you straight in. **It expires after five minutes.** Do not bookmark it - when it stops working, ask for a new one, which takes a second.
+You get a URL that logs you straight in. **It expires after five minutes.** Do not bookmark it - when it stops working, ask for a new one, which takes a second. A suspended project gets no sign-on link.
+
+## Renaming a database
+
+```text
+Rename the database shop on this project to store.
+```
+
+The new name gets the project's prefix, like any new database. The data is moved, every user keeps the access it had, and the old name disappears. If anything fails along the way, the old database is kept as it was. Update your application to the new prefixed name afterwards, and rebuild.
+
+The application database that the engine creates for a container project (its name ends in `app`) cannot be renamed. A name that another database of the project already uses is refused.
+
+## Copies of a project
+
+On a traditional PHP project, a staging copy or a clone brings the databases with it, under the new project's prefix, with new users and passwords and the same permissions. A push between the two replaces the databases on the other side, or only the tables you pick, and keeps that side's users and passwords. A container project's databases are not copied. See [Staging](projects.md#staging) and [Cloning](projects.md#cloning).
 
 ## Limits
 
@@ -60,6 +74,9 @@ The user exists but has no permission on that database, or the password does not
 
 **The application cannot log in after a rebuild, and used to work.**
 The database still holds the password it was first created with, while your application now has a different one. Changing the environment variable does not change the password inside the database. See [Reading errors](../02-getting-started/reading-errors.md).
+
+**A rename is refused.**
+The name is already used by another database of the project, is reserved, or is too long once the prefix is added. A container project's own application database (ending in `app`) cannot be renamed.
 
 **"Database limit reached".**
 The project has used up its plan's database allowance. Either raise the limit ([Limits](projects.md#limits)) or delete a database it no longer needs.
@@ -122,6 +139,15 @@ Set tshop's database limit to 1, then create a second database.
 ```
 
 Mode: modify. Tools: `project_update`, `mysql_database_create`. Check: the second database is refused as "limit reached", and the assistant points at raising the limit or deleting one.
+
+**Rename a database**
+
+```text
+Rename the database shop on tshop to store. Then list its databases and what
+shopuser may do on store.
+```
+
+Mode: full. Tools: `mysql_database_rename` with `new_dbname`, `task_get`, `mysql_database_list`, `mysql_privileges_get`. Check: the rename runs as a task, the new name has the project's prefix, shopuser keeps its access on the new name, and the old name is gone. On a container project the application's own database (ending in `app`) is refused.
 
 **Remove**
 

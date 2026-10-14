@@ -65,6 +65,8 @@ List the tunnel hostnames on this project's domain.
 
 ## Remove a hostname or the token
 
+A hostname stays until you remove it, unless you gave it a lifetime when you attached it ("for 7 days", from 5 minutes to 30 days). The engine then removes it, including the DNS record at Cloudflare. For a short-lived address without a Cloudflare account, ask for a preview address instead: [A preview address](domains-and-ssl.md#a-preview-address).
+
 To stop serving a name through Cloudflare:
 
 ```text

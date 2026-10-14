@@ -46,6 +46,14 @@ Suspended projects are skipped, because a site stopped on purpose is not a fault
 
 How to read the result: [What the engine checks](#what-the-engine-checks).
 
+To see whether anything is running on a project right now, such as a deploy, a push or a restore, ask for its tasks:
+
+```text
+Is anything running on tshop right now?
+```
+
+A push counts as a task, so it shows up here too. By default you see the tasks your own token started, plus the ones the engine started itself. A token limited to some projects sees only those projects.
+
 ## What the engine checks
 
 Two separate questions, and the difference between them is the useful part.
@@ -105,6 +113,14 @@ Show me what the app container of shop printed between 14:00 and 14:30 today.
 
 The assistant reads up to 5000 lines at a time, and can limit them to a period such as the last two hours.
 
+**PHP errors.** On traditional PHP hosting, every project keeps its own PHP error log, one file for all its domains. It holds the last errors your PHP code raised, such as a fatal error behind a blank page.
+
+```text
+Show me the last 100 lines of the PHP error log of tshop.
+```
+
+The assistant can read up to 5000 lines and limit them to a period. The file is also in the list of log files for the project's domains. It is rotated at 10 MB, and the last three older copies are kept. On a project in its own container there is no separate file: the assistant gets what the app container printed, as above. A project that existed before the update starts writing the log after the update, once its PHP restarts or you change a PHP setting on it.
+
 Use the webserver logs for 404s and 500s that only some visitors hit. For how many people came, and how much data they transferred, ask for the counts: [Visitor statistics](visitor-statistics.md). If the assistant cannot read the logs, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
 ## 4. Usage - "is it running out of something?"
@@ -125,7 +141,7 @@ Samples are kept over several time windows, from the last few minutes to the las
 How close is this project to its limits?
 ```
 
-Covers storage, the disk its container logs take, domains, subdomains, FTP and SFTP accounts, and databases. To change a limit: [Limits](projects.md#limits).
+Covers storage, the disk its container logs take, domains, subdomains, FTP and SFTP accounts, and databases. Storage counts the project's files and also its own Docker data (images, build cache and database data), which is often the larger part. Disk use is measured in the background every 15 minutes, so a file you just added can take up to that long to show. Before the first measurement it is measured when you ask. To change a limit: [Limits](projects.md#limits).
 
 **From inside a project.** If you run a monitoring app or agent in a project (Zabbix, Netdata, node_exporter and the like), two files in it describe the whole server, not the project:
 
@@ -204,6 +220,14 @@ error log.
 
 Mode: read. Tools: `domain_log_list`, `domain_log_download` with `offset` and `length`. Check: the answer is an excerpt, not the whole file, and the log is the site's, not the deploy log.
 
+**PHP errors**
+
+```text
+Show the last 50 lines of the PHP error log of tshop, only from the last hour.
+```
+
+Mode: read. Tools: `php_error_log_get` with `lines` (up to 5000) and `since`. Check: on traditional PHP hosting the lines come from the project's own log, for all its domains. On a container project the same request returns the app container output.
+
 **What the app printed**
 
 ```text
@@ -240,6 +264,14 @@ will be sent before you send it.
 ```
 
 Mode: modify. Tools: `bug_report_create` with `attach_log` and `attach_health`. Check: the answer carries the redacted report, no `.env` values or tokens are in it, and the status says accepted and queued, not delivered.
+
+**What is running**
+
+```text
+List the tasks that are running on tshop. Then list the latest ten, newest first.
+```
+
+Mode: read. Tools: `task_list` with `project`, `status` active, `since`, `task_get`. Check: only tasks of tshop come back, a push appears as a task, and a token limited to some projects cannot ask for every project's tasks.
 
 **Tasks**
 

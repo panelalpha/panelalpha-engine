@@ -22,6 +22,8 @@ Hits and visits follow the dates you name. Unique visitors, how long a visit las
 
 The status-code breakdown is the exception: it follows the dates you name and gives requests and bytes per HTTP status, so a spike of 502s shows on the day it happened. 200 and 304 share one row, because the logs are counted that way.
 
+A date range can span at most ten years.
+
 Transfer counts every response, including crawlers, so it is higher than the visitor chart for the same days. Only traffic logged after you update is counted. Older logs are left out.
 
 Country, continent, and region lists stay empty until a City database is on this VPS. That download is not part of install and it is not on a schedule. Visitor addresses are looked up on this VPS only. They are never sent to a public geolocation service.

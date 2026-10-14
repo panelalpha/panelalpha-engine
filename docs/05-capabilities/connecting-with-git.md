@@ -76,7 +76,9 @@ Use this when the code is not in git. After the first deploy, updating that proj
 
 The engine keeps a copy of the repository. Ask the assistant to pull, switch branch, or go back to the last deployed commit. A successful pull rebuilds the site. You do not ask for the rebuild as well. Switching branch, or going back to an earlier commit, rebuilds the same way.
 
-The engine checks the request at once: the repository answers, and the branch or commit exists. The pull or switch and the rebuild then run in the background, like any rebuild, and the assistant follows them until they end. Asking again while one is still running is refused and points at the one under way. If the new version fails, or the change is cancelled, while the previous one is still running, the site keeps serving the previous one, and the project stays on the branch and commit it was on.
+A repository that uses git submodules gets them fetched on every pull, branch change and push, so a submodule that moved in the repository is deployed at its new commit. A submodule that cannot be fetched fails the deploy: see Troubleshooting below.
+
+The engine checks the request at once: the repository answers, and the branch or commit exists. The pull or switch and the rebuild then run in the background, like any rebuild, and the assistant follows them until they end. Asking again while one is still running is refused and points at the one under way. A pull, branch change or revert asked for while a deploy, backup or restore is running on the project is refused too, and the answer says which one. If the new version fails, or the change is cancelled, while the previous one is still running, the site keeps serving the previous one, and the project stays on the branch and commit it was on.
 
 ```text
 Pull the latest commit on this project.
@@ -94,6 +96,26 @@ Show recent commits on this project.
 This project's git token no longer works. Send me the page to replace it.
 ```
 
+## A project that was created without a repository
+
+A project created without a repository, for example one set up first and pointed at its code later, can be given one. The assistant checks the repository the same way as for a new project, saves it, and starts the first deploy.
+
+```text
+Connect https://github.com/org/app to the project shop and deploy it.
+```
+
+This works only for a project that runs in its own container and has not run an application yet. A project that already has a repository is refused. So is a classic hosting project, which cannot be converted. A private repository needs a token, as above.
+
+## Look at branches and tags first
+
+To see which branches and tags a repository has, before any project exists:
+
+```text
+List the branches and tags of https://github.com/org/app.
+```
+
+The engine reads the list from the repository without downloading the code, and shows the default branch first. A private repository needs a token. Without one, a private repository and one that does not exist both come back as "authentication failed".
+
 A rebuild without a pull replays the last successful plan against the files already on disk: [How a deploy works](../02-getting-started/how-a-deploy-works.md#deploying-again-later).
 
 Instead of asking for a pull each time, you can have your git host redeploy the project itself on every push: [Push to deploy](push-to-deploy.md).
@@ -105,6 +127,12 @@ The URL is wrong, or the repository is private and no token was saved. Check the
 
 **The deploy failed with "The repository's submodules could not be fetched".**
 The engine fetches the repository's submodules with the same token on every deploy, including after a pull or a push. A private submodule on another account or forge needs a token that can read it too. If the application does not need that submodule, the repository's `.panelalpha/panelalpha.yaml` can name the ones it does: `git: {submodules: [path/to/one]}`.
+
+**The repository is refused with `host_refused`.**
+The engine does not fetch from internal addresses: its own machine, the private networks and the Docker networks. This covers a repository, a submodule, and a file fetched by URL. It applies to a git server inside your own network too. The server operator can allow it in `/opt/panelalpha/shared-hosting/.env-core`: `EGRESS_ALLOW_PRIVATE=true` allows private network addresses, or `EGRESS_ALLOW_HOSTS=git.internal` allows named hosts only, comma separated (a name, never an address). Loopback and link-local addresses stay refused either way. Reload the engine after the change: [Change a setting](../02-getting-started/install.md#change-a-setting).
+
+**A pull or branch change is refused because the project is busy.**
+A deploy, backup or restore holds the project. The answer names which. Wait for it to end, or cancel the deploy, then ask again.
 
 **The deploy picked the wrong kind of application.**
 The identifying file is often not at the top of the repository: [What your repository needs](../07-supported-projects/what-your-repo-needs.md).
@@ -132,6 +160,15 @@ which branch, which port?
 ```
 
 Mode: read. Tools: `source_inspect`. Check: the answer names a stack, a branch and the way it was read (`tree` or `clone`). No project exists afterwards (`project_list` does not show a new one). No `.env` values appear, only names.
+
+**List branches and tags**
+
+```text
+Which branches and tags does https://github.com/org/app have? Which is the
+default branch?
+```
+
+Mode: read. Tools: `source_refs`. Check: the default branch is named and listed first, no project is created, and a URL on an internal address is refused with `host_refused`.
 
 **Choose another way to run it**
 
@@ -196,13 +233,21 @@ task's own log lines.
 
 Mode: read. Tools: `deploy_log_get` (with `offset` while `more` is true), `task_get`, `task_log_list`. Check: the log is read in pages, the second call continues from `next_offset`, and a failed deploy shows a `problem` with the fix when the failure is a known one.
 
+**Deploy history**
+
+```text
+List the deploys tmemos still has a log of. Show me the log of the second newest.
+```
+
+Mode: read. Tools: `deploy_list`, `deploy_log_read` (with `offset` while `more` is true). Check: each deploy shows its status, branch, commit and what started it, newest first, and the engine keeps the last 10 by default.
+
 **Cancel a deploy**
 
 ```text
 Start a rebuild of tmemos, then cancel it while it is running.
 ```
 
-Mode: full. Tools: `project_rebuild`, `deploy_cancel` or `task_cancel`. Check: the task ends `cancelled`, nothing is left running, and the project can be rebuilt again afterwards.
+Mode: full. Tools: `project_rebuild`, `deploy_cancel` or `task_cancel`. Check: the task ends `cancelled`, the version that was live keeps answering, only what the cancelled deploy created is removed, and the project can be rebuilt again afterwards.
 
 **Is it really the application?**
 
@@ -219,6 +264,15 @@ Upload /path/to/app.zip into project tzip and deploy it.
 ```
 
 Mode: modify. Tools: `file_upload`, `project_deploy_archive`, `task_get`. Check: a single top-level folder in the zip is unwrapped, the deploy completes, and a second request while it runs is refused with a pointer to the running task.
+
+**Attach a repository later**
+
+```text
+Create the project tlater without a repository. Then connect
+https://github.com/usememos/memos to it and deploy it.
+```
+
+Mode: modify. Tools: `project_create`, `project_source_attach`, `task_get`. Check: the attach answers with a task id, the deploy completes, and attaching a second repository to the same project is refused.
 
 **Do not deploy twice**
 

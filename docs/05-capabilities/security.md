@@ -32,7 +32,7 @@ Every wrong password, on any site, is written with the visitor's address to one 
 
 **A token with default permissions can permanently delete an entire project and everything in it.**
 
-Before you paste a token into any AI assistant, decide what that token is allowed to do, including which areas it can see: [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
+Before you paste a token into any AI assistant, decide what that token is allowed to do, including which areas it can see and which projects it can reach: [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do). A token can be limited to some projects. It cannot reach the others, and it cannot change a project's limits or suspend it.
 
 This is not really about AI. Any client holding that token has the same power. But an assistant is the one you will hand a token to most casually, so it is where the decision actually gets made.
 
@@ -48,6 +48,8 @@ Revoking stops it working immediately while keeping it in the list, so you keep 
 ## Projects kept apart
 
 Projects can reach the internet, the server's MySQL databases and image caches, and the server's mail and web services. They cannot connect directly to another project, the engine's API, FTP, SFTP or phpMyAdmin, or private addresses on your network. Visitors still reach the sites through the engine's webserver.
+
+One exception is on purpose. A project that runs in its own container can be allowed to call the engine's API, for an app that manages the engine, such as a deploy dashboard. The engine gives that project its own token, limited to that project, to chosen projects, or to everything, and deleting the project removes the token. Allowing and denying is a server command: [CLI commands](../06-commands/pae-cli.md#engine-api-for-projects) (`pae system:api-access:allow`). Allow it only for an app you trust with that reach.
 
 The update attempts to move running projects created on an earlier version onto the isolated network. An application using the server's MySQL may restart during the move, and its site is unavailable until it answers again. A stopped project is left where it was. If a project was stopped or the update reports that its move failed, start it and retry the move from the server: [CLI commands](../06-commands/pae-cli.md#projects-and-deploys).
 
@@ -67,7 +69,7 @@ Block 203.0.113.7 from this server, both ways.
 
 A rule applies to one direction, incoming or outgoing, unless you ask for both. A rule in both directions blocks (or allows) traffic from the address and to it, as one rule.
 
-ufw keeps one rule for the same ports, addresses and direction. A new rule, or an edit, that matches what a rule already there matches is refused, whatever its action or comment, and the answer names that rule: change or delete it instead. A rule is also refused when ufw would store it as one with a rule already there: an incoming rule from an address beside an outgoing one to it, or a host deny beside a published-port deny, with the same action, ports and comment, is stored exactly like one rule in both directions, or one deny for both. Change the rule already there instead. To match any address, leave the source or destination out; `0.0.0.0/0` and `::/0` are refused. A rule's comment is one line without `'`. ufw would read a few comments as part of the rule, so they are refused with the reason: one that is only `in`, `out`, `log` or `log-all`, and, on a published-port rule or an incoming deny, `delete` or one with `in` or `out` followed by more words. A comment that starts with `by Fail2Ban` is refused too: that is how a ban is told apart, and deleting a ban also lifts it in fail2ban. An edit keeps such a comment only on a rule that has it already, and on a deny from an address only if that rule is a ban from the same address. The engine opens the port a proxy rule listens on, other than 80 and 443. If you already have a rule for that port from any address, such as a deny, it is left as it is, and the engine's log names it.
+ufw keeps one rule for the same ports, addresses and direction. A new rule, or an edit, that matches what a rule already there matches is refused, whatever its action or comment, and the answer names that rule: change or delete it instead. A rule is also refused when ufw would store it as one with a rule already there: an incoming rule from an address beside an outgoing one to it, or a host deny beside a published-port deny, with the same action, ports and comment, is stored exactly like one rule in both directions, or one deny for both. Change the rule already there instead. To match any address, leave the source or destination out; `0.0.0.0/0` and `::/0` are refused. A port must be a number from 1 to 65535 with no leading zero, such as `8080` and not `08080`, and a range must not run backwards. Anything else is refused. A rule's comment is one line without `'`. ufw would read a few comments as part of the rule, so they are refused with the reason: one that is only `in`, `out`, `log` or `log-all`, and, on a published-port rule or an incoming deny, `delete` or one with `in` or `out` followed by more words. A comment that starts with `by Fail2Ban` is refused too: that is how a ban is told apart, and deleting a ban also lifts it in fail2ban. An edit keeps such a comment only on a rule that has it already, and on a deny from an address only if that rule is a ban from the same address. The firewall protects you from locking yourself out. A deny whose ports include 2011, the engine's own port, is always refused. A deny that covers your own address on SSH, or on every port, is refused until you confirm it, and the assistant should ask you first. A deny that also covers the web, FTP or SFTP ports is added with a warning that names them. If the firewall cannot load a change, the change is taken back and the rules stay as they were. The engine opens the port a proxy rule listens on, other than 80 and 443. If you already have a rule for that port from any address, such as a deny, it is left as it is, and the engine's log names it.
 
 There are two kinds of rule. **Host rules** cover the server's own ports, such as SSH and the sites on 80 and 443: `ufw allow 22/tcp` on the server. **Published-port rules** cover the ports Docker publishes for a container, such as the engine's own 2011, FTP and SFTP: `ufw route allow proto tcp to any port 8080` on the server. On its own, ufw does not see published ports at all; the engine sends their traffic through ufw's route rules, and drops whatever those do not allow. Neither kind reaches the other: allowing 22 on the host does not open a container published on 22, and a published-port rule does not open a host port.
 
@@ -81,9 +83,9 @@ Through the assistant or the API, an allow is a host rule unless you ask for pub
 
 A server updated from an engine without published-port rules keeps working: each allow rule that covered a port a container published at the time, and each incoming deny rule, gets a matching published-port rule, and the update log names each one.
 
-fail2ban watches the logins the server takes: SSH, SFTP, FTP, the sites' passwords ([Password protection](#password-protection)), and the engine's own API on 2011, where a request with a wrong or expired token counts as a failed login. After 5 failed attempts in 10 minutes (10 for the API, since a client with a stale token retries, and 10 for site passwords), an address is banned for an hour, and for longer each time it comes back (a site-password ban is always an hour). A ban closes every port to that address, published ports included. It is listed as one deny rule for both; delete it to lift the ban early.
+fail2ban watches the logins the server takes: SSH, SFTP, FTP, the sites' passwords ([Password protection](#password-protection)), and the engine's own API on 2011, where a request with a wrong or expired token counts as a failed login. After 5 failed attempts in 10 minutes (10 for the API, since a client with a stale token retries, and 10 for site passwords), an address is banned for an hour, and for longer each time it comes back (a site-password or API ban is always an hour). A ban closes every port to that address, published ports included. It is listed as one deny rule for both; delete it to lift the ban early.
 
-Trust the addresses that must never be locked out: your office, your monitoring, the panel that drives this engine. A trusted address is never banned, and trusting it lifts a ban it has now. It is not an allow rule: the firewall rules still apply to it.
+Trust the addresses that must never be locked out: your office, your monitoring, the panel that drives this engine. A trusted address is never banned, and trusting it lifts a ban it has now. It is not an allow rule: the firewall rules still apply to it. A range wider than /8 (IPv4) or /16 (IPv6) is refused, since it would keep much of the internet from ever being banned.
 
 ```text
 Trust 203.0.113.7, that's our office. Show me the trusted addresses.
@@ -172,7 +174,7 @@ Mode: read. Tools: `firewall_status`, `firewall_rule_list` (also with `scope` pu
 Block 203.0.113.7 from this server, both ways. Show me the rule, then delete it.
 ```
 
-Mode: full. Tools: `firewall_rule_create` with `action` deny, `direction` both, `firewall_rule_list`, `firewall_rule_delete`. Check: the deny is one rule for both host and published ports, it sits above the allows, and a second identical rule is refused naming the first.
+Mode: full. Tools: `firewall_rule_create` with `action` deny, `direction` both, `firewall_rule_list`, `firewall_rule_delete`. Check: the deny is one rule for both host and published ports, it sits above the allows, and a second identical rule is refused naming the first. A deny that covers 2011 is refused, and one that covers the caller's own address on SSH needs confirmation.
 
 **Allow a published port, then edit it**
 
@@ -181,7 +183,7 @@ Allow 203.0.113.7 to reach published container port 8080. Then change the
 comment to "office". Do not open any port for an application's website.
 ```
 
-Mode: modify. Tools: `firewall_rule_create` with `scope` published, `firewall_rule_update`. Check: the rule gets a new id when what it matches changes, and a comment starting `by Fail2Ban` is refused.
+Mode: modify. Tools: `firewall_rule_create` with `scope` published, `firewall_rule_update`. Check: the rule gets a new id when what it matches changes, and a comment starting `by Fail2Ban` is refused. A port such as 08080 or 70000 is refused.
 
 **Trusted addresses and the log**
 
@@ -190,7 +192,7 @@ Trust 203.0.113.7, that's our office. Show the trusted addresses. What did the
 firewall block in the last hour, and was 203.0.113.7 banned?
 ```
 
-Mode: full. Tools: `firewall_trusted_add`, `firewall_trusted_list`, `firewall_log_list` with `address`, `firewall_trusted_delete`. Check: a trusted address is never banned, and it still follows the firewall rules.
+Mode: full. Tools: `firewall_trusted_add`, `firewall_trusted_list`, `firewall_log_list` with `address`, `firewall_trusted_delete`. Check: a trusted address is never banned, and it still follows the firewall rules. A range wider than /8 is refused.
 
 **Off and on, reload**
 
@@ -235,7 +237,7 @@ A legitimate form submission was blocked. Read the ModSecurity audit log and
 tell me which rule fired.
 ```
 
-Mode: read. Tools: `modsec_audit_log_list`, `modsec_audit_log_tail`, `modsec_audit_log_download`. Check: the answer names one rule id and suggests turning off that rule, not ModSecurity as a whole.
+Mode: read. Tools: `modsec_audit_log_list`, `modsec_audit_log_tail`, `modsec_audit_log_download`. Check: the answer names one rule id and suggests turning off that rule, not ModSecurity as a whole. A large log is read in pieces with `offset`, and an older rotated (compressed) log can be read too.
 
 **Extra IP addresses**
 

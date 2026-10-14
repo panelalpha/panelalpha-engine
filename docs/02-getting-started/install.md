@@ -188,6 +188,16 @@ Disk quota counts the files a project writes as its own user. The images and bui
 
 For a hard limit that also covers Docker storage, use ext4 project quota. It needs the `project` feature, which can only be turned on while the disk is unmounted, so plan it on a fresh server before you install, with `/home` on its own ext4 disk: `tune2fs -O project,quota -Q prjquota /dev/<disk>`, then mount it with `prjquota` in `/etc/fstab`. Per project, tag its home and set the limit, in KB: `chattr -R -p <uid> +P /home/<project>` and `setquota -P <uid> 0 <limit-in-KB> 0 0 /home`. The engine does not do these two steps itself.
 
+**A repository or download address on my own network is refused with `host_refused`.**
+The engine will not fetch from an address that stays inside a network: the engine's own host, the private ranges (`10.x`, `172.16.x` to `172.31.x`, `192.168.x`) and similar internal addresses. This keeps a public link from reaching services inside your server. If your Git server or file server is one of those on purpose, add one of these lines to `.env-core` and reload, with the three steps in [Change a setting](#change-a-setting):
+
+```bash
+EGRESS_ALLOW_PRIVATE=true
+EGRESS_ALLOW_HOSTS=git.internal,files.internal
+```
+
+The first allows every private address. The second allows only the names you list, and it takes names, not addresses. Loopback, link-local and other reserved addresses stay refused either way.
+
 **I want a different webserver.**
 Not supported. Sites are served through nginx-proxy only.
 

@@ -19,17 +19,17 @@ You do this in your git host. The assistant cannot open your GitHub, GitLab, or 
 - **Bitbucket Cloud**: repository **Settings > Webhooks > Add webhook**. URL: the hook's URL. Secret: the hook's secret. Triggers: "Repository > Push".
 - **Bitbucket Data Center**: repository **Settings > Webhooks > Create webhook**. URL: the hook's URL. Secret: the hook's secret. Events: "Repository > Push".
 
-Put the secret in on every host. A call that does not send it is refused.
+Put the secret in on every host. A call that does not send it, or sends one that does not match, is refused.
 
 Save it, then push a commit to the branch the project follows and check the project updated.
 
 ## What a push does
 
-The hook follows the branch that copy is on now. A later change of branch is followed too. A test ping, a tag, a deleted branch, or a push to any other branch does nothing. The same delivery sent again does not deploy a second time.
+The hook follows the branch that copy is on now. A later change of branch is followed too. A test ping, a tag, a deleted branch, or a push to any other branch does nothing. The same delivery sent again does not deploy a second time, and neither does the same signed push sent again under a new delivery id.
 
 What the push changes depends on which copy the hook is for:
 
-- **The copy the engine deploys from.** A push makes that copy match the repository, then rebuilds the site. A tracked file you edited on the server is replaced. A file the repository does not know about is removed, except files the engine keeps for itself. Once this hook exists, the repository is the only source of truth for that copy.
+- **The copy the engine deploys from.** A push makes that copy match the repository, then rebuilds the site. A tracked file you edited on the server is replaced. A file the repository does not know about is removed, except files the engine keeps for itself. Submodules are fetched at the commits the push records, and one that cannot be fetched fails the deploy: [Connecting with Git](connecting-with-git.md#troubleshooting). Once this hook exists, the repository is the only source of truth for that copy.
 - **A folder the site keeps in git**, such as `public_html` on a WordPress project. A push only moves that folder forward. Uploads and a config the site wrote stay. There is no rebuild. If something on the server conflicts with the push (a tracked file edited on the server, a file sitting where the repository now wants to put one, or history that was rewritten), nothing changes. The answer names the paths.
 
 ```text
@@ -38,7 +38,7 @@ Show me the push-to-deploy hook for this project's public_html folder.
 
 A push that arrives while a deploy is already running waits. When that deploy finishes, the engine runs one more, from the latest push that waited. An earlier waiting push does not get a deploy of its own.
 
-A failed deploy leaves the new commit in place. It does not put the previous version back. If the engine stops in the middle of the deploy, that push is marked failed and says it was interrupted. Push again, or ask for a rebuild.
+If the site was already running and the new version fails, or the deploy is cancelled, the site keeps serving the previous version and the copy on the server goes back to the commit it was on: [Deploying again later](../02-getting-started/how-a-deploy-works.md#deploying-again-later). If the site was not running, the new commit stays in the copy on the server. If the engine stops in the middle of the deploy, that push is marked failed and says it was interrupted. Push again, or ask for a rebuild.
 
 ## If your git host can't reach it
 

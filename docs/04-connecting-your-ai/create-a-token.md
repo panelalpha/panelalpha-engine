@@ -46,6 +46,14 @@ pae mcp:token:revoke <id>
 
 Stops a token working immediately. Use this the moment a token might have leaked. `pae mcp:token:delete <id>` removes it from the list altogether.
 
+## A token limited to some projects
+
+A token made with `pae connect` or `pae mcp:token:create` reaches every project on the engine. Software such as a control panel can instead ask the engine for a token limited to chosen projects. `pae` has no option for this, and `pae mcp:token:list` does not show it.
+
+An assistant on a limited token sees and changes only those projects. A request that names another project is refused, project lists show only its own, and the tools that are about the whole server are not available to it, except reading general engine information and inspecting a repository. It also cannot change a project's limits or suspend and unsuspend it, because those belong to you. A project it creates by cloning or by making a staging copy is outside its projects until the limit is updated.
+
+The assistant activity log records which project each request named, and software can filter it by project.
+
 ## Next
 
 Set up your assistant: [pick yours](your-assistant.md#set-your-assistant-up).

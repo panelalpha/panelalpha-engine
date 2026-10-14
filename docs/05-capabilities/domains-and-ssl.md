@@ -24,13 +24,15 @@ Open `https://shop.example.com/` in a browser. You want a padlock with no warnin
 If you create a project without naming a domain, the engine picks the best public name it can. It tries, in order:
 
 1. **`<project>.<your base domain>`**, if you have configured a base domain for sites. The best option - you control it.
-2. **A `panelalpha.online` name**, if your VPS has a public IPv4. Works immediately with no DNS setup from you.
+2. **A `panelalpha.online` name**, if your VPS has a public IPv4. Works immediately with no DNS setup from you. Skipped when the engine is set to give new projects its own names instead (below).
 3. **A name derived from the engine's own certificate.**
 4. **`<project>.local`** - which resolves nowhere.
 
 **A `.local` name is not a public website.** The application built and started correctly; it simply has no address the world can reach. This is why such deploys are marked `partial`. Attach a domain you control before putting more work into the site.
 
 A `panelalpha.online` name is yours for as long as the project exists, and is released again when you remove it.
+
+The server operator can switch the `panelalpha.online` step off for every new project. With the engine setting `default_tunnel` set to `none`, a project created without a name gets step 1 or step 3 above, and nothing is registered at PanelAlpha Online. The value `panelalpha`, or no value, keeps the order above. A request that names `panelalpha` or `none` itself always wins over the setting. Change it with `pae settings:set default_tunnel none`, or with `pae configure address`: [CLI commands](../06-commands/pae-cli.md#configuring-the-engine).
 
 ## Extra names for an app that needs them
 
@@ -41,6 +43,16 @@ Add api-shop.panelalpha.online as an extra name for shop.panelalpha.online.
 ```
 
 This works for applications that let you choose those names (an `API_DOMAIN` setting or similar). An application that insists on a name *under* its own, such as `api.shop.panelalpha.online`, cannot get one on `panelalpha.online`. Give it a domain of your own, point its DNS at this server, and add the extra names (`api.shop.example.com`, ...) to the project as well, as addon domains, each with its own certificate.
+
+## A preview address
+
+To show a site before its domain points here, ask for a preview address. It is a `panelalpha.online` name that opens the site over HTTPS, and it stops working by itself after 24 hours unless you ask for another time (5 minutes up to 30 days):
+
+```text
+Give shop a preview address that lasts 3 days.
+```
+
+If you do not name the address, the engine picks one that starts with `preview-`. The site answers as itself, so an application tied to its real domain, WordPress for example, does not send visitors off to that domain. The browser stays on the preview name.
 
 ## Reach a site through Cloudflare
 
@@ -84,7 +96,11 @@ List the proxy rules on this engine.
 
 Do not add a rule that opens a public port for an application that already has a hostname. Traffic is supposed to arrive at the engine's webserver, which routes it into the right project: [Security](security.md#the-firewall).
 
-A rule that belongs to a project can only send traffic to that project's own app, named by the project's name. The engine refuses any other destination: another project, an address, the engine's own services (its database server, its API, its image registries) or the server itself. Its hostname, if it has one, must be one of the project's own domains or aliases: a project cannot answer for another project's site, on any port. A rule that belongs to the engine (a system rule) is yours as the server's administrator and may point anywhere the server reaches, the engine's own services included. Its port is opened in the firewall like any other, so a system rule to the database server puts that database on the internet.
+Two rules cannot serve the same hostname on the same port: the second one is refused. A rule that belongs to a project can only send traffic to that project's own app, named by the project's name. The engine refuses any other destination: another project, an address, the engine's own services (its database server, its API, its image registries) or the server itself. Its hostname, if it has one, must be one of the project's own domains or aliases: a project cannot answer for another project's site, on any port. A rule that belongs to the engine (a system rule) is yours as the server's administrator and may point anywhere the server reaches, the engine's own services included. Its port is opened in the firewall like any other, so a system rule to the database server puts that database on the internet.
+
+## Removing and renaming a domain
+
+A project's main domain cannot be deleted. To change it, ask for it to be renamed. If the rename fails part way, the engine puts the routing back as it was. A subdomain remembers the domain it belongs to, so the domain above it cannot be removed while the subdomain exists: remove the subdomain first.
 
 ## Mail from a domain
 
@@ -194,6 +210,15 @@ api-tshop as an extra name beside it. Show me both.
 
 Mode: modify. Tools: `tunnel_create` with `provider` panelalpha, `tunnel_list`. Check: both names open over HTTPS, and removing the extra name with `tunnel_delete` releases it so the label can be taken again.
 
+**Preview address**
+
+```text
+Give tshop a preview address. Then show its tunnels, and when the preview
+stops working.
+```
+
+Mode: modify. Tools: `tunnel_create` with `provider` panelalpha, `purpose` preview and optionally `ttl_minutes`, `tunnel_list`. Check: the name starts with `preview-`, the answer gives `valid_until` about 24 hours ahead when no lifetime was named, and the site opens on that name without redirecting to its own domain.
+
 **HTTP-01 challenges by hand**
 
 ```text
@@ -238,7 +263,7 @@ Mode: full. Tools: `proxy_rule_list`, `proxy_rule_create`, `proxy_rule_get`, `pr
 Remove www.shop.example.com from tshop.
 ```
 
-Mode: full. Tools: `domain_delete`, `domain_list`. Check: the domain is gone and the main domain is untouched.
+Mode: full. Tools: `domain_delete`, `domain_list`. Check: the domain is gone and the main domain is untouched. Asking to delete the main domain, or a domain that still has subdomains, is refused with the reason.
 
 ## From the server
 

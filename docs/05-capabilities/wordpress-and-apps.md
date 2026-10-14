@@ -158,6 +158,9 @@ Either the project is not one the engine can install WordPress onto, or the admi
 **WordPress is up but shows the wrong address, or redirects to the old one.**
 WordPress stores its site address in its own database. Changing the project's domain does not update it. Ask the assistant to run the WP-CLI command that updates the site URL.
 
+**The site shows a blank page or a PHP error.**
+On traditional PHP hosting, ask the assistant to read the project's PHP error log: [Monitoring and logs](monitoring-and-logs.md#3-domain-logs---what-are-visitors-doing). A WordPress site in its own container has no separate file, so the assistant reads what the app container printed instead.
+
 **Plugin installs or updates fail from inside wp-admin.**
 Usually file permissions, the account's disk quota, or PHP running out of memory. Ask the assistant to check the project's usage against its limits, raise `memory_limit` if needed, then run the update through WP-CLI instead.
 

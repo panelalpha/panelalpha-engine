@@ -86,8 +86,8 @@ Cursor is normally launched from a desktop icon, so it will not see a certificat
 
 The lasting fix is giving the engine a real certificate: [Install](../02-getting-started/install.md#if-connecting-asks-you-to-trust-a-certificate).
 
-**It wrote `.cursor/mcp.json` inside the project instead of `~/.cursor/mcp.json`.**
-Move the `panelalpha-engine` entry to the user file and delete it from the project file. If that project file was committed, revoke the token: see **I committed my token to a repository** below.
+**I put the connection in `.cursor/mcp.json` inside a project instead of `~/.cursor/mcp.json`.**
+Move the `panelalpha-engine` entry to the user file and delete it from the project file. If that project file was committed, revoke the token: see **I pasted the link or the token into a chat, or committed it to a repository** below.
 
 **The plugin with create and debug skills did not install.**
 Open **Customize**, then **Plugins**, import `https://github.com/panelalpha/agent-skills`, and install `engine`. Reload the window.
@@ -104,7 +104,7 @@ The token is truncated, or it is the wrong type. Assistants need a token from `p
 **It connects but can barely do anything.**
 The permission settings on your VPS are filtering its abilities. See [Decide what the assistant may do](your-assistant.md#decide-what-the-assistant-may-do).
 
-**I committed my token to a repository.**
+**I pasted the link or the token into a chat, or committed it to a repository.**
 Revoke it immediately on your VPS, then create a new one and add it again with `pae connect cursor`:
 
 ```bash

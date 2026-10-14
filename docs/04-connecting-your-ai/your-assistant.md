@@ -52,6 +52,8 @@ An assistant asked for its command list when it connected, so reconnect it to se
 
 A token minted for an assistant is refused if someone tries to use it against the engine's own API directly, so these limits are not one command away from being stepped around. A token minted for your own software (`pae api:token:create`) is refused at the assistant endpoint for the same reason. Tokens made before this distinction existed can still do both; mint a new one of the right kind to narrow that.
 
+A token can also be limited to some projects instead of some commands. `pae` cannot make one, software that calls the engine's API does: [A token limited to some projects](create-a-token.md#a-token-limited-to-some-projects).
+
 Whatever the limits, a token you no longer trust should be revoked with `pae mcp:token:revoke {id}`, which stops it everywhere at once.
 
 These settings live in `/opt/panelalpha/shared-hosting/.env-core`. If you edit that file by hand, the change does nothing until you restart the engine: [Change a setting](../02-getting-started/install.md#change-a-setting). Either way, an assistant that is already connected keeps the tool list it was given when it connected. Reconnect it to see the change.
@@ -106,7 +108,7 @@ A tool has to be in an enabled group (or named in `MCP_TOOLS`), allowed by the p
 
 ### How many tools the assistant loads
 
-The full list is 204 tools, and an assistant loads every listed tool's description when it connects. That is about 95 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
+The full list is 225 tools, and an assistant loads every listed tool's description when it connects. That is about 95 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
 
 - `search_tools` finds any other tool by what it does, for example `mysql user` or `cron`.
 - `execute_tools` runs the tool it found.
@@ -322,7 +324,7 @@ Your assistant is using a list it loaded earlier. Restart your assistant, then r
 
 ## Every tool
 
-This is every MCP tool the engine ships: **204** tools, grouped by area. You do not type these names. You describe the work in chat, and the assistant picks the tool.
+This is every MCP tool the engine ships: **225** tools, grouped by area. You do not type these names. You describe the work in chat, and the assistant picks the tool.
 
 A **project** is one hosting account. Every tool takes it as `name`; what the tools return still calls that value `username`, the REST API's name for it.
 
@@ -337,28 +339,28 @@ pae mcp:tool:list
 | Group | Toolset | Default | Tools |
 |---|---|---|---|
 | [Engine summaries](#engine-summaries) | `engine` | On | 2 |
-| [Projects](#projects) | `projects` | On | 18 |
+| [Projects](#projects) | `projects` | On | 22 |
 | [Domains](#domains) | `domains` | On | 8 |
 | [Domain PHP](#domain-php) | `domainphp` | On | 4 |
 | [Domain ACME](#domain-acme) | `domainacme` | On | 5 |
 | [Domain log files](#domain-log-files) | `domainlogfiles` | On | 2 |
 | [SSL certificates](#ssl-certificates) | `sslcertificates` | On | 3 |
-| [MySQL databases](#mysql-databases) | `mysqldatabases` | On | 4 |
+| [MySQL databases](#mysql-databases) | `mysqldatabases` | On | 5 |
 | [MySQL users](#mysql-users) | `mysqlusers` | On | 6 |
 | [MySQL privileges](#mysql-privileges) | `mysqlprivileges` | On | 3 |
 | [MySQL server](#mysql-server) | `mysqlserver` | On | 2 |
 | [FTP accounts](#ftp-accounts) | `ftpaccounts` | On | 4 |
-| [SFTP accounts](#sftp-accounts) | `sftpaccounts` | On | 4 |
+| [SFTP accounts](#sftp-accounts) | `sftpaccounts` | On | 6 |
 | [Cron jobs](#cron-jobs) | `cronjobs` | On | 4 |
-| [Files](#files) | `files` | On | 14 |
-| [PHP](#php) | `php` | On | 3 |
+| [Files](#files) | `files` | On | 15 |
+| [PHP](#php) | `php` | On | 4 |
 | [Containers](#containers) | `containers` | On | 5 |
 | [App users](#app-users) | `appusers` | On | 8 |
 | [Usage](#usage) | `usage` | On | 5 |
 | [WP-CLI](#wp-cli) | `wpcli` | On | 1 |
-| [Deploy](#deploy) | `deploy` | On | 4 |
+| [Deploy](#deploy) | `deploy` | On | 7 |
 | [Proxy rules](#proxy-rules) | `proxyrules` | On | 5 |
-| [System](#system) | `system` | On | 11 |
+| [System](#system) | `system` | On | 15 |
 | [Server metrics](#server-metrics) | `servermetrics` | On | 5 |
 | [Firewall](#firewall) | `firewall` | On | 12 |
 | [IP management](#ip-management) | `ipmanagement` | On | 6 |
@@ -366,12 +368,12 @@ pae mcp:tool:list
 | [Lighthouse](#lighthouse) | `lighthouse` | On | 1 |
 | [Backup stores](#backup-stores) | `backupcontainers` | On | 6 |
 | [Bug reports](#bug-reports) | `bugreports` | On | 1 |
-| [Backups](#backups) | `backups` | On | 5 |
+| [Backups](#backups) | `backups` | On | 9 |
 | [Tunnels](#tunnels) | `tunnels` | On | 3 |
 | [Git](#git) | `git` | On | 16 |
 | [Project settings](#project-settings) | `projectsettings` | On | 4 |
 | [SSH](#ssh) | `ssh` | On | 1 |
-| [Tasks](#tasks) | `tasks` | On | 3 |
+| [Tasks](#tasks) | `tasks` | On | 4 |
 | [Secret vault](#secret-vault) | `secretvault` | On | 5 |
 
 ## Engine summaries
@@ -386,6 +388,8 @@ pae mcp:tool:list
 | Tool | What it does |
 |---|---|
 | `app_credentials_get` | Get the admin login the engine generated for the deployed application |
+| `env_var_list` | List the environment variables a container project holds, with the values hidden unless asked for |
+| `env_var_set` | Set or remove environment variables of a container project, and apply them without a rebuild if asked |
 | `project_clone` | Clone a project |
 | `project_create` | Create a new hosting project (async) |
 | `project_create_sync` | Create a project and wait for the deploy in the same call. Same body as `project_create` |
@@ -397,7 +401,9 @@ pae mcp:tool:list
 | `project_password_set` | Set a password visitors must type before they see the site |
 | `project_password_unset` | Remove that password |
 | `project_push` | Push project state to a paired staging or live project |
+| `project_push_diff` | Compare the database tables of a staging project with its live project, without copying anything |
 | `project_rebuild` | Redeploy a project |
+| `project_source_attach` | Attach a git repository to a project created without one, and deploy it |
 | `project_staging` | Create a linked staging mirror of a live project |
 | `project_suspend` | Suspend a project |
 | `project_unsuspend` | Unsuspend a project |
@@ -459,6 +465,7 @@ pae mcp:tool:list
 | `mysql_database_delete` | Delete a MySQL database |
 | `mysql_database_get` | Get a MySQL database |
 | `mysql_database_list` | List MySQL databases of a project |
+| `mysql_database_rename` | Rename a MySQL database |
 
 ## MySQL users
 
@@ -503,6 +510,8 @@ pae mcp:tool:list
 | `sftp_account_delete` | Delete an SFTP account |
 | `sftp_account_list` | List SFTP accounts for a user |
 | `sftp_account_update` | Update an SFTP account |
+| `sftp_session_kill` | End the open SFTP sessions of one account |
+| `sftp_session_kill_all` | End every open SFTP session of a project |
 
 ## Cron jobs
 
@@ -523,6 +532,7 @@ pae mcp:tool:list
 | `file_download` | Download a file |
 | `file_exists` | Check if a file or directory exists |
 | `file_fetch` | Download an http or https address into a directory that already exists. Does not deploy the file |
+| `file_list` | List what is in a directory, directories first |
 | `file_mkdir` | Create a directory |
 | `file_move` | Move or rename a file or directory |
 | `file_move_contents` | Move the immediate children of a directory into a destination that already exists |
@@ -536,6 +546,7 @@ pae mcp:tool:list
 
 | Tool | What it does |
 |---|---|
+| `php_error_log_get` | Read the PHP error log of a project |
 | `php_ini_get` | Get custom PHP INI settings of a project |
 | `php_ini_set` | Update custom PHP INI settings of a project |
 | `php_version_list` | List available PHP versions on your VPS |
@@ -584,11 +595,12 @@ pae mcp:tool:list
 | Tool | What it does |
 |---|---|
 | `deploy_cancel` | Cancel a running deploy: mark cancelled, kill the subprocess tree, clean up |
-| `deploy_log_get` | Poll the deploy log (JSON-lines) from a byte-like line offset |
 | `deploy_list` | List the deploys the project still has a log of, newest first |
+| `deploy_log_get` | Poll the deploy log (JSON-lines) from a byte-like line offset |
 | `deploy_log_read` | Read a page of one kept deploy's log by its id |
 | `project_inspect` | Inspect a project's deployed application files |
 | `source_inspect` | Inspect an application source and report its stack, ports and services |
+| `source_refs` | List the branches and tags of a remote repository, without cloning it |
 
 ## Proxy rules
 
@@ -604,6 +616,10 @@ pae mcp:tool:list
 
 | Tool | What it does |
 |---|---|
+| `system_api_access_allow` | Let a project call this engine's API, or change its scope |
+| `system_api_access_deny` | Take that access away from a project |
+| `system_api_access_list` | List the projects allowed to call the engine's API |
+| `system_api_access_rotate` | Replace an allowed project's API token |
 | `system_engine_cert_request` | Request the engine's own Let's Encrypt certificate |
 | `system_exim_config_get` | Get Exim mail server configuration |
 | `system_exim_config_set` | Update Exim mail server configuration |
@@ -700,8 +716,12 @@ pae mcp:tool:list
 | `backup_create` | Create a project backup |
 | `backup_delete` | Delete a project backup |
 | `backup_get` | Get a project backup |
+| `backup_item_download` | Download one item of a finished backup |
 | `backup_list` | List backups for a project |
 | `backup_restore` | Restore a project backup |
+| `backup_schedule_delete` | Remove a project's automatic backup schedule |
+| `backup_schedule_get` | Show a project's automatic backup schedule |
+| `backup_schedule_set` | Create or replace a project's automatic backup schedule |
 
 ## Tunnels
 
@@ -753,6 +773,7 @@ pae mcp:tool:list
 |---|---|
 | `task_cancel` | Cancel a queued or running task; kill the work subprocess if it still matches |
 | `task_get` | Poll a task status and new log lines after a cursor |
+| `task_list` | List tasks, newest first, filtered by project, status, action or time |
 | `task_log_list` | Page of task log lines after a timestamp and/or id cursor |
 
 ## Secret vault

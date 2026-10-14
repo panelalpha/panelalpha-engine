@@ -55,7 +55,10 @@ curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --versi
 An update is already in progress; only one can run at a time. Wait for it to finish.
 
 **The version number did not change.**
-The update failed or you already had the newest version. The log is in `/opt/panelalpha/log/engine-updates/`.
+The update failed or you already had the newest version. The log is in `/opt/panelalpha/log/engine-updates/`. If you start updates from your assistant, the engine information it reads reports a run that never finished as failed, with the reason and the last lines of the updater's output, instead of leaving it looking as if it is still running.
+
+**The update stopped with `Failed to fetch`, followed by an address.**
+The updater downloads only over `https` and stops if it cannot, including after a redirect to a plain `http` address. The engine on this VPS was not replaced. Check that the VPS can reach `get.panelalpha.com` over HTTPS, then run the update again.
 
 **The update stopped while downloading the new version.**
 You will see `Could not clone`, followed by the address it tried. The engine on this VPS was not replaced. Run the update again. If it stops at the same point, contact PanelAlpha at [manage.panelalpha.com/contact](https://manage.panelalpha.com/contact).
