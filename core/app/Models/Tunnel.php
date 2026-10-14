@@ -16,6 +16,7 @@ use Illuminate\Support\Collection;
  *   wdns_site_id?: int,
  *   path?: string,
  *   target_ip?: string,
+ *   target_domain?: string,
  *   purpose?: string,
  *   expires_at?: string,
  *   valid_until?: string,
@@ -114,6 +115,18 @@ class Tunnel extends Model
         return is_string($purpose) && in_array($purpose, self::PURPOSES, true)
             ? $purpose
             : self::PURPOSE_DEFAULT;
+    }
+
+    /**
+     * The Host the proxy forwards: the tunnel's own name, or the domain's
+     * name for a preview, which the proxy swaps back to the tunnel's in
+     * every answer.
+     */
+    public function forwardedHost(): string
+    {
+        $target = $this->getDetails()['target_domain'] ?? null;
+
+        return is_string($target) && $target !== '' ? strtolower($target) : strtolower($this->hostname);
     }
 
     /**

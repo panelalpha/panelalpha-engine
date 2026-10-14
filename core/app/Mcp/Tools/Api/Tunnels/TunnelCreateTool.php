@@ -75,7 +75,7 @@ class TunnelCreateTool extends ApiTool
             'domain' => $schema->string()->required(),
             'hostname' => $schema->string()->description('The public hostname to attach. For the panelalpha provider it must be a single label under panelalpha.online: the name of the domain it is attached to, or a sibling of it such as `api-<name>.panelalpha.online`. Omit it with panelalpha and the engine allocates a `preview-<8>` label. Required for cloudflare. Example: my-shop.panelalpha.online.'),
             'provider' => $schema->string()->description('Defaults to panelalpha. One of: cloudflare, panelalpha. Example: panelalpha.'),
-            'purpose' => $schema->string()->description('What the address is for. Defaults to default. One of: default, preview. Example: preview.'),
+            'purpose' => $schema->string()->description('What the address is for. Defaults to default. A panelalpha preview reaches the site as its domain, so WordPress answers instead of redirecting; the proxy swaps the preview name back into links, redirects and cookies. One of: default, preview. Example: preview.'),
             'ttl_minutes' => $schema->integer()->min(5)->max(43200)->description('Minutes until the engine removes the tunnel. Omit it and a preview tunnel lasts 1440 minutes (24 h); a default tunnel then never expires.'),
         ];
     }

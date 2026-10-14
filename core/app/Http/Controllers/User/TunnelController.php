@@ -119,7 +119,9 @@ class TunnelController extends Controller
                     property: 'purpose',
                     type: 'string',
                     enum: ['default', 'preview'],
-                    description: 'What the address is for. Defaults to default.',
+                    description: 'What the address is for. Defaults to default. A panelalpha preview reaches '
+                        . 'the site as its domain, so WordPress answers instead of redirecting; the proxy swaps '
+                        . 'the preview name back into links, redirects and cookies.',
                     example: 'preview'
                 ),
                 new OA\Property(

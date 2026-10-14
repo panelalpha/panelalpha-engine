@@ -108,7 +108,7 @@ class TunnelManager
     ): Tunnel {
         [$hostname, $provider] = self::assertCreatable($user, $domain, $hostname, $provider);
 
-        $tunnel = self::createWithProvider($user, $domain, $hostname, $provider);
+        $tunnel = self::createWithProvider($user, $domain, $hostname, $provider, $purpose === Tunnel::PURPOSE_PREVIEW);
         self::recordLifetime($tunnel, $purpose, $expiresAt);
 
         return $tunnel;
@@ -167,14 +167,15 @@ class TunnelManager
         User $user,
         Domain $domain,
         string $hostname,
-        string $provider
+        string $provider,
+        bool $preview
     ): Tunnel {
         if ($provider === Tunnel::PROVIDER_CLOUDFLARE) {
             return Cloudflare::createHostname($user, $domain, $hostname);
         }
 
         if ($provider === Tunnel::PROVIDER_PANELALPHA) {
-            $tunnel = PanelAlphaConnect::createTunnel($user, $domain, $hostname);
+            $tunnel = PanelAlphaConnect::createTunnel($user, $domain, $hostname, forwardDomain: $preview);
             self::rebuildForSibling($domain, $tunnel);
 
             return $tunnel;

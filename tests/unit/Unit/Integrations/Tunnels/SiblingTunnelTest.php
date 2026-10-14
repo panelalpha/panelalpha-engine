@@ -73,6 +73,43 @@ class SiblingTunnelTest extends TestCase
         );
     }
 
+    public function test_a_preview_is_forwarded_as_the_domain_it_previews(): void
+    {
+        $this->fakeConnect('preview-abcd1234');
+        $domain = $this->makeMainDomain($this->makeUser('shop', [], 'shop.example.com'), 'shop.example.com');
+
+        $tunnel = PanelAlphaConnect::createTunnel($domain->getUser(), $domain, 'preview-abcd1234.panelalpha.online', forwardDomain: true);
+
+        Http::assertSent(fn ($request): bool => $request['target_domain'] === 'shop.example.com'
+            && $request['path'] === 'preview-abcd1234');
+        $this->assertSame('preview-abcd1234.panelalpha.online', $tunnel->hostname);
+        $this->assertSame('shop.example.com', $tunnel->getDetails()['target_domain'] ?? null);
+        $this->assertSame('shop.example.com', $tunnel->forwardedHost());
+    }
+
+    public function test_a_tunnel_forwarded_as_its_own_name_records_no_target(): void
+    {
+        $this->fakeConnect('api-shop');
+        $domain = $this->makeMainDomain($this->makeUser('shop', [], 'shop.panelalpha.online'), 'shop.panelalpha.online');
+
+        $tunnel = PanelAlphaConnect::createTunnel($domain->getUser(), $domain, 'api-shop.panelalpha.online');
+
+        $this->assertArrayNotHasKey('target_domain', $tunnel->getDetails());
+        $this->assertSame('api-shop.panelalpha.online', $tunnel->forwardedHost());
+    }
+
+    public function test_the_site_does_not_answer_to_a_preview_forwarded_as_the_domain(): void
+    {
+        $domain = $this->makeMainDomain($this->makeUser('shop', [], 'shop.example.com'), 'shop.example.com');
+        Tunnel::create(['domain_id' => $domain->id, 'user_id' => $domain->user_id, 'provider' => Tunnel::PROVIDER_PANELALPHA, 'hostname' => 'api-shop.panelalpha.online', 'details' => []]);
+        Tunnel::create(['domain_id' => $domain->id, 'user_id' => $domain->user_id, 'provider' => Tunnel::PROVIDER_PANELALPHA, 'hostname' => 'preview-abcd1234.panelalpha.online', 'details' => ['target_domain' => 'shop.example.com', 'purpose' => Tunnel::PURPOSE_PREVIEW]]);
+
+        $this->assertSame(['api-shop.panelalpha.online'], $domain->siblingTunnelHostnames());
+
+        $http = (new RoutingCompiler(new System()))->compile([$domain->fresh()])['http'];
+        $this->assertSame(['shop.example.com', 'api-shop.panelalpha.online'], $http[0]['server_names']);
+    }
+
     private function fakeConnect(string $path): void
     {
         Http::fake([
