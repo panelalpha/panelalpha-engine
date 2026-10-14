@@ -38,7 +38,7 @@
 <p>
 <a href="#الخطوة-1-ثبّت-engine-على-خادمك-vps"><img src="https://img.shields.io/badge/install-one--liner-2f8f46" alt="تثبيت بسطر واحد"></a>
 <a href="#الخطوة-1-ثبّت-engine-على-خادمك-vps"><img src="https://img.shields.io/badge/Debian_12%2F13-Ubuntu_22.04%2F24.04%2F26.04-a80030" alt="أنظمة التشغيل المدعومة"></a>
-<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-204_tools-6f42c1" alt="204 أداة MCP"></a>
+<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-225_tools-6f42c1" alt="225 أداة MCP"></a>
 <a href="#الترخيص"><img src="https://img.shields.io/badge/license-Apache_2.0-0b7285" alt="Apache 2.0"></a>
 <a href="https://discord.gg/9twHWR7xGX"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="انضم إلى Discord"></a>
 </p>
@@ -98,7 +98,7 @@ PanelAlpha Engine برنامج تثبّته على خادم VPS لاستضافة
 مثلاً، لتثبيت Engine ونشر n8n في الوقت نفسه، هذا كل ما تحتاجه:
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
 ```
 
 في النهاية يعرض عنوان موقعك الجديد، وإذا لم تمرّر `--no-password` فيعرض أيضاً كلمة المرور التي تفتحه. للمستودعات الخاصة، أو كلمة مرور من اختيارك، أو تشغيل تطبيق على خادم عليه Engine أصلاً، راجع: [One-line app installation command](docs/02-getting-started/install.md#one-line-app-installation-command).
@@ -106,7 +106,7 @@ curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.co
 تفضّل تنفيذ الخطوتين منفصلتين؟ استخدم الأمر أدناه لتثبيت Engine فقط، وانشر تطبيقك لاحقاً من خلال مساعدك (انظر الخطوة 2):
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 هذا كل شيء. خادمك جاهز. لاسم خاص، أو شهادة TLS خاصة بك، أو خادم خلف NAT، راجع: [خيارات التثبيت](docs/02-getting-started/install.md).
@@ -176,7 +176,7 @@ pae connect
 | `أعدّ نفق Cloudflare لـ n8n.mydomain.com.` | إعداد DNS والنفق، وهي أيضاً طريقة التقديم من خادم خلف NAT. |
 | `كم كان الزيارات الأسبوع الماضي؟` | الاستهلاك والسجلات والحدود لذلك المشروع، وللخادم كله. |
 
-أمثلة أوفى: [ماذا تطلب](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). القائمة الكاملة لما يصل إليه مساعدك: [204 أداة](docs/04-connecting-your-ai/your-assistant.md).
+أمثلة أوفى: [ماذا تطلب](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). القائمة الكاملة لما يصل إليه مساعدك: [225 أداة](docs/04-connecting-your-ai/your-assistant.md).
 
 ---
 
@@ -321,7 +321,7 @@ PanelAlpha Engine مجاني ومفتوح المصدر برخصة Apache 2.0. أ
 ## خادمك على بعد أمر واحد
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 ## الأمان

@@ -7,6 +7,8 @@ use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\FailureOutput;
 use App\Lib\Deploy\Platform\Strategies;
+use App\Models\ProxyRule;
+use App\Models\User;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\AnsweringPort;
 use App\System\Project\Dind\AppHealth;
@@ -70,6 +72,12 @@ final class ZeroDowntimeRedeploy
 
     private const LOG_LINES = 40;
 
+    /**
+     * Docker's exit codes for a start that failed on the image's command (not executable, not found).
+     * Any other failed start is 128: the daemon or the network, e.g. an address the running copy holds.
+     */
+    private const COMMAND_FAILED_EXIT_CODES = ['126', '127'];
+
     /** How long, once one of the copy's guessed ports answered, the others get to stop being silent or answering 5xx. */
     private const CHOICE_SECONDS = 60;
 
@@ -94,60 +102,94 @@ final class ZeroDowntimeRedeploy
     ) {
     }
 
-    /** Null to replace the app in place; the deploy log says why when something ran. */
+    /**
+     * Null to replace the app in place; the deploy log says why when something ran. This deploy holds the
+     * lock, so a second generation still here is an interrupted deploy's. A first start says nothing.
+     */
     public static function plan(DindProject $project): ?self
     {
         $logger = $project->shell()->logger();
         if ($logger === null) {
             return null;
         }
-        // This deploy holds the lock: a second generation still here is an
-        // interrupted deploy's.
         GenerationSweep::settleNext($project);
         if (self::copyHeld($project->username())) {
-            $logger->info('Replacing the running app in place, not beside it: a second copy an earlier redeploy left still serves the site, and it does until the new version answers');
-
-            return null;
+            return self::notBeside($logger, 'a second copy an earlier redeploy left still serves the site, and it does until the new version answers');
         }
 
-        // Nothing running, nothing to keep: a first start says nothing.
         $user = $project->userModel();
         $routed = $user->getAppPort();
         if ($routed === null || self::canonicalId($project, null) === null) {
             return null;
         }
         $config = self::composeConfig($project);
-        // The same guess, with the same services behind it: the port the last deploy found serving stands.
         $choice = AnsweringPort::choice($project);
-        $kept = AnsweringPort::claim($user, $choice, $config);
-        if ($kept !== null && $kept !== $routed) {
-            $project->networking()->routeTo($user, $kept);
-            $logger->info("Keeping the site on port {$kept}, where the last deploy found it served, not on the guessed {$routed}: nothing behind those ports has changed");
-            $routed = $kept;
-        }
-        $next = $config === null
-            ? 'its compose file could not be read'
-            : NextGeneration::plan($config, $routed, self::repositoryCompose($project));
-        if ($next instanceof NextGeneration && self::canonicalId($project, $next->service) === null) {
-            $next = "{$next->service} is not running, so there is nothing to keep serving";
-        }
-
-        // The rules stay where the running version answers until the switch.
+        $kept = self::keepLastDeploysPort($project, $user, $logger, $choice, $config, $routed);
+        $routed = $kept ?? $routed;
+        $next = self::nextOfRunning($project, $config, $routed);
         $served = RoutingSnapshot::servedPort($project->username()) ?? $routed;
-        $reason = is_string($next) ? $next : self::whyNotSwitchable($project, $next, $served);
+        if (is_string($next)) {
+            return self::notBeside($logger, $next);
+        }
+        $reason = self::whyNotSwitchable($project, $next, $served);
         if ($reason !== null) {
-            $logger->info("Replacing the running app in place, not beside it: {$reason}");
-
-            return null;
+            return self::notBeside($logger, $reason);
         }
 
-        /** @var NextGeneration $next */
         $logger->info("Zero-downtime redeploy: the new {$next->service} starts beside the running one, and traffic moves to it once it answers");
 
         $swap = new self($project, $next, $logger, $routed, $served);
         $swap->choice = $kept === null && $choice !== null && $choice['primary'] === $routed ? $choice : null;
 
         return $swap;
+    }
+
+    private static function notBeside(DeployLogger $logger, string $reason): null
+    {
+        $logger->info("Replacing the running app in place, not beside it: {$reason}");
+
+        return null;
+    }
+
+    /**
+     * The same guess, with the same services behind it: the port the last deploy found serving stands,
+     * and the site is routed there. That port, or null when none is claimed.
+     *
+     * @param ?array{primary: int, alternatives: list<int>} $choice
+     * @param ?array<string, mixed> $config
+     */
+    private static function keepLastDeploysPort(DindProject $project, User $user, DeployLogger $logger, ?array $choice, ?array $config, int $routed): ?int
+    {
+        $kept = AnsweringPort::claim($user, $choice, $config);
+        if ($kept !== null && $kept !== $routed) {
+            $project->networking()->routeTo($user, $kept);
+            $logger->info("Keeping the site on port {$kept}, where the last deploy found it served, not on the guessed {$routed}: nothing behind those ports has changed");
+        }
+
+        return $kept;
+    }
+
+    /**
+     * The second generation of a service that runs, else why there is none.
+     *
+     * @param ?array<string, mixed> $config
+     */
+    private static function nextOfRunning(DindProject $project, ?array $config, int $routed): NextGeneration|string
+    {
+        $next = self::planNext($project, $config, $routed);
+        if ($next instanceof NextGeneration && self::canonicalId($project, $next->service) === null) {
+            return "{$next->service} is not running, so there is nothing to keep serving";
+        }
+
+        return $next;
+    }
+
+    /** @param ?array<string, mixed> $config */
+    private static function planNext(DindProject $project, ?array $config, int $routed): NextGeneration|string
+    {
+        return $config === null
+            ? 'its compose file could not be read'
+            : NextGeneration::plan($config, $routed, self::repositoryCompose($project));
     }
 
     /**
@@ -159,8 +201,46 @@ final class ZeroDowntimeRedeploy
     {
         $state = new GenerationState($this->project->username());
         $nextProject = $this->next->projectName();
-        $state->put(GenerationState::NEXT, ['project' => $nextProject, 'routed' => $this->routedPort, 'routes' => [], 'rules' => []]);
+        $notStarted = $this->startBeside($state, $nextProject);
+        if ($notStarted !== null) {
+            return $notStarted;
+        }
 
+        $container = $this->containerOf($nextProject);
+        $this->routes = $this->routesOf($container);
+        if ($this->realignedToBoundPort($container, $alignment)) {
+            $restarted = $this->restartRealigned();
+            if ($restarted !== null) {
+                return $restarted;
+            }
+            $container = $this->containerOf($nextProject);
+            $this->routes = $this->routesOf($container);
+        }
+        if (!isset($this->routes[$this->routedPort])) {
+            return $this->noRoutedPort($container);
+        }
+        $failure = $this->chooseOnCopy($container);
+        $state->put(GenerationState::NEXT, ['project' => $nextProject, 'routed' => $this->routedPort, 'routes' => $this->routes, 'rules' => []]);
+
+        $port = $this->routes[$this->routedPort];
+        $failure ??= $this->awaitAnswer($port, $container);
+        if ($failure !== null) {
+            return $this->turnedAway($port, $failure, $container);
+        }
+        $this->logger->ok("The new version answers on port {$port}");
+        RoutingSnapshot::markGated($this->project->username());
+
+        return $this->switchTraffic($state, $nextProject, $port);
+    }
+
+    /**
+     * The second copy started and recorded: null once it runs, else what {@see begin()} returns.
+     *
+     * @return string|array{stdout: string, stderr: string, exit_code: int, previous_kept: true}|null
+     */
+    private function startBeside(GenerationState $state, string $nextProject): string|array|null
+    {
+        $state->put(GenerationState::NEXT, ['project' => $nextProject, 'routed' => $this->routedPort, 'routes' => [], 'rules' => []]);
         $failure = $this->writeOverride();
         if ($failure !== null) {
             return $this->inPlace("its override could not be written: {$failure}");
@@ -168,66 +248,74 @@ final class ZeroDowntimeRedeploy
 
         $this->logger->info("Starting the new version beside the running one (docker compose -p {$nextProject} up -d {$this->next->service})");
         $failure = $this->startCopy(false);
-        if ($failure !== null) {
-            return $this->notStarted('the second copy did not start', $failure);
+
+        return $failure === null ? null : $this->notStarted('the second copy did not start', $failure);
+    }
+
+    /**
+     * Read while it runs: Docker names no port of a copy in restart back-off.
+     *
+     * @return array<int, int>
+     */
+    private function routesOf(?string $container): array
+    {
+        return $container === null ? [] : $this->publishedPorts($container);
+    }
+
+    /**
+     * A first start forwards to the port the app really binds, so the copy has to, or it is probed on a
+     * port nothing listens on. True when the run file was realigned and the copy must start again.
+     */
+    private function realignedToBoundPort(?string $container, ?AppPortAlignment $alignment): bool
+    {
+        return $container !== null && $this->next->service === GeneratedCompose::APP_SERVICE
+            && ($alignment ?? new AppPortAlignment($this->project))->alignTo($container, fn (): bool => $this->failureOf($container) !== null);
+    }
+
+    /**
+     * No port of the copy is the routed one. A copy that stopped running is the new version failing,
+     * not a reason to replace the running one.
+     *
+     * @return string|array{stdout: string, stderr: string, exit_code: int, previous_kept: true}
+     */
+    private function noRoutedPort(?string $container): string|array
+    {
+        $dead = $container === null ? null : $this->failureOf($container);
+        if ($dead !== null) {
+            return $this->refuse($dead, $container);
         }
 
-        $container = $this->containerOf($nextProject);
-        // Read while it runs: Docker names no port of a copy in restart back-off.
-        $this->routes = $container === null ? [] : $this->publishedPorts($container);
-        // A first start forwards to the port the app really binds, so the copy
-        // has to, or it is probed on a port nothing listens on.
-        if ($container !== null && $this->next->service === GeneratedCompose::APP_SERVICE
-            && ($alignment ?? new AppPortAlignment($this->project))->alignTo($container, fn (): bool => $this->failureOf($container) !== null)) {
-            $restarted = $this->restartRealigned();
-            if ($restarted !== null) {
-                return $restarted;
-            }
-            $container = $this->containerOf($nextProject);
-            $this->routes = $container === null ? [] : $this->publishedPorts($container);
-        }
-        if (!isset($this->routes[$this->routedPort])) {
-            // A copy that stopped running is the new version failing, not a reason to replace the running one.
-            $dead = $container === null ? null : $this->failureOf($container);
-            if ($dead !== null) {
-                return $this->refuse($dead, $container);
-            }
+        return $this->inPlace('the second copy published no port Docker would name');
+    }
 
-            return $this->inPlace('the second copy published no port Docker would name');
-        }
-        // A guess between equal ports that no deploy settled for these ports is made on the copy first.
-        $failure = $this->chooseOnCopy($container);
-        $state->put(GenerationState::NEXT, ['project' => $nextProject, 'routed' => $this->routedPort, 'routes' => $this->routes, 'rules' => []]);
+    /** @return array{stdout: string, stderr: string, exit_code: int, previous_kept: true} */
+    private function turnedAway(int $port, string $failure, ?string $container): array
+    {
+        $this->logger->warn("The new version did not become healthy on port {$port}: {$failure}");
+        $this->recordOutput($container);
+        $this->discard();
 
-        $port = $this->routes[$this->routedPort];
-        $failure ??= $this->awaitAnswer($port, $container);
-        if ($failure !== null) {
-            $this->logger->warn("The new version did not become healthy on port {$port}: {$failure}");
-            $this->recordOutput($container);
-            $this->discard();
+        return [
+            'stdout' => '',
+            'stderr' => self::refusal($failure),
+            'exit_code' => 1,
+            self::PREVIOUS_KEPT => true,
+        ];
+    }
 
-            return [
-                'stdout' => '',
-                'stderr' => self::refusal($failure),
-                'exit_code' => 1,
-                self::PREVIOUS_KEPT => true,
-            ];
-        }
-        $this->logger->ok("The new version answers on port {$port}");
-        RoutingSnapshot::markGated($this->project->username());
-
+    /**
+     * The site's rules moved to the copy: {@see SWITCHED} once they are, else what {@see begin()} returns.
+     *
+     * @return string|array{stdout: string, stderr: string, exit_code: int, copy_kept: true, serving: string}
+     */
+    private function switchTraffic(GenerationState $state, string $nextProject, int $port): string|array
+    {
         $this->switched = self::switchMap($this->routes, $this->routedPort, $this->servedPort);
         $switch = new RouteSwitch($this->project->system(), $this->project->username());
         try {
             $this->movedRules = $switch->move($this->switched);
         } catch (\Throwable $e) {
-            // The rules are saved before the reload that failed: put them back.
-            try {
-                $switch->move(self::inverse($this->switched));
-            } catch (\Throwable) {
-            }
-
-            return $this->inPlace('the webserver could not be switched: ' . AppHealth::trimReason($e->getMessage()));
+            return $this->switchFailed($switch, $state, $nextProject, $e);
         }
         if ($this->movedRules === []) {
             return $this->inPlace("no proxy rule sends traffic to port {$this->servedPort}");
@@ -237,6 +325,69 @@ final class ZeroDowntimeRedeploy
         sleep(self::DRAIN_SECONDS);
 
         return self::SWITCHED;
+    }
+
+    /**
+     * The rules are moved back; replace in place once they are.
+     *
+     * @return string|array{stdout: string, stderr: string, exit_code: int, copy_kept: true, serving: string}
+     */
+    private function switchFailed(RouteSwitch $switch, GenerationState $state, string $nextProject, \Throwable $e): string|array
+    {
+        $leftOnCopy = $this->rulesOnCopy($switch);
+        try {
+            $switch->move(self::inverse($this->switched));
+        } catch (\Throwable $undo) {
+            return $this->keepCopyAfterFailedSwitch($state, $nextProject, $leftOnCopy, $e, $undo);
+        }
+
+        return $this->inPlace('the webserver could not be switched: ' . AppHealth::trimReason($e->getMessage()));
+    }
+
+    /**
+     * The rules are saved before the reload that failed: those on the copy's port, read before the
+     * undo moves them, or fails to.
+     *
+     * @return list<int>
+     */
+    private function rulesOnCopy(RouteSwitch $switch): array
+    {
+        $copyPort = $this->switched[$this->servedPort] ?? 0;
+
+        return $copyPort === 0 ? [] : array_map(
+            static fn (ProxyRule $rule): int => (int) $rule->id,
+            $switch->rulesTo([$copyPort])
+        );
+    }
+
+    /**
+     * Rules may still point at the copy: it stays, recorded with those rule ids, so the sweep moves them
+     * back before removing it.
+     *
+     * @param list<int> $leftOnCopy
+     * @return array{stdout: string, stderr: string, exit_code: int, copy_kept: true, serving: string}
+     */
+    private function keepCopyAfterFailedSwitch(GenerationState $state, string $nextProject, array $leftOnCopy, \Throwable $e, \Throwable $undo): array
+    {
+        $reason = 'the webserver could not be switched, and moving the rules back failed too: '
+            . AppHealth::trimReason($e->getMessage()) . ' / ' . AppHealth::trimReason($undo->getMessage());
+        $this->logger->warn($reason);
+        $state->put(GenerationState::NEXT, [
+            'project' => $nextProject,
+            'routed' => $this->routedPort,
+            'routes' => $this->switched,
+            'rules' => $leftOnCopy,
+            'back' => $this->servedPort,
+        ]);
+
+        return [
+            'stdout' => '',
+            'stderr' => "The new version could not be switched to: {$reason}. "
+                . 'Its second copy keeps serving the site until the rules can be moved back to the previous version.',
+            'exit_code' => 1,
+            self::COPY_KEPT => true,
+            self::SERVING => 'A failed route switch left the new version\'s second copy serving the site; nothing was torn down',
+        ];
     }
 
     /** @return list<string> */
@@ -256,15 +407,7 @@ final class ZeroDowntimeRedeploy
     public function finish(bool $replaced, string $output = ''): ?array
     {
         if (!$replaced) {
-            if ($this->movedRules === [] || self::answersWithin($this->project, $this->servedPort, self::BACK_SECONDS) === null) {
-                $this->abandon();
-
-                return null;
-            }
-            $this->logger->warn("Replacing the running app failed and nothing answers on port {$this->servedPort}; the second copy keeps serving while the previous version is started again");
-
-            return $this->rollBack('could not replace the running app (' . AppHealth::trimReason(FailureOutput::withoutNoise($output))
-                . "), and nothing answers on port {$this->servedPort} any more");
+            return $this->replaceFailed($output);
         }
         if ($this->movedRules !== []) {
             $container = $this->canonicalContainer();
@@ -276,11 +419,7 @@ final class ZeroDowntimeRedeploy
                 return $this->rollBack("did not answer on its own port {$this->routedPort} once it replaced the running one: {$failure}");
             }
         }
-        try {
-            $this->restoreRoutes(self::inverse($this->routes));
-        } catch (\Throwable $e) {
-            $this->logger->warn('Traffic could not be moved back yet, so the second copy keeps serving: ' . AppHealth::trimReason($e->getMessage()));
-
+        if (!$this->moveTrafficBack(self::inverse($this->routes))) {
             return null;
         }
         $this->discard();
@@ -295,19 +434,53 @@ final class ZeroDowntimeRedeploy
      */
     public function abandon(): void
     {
-        if ($this->movedRules !== [] && self::answersWithin($this->project, $this->servedPort, self::BACK_SECONDS) !== null) {
+        if ($this->onlyTheCopyServes()) {
             $this->logger->warn("Traffic stays on the second copy: nothing answers on port {$this->servedPort}");
 
             return;
         }
-        try {
-            $this->restoreRoutes(self::inverse($this->switched));
-        } catch (\Throwable $e) {
-            $this->logger->warn('Traffic could not be moved back yet, so the second copy keeps serving: ' . AppHealth::trimReason($e->getMessage()));
-
+        if (!$this->moveTrafficBack(self::inverse($this->switched))) {
             return;
         }
         $this->discard();
+    }
+
+    /** @return ?array{stdout: string, stderr: string, exit_code: int, previous_kept?: true, copy_kept?: true, serving: string} */
+    private function replaceFailed(string $output): ?array
+    {
+        if (!$this->onlyTheCopyServes()) {
+            $this->abandon();
+
+            return null;
+        }
+        $this->logger->warn("Replacing the running app failed and nothing answers on port {$this->servedPort}; the second copy keeps serving while the previous version is started again");
+
+        return $this->rollBack('could not replace the running app (' . AppHealth::trimReason(FailureOutput::withoutNoise($output))
+            . "), and nothing answers on port {$this->servedPort} any more");
+    }
+
+    /** The site's rules are on the copy, and the port they would go back to does not answer. */
+    private function onlyTheCopyServes(): bool
+    {
+        return $this->movedRules !== [] && self::answersWithin($this->project, $this->servedPort, self::BACK_SECONDS) !== null;
+    }
+
+    /**
+     * False when the rules could not be moved back yet, and the second copy keeps serving.
+     *
+     * @param array<int, int> $map
+     */
+    private function moveTrafficBack(array $map): bool
+    {
+        try {
+            $this->restoreRoutes($map);
+        } catch (\Throwable $e) {
+            $this->logger->warn('Traffic could not be moved back yet, so the second copy keeps serving: ' . AppHealth::trimReason($e->getMessage()));
+
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -376,14 +549,8 @@ final class ZeroDowntimeRedeploy
      */
     public static function servicesToPull(array $config): array
     {
-        $project = (string) ($config['name'] ?? '');
         $services = is_array($config['services'] ?? null) ? $config['services'] : [];
-        $built = [];
-        foreach ($services as $name => $service) {
-            if (is_array($service) && isset($service['build'])) {
-                $built[] = self::withoutLatest((string) ($service['image'] ?? "{$project}-{$name}"));
-            }
-        }
+        $built = self::builtImages($services, (string) ($config['name'] ?? ''));
         $pull = [];
         foreach ($services as $name => $service) {
             $image = is_array($service) ? trim((string) ($service['image'] ?? '')) : '';
@@ -396,6 +563,22 @@ final class ZeroDowntimeRedeploy
         }
 
         return $pull;
+    }
+
+    /**
+     * @param array<mixed> $services
+     * @return list<string> the images those services build, without `:latest`
+     */
+    private static function builtImages(array $services, string $project): array
+    {
+        $built = [];
+        foreach ($services as $name => $service) {
+            if (is_array($service) && isset($service['build'])) {
+                $built[] = self::withoutLatest((string) ($service['image'] ?? "{$project}-{$name}"));
+            }
+        }
+
+        return $built;
     }
 
     private static function withoutLatest(string $image): string
@@ -454,7 +637,10 @@ final class ZeroDowntimeRedeploy
         return $fallback;
     }
 
-    /** Why "<status> <exit code> <restarts>" from `docker inspect` will not answer; null while it may. */
+    /**
+     * Why "<status> <exit code> <restarts>" from `docker inspect` will not answer; null while it may.
+     * A container running again after a restart has its exit code reset, so restarts count instead.
+     */
     public static function containerFailure(string $inspect): ?string
     {
         $fields = preg_split('/\s+/', trim($inspect)) ?: [];
@@ -470,12 +656,9 @@ final class ZeroDowntimeRedeploy
         if ($status === 'restarting') {
             return "it keeps restarting (last exit code {$exit})";
         }
-        // Docker's codes for a start that failed on the image's command (127 not found, 126 not executable).
-        // Any other failed start is 128: the daemon or the network, e.g. an address the running copy holds.
-        if ($status === 'created' && in_array($exit, ['126', '127'], true)) {
+        if ($status === 'created' && in_array($exit, self::COMMAND_FAILED_EXIT_CODES, true)) {
             return "it could not be started (exit code {$exit})";
         }
-        // Running again after a restart: the exit code has been reset by then.
         if ($restarts > 0) {
             return "it keeps restarting ({$restarts} restarts so far)";
         }
@@ -563,10 +746,7 @@ final class ZeroDowntimeRedeploy
      */
     private function restartRealigned(): string|array|null
     {
-        $config = self::composeConfig($this->project);
-        $next = $config === null
-            ? 'its compose file could not be read'
-            : NextGeneration::plan($config, $this->routedPort, self::repositoryCompose($this->project));
+        $next = self::planNext($this->project, self::composeConfig($this->project), $this->routedPort);
         if (is_string($next)) {
             return $this->inPlace("the second copy could not follow the port the new version binds: {$next}");
         }
@@ -582,8 +762,9 @@ final class ZeroDowntimeRedeploy
     }
 
     /**
-     * The guess made again on the copy, before it is probed: the site goes where a first deploy's health check
-     * would send it ({@see AnsweringPort::better()}). Null once decided, else why the copy will not answer.
+     * The guess between equal ports no deploy settled, made again on the copy before it is probed: the site goes
+     * where a first deploy's health check would send it ({@see AnsweringPort::better()}). Null once decided,
+     * else why the copy will not answer.
      */
     private function chooseOnCopy(?string $container): ?string
     {
@@ -595,17 +776,20 @@ final class ZeroDowntimeRedeploy
         if ($choice['alternatives'] === []) {
             return null;
         }
+
+        return $this->askCopy($choice, $container);
+    }
+
+    /** @param array{primary: int, alternatives: list<int>} $choice */
+    private function askCopy(array $choice, string $container): ?string
+    {
         $ports = [$this->routedPort, ...$choice['alternatives']];
         $this->logger->info('Asking the new version which of ports ' . implode(', ', $ports) . ' serves the site: no deploy found it with what serves behind them now');
         $deadline = Carbon::now()->getTimestamp() + $this->startPeriod();
         $answeredSince = null;
         while (true) {
             $this->logger->throwIfCancelled();
-            $results = [];
-            foreach ($ports as $published) {
-                $answer = self::probe($this->project, $this->routes[$published]);
-                $results[] = ['port' => $published, 'http_code' => $answer['http_code'], 'detail' => $answer['detail']];
-            }
+            $results = $this->probeCopy($ports);
             if (AnsweringPort::servesAPage($results[0]['http_code'])) {
                 return null;
             }
@@ -614,15 +798,8 @@ final class ZeroDowntimeRedeploy
             if (array_filter($codes) !== []) {
                 $answeredSince ??= $now;
             }
-            // A silent port, or one answering what a starting app answers, gets the window to answer otherwise.
-            $waiting = array_filter($codes, static fn (?int $code): bool => $code === null || in_array($code, [500, 502, 503, 504], true));
-            if ($answeredSince !== null && ($waiting === [] || $now - $answeredSince >= self::CHOICE_SECONDS)) {
-                $better = AnsweringPort::better($choice, $results);
-                if ($better !== null) {
-                    $this->project->networking()->routeTo($this->project->userModel(), $better['port']);
-                    $this->logger->info("Routing the site to port {$better['port']} instead of {$this->routedPort}: on the new version {$better['reason']}");
-                    $this->routedPort = $better['port'];
-                }
+            if ($answeredSince !== null && (!self::anyStillStarting($codes) || $now - $answeredSince >= self::CHOICE_SECONDS)) {
+                $this->routeToBetter($choice, $results);
 
                 return null;
             }
@@ -635,6 +812,46 @@ final class ZeroDowntimeRedeploy
             }
             Sleep::sleep(self::POLL_SECONDS);
         }
+    }
+
+    /**
+     * @param list<int> $ports published ports, probed on the copy's
+     * @return list<array{port: int, http_code: ?int, detail: string}>
+     */
+    private function probeCopy(array $ports): array
+    {
+        $results = [];
+        foreach ($ports as $published) {
+            $answer = self::probe($this->project, $this->routes[$published]);
+            $results[] = ['port' => $published, 'http_code' => $answer['http_code'], 'detail' => $answer['detail']];
+        }
+
+        return $results;
+    }
+
+    /**
+     * A silent port, or one answering what a starting app answers: it gets the window to answer otherwise.
+     *
+     * @param list<?int> $codes
+     */
+    private static function anyStillStarting(array $codes): bool
+    {
+        return array_filter($codes, static fn (?int $code): bool => $code === null || in_array($code, [500, 502, 503, 504], true)) !== [];
+    }
+
+    /**
+     * @param array{primary: int, alternatives: list<int>} $choice
+     * @param list<array{port: int, http_code: ?int, detail: string}> $results
+     */
+    private function routeToBetter(array $choice, array $results): void
+    {
+        $better = AnsweringPort::better($choice, $results);
+        if ($better === null) {
+            return;
+        }
+        $this->project->networking()->routeTo($this->project->userModel(), $better['port']);
+        $this->logger->info("Routing the site to port {$better['port']} instead of {$this->routedPort}: on the new version {$better['reason']}");
+        $this->routedPort = $better['port'];
     }
 
     /**
@@ -762,10 +979,12 @@ final class ZeroDowntimeRedeploy
         return self::gateAnswer(AppHealth::parseProbeOutput($raw, [$port])[0]);
     }
 
-    /** Null once $port serves a page, else why it will not. */
+    /**
+     * Null once $port serves a page, else why it will not. On Laravel's clock and sleep, so a test runs
+     * these windows without waiting them out.
+     */
     private function awaitAnswer(int $port, ?string $container): ?string
     {
-        // Laravel's clock and sleep, so a test runs these windows without waiting them out.
         $deadline = Carbon::now()->getTimestamp() + $this->startPeriod();
         $erroringSince = null;
         while (true) {
@@ -883,7 +1102,11 @@ final class ZeroDowntimeRedeploy
         }
     }
 
-    /** @param array<int, int> $map */
+    /**
+     * The rules off the copy, recorded at once: it no longer holds the site, even should removing it fail.
+     *
+     * @param array<int, int> $map
+     */
     private function restoreRoutes(array $map): void
     {
         if ($this->movedRules === []) {
@@ -891,12 +1114,7 @@ final class ZeroDowntimeRedeploy
         }
         (new RouteSwitch($this->project->system(), $this->project->username()))->move($map, $this->movedRules);
         $this->movedRules = [];
-        // The copy no longer holds the site, even should removing it fail.
-        $state = new GenerationState($this->project->username());
-        $next = $state->get(GenerationState::NEXT);
-        if ($next !== null) {
-            $state->put(GenerationState::NEXT, ['rules' => []] + $next);
-        }
+        $this->updateNext(['rules' => []]);
         sleep(self::DRAIN_SECONDS);
     }
 
@@ -949,7 +1167,8 @@ final class ZeroDowntimeRedeploy
 
     /**
      * Nothing else answers: the copy keeps the site, and moves back only to the app's port once that
-     * answers ({@see GenerationSweep::settleNext()}).
+     * answers ({@see GenerationSweep::settleNext()}). The routing snapshot goes: nothing is left to restore,
+     * and nothing may route the site away from the copy.
      *
      * @return array{stdout: string, stderr: string, exit_code: int, copy_kept: true, serving: string}
      */
@@ -957,13 +1176,8 @@ final class ZeroDowntimeRedeploy
     {
         $copy = $this->switched[$this->servedPort] ?? 0;
         $back = $this->project->userModel()->getAppPort() ?? $this->routedPort;
-        $state = new GenerationState($this->project->username());
-        $next = $state->get(GenerationState::NEXT);
-        if ($next !== null) {
-            $state->put(GenerationState::NEXT, ['back' => $back] + $next);
-        }
-        // Nothing left to restore, and nothing to route the site away from the copy.
-        $state->forget(GenerationState::ROUTES);
+        $this->updateNext(['back' => $back]);
+        (new GenerationState($this->project->username()))->forget(GenerationState::ROUTES);
         $this->logger->warn("The previous version could not be started again: {$failure}. The new version's second copy keeps serving the site on port {$copy} until the app answers on port {$back}");
 
         return [
@@ -974,6 +1188,16 @@ final class ZeroDowntimeRedeploy
             self::COPY_KEPT => true,
             self::SERVING => 'The new version\'s second copy keeps serving the site; nothing was torn down',
         ];
+    }
+
+    /** @param array<string, mixed> $fields set on the NEXT entry, when there is one */
+    private function updateNext(array $fields): void
+    {
+        $state = new GenerationState($this->project->username());
+        $next = $state->get(GenerationState::NEXT);
+        if ($next !== null) {
+            $state->put(GenerationState::NEXT, $fields + $next);
+        }
     }
 
     private function inPlace(string $reason): string

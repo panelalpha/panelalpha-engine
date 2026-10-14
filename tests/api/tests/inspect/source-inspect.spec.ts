@@ -8,23 +8,39 @@ import { uniqueId } from '@/helpers/random';
 import { skipUnless } from '@/helpers/test-helpers';
 import { validateParsedApiResponse } from '@/helpers/validate-parsed-response';
 import { wpCliUnavailableReason, wpPath } from '@/helpers/wpcli-helpers';
+import { expectStatus } from '@/helpers/expect-status';
 
 test.describe('source inspect', () => {
   test('inspecting without a token is refused', async ({ anonymousRequest }) => {
     const response = await anonymousRequest.post('source/inspect', {
       data: { source: 'github.com/octocat/Spoon-Knife' },
     });
-    expect(response.status()).toBe(401);
+    await expectStatus(response, 401);
   });
 
   test('a missing source is a 422', async ({ api }) => {
     const response = await api.inspectSourceRaw({});
-    expect(response.status).toBe(422);
+    await expectStatus(response, 422);
   });
 
   test('garbage and missing paths are 422', async ({ api }) => {
-    expect((await api.inspectSourceRaw({ source: 'not a source' })).status).toBe(422);
-    expect((await api.inspectSourceRaw({ source: '/no/such/directory' })).status).toBe(422);
+    await expectStatus(await api.inspectSourceRaw({ source: 'not a source' }), 422);
+    await expectStatus(await api.inspectSourceRaw({ source: '/no/such/directory' }), 422);
+  });
+
+  test('a source on an internal address is refused', async ({ api }) => {
+    for (const source of [
+      'http://127.0.0.1/x.git',
+      'http://169.254.169.254/x.git',
+      'http://[::1]/x.git',
+      'http://10.0.0.5/x.git',
+    ]) {
+      const response = await api.inspectSourceRaw({ source, type: 'git' });
+      await expectStatus(response, 422);
+      const body = response.body as { problems?: { field?: string; code?: string }[] };
+      expect(body.problems?.[0]?.field, source).toBe('source');
+      expect(body.problems?.[0]?.code, source).toBe('host_refused');
+    }
   });
 
   test('a public git repository inspects without deploying', async ({ api }) => {
@@ -59,12 +75,12 @@ test.describe('source inspect', () => {
       source: configuredGitRepo(),
       recipe: 'Not A Recipe',
     });
-    expect(response.status).toBe(422);
+    await expectStatus(response, 422);
   });
 
   test('an unknown project is a 404 on both inspect paths', async ({ api }) => {
-    expect((await api.inspectProjectRaw('nosuchprojectxx')).status).toBe(404);
-    expect((await api.inspectProjectDeprecatedRaw('nosuchprojectxx')).status).toBe(404);
+    await expectStatus(await api.inspectProjectRaw('nosuchprojectxx'), 404);
+    await expectStatus(await api.inspectProjectDeprecatedRaw('nosuchprojectxx'), 404);
   });
 
   test('POST /source/inspect with a username matches GET /projects/{u}/inspect', async ({
@@ -84,8 +100,8 @@ test.describe('source inspect', () => {
   test('the deprecated source-inspection alias still answers', async ({ api, setupUser }) => {
     const current = await api.inspectProjectRaw(setupUser.username);
     const deprecated = await api.inspectProjectDeprecatedRaw(setupUser.username);
-    expect(current.status).toBe(200);
-    expect(deprecated.status).toBe(200);
+    await expectStatus(current, 200);
+    await expectStatus(deprecated, 200);
     const currentBody = current.body as { data?: { application?: { strategy?: string } } };
     const deprecatedBody = deprecated.body as { data?: { application?: { strategy?: string } } };
     expect(deprecatedBody.data?.application?.strategy).toBe(
@@ -93,8 +109,8 @@ test.describe('source inspect', () => {
     );
   });
 
-  test('inspecting an empty DinD project is accepted', async ({ api, userFactory }) => {
-    const user = await userFactory.createDindUser();
+  test('inspecting an empty DinD project is accepted', async ({ api, sharedEmptyDind }) => {
+    const user = await sharedEmptyDind.get();
     skipUnless(user, 'DinD is not available on this engine.');
     const response = await api.inspectProjectRaw(user.username);
     expect([200, 422]).toContain(response.status);
@@ -123,16 +139,20 @@ test.describe('source inspect', () => {
 });
 
 test.describe('source inspect of known instance kinds', () => {
-  test('the default public git fixture inspects as static', async ({ api }) => {
-    test.setTimeout(Timeouts.deploy);
-    test.skip(
-      configuredGitRepo() !== DEFAULT_DEPLOY_GIT_REPO,
-      'GIT_REPO is overridden; this assertion is for Spoon-Knife.'
-    );
-    const report = await api.inspectSource({ source: DEFAULT_DEPLOY_GIT_REPO, type: 'git' });
-    expect(inspectPlatform(report)).toBe('static');
-    expect(inspectStrategy(report)).toBe('static');
-  });
+  test(
+    'the default public git fixture inspects as static',
+    { tag: ['@smoke'] },
+    async ({ api }) => {
+      test.setTimeout(Timeouts.deploy);
+      test.skip(
+        configuredGitRepo() !== DEFAULT_DEPLOY_GIT_REPO,
+        'GIT_REPO is overridden; this assertion is for Spoon-Knife.'
+      );
+      const report = await api.inspectSource({ source: DEFAULT_DEPLOY_GIT_REPO, type: 'git' });
+      expect(inspectPlatform(report)).toBe('static');
+      expect(inspectStrategy(report)).toBe('static');
+    }
+  );
 
   test('the shared classic WordPress account inspects as wordpress', async ({ api, setupUser }) => {
     const reason = await wpCliUnavailableReason(api, setupUser);
@@ -149,7 +169,7 @@ test.describe('source inspect of known instance kinds', () => {
       type: 'project',
       subdirectory: relative,
     });
-    expect(inspected.status).toBe(200);
+    await expectStatus(inspected, 200);
     expect(inspectPlatform(inspected.body)).toBe('wordpress');
     expect(inspectStrategy(inspected.body)).toBe('php');
   });

@@ -3,13 +3,17 @@
 namespace App\System\Project;
 
 use App\Integrations\Statistics\Statistics;
+use App\Integrations\Tunnels\TunnelManager;
 use App\Lib\HttpAcmeChallengeStore;
+use App\Lib\Project\AccountFile;
+use App\Lib\Project\PhpErrorLog;
 use App\Lib\Ssl\CertificateFacts;
 use App\Lib\Ssl\CertificateStatus;
 use App\Lib\Ssl\EngineCertificate;
 use App\Lib\Ssl\IssuableDomain;
 use App\Lib\Ssl\Issuers;
 use App\Models\Domain as DomainModel;
+use App\Models\ProxyRule;
 use App\Models\Setting;
 use App\Models\User as ModelsUser;
 use App\System;
@@ -53,19 +57,24 @@ class Domain implements IssuableDomain
             $this->hostWebserver()->reload(false);
             $this->syncStatisticsConfig();
         } catch (\Exception $e) {
-            // Cleanup is best-effort; its own failure must not replace the error that caused it.
-            try {
-                $this->delete();
-            } catch (\Throwable $cleanup) {
-                \Illuminate\Support\Facades\Log::warning(
-                    "Cleanup after failed domain create failed for {$this->model->domain}: " . $cleanup->getMessage()
-                );
-            }
+            $this->deleteAfterFailedCreate();
             throw $e;
         }
     }
 
-    public function rebuild(bool $reload = true): void
+    /** Best-effort: a cleanup failure is logged so it cannot replace the error that caused it. */
+    private function deleteAfterFailedCreate(): void
+    {
+        try {
+            $this->delete();
+        } catch (\Throwable $cleanup) {
+            Log::warning(
+                "Cleanup after failed domain create failed for {$this->model->domain}: " . $cleanup->getMessage()
+            );
+        }
+    }
+
+    public function rebuild(): void
     {
         if ($this->model->sslEnabled() && !$this->hasSslCertificate()) {
             $this->generateCertificate();
@@ -76,31 +85,10 @@ class Domain implements IssuableDomain
 
     public function delete(): void
     {
-        try {
-            \App\Integrations\Tunnels\TunnelManager::teardownDomain($this->userModel(), $this->model);
-        } catch (\Throwable $e) {
-            Log::warning(
-                "Cloudflare teardown during domain delete failed for {$this->model->domain}: " . $e->getMessage()
-            );
-        }
-
-        try {
-            \App\Models\ProxyRule::query()
-                ->where('server_name', $this->model->domain)
-                ->delete();
-        } catch (\Throwable $e) {
-            Log::warning(
-                "ProxyRule cleanup during domain delete failed for {$this->model->domain}: " . $e->getMessage()
-            );
-        }
-
+        $this->tearDownTunnel();
+        $this->deleteOwnProxyRules();
         $this->forgetStatistics();
-
-        $this->hostWebserver()->deleteDomainConfig($this->model->domain);
-        if (!config('env.KEEP_WEBSERVER_LOGS_FOR_DELETED_DOMAINS')) {
-            $this->hostWebserver()->deleteDomainLogsDir($this->model->domain);
-        }
-        $this->hostWebserver()->reload();
+        $this->deleteFromHostWebserver();
 
         $this->project->deleteDomainConfig($this->model->domain);
         $this->project->reloadWebserver();
@@ -108,64 +96,99 @@ class Domain implements IssuableDomain
         (new HttpAcmeChallengeStore($this->system()))->deleteDomainDir($this->model->domain);
     }
 
+    private function tearDownTunnel(): void
+    {
+        try {
+            TunnelManager::teardownDomain($this->userModel(), $this->model);
+        } catch (\Throwable $e) {
+            Log::warning(
+                "Cloudflare teardown during domain delete failed for {$this->model->domain}: " . $e->getMessage()
+            );
+        }
+    }
+
+    /** Only this project's rules: another project's rule may name the same domain. */
+    private function deleteOwnProxyRules(): void
+    {
+        try {
+            ProxyRule::forUser($this->project->username())
+                ->where('server_name', $this->model->domain)
+                ->delete();
+        } catch (\Throwable $e) {
+            Log::warning(
+                "ProxyRule cleanup during domain delete failed for {$this->model->domain}: " . $e->getMessage()
+            );
+        }
+    }
+
+    private function deleteFromHostWebserver(): void
+    {
+        $this->hostWebserver()->deleteDomainConfig($this->model->domain);
+        if (!config('env.KEEP_WEBSERVER_LOGS_FOR_DELETED_DOMAINS')) {
+            $this->hostWebserver()->deleteDomainLogsDir($this->model->domain);
+        }
+        $this->hostWebserver()->reload();
+    }
+
     public function createDomainRootDir(): void
     {
-        $domainName = $this->model->domain;
         $user = $this->userModel();
-        $uid = $user->getUid();
-        $gid = $user->getGid();
-        $owner = "{$uid}:{$gid}";
-        $templateVars = [
-            'user' => $user->username,
-            'domain' => $domainName,
-        ];
+        $owner = "{$user->getUid()}:{$user->getGid()}";
 
         $system = $this->system();
-        $fs = $system->filesystem();
         $home = $system->projectHomeDirPath($this->project->username());
-        $domainDir = $home . '/' . $domainName;
+        $domainDir = $home . '/' . $this->model->domain;
         $domainRootDir = $home . $this->model->getDocumentRoot();
 
-        $system->exec(['sudo', 'mkdir', '-p', $domainDir]);
-        $system->exec(['sudo', 'chown', $owner, $domainDir]);
+        $this->makeOwnedDir($domainDir, $owner);
 
-        $publicHtmlMissing = !$fs->isDir($domainRootDir);
-        $system->exec(['sudo', 'mkdir', '-p', $domainRootDir]);
-        $system->exec(['sudo', 'chown', $owner, $domainRootDir]);
+        $documentRootMissing = !$system->filesystem()->isDir($domainRootDir);
+        $this->makeOwnedDir($domainRootDir, $owner);
 
-        if ($publicHtmlMissing) {
-            $template = $user->getTemplate() ?? 'default';
-            $domainTemplateDir = $system->projectDomainTemplateDirPath($template) . '/public_html';
-            if (!$fs->isDir($domainTemplateDir)) {
-                $domainTemplateDir = $system->templatesDirPath() . '/user-home/default-site';
-            }
-            $fs->makeDirFromTemplate($domainRootDir, $domainTemplateDir, $templateVars, $owner);
-            $system->exec(['sudo', 'chmod', '-R', 'ugo-rwx,u+rwX,go+rX', $domainRootDir]);
+        if ($documentRootMissing) {
+            $this->fillDocumentRootFromTemplate($domainRootDir, $owner);
         }
+    }
+
+    private function makeOwnedDir(string $dir, string $owner): void
+    {
+        $this->system()->exec(['sudo', 'mkdir', '-p', $dir]);
+        $this->system()->exec(['sudo', 'chown', $owner, $dir]);
+    }
+
+    private function fillDocumentRootFromTemplate(string $domainRootDir, string $owner): void
+    {
+        $templateVars = [
+            'user' => $this->userModel()->username,
+            'domain' => $this->model->domain,
+        ];
+        $this->system()->filesystem()->makeDirFromTemplate(
+            $domainRootDir,
+            $this->documentRootTemplateDir(),
+            $templateVars,
+            $owner
+        );
+        $this->system()->exec(['sudo', 'chmod', '-R', 'ugo-rwx,u+rwX,go+rX', $domainRootDir]);
+    }
+
+    /** The project template's `public_html`, or the engine's default site when it ships none. */
+    private function documentRootTemplateDir(): string
+    {
+        $system = $this->system();
+        $template = $this->userModel()->getTemplate() ?? 'default';
+        $templateDir = $system->projectDomainTemplateDirPath($template) . '/public_html';
+        if (!$system->filesystem()->isDir($templateDir)) {
+            $templateDir = $system->templatesDirPath() . '/user-home/default-site';
+        }
+
+        return $templateDir;
     }
 
     public function generateCertificate(): void
     {
         if ($this->model->domain == Setting::get('vhost-default-ip-domain')) {
-            $system = $this->system();
-            $engineDir = $system->engineDirPath();
-            $serverCertFile = $engineDir . '/crt/server.cert';
-            $serverKeyFile = $engineDir . '/crt/server.key';
+            $this->copyEngineCertificate();
 
-            $certDir = "{$this->projectDirPath()}/ssl-certs";
-            $certFile = "{$certDir}/{$this->model->domain}.crt";
-            $caFile = "{$certDir}/{$this->model->domain}.ca";
-            $pemFile = "{$certDir}/{$this->model->domain}.pem";
-            $keyFile = "{$certDir}/{$this->model->domain}.key";
-
-            $system->exec(['sudo', 'mkdir', '-p', $certDir]);
-            $system->exec(['sudo', 'cp', $serverCertFile, $certFile]);
-            $system->exec(['sudo', 'cp', $serverCertFile, $caFile]);
-            $system->exec(['sudo', 'cp', $serverCertFile, $pemFile]);
-            $system->exec(['sudo', 'cp', $serverKeyFile, $keyFile]);
-            $system->exec(['sudo', 'chmod', '600', $keyFile]);
-            $system->exec(['sudo', 'chmod', 'a+r', $certFile, $caFile, $pemFile]);
-            $system->exec(['sudo', 'chown', '-R', 'www-data:www-data', $certDir]);
             return;
         }
 
@@ -179,62 +202,74 @@ class Domain implements IssuableDomain
         Issuers::issueFor($this);
     }
 
+    /** The domain that answers for the server's bare IP serves the engine's own certificate. */
+    private function copyEngineCertificate(): void
+    {
+        $system = $this->system();
+        $engineDir = $system->engineDirPath();
+        $serverCertFile = $engineDir . '/crt/server.cert';
+        $serverKeyFile = $engineDir . '/crt/server.key';
+
+        $certDir = $this->certDir();
+        $certFile = $this->certFile('crt');
+        $caFile = $this->certFile('ca');
+        $pemFile = $this->certFile('pem');
+        $keyFile = $this->certFile('key');
+
+        $system->exec(['sudo', 'mkdir', '-p', $certDir]);
+        $system->exec(['sudo', 'cp', $serverCertFile, $certFile]);
+        $system->exec(['sudo', 'cp', $serverCertFile, $caFile]);
+        $system->exec(['sudo', 'cp', $serverCertFile, $pemFile]);
+        $system->exec(['sudo', 'cp', $serverKeyFile, $keyFile]);
+        $system->exec(['sudo', 'chmod', '600', $keyFile]);
+        $system->exec(['sudo', 'chmod', 'a+r', $certFile, $caFile, $pemFile]);
+        $system->exec(['sudo', 'chown', '-R', 'www-data:www-data', $certDir]);
+    }
+
     public function generateSelfSignedCertificate(): void
     {
-        $certDir = "{$this->projectDirPath()}/ssl-certs";
-
-        $certFile = "{$certDir}/{$this->model->domain}.crt";
-        $keyFile = "{$certDir}/{$this->model->domain}.key";
-        $caFile = "{$certDir}/{$this->model->domain}.ca";
-        $pemFile = "{$certDir}/{$this->model->domain}.pem";
-
-        $subj = "/C=US";
-        $subj .= "/ST=California";
-        $subj .= "/O=PanelAlpha";
-        $subj .= "/OU=Org";
-        $subj .= "/CN=" . $this->model->domain;
-
-        $command = [
-            'sudo',
-            'openssl',
-            'req',
-            '-x509',
-            '-newkey',
-            'rsa:4096',
-            '-keyout',
-            $keyFile,
-            '-out',
-            $certFile,
-            '-sha256',
-            '-days',
-            '365',
-            '-nodes',
-            '-subj',
-            $subj,
-        ];
+        $certDir = $this->certDir();
+        $certFile = $this->certFile('crt');
+        $keyFile = $this->certFile('key');
+        $caFile = $this->certFile('ca');
+        $pemFile = $this->certFile('pem');
 
         $this->system()->exec(['sudo', 'mkdir', '-p', $certDir]);
-        $this->system()->exec($command);
+        $this->system()->exec($this->selfSignCommand($keyFile, $certFile));
         $this->system()->exec(['sudo', 'chmod', '600', $certFile]);
         $this->system()->exec(['sudo', 'cp', $certFile, $caFile]);
         $this->system()->exec(['sudo', 'cp', $certFile, $pemFile]);
         $this->system()->exec(['sudo', 'chmod', 'a+r', $certFile, $caFile, $pemFile]);
     }
 
+    /**
+     * @return list<string>
+     */
+    private function selfSignCommand(string $keyFile, string $certFile): array
+    {
+        $subject = '/C=US/ST=California/O=PanelAlpha/OU=Org/CN=' . $this->model->domain;
+
+        return [
+            'sudo', 'openssl', 'req', '-x509',
+            '-newkey', 'rsa:4096',
+            '-keyout', $keyFile,
+            '-out', $certFile,
+            '-sha256',
+            '-days', '365',
+            '-nodes',
+            '-subj', $subject,
+        ];
+    }
+
     public function hasSslCertificate(): bool
     {
-        $certDir = "{$this->projectDirPath()}/ssl-certs";
-        $certFile = "{$certDir}/{$this->model->domain}.crt";
-
-        $process = $this->system()->runProcess(['test', '-e', $certFile]);
-        if ($process->getExitCode() === 0) {
+        if ($this->fileExists($this->certFile('crt'))) {
             return true;
         }
 
-        $this->normalizeCertFileNames($certDir);
+        $this->normalizeCertFileNames($this->certDir());
 
-        $process = $this->system()->runProcess(['test', '-e', $certFile]);
-        return $process->getExitCode() === 0;
+        return $this->fileExists($this->certFile('crt'));
     }
 
     /**
@@ -243,11 +278,8 @@ class Domain implements IssuableDomain
      */
     public function hasServableCertificate(): bool
     {
-        $certDir = "{$this->projectDirPath()}/ssl-certs";
-        $system = $this->system();
         foreach (['pem', 'key'] as $ext) {
-            $file = "{$certDir}/{$this->model->domain}.{$ext}";
-            if ($system->runProcess(['test', '-e', $file])->getExitCode() !== 0) {
+            if (!$this->fileExists($this->certFile($ext))) {
                 return false;
             }
         }
@@ -260,7 +292,7 @@ class Domain implements IssuableDomain
         if ($this->hasServableCertificate()) {
             return true;
         }
-        $this->normalizeCertFileNames("{$this->projectDirPath()}/ssl-certs");
+        $this->normalizeCertFileNames($this->certDir());
         if ($this->hasServableCertificate()) {
             return true;
         }
@@ -284,12 +316,8 @@ class Domain implements IssuableDomain
      */
     public function getSslCertificateInfo(): array
     {
-        $certDir = "{$this->projectDirPath()}/ssl-certs";
-        $certFile = "{$certDir}/{$this->model->domain}.crt";
-        $caFile = "{$certDir}/{$this->model->domain}.ca";
-
-        $cert = (string) file_get_contents($certFile);
-        $ca = (string) file_get_contents($caFile);
+        $cert = (string) file_get_contents($this->certFile('crt'));
+        $ca = (string) file_get_contents($this->certFile('ca'));
 
         $facts = CertificateFacts::fromPem($cert, $ca) ?? [
             'common_name' => '',
@@ -312,36 +340,29 @@ class Domain implements IssuableDomain
             $ca = $cert;
         }
 
-        $certDir = "{$this->projectDirPath()}/ssl-certs";
-        $certFile = "{$certDir}/{$this->model->domain}.crt";
-        $keyFile = "{$certDir}/{$this->model->domain}.key";
-        $caFile = "{$certDir}/{$this->model->domain}.ca";
-        $pemFile = "{$certDir}/{$this->model->domain}.pem";
-
-        $tmpCertFile = tempnam(sys_get_temp_dir(), 'tmp_');
-        $tmpKeyFile = tempnam(sys_get_temp_dir(), 'tmp_');
-        $tmpCaFile = tempnam(sys_get_temp_dir(), 'tmp_');
-        $tmpPemFile = tempnam(sys_get_temp_dir(), 'tmp_');
-
-        file_put_contents($tmpCertFile, trim($cert) . PHP_EOL);
-        file_put_contents($tmpKeyFile, trim($key) . PHP_EOL);
-        file_put_contents($tmpCaFile, trim($ca) . PHP_EOL);
-        file_put_contents($tmpPemFile, trim($cert) . PHP_EOL . trim($ca) . PHP_EOL);
+        $certFile = $this->certFile('crt');
+        $keyFile = $this->certFile('key');
+        $caFile = $this->certFile('ca');
+        $pemFile = $this->certFile('pem');
 
         $system = $this->system();
-        $system->exec(['sudo', 'mkdir', '-p', $certDir]);
+        $system->exec(['sudo', 'mkdir', '-p', $this->certDir()]);
 
-        $system->exec(['sudo', 'cp', $tmpCertFile, $certFile]);
-        $system->exec(['sudo', 'cp', $tmpKeyFile, $keyFile]);
-        $system->exec(['sudo', 'cp', $tmpCaFile, $caFile]);
-        $system->exec(['sudo', 'cp', $tmpPemFile, $pemFile]);
+        $this->installCertFile(trim($cert) . PHP_EOL, $certFile);
+        $this->installCertFile(trim($key) . PHP_EOL, $keyFile);
+        $this->installCertFile(trim($ca) . PHP_EOL, $caFile);
+        $this->installCertFile(trim($cert) . PHP_EOL . trim($ca) . PHP_EOL, $pemFile);
         $system->exec(['sudo', 'chmod', 'a+r', $certFile, $caFile, $pemFile]);
         $system->exec(['sudo', 'chmod', '600', $keyFile]);
+    }
 
-        unlink($tmpCertFile);
-        unlink($tmpKeyFile);
-        unlink($tmpCaFile);
-        unlink($tmpPemFile);
+    /** Stages the contents in a temp file the engine can write, then copies it in with sudo. */
+    private function installCertFile(string $contents, string $target): void
+    {
+        $tmpFile = tempnam(sys_get_temp_dir(), 'tmp_');
+        file_put_contents($tmpFile, $contents);
+        $this->system()->exec(['sudo', 'cp', $tmpFile, $target]);
+        unlink($tmpFile);
     }
 
     /**
@@ -349,89 +370,119 @@ class Domain implements IssuableDomain
      */
     public function listLogFiles(): array
     {
-        $webserver = $this->system()->webserver()->getCurrentWebserver();
-        $domainName = $this->model->domain;
-        $logsDir = $this->system()->engineDirPath() . "/webserver-logs/{$webserver}/{$domainName}";
+        $logsDir = $this->hostLogsDir($this->system()->webserver()->getCurrentWebserver());
 
         $files = [];
-        $fileNames = [];
-        foreach (scandir($logsDir) as $file) {
-            if (Str::startsWith($file, ['access', 'error'])) {
-                $fileNames[] = $file;
-            }
-        }
-
-        foreach ($fileNames as $fileName) {
-            $files[] = [
-                'file' => $fileName,
-                'path' => "{$logsDir}/{$fileName}",
-                'mtime' => filemtime("{$logsDir}/{$fileName}"),
-                'size' => filesize("{$logsDir}/{$fileName}"),
-            ];
+        foreach (self::logFileNames($logsDir) as $fileName) {
+            $files[] = self::logFileEntry($fileName, "{$logsDir}/{$fileName}");
         }
 
         return $files;
     }
 
     /**
+     * Host webserver logs (nginx-proxy ones listed twice, the second as `nginx_*`)
+     * and the project's Apache logs, newest first.
+     *
      * @return array<array{file: string, path: string, mtime: int, size: int}>
      */
     public function listWebserverLogFiles(): array
     {
-        $files = [];
-
-        $webserver = $this->system()->webserver()->getCurrentWebserver();
-        $domainName = $this->model->domain;
-        $logsDir = $this->system()->engineDirPath() . "/webserver-logs/{$webserver}/{$domainName}";
-
-        $fileNames = [];
-        if (is_dir($logsDir)) {
-            foreach (scandir($logsDir) as $file) {
-                if (Str::startsWith($file, ['access', 'error'])) {
-                    $fileNames[] = $file;
-                }
-            }
-            foreach ($fileNames as $fileName) {
-                $files[] = [
-                    'file' => $fileName,
-                    'path' => "{$logsDir}/{$fileName}",
-                    'mtime' => filemtime("{$logsDir}/{$fileName}"),
-                    'size' => filesize("{$logsDir}/{$fileName}"),
-                ];
-                if ($webserver == 'nginx-proxy') {
-                    $files[] = [
-                        'file' => 'nginx_' . $fileName,
-                        'path' => "{$logsDir}/{$fileName}",
-                        'mtime' => filemtime("{$logsDir}/{$fileName}"),
-                        'size' => filesize("{$logsDir}/{$fileName}"),
-                    ];
-                }
-            }
-        }
-
-        $fileNames = [];
-        $apacheLogsDir = $this->projectDirPath() . "/log/apache2";
-        if (is_dir($apacheLogsDir)) {
-            foreach (scandir($apacheLogsDir) as $file) {
-                if (Str::startsWith($file, ['access', 'error'])) {
-                    $fileNames[] = $file;
-                }
-            }
-            foreach ($fileNames as $fileName) {
-                $files[] = [
-                    'file' => 'apache_' . $fileName,
-                    'path' => "{$apacheLogsDir}/{$fileName}",
-                    'mtime' => filemtime("{$apacheLogsDir}/{$fileName}"),
-                    'size' => filesize("{$apacheLogsDir}/{$fileName}"),
-                ];
-            }
-        }
+        $files = array_merge($this->hostWebserverLogFiles(), $this->apacheLogFiles(), $this->phpErrorLogFiles());
 
         usort($files, function (array $a, array $b): int {
             return (int)$b['mtime'] - (int)$a['mtime'];
         });
 
         return $files;
+    }
+
+    /**
+     * The PHP handlers write one error log for the whole project; it is
+     * offered beside the webserver logs so the existing download serves it.
+     *
+     * @return list<array{file: string, path: string, mtime: int, size: int}>
+     */
+    private function phpErrorLogFiles(): array
+    {
+        $path = $this->projectDirPath() . '/log/php/' . PhpErrorLog::FILE_NAME;
+        $stat = AccountFile::ownedRegular($path, $this->userModel()->getUid());
+        if ($stat === null) {
+            return [];
+        }
+
+        return [[
+            'file' => PhpErrorLog::FILE_NAME,
+            'path' => $path,
+            'mtime' => (int) $stat['mtime'],
+            'size' => (int) $stat['size'],
+        ]];
+    }
+
+    /**
+     * @return list<array{file: string, path: string, mtime: int, size: int}>
+     */
+    private function hostWebserverLogFiles(): array
+    {
+        $webserver = $this->system()->webserver()->getCurrentWebserver();
+        $logsDir = $this->hostLogsDir($webserver);
+
+        $files = [];
+        foreach (self::logFileNames($logsDir) as $fileName) {
+            $files[] = self::logFileEntry($fileName, "{$logsDir}/{$fileName}");
+            if ($webserver == 'nginx-proxy') {
+                $files[] = self::logFileEntry('nginx_' . $fileName, "{$logsDir}/{$fileName}");
+            }
+        }
+
+        return $files;
+    }
+
+    /**
+     * @return list<array{file: string, path: string, mtime: int, size: int}>
+     */
+    private function apacheLogFiles(): array
+    {
+        $apacheLogsDir = $this->projectDirPath() . "/log/apache2";
+
+        $files = [];
+        foreach (self::logFileNames($apacheLogsDir) as $fileName) {
+            $files[] = self::logFileEntry('apache_' . $fileName, "{$apacheLogsDir}/{$fileName}");
+        }
+
+        return $files;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function logFileNames(string $dir): array
+    {
+        if (!is_dir($dir)) {
+            return [];
+        }
+
+        $fileNames = [];
+        foreach (scandir($dir) as $file) {
+            if (Str::startsWith($file, ['access', 'error'])) {
+                $fileNames[] = $file;
+            }
+        }
+
+        return $fileNames;
+    }
+
+    /**
+     * @return array{file: string, path: string, mtime: int, size: int}
+     */
+    private static function logFileEntry(string $label, string $path): array
+    {
+        return [
+            'file' => $label,
+            'path' => $path,
+            'mtime' => filemtime($path),
+            'size' => filesize($path),
+        ];
     }
 
     public function createFromTemplate(): void
@@ -444,11 +495,7 @@ class Domain implements IssuableDomain
             'php_version' => $this->model->getPhpVersion(),
         ];
         if ($this->model->sslEnabled()) {
-            $certDir = "/etc/apache2/ssl-certs";
-            $templateVars['ssl_enabled'] = true;
-            $templateVars['ssl_cert_file'] = "{$certDir}/{$domainName}.crt";
-            $templateVars['ssl_cert_key_file'] = "{$certDir}/{$domainName}.key";
-            $templateVars['ssl_cert_ca_file'] = "{$certDir}/{$domainName}.ca";
+            $templateVars += self::apacheSslTemplateVars($domainName);
         }
 
         $templatesDir = $this->system()->templatesDirPath();
@@ -482,37 +529,72 @@ class Domain implements IssuableDomain
         $this->hostWebserver()->reload();
     }
 
+    /**
+     * Paths of the certificate as the project's Apache container mounts them.
+     *
+     * @return array{ssl_enabled: true, ssl_cert_file: string, ssl_cert_key_file: string, ssl_cert_ca_file: string}
+     */
+    private static function apacheSslTemplateVars(string $domainName): array
+    {
+        $certDir = "/etc/apache2/ssl-certs";
+
+        return [
+            'ssl_enabled' => true,
+            'ssl_cert_file' => "{$certDir}/{$domainName}.crt",
+            'ssl_cert_key_file' => "{$certDir}/{$domainName}.key",
+            'ssl_cert_ca_file' => "{$certDir}/{$domainName}.ca",
+        ];
+    }
+
     private function projectDirPath(): string
     {
         return $this->system()->projectDirPath($this->project->username());
     }
 
+    private function certDir(): string
+    {
+        return "{$this->projectDirPath()}/ssl-certs";
+    }
+
+    private function certFile(string $ext): string
+    {
+        return "{$this->certDir()}/{$this->model->domain}.{$ext}";
+    }
+
+    private function fileExists(string $path): bool
+    {
+        return $this->system()->runProcess(['test', '-e', $path])->getExitCode() === 0;
+    }
+
+    /** Renames cert files stored under a differently-cased domain to the name the vhost loads. */
     private function normalizeCertFileNames(string $certDir): void
     {
-        $lowerDomain = $this->model->domain;
-        $system = $this->system();
-
         foreach (['.crt', '.key', '.ca', '.pem'] as $ext) {
-            $lowerFile = "{$certDir}/{$lowerDomain}{$ext}";
+            $this->normalizeCertFileName($certDir, $this->model->domain . $ext);
+        }
+    }
 
-            if ($system->runProcess(['test', '-e', $lowerFile])->getExitCode() === 0) {
-                continue;
-            }
+    /** Best-effort: a failed rename leaves the file where it was. */
+    private function normalizeCertFileName(string $certDir, string $fileName): void
+    {
+        $expected = "{$certDir}/{$fileName}";
+        if ($this->fileExists($expected)) {
+            return;
+        }
 
-            $process = $system->runProcess(['sudo', 'find', $certDir, '-maxdepth', '1', '-iname', $lowerDomain . $ext]);
-            if ($process->getExitCode() !== 0) {
-                continue;
-            }
+        $process = $this->system()->runProcess(['sudo', 'find', $certDir, '-maxdepth', '1', '-iname', $fileName]);
+        if ($process->getExitCode() !== 0) {
+            return;
+        }
 
-            $found = trim($process->getOutput());
-            if ($found === '' || $found === $lowerFile) {
-                continue;
-            }
+        $found = trim($process->getOutput());
+        if ($found === '' || $found === $expected) {
+            return;
+        }
 
-            try {
-                $system->exec(['sudo', 'mv', $found, $lowerFile]);
-            } catch (\Exception $e) {
-            }
+        try {
+            $this->system()->exec(['sudo', 'mv', $found, $expected]);
+        } catch (\Exception) {
         }
     }
 
@@ -549,9 +631,12 @@ class Domain implements IssuableDomain
 
     private function hostAccessLogDirectory(): string
     {
-        $webserver = $this->system()->webserver()->getCurrentWebserver();
+        return $this->hostLogsDir($this->system()->webserver()->getCurrentWebserver());
+    }
 
-        return $this->system()->engineDirPath() . '/webserver-logs/' . $webserver . '/' . $this->model->domain;
+    private function hostLogsDir(string $webserver): string
+    {
+        return $this->system()->engineDirPath() . "/webserver-logs/{$webserver}/{$this->model->domain}";
     }
 
     private function hostWebserver(): WebserverInterface

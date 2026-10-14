@@ -1,7 +1,10 @@
 import { Client as FtpClient } from 'basic-ftp';
 
+import { registerSecret } from './secret-registry';
+
 export const QUOTA_TEST_SIZE_MB = 1;
 export const UPDATED_FTP_PASSWORD = 'UpdatedFtpPass456!';
+registerSecret(UPDATED_FTP_PASSWORD);
 
 export interface FtpCredentials {
   host: string;
@@ -21,6 +24,7 @@ export async function withFtpClient<T>(body: (client: FtpClient) => Promise<T>):
 
 /** Logs in and lists the root directory — the smallest end-to-end FTP check. */
 export async function ftpLoginAndList({ host, user, password }: FtpCredentials): Promise<void> {
+  registerSecret(password);
   await withFtpClient(async (client) => {
     await client.access({ host, user, password, secure: false });
     await client.list();

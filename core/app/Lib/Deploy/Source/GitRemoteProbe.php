@@ -84,6 +84,43 @@ class GitRemoteProbe
         return $this->probe($repoField, $repoUrl, $token, $tokenField, null, 'git_branch');
     }
 
+    /**
+     * The branches and tags the remote advertises, listed the way a deploy asks.
+     *
+     * @throws GitRefsUnavailableException when the remote refuses or cannot be reached
+     */
+    public function refs(string $repoUrl, ?string $token): GitRefs
+    {
+        $repoUrl = trim($repoUrl);
+        $hasToken = $token !== null && trim($token) !== '';
+        $workspace = null;
+        $askPass = null;
+
+        try {
+            $command = GitUrl::withoutRedirects(self::symrefCommand($repoUrl));
+            if ($hasToken) {
+                $workspace = $this->makeWorkspace();
+                $askPass = $workspace === null ? null : $this->writeAskPass($workspace, (string) $token, $repoUrl);
+                if ($askPass === null) {
+                    throw new GitRefsUnavailableException(
+                        GitRefsUnavailableException::UNREACHABLE,
+                        'Could not prepare the Git credential helper.'
+                    );
+                }
+                $command = GitUrl::withAskPass($command, $askPass);
+            }
+
+            return $this->interpretRefs($this->runWithRetry($command), $repoUrl, $hasToken);
+        } finally {
+            if ($askPass !== null) {
+                @unlink($askPass);
+            }
+            if ($workspace !== null) {
+                @rmdir($workspace);
+            }
+        }
+    }
+
     private function probe(
         string $repoField,
         string $repoUrl,
@@ -102,32 +139,22 @@ class GitRemoteProbe
         $askPass = null;
 
         try {
-            $command = ['git', '-c', 'credential.helper=', '-c', 'core.askpass=',
-                'ls-remote', '--heads', '--', $repoUrl];
-            if ($branch !== null) {
-                // Tags too, since the clone's --branch takes one; HEAD for the default.
-                $command = ['git', '-c', 'credential.helper=', '-c', 'core.askpass=',
-                    'ls-remote', '--symref', '--', $repoUrl, 'HEAD', 'refs/heads/*', 'refs/tags/*'];
-            }
+            $command = $branch !== null
+                ? ['git', '-c', 'credential.helper=', '-c', 'core.askpass=', 'ls-remote', '--symref',
+                    '--', $repoUrl, 'HEAD', 'refs/heads/*', 'refs/tags/*']
+                : ['git', '-c', 'credential.helper=', '-c', 'core.askpass=', 'ls-remote', '--heads', '--', $repoUrl];
+            $command = GitUrl::withoutRedirects($command);
 
             if ($hasToken) {
                 $workspace = $this->makeWorkspace();
-                $askPass = $workspace === null ? null : $this->writeAskPass($workspace, (string) $token);
+                $askPass = $workspace === null ? null : $this->writeAskPass($workspace, (string) $token, $repoUrl);
                 if ($askPass === null) {
                     return GitProbeResult::unchecked();
                 }
                 $command = GitUrl::withAskPass($command, $askPass);
             }
 
-            // Only a timeout is retried: any answer, even a refusal, is final.
-            $attempt = 0;
-            do {
-                $run = $this->run($command);
-                // As the account's clone and fetches do ({@see GitUrl::overHttp11()}).
-                if (!$run['ok'] && GitUrl::refusedOverHttp2($run['stderr'])) {
-                    $run = $this->run(GitUrl::overHttp11($command));
-                }
-            } while ($run['timedOut'] && ++$attempt < $this->attempts);
+            $run = $this->runWithRetry($command);
 
             $result = $this->interpret($run, $repoField, $repoUrl, $hasToken, $tokenField);
             if ($branch !== null && $result->outcome === GitProbeResult::VERIFIED) {
@@ -152,6 +179,27 @@ class GitRemoteProbe
 
     /** What the last ls-remote printed: its refs, when it succeeded. */
     private string $lastOutput = '';
+
+    /**
+     * Only a timeout is retried: any answer, even a refusal, is final. A cut
+     * ref listing is retried over HTTP/1.1, as the account's clone and fetches
+     * do ({@see GitUrl::overHttp11()}).
+     *
+     * @param list<string> $command
+     * @return array{timedOut: bool, ok: bool, stderr: string}
+     */
+    private function runWithRetry(array $command): array
+    {
+        $attempt = 0;
+        do {
+            $run = $this->run($command);
+            if (!$run['ok'] && GitUrl::refusedOverHttp2($run['stderr'])) {
+                $run = $this->run(GitUrl::overHttp11($command));
+            }
+        } while ($run['timedOut'] && ++$attempt < $this->attempts);
+
+        return $run;
+    }
 
     /**
      * @param list<string> $command
@@ -245,6 +293,38 @@ class GitRemoteProbe
             'The repository could not be read: ' . $this->firstLine($result['stderr'])));
     }
 
+    /** @return list<string> */
+    private static function symrefCommand(string $repoUrl): array
+    {
+        return ['git', '-c', 'credential.helper=', '-c', 'core.askpass=', 'ls-remote', '--symref',
+            '--', $repoUrl, 'HEAD', 'refs/heads/*', 'refs/tags/*'];
+    }
+
+    /**
+     * @param array{timedOut: bool, ok: bool, stderr: string} $run
+     * @throws GitRefsUnavailableException
+     */
+    private function interpretRefs(array $run, string $repoUrl, bool $hasToken): GitRefs
+    {
+        $probe = $this->interpret($run, 'repository', $repoUrl, $hasToken, 'git_token');
+        if ($probe->outcome === GitProbeResult::VERIFIED) {
+            return GitRefs::parse($this->lastOutput);
+        }
+
+        $code = (string) ($probe->problem['code'] ?? '');
+        $outcome = match (true) {
+            str_ends_with($code, '_not_found') => GitRefsUnavailableException::NOT_FOUND,
+            str_ends_with($code, '_rejected'),
+            str_ends_with($code, '_requires_token') => GitRefsUnavailableException::AUTHENTICATION_FAILED,
+            default => GitRefsUnavailableException::UNREACHABLE,
+        };
+
+        throw new GitRefsUnavailableException(
+            $outcome,
+            (string) ($probe->problem['message'] ?? 'The repository could not be reached.')
+        );
+    }
+
     /**
      * Null when `ls-remote --symref` output lists the branch or tag.
      *
@@ -252,24 +332,14 @@ class GitRemoteProbe
      */
     public static function branchProblem(string $field, string $branch, string $refs, string $host): ?array
     {
-        $heads = [];
-        $tags = [];
-        $default = null;
-        foreach (preg_split('/\R/', $refs) ?: [] as $line) {
-            if (preg_match('#^ref: refs/heads/(\S+)\s+HEAD$#', $line, $m) === 1) {
-                $default = $m[1];
-            } elseif (preg_match('#^[0-9a-f]{40,64}\s+refs/heads/(\S+)$#', $line, $m) === 1) {
-                $heads[] = $m[1];
-            } elseif (preg_match('#^[0-9a-f]{40,64}\s+refs/tags/(\S+?)(\^\{\})?$#', $line, $m) === 1) {
-                $tags[$m[1]] = true;
-            }
-        }
-        $tags = array_keys($tags);
-
-        if (in_array($branch, $heads, true) || in_array($branch, $tags, true)) {
+        $parsed = GitRefs::parse($refs);
+        if ($parsed->hasBranch($branch)) {
             return null;
         }
 
+        $heads = $parsed->branches;
+        $tags = $parsed->tags;
+        $default = $parsed->defaultBranch;
         $suggestion = self::closestRef($branch, $heads, $tags);
         $examples = array_values(array_unique(array_filter([$default, ...array_slice($heads, 0, 10)])));
 
@@ -344,10 +414,10 @@ class GitRemoteProbe
         return @mkdir($dir, 0700) ? $dir : null;
     }
 
-    private function writeAskPass(string $workspace, string $token): ?string
+    private function writeAskPass(string $workspace, string $token, string $repoUrl): ?string
     {
         $path = $workspace . '/askpass.sh';
-        $written = file_put_contents($path, GitUrl::askPassScript($token), LOCK_EX);
+        $written = file_put_contents($path, GitUrl::askPassScript($token, GitUrl::hostOf($repoUrl)), LOCK_EX);
 
         return $written === false || !chmod($path, 0700) ? null : $path;
     }

@@ -101,12 +101,7 @@ class ModsecController extends Controller
     )]
     public function enableRuleset(string $name): JsonResponse
     {
-        $system = new System();
-        if (!$system->modsec()->rulesetExists($name)) {
-            abort(new JsonResponse([
-                'message' => 'Ruleset not found',
-            ], 404));
-        }
+        $system = $this->systemWithRuleset($name);
 
         $config = Setting::getModsecConfig();
         if (!in_array($name, $config['enabled_rulesets'])) {
@@ -132,22 +127,11 @@ class ModsecController extends Controller
     )]
     public function disableRuleset(string $name): JsonResponse
     {
-        $system = new System();
-        if (!$system->modsec()->rulesetExists($name)) {
-            abort(new JsonResponse([
-                'message' => 'Ruleset not found',
-            ], 404));
-        }
+        $system = $this->systemWithRuleset($name);
 
         $config = Setting::getModsecConfig();
         if (in_array($name, $config['enabled_rulesets'])) {
-            $enabled = [];
-            foreach ($config['enabled_rulesets'] as $rs) {
-                if ($rs === $name) {
-                    continue;
-                }
-                $enabled[] = $rs;
-            }
+            $enabled = array_values(array_filter($config['enabled_rulesets'], static fn ($rs): bool => $rs !== $name));
             Setting::setModsecConfig('enabled_rulesets', $enabled);
             $system->modsec()->rebuildConfig();
         }
@@ -177,12 +161,7 @@ class ModsecController extends Controller
     )]
     public function toggleConfigFiles(string $name, Request $request): ModsecRulesetCollection
     {
-        $system = new System();
-        if (!$system->modsec()->rulesetExists($name)) {
-            abort(new JsonResponse([
-                'message' => 'Ruleset not found',
-            ], 404));
-        }
+        $system = $this->systemWithRuleset($name);
 
         /**
          * @var array{
@@ -190,21 +169,40 @@ class ModsecController extends Controller
          *   disable?: ?array<string>,
          * } $params
          */
-        $params = $request->validate([
-            // A file name in the ruleset's rules/ directory, nothing more: it
-            // is joined to that path and renamed as root.
+        $params = $request->validate($this->configFileListRules());
+        $enable = !empty($params['enable']) ? $params['enable'] : [];
+        $disable = !empty($params['disable']) ? $params['disable'] : [];
+
+        $system->modsec()->toggleConfigFiles($name, $enable, $disable);
+
+        return $this->getRulesets();
+    }
+
+    /**
+     * Each entry is a bare file name in the ruleset's rules/ directory: it is joined to that path and renamed as root.
+     *
+     * @return array<string, mixed>
+     */
+    private function configFileListRules(): array
+    {
+        return [
             'enable' => 'array',
             'enable.*' => ['string', 'regex:' . Modsec::CONFIG_FILE_NAME],
             'disable' => 'array',
             'disable.*' => ['string', 'regex:' . Modsec::CONFIG_FILE_NAME],
-        ]);
-        $enable = !empty($params['enable']) ? $params['enable'] : [];
-        $disable = !empty($params['disable']) ? $params['disable'] : [];
+        ];
+    }
 
+    private function systemWithRuleset(string $name): System
+    {
         $system = new System();
-        $system->modsec()->toggleConfigFiles($name, $enable, $disable);
+        if (!$system->modsec()->rulesetExists($name)) {
+            abort(new JsonResponse([
+                'message' => 'Ruleset not found',
+            ], 404));
+        }
 
-        return $this->getRulesets();
+        return $system;
     }
 
     #[OA\Get(
@@ -313,12 +311,17 @@ class ModsecController extends Controller
         tags: ['ModSecurity'],
         parameters: [new OA\Parameter(name: 'filename', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
         responses: [
-            new OA\Response(response: 200, description: 'File download', content: new OA\MediaType(mediaType: 'application/octet-stream')),
+            // `format: binary` gives the generated MCP tool its offset/length window.
+            new OA\Response(response: 200, description: 'File download', content: new OA\MediaType(
+                mediaType: 'application/octet-stream',
+                schema: new OA\Schema(type: 'string', format: 'binary'),
+            )),
+            new OA\Response(response: 404, description: 'No such file, or core cannot read it'),
         ],
     )]
     public function downloadAuditLogFile(string $filename): BinaryFileResponse
     {
-        $path = (new AuditLogFiles())->path($filename) ?? abort(new JsonResponse([
+        $path = (new AuditLogFiles())->readablePath($filename) ?? abort(new JsonResponse([
             'message' => 'File not found',
         ], 404));
 

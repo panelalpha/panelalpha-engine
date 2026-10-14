@@ -8,6 +8,7 @@ import {
   type ModSecurityConfig,
   type ModSecurityRuleset,
 } from '@/types';
+import { describeAttempts, httpReason, recordAttempts } from '@/helpers/attempts';
 import { WpCliApi } from './wpcli.api';
 
 export class ModSecurityApi extends WpCliApi {
@@ -21,9 +22,12 @@ export class ModSecurityApi extends WpCliApi {
     const maxAttempts = 5;
     const retryDelayMs = 2000;
 
+    const reasons: string[] = [];
+
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       const response = await this.api.put('modsec/mode', { data: config });
       if (response.ok()) {
+        recordAttempts('PUT modsec/mode', attempt, reasons);
         return;
       }
 
@@ -32,15 +36,17 @@ export class ModSecurityApi extends WpCliApi {
       const shouldRetry =
         status === 422 && this.isContainerRestartingError(body) && attempt < maxAttempts;
 
+      reasons.push(httpReason(status, body));
       if (shouldRetry) {
         await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
         continue;
       }
 
+      recordAttempts('PUT modsec/mode', attempt, reasons);
       const url = response.url();
       const rawBody = JSON.stringify(body);
       throw new Error(
-        `API call failed\n` +
+        `API call failed (${describeAttempts(attempt, reasons)})\n` +
           `  URL:      ${url}\n` +
           `  Expected: 2xx  —  Got: ${status}\n` +
           `  Response: ${rawBody}`

@@ -2,7 +2,9 @@
 
 namespace App\Console\Commands\Deploy;
 
+use App\Lib\Deploy\DeployLog\DeployHistory;
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Models\User;
 use Illuminate\Console\Command;
 
 class DeployLogsListCommand extends Command
@@ -53,27 +55,31 @@ class DeployLogsListCommand extends Command
 
     private function listDeploys(string $username): int
     {
-        try {
-            $rows = DeployLogger::listDeploys($username);
-        } catch (\InvalidArgumentException $e) {
-            $this->error($e->getMessage());
+        $user = User::findByUsername($username);
+        if ($user === null) {
+            $this->error("Project '{$username}' not found.");
             return 1;
         }
 
+        $rows = DeployHistory::of($user);
         if ($rows === []) {
-            $this->info("No deploy logs for user '{$username}'");
+            $this->info("No deploy logs for project '{$username}'");
             return 0;
         }
 
         $this->table(
-            ['Deploy ID', 'Latest', 'Status', 'Size', 'Modified'],
+            ['Deploy ID', 'Status', 'Kind', 'Source', 'Branch', 'Trigger', 'Commit', 'Started', 'Finished'],
             array_map(static function (array $row): array {
                 return [
                     $row['id'],
-                    $row['is_latest'] ? 'yes' : '',
-                    $row['status'] ?? '-',
-                    self::formatBytes($row['bytes']),
-                    self::formatTs($row['mtime']),
+                    $row['status'],
+                    $row['kind'] ?? '-',
+                    $row['source'] ?? '-',
+                    $row['branch'] ?? '-',
+                    $row['trigger'] ?? '-',
+                    $row['commit'] !== null ? substr($row['commit'], 0, 12) : '-',
+                    self::formatTs($row['started_at']),
+                    self::formatTs($row['finished_at']),
                 ];
             }, $rows)
         );

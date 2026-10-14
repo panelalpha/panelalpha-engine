@@ -26,13 +26,13 @@ RUN apt-get update && \
 # Dind::preloadFrameworkBaseImages() before compose up.
 
 # Install Docker CE
-RUN curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg && \
+RUN curl --proto '=https' -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg && \
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null && \
   apt-get update && \
   apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
 # Install Railpack
-RUN curl -fsSL https://raw.githubusercontent.com/railwayapp/railpack/main/install.sh | bash -s -- --yes
+RUN curl --proto '=https' -fsSL https://raw.githubusercontent.com/railwayapp/railpack/main/install.sh | bash -s -- --yes
 
 # cloudflared (Cloudflare Tunnel connector) — one process per DinD account
 RUN ARCH="$(dpkg --print-architecture)" \
@@ -41,7 +41,7 @@ RUN ARCH="$(dpkg --print-architecture)" \
        arm64) CF_ARCH=arm64 ;; \
        *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
      esac \
-  && curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}" \
+  && curl --proto '=https' -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}" \
        -o /usr/local/bin/cloudflared \
   && chmod +x /usr/local/bin/cloudflared \
   && cloudflared --version
@@ -53,7 +53,7 @@ RUN apt-get install -y msmtp s6
 RUN ln -sf /usr/bin/msmtp /usr/sbin/sendmail
 
 # PHP + WP-CLI
-RUN wget -O /etc/apt/trusted.gpg.d/php.gpg https://packages.sury.org/php/apt.gpg && \
+RUN wget --https-only --max-redirect=0 -O /etc/apt/trusted.gpg.d/php.gpg https://packages.sury.org/php/apt.gpg && \
   echo "deb https://packages.sury.org/php/ $(lsb_release -sc) main" >/etc/apt/sources.list.d/php.list
 RUN apt-get update && apt-get install -y \
   php8.3 \

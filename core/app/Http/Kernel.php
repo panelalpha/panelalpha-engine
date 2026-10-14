@@ -46,8 +46,10 @@ class Kernel extends HttpKernel
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
             'auth:api',
             // Straight after authentication: who the token is, then what it
-            // was issued to do.
+            // was issued to do, then whether the project it acts on lets a
+            // token touch it at all.
             \App\Http\Middleware\EnsureTokenMayUseApi::class,
+            \App\Http\Middleware\EnsureProjectNotProtected::class,
             \App\Http\Middleware\CoverageMiddleware::class,
         ],
     ];

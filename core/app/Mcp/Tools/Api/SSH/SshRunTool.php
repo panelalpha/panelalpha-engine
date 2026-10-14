@@ -72,7 +72,7 @@ class SshRunTool extends ApiTool
             'name' => $schema->string()->required(),
             'command' => $schema->string()->description('Example: ls -la && cat composer.json.')->required(),
             'cwd' => $schema->string()->description('Directory to run in; defaults to the account home directory. Example: /home/demo/project.'),
-            'timeout' => $schema->integer()->description('Seconds before the command is killed (1-900, default 300).'),
+            'timeout' => $schema->integer()->description('Seconds before the command is killed (1-900, default 300); a killed command answers exit_code 124, or 137 when it ignored SIGTERM.'),
         ];
     }
 }

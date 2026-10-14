@@ -3,9 +3,11 @@
 namespace App\System\Project\Dind;
 
 use App\Lib\Deploy\Checkout\EngineArtifacts;
+use App\Lib\Deploy\Compose\ComposeEnvironment;
 use App\Lib\Deploy\Compose\ComposeHarden;
 use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Compose\GeneratedCompose;
+use App\Lib\Project\ApiAccess;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
 use App\Lib\Deploy\Platform\Probes\ProcfileWebProbe;
 use App\Lib\Deploy\Detect\PlaceholderPage;
@@ -50,6 +52,176 @@ class ComposeWriter
             EngineArtifacts::RUN_COMPOSE_MODE
         );
         $this->freezeRuntimeImage($yaml);
+    }
+
+    /**
+     * Point the generated run file's `environment:` at the env_vars the account
+     * now carries. A generated file bakes them in, and `environment:` outranks
+     * `env_file:`; a file the repository owns reads `.env` and is left alone.
+     *
+     * @param array<string, string> $vars the account's current env_vars
+     * @param list<string> $replaced the keys the file was generated with
+     * @return bool whether the run file changed
+     */
+    public function mergeAccountEnv(array $vars, array $replaced): bool
+    {
+        $path = $this->project->userAppComposeFilePath();
+        $fs = $this->project->system()->filesystem();
+        if (!$fs->fileExists($path)) {
+            return false;
+        }
+        $raw = (string) $fs->fileGetContents($path);
+        $compose = ComposeYaml::parse($raw);
+        if ($compose === null || !self::isEngineGenerated($compose)) {
+            return false;
+        }
+        $service = $compose['services'][GeneratedCompose::APP_SERVICE] ?? null;
+        if (!is_array($service)) {
+            return false;
+        }
+        $environment = $service['environment'] ?? [];
+        if (!is_array($environment) || self::isListStyleEnvironment($environment)) {
+            return false;
+        }
+        $merged = self::withAccountEnv($environment, $vars, $replaced);
+        if ($merged === null) {
+            return false;
+        }
+        $compose['services'][GeneratedCompose::APP_SERVICE]['environment'] = $merged;
+        $fs->filePutContents(
+            $path,
+            ComposeYaml::dump($compose, $raw, 6, 2),
+            $this->project->userModel()->getChownString(),
+            EngineArtifacts::RUN_COMPOSE_MODE
+        );
+
+        return true;
+    }
+
+    /**
+     * @param array<mixed> $compose
+     */
+    private static function isEngineGenerated(array $compose): bool
+    {
+        foreach (is_array($compose['services'] ?? null) ? $compose['services'] : [] as $service) {
+            if (is_array($service) && array_key_exists(GeneratedCompose::LABEL, (array) ($service['labels'] ?? []))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * `environment:` is read as a map of KEY/value pairs. A non-empty list is
+     * the `- KEY=value` form and is not ours to write into; an empty list is
+     * indistinguishable from an absent map after parsing, and is read as one.
+     *
+     * @param array<mixed> $environment
+     */
+    private static function isListStyleEnvironment(array $environment): bool
+    {
+        return $environment !== [] && array_is_list($environment);
+    }
+
+    /**
+     * The engine's own variables and the ones that name where the app is
+     * published are never the account's to replace.
+     *
+     * @param array<mixed> $environment
+     * @param array<string, string> $vars
+     * @param list<string> $replaced
+     * @return ?array<mixed> null when nothing changed
+     */
+    private static function withAccountEnv(array $environment, array $vars, array $replaced): ?array
+    {
+        $before = $environment;
+        foreach ($replaced as $key) {
+            if (!ComposeEnvironment::isReserved($key)) {
+                unset($environment[$key]);
+            }
+        }
+        foreach ($vars as $key => $value) {
+            if (!ComposeEnvironment::isReserved($key)) {
+                $environment[$key] = self::escapedForCompose((string) $value);
+            }
+        }
+
+        return $environment === $before ? null : $environment;
+    }
+
+    /**
+     * Point the generated run file's `environment:` at the engine's own API
+     * address, token and CA, or take them back out once the project is no longer
+     * allowed. A file the repository owns reads them from `.env.panelalpha`
+     * instead, which the environment rewrite already refreshed.
+     *
+     * @param array<string, string> $values
+     * @return bool whether the run file changed
+     */
+    public function mergeApiAccessEnv(array $values): bool
+    {
+        $path = $this->project->userAppComposeFilePath();
+        $fs = $this->project->system()->filesystem();
+        if (!$fs->fileExists($path)) {
+            return false;
+        }
+        $raw = (string) $fs->fileGetContents($path);
+        $compose = ComposeYaml::parse($raw);
+        if ($compose === null || !self::isEngineGenerated($compose)) {
+            return false;
+        }
+        $service = $compose['services'][GeneratedCompose::APP_SERVICE] ?? null;
+        if (!is_array($service)) {
+            return false;
+        }
+        $environment = $service['environment'] ?? [];
+        if (!is_array($environment) || self::isListStyleEnvironment($environment)) {
+            return false;
+        }
+        $merged = self::withApiAccessEnv($environment, $values);
+        if ($merged === null) {
+            return false;
+        }
+        $compose['services'][GeneratedCompose::APP_SERVICE]['environment'] = $merged;
+        $fs->filePutContents(
+            $path,
+            ComposeYaml::dump($compose, $raw, 6, 2),
+            $this->project->userModel()->getChownString(),
+            EngineArtifacts::RUN_COMPOSE_MODE
+        );
+
+        return true;
+    }
+
+    /**
+     * @param array<mixed> $environment
+     * @param array<string, string> $values
+     * @return ?array<mixed> null when nothing changed
+     */
+    private static function withApiAccessEnv(array $environment, array $values): ?array
+    {
+        $before = $environment;
+        $escaped = ComposeEnvironment::escapedForCompose($values);
+        foreach (ApiAccess::ENV_KEYS as $key) {
+            if (!array_key_exists($key, $escaped)) {
+                unset($environment[$key]);
+            }
+        }
+        foreach ($escaped as $key => $value) {
+            $environment[$key] = $value;
+        }
+
+        return $environment === $before ? null : $environment;
+    }
+
+    /**
+     * Compose interpolates `$` in an `environment:` value, so a literal one the
+     * account set reaches the container only when it is doubled.
+     */
+    private static function escapedForCompose(string $value): string
+    {
+        return str_replace('$', '$$', $value);
     }
 
     /**

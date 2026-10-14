@@ -7,6 +7,7 @@ import {
   onlineLabel,
   pickAddonParent,
   pickSiteIpv4,
+  projectNameResolves,
   resolveSiteBaseDomain,
   toPanelAlphaDirectZone,
   wwwAliasWouldAnswer,
@@ -38,6 +39,23 @@ test.describe('panelalpha.direct zone names', () => {
 
   test('reads the address back out of a zone parent', () => {
     expect(ipv4FromPanelAlphaDirectZone('198-51-100-10.panelalpha.direct')).toBe('198.51.100.10');
+  });
+});
+
+test.describe('projectNameResolves', () => {
+  test('a direct name resolves even though it is not an online label', () => {
+    expect(projectNameResolves('shop.10-10-10-44.panelalpha.direct')).toBe(true);
+    expect(onlineLabel('shop.10-10-10-44.panelalpha.direct')).toBeUndefined();
+  });
+
+  test('every generated rung except local resolves', () => {
+    expect(projectNameResolves('shop-4f2a.panelalpha.online')).toBe(true);
+    expect(projectNameResolves('shop.engine.example.com')).toBe(true);
+    expect(projectNameResolves('shop.local')).toBe(false);
+  });
+
+  test('ignores case and a trailing dot', () => {
+    expect(projectNameResolves('SHOP.LOCAL.')).toBe(false);
   });
 });
 

@@ -80,6 +80,21 @@ export async function restoreModSec(api: EngineApi, snapshot: ModSecSnapshot): P
   }
 }
 
+/** Whether the mode and every ruleset are back to what {@link snapshotModSec} recorded. */
+export async function modSecMatchesSnapshot(
+  api: EngineApi,
+  snapshot: ModSecSnapshot
+): Promise<boolean> {
+  const current = await snapshotModSec(api);
+  if (current.mode !== snapshot.mode) {
+    return false;
+  }
+  return snapshot.rulesets.every(
+    (ruleset) =>
+      current.rulesets.find((entry) => entry.name === ruleset.name)?.enabled === ruleset.enabled
+  );
+}
+
 /**
  * Whether a response is ModSecurity refusing the request.
  *
@@ -191,7 +206,12 @@ export async function auditLogFiles(
     return files;
   }
 
+  // The trigger only has to reach the WAF; whether it answers does not matter.
   await anonymousRequest.get(`${siteUrl}${AUDIT_TRIGGER_QUERY}`).catch(() => undefined);
-  await waitForCondition(read, { timeout: 20_000, interval: 2_000 }).catch(() => undefined);
+  await waitForCondition(read, {
+    timeout: 20_000,
+    interval: 2_000,
+    describeLast: () => `${files.length} audit log files listed`,
+  }).catch(() => undefined); // Nothing logged is reported by the empty list the caller checks.
   return files;
 }

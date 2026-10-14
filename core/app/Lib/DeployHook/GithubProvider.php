@@ -23,6 +23,9 @@ final class GithubProvider implements HookProvider
 {
     private const NULL_SHA = '0000000000000000000000000000000000000000';
 
+    /** Exactly `sha256=` and 64 hex digits, so hash_equals never compares a length the sender chose. */
+    private const SIGNATURE_PATTERN = '/^sha256=([0-9a-f]{64})$/i';
+
     public function name(): string
     {
         return 'github';
@@ -37,15 +40,18 @@ final class GithubProvider implements HookProvider
     {
         $header = (string) $request->headers->get('X-Hub-Signature-256', '');
 
-        // Exactly `sha256=` and 64 hex characters. Anything looser would hand
-        // hash_equals a string whose length is the caller's to choose.
-        if (preg_match('/^sha256=([0-9a-f]{64})$/i', $header, $m) !== 1) {
+        if ($secret === '' || preg_match(self::SIGNATURE_PATTERN, $header, $m) !== 1) {
             return false;
         }
 
         $expected = hash_hmac('sha256', $request->getContent(), $secret);
 
         return hash_equals($expected, strtolower($m[1]));
+    }
+
+    public function signsTheBody(): bool
+    {
+        return true;
     }
 
     public function parse(Request $request): HookEvent
@@ -62,7 +68,15 @@ final class GithubProvider implements HookProvider
             return new HookEvent($this->name(), HookEvent::OTHER, $event, $delivery);
         }
 
-        $payload = $this->payload($request);
+        return $this->pushEvent($event, $delivery, $this->payload($request));
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @throws InvalidPayload
+     */
+    private function pushEvent(string $event, ?string $delivery, array $payload): HookEvent
+    {
         $ref = $payload['ref'] ?? null;
         if (!is_string($ref) || $ref === '') {
             throw new InvalidPayload('A push without a ref.');
@@ -88,17 +102,14 @@ final class GithubProvider implements HookProvider
 
     /**
      * @return array<string, mixed>
+     * @throws InvalidPayload
      */
     private function payload(Request $request): array
     {
         $body = $request->getContent();
 
-        if (str_starts_with(strtolower((string) $request->headers->get('Content-Type', '')), 'application/x-www-form-urlencoded')) {
-            parse_str($body, $fields);
-            $body = $fields['payload'] ?? null;
-            if (!is_string($body)) {
-                throw new InvalidPayload('A form-encoded push without a payload field.');
-            }
+        if ($this->isFormEncoded($request)) {
+            $body = $this->formPayloadField($body);
         }
 
         $decoded = json_decode($body, true);
@@ -107,5 +118,24 @@ final class GithubProvider implements HookProvider
         }
 
         return $decoded;
+    }
+
+    private function isFormEncoded(Request $request): bool
+    {
+        return str_starts_with(strtolower((string) $request->headers->get('Content-Type', '')), 'application/x-www-form-urlencoded');
+    }
+
+    /**
+     * @throws InvalidPayload
+     */
+    private function formPayloadField(string $body): string
+    {
+        parse_str($body, $fields);
+        $payload = $fields['payload'] ?? null;
+        if (!is_string($payload)) {
+            throw new InvalidPayload('A form-encoded push without a payload field.');
+        }
+
+        return $payload;
     }
 }

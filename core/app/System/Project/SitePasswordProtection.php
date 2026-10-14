@@ -30,6 +30,9 @@ class SitePasswordProtection
 
     public const string MODE_BASIC = 'basic';
 
+    /** Failed passwords of every site, for fail2ban's site-password jail. */
+    private const string FAILED_PASSWORD_LOG = '/opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/site-password.log';
+
     public static function authMode(): string
     {
         $mode = strtolower(trim((string) config('env.SITE_PASSWORD_AUTH_MODE', self::MODE_CUSTOM)));
@@ -73,7 +76,6 @@ class SitePasswordProtection
             throw new \InvalidArgumentException('Password must not be empty.');
         }
 
-        $details = $user->getDetails();
         $version = self::version($user);
         if (self::isEnabled($user)) {
             $version++;
@@ -86,9 +88,7 @@ class SitePasswordProtection
         ]);
         $user->save();
 
-        self::applyWebserver($user);
-        self::syncCloudflareOrigins($user);
-        self::reclaimFrameworkCacheOwnership();
+        self::enforce($user);
     }
 
     public static function unset(User $user): void
@@ -97,17 +97,27 @@ class SitePasswordProtection
             return;
         }
 
+        self::forgetPassword($user);
+        $user->save();
+
+        self::enforce($user);
+    }
+
+    /** Assigns the details directly: setDetails() merges, so it cannot remove keys. */
+    private static function forgetPassword(User $user): void
+    {
         $details = $user->getDetails();
         unset(
             $details[self::DETAIL_ENABLED],
             $details[self::DETAIL_HASH],
             $details[self::DETAIL_VERSION],
         );
-        // setDetails merges; clear by writing nulls then stripping on next read is messy —
-        // overwrite the attribute with the filtered array via direct assignment path.
         $user->details = $details;
-        $user->save();
+    }
 
+    /** Rebuilds the vhosts and tunnel origins so the current password state applies. */
+    private static function enforce(User $user): void
+    {
         self::applyWebserver($user);
         self::syncCloudflareOrigins($user);
         self::reclaimFrameworkCacheOwnership();
@@ -124,7 +134,7 @@ class SitePasswordProtection
     }
 
     /**
-     * Extract password from an Authorization: Basic header (username ignored).
+     * Extract password from an Authorization: Basic header; the username is ignored and may be empty.
      */
     public static function passwordFromBasicHeader(?string $authorization): ?string
     {
@@ -138,7 +148,6 @@ class SitePasswordProtection
         if ($decoded === false) {
             return null;
         }
-        // user:pass — username may be empty (" :pass" / ":pass")
         $pos = strpos($decoded, ':');
         if ($pos === false) {
             return null;
@@ -150,13 +159,8 @@ class SitePasswordProtection
     public static function cookieValue(User $user): string
     {
         $version = self::version($user);
-        $sig = hash_hmac(
-            'sha256',
-            $user->username . '|' . $version,
-            self::cookieSigningKey()
-        );
 
-        return $version . '.' . $sig;
+        return $version . '.' . self::cookieSignature($user, $version);
     }
 
     public static function cookieIsValid(User $user, ?string $cookie): bool
@@ -172,13 +176,13 @@ class SitePasswordProtection
         if (!ctype_digit($versionPart) || (int) $versionPart !== self::version($user)) {
             return false;
         }
-        $expected = hash_hmac(
-            'sha256',
-            $user->username . '|' . (int) $versionPart,
-            self::cookieSigningKey()
-        );
 
-        return hash_equals($expected, $sig);
+        return hash_equals(self::cookieSignature($user, (int) $versionPart), $sig);
+    }
+
+    private static function cookieSignature(User $user, int $version): string
+    {
+        return hash_hmac('sha256', $user->username . '|' . $version, self::cookieSigningKey());
     }
 
     /**
@@ -191,28 +195,29 @@ class SitePasswordProtection
         }
 
         $mode = self::authMode();
-        $username = $user->username;
 
-        $authRequest = "auth_request /_pa_site_auth;\n"
-            . "            error_page 401 = @pa_site_auth_fail;";
+        return [
+            'site_password_enabled' => true,
+            'site_password_auth_mode' => $mode,
+            'site_password_auth_request' => "auth_request /_pa_site_auth;\n"
+                . "            error_page 401 = @pa_site_auth_fail;",
+            'site_password_locations' => self::gateLocations($mode, $user->username),
+        ];
+    }
 
-        if ($mode === self::MODE_BASIC) {
-            $failBody = "add_header WWW-Authenticate 'Basic realm=\"Protected\"' always;\n"
-                . "        return 401;";
-        } else {
-            $failBody = "resolver 127.0.0.54 valid=30s;\n"
-                . "        set \$enginehost core.shared-hosting.palocal;\n"
-                . "        proxy_pass http://\$enginehost/api/internal/site-password/{$username}/gate;\n"
-                . "        proxy_set_header Host \$host;\n"
-                . "        proxy_set_header X-Forwarded-Proto \$scheme;\n"
-                . "        proxy_set_header X-Original-URI \$request_uri;\n"
-                . "        proxy_set_header X-Real-IP \$remote_addr;\n"
-                . "        proxy_method GET;\n"
-                . "        proxy_pass_request_body off;\n"
-                . "        proxy_set_header Content-Length \"\";";
-        }
+    /**
+     * The gate's nginx locations. Only failed passwords are logged: the flag is set where an
+     * auth failure ends, so the app's own 401s are never counted.
+     */
+    private static function gateLocations(string $mode, string $username): string
+    {
+        $log = self::FAILED_PASSWORD_LOG;
+        $failBody = self::authFailureBody($mode, $username);
 
-        $locations = <<<NGINX
+        return <<<NGINX
+    set \$pa_site_password_basic_failed 0;
+    access_log {$log} site_password if=\$pa_site_password_basic_failed;
+    access_log {$log} site_password if=\$pa_site_password_form_failed;
     location = /_pa_site_auth {
         internal;
         resolver 127.0.0.54 valid=30s;
@@ -226,6 +231,7 @@ class SitePasswordProtection
         proxy_set_header X-PA-Auth-Mode {$mode};
     }
     location @pa_site_auth_fail {
+        set \$pa_site_password_basic_failed \$pa_site_password_basic;
         {$failBody}
     }
     location = /_pa_site_password {
@@ -238,13 +244,26 @@ class SitePasswordProtection
         proxy_set_header X-Real-IP \$remote_addr;
     }
 NGINX;
+    }
 
-        return [
-            'site_password_enabled' => true,
-            'site_password_auth_mode' => $mode,
-            'site_password_auth_request' => $authRequest,
-            'site_password_locations' => $locations,
-        ];
+    /** What a failed check answers: a Basic challenge, or the engine's password form. */
+    private static function authFailureBody(string $mode, string $username): string
+    {
+        if ($mode === self::MODE_BASIC) {
+            return "add_header WWW-Authenticate 'Basic realm=\"Protected\"' always;\n"
+                . "        return 401;";
+        }
+
+        return "resolver 127.0.0.54 valid=30s;\n"
+            . "        set \$enginehost core.shared-hosting.palocal;\n"
+            . "        proxy_pass http://\$enginehost/api/internal/site-password/{$username}/gate;\n"
+            . "        proxy_set_header Host \$host;\n"
+            . "        proxy_set_header X-Forwarded-Proto \$scheme;\n"
+            . "        proxy_set_header X-Original-URI \$request_uri;\n"
+            . "        proxy_set_header X-Real-IP \$remote_addr;\n"
+            . "        proxy_method GET;\n"
+            . "        proxy_pass_request_body off;\n"
+            . "        proxy_set_header Content-Length \"\";";
     }
 
     private static function applyWebserver(User $user): void
@@ -292,10 +311,8 @@ NGINX;
     }
 
     /**
-     * Login is throttled via the file cache. Artisan through `docker compose exec`
-     * / `pae` often runs as root and leaves cache shards root-owned; php-fpm
-     * (www-data) then 500s on POST /_pa_site_password. Reclaim after enabling
-     * the gate — same ownership pattern as deploy telemetry spool.
+     * Hands the framework cache back to www-data when running as root: the gate's login throttle
+     * lives there, and root-owned shards make php-fpm 500 on POST /_pa_site_password.
      *
      * @param ?int $euid override for tests (null = posix_geteuid / treat as non-root)
      * @param ?ProcessRunner $runner override for tests
@@ -321,9 +338,9 @@ NGINX;
         }
     }
 
+    /** Strips only the trailing newline a CLI prompt leaves; spaces are part of the password. */
     private static function normalizePassword(string $password): string
     {
-        // Do not trim interior spaces; only strip a trailing newline from CLI prompts.
         return preg_replace("/\r\n$|\n$|\r$/", '', $password) ?? $password;
     }
 

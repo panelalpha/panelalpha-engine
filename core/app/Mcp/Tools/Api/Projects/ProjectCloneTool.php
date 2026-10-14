@@ -57,6 +57,7 @@ class ProjectCloneTool extends ApiTool
         return [
             'new_username',
             'domain',
+            'copy_databases',
         ];
     }
 
@@ -80,6 +81,7 @@ class ProjectCloneTool extends ApiTool
             'name' => $schema->string()->description('Source project\'s name.')->required(),
             'new_name' => $schema->string()->description('Sent to the API as `new_username`.'),
             'domain' => $schema->string(),
+            'copy_databases' => $schema->boolean()->description('Copy the source project\'s MySQL databases under the clone prefix. Defaults to true.'),
         ];
     }
 }

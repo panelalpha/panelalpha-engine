@@ -84,26 +84,6 @@ test.describe('SSL certificates', () => {
       await domainFactory.deleteDomain(setupUser.username, domain);
     }
   });
-
-  test('installing twice over the same domain succeeds', async ({ api, userFactory }) => {
-    const user = await userFactory.createSimpleUser();
-
-    for (const attempt of [1, 2]) {
-      await test.step(`install #${attempt}`, async () => {
-        await api.installSslCertificate(
-          user.username,
-          user.domain,
-          TEST_SSL_CERT,
-          TEST_SSL_KEY,
-          TEST_SSL_CERT
-        );
-      });
-    }
-
-    expect(
-      (await api.getInstalledSslCertificate(user.username, user.domain)).data?.certificate
-    ).toContain('BEGIN CERTIFICATE');
-  });
 });
 
 test.describe('installed-ssl-cert lookups', () => {

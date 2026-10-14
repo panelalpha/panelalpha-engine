@@ -33,6 +33,18 @@ http {
     # `combined` is predefined by nginx. Defining it again makes nginx refuse to start.
     log_format bytes '[$time_local] $body_bytes_sent';
 
+    # Failed site passwords, every site in one file for fail2ban's site-password
+    # jail. The vhost logs a Basic attempt only where its auth check failed.
+    log_format site_password '$remote_addr [$time_local] "$host" site-password $status "$request_method $uri"';
+    map $http_authorization $pa_site_password_basic {
+        "~*^basic\s" 1;
+        default 0;
+    }
+    map "$request_method $status $uri" $pa_site_password_form_failed {
+        "POST 401 /_pa_site_password" 1;
+        default 0;
+    }
+
     access_log  /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/access.log  main;
 
     sendfile        on;

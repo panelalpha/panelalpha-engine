@@ -1,6 +1,7 @@
 import { expect } from '@playwright/test';
 import type { EngineApi } from '@/clients/engine-api';
 import { waitForCondition } from './retry';
+import { redactAndTruncate } from './redact';
 
 export interface WpCliCommandResult {
   exit_code: number;
@@ -52,6 +53,7 @@ export async function waitForWpCliReady(
   options: { timeout?: number; interval?: number } = {}
 ): Promise<void> {
   const wpPathArg = `--path=${wpPath}`;
+  let last = 'no response yet';
 
   await waitForCondition(
     async () => {
@@ -61,12 +63,15 @@ export async function waitForWpCliReady(
           'is-installed',
           wpPathArg,
         ]);
+        last = `exit ${response.exit_code}, stderr: ${redactAndTruncate(response.stderr, 300)}`;
         return response.exit_code === 0;
-      } catch {
+      } catch (error) {
+        last = `request failed: ${redactAndTruncate(error instanceof Error ? error.message : String(error), 300)}`;
         return false;
       }
     },
     {
+      describeLast: () => last,
       timeout: options.timeout ?? 120_000,
       interval: options.interval ?? 2_000,
       message: `WP-CLI not ready for ${username} (${wpPath})`,

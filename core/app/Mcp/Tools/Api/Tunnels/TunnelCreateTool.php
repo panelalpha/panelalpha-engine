@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Attach a public tunnel hostname to a domain
 
-    Registers a public hostname that reaches this domain without any DNS record of your own. The `panelalpha` provider allocates a name under panelalpha.online through the licensing proxy -- the way to give an application a public address with a trusted certificate on an engine with no DNS of its own. The proxy forwards each name with itself as `Host`, and the domain's site answers to it. Attach the project's own name to the project domain of the same name. A project may also add a few sibling names beside it, such as `api-<name>.panelalpha.online`, for an application that routes by Host to fixed extra names; the application has to accept those names, so its prefixes must be configurable. Nested names such as `api.<name>.panelalpha.online` are not available: an application that needs them needs a domain of the customer's own plus addon domains. Labels are first come, first served across the fleet, so a name in use is refused; deleting the tunnel releases it again. `cloudflare` puts a CNAME in a zone the project's own API token controls, so it fits a custom domain; set the token first with PUT /projects/{username}/settings/cloudflare-api-token.
+    Registers a public hostname that reaches this domain without any DNS record of your own. The `panelalpha` provider allocates a name under panelalpha.online through the licensing proxy -- the way to give an application a public address with a trusted certificate on an engine with no DNS of its own. The proxy forwards each name with itself as `Host`, and the domain's site answers to it. Attach the project's own name to the project domain of the same name. A project may also add a few sibling names beside it, such as `api-<name>.panelalpha.online`, for an application that routes by Host to fixed extra names; the application has to accept those names, so its prefixes must be configurable. Nested names such as `api.<name>.panelalpha.online` are not available: an application that needs them needs a domain of the customer's own plus addon domains. Labels are first come, first served across the fleet, so a name in use is refused; deleting the tunnel releases it again. `cloudflare` puts a CNAME in a zone the project's own API token controls, so it fits a custom domain; set the token first with PUT /projects/{username}/settings/cloudflare-api-token. Omit `hostname` with the `panelalpha` provider and the engine allocates a free `preview-<8 random [a-z0-9]>` label under panelalpha.online; it draws a new label when one is taken, and answers 409 `tunnel_hostname_unavailable` when five labels in a row are. `purpose` separates a long-lived address (`default`) from one a preview opens (`preview`); `ttl_minutes` gives either a lifetime the engine enforces -- returned as `valid_until`, and stored under `details.expires_at` -- 24 hours for a `preview` tunnel that does not name one. The proxy's own `details.valid_until` is a separate value the engine does not act on. An expired tunnel is removed by the engine and never returned by GET.
     MARKDOWN)]
 #[IsDestructive]
 class TunnelCreateTool extends ApiTool
@@ -50,6 +50,8 @@ class TunnelCreateTool extends ApiTool
         return [
             'hostname',
             'provider',
+            'purpose',
+            'ttl_minutes',
         ];
     }
 
@@ -71,8 +73,10 @@ class TunnelCreateTool extends ApiTool
         return [
             'name' => $schema->string()->required(),
             'domain' => $schema->string()->required(),
-            'hostname' => $schema->string()->description('The public hostname to attach. For the panelalpha provider it must be a single label under panelalpha.online: the name of the domain it is attached to, or a sibling of it such as `api-<name>.panelalpha.online`. Example: my-shop.panelalpha.online.')->required(),
+            'hostname' => $schema->string()->description('The public hostname to attach. For the panelalpha provider it must be a single label under panelalpha.online: the name of the domain it is attached to, or a sibling of it such as `api-<name>.panelalpha.online`. Omit it with panelalpha and the engine allocates a `preview-<8>` label. Required for cloudflare. Example: my-shop.panelalpha.online.'),
             'provider' => $schema->string()->description('Defaults to panelalpha. One of: cloudflare, panelalpha. Example: panelalpha.'),
+            'purpose' => $schema->string()->description('What the address is for. Defaults to default. A panelalpha preview reaches the site as its domain, so WordPress answers instead of redirecting; the proxy swaps the preview name back into links, redirects and cookies. One of: default, preview. Example: preview.'),
+            'ttl_minutes' => $schema->integer()->min(5)->max(43200)->description('Minutes until the engine removes the tunnel. Omit it and a preview tunnel lasts 1440 minutes (24 h); a default tunnel then never expires.'),
         ];
     }
 }

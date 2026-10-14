@@ -8,9 +8,9 @@ import type { SystemChangeStatus } from '@/types';
 
 /**
  * Updating the engine replaces the software the rest of the suite is testing, so
- * this lives in its own Playwright project and never runs as part of `npm test`:
+ * this lives in its own Playwright project and never runs as part of `bun run test`:
  *
- *     npm run test:update
+ *     bun run test:update
  */
 
 const UPDATE_POLL_TIMEOUT_MS = 300_000;

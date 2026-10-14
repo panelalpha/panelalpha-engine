@@ -17,16 +17,18 @@ use App\Lib\Deploy\Inspect\SourceResolver;
 use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Vault\RequestVault;
 use App\Models\User;
+use App\OpenApi\ApiDefinitions;
 use Illuminate\Http\JsonResponse;
 use OpenApi\Attributes as OA;
 
 /**
  * Read an application without deploying it.
  *
- * Four kinds of source answer the same question — what is this, what does it
- * listen on, what does it need — and they are the four a caller actually has:
- * a repository URL, a directory on this server, a hosting project already
- * holding files, and a bare `github.com/owner/repo` somebody pasted.
+ * Three kinds of source answer the same question — what is this, what does it
+ * listen on, what does it need — and they are the three a caller actually has:
+ * a repository URL, a hosting project already holding files, and a bare
+ * `github.com/owner/repo` somebody pasted. A directory on this server is
+ * refused: it would read anything core can.
  *
  * The answer comes from the deploy pipeline's own detection, so it is a
  * prediction of the deploy rather than a second opinion about it. For a
@@ -40,8 +42,8 @@ class SourceInspectionController extends Controller
         path: '/source/inspect',
         summary: 'Inspect an application source and report its stack, ports and services',
         description: 'Detects what an application is without deploying it. The source may be a Git '
-            . 'repository URL, an absolute path on this server, or the username of an existing '
-            . 'project (its files under the account home directory). A public github.com '
+            . 'repository URL or the username of an existing project (its files under the '
+            . 'account home directory); a directory on this server is refused. A public github.com '
             . 'repository is read from its file list and only the files detection reads are '
             . 'fetched; any other Git source, or one that cannot be read that way, is cloned '
             . 'shallow into a temporary directory and removed again. `source.method` says which '
@@ -49,7 +51,8 @@ class SourceInspectionController extends Controller
             . 'never returned - only the variable names. A project username returns the same '
             . 'report as GET /projects/{username}/inspect, including the `deployment` snapshot '
             . 'its last deploy froze and the `drift` between that and the files on disk - so a '
-            . 'caller that already has a username does not need the other endpoint.',
+            . 'caller that already has a username does not need the other endpoint. A token limited '
+            . 'to some projects may name only those as a project source.',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             required: ['source'],
@@ -57,14 +60,16 @@ class SourceInspectionController extends Controller
                 new OA\Property(
                     property: 'source',
                     type: 'string',
-                    description: 'Repository URL (the scheme may be left out), absolute path, or project username.',
+                    description: 'Repository URL (the scheme may be left out), or the username of an existing project.',
                     example: 'github.com/owner/repo'
                 ),
                 new OA\Property(
                     property: 'type',
                     type: 'string',
-                    enum: ['git', 'path', 'project'],
-                    description: 'How to read `source`. Detected from its shape when omitted.'
+                    enum: ['git', 'project'],
+                    description: 'How to read `source`. Detected from its shape when omitted. `path` '
+                        . 'is not accepted: inspecting an arbitrary server directory is not exposed '
+                        . 'over the API.'
                 ),
                 new OA\Property(property: 'branch', type: 'string', description: 'Git branch to inspect.'),
                 new OA\Property(
@@ -109,6 +114,7 @@ class SourceInspectionController extends Controller
             new OA\Response(response: 200, description: 'Inspection result', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
+            new OA\Response(response: 403, description: ApiDefinitions::OUT_OF_SCOPE_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 422, description: 'Source could not be read', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
@@ -130,43 +136,16 @@ class SourceInspectionController extends Controller
         $source = $params['source'];
         $plan = DeployPlanInput::parse($params['stages'] ?? null);
         $recipe = RecipeChoiceInput::parse($params['recipe'] ?? null);
-        $type = $params['type'] ?? SourceResolver::classify($source);
-        if ($type === null) {
-            throw ProblemException::one(
-                'source',
-                'source_unrecognised',
-                'Could not tell what this source is. Pass `type` as git, path or project.'
-            );
-        }
+        $type = $this->sourceType($source, $params['type'] ?? null);
 
         if ($type === SourceResolver::TYPE_PROJECT) {
             return $this->reportProject($source, $params['subdirectory'] ?? null, $plan, $recipe);
         }
 
-        try {
-            // git_token may be a global `vault:<id>`: an inspection belongs
-            // to no project. No token clones anonymously.
-            $resolved = $type === SourceResolver::TYPE_GIT
-                ? $this->resolver()->fromGit(
-                    $source,
-                    $params['branch'] ?? null,
-                    RequestVault::get('git_token', null),
-                    $params['subdirectory'] ?? null
-                )
-                : $this->resolver()->fromDirectory(SourceResolver::TYPE_PATH, $source, $source);
-        } catch (InspectException $e) {
-            throw ProblemException::of([$e->toProblem()]);
-        }
+        $this->refuseServerDirectory($type);
+        $resolved = $this->cloneGitSource($source, $params['branch'] ?? null, $params['subdirectory'] ?? null);
 
-        try {
-            return $this->report($resolved, $params['subdirectory'] ?? null, null, $plan, $recipe);
-        } catch (InspectException $e) {
-            throw ProblemException::of([$e->toProblem()]);
-        } finally {
-            // A git source is a real clone on disk. Nothing below this line
-            // gets to decide whether to keep it.
-            $resolved->release();
-        }
+        return $this->reportAndRelease($resolved, $params['subdirectory'] ?? null, $plan, $recipe);
     }
 
     #[OA\Get(
@@ -216,8 +195,67 @@ class SourceInspectionController extends Controller
         return $this->reportProject($username, $params['subdirectory'] ?? null);
     }
 
+    /** @throws ProblemException when the source is not recognisable and no `type` was passed */
+    private function sourceType(string $source, ?string $type): string
+    {
+        $type = $type ?? SourceResolver::classify($source);
+        if ($type === null) {
+            throw ProblemException::one(
+                'source',
+                'source_unrecognised',
+                'Could not tell what this source is. Pass `type` as git or project.'
+            );
+        }
+
+        return $type;
+    }
+
+    /** @throws ProblemException for anything but a Git source */
+    private function refuseServerDirectory(string $type): void
+    {
+        if ($type !== SourceResolver::TYPE_GIT) {
+            throw ProblemException::one(
+                'type',
+                'source_type_unsupported',
+                'Inspecting an arbitrary server directory is not supported. Use `type: project` '
+                    . 'with the project username, or a Git repository URL.'
+            );
+        }
+    }
+
     /**
-     * A hosting account's own files, plus what its last deploy decided.
+     * Clones a Git source. Its git_token may be a global `vault:<id>`, since an inspection belongs
+     * to no project; no token clones anonymously.
+     */
+    private function cloneGitSource(string $source, ?string $branch, ?string $subdirectory): ResolvedSource
+    {
+        try {
+            return $this->resolver()->fromGit(
+                $source,
+                $branch,
+                RequestVault::get('git_token', null),
+                $subdirectory
+            );
+        } catch (InspectException $e) {
+            throw ProblemException::of([$e->toProblem()]);
+        }
+    }
+
+    /** Reports on a clone, which is a real checkout on disk and is released whatever the report does. */
+    private function reportAndRelease(ResolvedSource $resolved, ?string $subdirectory, ?DeployPlan $plan, ?string $recipe): JsonResponse
+    {
+        try {
+            return $this->report($resolved, $subdirectory, null, $plan, $recipe);
+        } catch (InspectException $e) {
+            throw ProblemException::of([$e->toProblem()]);
+        } finally {
+            $resolved->release();
+        }
+    }
+
+    /**
+     * A hosting account's own files, plus what its last deploy decided. Problems name `project`,
+     * not `source`, because this endpoint is addressed by username.
      */
     private function reportProject(
         string $username,
@@ -228,9 +266,7 @@ class SourceInspectionController extends Controller
         $user = $this->projectOr404($username);
 
         try {
-            // getHomeDir() honours an account whose home was recorded
-            // somewhere other than /home/<username>, and falls back to it.
-            $home = rtrim($user->getHomeDir(), '/');
+            $home = $this->projectHome($user);
             $directory = SourceResolver::projectDirectory($home, $user->getMainDomain()?->getDocumentRoot(), $relative);
             $resolved = $this->resolver()->fromDirectory(SourceResolver::TYPE_PROJECT, $username, $directory);
 
@@ -242,9 +278,14 @@ class SourceInspectionController extends Controller
                 $recipe
             );
         } catch (InspectException $e) {
-            // `project`, not `source`: this endpoint is addressed by username.
             throw ProblemException::of([$e->toProblem('project')]);
         }
+    }
+
+    /** getHomeDir() honours a home recorded somewhere other than /home/<username>, and falls back to it. */
+    private function projectHome(User $user): string
+    {
+        return rtrim($user->getHomeDir(), '/');
     }
 
     /**
@@ -259,41 +300,58 @@ class SourceInspectionController extends Controller
         ?DeployPlan $plan = null,
         ?string $recipe = null
     ): JsonResponse {
-        // A project's directory was already chosen and checked against the
-        // account home; for the other two the subdirectory is applied here.
-        $dir = $resolved->type === SourceResolver::TYPE_PROJECT
-            ? $resolved->dir
-            : SourceResolver::descend($resolved->dir, $subdirectory);
-
-        // An account remembers the repository it was created from even when
-        // the checkout on disk has lost its remote, and that URL is what
-        // decides whether the engine's own app config for that repository applies.
+        $dir = $this->inspectedDirectory($resolved, $subdirectory);
         $repositoryUrl = $this->repositoryUrl($resolved) ?? $user?->getGitRepo();
-
-        // The deploy lays a recipe's files over the checkout before detection;
-        // a clone is ours to write to, and without them inspect judged a tree
-        // the deploy never sees.
-        if ($resolved->type === SourceResolver::TYPE_GIT) {
-            RecipeFileOverlay::apply($dir, $repositoryUrl);
-        }
+        $this->overlayRecipeFiles($resolved, $dir, $repositoryUrl);
 
         $report = AppInspector::inspect($dir, $repositoryUrl, $plan, $recipe);
 
         $data = ['source' => $this->describe($resolved, $subdirectory)];
-
         if ($user !== null) {
-            $details = $user->getDetails();
-            $commit = $resolved->meta['commit'] ?? null;
-            // What is running, and then where the files have moved on from it.
-            $data['deployment'] = DeploymentSnapshot::describe($details);
-            $data['drift'] = DeploymentSnapshot::drift(
-                $details,
-                $report,
-                is_string($commit) ? $commit : null
-            );
+            $data += $this->deploymentAndDrift($user, $resolved, $report);
         }
 
         return new JsonResponse(['data' => array_merge($data, $report)]);
+    }
+
+    /** A project's directory was already chosen and checked against the account home; other sources descend here. */
+    private function inspectedDirectory(ResolvedSource $resolved, ?string $subdirectory): string
+    {
+        return $resolved->type === SourceResolver::TYPE_PROJECT
+            ? $resolved->dir
+            : SourceResolver::descend($resolved->dir, $subdirectory);
+    }
+
+    /**
+     * The deploy lays a recipe's files over the checkout before detection, so a clone (ours to
+     * write to) gets them too; otherwise inspect would judge a tree the deploy never sees.
+     */
+    private function overlayRecipeFiles(ResolvedSource $resolved, string $dir, ?string $repositoryUrl): void
+    {
+        if ($resolved->type === SourceResolver::TYPE_GIT) {
+            RecipeFileOverlay::apply($dir, $repositoryUrl);
+        }
+    }
+
+    /**
+     * What is running in the project, and then where its files have moved on from it.
+     *
+     * @param array<string, mixed> $report
+     * @return array{deployment: mixed, drift: mixed}
+     */
+    private function deploymentAndDrift(User $user, ResolvedSource $resolved, array $report): array
+    {
+        $details = $user->getDetails();
+        $commit = $resolved->meta['commit'] ?? null;
+
+        return [
+            'deployment' => DeploymentSnapshot::describe($details),
+            'drift' => DeploymentSnapshot::drift(
+                $details,
+                $report,
+                is_string($commit) ? $commit : null
+            ),
+        ];
     }
 
     private function resolver(): SourceResolver
@@ -313,7 +371,7 @@ class SourceInspectionController extends Controller
      * The repository this source came from, when anything knows: the URL that
      * was cloned, or the origin remote of a checkout already on disk. It is
      * what decides whether the engine's own app config for that repository
-     * applies.
+     * applies; a project whose checkout lost its remote falls back to the one it was created from.
      */
     private function repositoryUrl(ResolvedSource $resolved): ?string
     {
@@ -323,6 +381,9 @@ class SourceInspectionController extends Controller
     }
 
     /**
+     * A clone has no `path`: it stops existing before the response is written. `method` is
+     * `tree` or `clone` for a git source, null for a directory that was simply read.
+     *
      * @return array<string, mixed>
      */
     private function describe(ResolvedSource $resolved, ?string $subdirectory): array
@@ -332,8 +393,6 @@ class SourceInspectionController extends Controller
         return [
             'type' => $resolved->type,
             'reference' => $resolved->reference,
-            // A temp clone's path is an implementation detail that stops
-            // existing before the response is written.
             'path' => $resolved->type === SourceResolver::TYPE_GIT ? null : $resolved->dir,
             'subdirectory' => $subdirectory === '' ? null : $subdirectory,
             'git' => [
@@ -341,7 +400,6 @@ class SourceInspectionController extends Controller
                 'branch' => $resolved->meta['branch'] ?? null,
                 'commit' => $resolved->meta['commit'] ?? null,
             ],
-            // `tree` or `clone` for a git source; a directory was simply read.
             'method' => $resolved->meta['method'] ?? null,
         ];
     }

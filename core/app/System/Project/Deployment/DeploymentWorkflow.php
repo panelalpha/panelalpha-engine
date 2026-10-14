@@ -6,6 +6,7 @@ use App\Exceptions\DeployCancelledException;
 use App\Exceptions\ProblemException;
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Deploy\DeployLog\DeployStartLine;
 use App\Lib\Deploy\DeployLog\FailureOutput;
 use App\Lib\Domains\PublicUrl;
 use App\System\Project\Dind as DindRuntime;
@@ -97,6 +98,7 @@ final class DeploymentWorkflow
         if ($mechanics->hasGitProject() || $user->getTemplate() === 'dind') {
             try {
                 $result = $mechanics->startApplication();
+                $deployLogger?->throwIfCancelled();
                 if ($result['exit_code'] !== 0) {
                     try {
                         // A first deploy: the volumes hold only what this failed start wrote.
@@ -166,8 +168,9 @@ final class DeploymentWorkflow
      * @param string  $source what the deploy log says started this: `git` for a manual porcelain call,
      *                        `push` for a Deploy Hook delivery
      * @param ?string $commit the commit the checkout is at, named in the log when the caller knows it
+     * @param ?string $branch the branch the checkout is on, named in the log when the caller knows it
      */
-    public function rebuildFromCheckout(?DeployLogger $deployLogger = null, string $source = 'git', ?string $commit = null): void
+    public function rebuildFromCheckout(?DeployLogger $deployLogger = null, string $source = 'git', ?string $commit = null, ?string $branch = null): void
     {
         $mechanics = $this->resolveMechanics();
         $user = $mechanics->user();
@@ -175,10 +178,11 @@ final class DeploymentWorkflow
         if ($deployLogger === null) {
             $deployLogger = DeployLogger::resumeRunningOrStartSafely($user->username);
         }
-        $deployLogger->info('Deploy started (source: ' . $source . ($commit !== null && $commit !== '' ? ', commit: ' . $commit : '') . ')');
+        $deployLogger->info(DeployStartLine::text($source, ['commit' => $commit, 'branch' => $branch]));
 
         $succeeded = false;
         try {
+            $mechanics->recordRunningVersion();
             $reuseRunning = $user->getTemplate() === 'dind' && $mechanics->isApplicationEnvironmentRunning();
             if (!$reuseRunning) {
                 $deployLogger->stage(DeployLogger::STAGE_PREPARING);
@@ -190,6 +194,7 @@ final class DeploymentWorkflow
 
             $domain = $mechanics->requireMainDomain();
             $result = $mechanics->startApplication();
+            $deployLogger->throwIfCancelled();
             if ($result['exit_code'] !== 0) {
                 if (!empty($result[AppLauncher::RELEASE_FAILED])) {
                     // Nothing new was started: tearing down now would only stop the version still serving.
@@ -278,6 +283,7 @@ final class DeploymentWorkflow
 
         $succeeded = false;
         try {
+            $mechanics->recordRunningVersion();
             $reuseRunning = $mechanics->isApplicationEnvironmentRunning();
             if (!$reuseRunning) {
                 $deployLogger->stage(DeployLogger::STAGE_PREPARING);
@@ -326,6 +332,7 @@ final class DeploymentWorkflow
 
         $succeeded = false;
         try {
+            $mechanics->recordRunningVersion();
             $deployLogger?->stage(DeployLogger::STAGE_CLONING);
             $mechanics->ingestArchive($zipPath);
 
@@ -354,6 +361,7 @@ final class DeploymentWorkflow
     {
         $deployLogger?->stage(DeployLogger::STAGE_RUNNING);
         $result = $mechanics->startApplication();
+        $deployLogger?->throwIfCancelled();
         if ($result['exit_code'] !== 0) {
             if (!empty($result[AppLauncher::RELEASE_FAILED])) {
                 $deployLogger?->info(self::releaseFailedLine($result));

@@ -28,9 +28,8 @@ use Symfony\Component\Process\Process;
 class System implements ProcessRunner
 {
     /**
-     * The two roots every other path derives from. Kept as methods rather than
-     * constants because 44 test files subclass System to redirect them at a
-     * temporary tree, and every derived path below has to follow.
+     * The two roots every other path derives from; methods rather than
+     * constants so a test subclass can redirect every derived path at once.
      */
     public function homesDirPath(): string
     {
@@ -223,13 +222,19 @@ class System implements ProcessRunner
             ]);
         }
 
+        $this->scheduleWebserverReload();
+
+        return false;
+    }
+
+    /** Best-effort: a failure to schedule is only logged. */
+    private function scheduleWebserverReload(): void
+    {
         try {
             $this->webserver()->scheduleWebserverReloadInBackground();
         } catch (\Throwable $scheduleError) {
             Log::warning('Could not schedule a background webserver reload: ' . $scheduleError->getMessage());
         }
-
-        return false;
     }
 
     public function project(ModelsUser $model): SystemProject
@@ -283,16 +288,10 @@ class System implements ProcessRunner
     public function isComposeServiceRunning(string $service): bool
     {
         $command = "sudo docker compose -f {$this->composeFilePath()} ps --services --filter status=running";
-        $result = $this->exec($command);
-        $result = trim($result);
-        $services = explode("\n", $result);
-        if (in_array($service, $services)) {
-            return true;
-        }
-        return false;
-    }
+        $services = explode("\n", trim($this->exec($command)));
 
-    // --- HOST PROCESSES ---
+        return in_array($service, $services);
+    }
 
     public function processes(): HostProcess
     {
@@ -300,12 +299,9 @@ class System implements ProcessRunner
     }
 
     /**
-     * Run to completion and return stdout, or throw.
-     *
-     * These five stay on System, and keep calling each other through $this,
-     * because about thirty test files override one or another of them to keep a
-     * test from running a real command -- some override only exec(), some only
-     * runProcess(). {@see HostProcess}
+     * Run to completion and return stdout, or throw. The five process methods
+     * stay here calling each other through $this, so a test overriding any
+     * one of them stops every real command. {@see HostProcess}
      *
      * @param string|list<string> $cmd
      * @throws DockerErrorException
@@ -320,9 +316,9 @@ class System implements ProcessRunner
      * @param string|list<string> $cmd
      * @throws DockerErrorException
      */
-    public function execOnHost(string|array $cmd, array $env = []): string
+    public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
     {
-        return $this->exec(HostProcess::onHost($cmd), $env);
+        return $this->exec(HostProcess::onHost($cmd), $env, $timeout);
     }
 
     /**
@@ -355,27 +351,6 @@ class System implements ProcessRunner
         return $this->runProcess(HostProcess::onHost($cmd), $env, $timeout);
     }
 
-    public function getEnv(): array
-    {
-        $lines = file($this->engineDirPath() . '/.env', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        $env = [];
-        foreach ($lines as $line) {
-            $line = trim($line);
-            if ($line === '' || str_starts_with($line, '#')) continue;
-            if (strpos($line, '=') !== false) {
-                /** @psalm-suppress PossiblyUndefinedArrayOffset */
-                [$key, $value] = explode('=', $line, 2);
-                $key = trim($key);
-                $value = trim($value, " \t\n\r\0\x0B\"'");
-                $env[$key] = $value;
-            }
-        }
-
-        return $env;
-    }
-
-    // --- UPDATE ENGINE ---
-
     public function update(): EngineUpdate
     {
         return new EngineUpdate($this);
@@ -387,6 +362,8 @@ class System implements ProcessRunner
      *   finished_at: ?int,
      *   pid: ?int,
      *   exit_code: ?int,
+     *   failed: bool,
+     *   reason: ?string,
      *   tail_stdout: ?string,
      *   tail_stderr: ?string,
      *   from_version: ?string,

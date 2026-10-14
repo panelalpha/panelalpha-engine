@@ -1,6 +1,7 @@
 import { expect, test } from '@/fixtures/test-options';
 import { httpScheme, isUnknownHostResponse } from '@/helpers/webserver-helpers';
 import { rand } from '@/helpers/random';
+import { expectStatus } from '@/helpers/expect-status';
 
 test.describe('404 handling', () => {
   const missingResources = [
@@ -12,7 +13,7 @@ test.describe('404 handling', () => {
 
   for (const [label, path] of missingResources) {
     test(`unknown ${label} returns 404`, async ({ api }) => {
-      expect((await api.get(path)).status()).toBe(404);
+      await expectStatus(await api.get(path), 404);
     });
   }
 
@@ -25,7 +26,7 @@ test.describe('404 handling', () => {
     ]);
 
     for (const response of responses) {
-      expect(response.status(), `${response.url()} should be 404`).toBe(404);
+      await expectStatus(response, 404, `${response.url()} should be 404`);
     }
   });
 
@@ -49,6 +50,7 @@ test.describe('404 handling', () => {
     const host = new URL(settings.apiBaseUrl).hostname;
     const isLiteral = /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(':');
 
+    // A failed system-info read leaves the IP empty, which the skip below reports.
     const ip = isLiteral
       ? host
       : await api

@@ -7,13 +7,8 @@ use App\Lib\Deploy\Dind\DindBuildStorage;
 use App\Lib\Deploy\Engine\AccountStorage;
 
 /**
- * The inner daemon's disk, which is the account's disk.
- *
- * Its data-root lives under ~/docker rather than on the host, so a build
- * cache nobody clears comes out of the customer's quota. Reclaiming is only
- * safe while the account runs no containers — pruning under a live stack
- * would take images out from under it — so every path here is gated on that
- * check rather than on how full the disk is.
+ * The inner daemon's disk (data-root under ~/docker), which comes out of the account's quota.
+ * Pruning everything is gated on the account running no containers, not on how full the disk is.
  */
 class StorageReclaim
 {
@@ -26,14 +21,26 @@ class StorageReclaim
 
     /**
      * Clear the build cache before a heavy build when the account is low on
-     * disk and nothing is running that could be disrupted.
+     * disk and nothing is running that could be disrupted. Best-effort like the
+     * prune itself: a probe that times out or fails is logged and the build goes on.
      */
     public function reclaimIfNeeded(): void
     {
-        if (!$this->canAggressivelyReclaim()) {
+        try {
+            $needed = $this->canAggressivelyReclaim() && $this->isLowOnDiskForBuild();
+        } catch (\Throwable $e) {
+            $this->inner->host()->logWarn('Could not check inner Docker disk before the build: ' . $e->getMessage());
+
             return;
         }
 
+        if ($needed) {
+            $this->reclaim(false);
+        }
+    }
+
+    private function isLowOnDiskForBuild(): bool
+    {
         $shell = $this->inner->dind()->shell();
         $storage = $this->storage();
         $availableBytes = $storage->parseFreeBytes(
@@ -43,11 +50,7 @@ class StorageReclaim
             $shell->execAsUserQuiet($storage->buildCacheProbeArgv(), [], 120)
         );
 
-        if (!DindBuildStorage::shouldReclaimBeforeBuild($availableBytes, $buildCacheBytes, false)) {
-            return;
-        }
-
-        $this->reclaim(false);
+        return DindBuildStorage::shouldReclaimBeforeBuild($availableBytes, $buildCacheBytes, false);
     }
 
     /**
@@ -62,6 +65,10 @@ class StorageReclaim
         return $containers === '';
     }
 
+    /**
+     * Prunes through dockerd, which keeps running: the account has no containers here,
+     * so nothing depends on what goes.
+     */
     public function reclaim(bool $emergency): void
     {
         $this->inner->host()->logInfo(
@@ -69,23 +76,18 @@ class StorageReclaim
                 ? 'Clearing inner Docker cache after disk-full build failure'
                 : 'Clearing inner Docker cache before heavy build'
         );
-        // Through dockerd, which keeps running: the account has no containers
-        // here, so nothing depends on what goes.
         foreach ($this->storage()->reclaimArgvs() as $argv) {
-            $this->inner->dind()->shell()->exec($argv, [], 300);
+            $this->prune($argv);
         }
     }
 
     /**
-     * After a step was stopped for disk. With the app still up (a rebuild
-     * keeps it serving) only what no container uses goes: the build cache and
-     * unused images.
+     * After a step was stopped for disk. With nothing running the daemon restarts first, since the killed
+     * build's half-written layer stays leased until it does; with the app still up only unused data goes.
      */
     public function reclaimAfterDiskLimit(): void
     {
         if ($this->canAggressivelyReclaim()) {
-            // The killed build's half-written layer stays leased, and unprunable,
-            // until the daemon restarts (1.2 GB measured); nothing runs to lose.
             $this->restartEngine();
             $this->reclaim(true);
 
@@ -94,7 +96,22 @@ class StorageReclaim
 
         $this->inner->host()->logInfo('Clearing inner Docker build cache and unused images after the disk limit');
         foreach ($this->whileRunningArgvs() as $argv) {
+            $this->prune($argv);
+        }
+    }
+
+    /**
+     * Best-effort: a prune that times out or meets a daemon error must not fail
+     * the deploy it was meant to help, and the next prune still runs.
+     *
+     * @param list<string> $argv
+     */
+    private function prune(array $argv): void
+    {
+        try {
             $this->inner->dind()->shell()->exec($argv, [], 300);
+        } catch (\Throwable $e) {
+            $this->inner->host()->logWarn('Could not reclaim inner Docker disk (' . implode(' ', $argv) . '): ' . $e->getMessage());
         }
     }
 
@@ -116,10 +133,7 @@ class StorageReclaim
         $dind->awaitReady(10, 2);
     }
 
-    /**
-     * Part of deleting the account. Quiet: a deploy log left cancelled -- a
-     * delete may follow a cancelled deploy -- must not stop it.
-     */
+    /** Part of deleting the account; quiet, so a deploy log left cancelled before the delete cannot stop it. */
     public function wipeDataRoot(): void
     {
         $dind = $this->inner->dind();

@@ -1,4 +1,5 @@
 import { expect, test } from '@/fixtures/test-options';
+import { CleanupSteps } from '@/helpers/cleanup-step';
 import {
   LSCACHE_PLUGIN,
   ensureLscachePluginActive,
@@ -18,11 +19,29 @@ test.describe('LiteSpeed Cache plugin', () => {
   });
 
   test.afterEach(async ({ api, setupUser }) => {
+    // beforeEach can skip before it reads the plugin state; there is nothing to restore then.
+    if (wasActive === undefined) {
+      return;
+    }
+
     const path = wpPath(setupUser);
-    const action = wasActive ? 'activate' : 'deactivate';
-    await api
-      .executeWpCliCommand(setupUser.username, ['plugin', action, LSCACHE_PLUGIN, path])
-      .catch(() => undefined);
+    const cleanup = new CleanupSteps();
+    await cleanup.run(
+      'restore the LiteSpeed Cache plugin state',
+      () =>
+        api.executeWpCliCommand(setupUser.username, [
+          'plugin',
+          wasActive ? 'activate' : 'deactivate',
+          LSCACHE_PLUGIN,
+          path,
+        ]),
+      {
+        verify: async () =>
+          (await isLscachePluginActive(api, setupUser.username, path)) === wasActive,
+        describe: () => `the plugin is not back to ${wasActive ? 'active' : 'inactive'}`,
+      }
+    );
+    await cleanup.finish();
   });
 
   test('the plugin installs and activates', async ({ api, setupUser }) => {

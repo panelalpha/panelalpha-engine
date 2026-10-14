@@ -17,7 +17,7 @@ RUN set -ex && \
         openssl-dev \
         tar && \
     cd /tmp && \
-    curl -sSL https://download.pureftpd.org/pub/pure-ftpd/releases/pure-ftpd-$VERSION.tar.gz | \
+    curl --proto '=https' -sSL https://download.pureftpd.org/pub/pure-ftpd/releases/pure-ftpd-$VERSION.tar.gz | \
     tar xz --strip 1 && \
     patch -p1 src/ftpd.c minimal.patch && \
     patch -p1 src/ftpd.c skip_no_anonymous_login_reply.patch && \

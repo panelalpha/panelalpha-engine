@@ -11,10 +11,13 @@ use App\Lib\DeployHook\CheckoutSync;
 use App\Lib\DeployHook\GitCheckoutSync;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Models\PersonalAccessToken;
+use App\Models\Setting;
 use App\System;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull;
 use Illuminate\Http\Request;
+use Illuminate\Queue\Events\JobProcessing;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 use InvalidArgumentException;
 use Laravel\Sanctum\Sanctum;
@@ -83,6 +86,14 @@ class AppServiceProvider extends ServiceProvider
         ConvertEmptyStringsToNull::skipWhen(static function (Request $request): bool {
             return $request->is('api/projects/*/wp-cli/command')
                 || $request->is('api/users/*/wp-cli/command');
+        });
+
+        // A queue worker holds the settings table in a static for the life of the
+        // process, and an allowance is written by the CLI or the API in another
+        // one. Without this, the first apply after an allowance reads a snapshot
+        // taken before it and delivers nothing.
+        Event::listen(JobProcessing::class, static function (): void {
+            Setting::clearRuntimeSettings();
         });
     }
 }

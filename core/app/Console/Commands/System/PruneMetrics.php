@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\System;
 
+use App\Lib\Host\ProjectDisk;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
@@ -20,6 +21,10 @@ class PruneMetrics extends Command
 
         $this->pruneByDaysLimit($daysLimit);
         $this->pruneByEntriesLimit($entriesLimit);
+
+        $days = ProjectDisk::daysKept();
+        $deleted = DB::table('project_disk_usage')->where('timestamp', '<', now('UTC')->subDays($days))->delete();
+        $this->info("Deleted $deleted project disk measurements older than $days days.");
 
         $this->info("Pruning completed.");
         return 0;

@@ -72,6 +72,10 @@ for user in "${!conf_users[@]}"; do
     [[ -z "$pubkey" ]] && continue
     cat >> "$SSH_KEYS_CONF" <<EOF
 Match User $user
+    ChrootDirectory %h
+    ForceCommand internal-sftp
+    AllowTcpForwarding no
+    X11Forwarding no
     AuthorizedKeysCommand /bin/echo "$pubkey"
     AuthorizedKeysCommandUser nobody
 EOF

@@ -49,7 +49,7 @@ le_public_ip() {
     local ip
     ip=$(ip route get 8.8.8.8 2>/dev/null | sed -n '/src/{s/.*src *\([^ ]*\).*/\1/p;q}')
     if [ -z "$ip" ] || le_ip_is_private "$ip"; then
-        ip=$(curl -s4 --max-time 10 icanhazip.com 2>/dev/null | tr -d '[:space:]')
+        ip=$(curl --proto '=https' -s4 --max-time 10 https://icanhazip.com 2>/dev/null | tr -d '[:space:]')
     fi
     echo "$ip"
 }

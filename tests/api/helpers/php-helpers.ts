@@ -1,6 +1,7 @@
 import type { APIRequestContext } from '@playwright/test';
 import type { EngineApi } from '@/clients/engine-api';
 import { delay, waitForCondition } from '@/helpers/retry';
+import { redactAndTruncate } from '@/helpers/redact';
 import { getWebserverInfo, getWebserverPropagationDelay } from '@/helpers/webserver-helpers';
 
 /** Spacing between repeated HTTP probes while verifying a PHP version switch. */
@@ -46,14 +47,18 @@ export async function waitForServedPhpVersion(
   const wanted = majorMinor(version);
   const { slug } = await getWebserverInfo(api);
 
+  let lastBody = '';
+
   await waitForCondition(
     async () => {
       const body = await fetchProbe(http, domain, script);
+      lastBody = body;
       return body.includes('PHP_VERSION:') && body.includes(wanted);
     },
     {
       timeout: budgetMs + getWebserverPropagationDelay(slug),
       interval: 2_000,
+      describeLast: () => `probe body: ${redactAndTruncate(lastBody, 300)}`,
       message: `${domain} did not start serving PHP ${wanted} on ${script}`,
     }
   );

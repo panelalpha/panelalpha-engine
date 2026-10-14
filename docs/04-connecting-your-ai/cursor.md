@@ -1,44 +1,36 @@
 # Connecting Cursor
 
-Cursor is an editor. It has no install command like Claude Code, so the engine prints two ways to add it. A prompt you paste into a Cursor Agent chat does both the plugin and the connection. Or you add the connection yourself and then install the plugin. Pick one path.
+`pae connect cursor` prints an install link for the MCP connection and a separate prompt for the `engine` plugin. Open the link on your computer to add the connection, then install the plugin.
 
 The **plugin** is `engine` from [panelalpha/agent-skills](https://github.com/panelalpha/agent-skills). It teaches Cursor how to create a site and how to debug one that failed. It does not put your engine address or token into Cursor. That is a separate MCP connection.
 
-## 1. Get both on your VPS
+## 1. Get the connection on your VPS
 
 ```bash
 pae connect cursor
 ```
 
-Run this on your VPS. It creates a token and prints a prompt, a configuration block, and the plugin step, with your address and token already filled in.
+Run this on your VPS. It creates a token and prints an install link with your address and token already filled in, a manual configuration block, and a plugin-only prompt.
 
 ## 2. Add the engine to Cursor
 
-Do this on your own computer. Use the prompt, or both of the steps after it.
+Do this on your own computer, where Cursor is installed.
 
-### Paste the prompt into Cursor
+### Open the install link
 
-Open a Cursor **Agent** chat, not Ask, and paste the sentence your VPS printed. That installs the plugin and adds the connection.
+Open the `cursor://anysphere.cursor-deeplink/mcp/install?...` link your VPS printed. If your terminal does not make it clickable, copy the complete link into your browser's address bar and allow it to open Cursor.
 
-It looks like this:
+Cursor opens its MCP settings and asks you to install `panelalpha-engine`. Review the server address and confirm **Install**. The connection is added to your user configuration, `~/.cursor/mcp.json`, so it is available in every project. Other MCP servers remain in the file. If `panelalpha-engine` already exists, confirming the install replaces that entry with the new address and token.
 
-```text
-Add the GitHub marketplace panelalpha/agent-skills and install engine. Then add an MCP server named panelalpha-engine to ~/.cursor/mcp.json (all projects, not a project file) with url=https://203.0.113.10:2011/mcp and header Authorization: Bearer <token>. If that file already has other servers, add panelalpha-engine alongside them. Confirm panelalpha-engine is connected, then list the projects on this engine.
-```
+The link uses Cursor's [MCP install-link format](https://prod.cursor.com/docs/mcp/install-links): a server name and a base64-encoded JSON configuration containing the URL and Authorization header.
 
-**Copy the prompt your VPS printed, not the one above.** `203.0.113.10` is a placeholder address used throughout this guide.
+**Keep the link private.** Base64 does not encrypt the token. Do not paste the link or the manual configuration into an Agent chat, commit it to a repository, or share it with someone else.
 
-What this does: Cursor installs `engine` from `panelalpha/agent-skills`, then writes the engine into `~/.cursor/mcp.json` so it is available in every project.
+Then install the plugin below.
 
-What you should see: it installs the plugin, edits that file, then lists the projects on this engine. An empty list on a new engine is a success.
+### Or add the connection manually
 
-If Cursor asks for permission to write `~/.cursor/mcp.json`, allow it. That is the user file. A file inside a project risks committing your token to a repository.
-
-If the plugin does not install from the chat, use **Install the plugin** below.
-
-### Or add the connection yourself
-
-Open **Settings**, then **Tools & MCP**, then **New MCP Server**. Cursor opens a configuration file for you to fill in. Paste the block your VPS printed.
+Open **Settings**, then **Tools & MCP**, then **New MCP Server**. Cursor opens a configuration file for you to fill in. Use the block your VPS printed.
 
 It looks like this:
 
@@ -55,7 +47,7 @@ It looks like this:
 }
 ```
 
-Use `~/.cursor/mcp.json` so the engine is available in every project. Putting the file inside a project risks committing your token to a repository.
+Use your printed address and token; `203.0.113.10` is a placeholder. Use `~/.cursor/mcp.json` so the engine is available in every project. Putting the file inside a project risks committing your token to a repository.
 
 If the file already has other servers in it, add `panelalpha-engine` alongside them rather than replacing the whole file.
 
@@ -63,11 +55,15 @@ Then install the plugin.
 
 ### Install the plugin
 
-This is the `engine` plugin from `panelalpha/agent-skills`. Do this after adding the connection yourself, or when the prompt did not install it.
+Open a Cursor **Agent** chat and paste the plugin-only prompt your VPS printed:
 
-Open **Customize**, then **Plugins**. Import `https://github.com/panelalpha/agent-skills` and install `engine`. Reload the window.
+```text
+Add the GitHub marketplace panelalpha/agent-skills and install engine.
+```
 
-The plugin adds the create and debug skills. It does not connect to your engine on its own. The connection is the prompt or the configuration block above.
+This prompt installs only the create and debug skills. It contains no engine address or MCP token. The MCP connection is added through the install link or manual configuration above.
+
+You can also open **Customize**, then **Plugins**. Import `https://github.com/panelalpha/agent-skills` and install `engine`. Reload the window.
 
 ## 3. Confirm it works
 
@@ -90,8 +86,8 @@ Cursor is normally launched from a desktop icon, so it will not see a certificat
 
 The lasting fix is giving the engine a real certificate: [Install](../02-getting-started/install.md#if-connecting-asks-you-to-trust-a-certificate).
 
-**It wrote `.cursor/mcp.json` inside the project instead of `~/.cursor/mcp.json`.**
-Move the `panelalpha-engine` entry to the user file and delete it from the project file. If that project file was committed, revoke the token: see **I committed my token to a repository** below.
+**I put the connection in `.cursor/mcp.json` inside a project instead of `~/.cursor/mcp.json`.**
+Move the `panelalpha-engine` entry to the user file and delete it from the project file. If that project file was committed, revoke the token: see **I pasted the link or the token into a chat, or committed it to a repository** below.
 
 **The plugin with create and debug skills did not install.**
 Open **Customize**, then **Plugins**, import `https://github.com/panelalpha/agent-skills`, and install `engine`. Reload the window.
@@ -108,7 +104,7 @@ The token is truncated, or it is the wrong type. Assistants need a token from `p
 **It connects but can barely do anything.**
 The permission settings on your VPS are filtering its abilities. See [Decide what the assistant may do](your-assistant.md#decide-what-the-assistant-may-do).
 
-**I committed my token to a repository.**
+**I pasted the link or the token into a chat, or committed it to a repository.**
 Revoke it immediately on your VPS, then create a new one and add it again with `pae connect cursor`:
 
 ```bash

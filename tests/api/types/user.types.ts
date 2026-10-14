@@ -59,6 +59,8 @@ export interface User {
   email: string | null;
   email_verified_at: string | null;
   status: 'active' | 'suspended' | 'pending';
+  /** While true, an API or MCP token may not delete, stop or redeploy this project. */
+  protected: boolean;
   staging?: string | null;
   staging_of?: string | null;
   created_at: string;
@@ -76,11 +78,22 @@ export interface UserCredentials {
   mysqlPassword: string;
 }
 
+/** One table of one database, as a push selection and the table diff name it. */
+export interface PushTable {
+  database: string;
+  name: string;
+}
+
+/** What `GET /projects/{username}/push/diff` answers under `data`. */
+export interface PushDiff {
+  tables_structure_diff: PushTable[];
+  tables_data_diff: PushTable[];
+}
+
 /**
  * Combined data structure produced by the setup test and consumed by dependent tests.
  * Shared via playwright-relay under key '[setup] should create test user with WordPress'.
- */
-export interface SetupTestData extends UserCredentials {
+ */ export interface SetupTestData extends UserCredentials {
   wpPath: string;
   url: string;
   admin_username: string;
@@ -114,6 +127,15 @@ export interface CreateUserRequest {
   dedicated_ipv4?: boolean | null;
   dedicated_ipv6?: boolean | null;
   git_repo?: string | null;
+  git_branch?: string | null;
+  git_token?: string | null;
+  env_vars?: Record<string, string | null> | null;
+  stages?: Record<string, unknown> | null;
+  recipe?: string | null;
+}
+
+export interface AttachSourceRequest {
+  git_repo: string;
   git_branch?: string | null;
   git_token?: string | null;
   env_vars?: Record<string, string | null> | null;

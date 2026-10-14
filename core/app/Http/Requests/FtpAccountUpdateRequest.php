@@ -2,29 +2,28 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\ReadsFtpQuota;
+use App\Http\Requests\Concerns\ResolvesVaultFields;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rules\Password;
 
 class FtpAccountUpdateRequest extends FormRequest
 {
+    use ReadsFtpQuota;
+    use ResolvesVaultFields;
+
+    protected function prepareForValidation(): void
+    {
+        $this->resolveVaultFields(['password']);
+    }
+
     public function authorize(): bool
     {
         return true;
     }
 
-    public function getQuota(): ?int
-    {
-        if (!empty($this->get('unlimited_quota'))) {
-            return null;
-        }
-        return (int)$this->get('quota');
-    }
-
     /**
-     * This is a partial update: quota/unlimited_quota are optional, and an
-     * omitted pair must mean "leave the quota as it is", not "set it to 0"
-     * -- getQuota() alone can't tell those apart, since it always returns
-     * a concrete int or null.
+     * An omitted quota/unlimited_quota pair leaves the quota as it is, which
+     * getQuota() alone cannot tell apart from "set it to 0".
      */
     public function quotaProvided(): bool
     {

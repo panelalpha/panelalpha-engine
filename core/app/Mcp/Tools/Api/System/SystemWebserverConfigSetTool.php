@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('system_webserver_config_set')]
 #[Description(<<<'MARKDOWN'
     Update webserver configuration
+
+    (Open)LiteSpeed only; answers 422 on nginx-proxy.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

@@ -22,6 +22,10 @@ if [ -d /opt/panelalpha/shared-hosting ]; then
         chown -R www-data:www-data "$d"
     done
 fi
+# Coverage recordings: bind-mounted from the host's tests/coverage, which Docker
+# creates root-owned when it is missing; php-fpm and the workers write to it as www-data.
+mkdir -p /var/www/tests/coverage
+chown www-data:www-data /var/www/tests/coverage
 mkdir -p /var/tmp/panelalpha-backup
 chown www-data:www-data /var/tmp/panelalpha-backup
 chmod 1777 /var/tmp/panelalpha-backup
@@ -33,6 +37,10 @@ rm -rf /run/service
 mkdir -p /run/service
 cp -a /etc/s6/core/. /run/service/
 php /var/www/html/artisan system:queue-workers:sync
+# A restart SIGKILLs the unsupervised `schedule:run`, leaving its
+# withoutOverlapping() mutexes in the persistent file cache; clear them so an
+# interrupted command runs on the next tick instead of being skipped.
+php /var/www/html/artisan schedule:clear-cache >/dev/null 2>&1 || true
 # nginx.conf believes forwarded headers on :80 from the loopback and from the
 # bridge gateway -- the host webserver's /panelalpha-sso hop -- and nothing
 # else. The gateway differs per host, so it is read here from the default

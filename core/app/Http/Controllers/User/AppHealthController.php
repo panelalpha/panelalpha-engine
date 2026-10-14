@@ -5,7 +5,6 @@ namespace App\Http\Controllers\User;
 use App\Http\Controllers\Controller;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AppHealth;
-use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -24,15 +23,20 @@ class AppHealthController extends Controller
     {
         $user = $this->projectOr404($username);
         if ($user->getTemplate() !== 'dind') {
-            abort(new JsonResponse(['message' => 'App health checks are only available for dind users'], 403));
+            $this->refuseNonContainerProject();
         }
 
         $runtime = $user->project()->runtime();
         if (!$runtime instanceof Dind) {
-            abort(new JsonResponse(['message' => 'App health checks are only available for dind users'], 403));
+            $this->refuseNonContainerProject();
         }
 
         return $runtime;
+    }
+
+    private function refuseNonContainerProject(): never
+    {
+        abort(new JsonResponse(['message' => 'App health checks work only on container projects (template dind).'], 403));
     }
 
     #[OA\Get(

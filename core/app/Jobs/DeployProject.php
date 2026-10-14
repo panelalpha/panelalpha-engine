@@ -3,6 +3,8 @@
 namespace App\Jobs;
 
 use App\Exceptions\NotFoundException;
+use App\Exceptions\ProblemException;
+use App\Exceptions\TaskCancelledException;
 use App\Jobs\Concerns\AttachTask;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Platform\DeployPlan;
@@ -13,6 +15,7 @@ use App\Lib\Project\CreateInspection;
 use App\Lib\Task\DeployLogTail;
 use App\Lib\Task\TaskLogSink;
 use App\Models\User;
+use App\Support\JobBudget;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -32,7 +35,7 @@ class DeployProject implements ShouldQueue
 
     public int $tries = 1;
 
-    public int $timeout = 7200;
+    public int $timeout = JobBudget::SECONDS;
 
     /** The project's row; null on a job queued before it was recorded. */
     public ?int $userId = null;
@@ -57,43 +60,15 @@ class DeployProject implements ShouldQueue
     {
         $this->runTask(function (): void {
             $user = $this->project();
-
-            $plan = $this->stages !== null ? DeployPlan::fromArray($this->stages) : null;
-            app(DeployPlanContext::class)->set($plan);
-            // Set even when null: the worker's singleton outlives the previous job.
-            app(RecipeChoiceContext::class)->set($this->recipe);
+            $this->bindDeployContext();
 
             $sink = new TaskLogSink($this->task());
             DeployLogger::streamTo($sink);
 
-            $logger = null;
             try {
-                if ($user->hasGitProject() || $user->getTemplate() === 'dind') {
-                    $logger = DeployLogger::startSafely($user->username);
-                    if ($logger !== null) {
-                        $gitRepo = $user->getGitRepo();
-                        $logger->info($gitRepo
-                            ? 'Deploy started (source: git, repo: ' . GitUrl::sanitize($gitRepo) . ')'
-                            : 'Deploy started (source: dind template)');
-                        CreateInspection::fromArray($this->inspection)?->writeTo($logger);
-                    }
-                }
-
-                // The rollback deletes the deploy log; keep its tail on the task.
-                $tailKept = false;
-                $keepTail = function (DeployLogger $failed) use ($sink, &$tailKept): void {
-                    $sink->flush();
-                    $tailKept = DeployLogTail::preserve($this->task(), $failed);
-                };
-
-                try {
-                    $user->project()->runDeployment($logger, $keepTail);
-                } catch (ValidationException $e) {
-                    // Pipeline already rolled the account back and finished the
-                    // deploy log. Surface the message on the task and stop.
-                    $summary = $this->validationSummary($e);
-                    throw new RuntimeException($tailKept ? DeployLogTail::retarget($summary) : $summary, 0, $e);
-                }
+                $logger = $this->startDeployLog($user);
+                $this->recordDeployId($logger);
+                $this->deploy($user, $logger, $sink);
 
                 $user->refresh();
                 $this->recordOutcome($user);
@@ -102,6 +77,11 @@ class DeployProject implements ShouldQueue
                 DeployLogger::stopStreaming();
             }
         });
+    }
+
+    protected function runDeployment(User $user, ?DeployLogger $logger, callable $keepTail): void
+    {
+        $user->project()->runDeployment($logger, $keepTail);
     }
 
     /**
@@ -116,6 +96,81 @@ class DeployProject implements ShouldQueue
 
         return User::query()->whereKey($this->userId)->first()
             ?? throw new NotFoundException("Project '{$this->username}' not found.", User::class);
+    }
+
+    /**
+     * Set even when null: the worker's singletons outlive the previous job.
+     */
+    private function bindDeployContext(): void
+    {
+        app(DeployPlanContext::class)->set($this->stages !== null ? DeployPlan::fromArray($this->stages) : null);
+        app(RecipeChoiceContext::class)->set($this->recipe);
+    }
+
+    private function startDeployLog(User $user): ?DeployLogger
+    {
+        if (!$user->hasGitProject() && $user->getTemplate() !== 'dind') {
+            return null;
+        }
+
+        $logger = DeployLogger::startSafely($user->username);
+        if ($logger === null) {
+            return null;
+        }
+
+        $gitRepo = $user->getGitRepo();
+        $logger->info($gitRepo
+            ? 'Deploy started (source: git, repo: ' . GitUrl::sanitize($gitRepo) . ')'
+            : 'Deploy started (source: dind template)');
+        CreateInspection::fromArray($this->inspection)?->writeTo($logger);
+
+        return $logger;
+    }
+
+    /**
+     * The deploy this task runs, so the reconciler, a cancel and an API client
+     * can tie the create to its log as they do a rebuild.
+     */
+    private function recordDeployId(?DeployLogger $logger): void
+    {
+        $task = $this->task();
+        if ($task === null || $logger === null) {
+            return;
+        }
+        $task->details = array_merge($task->details ?? [], ['deploy_id' => $logger->getDeployId()]);
+        $task->save();
+    }
+
+    /**
+     * A failed pipeline has already rolled the account back and deleted the
+     * deploy log, so the log's tail is kept on the task and only the message is raised.
+     */
+    private function deploy(User $user, ?DeployLogger $logger, TaskLogSink $sink): void
+    {
+        $tailKept = false;
+        $keepTail = function (DeployLogger $failed) use ($sink, &$tailKept): void {
+            $sink->flush();
+            $tailKept = DeployLogTail::preserve($this->task(), $failed);
+        };
+
+        try {
+            $this->runDeployment($user, $logger, $keepTail);
+        } catch (ValidationException $e) {
+            if ($this->isCancellation($e)) {
+                throw new TaskCancelledException();
+            }
+
+            $summary = $this->validationSummary($e);
+            throw new RuntimeException($tailKept ? DeployLogTail::retarget($summary) : $summary, 0, $e);
+        }
+    }
+
+    /**
+     * A cancel is an expected outcome: no failed job, no ERROR line.
+     */
+    private function isCancellation(ValidationException $e): bool
+    {
+        return $e instanceof ProblemException && ($e->problems[0]['code'] ?? null) === 'deploy_cancelled';
     }
 
     public function failed(?Throwable $e): void
@@ -142,8 +197,7 @@ class DeployProject implements ShouldQueue
             if ($warnings !== []) {
                 $details['deployment_warnings'] = $warnings;
             }
-        } elseif ($user->getTemplate() === 'dind' && !$user->hasGitProject() && $status === 'unknown') {
-            // Zip/placeholder path: pipeline stopped after preparing.
+        } elseif ($this->stoppedBeforeFilesArrived($user, $status)) {
             $details['waiting_for_files'] = true;
         } else {
             $details['deployment_status'] = $status === 'unknown' ? 'success' : $status;
@@ -151,6 +205,14 @@ class DeployProject implements ShouldQueue
 
         $task->details = $details;
         $task->save();
+    }
+
+    /**
+     * The zip/placeholder path: the pipeline stops after preparing and waits for an upload.
+     */
+    private function stoppedBeforeFilesArrived(User $user, string $status): bool
+    {
+        return $user->getTemplate() === 'dind' && !$user->hasGitProject() && $status === 'unknown';
     }
 
     private function validationSummary(ValidationException $e): string

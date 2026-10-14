@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('backup_container_delete')]
 #[Description(<<<'MARKDOWN'
     Delete a backup container
+
+    A store that still holds backups is refused with 409 unless `delete_backups` is set, which removes the backups with the store (as an asynchronous task, answered 202 with a task_id).
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -42,12 +44,23 @@ class BackupContainerDeleteTool extends ApiTool
     }
 
     /**
+     * @return array<int, string>
+     */
+    protected function queryParams(): array
+    {
+        return [
+            'delete_backups',
+        ];
+    }
+
+    /**
      * @return array<string, \Illuminate\JsonSchema\Types\Type>
      */
     public function schema(JsonSchema $schema): array
     {
         return [
             'id' => $schema->integer()->required(),
+            'delete_backups' => $schema->boolean()->description('Set to remove the store and its backups together; without it a non-empty store is refused with 409.'),
         ];
     }
 }

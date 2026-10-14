@@ -38,7 +38,7 @@ Open source. Self-hosted. Makkelijk voor iedereen, niet alleen voor sysadmins.
 <p>
 <a href="#stap-1-installeer-engine-op-je-vps"><img src="https://img.shields.io/badge/install-one--liner-2f8f46" alt="Installatie met één commando"></a>
 <a href="#stap-1-installeer-engine-op-je-vps"><img src="https://img.shields.io/badge/Debian_12%2F13-Ubuntu_22.04%2F24.04%2F26.04-a80030" alt="Ondersteunde systemen"></a>
-<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-204_tools-6f42c1" alt="204 MCP-tools"></a>
+<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-225_tools-6f42c1" alt="225 MCP-tools"></a>
 <a href="#licentie"><img src="https://img.shields.io/badge/license-Apache_2.0-0b7285" alt="Apache 2.0"></a>
 <a href="https://discord.gg/9twHWR7xGX"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Kom op Discord"></a>
 </p>
@@ -96,7 +96,7 @@ Je hebt een **verse** server nodig met Debian 12/13 of Ubuntu 22.04/24.04/26.04,
 Wil je bijvoorbeeld Engine installeren en tegelijk n8n deployen, dan is dit alles wat je nodig hebt:
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
 ```
 
 Aan het einde toont hij het adres van je nieuwe site en, als je `--no-password` niet meegeeft, het wachtwoord waarmee je die opent. Voor privérepository's, een eigen wachtwoord of een applicatie op een server waar Engine al op staat, zie: [One-line app installation command](docs/02-getting-started/install.md#one-line-app-installation-command).
@@ -104,7 +104,7 @@ Aan het einde toont hij het adres van je nieuwe site en, als je `--no-password` 
 Liever de twee stappen los? Gebruik het commando hieronder om alleen Engine te installeren en deploy je applicatie later via je assistent (zie stap 2):
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 Dat is alles. Je server is klaar. Voor een eigen naam, je eigen TLS-certificaat of een server achter NAT, zie: [installatie-opties](docs/02-getting-started/install.md).
@@ -174,7 +174,7 @@ Geen commando's om te leren, en ook geen toverformules. Dit zijn voorbeelden van
 | `Zet een Cloudflare-tunnel op voor n8n.mydomain.com.` | DNS en tunnel geregeld, en zo serveer je ook vanaf een server achter NAT. |
 | `Hoeveel verkeer kregen we vorige week?` | Verbruik, logs en limieten voor dat project, en voor de hele server. |
 
-Meer uitgewerkte voorbeelden: [waar je om kunt vragen](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). De volledige lijst van wat je assistent kan bereiken: [204 tools](docs/04-connecting-your-ai/your-assistant.md).
+Meer uitgewerkte voorbeelden: [waar je om kunt vragen](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). De volledige lijst van wat je assistent kan bereiken: [225 tools](docs/04-connecting-your-ai/your-assistant.md).
 
 ---
 
@@ -319,7 +319,7 @@ Niet zo van Discord? [Ons forum](https://community.panelalpha.com/) is net zo op
 ## Je server is één commando verwijderd
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 ## Beveiliging

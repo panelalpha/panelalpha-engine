@@ -11,7 +11,7 @@ class EnsureSwaggerEnabled
     public function handle(Request $request, Closure $next): mixed
     {
         if (!env('SWAGGER_ENABLED', false)) {
-            return new JsonResponse('Not Found', 404);
+            return new JsonResponse(['message' => 'Not found'], 404);
         }
 
         return $next($request);

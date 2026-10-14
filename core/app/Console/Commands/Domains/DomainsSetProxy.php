@@ -46,39 +46,17 @@ class DomainsSetProxy extends Command
             return 1;
         }
 
-        $domain = Domain::findByNameOrAlias($domainName);
-        if (!$domain) {
-            $this->error("Domain '{$domainName}' not found.");
+        $domain = $this->ownedDomain($domainName, $projectOpt);
+        if ($domain === null) {
             return 1;
         }
-        $domain->loadMissing('user');
         $user = $domain->user;
-        if (!$user) {
-            $this->error('Domain has no project/user.');
-            return 1;
-        }
-        if ($projectOpt !== '' && strtolower($projectOpt) !== strtolower($user->username)) {
-            $this->error(
-                "Domain '{$domain->domain}' belongs to project '{$user->username}', not '{$projectOpt}'."
-            );
-            return 1;
-        }
 
-        $username = $user->username;
-        $fqdn = $domain->domain;
-
-        try {
-            [$upstreamHost, $upstreamPort] = UpstreamSpec::parse($proxyTo, $username);
-        } catch (\InvalidArgumentException $e) {
-            $this->error($e->getMessage());
+        $upstream = $this->upstream($proxyTo, $user->username);
+        if ($upstream === null) {
             return 1;
         }
-        // The rules are the project's own.
-        $refusal = ProxyRuleUpstream::refusal('user', $username, $upstreamHost);
-        if ($refusal !== null) {
-            $this->error($refusal);
-            return 1;
-        }
+        [$upstreamHost, $upstreamPort] = $upstream;
 
         $listenPorts = $this->resolveListenPorts();
         if ($listenPorts === null) {
@@ -86,59 +64,108 @@ class DomainsSetProxy extends Command
         }
 
         $hasTunnels = $domain->hasTunnels();
-        $changes = [];
-        foreach ($listenPorts as $listenPort) {
-            $existing = ProxyRule::query()
-                ->where('owner_scope', 'user')
-                ->where('username', $username)
-                ->where('transport', 'http')
-                ->where('listen_port', $listenPort)
-                ->where('server_name', $fqdn)
-                ->first();
-
-            $current = $existing
-                ? "{$existing->upstream_host}:{$existing->upstream_port}"
-                    . ($existing->enabled ? '' : ' (disabled)')
-                : '-';
-            $changes[] = [
-                'listen' => $listenPort,
-                'current' => $current,
-                'new' => "{$upstreamHost}:{$upstreamPort}",
-                'action' => $existing ? 'update' : 'create',
-            ];
-        }
-
-        $this->line('');
-        $this->info("Set proxy for {$fqdn} (project: {$username})");
-        $table = new Table($this->output);
-        $table->setHeaders(['Listen', 'Current', 'New', 'Action']);
-        $table->setRows(array_map(static fn (array $c): array => [
-            (string) $c['listen'],
-            $c['current'],
-            $c['new'],
-            $c['action'],
-        ], $changes));
-        $table->render();
-        if ($hasTunnels) {
-            $this->comment(
-                "Domain has tunnel(s): Cloudflare ingress will sync to http://127.0.0.1:{$upstreamPort} inside DinD."
-            );
-        }
+        $this->showPlan($domain, $listenPorts, $upstreamHost, $upstreamPort, $hasTunnels);
 
         if (!$this->option('force') && !$this->confirm('Apply these changes?')) {
             $this->info('Cancelled.');
             return 0;
         }
 
+        $this->writeRules($domain, $listenPorts, $upstreamHost, $upstreamPort);
+        $tunnelError = $hasTunnels ? $this->syncTunnels($domain) : null;
+
+        $domain->projectDomain()->rebuild();
+        (new System())->webserver()->scheduleWebserverReloadInBackground();
+
+        return $this->reportApplied($tunnelError, $hasTunnels);
+    }
+
+    /** The domain with its owner loaded, or null once a refusal has been printed. */
+    private function ownedDomain(string $domainName, string $projectOpt): ?Domain
+    {
+        $domain = Domain::findByNameOrAlias($domainName);
+        if (!$domain) {
+            $this->error("Domain '{$domainName}' not found.");
+            return null;
+        }
+        $domain->loadMissing('user');
+        $user = $domain->user;
+        if (!$user) {
+            $this->error('Domain has no project/user.');
+            return null;
+        }
+        if ($projectOpt !== '' && strtolower($projectOpt) !== strtolower($user->username)) {
+            $this->error(
+                "Domain '{$domain->domain}' belongs to project '{$user->username}', not '{$projectOpt}'."
+            );
+            return null;
+        }
+
+        return $domain;
+    }
+
+    /**
+     * The upstream as [host, port], or null once a refusal has been printed.
+     * The rules are the project's own.
+     *
+     * @return ?array{0: string, 1: int}
+     */
+    private function upstream(string $proxyTo, string $username): ?array
+    {
+        try {
+            [$upstreamHost, $upstreamPort] = UpstreamSpec::parse($proxyTo, $username);
+        } catch (\InvalidArgumentException $e) {
+            $this->error($e->getMessage());
+            return null;
+        }
+
+        $refusal = ProxyRuleUpstream::refusal('user', $username, $upstreamHost);
+        if ($refusal !== null) {
+            $this->error($refusal);
+            return null;
+        }
+
+        return [$upstreamHost, $upstreamPort];
+    }
+
+    /** @param list<int> $listenPorts */
+    private function showPlan(Domain $domain, array $listenPorts, string $upstreamHost, int $upstreamPort, bool $hasTunnels): void
+    {
+        $this->line('');
+        $this->info("Set proxy for {$domain->domain} (project: {$domain->user->username})");
+        $table = new Table($this->output);
+        $table->setHeaders(['Listen', 'Current', 'New', 'Action']);
+        $table->setRows(array_map(
+            fn (int $listenPort): array => $this->plannedChange($domain, $listenPort, "{$upstreamHost}:{$upstreamPort}"),
+            $listenPorts
+        ));
+        $table->render();
+        if ($hasTunnels) {
+            $this->comment(
+                "Domain has tunnel(s): Cloudflare ingress will sync to http://127.0.0.1:{$upstreamPort} inside DinD."
+            );
+        }
+    }
+
+    /** @return array{0: string, 1: string, 2: string, 3: string} listen, current, new, action */
+    private function plannedChange(Domain $domain, int $listenPort, string $new): array
+    {
+        $existing = ProxyRule::query()->where($this->ruleKey($domain, $listenPort))->first();
+
+        $current = $existing
+            ? "{$existing->upstream_host}:{$existing->upstream_port}"
+                . ($existing->enabled ? '' : ' (disabled)')
+            : '-';
+
+        return [(string) $listenPort, $current, $new, $existing ? 'update' : 'create'];
+    }
+
+    /** @param list<int> $listenPorts */
+    private function writeRules(Domain $domain, array $listenPorts, string $upstreamHost, int $upstreamPort): void
+    {
         foreach ($listenPorts as $listenPort) {
             ProxyRule::updateOrCreate(
-                [
-                    'owner_scope' => 'user',
-                    'username' => $username,
-                    'transport' => 'http',
-                    'listen_port' => $listenPort,
-                    'server_name' => $fqdn,
-                ],
+                $this->ruleKey($domain, $listenPort),
                 [
                     'enabled' => true,
                     'listen_ip' => '*',
@@ -148,26 +175,52 @@ class DomainsSetProxy extends Command
                     'is_generated' => false,
                     'metadata' => [
                         'source' => 'domain-set-proxy',
-                        'description' => "{$listenPort}→{$upstreamPort} for {$fqdn}",
+                        'description' => "{$listenPort}→{$upstreamPort} for {$domain->domain}",
                     ],
                 ]
             );
         }
+    }
 
-        if ($hasTunnels) {
-            try {
-                TunnelManager::syncFromProxyRules($user, $domain);
-            } catch (CloudflareException $e) {
-                $this->error($e->getMessage());
-                return 1;
-            } catch (\Throwable $e) {
-                $this->error('Tunnel ingress sync failed: ' . $e->getMessage());
-                return 1;
-            }
+    /** @return array<string, string|int> the columns that identify one of the domain's HTTP proxy rules */
+    private function ruleKey(Domain $domain, int $listenPort): array
+    {
+        return [
+            'owner_scope' => 'user',
+            'username' => $domain->user->username,
+            'transport' => 'http',
+            'listen_port' => $listenPort,
+            'server_name' => $domain->domain,
+        ];
+    }
+
+    /**
+     * Push the rules to the domain's tunnels and return the failure, if any.
+     * The rules are already the source of truth, so a failed sync must not stop
+     * the vhost rebuild; it is reported on its own afterwards.
+     */
+    private function syncTunnels(Domain $domain): ?string
+    {
+        try {
+            TunnelManager::syncFromProxyRules($domain->user, $domain);
+        } catch (CloudflareException $e) {
+            return $e->getMessage();
+        } catch (\Throwable $e) {
+            return 'Tunnel ingress sync failed: ' . $e->getMessage();
         }
 
-        $domain->projectDomain()->rebuild();
-        (new System())->webserver()->scheduleWebserverReloadInBackground();
+        return null;
+    }
+
+    private function reportApplied(?string $tunnelError, bool $hasTunnels): int
+    {
+        if ($tunnelError !== null) {
+            $this->error($tunnelError);
+            $this->warn('The proxy rules were written and the domain vhost rebuilt; only the tunnel ingress sync failed.');
+
+            return 1;
+        }
+
         $this->info($hasTunnels
             ? 'Proxy rules updated; nginx rebuilt; tunnel ingress synced.'
             : 'Proxy rules updated; domain vhost rebuilt.');

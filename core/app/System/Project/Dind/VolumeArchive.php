@@ -3,6 +3,7 @@
 namespace App\System\Project\Dind;
 
 use App\Lib\Deploy\Compose\NamedVolumes;
+use App\Support\JobBudget;
 use App\System\Project\Dind as DindProject;
 use RuntimeException;
 
@@ -12,7 +13,8 @@ use RuntimeException;
  */
 final class VolumeArchive
 {
-    private const COMPOSE_TIMEOUT = 7200;
+    /** The job's own budget, so a long tar fails here and cleans up before the job's alarm kills the worker. */
+    private const COMPOSE_TIMEOUT = JobBudget::COMMAND_SECONDS;
     private const VOLUME_TAR_IMAGE = 'alpine:3.20';
     private const VOLUME_SCRATCH_SUBDIR = '.panelalpha-backup-scratch';
 
@@ -36,19 +38,23 @@ final class VolumeArchive
         $used = NamedVolumes::usedBy($services, $declared);
         $volumes = [];
         foreach (array_keys($used) as $name) {
-            $dockerName = $name;
-            $entry = $declared[$name] ?? null;
-            if (is_array($entry) && isset($entry['name']) && is_string($entry['name']) && $entry['name'] !== '') {
-                $dockerName = $entry['name'];
-            }
-
             $volumes[] = [
                 'name' => $name,
-                'docker_name' => $dockerName,
+                'docker_name' => self::declaredDockerName($name, $declared[$name] ?? null),
             ];
         }
 
         return $volumes;
+    }
+
+    /** The volume's own `name:` when its declaration sets one, else its compose key. */
+    private static function declaredDockerName(int|string $name, mixed $entry): int|string
+    {
+        if (is_array($entry) && isset($entry['name']) && is_string($entry['name']) && $entry['name'] !== '') {
+            return $entry['name'];
+        }
+
+        return $name;
     }
 
     /**
@@ -62,7 +68,6 @@ final class VolumeArchive
             120,
         );
 
-        /** @var mixed $decoded */
         $decoded = json_decode($output, true);
         if (!is_array($decoded)) {
             throw new RuntimeException('Failed to parse inner compose config JSON');
@@ -257,7 +262,7 @@ SH);
 
     private function assertDockerVolumeName(string $name): void
     {
-        if (!preg_match('/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/', $name)) {
+        if (!preg_match('/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/D', $name)) {
             throw new RuntimeException('Invalid docker volume name');
         }
     }

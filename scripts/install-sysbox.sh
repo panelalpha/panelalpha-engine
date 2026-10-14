@@ -244,7 +244,7 @@ EOF
 
 install_or_upgrade_sysbox_package() {
     log_info "Downloading Sysbox ${SYSBOX_VERSION}..."
-    curl -sSfL "$SYSBOX_DEB_URL" -o /tmp/sysbox.deb
+    curl --proto '=https' -sSfL "$SYSBOX_DEB_URL" -o /tmp/sysbox.deb
     if ! apt-get install -y /tmp/sysbox.deb; then
         rm -f /tmp/sysbox.deb
         log_error "Failed to install Sysbox package"

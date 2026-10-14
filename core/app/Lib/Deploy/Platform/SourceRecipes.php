@@ -51,23 +51,19 @@ final class SourceRecipes
 
     /**
      * The recipe for the repository this URL names, or null when there is no
-     * directory for it or the directory declares no platform.
+     * directory for it or the directory declares no platform. Cached per recipe
+     * file stamp, so a long-lived worker sees an added or edited recipe.
      *
      * @throws ManifestException
      */
     public static function for(?string $gitUrl, ?string $directory = null): ?PlatformManifest
     {
-        if ($gitUrl === null || trim($gitUrl) === '') {
-            return null;
-        }
-        $slug = RepoUrl::slug($gitUrl);
+        $slug = self::slugOf($gitUrl);
         if ($slug === null) {
             return null;
         }
 
-        $root = rtrim($directory ?? self::defaultDirectory(), '/');
-        // Keyed on the file's stamp too, so an added or edited recipe is read
-        // again rather than served from a long-lived worker's memory.
+        $root = self::root($directory);
         $key = $root . ':' . $slug . ':' . self::stamp($root . '/' . $slug);
         if (array_key_exists($key, self::$cache)) {
             return self::$cache[$key];
@@ -77,41 +73,47 @@ final class SourceRecipes
     }
 
     /**
-     * The directory for the repository this URL names, or null when there is none.
-     *
-     * The same lookup {@see for()} does, one step earlier: the health checks a
-     * recipe ships live beside its manifest, and a caller that has only the URL
-     * — the deploy, which freezes the path onto the account — needs the
-     * directory rather than the parsed recipe.
+     * The directory for the repository this URL names, or null when there is none:
+     * the lookup {@see for()} does, for callers that need the recipe's checks beside it.
      */
     public static function directoryFor(?string $gitUrl, ?string $directory = null): ?string
     {
-        if ($gitUrl === null || trim($gitUrl) === '') {
-            return null;
-        }
-        $slug = RepoUrl::slug($gitUrl);
+        $slug = self::slugOf($gitUrl);
         if ($slug === null) {
             return null;
         }
 
-        $root = rtrim($directory ?? self::defaultDirectory(), '/');
-        $path = $root . '/' . $slug;
+        $path = self::root($directory) . '/' . $slug;
 
         return is_dir($path) ? $path : null;
     }
 
+    private static function slugOf(?string $gitUrl): ?string
+    {
+        if ($gitUrl === null || trim($gitUrl) === '') {
+            return null;
+        }
+
+        return RepoUrl::slug($gitUrl);
+    }
+
+    /** The recipe tree's root, without a trailing slash. */
+    private static function root(?string $directory): string
+    {
+        return rtrim($directory ?? self::defaultDirectory(), '/');
+    }
+
     /**
      * The recipe a `.panelalpha/`-shaped directory declares, wherever it is.
-     * Null when it declares no `platform:`, which most do not — but the
-     * `panelalpha.yaml` itself has to be there.
+     * Null when there is no directory or it declares no `platform:`, which most do
+     * not — but an existing directory without `panelalpha.yaml` is a half-written recipe.
+     * The recipe's own `checks/` are passed along, so a `check:` naming one is known.
      *
      * @throws ManifestException
      */
     public static function at(string $dir, ?string $name = null, ?AppConfigSource $source = null): ?PlatformManifest
     {
         $source ??= new LocalAppConfigSource();
-        // No directory is the ordinary case: nobody has written about this
-        // repository. An empty one is a half-written recipe.
         if (!$source->isDirectory(rtrim($dir, '/'))) {
             return null;
         }
@@ -122,10 +124,6 @@ final class SourceRecipes
             );
         }
 
-        // The recipe's own check files, so a `check:` entry naming one is not
-        // refused as unknown. Passed as the directory for the same reason the
-        // health check keeps it: the checks live here, beside the manifest that
-        // needs them.
         return self::fromAppConfig(
             AppConfig::fromYaml($config),
             $name ?? $dir,
@@ -137,8 +135,7 @@ final class SourceRecipes
      * Where a recipe directory keeps its own health checks, if it keeps any.
      *
      * `checks/` beside `panelalpha.yaml`, and only when it exists: a recipe
-     * with no checks of its own must reach `CheckRegistry` as "no directory",
-     * so the answer is the same as it was before this existed.
+     * with no checks of its own must reach `CheckRegistry` as "no directory".
      */
     public static function checksDirectory(string $dir): ?string
     {
@@ -172,43 +169,8 @@ final class SourceRecipes
             );
         }
 
-        $id = $declared['id'];
-        // `extends`, when present, names the recipe to inherit from and the id
-        // does not: the two split in AppConfig so a source recipe can be its
-        // own thing (its own id, resolvable by itself) that starts from a
-        // shipped recipe. When `extends` is absent the id itself is the base
-        // — a recipe sharing a shipped manifest's id extends it, which is how
-        // `extends: matomo` reads before this split.
-        $baseId = is_string($raw = $declared[AppConfig::EXTENDS_KEY] ?? null)
-            && trim($raw) !== '' ? trim($raw) : (string) $id;
-        $base = self::base($baseId);
-        if ($base === [] && !isset($declared['label'])) {
-            throw new ManifestException("{$name}: nothing extends '{$baseId}' and the file describes no manifest of its own");
-        }
-
-        // A base that spells no `strategy` means its id *is* its strategy —
-        // `compose.yaml` carries no `strategy:` key, `compose` is the strategy
-        // it produces. A recipe that states its own id and inherits such a base
-        // therefore inherits no strategy at all, and `PlatformManifest` then
-        // defaults it to the recipe's own id: `extends: compose` + `id:
-        // market-radar` produced `strategy: market-radar`, which no generator
-        // recognises. State the base's id as the strategy, which is exactly
-        // what the base itself meant by omitting the key.
-        if (!isset($base['strategy']) && ($base['id'] ?? null) === $baseId) {
-            $base['strategy'] = $baseId;
-        }
-
-        // A key written with no value says nothing; it does not unset what the
-        // recipe being extended declared. Removing an inherited value means
-        // writing the manifest out rather than extending one.
-        $stated = array_filter($declared, static fn (mixed $value): bool => $value !== null);
-
-        $raw = array_merge($base, $stated);
-        unset($raw['detect']);
-        // `extends` was the address of the base recipe, not a manifest key —
-        // PlatformManifest would refuse it. Drop it once the base is merged.
-        unset($raw[AppConfig::EXTENDS_KEY]);
-        $raw['priority'] ??= 0;
+        $raw = self::mergedOntoBase($declared, $name);
+        self::assertKnownStrategy($raw, $name);
 
         return PlatformManifest::fromArray(
             $raw,
@@ -216,6 +178,77 @@ final class SourceRecipes
             requireDetect: false,
             recipeChecks: $checksDirectory
         );
+    }
+
+    /**
+     * The declared keys over the recipe they extend. A key with no value does not
+     * unset an inherited one, and `extends` itself is not a manifest key.
+     *
+     * @param array<string, mixed> $declared
+     * @return array<string, mixed>
+     * @throws ManifestException
+     */
+    private static function mergedOntoBase(array $declared, string $name): array
+    {
+        $baseId = self::baseIdOf($declared);
+        $base = self::base($baseId);
+        if ($base === [] && !isset($declared['label'])) {
+            throw new ManifestException("{$name}: nothing extends '{$baseId}' and the file describes no manifest of its own");
+        }
+
+        $stated = array_filter($declared, static fn (mixed $value): bool => $value !== null);
+        $raw = array_merge(self::withImplicitStrategy($base, $baseId), $stated);
+        unset($raw['detect']);
+        unset($raw[AppConfig::EXTENDS_KEY]);
+        $raw['priority'] ??= 0;
+
+        return $raw;
+    }
+
+    /**
+     * The recipe to inherit from: `extends` when it is set, else the recipe's own id,
+     * so a recipe sharing a shipped manifest's id extends it.
+     *
+     * @param array<string, mixed> $declared
+     */
+    private static function baseIdOf(array $declared): string
+    {
+        $extends = $declared[AppConfig::EXTENDS_KEY] ?? null;
+
+        return is_string($extends) && trim($extends) !== '' ? trim($extends) : (string) $declared['id'];
+    }
+
+    /**
+     * A base that spells no `strategy` means its id is its strategy (`compose.yaml`
+     * produces `compose`); stated, so a recipe with its own id does not default to that.
+     *
+     * @param array<string, mixed> $base
+     * @return array<string, mixed>
+     */
+    private static function withImplicitStrategy(array $base, string $baseId): array
+    {
+        if (!isset($base['strategy']) && ($base['id'] ?? null) === $baseId) {
+            $base['strategy'] = $baseId;
+        }
+
+        return $base;
+    }
+
+    /**
+     * The pipeline falls back on a strategy it does not know, so a typo would deploy
+     * green and serve the placeholder page. An unset key keeps the default, the id.
+     *
+     * @param array<string, mixed> $raw
+     * @throws ManifestException
+     */
+    private static function assertKnownStrategy(array $raw, string $name): void
+    {
+        if (isset($raw['strategy']) && is_string($raw['strategy']) && !Strategies::isKnown($raw['strategy'])) {
+            throw new ManifestException(
+                "{$name}: strategy '{$raw['strategy']}' is not one this engine deploys; "
+                . 'expected one of: ' . implode(', ', Strategies::ALL)
+            );
+        }
     }
 
     /**
@@ -240,20 +273,18 @@ final class SourceRecipes
 
     /**
      * Every recipe the tree declares, in path order. Only id lookups and the
-     * contract tests walk it; a deploy reads one directory.
+     * contract tests walk it; a deploy reads one directory. Several recipes may
+     * share an id; the first in path order answers for it.
      *
+     * Cached until a recipe file changes, so a long-lived worker sees new recipes.
      * A directory it cannot read is skipped and recorded in {@see skipped()},
-     * not thrown: this walk stands behind findById(), so one malformed
-     * directory used to take every app on the host with it.
+     * not thrown, so one malformed recipe does not break every lookup.
      *
      * @return list<PlatformManifest>
      */
     public static function all(?string $directory = null): array
     {
-        $root = rtrim($directory ?? self::defaultDirectory(), '/');
-        // A queue worker outlives the tree it first read. Caching the walk
-        // unconditionally made findById() miss a recipe for() had just found,
-        // and the deploy then ran none of its commands.
+        $root = self::root($directory);
         $directories = self::directories($root);
         $signature = self::signature($directories);
         if (isset(self::$allCache[$root]) && self::$allCache[$root]['signature'] === $signature) {
@@ -261,44 +292,36 @@ final class SourceRecipes
         }
 
         $manifests = [];
-        $seen = [];
         $skipped = [];
         foreach ($directories as $slug => $dir) {
-            // A directory this cannot read breaks its own app, not the
-            // registry. `at()` throwing is right when a caller named that
-            // repository -- silence there would hide a typo -- but `all()` is
-            // walked by findById(), so every deploy and every health report on
-            // the host went down with one malformed directory, naming an
-            // application the reader had never heard of. Twice in one day:
-            // once for a write-up committed without a manifest, once for the
-            // window between `mkdir` and writing panelalpha.yaml while a
-            // recipe was being written.
-            try {
-                $manifest = self::at($dir, $slug);
-            } catch (ManifestException $e) {
-                $skipped[$slug] = $e->getMessage();
-                error_log('panelalpha: skipping recipe directory ' . $dir . ': ' . $e->getMessage());
-                continue;
+            $manifest = self::readOrSkip($dir, $slug, $skipped);
+            if ($manifest !== null) {
+                $manifests[] = $manifest;
             }
-            if ($manifest === null) {
-                continue;
-            }
-            // Several repositories may deliberately share one recipe id —
-            // `ladigitale-spa-php` is the point of the per-app-id + extends
-            // split: N family members that are one stack. The first directory
-            // in path order answers for the id (a deploy records the id and
-            // everything downstream resolves it through PlatformRegistry,
-            // whose `find` walks the shipped manifests before these, so the
-            // lookup lands on whichever of the same-stack recipes is first);
-            // a later one is still reachable by its own path.
-            $seen[$manifest->id] ??= $slug;
-            $manifests[] = $manifest;
         }
 
         self::$skipped[$root] = $skipped;
         self::$allCache[$root] = ['signature' => $signature, 'manifests' => $manifests];
 
         return $manifests;
+    }
+
+    /**
+     * The recipe in one directory of the walk, or null; a malformed one is logged
+     * and recorded in $skipped rather than thrown.
+     *
+     * @param array<string, string> $skipped slug => reason, filled in place
+     */
+    private static function readOrSkip(string $dir, string $slug, array &$skipped): ?PlatformManifest
+    {
+        try {
+            return self::at($dir, $slug);
+        } catch (ManifestException $e) {
+            $skipped[$slug] = $e->getMessage();
+            error_log('panelalpha: skipping recipe directory ' . $dir . ': ' . $e->getMessage());
+
+            return null;
+        }
     }
 
     /**
@@ -329,16 +352,13 @@ final class SourceRecipes
 
     /**
      * What the last {@see all()} over this tree could not read, slug => reason.
-     *
-     * Skipping without saying so would turn a loud failure into a silent one,
-     * which is the other way to get this wrong. Deploying the malformed app
-     * itself still fails, through {@see at()} on its own path.
+     * Deploying the malformed app itself still fails, through {@see at()}.
      *
      * @return array<string, string>
      */
     public static function skipped(?string $directory = null): array
     {
-        $root = rtrim($directory ?? self::defaultDirectory(), '/');
+        $root = self::root($directory);
         if (!isset(self::$skipped[$root])) {
             self::all($root);
         }
@@ -364,7 +384,7 @@ final class SourceRecipes
      */
     public static function directories(?string $directory = null): array
     {
-        $root = rtrim($directory ?? self::defaultDirectory(), '/');
+        $root = self::root($directory);
         if (!is_dir($root)) {
             return [];
         }

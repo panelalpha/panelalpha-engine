@@ -6,14 +6,17 @@ use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\System\Project\Dind as DindProject;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Symfony\Component\Process\Process;
 
 /**
- * App-level management (users, roles, install, info) for a deployed DinD project.
- *
- * Delegates to overrides/app.sh via the app config CLI contract.
+ * App-level management (users, roles, install, info) for a deployed DinD project,
+ * delegated to overrides/app.sh via the app config CLI contract.
  */
 class AppManager
 {
+    /** @var list<string>|null the script's `info` answer, read once per manager. */
+    private ?array $advertised = null;
+
     public function __construct(
         private DindProject $dind,
     ) {
@@ -64,11 +67,14 @@ class AppManager
     }
 
     /**
-     * @return string[]
+     * @return list<string>
      */
     public function info(): array
     {
-        return json_decode($this->run('info'), true) ?? [];
+        /** @var list<string> $info */
+        $info = json_decode($this->run('info'), true) ?? [];
+
+        return $info;
     }
 
     /**
@@ -85,9 +91,8 @@ class AppManager
     }
 
     /**
-     * The script as the account runs it. Recipe scripts call a bare
-     * `docker compose`, which on its own finds no file: the engine's run file
-     * is docker-compose.panelalpha.yml, so hand them the deploy's own files.
+     * The script as the account runs it, given the deploy's own compose files: a bare `docker compose`
+     * in a recipe script finds no file, since the engine's run file is docker-compose.panelalpha.yml.
      *
      * @return list<string>
      */
@@ -101,51 +106,113 @@ class AppManager
         return ['env', ...$env, 'bash', $this->scriptPath(), ...$args];
     }
 
+    /**
+     * Refuses an unsupported command before it runs: refusing after it ran would report
+     * a users:add or users:delete that already happened as a failure.
+     */
     private function run(string ...$args): string
     {
-        $scriptPath = $this->scriptPath();
-        $shell = $this->dind->shell();
-        $command = $this->scriptCommand(...$args);
-
-        $process = $shell->runProcessAsUser($command);
-
-        if (
-            $process->getExitCode() !== 0
-            && Str::contains($process->getErrorOutput(), $scriptPath . ': no such file', true)
-        ) {
-            $this->installScript($scriptPath);
-            $process = $shell->runProcessAsUser($command);
+        if ($args !== []) {
+            $this->refuseUnsupported($args[0]);
         }
 
-        if (
-            $process->getExitCode() !== 0
-            && Str::contains($process->getErrorOutput(), 'MISSING_SNIPPET', true)
-        ) {
-            $this->dind->installFileSnippets();
-            $process = $shell->runProcessAsUser($command);
-        }
-
+        $process = $this->runRecovering($this->scriptPath(), $this->dind->shell(), $this->scriptCommand(...$args));
         if ($process->getExitCode() !== 0) {
-            $output = $process->getErrorOutput() ?: $process->getOutput();
-            if (self::scriptError($output) === null) {
-                // Arguments may carry passwords: log the action only.
-                Log::warning(sprintf(
-                    'App management %s failed for %s: %s',
-                    $args[0] ?? '',
-                    $this->dind->username(),
-                    trim($output)
-                ));
-            }
-            throw new \Exception(self::failureMessage($output));
+            $this->throwFailure($args[0] ?? '', $process);
         }
 
         return $process->getOutput();
     }
 
     /**
-     * What the caller is told. The script contract reports errors as
-     * {"error": "..."}; anything else is docker or shell output, which stays
-     * in the log.
+     * Runs the script, installing it or the file snippets and running it again when either is missing.
+     *
+     * @param list<string> $command
+     */
+    private function runRecovering(string $scriptPath, ShellOperations $shell, array $command): Process
+    {
+        $process = $shell->runProcessAsUser($command);
+
+        if (self::failedWith($process, $scriptPath . ': no such file')) {
+            $this->installScript($scriptPath);
+            $process = $shell->runProcessAsUser($command);
+        }
+
+        if (self::failedWith($process, 'MISSING_SNIPPET')) {
+            $this->dind->installFileSnippets();
+            $process = $shell->runProcessAsUser($command);
+        }
+
+        return $process;
+    }
+
+    private static function failedWith(Process $process, string $errorText): bool
+    {
+        return $process->getExitCode() !== 0 && Str::contains($process->getErrorOutput(), $errorText, true);
+    }
+
+    /** Logs only the action, since arguments may carry passwords, and only output that is not the script's own error. */
+    private function throwFailure(string $action, Process $process): never
+    {
+        $output = $process->getErrorOutput() ?: $process->getOutput();
+        if (self::scriptError($output) === null) {
+            Log::warning(sprintf(
+                'App management %s failed for %s: %s',
+                $action,
+                $this->dind->username(),
+                trim($output)
+            ));
+        }
+        throw new \Exception(self::failureMessage($output));
+    }
+
+    /**
+     * The commands the script advertised via `info`, cached for this manager.
+     *
+     * @return list<string>
+     */
+    private function advertised(): array
+    {
+        return $this->advertised ??= $this->readAdvertised();
+    }
+
+    /**
+     * An `info` that fails or is not a list of names says nothing, which allows every command.
+     *
+     * @return list<string>
+     */
+    private function readAdvertised(): array
+    {
+        try {
+            $info = $this->info();
+        } catch (\Exception) {
+            $info = [];
+        }
+
+        return array_is_list($info) && array_filter($info, 'is_string') === $info ? $info : [];
+    }
+
+    /** Refuse a `users:*`, `install` or `roles:list` command the script's `info` does not list. */
+    private function refuseUnsupported(string $command): void
+    {
+        if (!str_starts_with($command, 'users:') && $command !== 'install' && $command !== 'roles:list') {
+            return;
+        }
+
+        $advertised = $this->advertised();
+        if ($advertised === [] || in_array($command, $advertised, true)) {
+            return;
+        }
+
+        throw new \Exception(
+            "The application does not support the '{$command}' command. Its app script lists: "
+            . implode(', ', $advertised) . '.'
+        );
+    }
+
+    /**
+     * What the caller is told: the script contract's {"error": "..."}; anything else is docker
+     * or shell output, which stays in the log.
      */
     public static function failureMessage(string $output): string
     {

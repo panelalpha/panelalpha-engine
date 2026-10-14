@@ -6,7 +6,10 @@ use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\DeployBusyException;
 use App\Exceptions\ProblemException;
 use App\Exceptions\ProjectBusyException;
+use App\Auth\TokenAbilities;
+use App\Http\Controllers\Concerns\StreamsNdjson;
 use App\Http\Requests\DeployPlanInput;
+use App\Http\Requests\ProjectSourceAttachRequest;
 use App\Http\Requests\RecipeChoiceInput;
 use App\Http\Requests\UserCloneRequest;
 use App\Lib\Host\ProjectMemory;
@@ -17,6 +20,7 @@ use App\Http\Resources\TaskResource;
 use App\Http\Resources\UserCollection;
 use App\Http\Resources\UserResource;
 use App\System;
+use App\System\Projects;
 use App\Lib\Helper;
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\DeployLog\DeployLogger;
@@ -24,11 +28,12 @@ use App\Lib\Deploy\EnvVarOverrides;
 use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
-use App\Lib\Deploy\Source\GitUrl;
+use App\Lib\Project\CreateInspection;
 use App\Lib\Project\NewProjectInput;
 use App\Lib\Project\ProjectDeleter;
 use App\Lib\Project\ProjectCreator;
 use App\Lib\Project\ProjectRebuild;
+use App\Lib\Project\SourceAttacher;
 use App\Lib\Domains\DomainPlan;
 use App\Lib\Domains\MainDomainRename;
 use App\Lib\Limits\ResourceLimit;
@@ -37,6 +42,7 @@ use App\Models\Domain;
 use App\Models\Setting;
 use App\System\Project\Dind;
 use App\Models\User;
+use App\OpenApi\ApiDefinitions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -48,6 +54,8 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class UserController extends Controller
 {
+    use StreamsNdjson;
+
     /** How a create answers with what it found in the repository before cloning it. */
     private const INSPECTION_DOC = "A public github.com repository with no git_token is inspected from its "
         . "file list before anything is created, as POST /source/inspect does, in seconds. It never "
@@ -76,7 +84,6 @@ class UserController extends Controller
         ],
     )]
     /**
-     * @param Request $request
      * @return UserCollection
      */
     public function index(Request $request)
@@ -85,10 +92,15 @@ class UserController extends Controller
             'per_page' => 'integer',
         ]);
 
+        $query = User::query()->with(['liveUser', 'stagingUser']);
+
+        $projects = TokenAbilities::forCurrentRequest()->projects();
+        if ($projects !== null) {
+            $query->whereIn('username', $projects);
+        }
+
         /** @var LengthAwarePaginator */
-        $users = User::query()
-            ->with(['liveUser', 'stagingUser'])
-            ->paginate($params['per_page'] ?? 15);
+        $users = $query->paginate($params['per_page'] ?? 15);
 
         return new UserCollection($users);
     }
@@ -110,6 +122,11 @@ class UserController extends Controller
     public function listAll(Request $request): UserCollection
     {
         $query = User::query()->with(['liveUser', 'stagingUser']);
+
+        $projects = TokenAbilities::forCurrentRequest()->projects();
+        if ($projects !== null) {
+            $query->whereIn('username', $projects);
+        }
 
         if (!empty($request->get('with_domain_names'))) {
             $query->with('domains');
@@ -201,15 +218,18 @@ class UserController extends Controller
                     type: 'string',
                     enum: ['panelalpha', 'none'],
                     nullable: true,
-                    description: 'How the domain reaches this host. panelalpha, the default, allocates a '
-                        . 'free label under panelalpha.online, makes it the project domain and attaches '
-                        . 'the tunnel in this one call -- so `domain`, if given at all, must be that same '
-                        . 'name. none means the domain already resolves here, which is true of '
-                        . '<name>.<cert_domain> and of a domain the caller pointed at this host. A '
-                        . 'Cloudflare tunnel is not available here: it needs the project\'s API token, '
-                        . 'which can only be set once the project exists -- create it, PUT '
+                    description: 'How the domain reaches this host. Omitted, the Engine setting '
+                        . '`default_tunnel` decides: `none` keeps the name the domain already resolves on '
+                        . '(`<name>.<cert_domain>` or the configured sites_base_domain) and registers '
+                        . 'nothing at PanelAlpha Online; `panelalpha` and an unset setting both give the '
+                        . 'default ladder, where a configured sites_base_domain comes first and otherwise '
+                        . 'a free label under panelalpha.online is allocated, made the project domain and '
+                        . 'attached in this one call, so `domain`, if given at all, must be that same '
+                        . 'name. GET /system/info reports the setting. A Cloudflare tunnel is not '
+                        . 'available here: it needs the project\'s API token, which can only be set once '
+                        . 'the project exists -- create it, PUT '
                         . '/projects/{username}/settings/cloudflare-api-token, then POST the tunnel.',
-                    x: ['mcp-description' => 'panelalpha (default): a free panelalpha.online name with a trusted certificate, tunnel attached in this call. none: `domain` already points at this host.']
+                    x: ['mcp-description' => 'Omitted, the Engine setting `default_tunnel` decides: none uses `<name>.<cert_domain>` and registers nothing; panelalpha and an unset setting both use the default ladder (a configured base domain first, a free panelalpha.online name otherwise). An explicit value here wins.']
                 ),
                 new OA\Property(
                     property: 'git_repo',
@@ -282,15 +302,11 @@ class UserController extends Controller
     )]
     public function storeAsync(UserStoreRequest $request, ProjectCreator $creator): JsonResponse
     {
-        // Reject before provision so a stream-oriented client does not leave
-        // an account with no matching HTTP response shape.
-        if ($request->headers->has('X-Deploy-Stream')) {
-            abort(400, 'X-Deploy-Stream is not supported on POST /projects; use POST /users for a synchronous create.');
-        }
+        $this->refuseDeployStreamOnQueuedCreate($request);
 
-        $task = $creator->queue(self::newProjectInput($request));
+        $task = $creator->queue(self::newProjectInput($request, $request->nameField()));
 
-        return self::withInspection(TaskResource::make($task)->response(), $creator)->setStatusCode(202);
+        return self::withInspection(TaskResource::make($task)->response(), $creator->inspection())->setStatusCode(202);
     }
 
     #[OA\Post(
@@ -342,12 +358,12 @@ class UserController extends Controller
                 new OA\Property(property: 'memory_limit', type: 'integer', example: 2048, description: 'MB. Omitted: memory_budget.default_project_mb, the RAM of the server less what is kept for the engine. Refused when larger than memory_budget.max_project_mb in GET /metrics/current', x: ['mcp-description' => 'MB. Default: the server\'s RAM less the engine\'s share, which is also the most allowed.']),
                 new OA\Property(property: 'cpu_limit', type: 'number', format: 'float', example: 1.0, nullable: true),
                 new OA\Property(property: 'bandwidth_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'mysql_databases_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'ftp_accounts_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'sftp_accounts_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'addon_domains_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'subdomains_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'inodes_limit', type: 'integer', nullable: true),
+                new OA\Property(property: 'mysql_databases_limit', type: 'integer', nullable: true, description: '-1 for unlimited'),
+                new OA\Property(property: 'ftp_accounts_limit', type: 'integer', nullable: true, description: '-1 for unlimited'),
+                new OA\Property(property: 'sftp_accounts_limit', type: 'integer', nullable: true, description: '-1 for unlimited'),
+                new OA\Property(property: 'addon_domains_limit', type: 'integer', nullable: true, description: '-1 for unlimited'),
+                new OA\Property(property: 'subdomains_limit', type: 'integer', nullable: true, description: '-1 for unlimited'),
+                new OA\Property(property: 'inodes_limit', type: 'integer', nullable: true, description: '-1 for unlimited'),
                 new OA\Property(property: 'dedicated_ipv4', type: 'boolean', example: false),
                 new OA\Property(property: 'dedicated_ipv6', type: 'boolean', example: false),
                 new OA\Property(
@@ -364,15 +380,18 @@ class UserController extends Controller
                     type: 'string',
                     enum: ['panelalpha', 'none'],
                     nullable: true,
-                    description: 'How the domain reaches this host. panelalpha, the default, allocates a '
-                        . 'free label under panelalpha.online, makes it the project domain and attaches '
-                        . 'the tunnel in this one call -- so `domain`, if given at all, must be that same '
-                        . 'name. none means the domain already resolves here, which is true of '
-                        . '<name>.<cert_domain> and of a domain the caller pointed at this host. A '
-                        . 'Cloudflare tunnel is not available here: it needs the project\'s API token, '
-                        . 'which can only be set once the project exists -- create it, PUT '
+                    description: 'How the domain reaches this host. Omitted, the Engine setting '
+                        . '`default_tunnel` decides: `none` keeps the name the domain already resolves on '
+                        . '(`<name>.<cert_domain>` or the configured sites_base_domain) and registers '
+                        . 'nothing at PanelAlpha Online; `panelalpha` and an unset setting both give the '
+                        . 'default ladder, where a configured sites_base_domain comes first and otherwise '
+                        . 'a free label under panelalpha.online is allocated, made the project domain and '
+                        . 'attached in this one call, so `domain`, if given at all, must be that same '
+                        . 'name. GET /system/info reports the setting. A Cloudflare tunnel is not '
+                        . 'available here: it needs the project\'s API token, which can only be set once '
+                        . 'the project exists -- create it, PUT '
                         . '/projects/{username}/settings/cloudflare-api-token, then POST the tunnel.',
-                    x: ['mcp-description' => 'panelalpha (default): a free panelalpha.online name with a trusted certificate, tunnel attached in this call. none: `domain` already points at this host.']
+                    x: ['mcp-description' => 'Omitted, the Engine setting `default_tunnel` decides: none uses `<name>.<cert_domain>` and registers nothing; panelalpha and an unset setting both use the default ladder (a configured base domain first, a free panelalpha.online name otherwise). An explicit value here wins.']
                 ),
                 new OA\Property(
                     property: 'git_repo',
@@ -442,11 +461,9 @@ class UserController extends Controller
     )]
     public function store(UserStoreRequest $request, ProjectCreator $creator): JsonResponse|StreamedResponse
     {
-        // Validate the streaming opt-in up front so an unknown value never
-        // leaves a half-created account behind.
         $streamDeploy = $this->wantsDeployStream($request);
 
-        $user = $creator->provisionForDeploy(self::newProjectInput($request));
+        $user = $creator->provisionForDeploy(self::newProjectInput($request, $request->nameField()));
         $deployLogger = $creator->startDeployLog($user);
 
         if ($deployLogger !== null && $streamDeploy) {
@@ -459,18 +476,29 @@ class UserController extends Controller
 
         $creator->deploy($user, $deployLogger);
 
-        return self::withInspection((new UserResource($user))->response(), $creator);
+        return self::withInspection((new UserResource($user))->response(), $creator->inspection());
+    }
+
+    /**
+     * Refused before provisioning, so a stream-oriented client does not leave an account behind
+     * with no matching HTTP response shape.
+     */
+    private function refuseDeployStreamOnQueuedCreate(Request $request): void
+    {
+        if ($request->headers->has('X-Deploy-Stream')) {
+            abort(400, 'X-Deploy-Stream is not supported on POST /projects; use POST /users for a synchronous create.');
+        }
     }
 
     /**
      * `data.inspection`: what the inspection before the clone found, or null
-     * when it did not run. Only a create carries it.
+     * when it did not run. A create and a source attach carry it.
      */
-    private static function withInspection(JsonResponse $response, ProjectCreator $creator): JsonResponse
+    private static function withInspection(JsonResponse $response, ?CreateInspection $inspection): JsonResponse
     {
         $payload = $response->getData(true);
         if (is_array($payload) && is_array($payload['data'] ?? null)) {
-            $payload['data']['inspection'] = $creator->inspection()?->toResponse();
+            $payload['data']['inspection'] = $inspection?->toResponse();
             $response->setData($payload);
         }
 
@@ -478,11 +506,11 @@ class UserController extends Controller
     }
 
     /** The create as ProjectCreator takes it: validated fields, plus the raw ones it reads itself. */
-    private static function newProjectInput(UserStoreRequest $request): NewProjectInput
+    private static function newProjectInput(Request $request, string $nameField): NewProjectInput
     {
         return new NewProjectInput(
             $request->validated(),
-            $request->nameField(),
+            $nameField,
             $request->input('git_token'),
             $request->input('env_vars'),
             $request->input(DeployPlanInput::FIELD),
@@ -491,32 +519,9 @@ class UserController extends Controller
     }
 
     /**
-     * An archive cannot replace a project that deploys from git.
-     *
-     * The deploy treated the uploaded tree as the repository's checkout -- its
-     * recipe, its app config, its HEAD -- found no .git, and failed only after
-     * the archive had already replaced ~/project. A deploy-managed repository
-     * cannot be disconnected either, so say what can be done instead, before
-     * anything is touched.
-     */
-    private static function refuseArchiveOnGitProject(User $user): void
-    {
-        if (!$user->hasGitProject()) {
-            return;
-        }
-
-        throw ProblemException::one(
-            'zip_path',
-            'archive_on_git_project',
-            "Project '{$user->username}' deploys from its git repository, so an archive cannot replace it. "
-            . 'Push the change to the repository and rebuild, or deploy the archive into a project created without a repository.',
-            ['git_repo' => GitUrl::sanitize((string) $user->getGitRepo())]
-        );
-    }
-
-    /**
      * Opt-in NDJSON streaming of the deploy log, negotiated via the
-     * X-Deploy-Stream request header. Unknown values are rejected.
+     * X-Deploy-Stream request header. Unknown values are rejected, before
+     * anything is created.
      */
     private function wantsDeployStream(Request $request): bool
     {
@@ -543,97 +548,113 @@ class UserController extends Controller
      */
     private function respondWithDeployStream(\Closure $pipeline, ?DeployLogger $deployLogger, ?callable $userFrame = null): StreamedResponse
     {
-        ignore_user_abort(true);
-        set_time_limit(0);
+        return self::ndjsonResponse(function () use ($pipeline, $deployLogger, $userFrame) {
+            self::dropOutputBuffers();
+            $this->runStreamedPipeline($pipeline, $deployLogger);
+            self::emitFrame(self::closingFrame($deployLogger?->readLatest(), $userFrame));
+        }, ['X-Deploy-Stream-Accepted' => 'ndjson']);
+    }
 
-        return response()->stream(function () use ($pipeline, $deployLogger, $userFrame) {
-            // Under PHPUnit, TestResponse::streamedContent() owns a buffer.
-            if (!app()->runningUnitTests()) {
-                while (ob_get_level() > 0) {
-                    ob_end_clean();
-                }
-            }
-            $emit = static function (array $frame): void {
-                echo json_encode($frame, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
-                flush();
-            };
+    /** @param array<string, mixed> $frame */
+    private static function emitFrame(array $frame): void
+    {
+        echo json_encode($frame, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
+        flush();
+    }
 
-            // Lines written before the stream opened (e.g. the initial
-            // "Deploy started" entry) ride along in the start frame so the
-            // consumer's offsets still line up with the log file.
-            $backlog = $deployLogger !== null ? $deployLogger->read(0) : ['lines' => []];
-            $latest = $deployLogger?->readLatest();
+    /**
+     * Emits the start frame and runs the pipeline with its log teed into the stream. Lines written
+     * before the stream opened (the "Deploy started" entry) ride along in the start frame, so the
+     * consumer's offsets still line up with the log file.
+     */
+    private function runStreamedPipeline(\Closure $pipeline, ?DeployLogger $deployLogger): void
+    {
+        $backlog = $deployLogger !== null ? $deployLogger->read(0) : ['lines' => []];
+        $latest = $deployLogger?->readLatest();
 
-            DeployLogger::streamTo($emit);
-            try {
-                $emit([
-                    'type' => 'start',
-                    'id' => $latest['id'] ?? null,
-                    'started_at' => $latest['started_at'] ?? null,
-                    'lines' => $backlog['lines'],
-                ]);
-                $pipeline();
-            } catch (\Throwable $e) {
-                // Expected: ValidationException after the pipeline finished the
-                // log (failed/cancelled). Unexpected: close the log here.
-                $latest = $deployLogger?->readLatest();
-                if (($latest['status'] ?? null) === DeployLogger::STATUS_RUNNING) {
-                    $deployLogger?->recordFailureOutput($e->getMessage());
-                    $deployLogger?->finish(
-                        DeployLogger::STATUS_FAILED,
-                        DeployFailureExplainer::explain($e->getMessage()) ?? $e->getMessage()
-                    );
-                }
-                if (!($e instanceof ValidationException)) {
-                    Log::error("Streamed deploy failed: {$e->getMessage()}");
-                }
-            } finally {
-                DeployLogger::stopStreaming();
-            }
+        DeployLogger::streamTo(self::emitFrame(...));
+        try {
+            self::emitFrame([
+                'type' => 'start',
+                'id' => $latest['id'] ?? null,
+                'started_at' => $latest['started_at'] ?? null,
+                'lines' => $backlog['lines'],
+            ]);
+            $pipeline();
+        } catch (\Throwable $e) {
+            self::closeLogAfterFailure($deployLogger, $e);
+        } finally {
+            DeployLogger::stopStreaming();
+        }
+    }
 
-            $latest = $deployLogger?->readLatest();
-            $status = $latest['status'] ?? null;
-            // Zip accounts leave the logger running after preparing; do not
-            // emit finish or the wizard treats the placeholder as deployed.
-            if ($status === DeployLogger::STATUS_RUNNING) {
-                $emit([
-                    'type' => 'continue',
-                    'status' => $status,
-                    'stage' => $latest['stage'] ?? null,
-                    'stages' => $latest['stages'] ?? [],
-                ]);
+    /**
+     * A ValidationException is expected once the pipeline has finished the log as failed or
+     * cancelled; a log still running is closed as failed here, and anything else is logged.
+     */
+    private static function closeLogAfterFailure(?DeployLogger $deployLogger, \Throwable $e): void
+    {
+        $latest = $deployLogger?->readLatest();
+        if (($latest['status'] ?? null) === DeployLogger::STATUS_RUNNING) {
+            $deployLogger?->recordFailureOutput($e->getMessage());
+            $deployLogger?->finish(
+                DeployLogger::STATUS_FAILED,
+                DeployFailureExplainer::explain($e->getMessage()) ?? $e->getMessage()
+            );
+        }
+        if (!($e instanceof ValidationException)) {
+            Log::error("Streamed deploy failed: {$e->getMessage()}");
+        }
+    }
 
-                return;
-            }
-            $frame = [
-                'type' => 'finish',
+    /**
+     * The last frame: `continue` while the log still runs (an archive account leaves it running after
+     * preparing, and a finish would make the wizard treat the placeholder as deployed), otherwise
+     * `finish` with the terminal status and, on success, the user data.
+     *
+     * @param array<string, mixed>|null $latest
+     * @return array<string, mixed>
+     */
+    private static function closingFrame(?array $latest, ?callable $userFrame): array
+    {
+        $status = $latest['status'] ?? null;
+        if ($status === DeployLogger::STATUS_RUNNING) {
+            return [
+                'type' => 'continue',
                 'status' => $status,
                 'stage' => $latest['stage'] ?? null,
                 'stages' => $latest['stages'] ?? [],
-                'error' => $latest['error'] ?? null,
-                'finished_at' => $latest['finished_at'] ?? null,
-                'problem' => $latest['problem'] ?? null,
             ];
-            if (
-                $userFrame !== null
-                && in_array($frame['status'], [DeployLogger::STATUS_SUCCESS, DeployLogger::STATUS_PARTIAL], true)
-            ) {
-                $frame['user'] = $userFrame();
-            }
-            $emit($frame);
-        }, 200, [
-            'Content-Type' => 'application/x-ndjson',
-            'X-Accel-Buffering' => 'no',
-            'Cache-Control' => 'no-cache',
-            'X-Deploy-Stream-Accepted' => 'ndjson',
-        ]);
+        }
+        $frame = [
+            'type' => 'finish',
+            'status' => $status,
+            'stage' => $latest['stage'] ?? null,
+            'stages' => $latest['stages'] ?? [],
+            'error' => $latest['error'] ?? null,
+            'finished_at' => $latest['finished_at'] ?? null,
+            'problem' => $latest['problem'] ?? null,
+        ];
+        if (
+            $userFrame !== null
+            && in_array($frame['status'], [DeployLogger::STATUS_SUCCESS, DeployLogger::STATUS_PARTIAL], true)
+        ) {
+            $frame['user'] = $userFrame();
+        }
+
+        return $frame;
     }
 
     #[OA\Post(
         path: '/projects/{username}/rebuild',
         summary: 'Redeploy a project',
-        description: 'Detects, builds and starts the application again from ~/project, after importing '
-            . '`zip_path` into it when given (refused on a project deployed from git). The request is '
+        description: 'Detects, builds and starts the application again. A project deployed from git '
+            . 'is cloned again from the tip of its branch first: the deploy picks up new commits without a '
+            . 'pull, a revert to an older commit is undone, and files written into ~/project since the last '
+            . 'deploy are discarded. Keep such changes in the repository, and data the application writes in '
+            . 'its volumes or a database, which a rebuild keeps. Any other project is built from the files '
+            . 'already in ~/project, after importing `zip_path` into it when given (refused on a project '
+            . 'deployed from git). The request is '
             . 'checked and `env_vars` applied at once; the deploy itself runs in a queue job, and the answer '
             . 'is 202 with a task (`details.action: rebuild`). Poll GET /tasks/{id} until it is completed, '
             . 'failed or cancelled: a failure is on the task as `details.error`, and `details.problems` '
@@ -643,8 +664,10 @@ class UserController extends Controller
             . 'deploy was not started as a task (the CLI, a push); follow GET /projects/{username}/deploy-log '
             . 'then. With X-Deploy-Stream: ndjson the deploy runs in the request instead and its log is '
             . 'streamed as NDJSON.',
-        x: ['mcp-description' => 'Detects, builds and starts the app again from ~/project, importing '
-            . '`zip_path` first when given (refused on a git project). Answers at once with a task `id`: '
+        x: ['mcp-description' => 'Detects, builds and starts the app again. A git project is cloned again '
+            . 'from its branch tip first, so files written into ~/project since the last deploy are lost: '
+            . 'commit them to the repository instead. Any other project builds from the files in ~/project, '
+            . 'importing `zip_path` first when given (refused on a git project). Answers at once with a task `id`: '
             . 'follow it with task_get until completed, failed or cancelled; a failure is in details.error '
             . 'and details.problems. A 409 means a deploy is already running: follow the task_id it names '
             . 'with task_get (task_cancel if it is stuck), or deploy_log_get when task_id is null, instead '
@@ -707,12 +730,7 @@ class UserController extends Controller
             )),
             new OA\Response(response: 400, description: 'Unsupported X-Deploy-Stream value'),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: 'A deploy of this project is already queued or running', content: new OA\JsonContent(
-                properties: [
-                    new OA\Property(property: 'message', type: 'string'),
-                    new OA\Property(property: 'task_id', type: 'integer', nullable: true),
-                ],
-            )),
+            new OA\Response(response: 409, description: 'A deploy of this project is already queued or running. ' . ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
             new OA\Response(response: 503, description: 'The project could not be locked to start the deploy, or, with X-Deploy-Stream: ndjson, its deploy log could not be opened to stream from'),
         ],
@@ -731,7 +749,7 @@ class UserController extends Controller
         ]);
         $zipPath = ($params['zip_path'] ?? '') !== '' ? $params['zip_path'] : null;
         if ($zipPath !== null) {
-            self::refuseArchiveOnGitProject($user);
+            ProjectRebuild::refuseArchiveOnGitProject($user);
         }
         $plan = DeployPlanInput::parse($request->input(DeployPlanInput::FIELD));
         $recipe = RecipeChoiceInput::parse($request->input(RecipeChoiceInput::FIELD));
@@ -754,7 +772,8 @@ class UserController extends Controller
     /**
      * Queue the redeploy and answer 202 with its task; or, when the client
      * asked for the stream, run it here and stream its log. Runs while no
-     * other deploy of the project can be queued or started.
+     * other deploy of the project can be queued or started. The env_vars are
+     * resolved before anything starts, so a vault reference they cannot use is still a 422.
      *
      * @param ?\Closure(): array<string, string> $envVars the env_vars to store, null to leave them
      */
@@ -768,21 +787,8 @@ class UserController extends Controller
         bool $stream,
         ?\Closure $envVars,
     ): JsonResponse|StreamedResponse {
-        // Resolved before anything starts, so a vault reference it cannot use is still a 422.
         $env = $envVars !== null ? $envVars() : null;
-
-        try {
-            $deployLogger = $stream ? $rebuild->openLog($user, $action) : null;
-        } catch (DeployAlreadyRunningException) {
-            // A deploy with no task took the lock since the check: answered as the check would.
-            throw new DeployBusyException($user->username, null);
-        }
-        if ($stream && $deployLogger === null) {
-            abort(new JsonResponse([
-                'message' => 'The deploy log could not be opened, so there is nothing to stream. '
-                    . 'Try again, or leave out X-Deploy-Stream to queue the deploy.',
-            ], 503));
-        }
+        $deployLogger = $stream ? $this->openStreamLog($rebuild, $user, $action) : null;
 
         if ($env !== null) {
             $user->setDetails(['env_vars' => $env]);
@@ -803,6 +809,27 @@ class UserController extends Controller
         $task = $rebuild->queue($user, $action, $zipPath, $plan, $recipe);
 
         return TaskResource::make($task)->response()->setStatusCode(202);
+    }
+
+    /**
+     * The log a streamed redeploy writes to. A deploy with no task that took the lock since the
+     * idle check is answered as the check would have; a log that cannot be opened is a 503.
+     */
+    private function openStreamLog(ProjectRebuild $rebuild, User $user, string $action): DeployLogger
+    {
+        try {
+            $deployLogger = $rebuild->openLog($user, $action);
+        } catch (DeployAlreadyRunningException) {
+            throw new DeployBusyException($user->username, null);
+        }
+        if ($deployLogger === null) {
+            abort(new JsonResponse([
+                'message' => 'The deploy log could not be opened, so there is nothing to stream. '
+                    . 'Try again, or leave out X-Deploy-Stream to queue the deploy.',
+            ], 503));
+        }
+
+        return $deployLogger;
     }
 
     #[OA\Post(
@@ -879,12 +906,7 @@ class UserController extends Controller
             )),
             new OA\Response(response: 400, description: 'Unsupported X-Deploy-Stream value'),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: 'A deploy of this project is already queued or running', content: new OA\JsonContent(
-                properties: [
-                    new OA\Property(property: 'message', type: 'string'),
-                    new OA\Property(property: 'task_id', type: 'integer', nullable: true),
-                ],
-            )),
+            new OA\Response(response: 409, description: 'A deploy of this project is already queued or running. ' . ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
             new OA\Response(response: 503, description: 'The project could not be locked to start the deploy, or, with X-Deploy-Stream: ndjson, its deploy log could not be opened to stream from'),
         ],
@@ -892,11 +914,7 @@ class UserController extends Controller
     public function deployArchive(string $username, Request $request, ProjectRebuild $rebuild): JsonResponse|StreamedResponse
     {
         $user = $this->projectOr404($username);
-        if ($user->getTemplate() !== 'dind') {
-            throw ValidationException::withMessages([
-                'zip_path' => 'Archive deploy is only supported for dind users.',
-            ]);
-        }
+        ProjectRebuild::refuseArchiveOnClassicProject($user);
 
         /** @var array{zip_path: string, env_vars?: array<string, string>} $params */
         $params = $request->validate([
@@ -906,17 +924,111 @@ class UserController extends Controller
             'stages' => 'array|nullable',
             'recipe' => 'string|nullable|max:64',
         ]);
-        self::refuseArchiveOnGitProject($user);
+        ProjectRebuild::refuseArchiveOnGitProject($user);
         $plan = DeployPlanInput::parse($request->input(DeployPlanInput::FIELD));
         $recipe = RecipeChoiceInput::parse($request->input(RecipeChoiceInput::FIELD));
         $rebuild->assertArchive($user, $params['zip_path']);
         $stream = $this->wantsDeployStream($request);
         $envVars = array_key_exists('env_vars', $params)
-            ? static fn (): array => EnvVarOverrides::applyIncoming($params['env_vars'] ?? null, $user->getEnvVars())
+            ? static fn (): array => EnvVarOverrides::applyIncoming(
+                is_array($params['env_vars'] ?? null) ? RequestVault::get('env_vars', $user->username) : null,
+                $user->getEnvVars()
+            )
             : null;
 
         return $rebuild->whileIdle($user, fn () => $this->startRedeploy(
             $rebuild, $user, ProjectRebuild::DEPLOY_ARCHIVE, $params['zip_path'], $plan, $recipe, $stream, $envVars
+        ));
+    }
+
+    #[OA\Post(
+        path: '/projects/{username}/source',
+        summary: 'Attach a git source to a project that has none',
+        description: 'Gives a project created before its source was known the repository it deploys from, and '
+            . 'deploys it. Only a dind project (`template: dind`) that carries no git_repo and has not produced '
+            . 'an application yet is accepted: the account a source-less create leaves waiting for files. A '
+            . 'classic shared-hosting project, and a dind project that already runs an application, are refused '
+            . 'with 409 problems[{field: git_repo, code: project_not_eligible}] -- converting a classic account '
+            . 'to dind is not supported, and an existing application is not replaced. A project that already has '
+            . 'a git_repo is refused with 409 problems[{field: git_repo, code: source_already_attached}]. The '
+            . 'repository is read as POST /projects reads it: vault references resolved, private, loopback and '
+            . 'reserved addresses refused, and the remote probed for the branch. The source is stored and the '
+            . 'deploy runs in a queue job; the answer is 202 with a task (`details.action: attach_source`, '
+            . '`details.git_repo`). Follow it as a create. While a deploy of this project is queued or running '
+            . 'the answer is 409 with that deploy\'s `task_id`. A clone or build failure leaves the project dind '
+            . 'with the source attached and a failed deploy, which POST /projects/{username}/rebuild retries.',
+        x: ['mcp-description' => 'Gives a dind project created without a source the git_repo it deploys from, and '
+            . 'deploys it. Answers at once with a task `id`: follow it with task_get until completed, failed or '
+            . 'cancelled; a failure is in details.error and details.problems. Refuses a project that already has a '
+            . 'git_repo, a classic project, and a dind project already running an application.'],
+        security: [['bearerAuth' => []]],
+        tags: ['Projects'],
+        parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
+        requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
+            required: ['git_repo'],
+            properties: [
+                new OA\Property(
+                    property: 'git_repo',
+                    type: 'string',
+                    example: 'https://github.com/owner/repo.git',
+                    description: 'HTTPS clone URL, the same rule POST /projects applies. A schemeless '
+                        . 'github.com/owner/repo is accepted and has the scheme filled in.',
+                ),
+                new OA\Property(property: 'git_branch', type: 'string', nullable: true, description: 'Branch or tag to deploy; omitted, the remote default branch.'),
+                new OA\Property(
+                    property: 'git_token',
+                    type: 'string',
+                    nullable: true,
+                    description: 'Optional HTTPS token injected at clone time. A `vault:<id>` from vault_secret_create '
+                        . 'is accepted here in place of the literal token. Never logged or returned.',
+                ),
+                new OA\Property(
+                    property: 'env_vars',
+                    type: 'object',
+                    nullable: true,
+                    additionalProperties: new OA\AdditionalProperties(type: 'string'),
+                    description: 'Optional KEY=value overrides, merged onto the ones the project already carries. '
+                        . 'An empty value removes that key; null clears them all.',
+                ),
+                new OA\Property(
+                    property: 'recipe',
+                    type: 'string',
+                    nullable: true,
+                    description: 'Deploy with this recipe instead of the one detection picks. This deploy only.',
+                    example: 'php',
+                ),
+                new OA\Property(
+                    property: 'stages',
+                    type: 'object',
+                    nullable: true,
+                    description: 'Commands this deploy runs, per stage. This deploy only.',
+                ),
+            ],
+        )),
+        responses: [
+            new OA\Response(response: 202, description: 'Source stored; deploy queued. `data` is the task to follow, with `data.inspection` as a create returns it.', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', type: 'object')],
+            )),
+            new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 409, description: 'A deploy of this project is already queued or running (message and task_id), or the project cannot take a source (problems: source_already_attached, project_not_eligible). ' . ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
+            new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 503, description: 'The project could not be locked to start the attach'),
+        ],
+    )]
+    public function attachSource(
+        string $username,
+        ProjectSourceAttachRequest $request,
+        SourceAttacher $attacher,
+        ProjectRebuild $rebuild,
+    ): JsonResponse {
+        $user = $this->projectOr404($username);
+        $plan = DeployPlanInput::parse($request->input(DeployPlanInput::FIELD));
+        $recipe = RecipeChoiceInput::parse($request->input(RecipeChoiceInput::FIELD));
+        $input = self::newProjectInput($request, 'username');
+
+        return $rebuild->whileIdle($user, fn (): JsonResponse => self::withInspection(
+            TaskResource::make($attacher->attach($user, $input, $plan, $recipe))->response()->setStatusCode(202),
+            $attacher->inspection(),
         ));
     }
 
@@ -930,6 +1042,12 @@ class UserController extends Controller
             properties: [
                 new OA\Property(property: 'new_username', type: 'string', nullable: true),
                 new OA\Property(property: 'domain', type: 'string', nullable: true),
+                new OA\Property(
+                    property: 'copy_databases',
+                    description: 'Copy the source project\'s MySQL databases under the clone prefix. Defaults to true.',
+                    type: 'boolean',
+                    nullable: true,
+                ),
             ],
         )),
         responses: [
@@ -955,13 +1073,53 @@ class UserController extends Controller
     {
         $srcUser = $this->projectOr404($username);
 
-        /** @var array{new_username?: ?string, domain?: ?string} */
+        /** @var array{new_username?: ?string, domain?: ?string, copy_databases?: ?bool} */
         $params = $request->validated();
+        $copyDatabases = $params['copy_databases'] ?? true;
 
         $system = new System();
 
-        // ── Resolve new username ─────────────────────────────────────────────
-        $newUsername = !empty($params['new_username']) ? $params['new_username'] : null;
+        $newUsername = $this->cloneUsername($srcUser, $params['new_username'] ?? null, $system);
+        $cloneDomain = $this->cloneDomainName($srcUser, $params['domain'] ?? null);
+        $this->assertMemoryLimitFits($srcUser);
+        Projects::assertDatabaseNamesFit($srcUser, $newUsername . '_');
+        $newDetails = $srcUser->detailsForCopiedProject($newUsername);
+        $domainAliases = $this->wwwAliasIfFree($cloneDomain);
+
+        /** @var User */
+        $cloneUser = User::make([
+            'username' => $newUsername,
+            'domain'   => $cloneDomain,
+            'email'    => $srcUser->email,
+            'details'  => $newDetails,
+        ]);
+
+        if ($cloneUser->project()->hostingExists()) {
+            throw ValidationException::withMessages([
+                'new_username' => 'Username not available.',
+            ]);
+        }
+
+        $cloneDomainModel = $this->unsavedMainDomain($cloneDomain, $domainAliases);
+
+        $cloneUser->save();
+        $cloneDomainModel->user_id = $cloneUser->id;
+        $cloneDomainModel->save();
+
+        try {
+            $system->projects()->clone($srcUser->username, $cloneUser->username, $copyDatabases);
+            $cloneUser = $cloneUser->refresh();
+        } catch (\Exception $e) {
+            $this->cloneFailed($cloneUser, $e);
+        }
+
+        return new UserResource($cloneUser);
+    }
+
+    /** @throws ValidationException when no free name can be generated, or the name is taken */
+    private function cloneUsername(User $srcUser, ?string $requested, System $system): string
+    {
+        $newUsername = !empty($requested) ? $requested : null;
         if ($newUsername === null) {
             $newUsername = Helper::generateCloneUsername($srcUser->username);
             if ($newUsername === null) {
@@ -982,11 +1140,19 @@ class UserController extends Controller
             ]);
         }
 
-        // ── Resolve clone domain ─────────────────────────────────────────────
-        $cloneDomain = !empty($params['domain']) ? $params['domain'] : null;
+        return $newUsername;
+    }
+
+    /**
+     * The requested domain without `www.`, or a generated staging domain.
+     *
+     * @throws ValidationException when none can be generated, or the domain is taken
+     */
+    private function cloneDomainName(User $srcUser, ?string $requested): string
+    {
+        $cloneDomain = !empty($requested) ? $requested : null;
         if ($cloneDomain === null) {
-            $srcDomain = $srcUser->domain;
-            $cloneDomain = Helper::generateCloneDomain($srcDomain);
+            $cloneDomain = Helper::generateCloneDomain($srcUser->domain);
             if ($cloneDomain === null) {
                 throw ValidationException::withMessages([
                     'domain' => 'Could not generate an available staging domain for the clone.',
@@ -1002,78 +1168,57 @@ class UserController extends Controller
             ]);
         }
 
-        // A clone keeps the source's memory limit, which must still fit this host.
+        return $cloneDomain;
+    }
+
+    /** A clone keeps the source's memory limit, which must still fit this host. */
+    private function assertMemoryLimitFits(User $srcUser): void
+    {
         ProjectMemory::assertFits(ProjectMemory::resolve($srcUser->getMemoryLimit()));
+    }
 
-        // ── Copy resource limits, settings and frozen deploy snapshot ────────
-        $newDetails = $srcUser->detailsForCopiedProject($newUsername);
-
-        // ── Build domain details ─────────────────────────────────────────────
+    /** @return list<string> the www alias, when it would answer and nothing holds it yet */
+    private function wwwAliasIfFree(string $cloneDomain): array
+    {
         $wwwAliasAvailable = DomainPlan::wwwAliasWouldAnswer($cloneDomain)
             && !Domain::domainOrAliasExists('www.' . $cloneDomain);
-        $domainAliases = $wwwAliasAvailable ? ['www.' . $cloneDomain] : [];
 
-        // ── Create model instances (not yet persisted) ───────────────────────
-        /** @var User */
-        $cloneUser = User::make([
-            'username' => $newUsername,
-            'domain'   => $cloneDomain,
-            'email'    => $srcUser->email,
-            'details'  => $newDetails,
-        ]);
+        return $wwwAliasAvailable ? ['www.' . $cloneDomain] : [];
+    }
 
-        if ($cloneUser->project()->hostingExists()) {
-            throw ValidationException::withMessages([
-                'new_username' => 'Username not available.',
-            ]);
-        }
-
-        /** @var Domain */
-        $cloneDomainModel = Domain::make([
-            'user_id' => null, // filled after user save
+    /**
+     * The clone's main domain; its user_id is set once the user is saved.
+     *
+     * @param list<string> $aliases
+     */
+    private function unsavedMainDomain(string $cloneDomain, array $aliases): Domain
+    {
+        return Domain::make([
+            'user_id' => null,
             'domain'  => $cloneDomain,
             'type'    => 'main',
             'details' => [
                 'document_root'     => "/{$cloneDomain}/public_html",
                 'redirect_enabled'  => false,
                 'redirect_url'      => null,
-                'aliases'           => $domainAliases,
+                'aliases'           => $aliases,
             ],
         ]);
+    }
 
-        // ── Persist + provision ──────────────────────────────────────────────
-        $cloneUser->save();
-        $cloneDomainModel->user_id = $cloneUser->id;
-        $cloneDomainModel->save();
-
+    /** Destroys the half-made clone, best-effort, and reports the failure as a deploy problem. */
+    private function cloneFailed(User $cloneUser, \Exception $e): never
+    {
         try {
-            $system->projects()->clone($srcUser->username, $cloneUser->username);
-            $cloneUser = $cloneUser->refresh();
-        } catch (\RuntimeException $e) {
-            try {
-                $cloneUser->refresh()->project()->destroy();
-            } catch (\Throwable $ignored) {
-            }
-            $match = DeployFailureExplainer::match($e->getMessage());
-            throw ProblemException::deploy(
-                $match['rule'] ?? 'clone_failed',
-                $match['message'] ?? $e->getMessage(),
-                null
-            );
-        } catch (\Exception $e) {
-            try {
-                $cloneUser->refresh()->project()->destroy();
-            } catch (\Throwable $ignored) {
-            }
-            $match = DeployFailureExplainer::match($e->getMessage());
-            throw ProblemException::deploy(
-                $match['rule'] ?? 'clone_failed',
-                $match['message'] ?? $e->getMessage(),
-                null
-            );
+            $cloneUser->refresh()->project()->destroy();
+        } catch (\Throwable) {
         }
-
-        return new UserResource($cloneUser);
+        $match = DeployFailureExplainer::match($e->getMessage());
+        throw ProblemException::deploy(
+            $match['rule'] ?? 'clone_failed',
+            $match['message'] ?? $e->getMessage(),
+            null
+        );
     }
 
     #[OA\Post(
@@ -1093,7 +1238,6 @@ class UserController extends Controller
         ],
     )]
     /**
-     * @param UserVerifyNewUsernameRequest $request
      * @return JsonResponse
      */
     public function verifyNewUsername(UserVerifyNewUsernameRequest $request)
@@ -1147,6 +1291,9 @@ class UserController extends Controller
     #[OA\Put(
         path: '/projects/{username}',
         summary: 'Update a project',
+        description: 'A token limited to some projects may change `domain` and `email` only. The resource '
+            . 'limits and the PHP-FPM, LSPHP and Redis settings are the operator\'s: sending any of them '
+            . 'with such a token is refused with 403, naming the fields.',
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -1154,27 +1301,30 @@ class UserController extends Controller
             properties: [
                 new OA\Property(property: 'domain', type: 'string', nullable: true),
                 new OA\Property(property: 'email', type: 'string', format: 'email', nullable: true),
-                new OA\Property(property: 'disk_space_limit', type: 'integer', nullable: true),
+                new OA\Property(property: 'disk_space_limit', type: 'integer', nullable: true, description: 'MB, -1 for unlimited; null clears the limit', x: ['mcp-nullable' => true]),
                 new OA\Property(property: 'memory_limit', type: 'integer', description: 'MB. Can be changed, not removed. Refused when larger than memory_budget.max_project_mb in GET /metrics/current'),
-                new OA\Property(property: 'cpu_limit', type: 'number', format: 'float', nullable: true),
-                new OA\Property(property: 'bandwidth_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'mysql_databases_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'ftp_accounts_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'sftp_accounts_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'addon_domains_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'subdomains_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'inodes_limit', type: 'integer', nullable: true),
+                new OA\Property(property: 'cpu_limit', type: 'number', format: 'float', nullable: true, description: 'null clears the limit', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'device_read_bps', type: 'integer', nullable: true, description: '-1 or null for unlimited', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'device_write_bps', type: 'integer', nullable: true, description: '-1 or null for unlimited', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'bandwidth_limit', type: 'integer', nullable: true, description: 'null clears the limit', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'mysql_databases_limit', type: 'integer', nullable: true, description: '-1 or null for unlimited', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'ftp_accounts_limit', type: 'integer', nullable: true, description: '-1 or null for unlimited', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'sftp_accounts_limit', type: 'integer', nullable: true, description: '-1 or null for unlimited', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'addon_domains_limit', type: 'integer', nullable: true, description: '-1 or null for unlimited', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'subdomains_limit', type: 'integer', nullable: true, description: '-1 or null for unlimited', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'inodes_limit', type: 'integer', nullable: true, description: '-1 or null for unlimited', x: ['mcp-nullable' => true]),
             ],
         )),
         responses: [
             new OA\Response(response: 200, description: 'Updated project', content: new OA\JsonContent(ref: '#/components/schemas/User')),
+            new OA\Response(response: 403, description: ApiDefinitions::OPERATOR_ONLY_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 409, description: ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error; domain_taken when the domain is already on this engine', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     /**
      * @param string $username
-     * @param UserUpdateRequest $request
      * @return UserResource
      */
     public function update($username, UserUpdateRequest $request)
@@ -1206,36 +1356,69 @@ class UserController extends Controller
         if (array_key_exists('email', $params)) {
             $user->email = $params['email'];
         }
-        foreach ([...ResourceLimit::keys(), 'php_fpm_pool_settings', 'lsphp_settings', 'redis_config'] as $key) {
-            if (array_key_exists($key, $params)) {
-                $user->setDetails([$key => $params[$key]]);
-            }
-        }
+        $this->applyResourceLimits($user, $params);
+        $this->applyServiceSettings($user, $params);
 
         if (array_key_exists('domain', $params)) {
             MainDomainRename::apply($user, (string) $params['domain']);
         }
 
         $user->save();
+        $this->applyMemoryLimitNow($user, $params);
 
-        // Applied now, not at the next rebuild: the account keeps running.
+        return new UserResource($user);
+    }
+
+    /**
+     * Stored as the console stores them: -1 is "no limit", and an explicit null clears the limit.
+     *
+     * @param array<string, mixed> $params
+     */
+    private function applyResourceLimits(User $user, array $params): void
+    {
+        foreach (ResourceLimit::all() as $limit) {
+            if (array_key_exists($limit->key, $params)) {
+                $raw = $params[$limit->key];
+                $user->setDetails([$limit->key => $raw === null ? null : $limit->normalize($raw)]);
+            }
+        }
+    }
+
+    /** @param array<string, mixed> $params */
+    private function applyServiceSettings(User $user, array $params): void
+    {
+        foreach (['php_fpm_pool_settings', 'lsphp_settings', 'redis_config'] as $key) {
+            if (array_key_exists($key, $params)) {
+                $user->setDetails([$key => $params[$key]]);
+            }
+        }
+    }
+
+    /**
+     * A new memory limit is applied to the running account at once, not at the next rebuild.
+     *
+     * @param array<string, mixed> $params
+     */
+    private function applyMemoryLimitNow(User $user, array $params): void
+    {
         $runtime = $user->project()->runtime();
         if (array_key_exists('memory_limit', $params) && $runtime instanceof Dind) {
             $runtime->applyMemoryLimit();
         }
-
-        return new UserResource($user);
     }
 
     #[OA\Put(
         path: '/projects/{username}/suspend',
         summary: 'Suspend a project',
+        description: 'Only an unscoped token may call this: a token limited to some projects is refused with 403, even on its own project.',
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
         responses: [
             new OA\Response(response: 200, description: 'Project suspended', content: new OA\JsonContent(ref: '#/components/schemas/User')),
+            new OA\Response(response: 403, description: ApiDefinitions::OPERATOR_ONLY_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 409, description: ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
         ],
     )]
     public function suspend(string $username): UserResource
@@ -1246,19 +1429,38 @@ class UserController extends Controller
         $user->save();
 
         $system = new System();
+        $this->rotatePhpMyAdminSsoPassword($system, $user);
         $reloaded = $system->rebuildDomains();
 
         return (new UserResource($user))->additional(['reload_pending' => !$reloaded]);
     }
 
+    /**
+     * An open phpMyAdmin session works through any domain's /phpmyadmin, so a new SSO password cuts
+     * it off; the next token sets a fresh one. Best-effort: a failure is only logged.
+     */
+    private function rotatePhpMyAdminSsoPassword(System $system, User $user): void
+    {
+        try {
+            $sso = 'sso_' . $user->username;
+            if ($system->mysql()->users()->userExists($sso)) {
+                $system->mysql()->users()->changeUserPassword($sso, Str::random(27));
+            }
+        } catch (\Throwable $e) {
+            Log::warning("Could not rotate the phpMyAdmin SSO password of {$user->username}: " . $e->getMessage());
+        }
+    }
+
     #[OA\Put(
         path: '/projects/{username}/unsuspend',
         summary: 'Unsuspend a project',
+        description: 'Only an unscoped token may call this: a token limited to some projects is refused with 403, even on its own project.',
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
         responses: [
             new OA\Response(response: 200, description: 'Project unsuspended', content: new OA\JsonContent(ref: '#/components/schemas/User')),
+            new OA\Response(response: 403, description: ApiDefinitions::OPERATOR_ONLY_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
@@ -1284,7 +1486,7 @@ class UserController extends Controller
         responses: [
             new OA\Response(response: 200, description: 'Project deleted', content: new OA\JsonContent(ref: '#/components/schemas/User')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: 'Project busy: a task, deploy or push is working on it', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 409, description: 'Project busy: a task, deploy or push is working on it. ' . ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
         ],
     )]
     /**
@@ -1294,11 +1496,17 @@ class UserController extends Controller
     public function destroy($username)
     {
         $user = $this->projectOr404($username);
+        $this->deleteProject($user);
 
+        return new UserResource($user);
+    }
+
+    /** A busy project is a refusal, answered 409 and not logged: nothing failed. Any other failure is logged and rethrown. */
+    private function deleteProject(User $user): void
+    {
         try {
             (new ProjectDeleter())->delete($user);
         } catch (ProjectBusyException $e) {
-            // A refusal, answered 409; nothing failed.
             throw $e;
         } catch (\Exception $e) {
             Log::warning(
@@ -1307,8 +1515,5 @@ class UserController extends Controller
             );
             throw $e;
         }
-
-        return new UserResource($user);
     }
-
 }

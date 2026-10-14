@@ -72,7 +72,7 @@ class Coverage extends Command
             return 1;
         }
 
-        $dir = base_path() . "/tests/coverage/{$tokenId}";
+        $dir = config('testing.coverage_dir') . "/{$tokenId}";
 
         $system = new System();
 
@@ -121,7 +121,7 @@ class Coverage extends Command
                 '--network',
                 'host',
                 '-v',
-                "/opt/panelalpha/shared-hosting/core/tests/coverage/{$tokenId}/html-report:/report",
+                config('testing.coverage_host_dir') . "/{$tokenId}/html-report:/report",
                 'php:8.3',
                 'php',
                 '-S',

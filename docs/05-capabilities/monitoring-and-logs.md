@@ -44,7 +44,17 @@ themselves properly.
 
 Suspended projects are skipped, because a site stopped on purpose is not a fault.
 
+The check, the six-hourly sweep and the deploy log cover projects that run in their own container. Traditional PHP hosting is not checked this way: open its address, and read its domain logs and PHP error log (section 3).
+
 How to read the result: [What the engine checks](#what-the-engine-checks).
+
+To see whether anything is running on a project right now, such as a deploy, a push or a restore, ask for its tasks:
+
+```text
+Is anything running on tshop right now?
+```
+
+A push counts as a task, so it shows up here too. By default you see the tasks your own token started, plus the ones the engine started itself. A token limited to some projects sees only those projects.
 
 ## What the engine checks
 
@@ -105,6 +115,14 @@ Show me what the app container of shop printed between 14:00 and 14:30 today.
 
 The assistant reads up to 5000 lines at a time, and can limit them to a period such as the last two hours.
 
+**PHP errors.** On traditional PHP hosting, every project keeps its own PHP error log, one file for all its domains. It holds the last errors your PHP code raised, such as a fatal error behind a blank page.
+
+```text
+Show me the last 100 lines of the PHP error log of tshop.
+```
+
+The assistant can read up to 5000 lines and limit them to a period. The file is also in the list of log files for the project's domains. It is rotated at 10 MB, and the last three older copies are kept. On a project in its own container there is no separate file: the assistant gets what the app container printed, as above. A project that existed before the update starts writing the log after the update, once its PHP restarts or you change a PHP setting on it.
+
 Use the webserver logs for 404s and 500s that only some visitors hit. For how many people came, and how much data they transferred, ask for the counts: [Visitor statistics](visitor-statistics.md). If the assistant cannot read the logs, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
 ## 4. Usage - "is it running out of something?"
@@ -125,7 +143,7 @@ Samples are kept over several time windows, from the last few minutes to the las
 How close is this project to its limits?
 ```
 
-Covers storage, the disk its container logs take, domains, subdomains, FTP and SFTP accounts, and databases. To change a limit: [Limits](projects.md#limits).
+Covers storage, the disk its container logs take, domains, subdomains, FTP and SFTP accounts, and databases. Storage counts the project's files and also its own Docker data (images, build cache and database data), which is often the larger part. Disk use is measured in the background every 15 minutes, so a file you just added can take up to that long to show. Before the first measurement it is measured when you ask. To change a limit: [Limits](projects.md#limits).
 
 **From inside a project.** If you run a monitoring app or agent in a project (Zabbix, Netdata, node_exporter and the like), two files in it describe the whole server, not the project:
 
@@ -164,6 +182,106 @@ It only reports applications it could actually reach. Suspended projects and pro
 
 **A site is fine in my browser but reported as not serving itself.**
 The engine checks from inside the account, so it is seeing something you are not - often a cached page in your browser, or a difference between what the proxy serves and what the application returns. Trust the engine's answer and ask it what specifically failed.
+
+## More requests to try
+
+**Mode** is the lowest permission mode that allows it: read, modify or full ([Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do)). Examples assume a project named `tshop`.
+
+**The server**
+
+```text
+How is this server doing? Give me CPU, memory and disk now, the last five
+minutes, the last hour and the last 12 hours, and the hourly averages.
+```
+
+Mode: read. Tools: `metrics_latest`, `metrics_current`, `metrics_last_5_minutes`, `metrics_last_hour`, `metrics_last_12_hours`, `metrics_last_hour_averages`, `system_info`. Check: the numbers are consistent between views, and the memory budget is shown.
+
+**One site, is it itself?**
+
+```text
+Is tshop serving the application itself, or something else?
+```
+
+Mode: read. Tools: `app_health_check` with `timeout` and `attempts`. Check: the answer separates "something answers" from "it is the application", and says what to do when it is not.
+
+**Everything at once**
+
+```text
+Sweep every project on this engine and tell me which ones are not serving
+themselves properly.
+```
+
+Mode: read. Tools: `project_list_summary`, `app_health_check` per project. Check: a suspended project is skipped, and each failure is paired with what it serves instead.
+
+**Web logs**
+
+```text
+List the log files of shop.example.com on tshop, then show me the end of the
+error log.
+```
+
+Mode: read. Tools: `domain_log_list`, `domain_log_download` with `offset` and `length`. Check: the answer is an excerpt, not the whole file, and the log is the site's, not the deploy log.
+
+**PHP errors**
+
+```text
+Show the last 50 lines of the PHP error log of tshop, only from the last hour.
+```
+
+Mode: read. Tools: `php_error_log_get` with `lines` (up to 5000) and `since`. Check: on traditional PHP hosting the lines come from the project's own log, for all its domains. On a container project the same request returns the app container output.
+
+**What the app printed**
+
+```text
+Show what the app container of tshop printed between 14:00 and 14:30 today, at
+most 200 lines.
+```
+
+Mode: read. Tools: `container_list`, `container_service_logs` with `since`, `until`, `lines`. Check: the lines are inside the window and the service name comes from `container_list`.
+
+**Restart pieces**
+
+```text
+Restart just the app service of tshop. Then stop the whole project and start it
+again.
+```
+
+Mode: modify. Tools: `container_service_action`, `container_project_action`, `container_list`. Check: after each action the containers are running again, and the site answers.
+
+**Is it fast?**
+
+```text
+Run a Lighthouse report on https://shop.example.com/ for desktop, summary only.
+Then try https://example.org/.
+```
+
+Mode: modify. Tools: `lighthouse_report_create` with `desktop_preset`, `summary`. Check: the first returns scores. The second is refused, because only the engine's own domains, aliases and tunnel hostnames are accepted. An IP address is refused the same way.
+
+**Report a problem**
+
+```text
+File a bug report about tshop: the site shows a blank page after deploy.
+Severity: medium. Attach the deploy log and health, and show me exactly what
+will be sent before you send it.
+```
+
+Mode: modify. Tools: `bug_report_create` with `attach_log` and `attach_health`. Check: the answer carries the redacted report, no `.env` values or tokens are in it, and the status says accepted and queued, not delivered.
+
+**What is running**
+
+```text
+List the tasks that are running on tshop. Then list the latest ten, newest first.
+```
+
+Mode: read. Tools: `task_list` with `name`, `status` active, `since`, `task_get`. Check: only tasks of tshop come back, a push appears as a task, and a token limited to some projects cannot ask for every project's tasks.
+
+**Tasks**
+
+```text
+List the log lines of the latest task for tshop after the last line you saw.
+```
+
+Mode: read. Tools: `task_get` with `after_id`, `task_log_list` with `since`. Check: only newer lines come back, even when several share one second.
 
 ## From the server
 

@@ -13,6 +13,7 @@ use App\Http\Controllers\SystemController;
 use App\Http\Controllers\User\CronJobController;
 use App\Http\Controllers\User\DeployHookController;
 use App\Http\Controllers\User\Domain\LogFileController;
+use App\Http\Controllers\User\EnvVarsController;
 use App\Http\Controllers\User\DomainController as UserDomainController;
 use App\Http\Controllers\User\ProjectSettingController;
 use App\Http\Controllers\User\ProjectPasswordController;
@@ -28,10 +29,12 @@ use App\Http\Controllers\User\MysqlController;
 use App\Http\Controllers\User\StagingController;
 use App\Http\Controllers\User\PhpController as UserPhpController;
 use App\Http\Controllers\User\BackupController;
+use App\Http\Controllers\User\BackupScheduleController;
 use App\Http\Controllers\User\AppCredentialsController;
 use App\Http\Controllers\User\AppHealthController;
 use App\Http\Controllers\User\AppUserController;
 use App\Http\Controllers\User\ContainerController;
+use App\Http\Controllers\User\DeployHistoryController;
 use App\Http\Controllers\User\DeployLogController;
 use App\Http\Controllers\User\ProxyRuleController;
 use App\Http\Controllers\User\UsageController;
@@ -42,6 +45,8 @@ use App\Http\Controllers\McpActivityLogController;
 use App\Http\Controllers\ServerMetricsController;
 use App\Http\Controllers\SecretVaultController;
 use App\Http\Controllers\SourceInspectionController;
+use App\Http\Controllers\SourceRefsController;
+use App\Http\Controllers\SystemApiAccessController;
 use App\Http\Controllers\TaskController;
 use App\Http\Controllers\User\SftpAccountController;
 use App\Http\Controllers\UserController;
@@ -77,6 +82,7 @@ Route::post('/internal/site-password/{username}/login', [SitePasswordGateControl
 Route::get('/mcp-tokens', [McpTokenController::class, 'index']);
 Route::post('/mcp-tokens', [McpTokenController::class, 'store']);
 Route::put('/mcp-tokens/{id}/revoke', [McpTokenController::class, 'revoke']);
+Route::put('/mcp-tokens/{id}/projects', [McpTokenController::class, 'updateProjects']);
 Route::delete('/mcp-tokens/{id}', [McpTokenController::class, 'destroy']);
 
 Route::get('/mcp-activity-logs', [McpActivityLogController::class, 'index']);
@@ -97,6 +103,7 @@ Route::post('/vault/secrets', [SecretVaultController::class, 'store']);
 Route::get('/vault/secrets/{ref}', [SecretVaultController::class, 'show']);
 Route::delete('/vault/secrets/{ref}', [SecretVaultController::class, 'destroy']);
 
+Route::get('/tasks', [TaskController::class, 'index']);
 Route::get('/tasks/{id}', [TaskController::class, 'show']);
 Route::get('/tasks/{id}/logs', [TaskController::class, 'logs']);
 Route::get('/tasks/{id}/logs/stream', [TaskController::class, 'streamLogs']);
@@ -124,10 +131,12 @@ $projectRoutes = function (): void {
     Route::get('/all', [UserController::class, 'listAll']);
     Route::post('/verify-new-username', [UserController::class, 'verifyNewUsername']);
     Route::post('/{username}/rebuild', [UserController::class, 'rebuild']);
+    Route::post('/{username}/source', [UserController::class, 'attachSource']);
     Route::post('/{username}/deploy-archive', [UserController::class, 'deployArchive']);
     Route::post('/{username}/clone', [UserController::class, 'clone']);
     Route::post('/{username}/staging', [StagingController::class, 'staging']);
     Route::post('/{username}/push', [StagingController::class, 'push']);
+    Route::get('/{username}/push/diff', [StagingController::class, 'pushDiff']);
     Route::get('/{username}', [UserController::class, 'show']);
     Route::put('/{username}', [UserController::class, 'update']);
     Route::put('/{username}/suspend', [UserController::class, 'suspend']);
@@ -135,6 +144,9 @@ $projectRoutes = function (): void {
     Route::put('/{username}/password', [ProjectPasswordController::class, 'update']);
     Route::delete('/{username}/password', [ProjectPasswordController::class, 'destroy']);
     Route::delete('/{username}', [UserController::class, 'destroy']);
+
+    Route::get('/{username}/env-vars', [EnvVarsController::class, 'index']);
+    Route::put('/{username}/env-vars', [EnvVarsController::class, 'update']);
 
     Route::get('/{username}/usage', [UsageController::class, 'getUsage']);
     Route::get('/{username}/bandwidth', [UsageController::class, 'getBandwidth']);
@@ -172,8 +184,13 @@ $projectRoutes = function (): void {
     Route::get('/{username}/backups', [BackupController::class, 'index']);
     Route::post('/{username}/backups', [BackupController::class, 'store']);
     Route::get('/{username}/backups/{id}', [BackupController::class, 'show']);
+    Route::get('/{username}/backups/{id}/items/{item}/download', [BackupController::class, 'download']);
     Route::post('/{username}/backups/{id}/restore', [BackupController::class, 'restore']);
     Route::delete('/{username}/backups/{id}', [BackupController::class, 'destroy']);
+
+    Route::get('/{username}/backup-schedule', [BackupScheduleController::class, 'show']);
+    Route::put('/{username}/backup-schedule', [BackupScheduleController::class, 'update']);
+    Route::delete('/{username}/backup-schedule', [BackupScheduleController::class, 'destroy']);
 
     Route::get('/{username}/ftp-accounts', [FtpAccountController::class, 'index']);
     Route::post('/{username}/ftp-accounts', [FtpAccountController::class, 'store']);
@@ -182,6 +199,8 @@ $projectRoutes = function (): void {
 
     Route::get('/{username}/sftp-accounts', [SftpAccountController::class, 'index']);
     Route::post('/{username}/sftp-accounts', [SftpAccountController::class, 'store']);
+    Route::post('/{username}/sftp-accounts/kill-sessions', [SftpAccountController::class, 'killSessionsAll']);
+    Route::post('/{username}/sftp-accounts/{sftpUser}/kill-sessions', [SftpAccountController::class, 'killSessions']);
     Route::put('/{username}/sftp-accounts/{sftpUser}', [SftpAccountController::class, 'update']);
     Route::delete('/{username}/sftp-accounts/{sftpUser}', [SftpAccountController::class, 'destroy']);
 
@@ -189,6 +208,7 @@ $projectRoutes = function (): void {
     Route::get('/{username}/mysql/databases/{dbname}', [DatabaseController::class, 'show']);
     Route::post('/{username}/mysql/databases', [DatabaseController::class, 'store']);
     Route::delete('/{username}/mysql/databases/{dbname}', [DatabaseController::class, 'destroy']);
+    Route::put('/{username}/mysql/databases/{dbname}/rename', [DatabaseController::class, 'rename']);
 
     Route::get('/{username}/mysql/users', [MysqlUserController::class, 'index']);
     Route::get('/{username}/mysql/users/{dbuser}', [MysqlUserController::class, 'show']);
@@ -212,8 +232,10 @@ $projectRoutes = function (): void {
 
     Route::get('/{username}/files/exists', [FileController::class, 'exists']);
     Route::get('/{username}/files/stat', [FileController::class, 'stat']);
+    Route::get('/{username}/files/list', [FileController::class, 'list']);
     Route::post('/{username}/files/upload', [FileController::class, 'upload']);
     Route::get('/{username}/files/download', [FileController::class, 'download']);
+    Route::get('/{username}/files/thumbnail', [FileController::class, 'thumbnail']);
     Route::delete('/{username}/files/remove', [FileController::class, 'remove']);
     Route::post('/{username}/files/mkdir', [FileController::class, 'mkdir']);
     Route::post('/{username}/files/zip', [FileController::class, 'zip']);
@@ -248,6 +270,7 @@ $projectRoutes = function (): void {
 
     Route::get('/{username}/php/custom-ini-settings', [UserPhpController::class, 'listCustomIniSettings']);
     Route::put('/{username}/php/custom-ini-settings', [UserPhpController::class, 'updateCustomIniSettings']);
+    Route::get('/{username}/php/error-log', [UserPhpController::class, 'errorLog']);
 
     Route::get('/{username}/containers', [ContainerController::class, 'index']);
     Route::post('/{username}/containers/action', [ContainerController::class, 'projectAction']);
@@ -268,6 +291,8 @@ $projectRoutes = function (): void {
 
     Route::get('/{username}/deploy-log', [DeployLogController::class, 'show']);
     Route::post('/{username}/deploy-cancel', [DeployLogController::class, 'cancel']);
+    Route::get('/{username}/deploys', [DeployHistoryController::class, 'index']);
+    Route::get('/{username}/deploys/{deploy}/log', [DeployHistoryController::class, 'log']);
 
     Route::get('/{username}/app/users', [AppUserController::class, 'index']);
     Route::post('/{username}/app/users', [AppUserController::class, 'store']);
@@ -323,6 +348,9 @@ Route::delete('/proxy-rules/{id}', [ProxyRuleController::class, 'destroy']);
 // this server, or an existing project's files.
 Route::post('/source/inspect', [SourceInspectionController::class, 'inspect']);
 
+// The branches and tags of a remote, for a branch picker before a project exists.
+Route::post('/source/refs', [SourceRefsController::class, 'refs']);
+
 Route::get('/php/available-versions', [PhpController::class, 'listAvailableVersions']);
 Route::get('/domains/{domain}/php-version', [DomainController::class, 'getPhpVersion']);
 Route::put('/domains/{domain}/php-version', [DomainController::class, 'setPhpVersion']);
@@ -344,6 +372,10 @@ Route::get('/domains/{domain}', [DomainController::class, 'show']);
 Route::post('/bug-reports', [BugReportController::class, 'store']);
 
 Route::get('/system/info', [SystemController::class, 'info']);
+Route::get('/system/api-access', [SystemApiAccessController::class, 'index']);
+Route::put('/system/api-access/{project}', [SystemApiAccessController::class, 'update']);
+Route::post('/system/api-access/{project}/rotate', [SystemApiAccessController::class, 'rotate']);
+Route::delete('/system/api-access/{project}', [SystemApiAccessController::class, 'destroy']);
 Route::get('/system/ssl-config', [SystemController::class, 'getSslConfig']);
 Route::put('/system/ssl-config', [SystemController::class, 'updateSslConfig']);
 Route::put('/system/engine-certificate', [SystemController::class, 'requestEngineCertificate']);

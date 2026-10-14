@@ -16,7 +16,9 @@ use App\System\Project\Dind\Strategy\RailpackStrategy;
 use App\System\Project\Dind\Strategy\RubyStrategy;
 use App\System\Project\Dind\Strategy\UserComposeStrategy;
 use App\Lib\Deploy\Compose\ComposeEnvironment;
+use App\Lib\Project\ApiAccess;
 use App\Lib\Deploy\Compose\ComposeOverride;
+use App\Lib\Deploy\Compose\ComposeValues;
 use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Compose\FrameworkService;
@@ -25,30 +27,8 @@ use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\Strategies;
 
 /**
- * Turn a detect decision into the files `docker compose up` will build from.
- *
- * This class is the dispatcher: it picks the writer for the strategy that was
- * detected and hands off. Each writer ends by putting a compose file into
- * ~/project — either the user's own, hardened in place, or one the engine
- * generates — plus whatever Dockerfile or nginx config that compose
- * references. Nothing here starts containers; {@see Dind::startUserApp()}
- * does that.
- *
- * The writers live in {@see Strategy} and reach their shared services back
- * through this object, so the accessors below are the whole of what they
- * share:
- *
- *   {@see AppConfigBootstrap}    what the project's app config does before detection
- *   {@see PrepareStage}        host-side work between the clone and the build
- *   {@see EntrypointWriter}    the staged entrypoint a generated image installs
- *   {@see AccountSecrets}      stable per-account secrets nobody supplied
- *   {@see ManifestDatabase}    a manifest's `database:` outside the PHP strategy
- *   {@see UserComposeStrategy} the project's own compose file, hardened
- *   {@see DockerfileStrategy}  a repository that ships its own Dockerfile
- *   {@see RubyStrategy}        Rails and plain Rack applications
- *   {@see PhpStrategy}         Laravel and plain PHP applications
- *   {@see FrameworkStrategy}   a framework a manifest recognised
- *   {@see RailpackStrategy}    build it with Railpack, or serve a page saying why not
+ * Dispatches a detect decision to the {@see Strategy} writer that puts the compose file (and what it
+ * references) into ~/project; the writers reach their shared services back through the accessors here.
  */
 class DeployStrategy
 {
@@ -111,13 +91,8 @@ class DeployStrategy
     }
 
     /**
-     * The decision a generated compose file is rendered from.
-     *
-     * Every strategy that generates one ends here rather than calling the
-     * cache and the environment separately, so a strategy added later cannot
-     * quietly ship a service the account's own `env_vars` do not reach.
-     * {@see ComposeEnvironment} for which keys an account may set and which
-     * two groups stay the engine's.
+     * The decision a generated compose file is rendered from. Every generating strategy goes through here,
+     * so none can ship a service the account's own `env_vars` do not reach ({@see ComposeEnvironment}).
      *
      * @param array<string, mixed> $decision
      * @return array<string, mixed>
@@ -125,12 +100,71 @@ class DeployStrategy
     public function composeDecision(array $decision): array
     {
         $decision = ComposeEnvironment::layer(
-            ComposeEnvironment::withInstanceSecret($decision, $this->secrets()->instanceSecret()),
+            ComposeEnvironment::withApiAccess(
+                ComposeEnvironment::withInstanceSecret($decision, $this->secrets()->instanceSecret()),
+                (new ApiAccess($this->dind->system()))->envFor($this->dind->userModel())
+            ),
             $this->appConfig?->env() ?? [],
             $this->secrets()->userEnvVars()
         );
+        $decision = ComposeEnvironment::withPublicAddress($decision, $this->dind->publicAppUrl());
 
-        return ComposeEnvironment::withPublicAddress($decision, $this->dind->publicAppUrl());
+        return $this->withDatabaseHostPinned($decision);
+    }
+
+    /**
+     * Pin the engine's database host whenever the app's env names it (a hand-set `DB_HOST`, say):
+     * the nested Docker resolves none of the engine's names.
+     *
+     * @param array<string, mixed> $decision
+     * @return array<string, mixed>
+     */
+    private function withDatabaseHostPinned(array $decision): array
+    {
+        $host = $this->engineDatabaseHostname();
+        if ($host === null) {
+            return $decision;
+        }
+        $env = is_array($decision['env'] ?? null) ? $decision['env'] : [];
+        $named = array_filter($env, static fn (mixed $value): bool => is_string($value) && str_contains($value, $host));
+        if ($named === []) {
+            return $decision;
+        }
+        $extraHosts = AppDatabase::extraHosts($this->dind);
+        if ($extraHosts === []) {
+            return $decision;
+        }
+        $existing = ComposeValues::stringList($decision['extra_hosts'] ?? null);
+        $decision['extra_hosts'] = $this->oneEntryPerHostName([...$existing, ...$extraHosts]);
+
+        return $decision;
+    }
+
+    /** Null when no container is bound to resolve it (a unit test). */
+    private function engineDatabaseHostname(): ?string
+    {
+        try {
+            return AppDatabase::hostname();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * The first entry for each host name wins, so a strategy's own pin listed first is kept.
+     *
+     * @param list<string> $entries `name:address` pairs
+     * @return list<string>
+     */
+    private function oneEntryPerHostName(array $entries): array
+    {
+        $byHost = [];
+        foreach ($entries as $entry) {
+            $name = strtolower((string) strstr($entry, ':', true));
+            $byHost[$name] ??= $entry;
+        }
+
+        return array_values($byHost);
     }
 
     /**
@@ -231,6 +265,10 @@ class DeployStrategy
     }
 
     /**
+     * Write the build definition for the detected strategy. A compose (or PAEMD, an app config's own
+     * compose stack) runs prepare at its own point; every other strategy runs it first, as it may write
+     * the very files the generator reads.
+     *
      * @param array{
      *   strategy: string,
      *   label: string,
@@ -248,20 +286,14 @@ class DeployStrategy
         string $sourceLabel
     ): void {
         $strategy = $decision['strategy'];
-        // Held for composeDecision(): not every writer below is handed the
-        // app config, and every generated compose file needs what it declared
-        // about the environment.
         $this->appConfig = $appConfig;
 
-        if ($strategy === Strategies::COMPOSE) {
+        if ($strategy === Strategies::COMPOSE || $strategy === Strategies::PAEMD) {
             $this->userCompose()->apply($decision, $appConfig, $projectDir, $chown, $sourceLabel);
 
             return;
         }
 
-        // Every other strategy generates its own build definition below, so
-        // the platform's prepare runs first — it may write the very files the
-        // generator is about to read.
         $this->prepare()->run($projectDir, $this->prepare()->manifestFor($decision, $appConfig), $appConfig);
 
         if ($strategy === Strategies::DOCKERFILE) {
@@ -295,27 +327,32 @@ class DeployStrategy
         }
 
         if ($strategy === Strategies::STATIC) {
-            // The whole recipe for a site with no build step: which document
-            // answers `/`. Detection worked it out -- static.yaml read it off
-            // a filename, html.yaml went looking -- and until now nothing
-            // downstream read the answer, so a site whose front page was
-            // called anything but index.html was mounted correctly and then
-            // served a 403.
-            $this->dind->composeWriter()->writeStaticNginxConf(
-                $projectDir,
-                is_string($decision['static_index'] ?? null) ? $decision['static_index'] : null,
-                $chown
-            );
-            $this->dind->composeWriter()->writeGeneratedCompose(
-                $projectDir,
-                DeployCompose::staticNginx(),
-                $chown
-            );
+            $this->writeStaticSite($decision, $projectDir, $chown);
 
             return;
         }
 
         $this->railpack()->applyFallback($projectDir, $chown, $sourceLabel);
+    }
+
+    /**
+     * A site with no build step: nginx serving the document detection picked to answer `/`,
+     * which is not always index.html.
+     *
+     * @param array<string, mixed> $decision
+     */
+    private function writeStaticSite(array $decision, string $projectDir, ?string $chown): void
+    {
+        $this->dind->composeWriter()->writeStaticNginxConf(
+            $projectDir,
+            is_string($decision['static_index'] ?? null) ? $decision['static_index'] : null,
+            $chown
+        );
+        $this->dind->composeWriter()->writeGeneratedCompose(
+            $projectDir,
+            DeployCompose::staticNginx(),
+            $chown
+        );
     }
 
     /**
@@ -329,16 +366,7 @@ class DeployStrategy
         if (!$fs->fileExists($override)) {
             return;
         }
-        $defined = [];
-        foreach ($this->dind->userAppComposeFiles() as $file) {
-            if ($file === $override || !$fs->fileExists($file)) {
-                continue;
-            }
-            $services = ComposeYaml::parse($fs->fileGetContents($file))['services'] ?? null;
-            foreach (is_array($services) ? array_keys($services) : [] as $name) {
-                $defined[] = (string) $name;
-            }
-        }
+        $defined = $this->servicesDefinedOutside($override);
         $trimmed = ComposeOverride::withoutUndefinedServices($fs->fileGetContents($override), $defined);
         if ($trimmed['dropped'] === [] || $trimmed['yaml'] === null) {
             return;
@@ -352,6 +380,28 @@ class DeployStrategy
     }
 
     /**
+     * Service names declared by the account's compose files other than the override.
+     *
+     * @return list<string>
+     */
+    private function servicesDefinedOutside(string $override): array
+    {
+        $fs = $this->dind->system()->filesystem();
+        $defined = [];
+        foreach ($this->dind->userAppComposeFiles() as $file) {
+            if ($file === $override || !$fs->fileExists($file)) {
+                continue;
+            }
+            $services = ComposeYaml::parse($fs->fileGetContents($file))['services'] ?? null;
+            foreach (is_array($services) ? array_keys($services) : [] as $name) {
+                $defined[] = (string) $name;
+            }
+        }
+
+        return $defined;
+    }
+
+    /**
      * Rails 6+ Host Authorization blocks the configured public vhost when the
      * app keeps a host whitelist. Drop a tiny initializer that adds it.
      */
@@ -361,10 +411,8 @@ class DeployStrategy
     }
 
     /**
-     * Re-normalize the project's own compose file into the run file, without
-     * running prepare or touching anything else. For {@see ContainerOperations}
-     * to call before `up`/`pull` on a compose-strategy project, so an edit the
-     * client made takes effect (ticket 05).
+     * Re-normalize the project's own compose file into the run file, and nothing else: called before
+     * `up`/`pull` on a compose-strategy project so the client's edit takes effect.
      */
     public function refreshComposeRunFile(string $projectDir, ?string $chown): void
     {

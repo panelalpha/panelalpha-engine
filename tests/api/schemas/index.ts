@@ -39,14 +39,18 @@ export {
   sslCertificateListSchema,
   sslCertificateSchema,
 } from './domain.schemas';
-export { customIniSettingsResponseSchema, domainPhpDirectivesResponseSchema } from './php.schemas';
+export {
+  customIniSettingsResponseSchema,
+  domainPhpDirectivesResponseSchema,
+  phpErrorLogResponseSchema,
+} from './php.schemas';
 export {
   deployHookCreateResponseSchema,
   deployHookDeliverySchema,
   deployHookRotateResponseSchema,
   deployHookShowResponseSchema,
 } from './deploy-hook.schemas';
-export { fileExistsResponseSchema, fileStatSchema } from './files.schemas';
+export { fileExistsResponseSchema, fileStatSchema, fileListResponseSchema } from './files.schemas';
 export {
   firewallLogEntrySchema,
   firewallLogsResponseSchema,
@@ -74,6 +78,11 @@ export {
   currentMetricsSchema,
   historicalMetricsResponseSchema,
   historicalMetricsEntrySchema,
+  apiAccessEntrySchema,
+  apiAccessListResponseSchema,
+  apiAccessEntryResponseSchema,
+  apiAccessRemovalResponseSchema,
+  apiAccessRotationResponseSchema,
 } from './system.schemas';
 export {
   createUserRequestSchema,
@@ -90,11 +99,16 @@ export {
   inspectReportResponseSchema,
   inspectReportSchema,
   inspectSourceSchema,
+  sourceRefsResponseSchema,
+  sourceRefsSchema,
   sshCommandResultSchema,
   sslConfigResponseSchema,
   sslConfigSchema,
   deployTimingsSchema,
   deployLogSnapshotSchema,
+  deployHistoryItemSchema,
+  deployHistoryListResponseSchema,
+  deployHistoryLogResponseSchema,
   appHealthSchema,
   appHealthCheckSchema,
   servingWordSchema,

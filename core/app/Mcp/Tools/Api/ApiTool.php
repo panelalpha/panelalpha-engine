@@ -77,6 +77,23 @@ abstract class ApiTool extends Tool
     /** The API path, relative to /api, with {placeholders} for path parameters. */
     abstract protected function path(): string;
 
+    /** The `VERB /path` operation this tool performs, as the API names it. */
+    public function operationKey(): string
+    {
+        return $this->httpMethod() . ' ' . $this->path();
+    }
+
+    /**
+     * The tool argument carrying the project username, or null for an endpoint
+     * that is not about one project.
+     */
+    public function projectArgument(): ?string
+    {
+        return in_array('username', $this->pathParams(), true)
+            ? $this->argument('username')
+            : null;
+    }
+
     /** @return array<int, string> Names of parameters substituted into the path. */
     protected function pathParams(): array
     {
@@ -149,6 +166,10 @@ abstract class ApiTool extends Tool
         return array_search($apiName, $this->argumentNames(), true) ?: $apiName;
     }
 
+    /**
+     * A malformed upload argument (an InvalidArgumentException) is the caller's
+     * mistake, not an incident: it is answered without being reported.
+     */
     public function handle(Request $request): Response
     {
         $input = $this->apiInput($request->validate($this->rules()));
@@ -156,8 +177,6 @@ abstract class ApiTool extends Tool
         try {
             $response = $this->dispatch($input);
         } catch (InvalidArgumentException $e) {
-            // A malformed upload argument is the caller's mistake, not an
-            // incident: say what is wrong and leave the error log alone.
             return Response::error($e->getMessage());
         } catch (Throwable $e) {
             report($e);
@@ -165,7 +184,17 @@ abstract class ApiTool extends Tool
             return Response::error('The API call failed: ' . $e->getMessage());
         }
 
-        // getContent() is false for both, so they would read as {data: null}.
+        return $this->toolResult($response, $input);
+    }
+
+    /**
+     * A file or a stream is answered before decoding: getContent() is false for
+     * both, so they would read as {data: null}.
+     *
+     * @param array<string, mixed> $input
+     */
+    private function toolResult(SymfonyResponse $response, array $input): Response
+    {
         if ($response instanceof BinaryFileResponse) {
             return $this->fileResult($response, (int)($input['offset'] ?? 0), (int)($input['length'] ?? DownloadWindow::MAX_BYTES));
         }
@@ -173,6 +202,16 @@ abstract class ApiTool extends Tool
             return Response::error('This endpoint streams its response, which cannot be relayed over MCP. Use the non-streaming equivalent (e.g. task_log_list).');
         }
 
+        return $this->jsonResult($response);
+    }
+
+    /**
+     * A 4xx/5xx from the API is the tool failing, not the transport: it comes back
+     * as a tool error so the model retries or reports rather than reading the error
+     * body as a successful result.
+     */
+    private function jsonResult(SymfonyResponse $response): Response
+    {
         $body = $this->decode($response);
         $status = $response->getStatusCode();
         if ($status >= 400 && $status < 500 && is_array($body)) {
@@ -191,9 +230,6 @@ abstract class ApiTool extends Tool
             ));
         }
 
-        // A 4xx/5xx from the API is the tool failing, not the transport: it
-        // comes back as a tool error so the model retries or reports rather
-        // than reading the error body as a successful result.
         return $status >= 400
             ? Response::error($this->encode($payload))
             : Response::json($payload);
@@ -213,43 +249,75 @@ abstract class ApiTool extends Tool
         if ($toTool === []) {
             return $body;
         }
-        $rename = static function (string $field) use ($toTool): string {
-            $head = explode('.', $field, 2);
-
-            return isset($toTool[$head[0]]) ? $toTool[$head[0]] . (isset($head[1]) ? '.' . $head[1] : '') : $field;
-        };
 
         if (is_array($body['errors'] ?? null)) {
-            $errors = [];
-            foreach ($body['errors'] as $field => $messages) {
-                $errors[$rename((string) $field)] = $messages;
-            }
-            $body['errors'] = $errors;
+            $body['errors'] = self::errorsByToolName($body['errors'], $toTool);
         }
         if (is_array($body['problems'] ?? null)) {
-            foreach ($body['problems'] as $i => $problem) {
-                if (!is_array($problem) || !is_string($problem['field'] ?? null)) {
-                    continue;
-                }
-                $from = $problem['field'];
-                $to = $rename($from);
-                if ($to === $from) {
-                    continue;
-                }
-                $body['problems'][$i]['field'] = $to;
-                $prefix = Str::snake($from) . '_';
-                if (is_string($problem['code'] ?? null) && str_starts_with($problem['code'], $prefix)) {
-                    $body['problems'][$i]['code'] = Str::snake($to) . '_' . substr($problem['code'], strlen($prefix));
-                }
-            }
+            $body['problems'] = self::problemsByToolName($body['problems'], $toTool);
         }
 
         return $body;
     }
 
     /**
+     * @param array<mixed> $errors
+     * @param array<string, string> $toTool
+     * @return array<string, mixed>
+     */
+    private static function errorsByToolName(array $errors, array $toTool): array
+    {
+        $renamed = [];
+        foreach ($errors as $field => $messages) {
+            $renamed[self::toolField((string) $field, $toTool)] = $messages;
+        }
+
+        return $renamed;
+    }
+
+    /**
+     * @param array<mixed> $problems
+     * @param array<string, string> $toTool
+     * @return array<mixed>
+     */
+    private static function problemsByToolName(array $problems, array $toTool): array
+    {
+        foreach ($problems as $i => $problem) {
+            if (!is_array($problem) || !is_string($problem['field'] ?? null)) {
+                continue;
+            }
+            $from = $problem['field'];
+            $to = self::toolField($from, $toTool);
+            if ($to === $from) {
+                continue;
+            }
+            $problems[$i]['field'] = $to;
+            $prefix = Str::snake($from) . '_';
+            if (is_string($problem['code'] ?? null) && str_starts_with($problem['code'], $prefix)) {
+                $problems[$i]['code'] = Str::snake($to) . '_' . substr($problem['code'], strlen($prefix));
+            }
+        }
+
+        return $problems;
+    }
+
+    /**
+     * An API field (or `field.sub` path) under the tool's argument name.
+     *
+     * @param array<string, string> $toTool
+     */
+    private static function toolField(string $field, array $toTool): string
+    {
+        $head = explode('.', $field, 2);
+
+        return isset($toTool[$head[0]]) ? $toTool[$head[0]] . (isset($head[1]) ? '.' . $head[1] : '') : $field;
+    }
+
+    /**
      * Validation rules derived from the declared parameters. The generated
      * schema() already describes types to the model; this is the enforcement.
+     * Every forwarded parameter gets a rule, if only `sometimes`: validate()
+     * returns only the keys it has rules for, and the API checks the values itself.
      *
      * @return array<string, string>
      */
@@ -261,11 +329,6 @@ abstract class ApiTool extends Tool
             $rules[$this->argument($name)] = 'required';
         }
 
-        // Every parameter the tool forwards needs a rule, not just the ones
-        // worth enforcing: Validator::validate() returns only the keys it has
-        // rules for, so a query or body parameter without one is dropped and
-        // the endpoint is called without it. The API validates the values
-        // itself -- these rules exist to keep the arguments, not to check them.
         foreach ([...$this->queryParams(), ...$this->bodyParams()] as $name) {
             $rules[$this->argument($name)] ??= 'sometimes';
         }
@@ -284,6 +347,8 @@ abstract class ApiTool extends Tool
     /**
      * The validated arguments keyed by the API's parameter names, so the
      * path, query and body declarations can be applied to them as they are.
+     * Built from the original rather than edited in place: a tool's `name` is
+     * the API's `username` while its `new_dbuser` is the API's `name`.
      *
      * @param array<string, mixed> $input
      * @return array<string, mixed>
@@ -293,20 +358,60 @@ abstract class ApiTool extends Tool
         $renamed = $this->argumentNames();
         $out = [];
 
-        // Built from the original rather than edited in place: a tool's
-        // `name` is the API's `username` while its `new_dbuser` is the API's
-        // `name`, and renaming one on top of the other would lose a value.
         foreach ($input as $argument => $value) {
             $out[$renamed[$argument] ?? $argument] = $value;
         }
 
-        return $out + $this->defaults();
+        $defaults = $this->defaults();
+        if ($defaults !== []) {
+            $out = $this->withDefaultsForOmitted($out, $defaults);
+        }
+
+        return $out + $defaults;
+    }
+
+    /**
+     * A null the schema does not admit is an omitted argument, so the default applies.
+     * Where the schema admits null, null has a meaning of its own and is kept.
+     *
+     * @param array<string, mixed> $input
+     * @param array<string, string> $defaults
+     * @return array<string, mixed>
+     */
+    private function withDefaultsForOmitted(array $input, array $defaults): array
+    {
+        $nullable = array_flip($this->nullableParams());
+        foreach ($defaults as $name => $default) {
+            if (($input[$name] ?? null) === null && !isset($nullable[$name])) {
+                $input[$name] = $default;
+            }
+        }
+
+        return $input;
     }
 
     /**
      * @param array<string, mixed> $input Keyed by API parameter name.
      */
     private function dispatch(array $input): SymfonyResponse
+    {
+        $path = $this->substitutedPath($input);
+
+        $files = [];
+        if ($this->fileParams() !== []) {
+            [$input, $files] = UploadArguments::resolve($input, $this->fileParams());
+        }
+
+        $sub = $this->subRequest($path, $input, $files);
+        $this->markAsToolCall($sub);
+
+        return $this->dispatchAsTheRequest($sub, $files);
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     */
+    private function substitutedPath(array $input): string
     {
         $path = $this->path();
 
@@ -318,11 +423,20 @@ abstract class ApiTool extends Tool
             );
         }
 
-        $files = [];
-        if ($this->fileParams() !== []) {
-            [$input, $files] = UploadArguments::resolve($input, $this->fileParams());
-        }
+        return $path;
+    }
 
+    /**
+     * A multipart endpoint gets its fields as form parameters and the files in the
+     * files bag, as a browser sends them; everything else is a JSON body, which is
+     * put in the `request` bag too, as Request::createFromBase() does for a real one.
+     * REMOTE_ADDR is the caller's, not 127.0.0.1: the firewall checks a deny against it.
+     *
+     * @param array<string, mixed> $input
+     * @param array<string, mixed> $files
+     */
+    private function subRequest(string $path, array $input, array $files): HttpRequest
+    {
         $query = $this->only($input, $this->queryParams());
         $body = $this->only($input, $this->bodyParams());
 
@@ -331,51 +445,64 @@ abstract class ApiTool extends Tool
             $uri .= '?' . http_build_query($query);
         }
 
-        // A multipart endpoint gets its fields as form parameters and the
-        // files in the files bag, the way a browser would send them; everything
-        // else is a JSON body.
-        $sub = $files !== []
-            ? HttpRequest::create(
-                $uri,
-                $this->method(),
-                $body,
-                [],
-                $files,
-                ['HTTP_ACCEPT' => 'application/json']
-            )
-            : HttpRequest::create(
-                $uri,
-                $this->method(),
-                [],
-                [],
-                [],
-                ['HTTP_ACCEPT' => 'application/json', 'CONTENT_TYPE' => 'application/json'],
-                $body === [] ? null : json_encode($body)
-            );
+        $sub = $this->createRequest($uri, $body, $files);
 
-        // A real JSON request gets its body in the `request` bag too
-        // (Request::createFromBase()); without it `$request->get()` reads null.
         if ($files === [] && $body !== []) {
             $sub->request->replace($body);
         }
 
-        // Same credentials the MCP caller presented; the API re-authorises.
+        return $sub;
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     * @param array<string, mixed> $files
+     */
+    private function createRequest(string $uri, array $body, array $files): HttpRequest
+    {
+        $server = ['HTTP_ACCEPT' => 'application/json', 'REMOTE_ADDR' => request()?->ip() ?? '127.0.0.1'];
+
+        if ($files !== []) {
+            return HttpRequest::create($uri, $this->method(), $body, [], $files, $server);
+        }
+
+        return HttpRequest::create(
+            $uri,
+            $this->method(),
+            [],
+            [],
+            [],
+            $server + ['CONTENT_TYPE' => 'application/json'],
+            $body === [] ? null : json_encode($body)
+        );
+    }
+
+    /**
+     * Forwards the MCP caller's credentials, so the API re-authorises. The via header
+     * is attribution anyone can set; the attribute is server-side and never filled from
+     * an inbound request, which is how `EnsureTokenMayUseApi` tells a tool call from a
+     * curl with an assistant's token.
+     */
+    private function markAsToolCall(HttpRequest $sub): void
+    {
         $bearer = request()?->bearerToken();
         if (is_string($bearer) && $bearer !== '') {
             $sub->headers->set('Authorization', 'Bearer ' . $bearer);
         }
 
         $sub->headers->set(self::VIA_HEADER, self::VIA_MCP);
-
-        // The same fact where a caller cannot reach it: the header above is
-        // attribution and anyone can set it, while `attributes` is server-side
-        // and never populated from an inbound request. `EnsureTokenMayUseApi`
-        // reads this to tell a tool call from a curl with an assistant's token.
         $sub->attributes->set(self::VIA_ATTRIBUTE, true);
+    }
 
-        // Controllers reach for request() as often as the injected instance, so
-        // the binding has to point at the sub-request for the duration and be
-        // put back afterwards -- otherwise the MCP request is left clobbered.
+    /**
+     * Controllers reach for request() as often as the injected instance, so the binding
+     * points at the sub-request for the duration and is put back afterwards. Whatever
+     * upload the endpoint left behind (a rejected file, a failed call) is removed.
+     *
+     * @param array<string, mixed> $files
+     */
+    private function dispatchAsTheRequest(HttpRequest $sub, array $files): SymfonyResponse
+    {
         $container = app();
         $original = $container->bound('request') ? $container->make('request') : null;
         $container->instance('request', $sub);
@@ -386,21 +513,20 @@ abstract class ApiTool extends Tool
             if ($original !== null) {
                 $container->instance('request', $original);
             }
-            // The endpoint moves the upload into place; whatever it left
-            // behind (a rejected file, a failed call) is ours to remove.
             UploadArguments::discard($files);
         }
     }
 
     /**
+     * A null is dropped like an omitted argument, unless the schema admits null
+     * for that argument: there the API gives null a meaning of its own.
+     *
      * @param array<string, mixed> $input
      * @param array<int, string> $keys
      * @return array<string, mixed>
      */
     private function only(array $input, array $keys): array
     {
-        // A null is dropped like an omitted argument, unless the schema admits
-        // null for that argument: there the API gives null a meaning of its own.
         $nullable = array_flip($this->nullableParams());
 
         return array_filter(
@@ -442,20 +568,9 @@ abstract class ApiTool extends Tool
     {
         $file = $response->getFile();
 
-        // Read through the stream rather than stat(): the path may be sudophp://.
-        $handle = @fopen($file->getPathname(), 'rb');
-        $window = $handle === false ? null : DownloadWindow::read($handle, max(0, $offset), $length);
-        if ($handle !== false) {
-            fclose($handle);
-        }
+        $window = self::readWindow($file->getPathname(), $offset, $length);
         if ($window === null) {
             return Response::error("Could not read {$file->getFilename()}.");
-        }
-
-        // Content sniffing cannot see through sudophp://, so fall back to the extension.
-        $mimeType = explode(';', (string)$response->headers->get('Content-Type'))[0];
-        if ($mimeType === '' || $mimeType === 'application/octet-stream') {
-            $mimeType = MimeTypes::getDefault()->getMimeTypes($file->getExtension())[0] ?? 'application/octet-stream';
         }
 
         $size = @filesize($file->getPathname());
@@ -464,10 +579,37 @@ abstract class ApiTool extends Tool
             'status' => $response->getStatusCode(),
             'data' => [
                 'filename' => $file->getFilename(),
-                'mime_type' => $mimeType,
+                'mime_type' => self::mimeTypeOf($response, $file),
                 'size' => $size === false ? null : $size,
             ] + $window,
         ]);
+    }
+
+    /**
+     * Read through the stream rather than stat(): the path may be sudophp://.
+     *
+     * @return ?array<string, mixed>
+     */
+    private static function readWindow(string $path, int $offset, int $length): ?array
+    {
+        $handle = @fopen($path, 'rb');
+        $window = $handle === false ? null : DownloadWindow::read($handle, max(0, $offset), $length);
+        if ($handle !== false) {
+            fclose($handle);
+        }
+
+        return $window;
+    }
+
+    /** Content sniffing cannot see through sudophp://, so an unspecific type falls back to the extension. */
+    private static function mimeTypeOf(BinaryFileResponse $response, \SplFileInfo $file): string
+    {
+        $mimeType = explode(';', (string)$response->headers->get('Content-Type'))[0];
+        if ($mimeType === '' || $mimeType === 'application/octet-stream') {
+            $mimeType = MimeTypes::getDefault()->getMimeTypes($file->getExtension())[0] ?? 'application/octet-stream';
+        }
+
+        return $mimeType;
     }
 
     private function decode(SymfonyResponse $response): mixed

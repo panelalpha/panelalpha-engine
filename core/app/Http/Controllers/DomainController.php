@@ -27,10 +27,7 @@ class DomainController extends Controller
     )]
     public function show(string $domain): DomainResource|JsonResponse
     {
-        $domainModel = Domain::findByName($domain);
-        if (!$domainModel) {
-            return new JsonResponse('Not Found', 404);
-        }
+        $domainModel = $this->domainOr404($domain);
 
         return new DomainResource($domainModel);
     }
@@ -50,10 +47,7 @@ class DomainController extends Controller
     )]
     public function getPhpVersion(string $domain): JsonResponse
     {
-        $domainModel = Domain::findByName($domain);
-        if (!$domainModel) {
-            return new JsonResponse('Not Found', 404);
-        }
+        $domainModel = $this->domainOr404($domain);
 
         $version = $domainModel->getPhpVersion();
 
@@ -62,7 +56,8 @@ class DomainController extends Controller
 
     #[OA\Put(
         path: '/domains/{domain}/php-version',
-        summary: 'Set PHP version for a domain',
+        summary: 'Set PHP version for a domain (PHP hosting projects only)',
+        description: 'PHP hosting projects only: a dind app runs PHP from its own image, and a dind project answers 422. Set the version in the image instead.',
         security: [['bearerAuth' => []]],
         tags: ['Domain PHP'],
         parameters: [new OA\Parameter(name: 'domain', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -77,10 +72,7 @@ class DomainController extends Controller
     )]
     public function setPhpVersion(string $domain, DomainSetPhpVersionRequest $request): JsonResponse
     {
-        $domainModel = Domain::findByName($domain);
-        if (!$domainModel) {
-            return new JsonResponse('Not Found', 404);
-        }
+        $domainModel = $this->domainOr404($domain);
 
         /** @var array{version: string} */
         $params = $request->validated();
@@ -105,10 +97,7 @@ class DomainController extends Controller
     )]
     public function getPhpDirectives(string $domain, System $system): JsonResponse
     {
-        $domainModel = Domain::findByName($domain);
-        if (!$domainModel) {
-            return new JsonResponse('Not Found', 404);
-        }
+        $domainModel = $this->domainOr404($domain);
 
         $data = $domainModel->user->project($system)->php()->getDomainDirectives($domainModel);
 
@@ -119,7 +108,8 @@ class DomainController extends Controller
 
     #[OA\Put(
         path: '/domains/{domain}/php-directives',
-        summary: 'Replace domain PHP directives',
+        summary: 'Replace domain PHP directives (PHP hosting projects only)',
+        description: 'PHP hosting projects only: a dind app runs PHP from its own image and reads neither the domain file nor php.ini, so a dind project answers 422. Set the directive in the image instead.',
         security: [['bearerAuth' => []]],
         tags: ['Domain PHP'],
         parameters: [new OA\Parameter(name: 'domain', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -137,15 +127,17 @@ class DomainController extends Controller
     )]
     public function setPhpDirectives(string $domain, DomainReplacePhpDirectivesRequest $request, System $system): JsonResponse
     {
-        $domainModel = Domain::findByName($domain);
-        if (!$domainModel) {
-            return new JsonResponse('Not Found', 404);
-        }
+        $domainModel = $this->domainOr404($domain);
 
         /** @var array{settings: array<string, string>} */
         $params = $request->validated();
         $domainModel->user->project($system)->php()->replaceDomainDirectives($domainModel, $params['settings']);
 
         return new JsonResponse(null, Response::HTTP_NO_CONTENT);
+    }
+
+    private function domainOr404(string $domain): Domain
+    {
+        return Domain::findByName($domain) ?? abort(new JsonResponse(['message' => 'Not found'], 404));
     }
 }

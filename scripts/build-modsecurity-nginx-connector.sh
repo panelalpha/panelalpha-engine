@@ -29,7 +29,7 @@ docker run --rm \
         apt-get -y install wget git g++ libpcre2-dev zlib1g-dev make
         
         cd /tmp
-        wget "http://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
+        wget --https-only --max-redirect=0 "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
         tar xzf "nginx-${NGINX_VERSION}.tar.gz"
         cd "nginx-${NGINX_VERSION}"
 

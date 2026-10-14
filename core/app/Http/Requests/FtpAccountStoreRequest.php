@@ -2,29 +2,31 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\ReadsFtpQuota;
+use App\Http\Requests\Concerns\ResolvesVaultFields;
+use App\Rules\DomainName;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rules\Password;
 
 class FtpAccountStoreRequest extends FormRequest
 {
+    use ReadsFtpQuota;
+    use ResolvesVaultFields;
+
+    protected function prepareForValidation(): void
+    {
+        $this->resolveVaultFields(['password']);
+    }
+
     public function authorize(): bool
     {
         return true;
-    }
-
-    public function getQuota(): ?int
-    {
-        if (!empty($this->get('unlimited_quota'))) {
-            return null;
-        }
-        return (int)$this->get('quota');
     }
 
     public function rules(): array
     {
         return [
             'user' => 'string|required|alpha_num:ascii|max:32',
-            'domain' => 'string|required|regex:/^(?!:\/\/)(?=.{1,255}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i',
+            'domain' => 'string|required|regex:' . DomainName::REGEX,
             'password' => 'required|string|min:8|max:255',
             'directory' => 'string|nullable|max:4096',
             'unlimited_quota' => 'boolean',

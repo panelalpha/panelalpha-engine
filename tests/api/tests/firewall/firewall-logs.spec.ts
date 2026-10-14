@@ -1,26 +1,21 @@
 import { lookup } from 'node:dns/promises';
-import { connect } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import { expect, test } from '@/fixtures/test-options';
 import {
   deleteFirewallRulesQuietly,
   listFirewallRules,
   randomTestNetAddress,
+  readFirewallStatus,
   requireFirewall,
 } from '@/helpers/firewall-helpers';
+import { expectStatus } from '@/helpers/expect-status';
+import {
+  knock,
+  ruleAcceptingEveryPortFrom,
+  runnerAddressSeenByHost,
+} from '@/helpers/firewall-knock';
+import { resolveHostExec } from '@/helpers/host-exec';
 import { firewallLogsResponseSchema, firewallRuleResponseSchema } from '@/schemas';
-
-/** One TCP attempt at the engine's host on a port nothing allows; the answer does not matter. */
-function knock(host: string, port: number): Promise<void> {
-  return new Promise((resolve) => {
-    const socket = connect({ host, port, timeout: 2_000 });
-    const done = (): void => {
-      socket.destroy();
-      resolve();
-    };
-    socket.once('connect', done).once('timeout', done).once('error', done);
-  });
-}
 
 /** Whether `host` is this runner's own machine, where a knock never crosses the firewall. */
 async function isThisMachine(host: string): Promise<boolean> {
@@ -29,6 +24,29 @@ async function isThisMachine(host: string): Promise<boolean> {
     .flat()
     .map((nic) => nic?.address);
   return address.startsWith('127.') || address === '::1' || own.includes(address);
+}
+
+/**
+ * Why this runner's knock can never reach ufw's default policy, or null when it
+ * can. A host that answers the knock let it in; one that accepts every port
+ * from the runner's address (an admin-access rule, a ufw allow for it) does the
+ * same even where the answer is lost on the way back.
+ */
+async function whyKnockIsNeverRefused(
+  host: string,
+  port: number,
+  defaultIncoming: string | null
+): Promise<string | null> {
+  const outcome = await knock(host, port);
+  if (defaultIncoming === 'deny' && (outcome === 'refused' || outcome === 'connected')) {
+    return `${host} answered a knock on port ${port} (${outcome}), so a rule accepts this runner before ufw's default deny and nothing is logged. Run it from an address the host does not allow.`;
+  }
+  const hostExec = await resolveHostExec();
+  const runner = hostExec?.mode === 'ssh' ? await runnerAddressSeenByHost(hostExec) : null;
+  const rule = hostExec && runner ? await ruleAcceptingEveryPortFrom(hostExec, runner) : null;
+  return rule
+    ? `${host} sees this runner as ${runner}, which it accepts on every port before ufw's default deny (${rule}), so nothing is logged. Run it from an address the host does not allow.`
+    : null;
 }
 
 test.describe('Firewall log', () => {
@@ -47,6 +65,9 @@ test.describe('Firewall log', () => {
     );
     // Far from anything the engine opens, and different every run.
     const port = 47_000 + Math.floor(Math.random() * 2_000);
+    const { default_incoming: defaultIncoming } = await readFirewallStatus(api);
+    const neverRefused = await whyKnockIsNeverRefused(host, port, defaultIncoming);
+    test.skip(neverRefused !== null, neverRefused ?? '');
 
     await expect
       .poll(
@@ -89,7 +110,7 @@ test.describe('Firewall log', () => {
       { address: 'example.com' },
     ];
     for (const query of invalid) {
-      expect((await api.getFirewallLogsRaw(query)).status, JSON.stringify(query)).toBe(422);
+      await expectStatus(await api.getFirewallLogsRaw(query), 422, JSON.stringify(query));
     }
   });
 });
@@ -151,7 +172,7 @@ test.describe('Firewall rules in both directions', () => {
       if (typeof id === 'string') {
         created.add(id);
       }
-      expect(response.status, JSON.stringify(response.body)).toBe(422);
+      await expectStatus(response, 422, JSON.stringify(response.body));
     }
   });
 });

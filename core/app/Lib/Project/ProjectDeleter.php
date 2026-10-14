@@ -6,13 +6,16 @@ use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\ProjectBusyException;
 use App\Jobs\CreateStaging;
 use App\Lib\Deploy\DeployLog\DeployLock;
+use App\Lib\Project\ApiAccess;
 use App\Lib\Task\ProcessTreeKiller;
 use App\Lib\Task\TaskCanceller;
 use App\Lib\Task\TaskReconciler;
 use App\Models\Task;
 use App\Models\User;
+use App\Support\JobBudget;
 use App\System;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Deleting a project (REST, MCP, `project:delete`) never overlaps a job that
@@ -25,9 +28,11 @@ use Illuminate\Database\Eloquent\Builder;
 class ProjectDeleter
 {
     /** The longest a job may run (its $timeout); a cancelled one older than that is gone. */
-    private const STOPPING_WINDOW_SECONDS = 7200;
+    private const STOPPING_WINDOW_SECONDS = JobBudget::SECONDS;
 
     private TaskCanceller $canceller;
+
+    private ApiAccess $apiAccess;
 
     /** @var callable(Task): ?bool */
     private $inQueue;
@@ -36,29 +41,35 @@ class ProjectDeleter
      * @param null|callable(Task): ?bool $inQueue whether a task's job is still queued or
      *        reserved by a worker; {@see TaskReconciler::queueCheck()} by default
      */
-    public function __construct(?TaskCanceller $canceller = null, ?callable $inQueue = null)
-    {
+    public function __construct(
+        ?TaskCanceller $canceller = null,
+        ?callable $inQueue = null,
+        ?ApiAccess $apiAccess = null,
+    ) {
         $this->canceller = $canceller ?? new TaskCanceller(new ProcessTreeKiller(new System()));
         $this->inQueue = $inQueue ?? TaskReconciler::queueCheck();
+        $this->apiAccess = $apiAccess ?? new ApiAccess();
     }
 
     /**
+     * A lock held elsewhere is reported as the task holding it, when a task does.
+     *
      * @throws ProjectBusyException
      */
     public function delete(User $user): void
     {
         try {
-            $lock = DeployLock::acquireFor($user->username);
+            $lock = DeployLock::acquireFor($user->username, DeployLock::HOLDER_DELETE);
         } catch (DeployAlreadyRunningException) {
-            // Named after the task holding it, when a task does.
             $this->assertIdle($user, lockHeldElsewhere: true);
-            throw ProjectBusyException::deployRunning($user->username);
+            throw ProjectBusyException::lockHeld($user->username);
         }
 
         try {
             $this->assertIdle($user);
             $user->project()->assertDeletable();
             $this->cancelQueued($user);
+            $this->releaseApiAccess($user);
             $this->destroy($user);
         } finally {
             $lock->release();
@@ -71,22 +82,52 @@ class ProjectDeleter
     }
 
     /**
+     * The account is going away, so its Engine API allowance and token go with
+     * it. Nothing is applied: the lock this delete holds is the one an apply
+     * would need, and the next firewall apply drops the rule anyway.
+     */
+    private function releaseApiAccess(User $user): void
+    {
+        try {
+            $this->apiAccess->deny($user, apply: false);
+        } catch (\Throwable $e) {
+            Log::warning("Could not remove the Engine API access of '{$user->username}': " . $e->getMessage());
+        }
+    }
+
+    /**
      * @param bool $lockHeldElsewhere the account's deploy lock is held, so not by this delete
      * @throws ProjectBusyException
      */
     private function assertIdle(User $user, bool $lockHeldElsewhere = false): void
     {
-        // A task whose worker died is stopped, though its row may still say running and
-        // its queue row stays reserved for a day. Unless the lock is held elsewhere: a
-        // build that worker started may be what holds it.
-        $working = static fn (Task $task): bool => $lockHeldElsewhere || !TaskReconciler::workerGone($task);
+        $this->assertNoTaskRunning($user, $lockHeldElsewhere);
+        $this->assertNoCancelledTaskStopping($user, $lockHeldElsewhere);
+        $this->assertNoPushRunning($user);
+    }
 
-        $running = $this->tasksOf($user)->where('status', Task::STATUS_RUNNING)->orderBy('id')->get()->first($working);
+    /**
+     * @throws ProjectBusyException
+     */
+    private function assertNoTaskRunning(User $user, bool $lockHeldElsewhere): void
+    {
+        $running = $this->tasksOf($user)
+            ->where('status', Task::STATUS_RUNNING)
+            ->orderBy('id')
+            ->get()
+            ->first(static fn (Task $task): bool => self::stillWorking($task, $lockHeldElsewhere));
         if ($running !== null) {
             throw ProjectBusyException::taskRunning($user->username, $running);
         }
+    }
 
-        // A cancel marks the task at once; its job may still be at work.
+    /**
+     * A cancel marks the task at once; its job may still be at work.
+     *
+     * @throws ProjectBusyException
+     */
+    private function assertNoCancelledTaskStopping(User $user, bool $lockHeldElsewhere): void
+    {
         $cancelled = $this->tasksOf($user)
             ->where('status', Task::STATUS_CANCELLED)
             ->whereNotNull('job_id')
@@ -94,12 +135,19 @@ class ProjectDeleter
             ->orderBy('id')
             ->get();
         foreach ($cancelled as $task) {
-            if ($working($task) && ($this->inQueue)($task) === true) {
+            if (self::stillWorking($task, $lockHeldElsewhere) && ($this->inQueue)($task) === true) {
                 throw ProjectBusyException::taskStopping($user->username, $task);
             }
         }
+    }
 
-        // A push has no task: its target carries the flag Projects::assertIdle() reads.
+    /**
+     * A push has no task: its target carries the flag Projects::assertIdle() reads.
+     *
+     * @throws ProjectBusyException
+     */
+    private function assertNoPushRunning(User $user): void
+    {
         foreach ([$user, $user->liveUser, $user->stagingUser] as $side) {
             if ($side !== null && ($side->asyncStatus()['push'] ?? null) === 'running') {
                 throw ProjectBusyException::pushRunning($user->username);
@@ -108,6 +156,18 @@ class ProjectDeleter
     }
 
     /**
+     * A task whose worker died is stopped, though its row may still say running and its queue
+     * row stays reserved for a day. Unless the lock is held elsewhere: a build that worker
+     * started may be what holds it.
+     */
+    private static function stillWorking(Task $task, bool $lockHeldElsewhere): bool
+    {
+        return $lockHeldElsewhere || !TaskReconciler::workerGone($task);
+    }
+
+    /**
+     * A task that cannot be cancelled was taken by a worker since the idle check, so it is re-run.
+     *
      * @throws ProjectBusyException
      */
     private function cancelQueued(User $user): void
@@ -119,7 +179,6 @@ class ProjectDeleter
             ->get();
         foreach ($queued as $task) {
             if (!$this->canceller->cancelQueued($task)) {
-                // A worker took it since the check above.
                 $this->assertIdle($user);
             }
         }

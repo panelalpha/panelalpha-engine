@@ -4,7 +4,10 @@ namespace App\System\Project;
 
 use App\Models\Domain;
 use App\System\Project as UserProject;
+use App\System\Project\PhpHosting;
+use App\System\Project\PhpHosting\PhpErrorLogConfig;
 use App\System\Project\PhpHosting\PhpHandlerNotRunning;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 class Php
@@ -20,12 +23,13 @@ class Php
     }
 
     /**
+     * Empty for a version the project template did not ship, which has no file yet.
+     *
      * @return array<string, string>
      */
     public function getCustomIniSettings(string $phpVersion): array
     {
         $iniFile = $this->customIniFilePath($phpVersion);
-        // A version the project template did not ship has no file yet.
         if (!is_file($iniFile)) {
             return [];
         }
@@ -47,11 +51,8 @@ class Php
      */
     public function updateCustomIniSettings(string $phpVersion, array $settings): void
     {
-        $iniFile = $this->customIniFilePath($phpVersion);
-
-        $iniString = $this->encodeIniMap($settings);
-
-        file_put_contents($iniFile, $iniString);
+        $this->applyPhpErrorLogConfig();
+        file_put_contents($this->customIniFilePath($phpVersion), $this->encodeIniMap($settings));
         $this->restartPhpHandler($phpVersion);
     }
 
@@ -63,6 +64,7 @@ class Php
      */
     public function getDomainDirectives(Domain $domain): array
     {
+        $this->requirePhpHosting();
         $path = $this->domainDirectivesPath($domain);
         $system = $this->project->system();
         if (!$system->fileExists($path)) {
@@ -72,21 +74,21 @@ class Php
         try {
             return $this->parseIniMap($system->fileGetContents($path));
         } catch (\InvalidArgumentException $e) {
-            throw ValidationException::withMessages([
-                'settings' => $e->getMessage(),
-            ]);
+            throw self::invalidSettings($e->getMessage());
         }
     }
 
     /**
+     * An empty map removes the file.
+     *
      * @param array<string, string> $settings
      */
     public function replaceDomainDirectives(Domain $domain, array $settings): void
     {
+        $this->requirePhpHosting();
         $path = $this->domainDirectivesPath($domain);
         $system = $this->project->system();
-        $directory = dirname($path);
-        if (!$system->directoryExists($directory)) {
+        if (!$system->directoryExists(dirname($path))) {
             throw ValidationException::withMessages([
                 'document_root' => 'Document root does not exist.',
             ]);
@@ -103,17 +105,20 @@ class Php
         try {
             $contents = $this->encodeIniMap($settings);
         } catch (\InvalidArgumentException $e) {
-            throw ValidationException::withMessages([
-                'settings' => $e->getMessage(),
-            ]);
+            throw self::invalidSettings($e->getMessage());
         }
+        $this->installDirectivesFile($contents, $path);
+    }
+
+    /** Staged in a temp file the engine can write, then copied in with sudo and owned by the account. */
+    private function installDirectivesFile(string $contents, string $path): void
+    {
         $temporary = tempnam(sys_get_temp_dir(), 'pa-ini-');
         if ($temporary === false || file_put_contents($temporary, $contents) === false) {
-            throw ValidationException::withMessages([
-                'settings' => 'Could not write domain PHP directives.',
-            ]);
+            throw self::invalidSettings('Could not write domain PHP directives.');
         }
 
+        $system = $this->project->system();
         try {
             $system->exec(['sudo', 'cp', $temporary, $path]);
             $chown = $this->project->model()->getChownString();
@@ -124,6 +129,13 @@ class Php
         } finally {
             @unlink($temporary);
         }
+    }
+
+    private static function invalidSettings(string $message): ValidationException
+    {
+        return ValidationException::withMessages([
+            'settings' => $message,
+        ]);
     }
 
     private function domainDirectivesPath(Domain $domain): string
@@ -186,6 +198,36 @@ class Php
         return $flat;
     }
 
+    /**
+     * A dind app runs PHP from its own image and reads none of these files, so
+     * a write would succeed and change nothing ({@see \App\Lib\Project\CustomIniSettings}).
+     */
+    private function requirePhpHosting(): void
+    {
+        if (!$this->project->runtime() instanceof PhpHosting) {
+            throw ValidationException::withMessages([
+                'project' => 'Custom PHP INI settings apply only to PHP hosting projects. '
+                    . 'A dind project runs PHP from its own image; set php.ini there.',
+            ]);
+        }
+    }
+
+    /**
+     * A settings change re-renders the error-log directives too, so a project
+     * that predates them picks them up without a separate command.
+     */
+    private function applyPhpErrorLogConfig(): void
+    {
+        $runtime = $this->project->runtime();
+        if ($runtime instanceof PhpHosting) {
+            (new PhpErrorLogConfig())->apply($runtime);
+        }
+    }
+
+    /**
+     * With no domain on this version yet the file is saved and takes effect when one
+     * uses it; that is logged so it is not a silent success.
+     */
     private function restartPhpHandler(string $phpVersion): void
     {
         $runtime = $this->project->runtime();
@@ -195,9 +237,7 @@ class Php
         try {
             $runtime->phpRuntime()->restartPhpHandler($phpVersion);
         } catch (PhpHandlerNotRunning) {
-            // No domain uses this version: the file is saved and takes effect
-            // when one does. Said in the log so it is not a silent success.
-            \Illuminate\Support\Facades\Log::info(
+            Log::info(
                 "PHP {$phpVersion} settings saved for {$this->project->username()}; no domain runs that version yet"
             );
         }

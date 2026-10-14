@@ -1,0 +1,133 @@
+<?php
+
+namespace Tests\Unit\System\Project\Dind\Generation;
+
+use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\System\Project\Dind\Generation\GenerationState;
+use Tests\TestCase;
+
+/**
+ * What a redeploy kept beside the running app is written down
+ * next to its deploy lock, so a sweep can find it after the deploy died.
+ */
+class GenerationStateTest extends TestCase
+{
+    private string $username = '';
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->username = 'gen-' . bin2hex(random_bytes(6));
+    }
+
+    protected function tearDown(): void
+    {
+        DeployLogger::deleteUserLogs($this->username);
+        parent::tearDown();
+    }
+
+    public function test_entries_are_kept_until_forgotten(): void
+    {
+        $state = new GenerationState($this->username);
+        $state->put(GenerationState::NEXT, ['project' => 'project-next', 'routes' => [3000 => 32771], 'rules' => [7]]);
+        $state->put(GenerationState::CHECKOUT, ['path' => '/home/x/.project-prev', 'containers' => ['c0ffee']]);
+
+        $again = new GenerationState($this->username);
+        $this->assertSame('project-next', $again->get(GenerationState::NEXT)['project']);
+        $this->assertSame(['c0ffee'], $again->get(GenerationState::CHECKOUT)['containers']);
+        $this->assertContains($this->username, GenerationState::usernames());
+
+        $again->forget(GenerationState::NEXT);
+        $this->assertNull($again->get(GenerationState::NEXT));
+        $this->assertNotNull($again->get(GenerationState::CHECKOUT));
+
+        $again->forget(GenerationState::CHECKOUT);
+        $this->assertFileDoesNotExist(GenerationState::path($this->username));
+        $this->assertNotContains($this->username, GenerationState::usernames());
+    }
+
+    public function test_an_unsafe_name_is_refused(): void
+    {
+        $this->expectException(\Throwable::class);
+        new GenerationState('../etc');
+    }
+
+    /**
+     * Not every writer holds the deploy lock: a checkout moved aside for a
+     * manual pull records CHECKOUT, while a sweep or a running deploy writes
+     * NEXT. Each put() reads the whole file, changes one key and renames it
+     * back, so two such writers that interleave drop each other's key. Both
+     * put() and forget() have to hold the same file lock.
+     */
+    public function test_a_put_waits_for_the_state_lock_another_writer_holds(): void
+    {
+        if (!function_exists('pcntl_fork')) {
+            $this->markTestSkipped('pcntl is not available');
+        }
+
+        $path = GenerationState::path($this->username);
+        @mkdir(dirname($path), 0755, true);
+        $lock = fopen($path . '.lock', 'c');
+        $this->assertNotFalse($lock, 'put() has a lock file to take');
+        flock($lock, LOCK_EX);
+
+        $pid = pcntl_fork();
+        $this->assertNotSame(-1, $pid, 'could not fork');
+        if ($pid === 0) {
+            (new GenerationState($this->username))->put(GenerationState::CHECKOUT, ['path' => '/home/x/.project-prev']);
+            exit(0);
+        }
+
+        // While the lock is held elsewhere, the child's put() must not land.
+        usleep(300_000);
+        $this->assertNull(
+            (new GenerationState($this->username))->get(GenerationState::CHECKOUT),
+            'the child blocked on the lock instead of writing'
+        );
+
+        flock($lock, LOCK_UN);
+        fclose($lock);
+        pcntl_waitpid($pid, $status);
+
+        $this->assertSame(
+            '/home/x/.project-prev',
+            (new GenerationState($this->username))->get(GenerationState::CHECKOUT)['path'] ?? null,
+            'the child wrote once the lock was free'
+        );
+    }
+
+    /** A checkout moved aside before a pull takes the lock is not the sweep's yet. */
+    public function test_an_entry_belongs_to_the_live_process_that_wrote_it_for_a_while(): void
+    {
+        $this->assertFalse(GenerationState::ownedElsewhere(['owner' => GenerationState::owner()]), 'this process');
+        $this->assertFalse(GenerationState::ownedElsewhere([]), 'no owner noted');
+
+        $other = $this->startOtherProcess();
+        try {
+            $pid = proc_get_status($other)['pid'];
+            $alive = ['owner' => ['pid' => $pid, 'start' => \App\Lib\Deploy\DeployLog\ProcessIdentity::startTime($pid), 'at' => time()]];
+            $this->assertTrue(GenerationState::ownedElsewhere($alive));
+            $this->assertFalse(GenerationState::ownedElsewhere($alive, time() + GenerationState::OWNER_GRACE_SECONDS + 1), 'too old to be a pull in progress');
+
+            $gone = ['owner' => ['pid' => $pid, 'start' => 'not-its-start-time', 'at' => time()]];
+            $this->assertFalse(GenerationState::ownedElsewhere($gone), 'the pid was reused');
+        } finally {
+            proc_terminate($other);
+            proc_close($other);
+        }
+    }
+
+    /**
+     * A live process other than this one. The parent is not one: where PHP is
+     * PID 1 in a container, posix_getppid() is 0.
+     *
+     * @return resource
+     */
+    private function startOtherProcess()
+    {
+        $process = proc_open(['sleep', '30'], [], $pipes);
+        $this->assertIsResource($process, 'could not start a process to own the entry');
+
+        return $process;
+    }
+}

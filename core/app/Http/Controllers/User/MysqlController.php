@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\MysqlUsePmaSsoTokenRequest;
 use App\Models\MysqlSsoToken;
 use App\Models\User;
+use App\System\Project\Dind\AppDatabase;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Str;
@@ -37,7 +38,7 @@ class MysqlController extends Controller
     public function serverInfo()
     {
         $data = [
-            'host' => config('env.USERS_DB_HOST'),
+            'host' => $this->hostReachableFromAccount(),
             'port' => '3306',
         ];
 
@@ -64,26 +65,25 @@ class MysqlController extends Controller
     public function createPhpmyadminSsoToken(string $username): JsonResponse
     {
         $user = $this->projectOr404($username);
+        $this->refuseSuspendedProject($user);
+        $domain = $user->getMainDomain() ?? abort(404, 'Not found');
 
+        $token = $this->replaceSsoToken($user);
+        $url = "https://{$domain->domain}/phpmyadmin/signon.php?pmassotoken={$token->token}";
+
+        return new JsonResponse(['data' => ['url' => $url]]);
+    }
+
+    /** The project's only SSO token: any earlier one is revoked. */
+    private function replaceSsoToken(User $user): MysqlSsoToken
+    {
         $user->mysqlSsoTokens()->delete();
 
-        $token = MysqlSsoToken::create([
+        return MysqlSsoToken::create([
             'user_id' => $user->id,
             'token' => Str::random(64),
             'expires_at' => Carbon::now()->addMinutes(5),
         ]);
-
-        $domain = $user->getMainDomain();
-        if (!$domain) {
-            abort(404, 'Not found');
-        }
-        $url = "https://{$domain->domain}/phpmyadmin/signon.php?pmassotoken={$token->token}";
-
-        $data = [
-            'url' => $url,
-        ];
-
-        return new JsonResponse(['data' => $data]);
     }
 
     #[OA\Put(
@@ -115,24 +115,61 @@ class MysqlController extends Controller
         /** @var array{token: string} */
         $params = $request->validated();
 
-        // Deleted before anything is handed out: only the request whose delete
-        // removed the row gets credentials.
-        $token = MysqlSsoToken::claim($params['token']);
+        $token = $this->usableToken($params['token']);
+        $credentials = $token->getCredentials();
+
+        return new JsonResponse(['data' => $credentials]);
+    }
+
+    /** The name a DinD app's compose pins ({@see AppDatabase::extraHosts()}), so it resolves from inside the account. */
+    private function hostReachableFromAccount(): string
+    {
+        return AppDatabase::hostname();
+    }
+
+    /**
+     * A token is redeemed through any domain's /phpmyadmin, not only this project's, so a suspended
+     * vhost alone does not cut database access.
+     *
+     * @throws ValidationException
+     */
+    private function refuseSuspendedProject(User $user): void
+    {
+        if ($user->status === 'suspended') {
+            throw ValidationException::withMessages([
+                'project' => 'The project is suspended; phpMyAdmin is not available for it.',
+            ]);
+        }
+    }
+
+    /**
+     * The token, claimed (deleted) before anything is handed out so only the request whose delete removed
+     * the row gets credentials. One minted before its project was suspended is refused all the same.
+     *
+     * @throws ValidationException
+     */
+    private function usableToken(string $value): MysqlSsoToken
+    {
+        $token = MysqlSsoToken::claim($value);
 
         if (!$token) {
             throw ValidationException::withMessages([
-                'Invalid token'
+                'token' => 'Invalid token'
             ]);
         }
 
         if ($token->expired()) {
             throw ValidationException::withMessages([
-                'Invalid token expired'
+                'token' => 'Invalid token expired'
             ]);
         }
 
-        $credentials = $token->getCredentials();
+        if ($token->user->status === 'suspended') {
+            throw ValidationException::withMessages([
+                'token' => 'Invalid token'
+            ]);
+        }
 
-        return new JsonResponse(['data' => $credentials]);
+        return $token;
     }
 }

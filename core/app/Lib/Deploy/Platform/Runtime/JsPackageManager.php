@@ -263,6 +263,11 @@ class JsPackageManager
     /** Seconds before the strip script is killed; `bun -e` can hang on it. */
     private const STRIP_TIMEOUT_SECONDS = 30;
 
+    /**
+     * On a host build this runs against a bind mount of the checkout, so the
+     * file is written only when a script actually goes: a strip that matches
+     * nothing leaves the tracked package.json byte-identical.
+     */
     public static function dockerfileStripGitHookScriptsCommand(string $pm, bool $sourcePresent = false): string
     {
         // The repository-file rule applies only where the file is absent — the
@@ -284,12 +289,13 @@ class JsPackageManager
             . 'if(!p.scripts)process.exit(0);'
             . 'const re=/\\b(husky|lefthook|simple-git-hooks|yorkie|pre-commit)\\b/i;'
             . $localRule
+            . 'let removed=false;'
             . 'for(const k of["preinstall","install","postinstall","prepare"]){'
             . 'const s=p.scripts[k];'
             . 'if(typeof s!=="string")continue;'
-            . 'if(re.test(s)' . $localTest . ')delete p.scripts[k];'
+            . 'if(re.test(s)' . $localTest . '){delete p.scripts[k];removed=true;}'
             . '}'
-            . 'fs.writeFileSync("package.json",JSON.stringify(p));';
+            . 'if(removed)fs.writeFileSync("package.json",JSON.stringify(p));';
 
         $runner = $pm === 'bun' ? 'bun' : 'node';
 

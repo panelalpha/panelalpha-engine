@@ -2,6 +2,8 @@
 
 namespace App\System\Project\Dind\Source;
 
+use App\Exceptions\DeployCancelledException;
+use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\Platform\ManifestException;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Models\User as ModelsUser;
@@ -11,7 +13,6 @@ use App\System\Project\Dind\ShellOperations;
 use App\System\Project\Git\Exception as GitException;
 use App\System\Project\Git\Path as GitPath;
 use App\System\Project\Git\WorkTree;
-use Illuminate\Support\Facades\Log;
 
 /**
  * The deploy ingest's view of ~/project. Everything a work tree can do lives in
@@ -68,36 +69,60 @@ class GitRepository extends WorkTree
         }
 
         $gitToken = $user->getGitToken();
-        $safeRepo = GitUrl::sanitize($gitRepo);
         $branch = $user->getGitBranch();
-        if ($branch !== null) {
-            $logger?->info("Cloning repository {$safeRepo} (branch: {$branch})");
-        } else {
-            $logger?->info("Cloning repository {$safeRepo}");
-        }
+        $logger?->info($this->cloningMessage($gitRepo, $branch));
 
-        try {
+        $this->cloneAndAdopt($gitRepo, $branch, $gitToken, $gitProjectDir, $beforeReplacing);
+        $logger?->ok(self::clonedMessage($branch ?? $this->readHeadBranch()));
+        if ($this->wantsFullHistory($gitRepo)) {
+            $logger?->info('Fetching the full history and tags (the recipe sets git: {history: full})');
+            $this->rethrowingGitFailure(fn () => $this->fetchFullHistory($gitToken));
+        }
+        $this->fetchSubmodules($gitRepo, $gitToken);
+    }
+
+    private function cloningMessage(string $gitRepo, ?string $branch): string
+    {
+        $safeRepo = GitUrl::sanitize($gitRepo);
+
+        return $branch !== null
+            ? "Cloning repository {$safeRepo} (branch: {$branch})"
+            : "Cloning repository {$safeRepo}";
+    }
+
+    /** Names the branch the clone landed on, so the deploy history can tell a default-branch create's branch. */
+    private static function clonedMessage(?string $branch): string
+    {
+        return $branch !== null ? "Repository cloned (branch: {$branch})" : 'Repository cloned';
+    }
+
+    private function cloneAndAdopt(
+        string $gitRepo,
+        ?string $branch,
+        ?string $gitToken,
+        string $gitProjectDir,
+        ?callable $beforeReplacing,
+    ): void {
+        $this->rethrowingGitFailure(function () use ($gitRepo, $branch, $gitToken, $gitProjectDir, $beforeReplacing): void {
             if ($beforeReplacing === null) {
                 $this->clone($gitRepo, $branch, $gitToken);
             } else {
                 $this->cloneThenReplace($gitRepo, $branch, $gitToken, $gitProjectDir, $beforeReplacing);
             }
             $this->adoptCheckout($gitRepo, $branch, $gitToken);
+        });
+    }
+
+    /**
+     * Runs $operation with a git failure turned into a RuntimeException carrying its message.
+     */
+    private function rethrowingGitFailure(callable $operation): void
+    {
+        try {
+            $operation();
         } catch (GitException $e) {
             throw new \RuntimeException($e->getMessage(), 0, $e);
         }
-
-        $logger?->ok('Repository cloned');
-        if ($this->wantsFullHistory($gitRepo)) {
-            $logger?->info('Fetching the full history and tags (the recipe sets git: {history: full})');
-            try {
-                $this->fetchFullHistory($gitToken);
-            } catch (GitException $e) {
-                throw new \RuntimeException($e->getMessage(), 0, $e);
-            }
-        }
-        $this->fetchSubmodules($gitToken);
-        $this->allowUntrustedGitDirectory();
     }
 
     private function cloneThenReplace(
@@ -107,8 +132,8 @@ class GitRepository extends WorkTree
         string $gitProjectDir,
         callable $beforeReplacing,
     ): void {
+        $this->tree()->removeAbandonedStaging();
         $stagingDir = $this->tree()->stagingDirPath();
-        $this->tree()->removeStaging($stagingDir);
         $this->emptyDirectoryFor($stagingDir, clear: false);
 
         try {
@@ -137,44 +162,61 @@ class GitRepository extends WorkTree
         }
     }
 
-    /** Read after the clone, so a repository's own `.panelalpha/` can ask too. */
+    /**
+     * Read after the clone, so a repository's own `.panelalpha/` can ask too. A malformed
+     * app config reads as no, and is reported by the preparation that follows.
+     */
     private function wantsFullHistory(string $gitRepo): bool
     {
         try {
             return $this->project->appConfig($gitRepo)?->fullGitHistory() ?? false;
         } catch (ManifestException) {
-            // A malformed app config is reported by the preparation that follows.
             return false;
         }
     }
 
-    public function allowUntrustedGitDirectory(): void
+    /**
+     * The submodules the checkout records, or the ones the app config names. One that
+     * cannot be fetched fails the deploy: a build without it fails later, on a missing
+     * file that says nothing about the submodule.
+     */
+    public function fetchSubmodules(string $gitRepo, ?string $gitToken): void
     {
-        try {
-            $this->configureSafeDirectory();
-        } catch (\Exception $e) {
-            Log::warning('Could not set git safe.directory', ['error' => $e->getMessage()]);
+        if (!is_file($this->absolutePath . '/.gitmodules')) {
+            return;
         }
-    }
-
-    private function fetchSubmodules(?string $gitToken): void
-    {
         $logger = $this->project->shell()->logger();
+        $paths = $this->wantedSubmodules($gitRepo);
+        if ($paths !== null && $paths !== []) {
+            $logger?->info('Fetching only the submodules the app config names: ' . implode(', ', $paths));
+        }
 
         try {
-            if (!$this->initSubmodules($gitToken)) {
+            if (!$this->initSubmodules($gitToken, $paths)) {
                 return;
             }
+        } catch (DeployCancelledException $e) {
+            throw $e;
         } catch (\Throwable $e) {
-            $logger?->warn(
-                'Some submodules could not be fetched, so parts of this repository are missing: '
-                . GitUrl::sanitize($e->getMessage())
-            );
-
-            return;
+            throw new \RuntimeException(DeployFailureExplainer::SUBMODULE_FAILURE . ': ' . GitUrl::sanitize($e->getMessage()), 0, $e);
         }
 
         $logger?->ok('Submodules fetched');
+    }
+
+    /**
+     * `git: {submodules: [...]}`; null for every one. A malformed app config reads as
+     * every one, and is reported by the preparation that follows.
+     *
+     * @return ?list<string>
+     */
+    private function wantedSubmodules(string $gitRepo): ?array
+    {
+        try {
+            return $this->project->appConfig($gitRepo)?->gitSubmodules();
+        } catch (ManifestException) {
+            return null;
+        }
     }
 
     protected function user(): ModelsUser
@@ -201,6 +243,11 @@ class GitRepository extends WorkTree
     protected function runCommand(array $cmd, int $timeout): string
     {
         return $this->shell()->execAsUser($cmd, [], $timeout);
+    }
+
+    protected function runQuietCommand(array $cmd, int $timeout): string
+    {
+        return $this->shell()->execAsUserQuiet($cmd, [], $timeout);
     }
 
     private function tree(): ProjectTree

@@ -14,41 +14,23 @@ use Illuminate\Support\Facades\Log;
  * A task row is the only handle a client has on a job: `GET /tasks/{id}`
  * answers from it forever. When the process running the work dies -- a host
  * reboot, an OOM kill, a restarted queue worker -- nothing writes a
- * terminal status, because the writer is the thing that died. The row then
- * reads `running` for good and every poller waits on a job that no longer
- * exists.
- *
- * A reboot leaves tasks `running` with a null pid, and a poller waits on them
- * indefinitely though the work died with the previous boot. `task:prune`
- * cannot help -- it skips non-terminal rows by design, since deleting an
- * in-flight task would be worse than a stuck one.
+ * terminal status, because the writer is the thing that died. `task:prune`
+ * cannot help: it skips non-terminal rows by design.
  *
  * **The queue is the evidence, not the deploy log.** A job keeps its row in
  * the `jobs` table while it is pending or reserved by a worker, and loses it
- * when it finishes. So "is this job still queued?" is answered by that table
- * directly, exactly, and with no window in which the answer is ambiguous.
+ * when it finishes, so "is this job still queued?" is answered exactly. The
+ * job uuid is a field inside the payload, so it is matched by decoding
+ * ({@see queueCheck()}).
  *
- * The read must go through the *payload*, not the uuid: the uuid is a field
- * inside it. A lookup keyed by the bare uuid silently misses every time --
- * which is what the first version of this class did against Redis, and it
- * retired nothing at all. {@see queueCheck()}
- *
- * The deploy log looks like evidence and is not. It is written *by* the work,
- * so it cannot outlive it -- and it is deleted with the account on rollback,
- * which is the last thing every failed deploy does. An earlier version of
- * this class read a missing log as "the work died", and a sweep run by hand
- * with no grace period then cancelled two deploys that were mid-rollback and
- * very much alive. A signal that is absent both
- * when a job died *and* when it is finishing normally cannot be the signal.
- *
- * The log is still worth reading once the queue has said the job is gone: its
- * terminal status is the deploy's own verdict, and adopting it beats
- * inventing one.
+ * A missing deploy log is no evidence: the log is deleted with the account on
+ * rollback, the last thing every failed deploy does, so it is absent both when
+ * a job died and when it is finishing normally. Once the queue says the job is
+ * gone, a log's terminal status is still the deploy's own verdict, and adopted.
  *
  * Fails *closed* at every step. An unreadable queue, a non-deploy job with no
- * recorded pid, a job still reserved -- all leave the row alone. Retiring a
- * live deploy would tell a customer their deploy stopped while it runs. The
- * one exception is a reserved job whose recorded worker process has died: the
+ * recorded pid, a job still reserved -- all leave the row alone. The one
+ * exception is a reserved job whose recorded worker process has died: the
  * row stays reserved until retry_after, a day, though nothing runs it.
  */
 final class TaskReconciler
@@ -56,6 +38,9 @@ final class TaskReconciler
     public const ORPHAN_MESSAGE = DeployLogger::INTERRUPTED_MESSAGE;
 
     /**
+     * `$olderThanSeconds` spares a task that started moments ago: it may be between
+     * `markRunning()` and its job being pushed.
+     *
      * @param null|callable(Task): ?bool $isPending overrides the queue check
      * @return list<int> the ids it retired
      */
@@ -67,38 +52,71 @@ final class TaskReconciler
         $query = Task::query()->where('status', Task::STATUS_RUNNING);
 
         if ($olderThanSeconds !== null && $olderThanSeconds > 0) {
-            // A task that started moments ago may be between `markRunning()`
-            // and its job being pushed -- and is certainly still wanted.
             $query->where('started_at', '<', now()->subSeconds($olderThanSeconds));
         }
 
         $retired = [];
         foreach ($query->get() as $task) {
-            $latest = self::deployLogOf($task);
-            $decision = self::decide($task, $latest, $isPending);
-
-            if ($decision === null) {
-                continue;
+            if (self::retire($task, $dryRun, $isPending)) {
+                $retired[] = (int) $task->id;
             }
+        }
 
-            $retired[] = (int) $task->id;
-            if ($dryRun) {
-                continue;
-            }
-
-            self::apply($task, $decision, $latest);
-            if (self::workerGone($task)) {
-                self::dropReservedJob($task);
-            }
+        if (!$dryRun) {
+            self::dropRowsOfCancelledDeadWorkers();
         }
 
         return $retired;
     }
 
     /**
-     * The dead worker's queue row, still reserved: recorded as failed and
-     * deleted, so a worker does not run the job's failed() a day later, at
-     * retry_after. That would act on whatever has the job's names by then --
+     * Whether the task is to be retired; outside a dry run it is, along with a dead worker's queue row.
+     *
+     * @param null|callable(Task): ?bool $isPending
+     */
+    private static function retire(Task $task, bool $dryRun, ?callable $isPending): bool
+    {
+        $latest = self::deployLogOf($task);
+        $decision = self::decide($task, $latest, $isPending);
+
+        if ($decision === null) {
+            return false;
+        }
+        if ($dryRun) {
+            return true;
+        }
+
+        self::apply($task, $decision, $latest);
+        if (self::workerGone($task)) {
+            self::dropReservedJob($task);
+        }
+
+        return true;
+    }
+
+    /**
+     * A task cancelled after its worker died is already terminal, so reconcile()
+     * never sees it, but its reserved row is just as stale. Rows older than a day
+     * have been failed by a worker at retry_after already.
+     */
+    private static function dropRowsOfCancelledDeadWorkers(): void
+    {
+        $cancelled = Task::query()
+            ->where('status', Task::STATUS_CANCELLED)
+            ->whereNotNull('job_id')
+            ->where('cancelled_at', '>=', now()->subDay())
+            ->get();
+        foreach ($cancelled as $task) {
+            if (self::workerGone($task)) {
+                self::dropReservedJob($task);
+            }
+        }
+    }
+
+    /**
+     * The dead worker's queue row, still reserved: deleted, then recorded as failed
+     * (that record is only for the record), so a worker does not run the job's failed()
+     * a day later, at retry_after. That would act on whatever has the job's names by then --
      * CreateStaging's destroys the staging project, which may have been
      * created again since this task was retired.
      */
@@ -108,15 +126,14 @@ final class TaskReconciler
         if (!is_string($jobId) || $jobId === '') {
             return;
         }
-        $table = config('queue.connections.database.table') ?? 'jobs';
-        $queue = is_string($task->queue) && $task->queue !== '' ? $task->queue : 'default';
+        $table = self::jobsTable();
+        $queue = self::queueOf($task);
 
         try {
             foreach (DB::table($table)->where('queue', $queue)->get(['id', 'payload']) as $row) {
                 if (self::memberUuid((string) $row->payload) !== $jobId) {
                     continue;
                 }
-                // Deleted first: the failed_jobs record is only for the record.
                 DB::table($table)->where('id', $row->id)->delete();
                 app('queue.failer')->log('database', $queue, (string) $row->payload, new \RuntimeException(self::ORPHAN_MESSAGE));
             }
@@ -126,16 +143,16 @@ final class TaskReconciler
     }
 
     /**
-     * The status this task should have, or null to leave it running.
+     * The status this task should have, or null to leave it running. A deploy log's
+     * terminal status is the work's own verdict and is adopted whatever the queue says.
+     * Otherwise a dead worker's task is cancelled, and so is one whose job left the queue
+     * with nothing finishing it; a pending job, or a queue that cannot tell (null), is left alone.
      *
      * @param array<string, mixed>|null $latest the deploy log, when one is readable
      * @param null|callable(Task): ?bool $isPending
      */
     public static function decide(Task $task, ?array $latest, ?callable $isPending = null): ?string
     {
-        // A deploy log's terminal status is a real verdict, so it is adopted
-        // rather than replaced, whatever the queue says -- the work is over
-        // and the row merely never heard about it.
         if ($latest !== null && ($latest['status'] ?? null) !== DeployLogger::STATUS_RUNNING) {
             return match ($latest['status']) {
                 DeployLogger::STATUS_SUCCESS, DeployLogger::STATUS_PARTIAL => Task::STATUS_COMPLETED,
@@ -144,27 +161,23 @@ final class TaskReconciler
         }
 
         if (self::workerGone($task)) {
-            // Its queue row stays reserved until retry_after, a day later, but
-            // nothing runs it. Unless a child it started still holds its
-            // deploy's lock: the log is closed with a verdict once that ends.
-            return $latest !== null && DeployLogger::isLockedFor((string) $task->username)
-                ? null
-                : Task::STATUS_CANCELLED;
+            return self::childHoldsTheDeployLock($task, $latest) ? null : Task::STATUS_CANCELLED;
         }
 
         $pending = ($isPending ?? self::queueCheck())($task);
 
-        if ($pending !== false) {
-            // true: still queued or reserved, so a worker still owes it an
-            // answer. null: nothing could tell us, and "cannot tell" is not
-            // evidence of death.
-            return null;
-        }
+        return $pending === false ? Task::STATUS_CANCELLED : null;
+    }
 
-        // The job is not in the queue any more and no worker took it to the
-        // end. For a non-deploy job that is all that can be said -- no log
-        // exists to say more -- but it is enough.
-        return Task::STATUS_CANCELLED;
+    /**
+     * A child the dead worker started may still hold its deploy's lock; the log is closed
+     * with a verdict once that ends.
+     *
+     * @param array<string, mixed>|null $latest
+     */
+    private static function childHoldsTheDeployLock(Task $task, ?array $latest): bool
+    {
+        return $latest !== null && DeployLogger::isLockedFor((string) $task->username);
     }
 
     /**
@@ -181,16 +194,29 @@ final class TaskReconciler
         }
 
         if ($status === Task::STATUS_FAILED) {
-            // The deploy log recorded a real failure with its own reason.
-            $reason = $latest['error'] ?? null;
-            $task->markFailed(is_string($reason) && $reason !== '' ? $reason : self::ORPHAN_MESSAGE);
+            self::failWithTheLogsReason($task, $latest);
 
             return;
         }
 
-        // Interrupted with no verdict anywhere. Not invented, and named as
-        // what it is: `cancelled` is what this engine already means by
-        // "stopped without a verdict".
+        self::retireWithoutVerdict($task);
+    }
+
+    /**
+     * @param array<string, mixed>|null $latest
+     */
+    private static function failWithTheLogsReason(Task $task, ?array $latest): void
+    {
+        $reason = $latest['error'] ?? null;
+        $task->markFailed(is_string($reason) && $reason !== '' ? $reason : self::ORPHAN_MESSAGE);
+    }
+
+    /**
+     * Interrupted with no verdict anywhere, so none is invented: `cancelled` is what this
+     * engine already means by "stopped without a verdict".
+     */
+    private static function retireWithoutVerdict(Task $task): void
+    {
         $task->details = array_merge($task->details ?? [], ['reconciled' => self::ORPHAN_MESSAGE]);
         $task->markCancelled();
         Log::warning('Task ' . $task->id . ' for ' . $task->username
@@ -229,34 +255,50 @@ final class TaskReconciler
      */
     public static function queueCheck(?callable $payloads = null): callable
     {
-        return static function (Task $task) use ($payloads): ?bool {
-            $jobId = $task->job_id;
-            if (!is_string($jobId) || $jobId === '') {
-                // No uuid was ever recorded (a job that died before a worker
-                // took it). Nothing to look up.
-                return null;
+        return static fn (Task $task): ?bool => self::isQueued($task, $payloads);
+    }
+
+    /**
+     * Null when the task never recorded a job uuid (a job that died before a worker took it)
+     * or the queue cannot be read. The queue is read whole, which its depth bounds.
+     *
+     * @param null|callable(string): iterable<mixed> $payloads
+     */
+    private static function isQueued(Task $task, ?callable $payloads): ?bool
+    {
+        $jobId = $task->job_id;
+        if (!is_string($jobId) || $jobId === '') {
+            return null;
+        }
+
+        $queue = self::queueOf($task);
+
+        try {
+            $payloads ??= static fn (string $queue): iterable => DB::table(self::jobsTable())
+                ->where('queue', $queue)
+                ->pluck('payload');
+
+            $members = [];
+            foreach ($payloads($queue) as $payload) {
+                $members[] = $payload;
             }
 
-            $queue = is_string($task->queue) && $task->queue !== '' ? $task->queue : 'default';
+            return self::membersCarryJob($members, $jobId);
+        } catch (\Throwable $e) {
+            Log::warning('Could not read the queue to reconcile task ' . $task->id . ': ' . $e->getMessage());
 
-            try {
-                // Bounded by the queue depth, so reading it whole is safe.
-                $payloads ??= static fn (string $queue): iterable => DB::table(config('queue.connections.database.table') ?? 'jobs')
-                    ->where('queue', $queue)
-                    ->pluck('payload');
+            return null;
+        }
+    }
 
-                $members = [];
-                foreach ($payloads($queue) as $payload) {
-                    $members[] = $payload;
-                }
+    private static function jobsTable(): string
+    {
+        return config('queue.connections.database.table') ?? 'jobs';
+    }
 
-                return self::membersCarryJob($members, $jobId);
-            } catch (\Throwable $e) {
-                Log::warning('Could not read the queue to reconcile task ' . $task->id . ': ' . $e->getMessage());
-
-                return null;
-            }
-        };
+    private static function queueOf(Task $task): string
+    {
+        return is_string($task->queue) && $task->queue !== '' ? $task->queue : 'default';
     }
 
     /**
@@ -320,14 +362,7 @@ final class TaskReconciler
             return null;
         }
 
-        try {
-            $latest = DeployLogger::readLatestFor($username);
-        } catch (\Throwable $e) {
-            Log::warning('Could not read the deploy log for ' . $username . ': ' . $e->getMessage());
-
-            return null;
-        }
-
+        $latest = self::readLatestLog($username);
         if (!is_array($latest)) {
             return null;
         }
@@ -337,14 +372,34 @@ final class TaskReconciler
             return ($latest['id'] ?? null) === $deployId ? $latest : null;
         }
 
-        // Started well before this task did, so it belongs to an earlier
-        // deploy. The minute of slack absorbs clock and ordering jitter.
-        $startedFrom = $latest['started_at'] ?? null;
-        if ($task->started_at !== null && is_numeric($startedFrom)
-            && (int) $startedFrom < $task->started_at->getTimestamp() - 60) {
+        return self::startedBeforeTheTask($task, $latest) ? null : $latest;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private static function readLatestLog(string $username): ?array
+    {
+        try {
+            return DeployLogger::readLatestFor($username);
+        } catch (\Throwable $e) {
+            Log::warning('Could not read the deploy log for ' . $username . ': ' . $e->getMessage());
+
             return null;
         }
+    }
 
-        return $latest;
+    /**
+     * A log started well before the task did belongs to an earlier deploy. The minute
+     * of slack absorbs clock and ordering jitter.
+     *
+     * @param array<string, mixed> $latest
+     */
+    private static function startedBeforeTheTask(Task $task, array $latest): bool
+    {
+        $startedFrom = $latest['started_at'] ?? null;
+
+        return $task->started_at !== null && is_numeric($startedFrom)
+            && (int) $startedFrom < $task->started_at->getTimestamp() - 60;
     }
 }

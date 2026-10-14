@@ -42,6 +42,16 @@ class BackupListTool extends ApiTool
     }
 
     /**
+     * @return array<int, string>
+     */
+    protected function queryParams(): array
+    {
+        return [
+            'kind',
+        ];
+    }
+
+    /**
      * @return array<string, string>
      */
     protected function argumentNames(): array
@@ -58,6 +68,7 @@ class BackupListTool extends ApiTool
     {
         return [
             'name' => $schema->string()->required(),
+            'kind' => $schema->string()->description('One of: manual, scheduled.'),
         ];
     }
 }

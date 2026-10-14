@@ -2,13 +2,10 @@
 
 namespace App\Models;
 
-use App\Lib\Testing\CoverageRecorder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\App;
-use Illuminate\Support\Facades\Auth;
 use InvalidArgumentException;
 use Laravel\Sanctum\PersonalAccessToken;
 
@@ -19,6 +16,15 @@ class Task extends Model
     public const STATUS_COMPLETED = 'completed';
     public const STATUS_FAILED = 'failed';
     public const STATUS_CANCELLED = 'cancelled';
+
+    /** @var list<string> */
+    public const STATUSES = [
+        self::STATUS_QUEUED,
+        self::STATUS_RUNNING,
+        self::STATUS_COMPLETED,
+        self::STATUS_FAILED,
+        self::STATUS_CANCELLED,
+    ];
 
     /** @var list<string> */
     public const TERMINAL_STATUSES = [
@@ -40,7 +46,24 @@ class Task extends Model
         \App\Jobs\RebuildProject::class,
     ];
 
+    /**
+     * Jobs that run under the account's deploy lock: a deploy, and an env var
+     * apply that recreates its services. A delete or another deploy refuses
+     * while one is queued or running.
+     *
+     * @var list<class-string>
+     */
+    public const DEPLOY_LOCK_JOB_TYPES = [
+        \App\Jobs\DeployProject::class,
+        \App\Jobs\RebuildProject::class,
+        \App\Jobs\ApplyEnvVars::class,
+    ];
+
+    /** The message a refused `since` answers with, on the API and over MCP. */
+    public const SINCE_EXPECTED = 'since must be unix seconds or an ISO-8601 datetime';
+
     protected $fillable = [
+        'api_token_id',
         'job_id',
         'username',
         'queue',
@@ -57,6 +80,7 @@ class Task extends Model
     ];
 
     protected $casts = [
+        'api_token_id' => 'integer',
         'details' => 'array',
         'pid' => 'integer',
         'queued_at' => 'datetime',
@@ -76,60 +100,23 @@ class Task extends Model
             throw new InvalidArgumentException('job_type and queue are required');
         }
 
-        $details = self::stampCoverageTokenId($details);
-
         return self::create([
             'job_type' => $jobType,
             'queue' => $queue,
             'username' => $username,
+            'api_token_id' => self::currentTokenId(),
             'details' => $details,
             'status' => self::STATUS_QUEUED,
             'queued_at' => now(),
         ]);
     }
 
-    /**
-     * When a coverage recording session is active for the current API token,
-     * persist its id on the task so queue workers can dump coverage later.
-     *
-     * @param array<string, mixed>|null $details
-     * @return array<string, mixed>|null
-     */
-    private static function stampCoverageTokenId(?array $details): ?array
+    /** The bearer that started this task, or null for work the engine began itself. */
+    public static function currentTokenId(): ?int
     {
-        $tokenId = self::currentCoverageTokenId();
-        if ($tokenId === null) {
-            return $details;
-        }
+        $token = request()?->user()?->currentAccessToken();
 
-        $details ??= [];
-        $details['api_token_id'] = $tokenId;
-
-        return $details;
-    }
-
-    private static function currentCoverageTokenId(): ?int
-    {
-        if (!App::hasDebugModeEnabled()) {
-            return null;
-        }
-
-        $user = Auth::user();
-        if (!$user instanceof Admin) {
-            return null;
-        }
-
-        $token = $user->currentAccessToken();
-        if (!$token instanceof PersonalAccessToken) {
-            return null;
-        }
-
-        $tokenId = (int) $token->id;
-        if (!CoverageRecorder::isRecording($tokenId)) {
-            return null;
-        }
-
-        return $tokenId;
+        return $token instanceof PersonalAccessToken ? (int) $token->id : null;
     }
 
     public function logs(): HasMany
@@ -191,6 +178,18 @@ class Task extends Model
         return Carbon::parse((string) $since);
     }
 
+    /** Whether {@see parseSince()} can read this; Carbon throws on anything else. */
+    public static function isSince(int|string|null $since): bool
+    {
+        try {
+            self::parseSince($since);
+
+            return true;
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
     public function isTerminal(): bool
     {
         return in_array($this->status, self::TERMINAL_STATUSES, true);
@@ -209,6 +208,8 @@ class Task extends Model
     }
 
     /**
+     * Merging `details` from this copy is safe: nothing else writes a queued task's details.
+     *
      * @param array<string, mixed> $details merged into `details` by the same write
      */
     public function markRunning(?string $jobId = null, array $details = []): bool
@@ -218,7 +219,6 @@ class Task extends Model
             $values['job_id'] = $jobId;
         }
         if ($details !== []) {
-            // Written only while the row is queued, and nothing else writes a queued task's details.
             $values['details'] = $this->castAttributeAsJson('details', array_merge($this->details ?? [], $details));
         }
 
@@ -257,44 +257,65 @@ class Task extends Model
 
     public function markCompleted(): bool
     {
-        if ($this->isTerminal()) {
+        return $this->settle(['status' => self::STATUS_COMPLETED, 'completed_at' => now()]);
+    }
+
+    /**
+     * Merge fields into `details` from the worker that owns the row right now.
+     *
+     * @param array<string, mixed> $details
+     */
+    public function mergeDetails(array $details): bool
+    {
+        if ($details === []) {
             return false;
         }
 
-        $this->status = self::STATUS_COMPLETED;
-        $this->completed_at = now();
-        $this->save();
+        $this->details = array_merge($this->details ?? [], $details);
 
-        return true;
+        return $this->save();
     }
 
     public function markFailed(string $error): bool
     {
-        if ($this->isTerminal()) {
-            return false;
-        }
-
         $details = $this->details ?? [];
         $details['error'] = $error;
-        $this->details = $details;
-        $this->status = self::STATUS_FAILED;
-        $this->failed_at = now();
-        $this->save();
 
-        return true;
+        return $this->settle([
+            'status' => self::STATUS_FAILED,
+            'failed_at' => now(),
+            'details' => $this->castAttributeAsJson('details', $details),
+        ]);
     }
 
     public function markCancelled(): bool
     {
+        return $this->settle(['status' => self::STATUS_CANCELLED, 'cancelled_at' => now()]);
+    }
+
+    /**
+     * The first terminal write wins, decided by a conditional update on the
+     * row: a cancel and a finishing worker may each hold a running copy.
+     * `details` set in memory (the reconciler does) is written by the same update.
+     *
+     * @param array<string, mixed> $values
+     */
+    private function settle(array $values): bool
+    {
         if ($this->isTerminal()) {
             return false;
         }
+        if (!array_key_exists('details', $values) && $this->isDirty('details')) {
+            $values['details'] = $this->castAttributeAsJson('details', $this->details);
+        }
 
-        $this->status = self::STATUS_CANCELLED;
-        $this->cancelled_at = now();
-        $this->save();
+        $moved = static::query()
+            ->whereKey($this->getKey())
+            ->whereNotIn('status', self::TERMINAL_STATUSES)
+            ->update($values) === 1;
+        $this->refresh();
 
-        return true;
+        return $moved;
     }
 
     public function setPid(?int $pid, ?string $startTime): void

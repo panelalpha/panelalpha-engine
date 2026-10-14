@@ -89,6 +89,12 @@ server {
     error_page 502 /{{ $user }}-error-pages/502.html;
     error_page 503 /{{ $user }}-error-pages/503.html;
     location /phpmyadmin {
+@if(!empty($suspended))
+        # A suspended project returns 503 for its site, but phpMyAdmin sits
+        # outside `location /` and kept working for anyone with a token or an
+        # open session, so suspension did not cut database access (engine#856).
+        return 503;
+@else
         proxy_set_header X-Real-IP $remote_addr;
         set $pmapass 0;
         if ($arg_pmassotoken) {
@@ -102,6 +108,7 @@ server {
             rewrite ^/phpmyadmin(.*) /$1 break;
             proxy_pass http://phpmyadmin-users.shared-hosting.palocal;
         }
+@endif
     }
     location /panelalpha-sso {
         resolver 127.0.0.54 valid=30s;
@@ -224,6 +231,11 @@ server {
         error_page 502 /{{ $user }}-error-pages/502.html;
         error_page 503 /{{ $user }}-error-pages/503.html;
         location /phpmyadmin {
+@if(!empty($suspended))
+            # As on :80: a suspended project must not keep database access
+            # through phpMyAdmin (engine#856).
+            return 503;
+@else
             proxy_set_header X-Real-IP $remote_addr;
             set $pmapass 0;
             if ($arg_pmassotoken) {
@@ -237,6 +249,7 @@ server {
                 rewrite ^/phpmyadmin(.*) /$1 break;
                 proxy_pass http://phpmyadmin-users.shared-hosting.palocal;
             }
+@endif
         }
         location /panelalpha-sso {
             resolver 127.0.0.54 valid=30s;

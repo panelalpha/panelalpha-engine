@@ -74,9 +74,9 @@ class FtpAccountCreateTool extends ApiTool
             'user' => $schema->string()->description('Example: ftpuser1.')->required(),
             'domain' => $schema->string()->description('Example: example.com.')->required(),
             'password' => $schema->string()->required(),
-            'directory' => $schema->string()->description('Example: /public_html.'),
-            'unlimited_quota' => $schema->boolean(),
-            'quota' => $schema->integer()->description('Quota in MB'),
+            'directory' => $schema->string()->description('An existing directory inside the project home the account is limited to: /project on a repository-deployed project, /public_html on traditional PHP hosting. Omitted, the account gets the whole home. Example: /public_html.'),
+            'unlimited_quota' => $schema->boolean()->description('Send true, or omit quota, for an account with no quota of its own. It reads back as `details.unlimited_quota: true`; `details.quota` then holds the project\'s disk space limit (-1 when its disk space is unlimited), not 0.'),
+            'quota' => $schema->integer()->description('Quota in MB, capped at the project\'s disk space limit. Omit it, or send 0, for an account with no quota of its own.'),
         ];
     }
 }

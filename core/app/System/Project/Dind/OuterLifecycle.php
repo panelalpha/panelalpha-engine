@@ -16,30 +16,56 @@ final class OuterLifecycle
     ) {
     }
 
+    /**
+     * A container sysbox forgot (it was restarted meanwhile) either cannot start at all or starts
+     * with its image unmapped; both are recreated.
+     */
     public function up(): void
     {
-        $this->prepareTenantNetwork();
-        $path = $this->project->composeFilePath();
-        $this->project->system()->exec([
-            'sudo',
-            'docker',
-            'compose',
-            '-f',
-            $path,
-            'up',
-            '-d',
-            '--remove-orphans',
-        ]);
-        // A port is bound to its container's address only once the
-        // container exists, and until then the bridge drops its frames.
-        $this->prepareTenantNetwork();
+        try {
+            $this->composeUp();
+        } catch (\Exception $e) {
+            if (!self::isSysboxStartRefusal($e)) {
+                throw $e;
+            }
+            (new AccountMapping($this->project))->recreate();
+
+            return;
+        }
+        (new AccountMapping($this->project))->ensureMapped();
+    }
+
+    private static function isSysboxStartRefusal(\Exception $e): bool
+    {
+        return AccountRuntime::isSysbox() && AccountMapping::isStartRefusal($e->getMessage());
+    }
+
+    /** A new account container in place of the old one; {@see AccountMapping}. */
+    public function recreate(): void
+    {
+        $this->composeUp('--force-recreate');
     }
 
     /**
-     * The account joins pash-tenants, which compose cannot start without, and
-     * whose firewall a reboot drops. One that
-     * cannot be applied is a warning, not an account left down: with no rules
-     * enable_icc still drops traffic between the network's members.
+     * The tenant firewall is applied again after up: a port is bound to its container's address
+     * only once the container exists, and until then the bridge drops its frames.
+     */
+    private function composeUp(string ...$flags): void
+    {
+        $this->prepareTenantNetwork();
+        $this->project->system()->exec($this->composeArgv('up', '-d', '--remove-orphans', ...$flags));
+        $this->prepareTenantNetwork();
+    }
+
+    /** @return list<string> */
+    private function composeArgv(string ...$args): array
+    {
+        return ['sudo', 'docker', 'compose', '-f', $this->project->composeFilePath(), ...$args];
+    }
+
+    /**
+     * Compose cannot start the account without pash-tenants, whose firewall a reboot drops. A failure only
+     * warns: with no rules, enable_icc still drops traffic between the network's members.
      */
     private function prepareTenantNetwork(): void
     {
@@ -54,15 +80,7 @@ final class OuterLifecycle
 
     public function down(): void
     {
-        $path = $this->project->composeFilePath();
-        $this->project->system()->exec([
-            'sudo',
-            'docker',
-            'compose',
-            '-f',
-            $path,
-            'down',
-        ]);
+        $this->project->system()->exec($this->composeArgv('down'));
     }
 
     public function tearDown(): void
@@ -83,20 +101,14 @@ final class OuterLifecycle
     public function deleteOuterStack(): void
     {
         if ($this->project->exists()) {
-            $path = $this->project->composeFilePath();
-            $this->project->system()->runProcess([
-                'sudo',
-                'docker',
-                'compose',
-                '-f',
-                $path,
-                'down',
-                '-v',
-                '--remove-orphans',
-            ]);
+            $this->project->system()->runProcess($this->composeArgv('down', '-v', '--remove-orphans'));
         }
+        $this->removeAccountContainer();
+    }
 
-        // Only the account's own container: a foreign one may share the name.
+    /** Only the account's own container: a foreign one may share the name. */
+    private function removeAccountContainer(): void
+    {
         $username = $this->project->username();
         if ((new AccountContainers($this->project->system()))->ownsContainerNamed($username)) {
             $this->project->system()->runProcess(['sudo', 'docker', 'rm', '-f', $username]);

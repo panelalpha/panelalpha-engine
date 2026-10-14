@@ -73,32 +73,21 @@ class Network
     }
 
     /**
+     * @return array{gateway: string, interface: string}
+     * @throws Exception
+     */
+    private function defaultRoute(int $family): array
+    {
+        return $family === 4 ? $this->getDefaultIpv4Route() : $this->getDefaultIpv6Route();
+    }
+
+    /**
      * @return list<string>
      * @throws Exception
      */
     public function generateIpRouteAddCommand(string $ip, int $mask, int $family, ?string $gateway = null, ?string $interface = null): array
     {
-        if ($gateway === null || $interface === null) {
-            $route = $family === 4
-                ? $this->getDefaultIpv4Route()
-                : $this->getDefaultIpv6Route();
-            if ($gateway === null) {
-                $gateway = $route['gateway'];
-            }
-            if ($interface === null) {
-                $interface = $route['interface'];
-            }
-        }
-        return [
-            'ip',
-            'route',
-            'add',
-            $ip . '/' . $mask,
-            'via',
-            $gateway,
-            'dev',
-            $interface,
-        ];
+        return $this->ipRouteCommand('add', $ip, $mask, $family, $gateway, $interface);
     }
 
     /**
@@ -107,28 +96,24 @@ class Network
      */
     public function generateIpRouteDelCommand(string $ip, int $mask, int $family, ?string $gateway = null, ?string $interface = null): array
     {
+        return $this->ipRouteCommand('del', $ip, $mask, $family, $gateway, $interface);
+    }
+
+    /**
+     * `ip route <verb>` via the given gateway and interface, each defaulting to the default route's.
+     *
+     * @return list<string>
+     * @throws Exception
+     */
+    private function ipRouteCommand(string $verb, string $ip, int $mask, int $family, ?string $gateway, ?string $interface): array
+    {
         if ($gateway === null || $interface === null) {
-            $route = $family === 4
-                ? $this->getDefaultIpv4Route()
-                : $this->getDefaultIpv6Route();
-            if ($gateway === null) {
-                $gateway = $route['gateway'];
-            }
-            if ($interface === null) {
-                $interface = $route['interface'];
-            }
+            $route = $this->defaultRoute($family);
+            $gateway ??= $route['gateway'];
+            $interface ??= $route['interface'];
         }
 
-        return [
-            'ip',
-            'route',
-            'del',
-            $ip . '/' . $mask,
-            'via',
-            $gateway,
-            'dev',
-            $interface,
-        ];
+        return ['ip', 'route', $verb, $ip . '/' . $mask, 'via', $gateway, 'dev', $interface];
     }
 
     /**
@@ -137,21 +122,7 @@ class Network
      */
     public function generateIpAddressAddCommand(string $ip, int $mask, int $family, ?string $interface = null): array
     {
-        if ($interface === null) {
-            $route = $family === 4
-                ? $this->getDefaultIpv4Route()
-                : $this->getDefaultIpv6Route();
-            $interface = $route['interface'];
-        }
-
-        return [
-            'ip',
-            'addr',
-            'add',
-            $ip . '/' . $mask,
-            'dev',
-            $interface,
-        ];
+        return ['ip', 'addr', 'add', $ip . '/' . $mask, 'dev', $interface ?? $this->defaultRoute($family)['interface']];
     }
 
     /**
@@ -160,21 +131,7 @@ class Network
      */
     public function generateIpAddressDelCommand(string $ip, int $mask, int $family, ?string $interface = null): array
     {
-        if ($interface === null) {
-            $route = $family === 4
-                ? $this->getDefaultIpv4Route()
-                : $this->getDefaultIpv6Route();
-            $interface = $route['interface'];
-        }
-
-        return [
-            'ip',
-            'addr',
-            'del',
-            $ip . '/' . $mask,
-            'dev',
-            $interface,
-        ];
+        return ['ip', 'addr', 'del', $ip . '/' . $mask, 'dev', $interface ?? $this->defaultRoute($family)['interface']];
     }
 
     /**
@@ -190,41 +147,15 @@ class Network
         bool $replaceDefaultIpv4 = false,
     ): array {
         $localIps = $this->localIpv4Addresses();
-        $maps = [];
-
-        foreach ($localIps as $localIp) {
-            $publicIp = $this->lookupPublicIp($localIp, $lookupUrl);
-            if ($publicIp === null || $publicIp === $localIp) {
-                continue;
-            }
-
-            $maps[] = Ipv4NatMap::upsertMap($localIp, $publicIp);
-        }
+        $previousPublicToLocal = Ipv4NatMap::getPublicToLocalMap();
+        $maps = $this->upsertDiscoveredMaps($localIps, $lookupUrl);
 
         $defaultIpv4Previous = Setting::get('default_ipv4');
-        $defaultIpv4Current = $defaultIpv4Previous;
-        $defaultIpv4Replaced = false;
-
-        if ($replaceDefaultIpv4 && !empty($defaultIpv4Previous)) {
-            $publicToLocal = Ipv4NatMap::getPublicToLocalMap();
-            if (isset($publicToLocal[$defaultIpv4Previous])) {
-                $localToPublic = Ipv4NatMap::getLocalToPublicMap();
-                $publicIp = $localToPublic[$defaultIpv4Previous] ?? null;
-                if ($publicIp !== null) {
-                    Setting::set('default_ipv4', $publicIp);
-                    $defaultIpv4Current = $publicIp;
-                    $defaultIpv4Replaced = true;
-                }
-            } elseif (in_array($defaultIpv4Previous, $localIps, true)) {
-                $localToPublic = Ipv4NatMap::getLocalToPublicMap();
-                $publicIp = $localToPublic[$defaultIpv4Previous] ?? null;
-                if ($publicIp !== null) {
-                    Setting::set('default_ipv4', $publicIp);
-                    $defaultIpv4Current = $publicIp;
-                    $defaultIpv4Replaced = true;
-                }
-            }
-        }
+        $replacement = $replaceDefaultIpv4 && !empty($defaultIpv4Previous)
+            ? $this->replaceDefaultIpv4($defaultIpv4Previous, $localIps, $previousPublicToLocal)
+            : null;
+        $defaultIpv4Current = $replacement ?? $defaultIpv4Previous;
+        $defaultIpv4Replaced = $replacement !== null;
 
         return [
             'maps' => $maps,
@@ -232,6 +163,44 @@ class Network
             'default_ipv4_previous' => $defaultIpv4Previous,
             'default_ipv4_current' => $defaultIpv4Current,
         ];
+    }
+
+    /**
+     * @param list<string> $localIps
+     * @return array<Ipv4NatMap>
+     */
+    private function upsertDiscoveredMaps(array $localIps, string $lookupUrl): array
+    {
+        $maps = [];
+        foreach ($localIps as $localIp) {
+            $publicIp = $this->lookupPublicIp($localIp, $lookupUrl);
+            if ($publicIp !== null && $publicIp !== $localIp) {
+                $maps[] = Ipv4NatMap::upsertMap($localIp, $publicIp);
+            }
+        }
+
+        return $maps;
+    }
+
+    /**
+     * Point the default IPv4 setting at the public address NAT now maps its local
+     * address to, when it names a local address or one the map gave out before
+     * this rebuild; null when nothing was replaced.
+     *
+     * @param list<string> $localIps
+     * @param array<string, string> $previousPublicToLocal
+     */
+    private function replaceDefaultIpv4(string $previous, array $localIps, array $previousPublicToLocal): ?string
+    {
+        $localIp = in_array($previous, $localIps, true) ? $previous : ($previousPublicToLocal[$previous] ?? null);
+        $publicIp = $localIp === null ? null : (Ipv4NatMap::getLocalToPublicMap()[$localIp] ?? null);
+        if ($publicIp === null || $publicIp === $previous) {
+            return null;
+        }
+
+        Setting::set('default_ipv4', $publicIp);
+
+        return $publicIp;
     }
 
     /**
@@ -259,6 +228,63 @@ class Network
         }
 
         return array_values(array_unique($ips));
+    }
+
+    /**
+     * Whether the interface carries `$ip/$mask` now: `ip addr add` exiting 0
+     * does not prove it. The default route's interface when none is given.
+     *
+     * @throws Exception when the interface cannot be inspected
+     */
+    public function interfaceHasAddress(string $ip, int $mask, int $family, ?string $interface = null): bool
+    {
+        $interface ??= $this->defaultRoute($family)['interface'];
+
+        $process = $this->system->runProcessOnHost(['ip', 'addr', 'show', 'dev', $interface]);
+        if (!$process->isSuccessful()) {
+            throw new Exception(
+                "Could not read addresses of interface {$interface}: "
+                . ($process->getErrorOutput() ?: $process->getOutput())
+            );
+        }
+
+        foreach (explode("\n", $process->getOutput()) as $line) {
+            if (!preg_match('/\binet6?\s+([0-9a-fA-F:.]+)\/(\d+)/', $line, $matches)) {
+                continue;
+            }
+
+            if (self::sameAddress($matches[1], $ip) && (int) $matches[2] === $mask) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** The kernel prints the canonical form, so `2001:db8:0:0::5` and `2001:db8::5` are one address. */
+    public static function sameAddress(string $a, string $b): bool
+    {
+        if (filter_var($a, FILTER_VALIDATE_IP) === false || filter_var($b, FILTER_VALIDATE_IP) === false) {
+            return strtolower($a) === strtolower($b);
+        }
+
+        return inet_pton($a) === inet_pton($b);
+    }
+
+    /**
+     * Whether the host routes exactly `$ip/$mask` now: `ip route add` can fail, or exit 0, without proving it.
+     *
+     * @throws Exception when the routes cannot be read
+     */
+    public function hasRoute(string $ip, int $mask, int $family): bool
+    {
+        $cmd = $family === 6 ? ['ip', '-6', 'route', 'show', "{$ip}/{$mask}"] : ['ip', 'route', 'show', "{$ip}/{$mask}"];
+        $process = $this->system->runProcessOnHost($cmd);
+        if (!$process->isSuccessful()) {
+            throw new Exception("Could not read the host's routes: " . ($process->getErrorOutput() ?: $process->getOutput()));
+        }
+
+        return trim($process->getOutput()) !== '';
     }
 
     private function lookupPublicIp(string $localIp, string $lookupUrl): ?string
@@ -290,20 +316,11 @@ class Network
         }
     }
 
+    /** A valid IPv4 address outside 127.0.0.0/8 and 0.0.0.0/8. */
     private function isUsableHostIpv4(string $ip): bool
     {
-        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-            return false;
-        }
-
-        if (strpos($ip, '127.') === 0) {
-            return false;
-        }
-
-        if (strpos($ip, '0.') === 0) {
-            return false;
-        }
-
-        return true;
+        return filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)
+            && !str_starts_with($ip, '127.')
+            && !str_starts_with($ip, '0.');
     }
 }

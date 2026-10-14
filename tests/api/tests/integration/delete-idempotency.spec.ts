@@ -1,6 +1,7 @@
-import { expect, test } from '@/fixtures/test-options';
+import { test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
 import { rand } from '@/helpers/random';
+import { expectStatus } from '@/helpers/expect-status';
 import type { EngineFixtures } from '@/fixtures/test-options';
 
 /**
@@ -75,7 +76,7 @@ test.describe('double DELETE', () => {
       cronFactory,
       ftpFactory,
     }) => {
-      const user = await userFactory.createSimpleUser();
+      const user = await test.step('create a project', () => userFactory.createSimpleUser());
 
       const fixtures = {
         api,
@@ -86,14 +87,18 @@ test.describe('double DELETE', () => {
         cronFactory,
         ftpFactory,
       } as unknown as EngineFixtures;
-      const id = await resource.create(fixtures, user);
+      const id = await test.step(`create ${label}`, () => resource.create(fixtures, user));
       const path = `projects/${user.username}/${resource.collection}/${encodeURIComponent(id)}`;
 
-      const first = await authedRequest.delete(path);
-      expectOneOf(first.status(), IDEMPOTENT_STATUSES, `first DELETE of ${label}`);
+      await test.step('delete it the first time', async () => {
+        const first = await authedRequest.delete(path);
+        expectOneOf(first.status(), IDEMPOTENT_STATUSES, `first DELETE of ${label}`);
+      });
 
-      const second = await authedRequest.delete(path);
-      expect(second.status(), `second DELETE of ${label} should report it is gone`).toBe(404);
+      await test.step('delete it the second time', async () => {
+        const second = await authedRequest.delete(path);
+        await expectStatus(second, 404, `second DELETE of ${label} should report it is gone`);
+      });
     });
   }
 });

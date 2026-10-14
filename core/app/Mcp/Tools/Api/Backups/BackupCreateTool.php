@@ -15,6 +15,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('backup_create')]
 #[Description(<<<'MARKDOWN'
     Create a project backup
+
+    Supported for PHP hosting and DinD projects alike. On DinD the `databases` flag also controls the project volumes. A request that selects neither files nor databases is refused with 422 `nothing_to_back_up`.
     MARKDOWN)]
 #[IsDestructive]
 class BackupCreateTool extends ApiTool
@@ -46,6 +48,9 @@ class BackupCreateTool extends ApiTool
     {
         return [
             'container',
+            'files',
+            'databases',
+            'note',
         ];
     }
 
@@ -67,6 +72,9 @@ class BackupCreateTool extends ApiTool
         return [
             'name' => $schema->string()->required(),
             'container' => $schema->string()->description('Backup container id or name')->required(),
+            'files' => $schema->boolean()->description('Include the project files (default true).'),
+            'databases' => $schema->boolean()->description('Include the databases; on DinD this also includes the volumes (default true).'),
+            'note' => $schema->string()->max(255)->description('Free-form note shown with the backup.'),
         ];
     }
 }

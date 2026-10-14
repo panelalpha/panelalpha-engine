@@ -3,6 +3,7 @@ import {
   type ApiResponse,
   type CreateSftpAccountRequest,
   type SftpAccount,
+  type SftpSessionsKilled,
   type UpdateSftpAccountRequest,
 } from '@/types';
 import { FtpApi } from './ftp.api';
@@ -36,6 +37,23 @@ export class SftpApi extends FtpApi {
     const response = await this.api.put(`projects/${username}/sftp-accounts/${sftpUsername}`, {
       data,
     });
+    await this.assertStatus(response, 200);
+    return response.json();
+  }
+
+  async killSftpSessions(
+    username: string,
+    sftpUsername: string
+  ): Promise<ApiResponse<SftpSessionsKilled>> {
+    const response = await this.api.post(
+      `projects/${username}/sftp-accounts/${sftpUsername}/kill-sessions`
+    );
+    await this.assertStatus(response, 200);
+    return response.json();
+  }
+
+  async killAllSftpSessions(username: string): Promise<ApiResponse<SftpSessionsKilled>> {
+    const response = await this.api.post(`projects/${username}/sftp-accounts/kill-sessions`);
     await this.assertStatus(response, 200);
     return response.json();
   }

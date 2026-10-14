@@ -73,8 +73,8 @@ class FtpAccountUpdateTool extends ApiTool
             'name' => $schema->string()->required(),
             'ftpUser' => $schema->string()->description('Example: ftpuser1@example.com.')->required(),
             'password' => $schema->string(),
-            'unlimited_quota' => $schema->boolean(),
-            'quota' => $schema->integer(),
+            'unlimited_quota' => $schema->boolean()->description('Send true, or send quota: 0, for an account with no quota of its own. It reads back as `details.unlimited_quota: true`; `details.quota` then holds the project\'s disk space limit (-1 when its disk space is unlimited), not 0.'),
+            'quota' => $schema->integer()->description('Quota in MB, capped at the project\'s disk space limit. 0 means no quota of its own.'),
         ];
     }
 }

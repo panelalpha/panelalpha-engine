@@ -38,6 +38,7 @@ class DomainAllocator
     public function allocate(string $username, ?string $requested = null, ?string $tunnel = null): AllocatedDomain
     {
         $settings = self::settings();
+        $tunnel = DomainPlan::resolveTunnel($tunnel, $settings);
 
         // Seeded before the walk, because a rung that was never a candidate
         // is invisible to it: on a host with no public address neither
@@ -240,11 +241,11 @@ class DomainAllocator
     }
 
     /**
-     * Whether the proxy refused the label because someone else has it, as
-     * opposed to refusing to talk to us at all. The first is a reason to try
-     * another name; the second is a reason to stop trying this zone.
+     * Whether a refusal means the label is taken -- locally or at the proxy --
+     * as opposed to a proxy that will not talk to us at all. The first is a
+     * reason to try another name; the second is a reason to stop trying.
      */
-    private static function nameIsTaken(string $message): bool
+    public static function nameIsTaken(string $message): bool
     {
         return preg_match('/not available|already (in use|exists|taken|registered)|duplicate|taken/i', $message) === 1;
     }
@@ -275,7 +276,7 @@ class DomainAllocator
     }
 
     /**
-     * @return array{sites_base_domain: ?string, cert_domain: ?string, default_ipv4: ?string}
+     * @return array{sites_base_domain: ?string, cert_domain: ?string, default_ipv4: ?string, default_tunnel: ?string}
      */
     private static function settings(): array
     {
@@ -283,6 +284,7 @@ class DomainAllocator
             'sites_base_domain' => Setting::get('default_wildcard_domain'),
             'cert_domain' => Setting::get('cert_domain'),
             'default_ipv4' => Setting::get('default_ipv4'),
+            'default_tunnel' => Setting::get(DomainPlan::SETTING_DEFAULT_TUNNEL),
         ];
     }
 }

@@ -2,8 +2,13 @@ import { expect, test } from '@/fixtures/test-options';
 import {
   clearSetupDindState,
   readSetupDindState,
+  refreshLease,
+  runIdentity,
+  writeLease,
   writeSetupDindState,
 } from '@/fixtures/helper/setup-state';
+import { expectStatus } from '@/helpers/expect-status';
+import { recordMatchesUsername } from '@/helpers/test-user-cleanup';
 import { configuredGitRepo, waitForDeploy } from '@/helpers/deploy-helpers';
 import { isDindUser } from '@/helpers/sss-feature-helpers';
 import { skipUnless } from '@/helpers/test-helpers';
@@ -28,15 +33,23 @@ test('provision shared DinD git-deployed user', async ({
     if (!state) {
       return undefined;
     }
-    const known = (await api.getUserRaw(state.username)).status !== 404;
-    if (!known) {
+    const raw = await api.getUserRaw(state.username);
+    if (raw.status === 404) {
       clearSetupDindState();
       return undefined;
     }
+    await expectStatus(raw, 200, `Cached DinD user "${state.username}" cannot be reused`);
+    expect(
+      recordMatchesUsername(raw.body, state.username),
+      `GET projects/${state.username} answered 200 with a different record`
+    ).toBe(true);
+    writeLease([state.username]);
+    writeSetupDindState({ ...state, ...runIdentity() });
     return state;
   });
 
   if (reused) {
+    refreshLease();
     return;
   }
 
@@ -51,17 +64,20 @@ test('provision shared DinD git-deployed user', async ({
     'Container management is not available for the created user.'
   );
 
+  writeLease([created.username]);
+
   const log = await waitForDeploy(api, created.username, {
     timeout: settings.timing.deployTimeout,
   });
-  expect(['success', 'partial', 'failed', 'cancelled']).toContain(log.status);
+  expect(
+    ['success', 'partial'],
+    `Deploy of ${created.username} ended ${log.status} (stage ${log.stage ?? 'none'})`
+  ).toContain(log.status);
 
   const url = `https://${created.domain}/`;
-  if (log.status === 'success' || log.status === 'partial') {
-    await waitForSiteHttpReady(anonymousRequest, url, {
-      timeout: Math.min(settings.timing.deployTimeout, 90_000),
-    }).catch(() => undefined);
-  }
+  await waitForSiteHttpReady(anonymousRequest, url, {
+    timeout: Math.min(settings.timing.deployTimeout, 90_000),
+  });
 
   writeSetupDindState({
     username: created.username,
@@ -69,5 +85,7 @@ test('provision shared DinD git-deployed user', async ({
     url,
     git_repo: gitRepo,
     createdAt: Date.now(),
+    ...runIdentity(),
   });
+  refreshLease();
 });

@@ -45,8 +45,10 @@ return [
     'POST /projects/{username}/clone' => 'project_clone',
     'POST /projects/{username}/staging' => 'project_staging',
     'POST /projects/{username}/push' => 'project_push',
+    'GET /projects/{username}/push/diff' => 'project_push_diff',
     'POST /projects/{username}/deploy-archive' => 'project_deploy_archive',
     'POST /projects/{username}/rebuild' => 'project_rebuild',
+    'POST /projects/{username}/source' => 'project_source_attach',
     'PUT /projects/{username}/suspend' => 'project_suspend',
     'PUT /projects/{username}/unsuspend' => 'project_unsuspend',
     'PUT /projects/{username}/password' => 'project_password_set',
@@ -60,9 +62,13 @@ return [
     // Deploy
     'POST /projects/{username}/deploy-cancel' => 'deploy_cancel',
     'GET /projects/{username}/deploy-log' => 'deploy_log_get',
+    'GET /projects/{username}/deploys' => 'deploy_list',
+    'GET /projects/{username}/deploys/{deploy}/log' => 'deploy_log_read',
     // Not tied to a project: it reads a repository, a path or an account's
     // files and reports what would be deployed.
     'POST /source/inspect' => 'source_inspect',
+    // The branches and tags of a remote, before any project exists.
+    'POST /source/refs' => 'source_refs',
     // The same report for a project that already has files, plus the snapshot
     // its last deploy froze and where the two now disagree. One verb for both
     // questions: source_inspect takes a repository, project_inspect takes an
@@ -81,6 +87,8 @@ return [
     // Cloudflare API token a cloudflare tunnel needs. Secrets read back
     // redacted.
     'GET /projects/{username}/settings' => 'project_setting_list',
+    'GET /projects/{username}/env-vars' => 'env_var_list',
+    'PUT /projects/{username}/env-vars' => 'env_var_set',
     'GET /projects/{username}/settings/{key}' => 'project_setting_get',
     'PUT /projects/{username}/settings/{key}' => 'project_setting_set',
     'DELETE /projects/{username}/settings/{key}' => 'project_setting_delete',
@@ -122,12 +130,15 @@ return [
     'POST /projects/{username}/sftp-accounts' => 'sftp_account_create',
     'PUT /projects/{username}/sftp-accounts/{sftpUser}' => 'sftp_account_update',
     'DELETE /projects/{username}/sftp-accounts/{sftpUser}' => 'sftp_account_delete',
+    'POST /projects/{username}/sftp-accounts/{sftpUser}/kill-sessions' => 'sftp_session_kill',
+    'POST /projects/{username}/sftp-accounts/kill-sessions' => 'sftp_session_kill_all',
 
     // MySQL. These "users" are MySQL accounts, not projects.
     'GET /projects/{username}/mysql/databases' => 'mysql_database_list',
     'POST /projects/{username}/mysql/databases' => 'mysql_database_create',
     'GET /projects/{username}/mysql/databases/{dbname}' => 'mysql_database_get',
     'DELETE /projects/{username}/mysql/databases/{dbname}' => 'mysql_database_delete',
+    'PUT /projects/{username}/mysql/databases/{dbname}/rename' => 'mysql_database_rename',
     'GET /projects/{username}/mysql/users' => 'mysql_user_list',
     'POST /projects/{username}/mysql/users' => 'mysql_user_create',
     'GET /projects/{username}/mysql/users/{dbuser}' => 'mysql_user_get',
@@ -150,6 +161,7 @@ return [
     // command the route borrowed its spelling from.
     'GET /projects/{username}/files/exists' => 'file_exists',
     'GET /projects/{username}/files/stat' => 'file_stat',
+    'GET /projects/{username}/files/list' => 'file_list',
     'GET /projects/{username}/files/download' => 'file_download',
     'POST /projects/{username}/files/upload' => 'file_upload',
     'DELETE /projects/{username}/files/remove' => 'file_delete',
@@ -194,6 +206,7 @@ return [
     'GET /php/available-versions' => 'php_version_list',
     'GET /projects/{username}/php/custom-ini-settings' => 'php_ini_get',
     'PUT /projects/{username}/php/custom-ini-settings' => 'php_ini_set',
+    'GET /projects/{username}/php/error-log' => 'php_error_log_get',
 
     // Containers. The project action drives every service in the project's
     // compose stack; the service action drives one of them.
@@ -247,6 +260,10 @@ return [
     'POST /bug-reports' => 'bug_report_create',
 
     'GET /system/info' => 'system_info',
+    'GET /system/api-access' => 'system_api_access_list',
+    'PUT /system/api-access/{project}' => 'system_api_access_allow',
+    'POST /system/api-access/{project}/rotate' => 'system_api_access_rotate',
+    'DELETE /system/api-access/{project}' => 'system_api_access_deny',
     'PUT /system/update' => 'system_update',
     'PUT /system/change-webserver' => 'system_webserver_change',
     'PUT /system/webserver-config' => 'system_webserver_config_set',
@@ -304,6 +321,7 @@ return [
     'POST /lighthouse/generate-report' => 'lighthouse_report_create',
 
     // Tasks
+    'GET /tasks' => 'task_list',
     'GET /tasks/{id}' => 'task_get',
     'GET /tasks/{id}/logs' => 'task_log_list',
     'POST /tasks/{id}/cancel' => 'task_cancel',
@@ -320,6 +338,10 @@ return [
     'GET /projects/{username}/backups' => 'backup_list',
     'POST /projects/{username}/backups' => 'backup_create',
     'GET /projects/{username}/backups/{id}' => 'backup_get',
+    'GET /projects/{username}/backups/{id}/items/{item}/download' => 'backup_item_download',
     'POST /projects/{username}/backups/{id}/restore' => 'backup_restore',
     'DELETE /projects/{username}/backups/{id}' => 'backup_delete',
+    'GET /projects/{username}/backup-schedule' => 'backup_schedule_get',
+    'PUT /projects/{username}/backup-schedule' => 'backup_schedule_set',
+    'DELETE /projects/{username}/backup-schedule' => 'backup_schedule_delete',
 ];

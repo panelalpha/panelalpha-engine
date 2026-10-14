@@ -8,6 +8,7 @@
 #   ufw.sh fail2ban        rewrite fail2ban's jails and reload them, bans kept
 #                          (trusted list changed)
 #   ufw.sh uninstall       disable ufw and remove the engine's hooks
+#   ufw.sh refused         the stored rules iptables would not load, one per line
 #   ufw.sh published-on|published-off   the hook, called by ufw itself
 #
 # ufw reloads only its own chains (MANAGE_BUILTINS=no), so Docker's chains and
@@ -46,12 +47,16 @@ CSF_LEFTOVERS=("$CSF_SRC.tgz" "${PA_CSF_CRON:-/etc/cron.daily/csget}" "${PA_CSF_
 BACKUP_DIR=${PA_BACKUP_DIR:-/var/backups}
 SELF="$ENGINE_DIR/scripts/firewall/ufw.sh"
 CHAIN=PA-PUBLISHED
+PUBLISHED_JUMP=(-m conntrack --ctstate NEW -m conntrack --ctstate DNAT -j "$CHAIN")
 MANAGED="panelalpha:"
 # ufw rewrites user.rules whole on every call, so two writers at once lose or
 # resurrect each other's rules. Every ufw write takes this lock: this script's,
 # core's (App\System\Firewall\Ufw\UfwFirewall::LOCK) and fail2ban's ban action.
 UFW_LOCK=${PA_UFW_LOCK:-$ENGINE_DIR/data/ufw.lock}
 UFW_LOCK_WAIT=${PA_UFW_LOCK_WAIT:-30}
+# The trusted list's lock, shared with core's
+# App\System\Firewall\Ufw\UfwFirewall::TRUSTED_LOCK: both read-modify-write it.
+TRUSTED_LOCK=${PA_UFW_TRUSTED_LOCK:-$ENGINE_DIR/data/ufw-trusted.lock}
 
 say() { echo "firewall: $*"; }
 trim() { printf '%s' "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'; }
@@ -63,6 +68,25 @@ warn() { echo "firewall: $*" >&2; }
 iptables() { command iptables -w 30 "$@"; }
 ip6tables() { command ip6tables -w 30 "$@"; }
 
+# Runs "${@:3}" holding lock file $1, or says why not and fails; $2 names
+# the kind of change in that message. The lock file stays readable for core,
+# which opens it as www-data.
+with_lock() {
+    local lock_file=$1 lock_what=$2
+    shift 2
+    mkdir -p "$(dirname "$lock_file")"
+    (
+        flock -w "$UFW_LOCK_WAIT" 9 || {
+            warn "another $lock_what change held $lock_file for over ${UFW_LOCK_WAIT}s; nothing was changed"
+            exit 1
+        }
+        "$@"
+    ) 9>>"$lock_file"
+    local rc=$?
+    chmod 0644 "$lock_file" 2>/dev/null
+    return $rc
+}
+
 # Runs "$@" holding the ufw lock, or says why not and fails. Never around
 # fail2ban-client: fail2ban's ban action waits for the same lock.
 with_ufw_lock() {
@@ -70,20 +94,15 @@ with_ufw_lock() {
         "$@"
         return
     fi
-    mkdir -p "$(dirname "$UFW_LOCK")"
-    (
-        flock -w "$UFW_LOCK_WAIT" 9 || {
-            warn "another ufw change held $UFW_LOCK for over ${UFW_LOCK_WAIT}s; nothing was changed"
-            exit 1
-        }
-        UFW_LOCKED=1
-        "$@"
-    ) 9>>"$UFW_LOCK"
-    local rc=$?
-    # core opens it as www-data.
-    chmod 0644 "$UFW_LOCK" 2>/dev/null
-    return $rc
+    with_lock "$UFW_LOCK" ufw ufw_locked "$@"
 }
+ufw_locked() {
+    UFW_LOCKED=1
+    "$@"
+}
+
+# The trusted write reloads fail2ban, so it takes its own lock, not the ufw one.
+with_trusted_lock() { with_lock "$TRUSTED_LOCK" trusted-list "$@"; }
 
 # Every port sshd is configured for, is listening on, or this session came in
 # on: enabling ufw without the right one locks the operator out.
@@ -117,40 +136,83 @@ managed_route_rules() {
     echo "2222 tcp sftp"
 }
 
+# An IPv4 or IPv6 address or CIDR range as the API takes one
+# (FirewallRule::isAddress): no leading zero in an octet, which iptables reads
+# as octal, and a prefix no longer than the address.
 is_address() {
-    echo "$1" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?$|^[0-9A-Fa-f]*:[0-9A-Fa-f:.]*(/[0-9]{1,3})?$'
+    local ip=${1%%/*} prefix=${1#*/} bits=32 octet
+    if [[ $ip =~ ^(0|[1-9][0-9]{0,2})(\.(0|[1-9][0-9]{0,2})){3}$ ]]; then
+        for octet in ${ip//./ }; do [ "$octet" -le 255 ] || return 1; done
+    elif is_ipv6 "$ip"; then
+        bits=128
+    else
+        return 1
+    fi
+    [[ $1 != */* ]] || { [[ $prefix =~ ^[0-9]{1,3}$ ]] && [ "$prefix" -le $bits ]; }
+}
+# ufw is python3, so python3 is there; without it, the shape alone.
+is_ipv6() {
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -c 'import ipaddress, sys; ipaddress.IPv6Address(sys.argv[1])' "$1" 2>/dev/null
+    else
+        [[ $1 =~ ^[0-9A-Fa-f:.]+$ && $1 == *:*:* && $1 != *:::* && ${1/::/} != *::* ]]
+    fi
+}
+# A range wider than the API's trusted list takes (TrustedAddress::widthProblem).
+too_wide() {
+    [[ $1 == */* ]] || return 1
+    if [[ $1 == *:* ]]; then [ "${1#*/}" -lt 16 ]; else [ "${1#*/}" -lt 8 ]; fi
 }
 
-# A comment without the bytes ufw drops, those that are not UTF-8: as python3, ufw's
-# runtime, drops them; iconv is made to match (glibc keeps > U+10FFFF, musl a cut end).
+# A comment without the bytes ufw drops, those that are not UTF-8, as python3,
+# ufw's runtime, drops them.
 utf8_only() {
     if command -v python3 >/dev/null 2>&1; then
         python3 -c 'import os, sys; sys.stdout.buffer.write(os.fsencode(sys.argv[1]).decode("utf-8", "ignore").encode())' "$1" ||
             printf '%s' "$1"
     elif command -v iconv >/dev/null 2>&1; then
-        local s
-        s=$(
-            export LC_ALL=C
-            s=${1//$'\xf4'[$'\x90'-$'\xbf']/$'\xff\xff'}
-            printf '%sx' "${s//[$'\xf5'-$'\xfe']/$'\xff'}" | iconv -c -f UTF-8 -t UTF-8 2>/dev/null
-        )
-        case "$s" in *x) printf '%s' "${s%x}" ;; *) printf '%s' "$1" ;; esac
+        utf8_only_by_iconv "$1"
     else
         printf '%s' "$1"
     fi
 }
+# utf8_only without python3: iconv is made to match it, as glibc keeps code
+# points above U+10FFFF and musl cuts the end off.
+utf8_only_by_iconv() {
+    local s
+    s=$(
+        export LC_ALL=C
+        s=${1//$'\xf4'[$'\x90'-$'\xbf']/$'\xff\xff'}
+        printf '%sx' "${s//[$'\xf5'-$'\xfe']/$'\xff'}" | iconv -c -f UTF-8 -t UTF-8 2>/dev/null
+    )
+    case "$s" in *x) printf '%s' "${s%x}" ;; *) printf '%s' "$1" ;; esac
+}
 
 # A comment changed as little as ufw (ufw/parser.py) and the API
 # (FirewallRule::commentProblem()) need; prints it, then why, a line each.
+# Each step below edits c and adds its reason to why, in this subshell.
 safe_comment() ( # <comment> <host|route>
     export LC_ALL=C
+    drop_non_utf8 "$1"
+    blank_control_characters "$1"
+    replace_apostrophes
+    quote_reserved_prefixes
+    quote_rule_keyword
+    [ "$2" != route ] || quote_route_words
+    printf '%s\n' "$c" "${why[@]}"
+)
+
+# The first step, which starts c and why; first, or "\xffin" would be stored as "in".
+drop_non_utf8() { # <comment>
     why=()
-    # First, or "\xffin" would be stored as "in".
     c=$(utf8_only "$1" && printf x)
     c=${c%x}
     [ "$c" = "$1" ] || why+=("bytes that are not UTF-8 are dropped, as ufw drops them")
-    # C0, DEL, and C1 as UTF-8.
-    u=$c
+}
+
+# C0, DEL, and C1 as UTF-8 become spaces; a comment changed so far is trimmed.
+blank_control_characters() { # <comment as given>
+    local u=$c
     c=${c//[[:cntrl:]]/ }
     c=${c//$'\xc2'[$'\x80'-$'\x9f']/ }
     [ "$c" = "$u" ] || why+=("control characters become spaces")
@@ -158,12 +220,20 @@ safe_comment() ( # <comment> <host|route>
         c=${c#"${c%%[! ]*}"}
         c=${c%"${c##*[! ]}"}
     fi
+}
+
+replace_apostrophes() {
     case "$c" in *\'*)
         c=${c//\'/$'\xe2\x80\x99'}
         why+=("ufw refuses ' in a comment")
         ;;
     esac
-    # The prefix is quoted to the end of its word: "--rootdir=/srv" old.
+}
+
+# A prefix ufw or the engine reads is quoted to the end of its word:
+# "--rootdir=/srv" old.
+quote_reserved_prefixes() {
+    local p rest word
     for p in --rootdir= --datadir= "$MANAGED" 'by Fail2Ban'; do
         case "$c" in "$p"*)
             rest=${c#"$p"}
@@ -177,27 +247,37 @@ safe_comment() ( # <comment> <host|route>
             ;;
         esac
     done
+}
+
+quote_rule_keyword() {
     case "$c" in in | out | log | log-all)
         c="\"$c\""
         why+=("ufw would read it as part of the rule")
         ;;
     esac
-    if [ "$2" = route ]; then
-        w=" $c"
-        if [ "$c" = delete ] || [[ $w == *' in on '* && $w == *' out on '* ]] ||
-            { [[ $w == *' in '* || $w == *' out '* ]] &&
-                ! [[ $w == *' in on '* || $w == *' out on '* || $w == *' app in '* || $w == *' app out '* ]]; }; then
-            [ "$c" = delete ] && w=' "delete"'
-            while [[ $w == *' in '* || $w == *' out '* ]]; do
-                w=${w//' in '/' "in" '}
-                w=${w//' out '/' "out" '}
-            done
-            c=${w# }
-            why+=("ufw would read it as part of a route rule")
-        fi
-    fi
-    printf '%s\n' "$c" "${why[@]}"
-)
+}
+
+# Whether ufw's route parser would take words of <comment> for the rule's: a
+# bare "delete", both "in on" and "out on", or an "in" or "out" that is not part
+# of "in on", "out on", "app in" or "app out".
+misread_as_route() { # <comment>
+    local w=" $1"
+    [ "$1" = delete ] || [[ $w == *' in on '* && $w == *' out on '* ]] ||
+        { [[ $w == *' in '* || $w == *' out '* ]] &&
+            ! [[ $w == *' in on '* || $w == *' out on '* || $w == *' app in '* || $w == *' app out '* ]]; }
+}
+
+quote_route_words() {
+    local w=" $c"
+    misread_as_route "$c" || return 0
+    [ "$c" = delete ] && w=' "delete"'
+    while [[ $w == *' in '* || $w == *' out '* ]]; do
+        w=${w//' in '/' "in" '}
+        w=${w//' out '/' "out" '}
+    done
+    c=${w# }
+    why+=("ufw would read it as part of a route rule")
+}
 
 # A comment for a log line: in single quotes, which a written one never holds,
 # or as $'...' with control characters or bytes that are not UTF-8.
@@ -247,105 +327,175 @@ ufw_error() { printf '%s\n' "$1" | grep -i -m1 '^error' || printf '%s\n' "$1" | 
 # One csf.allow / csf.deny line into UFW_ARGS (the words after `ufw prepend`),
 # and for a bare address, which CSF applied both ways, UFW_ARGS_OUT as well:
 # the API lists the two as one rule in both directions. Its comment, as ufw
-# can store it, into UFW_COMMENT.
+# can store it, into UFW_COMMENT; an inbound deny's is fit for a route rule as
+# well, as convert_published carries it over to published ports and the API
+# lists the two as one rule only when their comments match.
 # Fails for comments, blank lines, the entries the engine itself wrote, lfd's
 # own automatic blocks (fail2ban takes over from lfd and starts empty) and
 # anything ufw cannot express, which is reported.
 UFW_ARGS=()
 UFW_ARGS_OUT=()
 csf_line_to_ufw() { # <allow|deny> <line>
-    local action=$1 line=${2%$'\r'} rule comment="" proto dir=in pspec aspec extra
-    local from=any to=any sport="" dport="" addr ports kind=host
+    local action=$1 line=${2%$'\r'} rule comment="" kind=host
     UFW_ARGS=()
     UFW_ARGS_OUT=()
     UFW_COMMENT=
     rule=$(trim "${line%%#*}")
     case "$line" in *'#'*) comment=$(trim "${line#*#}") ;; esac
-    [ -n "$rule" ] || return 1
-    case "$comment" in *'docker internal network'* | lfd:* | 'lfd '*) return 1 ;; esac
-    case "$rule" in
-    [Ii]nclude*)
-        warn "not moved, ufw has no include: $line"
-        return 1
-        ;;
-    esac
-
+    csf_line_movable "$rule" "$comment" "$line" || return 1
     if [ "${rule#*|}" = "$rule" ]; then
-        if ! is_address "$rule"; then
-            warn "not moved, not an address: $line"
-            return 1
-        fi
-        UFW_ARGS=("$action" in from "$rule" to any)
-        UFW_ARGS_OUT=("$action" out from any to "$rule")
+        csf_address_to_ufw "$action" "$rule" "$line" || return 1
     else
-        IFS='|' read -r proto dir pspec aspec extra <<<"$rule"
-        if [ -n "$extra" ] || ! echo "$proto" | grep -qE '^(tcp|udp)$' || ! echo "$dir" | grep -qE '^(in|out)$'; then
-            warn "not moved, unrecognised rule: $line"
-            return 1
-        fi
-        addr=${aspec#?=}
-        ports=$(echo "${pspec#?=}" | tr '_' ':')
-        case "$aspec" in
-        u=*)
-            warn "not moved, ufw cannot match a user id: $line"
-            return 1
-            ;;
-        s=*) from=$addr ;;
-        d=*) to=$addr ;;
-        *)
-            warn "not moved, unrecognised address: $line"
-            return 1
-            ;;
-        esac
-        is_address "$addr" || {
-            warn "not moved, not an address: $line"
-            return 1
-        }
-        case "$pspec" in
-        s=*) sport=$ports ;;
-        d=*) dport=$ports ;;
-        *)
-            warn "not moved, unrecognised port: $line"
-            return 1
-            ;;
-        esac
-        UFW_ARGS=("$action" "$dir" proto "$proto" from "$from")
-        [ -n "$sport" ] && UFW_ARGS+=(port "$sport")
-        UFW_ARGS+=(to "$to")
-        [ -n "$dport" ] && UFW_ARGS+=(port "$dport")
+        csf_filter_to_ufw "$action" "$rule" "$line" || return 1
     fi
-    # An inbound deny is carried over to published ports (convert_published),
-    # and the API lists the two as one rule only when their comments match.
-    [ "$action" = deny ] && [ "$dir" = in ] && kind=route
+    [ "$action" = deny ] && [ "${UFW_ARGS[1]}" = in ] && kind=route
     ufw_comment "$comment" "$kind" "$rule from csf.$action"
     return 0
 }
 
+# Whether a CSF line is a rule to move; an include, which ufw has no
+# equivalent for, is reported.
+csf_line_movable() { # <rule> <comment> <line>
+    [ -n "$1" ] || return 1
+    case "$2" in *'docker internal network'* | lfd:* | 'lfd '*) return 1 ;; esac
+    case "$1" in
+    [Ii]nclude*)
+        warn "not moved, ufw has no include: $3"
+        return 1
+        ;;
+    esac
+}
+
+csf_address_to_ufw() { # <allow|deny> <address> <line>
+    if ! is_address "$2"; then
+        warn "not moved, not an address: $3"
+        return 1
+    fi
+    UFW_ARGS=("$1" in from "$2" to any)
+    UFW_ARGS_OUT=("$1" out from any to "$2")
+}
+
+# A filter rule, proto|dir|s=or d=port|s=or d=address, into UFW_ARGS. A port
+# with zeros in front is moved without them, and that is said.
+csf_filter_to_ufw() { # <allow|deny> <rule> <line>
+    local proto dir pspec aspec extra
+    IFS='|' read -r proto dir pspec aspec extra <<<"$2"
+    if ! csf_filter_fields_known "$proto" "$dir" "$extra"; then
+        warn "not moved, unrecognised rule: $3"
+        return 1
+    fi
+    if ! csf_port "${pspec#?=}"; then
+        warn "not moved, not a port ufw can hold (1-65535, a range low to high): $3"
+        return 1
+    fi
+    [ "$CSF_PORT" = "$(echo "${pspec#?=}" | tr '_' ':')" ] ||
+        say "$2: port ${pspec#?=} is moved as $CSF_PORT: a leading zero is dropped, which iptables refuses (08080) or reads as octal (0443)"
+    csf_filter_sides_known "$aspec" "$pspec" "$3" || return 1
+    ufw_filter_args "$1" "$dir" "$proto" "$aspec" "$pspec" "$CSF_PORT"
+}
+
+csf_filter_fields_known() { # <proto> <dir> <extra fields>
+    [ -z "$3" ] && echo "$1" | grep -qE '^(tcp|udp)$' && echo "$2" | grep -qE '^(in|out)$'
+}
+
+# Whether ufw can match a filter rule's address field (s= or d=; not a user
+# id, u=) and port field (s= or d=); what it cannot is reported.
+csf_filter_sides_known() { # <address field> <port field> <line>
+    case "$1" in
+    u=*)
+        warn "not moved, ufw cannot match a user id: $3"
+        return 1
+        ;;
+    s=* | d=*) ;;
+    *)
+        warn "not moved, unrecognised address: $3"
+        return 1
+        ;;
+    esac
+    is_address "${1#?=}" || {
+        warn "not moved, not an address: $3"
+        return 1
+    }
+    case "$2" in
+    s=* | d=*) ;;
+    *)
+        warn "not moved, unrecognised port: $3"
+        return 1
+        ;;
+    esac
+}
+
+ufw_filter_args() { # <action> <dir> <proto> <address field> <port field> <ports>
+    local from=any to=any sport="" dport=""
+    case "$4" in s=*) from=${4#?=} ;; d=*) to=${4#?=} ;; esac
+    case "$5" in s=*) sport=$6 ;; d=*) dport=$6 ;; esac
+    UFW_ARGS=("$1" "$2" proto "$3" from "$from")
+    [ -n "$sport" ] && UFW_ARGS+=(port "$sport")
+    UFW_ARGS+=(to "$to")
+    [ -n "$dport" ] && UFW_ARGS+=(port "$dport")
+    return 0
+}
+
+# A CSF port (22, 30000_30009, 80,443) as ufw is to store it, into CSF_PORT;
+# fails for anything else. CSF hands it to iptables as written, and so would
+# ufw, whose iptables-restore then refuses the whole ruleset on a port like
+# 08080 and locks the host out. The port meant is decimal: zeros in front go.
+CSF_PORT=
+csf_port() {
+    local item lo hi out=()
+    CSF_PORT=
+    [[ $1 =~ ^[0-9]+([_:][0-9]+)?(,[0-9]+([_:][0-9]+)?)*$ ]] || return 1
+    for item in ${1//,/ }; do
+        lo=$(decimal_port "${item%%[_:]*}") || return 1
+        hi=$(decimal_port "${item##*[_:]}") || return 1
+        [ "$lo" -le "$hi" ] || return 1
+        if [ "$lo" = "$hi" ]; then out+=("$lo"); else out+=("$lo:$hi"); fi
+    done
+    CSF_PORT=$(IFS=,; echo "${out[*]}")
+}
+decimal_port() {
+    local n=${1#"${1%%[!0]*}"}
+    [ -n "$n" ] && [ ${#n} -le 5 ] && [ "$n" -le 65535 ] && echo "$n"
+}
+
 # Each rule goes on top; called for csf.deny first, then csf.allow, so the
-# allows end up above the denies and win, as they did under CSF.
+# allows end up above the denies and win, as they did under CSF. Until the
+# engine's route rules are there, convert_published carries the denies over.
 import_csf_file() { # <allow|deny> <file>
-    local action=$1 file=$2 line moved=0 rc refused comment what
+    local action=$1 file=$2 line moved=0 routed=
     [ -f "$file" ] || return 0
+    has_engine_routes && routed=1
     while IFS= read -r line || [ -n "$line" ]; do
         csf_line_to_ufw "$action" "$line" || continue
-        what="$(trim "${line%%#*}") from $(basename "$file")"
-        comment=$UFW_COMMENT refused=
-        ufw_write prepend "${UFW_ARGS[@]}"
-        rc=$?
-        [ $rc = 1 ] && refused=$UFW_ERROR UFW_COMMENT=
-        if [ $rc != 2 ] && [ ${#UFW_ARGS_OUT[@]} -gt 0 ]; then
-            ufw_write prepend "${UFW_ARGS_OUT[@]}"
-            rc=$?
-            [ $rc = 1 ] && refused=$UFW_ERROR
-        fi
-        if [ $rc = 2 ]; then
-            warn "not moved: $what ($UFW_ERROR)"
-            continue
-        fi
+        write_csf_rule "$(trim "${line%%#*}") from $(basename "$file")" "$routed" || continue
         moved=$((moved + 1))
-        [ -z "$refused" ] || warn "$what: moved without its comment $(shown "$comment"), which ufw refused ($refused)"
     done <"$file"
     say "moved $moved rule(s) from $(basename "$file")"
+}
+
+# Writes what csf_line_to_ufw made; with <routed>, an inbound deny covers
+# published ports too, as one made through the API does. Fails when ufw
+# refused the rule itself; one written without its comment is said.
+write_csf_rule() { # <the rule, for the log> <routed>
+    local what=$1 comment=$UFW_COMMENT refused="" rc
+    ufw_write prepend "${UFW_ARGS[@]}"
+    rc=$?
+    [ $rc = 1 ] && refused=$UFW_ERROR UFW_COMMENT=
+    if [ $rc != 2 ] && [ ${#UFW_ARGS_OUT[@]} -gt 0 ]; then
+        ufw_write prepend "${UFW_ARGS_OUT[@]}"
+        rc=$?
+        [ $rc = 1 ] && refused=$UFW_ERROR
+    fi
+    if [ $rc = 2 ]; then
+        warn "not moved: $what ($UFW_ERROR)"
+        return 1
+    fi
+    if [ -n "$2" ] && [ "${UFW_ARGS[0]} ${UFW_ARGS[1]}" = "deny in" ]; then
+        ufw_write route prepend deny "${UFW_ARGS[@]:2}"
+        [ $? != 2 ] || warn "$what: moved, but not to published ports ($UFW_ERROR)"
+    fi
+    [ -z "$refused" ] || warn "$what: moved without its comment $(shown "$comment"), which ufw refused ($refused)"
+    return 0
 }
 
 # Each address on its own line, as core compares them (FirewallRule::normalizeAddress):
@@ -371,37 +521,78 @@ for a in sys.stdin.read().splitlines():
 # when it does not hold that address yet, so a second migration adds nothing;
 # what is there, comments and order included, stays as it is.
 import_csf_ignores() {
-    local file line addr i list="$F2B_DIR/panelalpha-ignoreip" add
-    local -a held=() found=() canon=()
-    local -A have=()
-    if [ -f "$list" ]; then
-        while IFS= read -r line || [ -n "$line" ]; do
-            addr=$(trim "${line%%#*}")
-            [ -n "$addr" ] && held+=("$addr")
-        done <"$list"
-    fi
+    local list="$F2B_DIR/panelalpha-ignoreip" add
+    local -a held=() found=()
+    mapfile -t held < <(trusted_addresses "$list")
+    mapfile -t found < <(csf_trusted_addresses)
+    [ ${#found[@]} = 0 ] && return 0
+    add=$(addresses_not_held ${#held[@]} "${held[@]}" "${found[@]}")
+    [ -n "$add" ] || return 0
+    append_lines "$list" "$add"
+}
+
+# The addresses on the trusted list <list>, a line each, comments left out.
+trusted_addresses() { # <list>
+    local line addr
+    [ -f "$1" ] || return 0
+    while IFS= read -r line || [ -n "$line" ]; do
+        addr=$(trim "${line%%#*}")
+        [ -n "$addr" ] && printf '%s\n' "$addr"
+    done <"$1"
+    return 0
+}
+
+csf_trusted_addresses() {
+    local file line
     for file in "$CSF_DIR/csf.ignore" "$CSF_DIR/csf.allow"; do
         [ -f "$file" ] || continue
         while IFS= read -r line || [ -n "$line" ]; do
-            case "$line" in *'docker internal network'*) continue ;; esac
-            addr=$(trim "${line%%#*}")
-            [ -n "$addr" ] && is_address "$addr" && found+=("$addr")
+            csf_trusted_address "$file" "$line"
         done <"$file"
     done
-    [ ${#found[@]} = 0 ] && return 0
-    mapfile -t canon < <(printf '%s\n' "${held[@]}" "${found[@]}" | canonical_addresses)
-    [ ${#canon[@]} = $((${#held[@]} + ${#found[@]})) ] || canon=("${held[@]}" "${found[@]}")
-    for ((i = 0; i < ${#held[@]}; i++)); do have[${canon[i]}]=1; done
-    add=$(for ((i = 0; i < ${#found[@]}; i++)); do
-        addr=${canon[${#held[@]} + i]}
+}
+
+# The address on a line of csf.ignore or csf.allow, if it is one the trusted
+# list takes. csf.allow's rules (tcp|in|...) are not addresses, and
+# csf_line_to_ufw names a bad one there.
+csf_trusted_address() { # <file> <line>
+    local addr
+    case "$2" in *'docker internal network'*) return 0 ;; esac
+    addr=$(trim "${2%%#*}")
+    [ -n "$addr" ] || return 0
+    if ! is_address "$addr"; then
+        [ "$1" != "$CSF_DIR/csf.ignore" ] || warn "not trusted, not an address: $2 (csf.ignore)"
+        return 0
+    fi
+    if too_wide "$addr"; then
+        warn "not trusted, a range wider than /8 (IPv4) or /16 (IPv6) would keep much of the internet from ever being banned: $addr ($(basename "$1"))"
+        return 0
+    fi
+    printf '%s\n' "$addr"
+}
+
+# Of <held count> held addresses followed by found ones, the found ones not
+# held yet in any spelling, sorted.
+addresses_not_held() { # <held count> <held...> <found...>
+    local held_count=$1 i addr
+    shift
+    local -a all=("$@") canon=()
+    local -A have=()
+    mapfile -t canon < <(printf '%s\n' "${all[@]}" | canonical_addresses)
+    [ ${#canon[@]} = ${#all[@]} ] || canon=("${all[@]}")
+    for ((i = 0; i < held_count; i++)); do have[${canon[i]}]=1; done
+    for ((i = held_count; i < ${#all[@]}; i++)); do
+        addr=${canon[i]}
         [ -z "${have[$addr]+x}" ] || continue
         have[$addr]=1
-        echo "${found[i]}"
-    done | sort -u)
-    [ -n "$add" ] || return 0
-    # Or the first address added would join the last line.
-    [ ! -s "$list" ] || [ -z "$(tail -c1 "$list")" ] || echo >>"$list"
-    printf '%s\n' "$add" >>"$list"
+        echo "${all[i]}"
+    done | sort -u
+}
+
+# <lines> on lines of their own, also after a last line with no newline.
+append_lines() { # <file> <lines>
+    [ ! -s "$1" ] || [ -z "$(tail -c1 "$1")" ] || echo >>"$1"
+    printf '%s\n' "$2" >>"$1"
 }
 
 # An old core container still bind-mounting /etc/csf recreates it when Docker
@@ -469,7 +660,7 @@ import_from_csf() {
     with_ufw_lock import_csf_file deny "$CSF_DIR/csf.deny" &&
         with_ufw_lock import_csf_file allow "$CSF_DIR/csf.allow" || return 1
     mkdir -p "$F2B_DIR"
-    import_csf_ignores
+    with_trusted_lock import_csf_ignores
     [ -f "$CSF_DIR/csf.disable" ] && touch "$UFW_DIR/.panelalpha-keep-disabled"
     return 0
 }
@@ -479,6 +670,16 @@ import_from_csf() {
 # The backup is made here: clear_csf_leftover reads it as "the move finished".
 remove_csf() {
     [ -f "$CSF_DIR/csf.conf" ] || return 0
+    back_up_csf
+    uninstall_csf
+    if [ -f "$ENGINE_DIR/.env" ]; then
+        sed -i '/^CSF_UI=/d; /^CSF_UI_PASSWORD=/d' "$ENGINE_DIR/.env"
+    fi
+    say "CSF uninstalled"
+}
+
+# CSF's configuration into CSF_BACKUP, which stays empty when it could not be saved.
+back_up_csf() {
     mkdir -p "$BACKUP_DIR"
     CSF_BACKUP="$BACKUP_DIR/panelalpha-csf-$(date +%Y%m%d%H%M%S).tgz"
     if tar -czf "$CSF_BACKUP" -C "$(dirname "$CSF_DIR")" "$(basename "$CSF_DIR")" 2>/dev/null; then
@@ -486,6 +687,9 @@ remove_csf() {
     else
         CSF_BACKUP=
     fi
+}
+
+uninstall_csf() {
     if [ -f "$CSF_DIR/uninstall.sh" ]; then
         sh "$CSF_DIR/uninstall.sh" >/dev/null 2>&1 || true
     elif [ -f "$CSF_SRC/uninstall.sh" ]; then
@@ -494,10 +698,65 @@ remove_csf() {
     systemctl disable --now lfd csf >/dev/null 2>&1 || true
     systemctl reset-failed lfd csf >/dev/null 2>&1 || true
     rm -rf "$CSF_SRC" "$CSF_DIR" "${CSF_LEFTOVERS[@]}"
-    if [ -f "$ENGINE_DIR/.env" ]; then
-        sed -i '/^CSF_UI=/d; /^CSF_UI_PASSWORD=/d' "$ENGINE_DIR/.env"
+}
+
+# Whether ufw's live rules hold what its rule files say. A load that failed
+# leaves INPUT dropping with ufw-user-input empty, which locks the host out,
+# and a start that failed marks ufw off again but leaves its chains behind.
+ufw_loaded() {
+    local ipt prefix file want have
+    for ipt in iptables ip6tables; do
+        prefix=ufw file=$UFW_DIR/user.rules
+        [ "$ipt" = ip6tables ] && prefix=ufw6 file=$UFW_DIR/user6.rules
+        "$ipt" -n -L "$prefix-user-input" >/dev/null 2>&1 || continue
+        grep -qs '^ENABLED=yes' "$UFW_DIR/ufw.conf" || return 1
+        want=$(cat "$file" 2>/dev/null | grep -c "^-A $prefix-user-input ")
+        have=$("$ipt" -S "$prefix-user-input" 2>/dev/null | grep -c "^-A $prefix-user-input ")
+        [ "$have" -ge "$want" ] || return 1
+    done
+    return 0
+}
+
+# With the rule files put back after a failed change: loads them, or turns
+# ufw off so the host stays reachable, and says so with what iptables said.
+ufw_recover() {
+    local out=""
+    if grep -qs '^ENABLED=yes' "$UFW_DIR/ufw.conf"; then
+        out=$(ufw reload 2>&1) && ufw_loaded && return 0
+    elif ufw_loaded; then
+        return 0
     fi
-    say "CSF uninstalled"
+    ufw --force disable >/dev/null 2>&1
+    out=$(printf '%s\n' "$out" | sed '/^$/d' | tr '\n' ' ')
+    warn "ufw could not load its rules, so it is turned off to keep this host reachable${out:+: ${out% }}"
+    warn "fix the rules in $UFW_DIR/user.rules, then run 'ufw enable'"
+    return 1
+}
+
+# Runs "$@", which writes ufw's rules, so that a failure cannot lock the host
+# out: the rule files go back as they were and are loaded again, or ufw is
+# turned off. Fails when "$@" did, or its rules did not load.
+ufw_guarded() {
+    local saved f rc=0
+    saved=$(mktemp -d) || return 1
+    for f in user.rules user6.rules ufw.conf; do
+        [ ! -e "$UFW_DIR/$f" ] || cp -p "$UFW_DIR/$f" "$saved/" || {
+            rm -rf "$saved"
+            warn "could not copy $UFW_DIR/$f aside; nothing was changed"
+            return 1
+        }
+    done
+    "$@" || rc=1
+    if [ $rc = 0 ] && ufw_loaded; then
+        rm -rf "$saved"
+        return 0
+    fi
+    for f in user.rules user6.rules ufw.conf; do
+        [ ! -e "$saved/$f" ] || cp -p "$saved/$f" "$UFW_DIR/$f"
+    done
+    rm -rf "$saved"
+    ufw_recover
+    return 1
 }
 
 install_packages() {
@@ -510,29 +769,44 @@ install_packages() {
 }
 
 configure_ufw() {
-    local port proto label
+    set_ufw_defaults || return 1
+    turn_ufw_logging_on
+    open_managed_ports
+    route_rules
+    write_ufw_hooks
+}
+
+# Enabled without the default policies, ufw would let everything in.
+set_ufw_defaults() {
     if [ -f "$UFW_DEFAULTS" ]; then
         sed -i 's/^IPV6=.*/IPV6=yes/; s/^MANAGE_BUILTINS=.*/MANAGE_BUILTINS=no/' "$UFW_DEFAULTS"
     fi
-    # Enabled without them, ufw would let everything in.
     ufw default deny incoming >/dev/null &&
         ufw default allow outgoing >/dev/null &&
         ufw default deny routed >/dev/null || {
         warn "could not set ufw's default policies"
         return 1
     }
-    # The firewall API reads what was blocked from ufw's log; an operator's
-    # own level (medium, high) is kept.
+}
+
+# The firewall API reads what was blocked from ufw's log; an operator's own
+# level (medium, high) is kept.
+turn_ufw_logging_on() {
     if grep -q '^LOGLEVEL=off' "$UFW_DIR/ufw.conf" 2>/dev/null; then
         ufw logging low >/dev/null
     fi
+}
+
+open_managed_ports() {
+    local port proto label
     while read -r port proto label; do
         ufw allow proto "$proto" from any to any port "$port" comment "$MANAGED $label" >/dev/null ||
             warn "could not open $port/$proto ($label)"
     done < <(managed_rules)
-    route_rules
+}
 
-    # ufw runs these on start and stop; see the header.
+# The hooks ufw runs on start and stop; see the header.
+write_ufw_hooks() {
     cat >"$UFW_DIR/before.init" <<EOF
 #!/bin/sh
 # Written by the PanelAlpha engine (scripts/firewall/ufw.sh). ufw cannot delete
@@ -610,51 +884,75 @@ covers_published() { # <proto> <dport>
 # operator's allow that reached a port a container publishes now gets the same
 # rule as a route rule, so nothing reachable is cut off; every inbound deny gets
 # one too, as a deny made through the API now does, so nothing blocked opens.
-# Bans are mirror_bans' job. Each one is reported.
+# Bans are mirror_bans' job. Each one is reported. The rules are read before
+# ufw starts rewriting the files.
 convert_published() {
-    local ports rules action proto dport dst sport src dir hex comment words key
+    local ports rules action proto dport dst sport src dir hex comment key
     local -A seen=()
     ports=$(published_container_ports)
-    # Read before ufw starts rewriting the files.
     rules=$(tuples)
     while read -r action proto dport dst sport src dir hex; do
         case "$action" in allow | deny | reject) ;; *) continue ;; esac
         [ "$dir" = in ] || continue
         comment=
         [ "$hex" = - ] || comment=$(unhex "$hex")
-        case "$comment" in "$MANAGED"* | 'by Fail2Ban'*) continue ;; esac
-        if [ "$action" = allow ]; then
-            [ -n "$ports" ] && printf '%s\n' "$ports" | covers_published "$proto" "$dport" || continue
-        fi
-        words=(route)
-        [ "$action" = allow ] || words+=(prepend)
-        words+=("$action")
-        [ "$proto" = any ] || words+=(proto "$proto")
-        words+=(from "$(any "$src")")
-        [ "$sport" = any ] || words+=(port "$sport")
-        words+=(to "$(any "$dst")")
-        [ "$dport" = any ] || words+=(port "$dport")
-        key="${words[*]}"
+        reaches_published "$action" "$comment" "$proto" "$dport" "$ports" || continue
+        route_args_for "$action" "$proto" "$dport" "$dst" "$sport" "$src"
+        key="${ROUTE_ARGS[*]}"
         [ -z "${seen[$key]:-}" ] || continue
         seen[$key]=1
-        ufw_comment "$comment" route "ufw $key"
-        ufw_write "${words[@]}"
-        case $? in
-        0) say "carried over to published ports: ufw $key${UFW_COMMENT:+ comment $UFW_COMMENT}" ;;
-        1) warn "carried over to published ports without its comment $(shown "$UFW_COMMENT"), which ufw refused ($UFW_ERROR): ufw $key" ;;
-        *) warn "could not carry over to published ports: ufw $key ($UFW_ERROR)" ;;
-        esac
+        carry_over "$comment" "$key"
     done <<<"$rules"
+}
+
+# Whether an operator's inbound rule needs its route rule: every deny or
+# reject, and an allow that covers a port a container publishes now.
+reaches_published() { # <action> <comment> <proto> <dport> <published ports>
+    case "$2" in "$MANAGED"* | 'by Fail2Ban'*) return 1 ;; esac
+    [ "$1" = allow ] || return 0
+    [ -n "$5" ] && printf '%s\n' "$5" | covers_published "$3" "$4"
+}
+
+# The route rule's words for a host rule into ROUTE_ARGS; one that is not an
+# allow goes on top.
+ROUTE_ARGS=()
+route_args_for() { # <action> <proto> <dport> <dst> <sport> <src>
+    ROUTE_ARGS=(route)
+    [ "$1" = allow ] || ROUTE_ARGS+=(prepend)
+    ROUTE_ARGS+=("$1")
+    [ "$2" = any ] || ROUTE_ARGS+=(proto "$2")
+    ROUTE_ARGS+=(from "$(any "$6")")
+    [ "$5" = any ] || ROUTE_ARGS+=(port "$5")
+    ROUTE_ARGS+=(to "$(any "$4")")
+    [ "$3" = any ] || ROUTE_ARGS+=(port "$3")
+    return 0
+}
+
+# Writes ROUTE_ARGS with the host rule's comment, and says how that went.
+carry_over() { # <comment> <the rule, for the log>
+    ufw_comment "$1" route "ufw $2"
+    ufw_write "${ROUTE_ARGS[@]}"
+    case $? in
+    0) say "carried over to published ports: ufw $2${UFW_COMMENT:+ comment $UFW_COMMENT}" ;;
+    1) warn "carried over to published ports without its comment $(shown "$UFW_COMMENT"), which ufw refused ($UFW_ERROR): ufw $2" ;;
+    *) warn "could not carry over to published ports: ufw $2 ($UFW_ERROR)" ;;
+    esac
+}
+
+# Whether any of the engine's own route rules is there.
+has_engine_routes() {
+    local port proto label
+    while read -r port proto label; do
+        has_route_allow "$port" "$proto" && return 0
+    done < <(managed_route_rules)
+    return 1
 }
 
 # The engine's own published ports as route rules (see the header), put back
 # when missing; the first time they go in, the operator's rules are carried over.
 route_rules() {
-    local port proto label have=0
-    while read -r port proto label; do
-        has_route_allow "$port" "$proto" && have=1
-    done < <(managed_route_rules)
-    [ "$have" = 1 ] || convert_published
+    local port proto label
+    has_engine_routes || convert_published
     while read -r port proto label; do
         has_route_allow "$port" "$proto" ||
             ufw route allow proto "$proto" from any to any port "$port" comment "$MANAGED $label" </dev/null >/dev/null ||
@@ -687,18 +985,45 @@ mirror_bans() {
 #   sftp        the SFTP container's sshd: it logs to the host's journal as local5
 #   ftp         pure-ftpd, which logs to the host's journal through /dev/log
 #   engine-api  failed tokens on :2011, from core's api-access.log
+#   site-password  wrong passwords on protected sites, from sites-http's
+#               site-password.log
 # The stock filters match by process name, which would count the SFTP
 # container's sshd as the host's; the engine's own filters match the source.
 # Trusted addresses (the firewall API, CSF's old allow and ignore lists) are in
 # $F2B_DIR/panelalpha-ignoreip, one per line, "# comment" after it.
 configure_fail2ban() { # [trusted]: only the trusted list changed
-    local ignore="127.0.0.1/8 ::1" api_log="$ENGINE_DIR/logs/core/nginx/api-access.log" actions
-    mkdir -p "$F2B_DIR/jail.d" "$F2B_DIR/filter.d" "$F2B_DIR/action.d" "$(dirname "$api_log")"
+    local api_log="$ENGINE_DIR/logs/core/nginx/api-access.log" actions ignore containers
+    local site_log="$ENGINE_DIR/webserver-logs/nginx-proxy/site-password.log"
+    mkdir -p "$F2B_DIR/jail.d" "$F2B_DIR/filter.d" "$F2B_DIR/action.d" "$(dirname "$api_log")" "$(dirname "$site_log")"
     actions=$(ban_actions)
-    touch "$F2B_DIR/panelalpha-ignoreip" "$api_log"
-    # The address alone, also on a line written "address#comment".
-    ignore="$ignore $(awk '{ sub(/#.*/, "") } $1 != "" { print $1 }' "$F2B_DIR/panelalpha-ignoreip" | sort -u | tr '\n' ' ')"
+    touch "$F2B_DIR/panelalpha-ignoreip" "$api_log" "$site_log"
+    ignore=$(f2b_ignoreip)
+    containers=$(docker_subnets)
+    write_f2b_filters
+    write_f2b_ban_action
+    write_f2b_jails "$ignore" "$containers" "$api_log" "$site_log"
+    systemctl enable fail2ban >/dev/null 2>&1 || true
+    reload_fail2ban "$actions" "${1:-}"
+}
 
+# fail2ban's ignoreip: loopback and every address on the trusted list, also
+# one on a line written "address#comment".
+f2b_ignoreip() {
+    local ignore="127.0.0.1/8 ::1"
+    ignore="$ignore $(awk '{ sub(/#.*/, "") } $1 != "" { print $1 }' "$F2B_DIR/panelalpha-ignoreip" | sort -u | tr '\n' ' ')"
+    printf '%s' "${ignore% }"
+}
+
+# The host's Docker networks. A tunnel's cloudflared reaches a site from its
+# account's address on one: banning that would cut the account off the host.
+docker_subnets() {
+    local containers
+    containers=$(docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' $(docker network ls -q 2>/dev/null) 2>/dev/null |
+        tr ' ' '\n' | sed '/^$/d' | sort -u | tr '\n' ' ')
+    printf '%s' "${containers% }"
+}
+
+write_f2b_filters() {
     cat >"$F2B_DIR/filter.d/panelalpha-sshd.conf" <<'EOF'
 # Written by the PanelAlpha engine: the host's own sshd only.
 [INCLUDES]
@@ -727,8 +1052,17 @@ EOF
 failregex = ^<HOST> \S+ \S+ \[[^\]]*\] "[A-Z]+ /(?:api|mcp)\S* HTTP/[^"]*" 401
 ignoreregex =
 EOF
+    cat >"$F2B_DIR/filter.d/panelalpha-site-password.conf" <<'EOF'
+# Written by the PanelAlpha engine: a wrong password on a password-protected
+# site, from sites-http's site-password.log, which logs nothing else.
+[Definition]
+failregex = ^<HOST> \[[^]]*] "[^"]*" site-password 401 "
+ignoreregex =
+EOF
+}
 
-    # The lock is waited for less than fail2ban's 60 s action timeout.
+# The ufw lock is waited for less than fail2ban's 60 s action timeout.
+write_f2b_ban_action() {
     cat >"$F2B_DIR/action.d/panelalpha-ufw.conf" <<EOF
 # Written by the PanelAlpha engine: a ban is a ufw deny rule for the host and a
 # route deny rule for the ports Docker publishes; lifting it removes both, each
@@ -750,7 +1084,10 @@ actionunban = <ufwlock>
 comment = by Fail2Ban after <failures> attempts against <name>
 ufwlock = exec 9>>"$UFW_LOCK"; flock -w 50 9 || { echo "panelalpha-ufw: no ufw lock ($UFW_LOCK) after 50 s" >&2; exit 1; }
 EOF
+}
 
+write_f2b_jails() { # <ignoreip> <docker subnets> <api log> <site-password log>
+    local ignore=$1 containers=$2 api_log=$3 site_log=$4
     cat >"$F2B_DIR/jail.d/panelalpha.local" <<EOF
 # Written by the PanelAlpha engine (scripts/firewall/ufw.sh) on every install
 # and update, and when the firewall API changes the trusted addresses. Those
@@ -767,7 +1104,7 @@ bantime.increment = true
 bantime.maxtime = 1w
 findtime = 10m
 maxretry = 5
-ignoreip = ${ignore% }
+ignoreip = ${ignore}
 
 [sshd]
 enabled = true
@@ -790,7 +1127,9 @@ filter = panelalpha-ftp
 backend = systemd
 port = 21
 
-# A client with a stale token retries; it takes more than an SSH guess.
+# A client with a stale token retries; it takes more than an SSH guess. No
+# increment: after a few bans it bans on one 401, and a client whose token was
+# just replaced (PanelAlpha Connect) was then locked out for days.
 [engine-api]
 enabled = true
 filter = panelalpha-api
@@ -798,19 +1137,29 @@ logpath = $api_log
 backend = auto
 port = 2011
 maxretry = 10
+bantime.increment = false
+
+# Any site's visitors, often many behind one address, and a ban closes the
+# whole host to them. No increment: a fixed hour is enough to stop guessing.
+[site-password]
+enabled = true
+filter = panelalpha-site-password
+logpath = $site_log
+backend = auto
+port = 80,443
+maxretry = 10
+bantime.increment = false
+ignoreip = ${ignore}${containers:+ ${containers}}
 EOF
-    systemctl enable fail2ban >/dev/null 2>&1 || true
-    # A plain reload keeps a running jail but drops its action when the action
-    # changed: the sshd jail fail2ban starts with on install (nftables or
-    # iptables) was left with none, logging bans it never applied. A new ban
-    # action gets a restart, which puts the bans back through it. A changed
-    # trusted list alone gets a plain reload, which keeps every ban: a restart
-    # lifts them all and puts each back, two ufw writes apiece, for a minute on
-    # a busy host. Otherwise the jails are restarted, which also repairs one an
-    # earlier reload left bare.
-    if ! systemctl is-active --quiet fail2ban || [ "$actions" != "$(ban_actions)" ]; then
+}
+
+# A new ban action needs a restart, which puts the bans back through it: a
+# reload would leave a running jail without one. A changed trusted list alone
+# reloads and keeps every ban; otherwise the jails restart, repairing a bare one.
+reload_fail2ban() { # <ban actions before> <trusted, or "">
+    if ! systemctl is-active --quiet fail2ban || [ "$1" != "$(ban_actions)" ]; then
         systemctl restart fail2ban || warn "fail2ban did not start; see journalctl -u fail2ban"
-    elif [ "${1:-}" = trusted ]; then
+    elif [ "$2" = trusted ]; then
         fail2ban-client reload >/dev/null || warn "fail2ban did not reload; see journalctl -u fail2ban"
     else
         fail2ban-client reload --restart >/dev/null || warn "fail2ban did not reload; see journalctl -u fail2ban"
@@ -835,78 +1184,169 @@ routed_policy() {
 # The Docker hook, PA-PUBLISHED in DOCKER-USER for new connections Docker
 # DNATed; established ones never enter it. Connections from Docker's own
 # bridges are left alone: those are containers reaching a published port on
-# the host's address, which the tenant and build chains decide. The chain is
-# replaced in one iptables-restore, so a rebuild never leaves published ports
-# unfiltered.
+# the host's address, which the tenant and build chains decide.
 published_on() {
-    local ipt prefix policy last mine log
-    local jump=(-m conntrack --ctstate NEW -m conntrack --ctstate DNAT -j "$CHAIN")
+    local ipt policy
     policy=$(routed_policy)
     for ipt in iptables ip6tables; do
-        prefix=ufw
-        [ "$ipt" = ip6tables ] && prefix=ufw6
-        "$ipt" -n -L "$prefix-user-forward" >/dev/null 2>&1 || continue
-        if ! "$ipt" -n -L DOCKER-USER >/dev/null 2>&1; then
-            # Before Docker starts at boot; Docker keeps a DOCKER-USER it finds.
-            [ "$ipt" = iptables ] || continue
-            "$ipt" -N DOCKER-USER || continue
-        fi
-        # Logged as ufw logs its own default drops ([UFW BLOCK], rate-limited),
-        # so the firewall's log shows refused published ports too. Asked here:
-        # inside the pipe below, iptables-restore already holds the xtables lock
-        # that this call (-w) would wait for.
-        log=""
-        if "$ipt" -n -L "$prefix-logging-deny" >/dev/null 2>&1; then
-            log="$prefix-logging-deny"
-        fi
-        if ! {
-            echo "*filter"
-            echo ":$CHAIN - [0:0]"
-            echo "-A $CHAIN -i docker0 -j RETURN"
-            echo "-A $CHAIN -i br-+ -j RETURN"
-            echo "-A $CHAIN -j $prefix-user-forward"
-            [ -z "$log" ] || echo "-A $CHAIN -j $log"
-            echo "-A $CHAIN -j $policy"
-            echo COMMIT
-        } | "$ipt-restore" -w 30 --noflush; then
-            warn "$ipt: could not rebuild $CHAIN; published ports keep the rules they had"
-            "$ipt" -n -L "$CHAIN" >/dev/null 2>&1 || continue
-        fi
-        # After the tenant network's rules, which judge an account's traffic first.
-        read -r last mine < <("$ipt" -S DOCKER-USER 2>/dev/null | awk -v c="$CHAIN" '
-            $1 == "-A" { n++ }
-            $1 == "-A" && $NF == "PA-TENANT-NET" { last = n }
-            $1 == "-A" && $NF == c && !mine { mine = n }
-            END { print last + 0, mine + 0 }')
-        if ! "$ipt" -C DOCKER-USER "${jump[@]}" 2>/dev/null; then
-            "$ipt" -I DOCKER-USER $((last + 1)) "${jump[@]}"
-        elif [ "$mine" -lt "$last" ]; then
-            # Added first, then the old one goes: never a moment without it.
-            "$ipt" -I DOCKER-USER $((last + 1)) "${jump[@]}" && "$ipt" -D DOCKER-USER "${jump[@]}"
-        fi
+        hook_published "$ipt" "$policy"
     done
+}
+
+# The hook for one of iptables and ip6tables, once ufw's chains are there. An
+# IPv4 DOCKER-USER is made before Docker starts at boot; Docker keeps it.
+hook_published() { # <iptables|ip6tables> <policy>
+    local ipt=$1 prefix=ufw
+    [ "$ipt" = ip6tables ] && prefix=ufw6
+    "$ipt" -n -L "$prefix-user-forward" >/dev/null 2>&1 || return 0
+    if ! "$ipt" -n -L DOCKER-USER >/dev/null 2>&1; then
+        [ "$ipt" = iptables ] || return 0
+        "$ipt" -N DOCKER-USER || return 0
+    fi
+    rebuild_published_chain "$ipt" "$prefix" "$2" || return 0
+    jump_to_published_chain "$ipt"
+}
+
+# PA-PUBLISHED replaced in one iptables-restore, so a rebuild never leaves
+# published ports unfiltered. Fails when it could not be built and is not there.
+rebuild_published_chain() { # <ipt> <ufw prefix> <policy>
+    local log
+    log=$(ufw_logging_chain "$1" "$2")
+    published_chain_rules "$2" "$log" "$3" | "$1-restore" -w 30 --noflush && return 0
+    warn "$1: could not rebuild $CHAIN; published ports keep the rules they had"
+    "$1" -n -L "$CHAIN" >/dev/null 2>&1
+}
+
+# ufw's chain that logs its own default drops ([UFW BLOCK], rate-limited), so
+# refused published ports are logged as well. Asked before iptables-restore,
+# which holds the xtables lock this call (-w) would wait for.
+ufw_logging_chain() { # <ipt> <ufw prefix>
+    "$1" -n -L "$2-logging-deny" >/dev/null 2>&1 && echo "$2-logging-deny"
+}
+
+# PA-PUBLISHED as iptables-restore input: Docker's bridges return, then ufw's
+# route rules, the logging chain if any, and the policy.
+published_chain_rules() { # <ufw prefix> <logging chain, or ""> <policy>
+    echo "*filter"
+    echo ":$CHAIN - [0:0]"
+    echo "-A $CHAIN -i docker0 -j RETURN"
+    echo "-A $CHAIN -i br-+ -j RETURN"
+    echo "-A $CHAIN -j $1-user-forward"
+    [ -z "$2" ] || echo "-A $CHAIN -j $2"
+    echo "-A $CHAIN -j $3"
+    echo COMMIT
+}
+
+# The jump goes after the tenant network's rules, which judge an account's
+# traffic first. One found above them is added again below them before the
+# old one goes, so the hook is never missing.
+jump_to_published_chain() { # <ipt>
+    local last mine
+    read -r last mine < <("$1" -S DOCKER-USER 2>/dev/null | awk -v c="$CHAIN" '
+        $1 == "-A" { n++ }
+        $1 == "-A" && $NF == "PA-TENANT-NET" { last = n }
+        $1 == "-A" && $NF == c && !mine { mine = n }
+        END { print last + 0, mine + 0 }')
+    if ! "$1" -C DOCKER-USER "${PUBLISHED_JUMP[@]}" 2>/dev/null; then
+        "$1" -I DOCKER-USER $((last + 1)) "${PUBLISHED_JUMP[@]}"
+    elif [ "$mine" -lt "$last" ]; then
+        "$1" -I DOCKER-USER $((last + 1)) "${PUBLISHED_JUMP[@]}" && "$1" -D DOCKER-USER "${PUBLISHED_JUMP[@]}"
+    fi
 }
 
 published_off() {
     local ipt
     for ipt in iptables ip6tables; do
-        while "$ipt" -D DOCKER-USER -m conntrack --ctstate NEW -m conntrack --ctstate DNAT -j "$CHAIN" 2>/dev/null; do :; done
+        while "$ipt" -D DOCKER-USER "${PUBLISHED_JUMP[@]}" 2>/dev/null; do :; done
         "$ipt" -F "$CHAIN" 2>/dev/null
         "$ipt" -X "$CHAIN" 2>/dev/null
     done
     return 0
 }
 
-# CSF goes and ufw comes on, under one hold of the ufw lock. After CSF's
-# uninstaller only `ufw enable` is left to fail, and then the host has no
-# firewall at all: that is said in so many words.
+# Every stored rule iptables would refuse, one per line: its tuple line (or the
+# rule file and line, for one outside any rule), a tab, and iptables' error.
+# `--test` only parses, which is where a rule ufw stores but cannot load fails
+# (port 08080); each refused rule is set aside and the rest tested again.
+refused_rules() {
+    [ ! -f "$UFW_DIR/user.rules" ] || refused_in iptables "$UFW_DIR/user.rules"
+    [ ! -f "$UFW_DIR/user6.rules" ] || refused_in ip6tables "$UFW_DIR/user6.rules"
+    return 0
+}
+
+# refused_rules for one rule file, through <iptables|ip6tables>-restore.
+refused_in() { # <iptables|ip6tables> <file>
+    local left error line start tries
+    left=$(mktemp) || return 1
+    cp "$2" "$left"
+    tries=$(grep -c '^### tuple ###' "$left")
+    while ! error=$(command "$1-restore" -w 30 --test -n <"$left" 2>&1 >/dev/null); do
+        line=$(restore_error_line "$error")
+        start=$(tuple_at "$left" "$line")
+        if [ -z "$start" ] || [ "$tries" -le 0 ]; then
+            printf '%s%s\t%s\n' "$2" "${line:+ line $line}" "$(restore_error "$error")"
+            break
+        fi
+        printf '%s\t%s\n' "$(sed -n "${start}p" "$left")" "$(restore_error "$error")"
+        drop_tuple "$left" "$start"
+        tries=$((tries - 1))
+    done
+    rm -f "$left"
+}
+
+restore_error_line() { printf '%s\n' "$1" | sed -n 's/^Error occurred at line: \([0-9][0-9]*\).*/\1/p' | head -n 1; }
+restore_error() { printf '%s\n' "$1" | sed -n '1{s/^[^(]*([^)]*): //;p;}'; }
+
+# The line of the `### tuple ###` whose iptables lines hold line <n>, or nothing.
+tuple_at() { # <file> <n>
+    [ -n "$2" ] || return 0
+    awk -v n="$2" '/^### tuple ###/ { t = NR; next } !/^-/ { t = "" } NR == n { print t; exit }' "$1"
+}
+
+# Takes the rule whose tuple line is line <start>, with its iptables lines, out of <file>.
+drop_tuple() { # <file> <start>
+    awk -v s="$2" 'NR == s { skip = 1; next } skip && /^-/ { next } { skip = 0; print }' "$1" >"$1.left" &&
+        mv "$1.left" "$1"
+}
+
+# ufw does not start with a rule iptables refuses, and once CSF's uninstaller has
+# run the host would be left with no firewall: says which rules, and fails.
+rules_load() {
+    local refused rule why
+    refused=$(refused_rules)
+    [ -z "$refused" ] && return 0
+    while IFS=$'\t' read -r rule why; do
+        warn "iptables refuses the stored rule ${rule#"### tuple ### "}: $why"
+    done <<<"$refused"
+    return 1
+}
+
+# What is left to do after rules_load failed: delete the refused rules first.
+rules_refused() { # <1 when CSF is still installed>
+    local delete="delete them ('ufw status numbered', then 'ufw delete <number>')"
+    if [ -n "$1" ]; then
+        warn "ufw would not start with them, so CSF is left in place: $delete and run the install again"
+    else
+        warn "ufw would not start with them: $delete, then run 'ufw enable'"
+    fi
+}
+
+# CSF goes and ufw comes on, under one hold of the ufw lock. The stored rules
+# are test-loaded first, so a rule iptables refuses keeps CSF in place. After
+# CSF's uninstaller only `ufw enable` is left to fail; ufw is then turned off
+# rather than leave the host closed, so it has no firewall at all: that is said
+# in so many words. An active ufw loads nothing on enable, so ufw_guarded checks
+# that its rules are loaded.
 switch_on() {
     local had_csf=
     [ -f "$CSF_DIR/csf.conf" ] && had_csf=1
+    rules_load || {
+        rules_refused "$had_csf"
+        return 1
+    }
     CSF_BACKUP=
     remove_csf
-    # Enabling an active ufw reloads it, which applies the hooks above.
-    ufw --force enable >/dev/null && return 0
+    ufw_guarded ufw --force enable >/dev/null && return 0
     if [ -n "$had_csf" ]; then
         local saved=""
         [ -z "$CSF_BACKUP" ] || saved="; CSF's configuration is in $CSF_BACKUP"
@@ -936,24 +1376,41 @@ install() {
         warn "CSF's rules could not be moved to ufw; CSF is left in place"
         return 1
     }
-    with_ufw_lock configure_ufw || {
+    with_ufw_lock ufw_guarded configure_ufw || {
         not_set_up
         return 1
     }
     configure_fail2ban
-    with_ufw_lock mirror_bans || {
+    with_ufw_lock ufw_guarded mirror_bans || {
         not_set_up
         return 1
     }
     if [ -f "$UFW_DIR/.panelalpha-keep-disabled" ]; then
-        with_ufw_lock remove_csf || return 1
-        say "CSF was disabled on this host, so ufw is left off: run 'ufw enable' to turn it on"
-        rm -f "$UFW_DIR/.panelalpha-keep-disabled"
-        return 0
+        keep_ufw_off
+        return
     fi
     with_ufw_lock switch_on || return 1
     published_on
     say "ufw is on; open ports: $(managed_rules | awk '{ printf "%s%s/%s", sep, $1, $2; sep = " " }')"
+}
+
+# CSF had been turned off on this host (csf.disable), so ufw is left off too.
+keep_ufw_off() {
+    with_ufw_lock remove_csf || return 1
+    say "CSF was disabled on this host, so ufw is left off: run 'ufw enable' to turn it on"
+    rm -f "$UFW_DIR/.panelalpha-keep-disabled"
+    return 0
+}
+
+# What core runs when it starts. The engine's route rules are put back here as
+# well as in install: a host updated without the installer must not lose the
+# engine's ports when the hook moves to route rules.
+apply() {
+    local rc=0
+    clear_csf_leftover
+    if ufw_is_ours; then with_ufw_lock ufw_guarded route_rules || rc=1; fi
+    published_on
+    return $rc
 }
 
 # Without the engine the hooks would call a script that is gone, and ufw cannot
@@ -979,22 +1436,15 @@ uninstall() {
 
 case "${1:-}" in
 install) install ;;
-apply)
-    # Here as well as in install: a host updated without the installer must
-    # not lose the engine's ports when the hook moves to route rules.
-    clear_csf_leftover
-    rc=0
-    if ufw_is_ours; then with_ufw_lock route_rules || rc=1; fi
-    published_on
-    exit $rc
-    ;;
+apply) apply ;;
 published-on) published_on ;;
 published-off) published_off ;;
 fail2ban) configure_fail2ban trusted ;;
 unhook) unhook ;;
 uninstall) uninstall ;;
+refused) refused_rules ;;
 *)
-    echo "Usage: $0 install|apply|fail2ban|unhook|uninstall|published-on|published-off" >&2
+    echo "Usage: $0 install|apply|fail2ban|unhook|uninstall|refused|published-on|published-off" >&2
     exit 1
     ;;
 esac

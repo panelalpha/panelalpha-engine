@@ -1,8 +1,9 @@
-import { expect, test } from '@/fixtures/test-options';
+import { test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
 import { uniqueId } from '@/helpers/random';
 import { skipUnless } from '@/helpers/test-helpers';
 import { McpSession } from '@/helpers/mcp-helpers';
+import { expectStatus } from '@/helpers/expect-status';
 import { McpHttpClient } from '@/clients/mcp-http';
 
 /**
@@ -24,7 +25,7 @@ test.describe('MCP token surface', () => {
 
       const client = new McpHttpClient(anonymousRequest, settings.apiBaseUrl);
       const check = await client.check(token);
-      expect(check.status(), 'the same token must still work on /mcp').toBe(200);
+      await expectStatus(check, 200, 'the same token must still work on /mcp');
 
       const session = await McpSession.open(anonymousRequest, settings.apiBaseUrl, token);
       await session.callOk('project_list_summary');

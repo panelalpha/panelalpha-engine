@@ -4,6 +4,26 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { SystemApi } from './system.api';
 
+export interface FileEntry {
+  name: string;
+  path: string;
+  type: 'file' | 'dir' | 'link';
+  size: number;
+  mtime: number;
+  mode: string;
+  uid: number;
+  gid: number;
+  target: string | null;
+  target_type: 'file' | 'dir' | 'missing' | null;
+  has_subdirectories: boolean | null;
+}
+
+export interface FileListMeta {
+  path: string;
+  truncated: boolean;
+  total: number;
+}
+
 export class FilesApi extends SystemApi {
   async fileExists(username: string, filePath: string): Promise<{ exists: boolean; path: string }> {
     const response = await this.api.get(
@@ -13,24 +33,44 @@ export class FilesApi extends SystemApi {
     return response.json();
   }
 
-  async getFileStat(
-    username: string,
-    filePath: string
-  ): Promise<{
-    file_name: string;
-    size: string;
-    user_id: string;
-    group_id: string;
-    access_time: string;
-    modify_time: string;
-    status_change_time: string;
-    create_time: string;
-  }> {
+  async getFileStat(username: string, filePath: string): Promise<FileEntry> {
     const response = await this.api.get(
       `projects/${username}/files/stat?path=${encodeURIComponent(filePath)}`
     );
     await this.assertStatus(response, 200);
+    const body = (await response.json()) as { data: FileEntry };
+    return body.data;
+  }
+
+  async listFiles(
+    username: string,
+    dirPath: string,
+    options: { showHidden?: boolean; limit?: number } = {}
+  ): Promise<{ data: FileEntry[]; meta: FileListMeta }> {
+    const query = new URLSearchParams({ path: dirPath });
+    if (options.showHidden !== undefined) {
+      query.set('show_hidden', options.showHidden ? '1' : '0');
+    }
+    if (options.limit !== undefined) {
+      query.set('limit', String(options.limit));
+    }
+    const response = await this.api.get(`projects/${username}/files/list?${query.toString()}`);
+    await this.assertStatus(response, 200);
     return response.json();
+  }
+
+  async listFilesRaw(
+    username: string,
+    params: { path?: string; show_hidden?: string | number | boolean; limit?: string | number }
+  ): Promise<{ status: number; body: unknown }> {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined) {
+        query.set(key, String(value));
+      }
+    }
+    const response = await this.api.get(`projects/${username}/files/list?${query.toString()}`);
+    return this.rawCall(response);
   }
 
   async getFileContent(username: string, filePath: string): Promise<string> {

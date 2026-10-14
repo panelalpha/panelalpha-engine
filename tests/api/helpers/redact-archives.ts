@@ -2,10 +2,13 @@ import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { crc32, deflateRawSync, inflateRawSync } from 'node:zlib';
 
+import { redactStructuredText } from './redact';
+import { REDACTED, usableSecrets } from './secret-values';
+
 // A retained trace records `Authorization: Bearer <API_TOKEN>` verbatim and Playwright has
 // no hook to leave a header out, so the archives are rewritten after the run instead.
 
-export const REDACTED = '[REDACTED]';
+export { REDACTED, usableSecrets };
 
 const EOCD_SIGNATURE = 0x06054b50;
 const CENTRAL_SIGNATURE = 0x02014b50;
@@ -18,66 +21,149 @@ interface ZipEntry {
   data: Buffer;
 }
 
-/** Secrets shorter than this are not worth a rewrite and could match by chance. */
-const MIN_SECRET_LENGTH = 8;
+/** Archive entries and loose files with these extensions are rewritten as text. */
+const TEXT_EXTENSIONS = new Set([
+  '.json',
+  '.trace',
+  '.network',
+  '.txt',
+  '.html',
+  '.md',
+  '.log',
+  '.xml',
+]);
 
-export function usableSecrets(values: readonly (string | undefined)[]): string[] {
-  return [
-    ...new Set(values.map((v) => v?.trim() ?? '').filter((v) => v.length >= MIN_SECRET_LENGTH)),
-  ];
-}
+/** Loose files under a results directory that are rewritten; `.html` is left to the report step. */
+const LOOSE_TEXT_EXTENSIONS = new Set(['.json', '.txt', '.md', '.log']);
 
-/** Every `.zip` under `dir` with the secrets replaced; returns how many files changed. */
+const REPORT_DATA =
+  /(<template id="playwrightReportBase64">data:application\/zip;base64,)([A-Za-z0-9+/=\s]*)(<\/template>)/;
+
+/**
+ * Every archive, the report's embedded data and every plain-text attachment under `dir`
+ * with credentials replaced; returns how many files changed.
+ */
 export async function redactArchivesIn(dir: string, secrets: readonly string[]): Promise<number> {
-  if (secrets.length === 0) {
-    return 0;
-  }
   let changed = 0;
-  for (const file of await zipFilesUnder(dir)) {
-    const original = await readFile(file);
-    const redacted = redactZip(original, secrets);
-    if (redacted !== null) {
-      await writeFile(file, redacted);
-      changed += 1;
+  for (const file of await filesUnder(dir)) {
+    try {
+      const extension = path.extname(file).toLowerCase();
+      const name = path.basename(file);
+      if (extension === '.zip') {
+        const original = await readFile(file);
+        const result = redactZipDetailed(original, secrets);
+        if (result.status === 'unsupported') {
+          console.warn(`  Not redacted (unsupported archive): ${file}`);
+        } else if (result.zip !== null) {
+          await writeFile(file, result.zip);
+          changed += 1;
+        }
+      } else if (name === 'index.html') {
+        const original = await readFile(file, 'utf8');
+        const redacted = redactReportHtml(original, secrets);
+        if (redacted !== original) {
+          await writeFile(file, redacted);
+          changed += 1;
+        }
+      } else if (LOOSE_TEXT_EXTENSIONS.has(extension) || name === 'error-context.md') {
+        const original = await readFile(file, 'utf8');
+        const redacted = redactStructuredText(original, secrets);
+        if (redacted !== original) {
+          await writeFile(file, redacted);
+          changed += 1;
+        }
+      }
+    } catch (error) {
+      console.warn(`  Not redacted (${(error as Error).message}): ${file}`);
     }
   }
   return changed;
 }
 
-/** The archive with the secrets replaced, or null when none of them is in it. */
+/** The report page with the zip it embeds redacted; the page itself is returned as is otherwise. */
+export function redactReportHtml(html: string, secrets: readonly string[]): string {
+  const match = REPORT_DATA.exec(html);
+  if (!match) {
+    return html;
+  }
+  const result = redactZipDetailed(Buffer.from(match[2].replace(/\s/g, ''), 'base64'), secrets);
+  if (result.status === 'unsupported') {
+    console.warn('  Not redacted (unsupported archive): embedded report data in index.html');
+    return html;
+  }
+  if (result.zip === null) {
+    return html;
+  }
+  const encoded = result.zip.toString('base64');
+  return (
+    html.slice(0, match.index) +
+    match[1] +
+    encoded +
+    match[3] +
+    html.slice(match.index + match[0].length)
+  );
+}
+
+/** The archive with credentials replaced, or null when nothing changed or it cannot be read. */
 export function redactZip(zip: Buffer, secrets: readonly string[]): Buffer | null {
-  const entries = readZip(zip);
+  return redactZipDetailed(zip, secrets).zip;
+}
+
+function redactZipDetailed(
+  zip: Buffer,
+  secrets: readonly string[]
+): { status: 'changed' | 'unchanged' | 'unsupported'; zip: Buffer | null } {
+  let entries: ZipEntry[] | null;
+  try {
+    entries = readZip(zip);
+  } catch {
+    entries = null;
+  }
   if (entries === null) {
-    return null;
+    return { status: 'unsupported', zip: null };
   }
   let touched = false;
   const rewritten = entries.map((entry) => {
-    const data = redactBuffer(entry.data, secrets);
+    const data = redactEntry(entry, secrets);
     touched ||= data !== entry.data;
     return { name: entry.name, data };
   });
-  return touched ? writeZip(rewritten) : null;
+  return touched
+    ? { status: 'changed', zip: writeZip(rewritten) }
+    : { status: 'unchanged', zip: null };
 }
 
-function redactBuffer(data: Buffer, secrets: readonly string[]): Buffer {
-  if (!secrets.some((secret) => data.includes(secret))) {
-    return data;
+function redactEntry(entry: ZipEntry, secrets: readonly string[]): Buffer {
+  const name = entry.name.toString('utf8');
+  const text = decodeText(entry.data, TEXT_EXTENSIONS.has(path.extname(name).toLowerCase()));
+  if (text === null) {
+    return entry.data;
   }
-  let text = data.toString('latin1');
-  for (const secret of secrets) {
-    text = text.split(secret).join(REDACTED);
-  }
-  return Buffer.from(text, 'latin1');
+  const redacted = redactStructuredText(text.value, secrets);
+  return redacted === text.value ? entry.data : Buffer.from(redacted, text.encoding);
 }
 
-async function zipFilesUnder(dir: string): Promise<string[]> {
-  let names: string[];
+/** The data as text, or null for a binary entry. Known text extensions fall back to latin1. */
+function decodeText(
+  data: Buffer,
+  knownText: boolean
+): { value: string; encoding: 'utf8' | 'latin1' } | null {
+  if (data.includes(0)) {
+    return null;
+  }
   try {
-    names = await readdir(dir, { recursive: true });
+    return { value: new TextDecoder('utf-8', { fatal: true }).decode(data), encoding: 'utf8' };
+  } catch {
+    return knownText ? { value: data.toString('latin1'), encoding: 'latin1' } : null;
+  }
+}
+
+async function filesUnder(dir: string): Promise<string[]> {
+  try {
+    return (await readdir(dir, { recursive: true })).map((name) => path.join(dir, name));
   } catch {
     return [];
   }
-  return names.filter((name) => name.endsWith('.zip')).map((name) => path.join(dir, name));
 }
 
 /** Entries from the central directory; null for anything this reader does not handle (zip64). */

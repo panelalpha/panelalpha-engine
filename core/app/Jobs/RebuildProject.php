@@ -14,6 +14,7 @@ use App\Lib\Project\ProjectRebuild;
 use App\Lib\Task\TaskLogSink;
 use App\Models\User;
 use App\Rules\RuleExpectation;
+use App\Support\JobBudget;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -39,7 +40,10 @@ class RebuildProject implements ShouldQueue
 
     public int $tries = 1;
 
-    public int $timeout = 7200;
+    public int $timeout = JobBudget::SECONDS;
+
+    /** The project's row; null on a job queued before it was recorded. */
+    public ?int $userId = null;
 
     /**
      * @param array<string, list<array<string, mixed>>>|null $stages
@@ -52,44 +56,75 @@ class RebuildProject implements ShouldQueue
         public ?array $stages = null,
         public ?string $recipe = null,
         public ?array $git = null,
+        ?int $userId = null,
     ) {
+        $this->userId = $userId;
         $this->onQueue('default');
     }
 
     public function handle(ProjectRebuild $rebuild): void
     {
         $this->runTask(function () use ($rebuild): void {
-            $user = User::findByUsername($this->username);
+            $user = $this->project();
             if ($user === null) {
                 $this->logTask("Not deploying: project '{$this->username}' was deleted.");
                 throw new TaskCancelledException();
             }
 
-            app(DeployPlanContext::class)->set($this->stages !== null ? DeployPlan::fromArray($this->stages) : null);
-            // Set even when null: the worker's singleton outlives the previous job.
-            app(RecipeChoiceContext::class)->set($this->recipe);
-
-            $sink = new TaskLogSink($this->task());
-            DeployLogger::streamTo($sink);
-            try {
-                // Cancelled while it waited: stop before touching the deploy log.
-                $this->throwIfCancelled();
-                $logger = $rebuild->openLog($user, $this->action);
-                $this->recordDeployId($logger);
-                $result = $rebuild->run($user, $this->action, $logger, $this->zipPath, $this->git ?? []);
-            } catch (DeployAlreadyRunningException $e) {
-                // A deploy started without a task (the CLI, a push) took the lock since this was queued.
-                throw $this->failure(ProblemException::one('deploy', 'deploy_already_running', $e->getMessage()));
-            } catch (ValidationException $e) {
-                throw $this->failure($e);
-            } finally {
-                $sink->flush();
-                DeployLogger::stopStreaming();
-            }
+            $this->bindDeployContext();
+            $result = $this->rebuild($rebuild, $user);
 
             $user->refresh();
             $this->recordOutcome($user, $result);
         });
+    }
+
+    /**
+     * Set even when null: the worker's singletons outlive the previous job.
+     */
+    private function bindDeployContext(): void
+    {
+        app(DeployPlanContext::class)->set($this->stages !== null ? DeployPlan::fromArray($this->stages) : null);
+        app(RecipeChoiceContext::class)->set($this->recipe);
+    }
+
+    /**
+     * Runs the rebuild with its log streamed onto the task. A task cancelled while
+     * queued stops before touching the deploy log, and a deploy started without a
+     * task (the CLI, a push) may have taken the lock since this one was queued.
+     *
+     * @return array<string, mixed>
+     */
+    private function rebuild(ProjectRebuild $rebuild, User $user): array
+    {
+        $sink = new TaskLogSink($this->task());
+        DeployLogger::streamTo($sink);
+
+        try {
+            $this->throwIfCancelled();
+            $logger = $rebuild->openLog($user, $this->action);
+            $this->recordDeployId($logger);
+
+            return $rebuild->run($user, $this->action, $logger, $this->zipPath, $this->git ?? []);
+        } catch (DeployAlreadyRunningException $e) {
+            throw $this->failure(ProblemException::one('deploy', 'deploy_already_running', $e->getMessage()));
+        } catch (ValidationException $e) {
+            throw $this->failure($e);
+        } finally {
+            $sink->flush();
+            DeployLogger::stopStreaming();
+        }
+    }
+
+    /**
+     * By row id once the job carries one: a project deleted and created again
+     * under the same name is not the one this rebuild was queued for.
+     */
+    private function project(): ?User
+    {
+        return $this->userId === null
+            ? User::findByUsername($this->username)
+            : User::query()->whereKey($this->userId)->first();
     }
 
     public function failed(?Throwable $e): void
@@ -116,7 +151,7 @@ class RebuildProject implements ShouldQueue
     }
 
     /**
-     * The failure on the task as the 422 used to say it: `problems` with the
+     * The failure on the task in the 422's shape: `problems` with the
      * code, stage and deploy log offset, and the message as `details.error`.
      */
     private function failure(ValidationException $e): Throwable

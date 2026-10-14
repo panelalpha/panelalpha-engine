@@ -262,6 +262,14 @@ abstract class AbstractWebserver implements WebserverInterface
         throw new \Exception('Method ' . __METHOD__ . ' not implemented for class ' . get_called_class());
     }
 
+    /**
+     * For webservers whose reload never restarts them; nginx-proxy's can, so it overrides this.
+     */
+    public function reloadRouting(): void
+    {
+        $this->reload(false);
+    }
+
     public function restart(): void
     {
         throw new \Exception('Method ' . __METHOD__ . ' not implemented for class ' . get_called_class());

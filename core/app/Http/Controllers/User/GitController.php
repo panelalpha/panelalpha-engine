@@ -17,6 +17,7 @@ use App\Lib\Git\DeployKey;
 use App\Lib\Git\GitActions;
 use App\Lib\Project\ProjectRebuild;
 use App\Models\User;
+use App\OpenApi\ApiDefinitions;
 use App\System\Project\Git\Exception as GitException;
 use Illuminate\Http\JsonResponse;
 use OpenApi\Attributes as OA;
@@ -37,7 +38,7 @@ class GitController extends Controller
 
     private const QUEUED_RESPONSE = 'Deploy-managed checkout: the change and the rebuild are queued; `data` is the task to follow';
 
-    private const BUSY_RESPONSE = 'A deploy of this project is already queued or running';
+    private const BUSY_RESPONSE = 'A deploy of this project is already queued or running. ' . ApiDefinitions::PROTECTED_RESPONSE;
 
     private const GIT_ERROR_RESPONSE = 'Git failed, e.g. the remote could not be read';
 
@@ -128,7 +129,7 @@ class GitController extends Controller
             new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'path', description: 'Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'branch', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
-            new OA\Parameter(name: 'limit', in: 'query', required: false, schema: new OA\Schema(type: 'integer', minimum: 1)),
+            new OA\Parameter(name: 'limit', in: 'query', required: false, schema: new OA\Schema(type: 'integer', minimum: 1, maximum: GitActions::MAX_COMMITS)),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Commit list', content: new OA\JsonContent(
@@ -152,7 +153,9 @@ class GitController extends Controller
             . '`token` is a PAT (never logged). Set `repair` to re-adopt a missing .git. On a `deploy` '
             . 'account without repair this only keeps origin in sync and persists metadata — it does '
             . 'not clone from scratch. An SSH `repo_url` (`git@host:owner/repo.git`) needs the project\'s '
-            . 'deploy key (POST /projects/{username}/git/deploy-key) added to the repository first.',
+            . 'deploy key (POST /projects/{username}/git/deploy-key) added to the repository first. A `repo_url` '
+            . 'whose host resolves to an internal address is refused 422 with `problems[{field: repo_url, '
+            . 'code: host_refused}]`; anything that is not a URL (`file://`, `ext::`) fails validation first.',
         summary: 'Connect a directory to a git remote',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
@@ -238,12 +241,7 @@ class GitController extends Controller
             )),
             new OA\Response(response: 400, description: self::GIT_ERROR_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: self::BUSY_RESPONSE, content: new OA\JsonContent(
-                properties: [
-                    new OA\Property(property: 'message', type: 'string'),
-                    new OA\Property(property: 'task_id', type: 'integer', nullable: true),
-                ],
-            )),
+            new OA\Response(response: 409, description: self::BUSY_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
             new OA\Response(response: 503, description: self::LOCK_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
@@ -320,12 +318,7 @@ class GitController extends Controller
             )),
             new OA\Response(response: 400, description: self::GIT_ERROR_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: self::BUSY_RESPONSE, content: new OA\JsonContent(
-                properties: [
-                    new OA\Property(property: 'message', type: 'string'),
-                    new OA\Property(property: 'task_id', type: 'integer', nullable: true),
-                ],
-            )),
+            new OA\Response(response: 409, description: self::BUSY_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
             new OA\Response(response: 503, description: self::LOCK_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
@@ -397,12 +390,7 @@ class GitController extends Controller
             )),
             new OA\Response(response: 400, description: self::GIT_ERROR_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: self::BUSY_RESPONSE, content: new OA\JsonContent(
-                properties: [
-                    new OA\Property(property: 'message', type: 'string'),
-                    new OA\Property(property: 'task_id', type: 'integer', nullable: true),
-                ],
-            )),
+            new OA\Response(response: 409, description: self::BUSY_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
             new OA\Response(response: 503, description: self::LOCK_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
@@ -418,7 +406,6 @@ class GitController extends Controller
         return $this->queuedOrDone($git, $user, ProjectRebuild::REVERT, $params, fn () => $git->revert($user, $params));
     }
 
-    /** The action's data, or the git layer's refusal with the status it carries. */
     #[OA\Post(
         path: '/projects/{username}/git/deploy-key',
         description: 'Create the project\'s SSH deploy key, or return the one it has: `public_key` is the line '
@@ -506,6 +493,7 @@ class GitController extends Controller
         return $this->respond($run);
     }
 
+    /** The action's data, or the git layer's refusal with the status it carries. */
     private function respond(callable $action): JsonResponse
     {
         try {

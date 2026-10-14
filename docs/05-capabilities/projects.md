@@ -2,7 +2,7 @@
 
 A project is one hosting account: one website or application. Everything else on the engine belongs to a project - its domains, its databases, its files, its FTP logins.
 
-This page covers creating, inspecting, rebuilding, copying, suspending and deleting them. Backups have their own page: [Backups](backups.md).
+This page covers creating, inspecting, rebuilding, copying, suspending, protecting and deleting them. Backups have their own page: [Backups](backups.md).
 
 ## Creating one
 
@@ -37,13 +37,13 @@ The assistant answers with the sign-in address, the username and the password. I
 
 ## Rebuilding
 
-A rebuild replays the exact plan from the last successful deploy against the current files.
+A rebuild replays the exact plan from the last successful deploy against the current files. On a project connected to git, the current files are a fresh clone of its branch: anything changed in `~/project` on the server is replaced by what the repository holds.
 
 ```text
 Rebuild this project.
 ```
 
-Use it after you change files directly, after you change an environment variable, or when a site has degraded and you want it put back the way it shipped.
+Use it after you change files directly on a project without a repository, after you change an environment variable, or when a site has degraded and you want it put back the way it shipped.
 
 A rebuild runs in the background, and so does deploying an uploaded archive. The engine answers the assistant at once and the assistant follows the deploy until it ends, however long the build takes. Asking again while one is still running is refused and points at the one already under way, so a slow deploy is never started twice.
 
@@ -69,6 +69,28 @@ You can push in either direction between the pair - staging to live to release c
 
 A project can have **one** staging copy, and a staging copy cannot itself have one.
 
+**On a traditional PHP project, the copy gets its own databases.** Every MySQL database the project owns is copied into the staging copy, with new database users, new passwords and the same permissions. The staging copy then serves the copied site, not a placeholder page. A database the project does not own is not copied, and the assistant says so. To leave the databases out:
+
+```text
+Make a staging copy of this project without its databases.
+```
+
+**A push replaces the other side's files and databases.** Both are pushed unless you say otherwise. Before it replaces a database, the engine saves a copy of the one it is about to overwrite, and puts it back if the push fails. The other project keeps its own database users and passwords, so the site there keeps connecting.
+
+```text
+Push the staging copy live, files only.
+Push the staging copy live, databases only.
+```
+
+On a traditional PHP project you can also push only some tables, and leave the rest of the other side's database as it is. Ask what differs first:
+
+```text
+Which database tables differ between this project and its staging copy? Then
+push only those tables.
+```
+
+Container projects have no table push. On a container project, `databases` means the stored data volumes: they are pushed only together with the files, so a push with both left on carries both.
+
 ## Cloning
 
 A clone is an independent copy, with no ongoing link and no later push.
@@ -77,9 +99,9 @@ A clone is an independent copy, with no ongoing link and no later push.
 Clone this project.
 ```
 
-It copies the files, the stored data and the plan limits.
+It copies the files, the stored data and the plan limits. On a traditional PHP project it also copies the MySQL databases, with new users, new passwords and the same permissions, and the clone serves the copied site. To leave the databases out, say so: "Clone this project without its databases."
 
-**It does not copy** subdomains, FTP or SFTP accounts, or databases and their users. If your application needs a database, the clone will not have one until you create it. Use clone as a starting template, not as a backup.
+**It does not copy** subdomains, or FTP or SFTP accounts. On a container project it does not copy MySQL databases either: the application's own stored data is copied (unless you ask to leave the databases out, which leaves that data out too), but a database you created for it is not, so create one on the clone. Use clone as a starting template, not as a backup.
 
 ## Suspending
 
@@ -91,6 +113,19 @@ Unsuspend this project.
 ```
 
 A suspended project is also skipped by the engine's automatic health checks, because an application stopped deliberately is not a fault to report.
+
+## Protecting
+
+A project can be marked protected. While it is, an assistant or any other tool using a token cannot delete the project, suspend it, stop or restart it, rebuild or redeploy it, change its environment variables, or push into it. The engine refuses with `project_protected` and nothing runs.
+
+Only you can turn protection on or off, on the server, so a tool cannot lift it. The assistant can read the setting but not change it.
+
+```bash
+pae project:settings:set protected on --project=<name>
+pae project:settings:unset protected --project=<name>
+```
+
+Your own `pae` commands on the server are not affected. Details: [CLI commands](../06-commands/pae-cli.md).
 
 ## Deleting
 
@@ -105,14 +140,14 @@ Delete this project.
 Environment variables are settings your application reads when it starts: a database connection string, an API key, a mode switch.
 
 ```text
-Set DATABASE_URL to <value> on this project and rebuild.
+Set DATABASE_URL to <value> on this project.
 ```
 
 If the assistant cannot change these, those tools have been turned off: [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
-**The rebuild is not optional.** Almost every application reads these once at startup, so changing the value without restarting the application changes nothing you can see.
+The engine stores the value and restarts only the parts of the application that use the changed variable, without a rebuild. Almost every application reads these once at startup, so the restart is what makes the new value take effect. A value the build itself reads still needs a rebuild: ask for one after the change.
 
-Only the keys you name are changed; the rest are left alone.
+Only the keys you name are changed; the rest are left alone. To see what is set, ask the assistant to list the project's environment variables. Values are hidden in the list.
 
 If your repository commits its own `.env` file, the engine leaves that file exactly as committed. Your environment variables go into a separate file, `.env.panelalpha`, which each service that loads `.env` loads after it, so your values win. Code that reads `.env` straight from disk does not see them, and neither does a build step that reads `.env` while the site is being built, as Vite and Next.js do. Only the running application's environment has them. If you need a value at build time, either stop committing `.env`, or make the build read the value from the environment rather than from the file.
 
@@ -159,7 +194,7 @@ Cron jobs run on traditional PHP hosting. A project deployed into its own contai
 
 Describe the schedule in plain words and the assistant will work out the timing for you. If the assistant cannot manage cron jobs, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
-**This is not a backup schedule.** The engine has no built-in backup schedule; backups run when you ask for them. See [Backups](backups.md).
+**This is not a backup schedule.** Backups have their own schedule, set per project. See [Backups](backups.md#scheduled-backups).
 
 ## Troubleshooting
 
@@ -173,16 +208,168 @@ One staging copy per project. Push to the existing pair, or delete the existing 
 A staging copy or a push is already running on this project. Wait for it to finish and try again.
 
 **I cloned a project and the site cannot reach its database.**
-Clones do not copy databases. Create the database and user on the clone, then update its environment variables to point at the new one: [Databases](databases.md).
+A clone of a container project does not copy MySQL databases. Create the database and user on the clone, then update its environment variables to point at the new one: [Databases](databases.md). A traditional PHP project is copied with its databases, unless you asked for them to be left out. The copy has new database names and passwords, so a site that stores the old ones in its own files needs them updated.
+
+**A push or a delete is refused with "project_protected".**
+The project is protected. Turn it off on the server, then ask again: [Protecting](#protecting).
 
 **I changed an environment variable and nothing happened.**
-You did not rebuild. See [Environment variables](#environment-variables).
+The application reads that value while it is being built, so it needs a rebuild. See [Environment variables](#environment-variables).
 
 **I raised the memory limit and the application still runs out.**
 You did not rebuild, or the application needs more than the limit you set. See [Limits](#limits). The application gets a little less than the number you chose. If it is the *build* that runs out, check the deploy log for `Host build container memory`: it says whether the build was sized by the server or by `DEPLOY_BUILD_MEMORY`. See [Limits](#limits).
 
 **The assistant says stored secrets cannot be decoded.**
 Ask the assistant to list the affected secrets and check the engine's system information. The engine's encryption key, `APP_KEY` in `/opt/panelalpha/shared-hosting/.env-core`, may be invalid or may have changed since the secrets were stored. The project's environment variables, Git token, Cloudflare token, registry login or site password then read as empty, and the next save of the project, a redeploy included, stores them empty. Put the previous `APP_KEY` back before you change or redeploy the project. If you no longer have it, ask the assistant to set each named secret again. The application's database password is the exception: it is kept, and deploys are refused until it can be read, because a new one would lock the application out of its own database.
+
+## More requests to try
+
+**Mode** is the lowest permission mode that allows it: read, modify or full ([Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do)). Examples assume a project named `tshop`.
+
+**What is on this engine**
+
+```text
+List the projects on this engine, with their domain names. Then give me the
+short summary view of the same thing.
+```
+
+Mode: read. Tools: `project_list` (with `per_page`), `project_list_all` (with `with_domain_names`), `project_list_summary`. Check: the three views agree on the set of projects, and the paged one is paged.
+
+**One project in full**
+
+```text
+Show everything about project tshop: domain, template, limits, deploy status.
+```
+
+Mode: read. Tools: `project_get`. Check: the domain, the template and the deployment status match what `domain_list` and `deploy_log_get` say.
+
+**Change a limit and make it real**
+
+```text
+Show tshop's limits. Raise its memory limit to 2048 MB, its FTP accounts to 3
+and its databases to 2, then rebuild.
+```
+
+Mode: modify. Tools: `project_get`, `project_update`, `project_rebuild`, `task_get`. Check: the new numbers read back from `project_get`, the rebuild completes, and a value above the server's maximum is refused.
+
+**Usage against limits**
+
+```text
+How close is tshop to its limits this month? Include transfer.
+```
+
+Mode: read. Tools: `project_usage`. Check: `bandwidth.usage` against `bandwidth.maximum` (null means unlimited), and the log disk use is shown.
+
+**Offline and back**
+
+```text
+Suspend tshop. Check that the site no longer opens. Then unsuspend it.
+```
+
+Mode: modify. Tools: `project_suspend`, `project_unsuspend`, `project_get`. Check: nothing is deleted, the project reads suspended, and after the unsuspend the site opens again.
+
+**Site password**
+
+```text
+Put the password ShopTest-2026 on tshop. Check that the site asks for it.
+Then remove it.
+```
+
+Mode: modify. Tools: `project_password_set`, `project_password_unset`. Check: while set, an anonymous request to the site is refused and the page says "This site is password protected." After the removal it opens without a prompt. The password is not repeated in the assistant's answer.
+
+**Settings of a project**
+
+```text
+List the settings of tshop, read one, change it, then clear it.
+```
+
+Mode: full. Tools: `project_setting_list`, `project_setting_get`, `project_setting_set`, `project_setting_delete`. Check: a secret value comes back redacted, and the list says whether a value is present. Clearing a Cloudflare token while tunnels exist is refused unless forced: [Cloudflare](cloudflare.md#remove-a-hostname-or-the-token).
+
+**Generated login**
+
+```text
+What is the admin login for tshop?
+```
+
+Mode: modify (held back in `readonly`). Tools: `app_credentials_get`. Check: the answer has the sign-in address, the username and the password, or says the application declares none. In `readonly` mode the tool is not offered.
+
+**Environment variables without a rebuild**
+
+```text
+Show the environment variables of tshop, then set APP_DEBUG to false.
+```
+
+Mode: modify. Tools: `env_var_list`, `env_var_set`, `task_get`. Check: the list hides the values, the change finishes as a task without a rebuild, and the new value reads back. The same request on a traditional PHP project is refused.
+
+**Clone**
+
+```text
+Clone tshop as tshopcopy. List what was not copied.
+```
+
+Mode: modify. Tools: `project_clone`, `project_get`, `domain_list`, `mysql_database_list`, `ftp_account_list`. Check: the copy has the same limits and files, a staging-style domain, and no subdomains or FTP or SFTP accounts. A traditional PHP project's databases are copied under the new prefix with new users; a container project's are not.
+
+**Staging and back**
+
+```text
+Make a staging copy of tshop called tshopstage. When it is ready, push staging
+live. Later, push live back to staging.
+```
+
+Mode: modify. Tools: `project_staging`, `project_get` (until the staging copy is completed), `project_push` with `target`, `project_get` (until the push is completed). Check: the pair is linked, a second staging copy of the same project is refused, and a push while another runs is answered "busy".
+
+**Staging and push with databases**
+
+```text
+On the traditional PHP project tphpsite, make a staging copy called tphpstage
+with its databases. Then push only the files from live to staging, and then
+only the databases.
+```
+
+Mode: modify. Tools: `project_staging` with `copy_databases`, `mysql_database_list`, `project_push` with `files` and `databases`. Check: the copy lists databases under its own prefix, the pushed side keeps its own database users, and a push with both `files` and `databases` off is refused as "nothing to push".
+
+**Push only some tables**
+
+```text
+On tphpsite, list the database tables that differ from tphpstage, then push
+only the changed table named <table> to staging.
+```
+
+Mode: read for the first part, modify for the push. Tools: `project_push_diff`, `project_push` with `tables`. Check: the list names the differing tables, only those are replaced, and a container project is refused.
+
+**A protected project**
+
+```text
+Delete tshop. Then turn protection on tshop off.
+```
+
+Mode: full. Tools: `project_delete`, `project_setting_set`. Check: with `pae project:settings:set protected on --project=tshop` run on the server first, the delete, a rebuild or a stop sent by the assistant is refused as `project_protected`, and the assistant cannot turn protection off.
+
+**Name checks**
+
+```text
+Create a project called x with no repository.
+```
+
+Mode: modify. Tools: `project_verify_name`, `project_create`. Check: a too-short name is refused with the rule (3 to 15 lowercase letters and digits, starting with a letter), and nothing is created.
+
+**Cron jobs**
+
+```text
+On the traditional PHP project tphpsite, list the cron jobs, add one that runs
+/usr/bin/php /home/tphpsite/cron.php every hour on the hour, change it to every
+30 minutes, then delete it.
+```
+
+Mode: full. Tools: `cron_job_list`, `cron_job_create`, `cron_job_update`, `cron_job_delete`. Check: the job is addressed by its `hash`, the schedule reads back as asked, and the same request on a container project (such as `tshop`) is refused with the reason.
+
+**Delete**
+
+```text
+Delete the project tshopcopy and everything in it.
+```
+
+Mode: full. Tools: `project_delete`, `project_list`. Check: the assistant states that there is no undo and asks first. The project is gone from the list and its address no longer answers.
 
 ## From the server
 

@@ -21,6 +21,13 @@ test.describe('system info', () => {
     expect(Array.isArray(data.ipv4_nat_maps)).toBe(true);
   });
 
+  test('reports the Engine default_tunnel setting', async ({ api }) => {
+    const { data } = await api.getSystemInfo();
+
+    expect(data).toHaveProperty('default_tunnel');
+    expect([null, 'panelalpha', 'none']).toContain(data.default_tunnel ?? null);
+  });
+
   test('SSL certificates are listed per user', async ({ api, setupUser }) => {
     expect(Array.isArray((await api.listSslCertificates(setupUser.username)).data)).toBe(true);
   });

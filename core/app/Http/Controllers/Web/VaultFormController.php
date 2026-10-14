@@ -36,22 +36,7 @@ class VaultFormController
     {
         $entry = $this->find($token);
 
-        if ($entry === null) {
-            return $this->unavailable(
-                'This link is not usable',
-                'It does not lead to a secret any more. Ask the assistant that gave it to you for a new one.'
-            );
-        }
-
-        if ($entry->isSealed()) {
-            return $this->sealed();
-        }
-
-        if ($this->closed($entry)) {
-            return $this->expired($entry);
-        }
-
-        return $this->screen($token, $entry);
+        return $this->refusal($entry) ?? $this->screen($token, $entry);
     }
 
     public function store(Request $request, string $token): Response|View
@@ -62,6 +47,29 @@ class VaultFormController
 
         $entry = $this->find($token);
 
+        $refusal = $this->refusal($entry);
+        if ($refusal !== null) {
+            return $refusal;
+        }
+
+        $check = $this->checkBeforeSaving($entry, $validated['secret']);
+        if ($check['rejected'] !== null) {
+            return response($this->screen($token, $entry, $check['rejected']), 422);
+        }
+
+        if (!$entry->seal($validated['secret'], $check['verification'])) {
+            return $this->sealed();
+        }
+
+        return view('vault.saved', ['verification' => $entry->verification]);
+    }
+
+    /**
+     * The page for a link that takes no paste: unknown, already sealed, or expired. The POST checks
+     * it too, since anyone holding the link can repeat the POST without loading the page.
+     */
+    private function refusal(?SecretVaultEntry $entry): ?View
+    {
         if ($entry === null) {
             return $this->unavailable(
                 'This link is not usable',
@@ -69,8 +77,6 @@ class VaultFormController
             );
         }
 
-        // Checked again here, not just in show(): the form is a POST, and
-        // anyone holding the link can repeat it without ever loading the page.
         if ($entry->isSealed()) {
             return $this->sealed();
         }
@@ -79,18 +85,18 @@ class VaultFormController
             return $this->expired($entry);
         }
 
-        // Before the save, because a stored secret is final: a token that
-        // does not work must leave the link open for another try.
-        $check = app(PasteCheck::class)->run($entry, $validated['secret']);
-        if ($check['rejected'] !== null) {
-            return response($this->screen($token, $entry, $check['rejected']), 422);
-        }
+        return null;
+    }
 
-        $entry->setSecret($validated['secret']);
-        $entry->verification = $check['verification'];
-        $entry->save();
-
-        return view('vault.saved', ['verification' => $entry->verification]);
+    /**
+     * Runs before the save, because a stored secret is final: a token that does not work must leave
+     * the link open for another try.
+     *
+     * @return array{rejected: ?string, verification: ?array<string, string>}
+     */
+    private function checkBeforeSaving(SecretVaultEntry $entry, string $secret): array
+    {
+        return app(PasteCheck::class)->run($entry, $secret);
     }
 
     private function screen(string $token, SecretVaultEntry $entry, ?string $error = null): View
@@ -112,12 +118,8 @@ class VaultFormController
     }
 
     /**
-     * The secret is already set, and this link cannot change it.
-     *
-     * Said plainly rather than hidden behind "this link is not usable": the
-     * person is holding a live link to a real entry, and the useful thing to
-     * tell them is that the value is in place and what it takes to replace
-     * it.
+     * The secret is already set and this link cannot change it. Said plainly, not as "not usable":
+     * the holder has a live link to a real entry and needs to know how to replace the value.
      */
     private function sealed(): View
     {
@@ -148,10 +150,8 @@ class VaultFormController
     }
 
     /**
-     * What the save means. A sealed entry never reaches here, so there is no
-     * "this replaces what is there" case left to describe -- only how far
-     * the save reaches, which a global entry has to say: it is not for one
-     * project.
+     * What the save means and how far it reaches: a global entry is not for one project. A sealed
+     * entry never gets here, so there is no "replaces what is there" case.
      */
     private function note(SecretVaultEntry $entry): string
     {

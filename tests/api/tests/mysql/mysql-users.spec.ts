@@ -2,10 +2,12 @@ import { expect, test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
 import { UPDATED_DB_PASSWORD, createdMySqlName } from '@/helpers/mysql-helpers';
 import { rand } from '@/helpers/random';
+import { redactAndTruncate } from '@/helpers/redact';
 import { waitForCondition } from '@/helpers/retry';
+import { expectStatus } from '@/helpers/expect-status';
 
 test.describe('MySQL users', () => {
-  test('the user list is returned', async ({ api, setupUser }) => {
+  test('the user list is returned', { tag: ['@smoke'] }, async ({ api, setupUser }) => {
     expect(Array.isArray((await api.listMySqlUsers(setupUser.username)).data)).toBe(true);
   });
 
@@ -38,12 +40,21 @@ test.describe('MySQL users', () => {
       await api.deleteMySqlUser(setupUser.username, account);
       pendingCleanup = false;
 
+      let listedUsers: string[] = [];
       await waitForCondition(
-        async () =>
-          !(await api.listMySqlUsers(setupUser.username)).data.some(
-            (entry) => entry.user === account
-          ),
-        { timeout: settings.timing.propagationDelay, interval: 500 }
+        async () => {
+          listedUsers = (await api.listMySqlUsers(setupUser.username)).data.map(
+            (entry) => entry.user
+          );
+          return !listedUsers.includes(account);
+        },
+        {
+          timeout: settings.timing.propagationDelay,
+          interval: 500,
+          message: `MySQL user ${account} still listed after delete`,
+          describeLast: () =>
+            `listed users: ${redactAndTruncate(listedUsers.join(', ') || '(none)', 300)}`,
+        }
       );
     } finally {
       if (pendingCleanup) {
@@ -78,7 +89,7 @@ test.describe('MySQL users', () => {
         }
       })();
 
-      expect(response.status()).toBe(404);
+      await expectStatus(response, 404);
     });
   }
 

@@ -2,11 +2,15 @@
 
 namespace App\Integrations\Tunnels;
 
+use App\Exceptions\TunnelHostnameUnavailableException;
 use App\Lib\Apis\Cloudflare\CloudflareException;
+use App\Lib\Apis\PanelAlpha\PanelAlphaException;
+use App\Lib\Domains\DomainAllocator;
 use App\Models\Domain;
 use App\Models\Tunnel;
 use App\Models\User;
 use App\System;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -18,6 +22,15 @@ use Illuminate\Support\Facades\Log;
  */
 class TunnelManager
 {
+    /** The prefix of the labels the engine allocates for a tunnel it names itself. */
+    public const PREVIEW_LABEL_PREFIX = 'preview-';
+
+    /** Random characters in an allocated label, drawn from [a-z0-9]. */
+    private const PREVIEW_LABEL_LENGTH = 8;
+
+    /** Labels tried before an allocation gives up and answers `tunnel_hostname_unavailable`. */
+    private const PREVIEW_ATTEMPTS = 5;
+
     /**
      * Everything that must hold before a tunnel is worth attempting, in one
      * place because two callers ask: the API, and the console command that
@@ -89,16 +102,80 @@ class TunnelManager
         User $user,
         Domain $domain,
         string $hostname,
-        string $provider = Tunnel::PROVIDER_CLOUDFLARE
+        string $provider = Tunnel::PROVIDER_CLOUDFLARE,
+        string $purpose = Tunnel::PURPOSE_DEFAULT,
+        ?CarbonInterface $expiresAt = null
     ): Tunnel {
         [$hostname, $provider] = self::assertCreatable($user, $domain, $hostname, $provider);
 
+        $tunnel = self::createWithProvider($user, $domain, $hostname, $provider, $purpose === Tunnel::PURPOSE_PREVIEW);
+        self::recordLifetime($tunnel, $purpose, $expiresAt);
+
+        return $tunnel;
+    }
+
+    /**
+     * Allocate a free `preview-<8>` label under panelalpha.online and create
+     * the tunnel.
+     *
+     * A label is first come, first served across the fleet, so a collision --
+     * local or at the proxy -- is retried with a new draw rather than put to
+     * the caller. Only when every attempt is taken does the caller hear
+     * `tunnel_hostname_unavailable`.
+     */
+    public static function createAllocatedTunnel(
+        User $user,
+        Domain $domain,
+        string $purpose = Tunnel::PURPOSE_DEFAULT,
+        ?CarbonInterface $expiresAt = null
+    ): Tunnel {
+        for ($attempt = 0; $attempt < self::PREVIEW_ATTEMPTS; $attempt++) {
+            $hostname = self::previewHostname();
+
+            try {
+                return self::createTunnel(
+                    $user,
+                    $domain,
+                    $hostname,
+                    Tunnel::PROVIDER_PANELALPHA,
+                    $purpose,
+                    $expiresAt
+                );
+            } catch (CloudflareException | PanelAlphaException $e) {
+                if (!DomainAllocator::nameIsTaken($e->getMessage())) {
+                    throw $e;
+                }
+            }
+        }
+
+        throw new TunnelHostnameUnavailableException(self::PREVIEW_ATTEMPTS);
+    }
+
+    /** A random `preview-<8 [a-z0-9]>.panelalpha.online` name. */
+    public static function previewHostname(): string
+    {
+        $alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+        $label = self::PREVIEW_LABEL_PREFIX;
+        for ($i = 0; $i < self::PREVIEW_LABEL_LENGTH; $i++) {
+            $label .= $alphabet[random_int(0, strlen($alphabet) - 1)];
+        }
+
+        return $label . '.' . PanelAlphaConnect::PARENT_DOMAIN;
+    }
+
+    private static function createWithProvider(
+        User $user,
+        Domain $domain,
+        string $hostname,
+        string $provider,
+        bool $preview
+    ): Tunnel {
         if ($provider === Tunnel::PROVIDER_CLOUDFLARE) {
             return Cloudflare::createHostname($user, $domain, $hostname);
         }
 
         if ($provider === Tunnel::PROVIDER_PANELALPHA) {
-            $tunnel = PanelAlphaConnect::createTunnel($user, $domain, $hostname);
+            $tunnel = PanelAlphaConnect::createTunnel($user, $domain, $hostname, forwardDomain: $preview);
             self::rebuildForSibling($domain, $tunnel);
 
             return $tunnel;
@@ -108,20 +185,35 @@ class TunnelManager
     }
 
     /**
-     * Remove a public tunnel hostname.
-     * Cloudflare: DNS + ingress + DB row. Connector stops when no CF tunnels remain.
-     * PanelAlpha Online: remote DELETE on license proxy (best-effort) + local DB row.
+     * Write the engine's own lifetime and intent. The proxy's `valid_until` --
+     * the expiry Connect put on its site -- is a different value and is left as
+     * the provider wrote it; only `expires_at` drives expiry here.
      */
-    public static function deleteTunnel(User $user, Tunnel $tunnel): void
+    private static function recordLifetime(Tunnel $tunnel, string $purpose, ?CarbonInterface $expiresAt): void
+    {
+        $tunnel->setDetails(array_filter([
+            'purpose' => $purpose,
+            'expires_at' => $expiresAt?->toIso8601String(),
+        ], static fn (?string $value): bool => $value !== null));
+        $tunnel->save();
+    }
+
+    /**
+     * Remove a public tunnel hostname: the remote registration (best-effort),
+     * the local row, and the domain's vhost aliases.
+     */
+    public static function removeTunnel(User $user, Tunnel $tunnel): void
     {
         $domain = $tunnel->domain;
-        self::removeTunnel($user, $tunnel);
+        self::forgetTunnel($user, $tunnel);
+
         if ($domain instanceof Domain) {
             self::rebuildForSibling($domain, $tunnel);
         }
     }
 
-    private static function removeTunnel(User $user, Tunnel $tunnel): void
+    /** Drop the registration and the row, leaving the domain's aliases alone. */
+    private static function forgetTunnel(User $user, Tunnel $tunnel): void
     {
         if ((int) $tunnel->user_id !== (int) $user->id) {
             throw new CloudflareException('Tunnel does not belong to this project.');
@@ -162,7 +254,7 @@ class TunnelManager
         foreach (Tunnel::forDomain($domain) as $tunnel) {
             try {
                 // The domain is going away: nothing to rebuild.
-                self::removeTunnel($user, $tunnel);
+                self::forgetTunnel($user, $tunnel);
             } catch (\Throwable $e) {
                 Log::warning(
                     "Tunnel teardown failed for {$tunnel->hostname}: " . $e->getMessage()

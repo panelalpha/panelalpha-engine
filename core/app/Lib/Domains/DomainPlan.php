@@ -43,6 +43,9 @@ final class DomainPlan
     public const TUNNEL_NONE = 'none';
     public const TUNNELS = [self::TUNNEL_PANELALPHA, self::TUNNEL_NONE];
 
+    /** The Engine setting deciding the tunnel a create that named none gets. */
+    public const SETTING_DEFAULT_TUNNEL = 'default_tunnel';
+
     public const PANELALPHA_ONLINE = 'panelalpha.online';
     public const PANELALPHA_DIRECT = 'panelalpha.direct';
 
@@ -52,10 +55,11 @@ final class DomainPlan
      * @param string $username the project name, which is also the label a
      *        generated domain is built from
      * @param ?string $requested the caller's `domain`, if it gave one
-     * @param ?string $tunnel the caller's `tunnel`, if it gave one. Asking
-     *        for `panelalpha` explicitly outranks a configured base domain --
-     *        an explicit request beats a default, even the operator's.
-     * @param array{sites_base_domain?: ?string, cert_domain?: ?string, default_ipv4?: ?string} $settings
+     * @param ?string $tunnel the caller's `tunnel`, if it gave one; a missing one
+     *        becomes `none` only when the `default_tunnel` setting says so. Asking
+     *        for `panelalpha` explicitly outranks a configured base domain -- an
+     *        explicit request beats a default, even the operator's.
+     * @param array{sites_base_domain?: ?string, cert_domain?: ?string, default_ipv4?: ?string, default_tunnel?: ?string} $settings
      * @return list<array{domain: string, source: string, label: ?string}>
      *         `label` is set only on the rung that has to be allocated
      *         remotely, and is the single label to ask the proxy for.
@@ -67,6 +71,7 @@ final class DomainPlan
         array $settings
     ): array {
         $requested = self::normalise($requested);
+        $tunnel = self::resolveTunnel($tunnel, $settings);
 
         if ($requested !== null) {
             return [[
@@ -142,6 +147,23 @@ final class DomainPlan
         ];
 
         return $candidates;
+    }
+
+    /**
+     * The tunnel to walk the ladder with: the caller's own, otherwise `none` only
+     * when the setting says so -- `panelalpha` and unset both keep today's ladder.
+     *
+     * @param array{default_tunnel?: ?string} $settings
+     */
+    public static function resolveTunnel(?string $tunnel, array $settings): ?string
+    {
+        if ($tunnel !== null) {
+            return $tunnel;
+        }
+
+        return ($settings[self::SETTING_DEFAULT_TUNNEL] ?? null) === self::TUNNEL_NONE
+            ? self::TUNNEL_NONE
+            : null;
     }
 
     /**

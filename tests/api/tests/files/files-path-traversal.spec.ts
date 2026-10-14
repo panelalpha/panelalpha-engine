@@ -48,6 +48,12 @@ const PROBES: Record<string, TraversalProbe> = {
         )
       ).status(),
   },
+  'list, with a relative escape': {
+    send: async (api, username) =>
+      (
+        await api.get(`projects/${username}/files/list?path=${encodeURIComponent('../..//etc')}`)
+      ).status(),
+  },
   'put-contents, with a relative escape': {
     send: async (api, username) =>
       (

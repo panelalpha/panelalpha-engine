@@ -27,36 +27,26 @@ class DeployCompose
     private const IMAGE_REF_LIMIT = 6;
 
     /**
-     * Strategies that already have a runnable image, or bind-mount nginx: `up`
-     * should skip the build and the base-image pull.
+     * Strategies that already have a runnable image, or bind-mount the project onto
+     * a stock one (PHP, a host-run project): `up` skips the build and the base-image pull,
+     * since `up --build` fails on a service without `build:`.
      */
     public static function skipBuild(?string $strategy, ?string $runtime = null): bool
     {
-        // PHP bind-mounts the project onto the shared base image, so there is no
-        // build context and `up --build` fails on a service without `build:`.
         return $runtime === PlatformManifest::RUNTIME_NGINX
             || $runtime === PlatformManifest::RUNTIME_PHP
             || StandaloneNodeServe::isStandaloneStrategy($strategy)
-            // Same as PHP: stock image, project mounted, no build context.
             || HostRunProject::isStrategy($strategy)
             || in_array($strategy, [Strategies::STATIC, Strategies::FALLBACK, Strategies::RAILPACK], true);
     }
 
     /**
-     * `up -d` recreates a service only when its definition changes; for PHP and a
-     * mounted Node project nothing does — same image, mount and env — so the old
-     * container keeps running the previous entrypoint or build. The code is a
-     * bind mount, the lifecycle is not.
+     * `up -d` recreates a service only when its definition changes, and for a mounted
+     * project nothing does, so the old container would keep serving the previous
+     * build (Nitro's `.output` is even deleted under it) or nginx config.
      */
     public static function forceRecreate(?string $strategy, ?string $runtime = null): bool
     {
-        // A mounted Node project: nothing changes either, and `next start` read
-        // its build output at boot, so the old process serves the previous build.
-        // Nitro (Nuxt, TanStack Start) deletes and recreates `.output` on every
-        // build, so a container left running keeps a bind mount of the removed
-        // directory and answers 500 for every static file.
-        // nginx reads panelalpha.nginx.conf at start only, and an archive redeploy's
-        // `rsync --delete` replaces that file: the old container keeps the old config.
         return $runtime === PlatformManifest::RUNTIME_PHP
             || $runtime === PlatformManifest::RUNTIME_NGINX
             || in_array($strategy, [Strategies::STATIC, Strategies::FALLBACK], true)
@@ -114,44 +104,77 @@ class DeployCompose
             'labels' => [GeneratedCompose::LABEL => 'dockerfile'],
             'env_file' => ['.env'],
         ];
-
-        // A sibling naming the image it builds (dpaste's `migration: image: app`)
-        // must resolve to the tag this build produces, or Compose refuses with
-        // `pull access denied for app` before the build runs.
-        $image = self::builtImageName($decision['build_image'] ?? null);
-        if ($image !== null) {
-            $service['image'] = $image;
-        }
-
-        // Volumes the file's own app service mounted: the replacement serves the
-        // same app, and without them dpaste restart-loops on
-        // `unable to open database file`.
-        $appMounts = self::stringMounts($decision['app_mounts'] ?? null);
-        if ($appMounts !== []) {
-            $service['volumes'] = $appMounts;
-            // Each has to be declared, or compose refuses the file with
-            // `service "app" refers to undefined volume`.
-            $carried = is_array($decision['volumes'] ?? null) ? $decision['volumes'] : [];
-            foreach ($appMounts as $mount) {
-                $carried[explode(':', $mount)[0]] ??= null;
-            }
-            $decision['volumes'] = $carried;
-        }
-
-        // As the repository's own service runs it: a CMD ending in `exec bash`
-        // exits at once without a terminal.
-        foreach (['tty', 'stdin_open'] as $key) {
-            if (($decision[$key] ?? null) === true) {
-                $service[$key] = true;
-            }
-        }
-
+        $service = self::withBuiltImageTag($service, $decision);
+        [$service, $decision] = self::withAppMounts($service, $decision);
+        $service = self::withTerminal($service, $decision);
         [$service, $decision] = self::withDeclaredVolumes($service, $decision);
 
         return GeneratedCompose::render(
             $service + self::optional($decision),
             self::withoutEmptyVolumes($decision)
         );
+    }
+
+    /**
+     * Tag the build with the name a sibling service refers to it by (dpaste's
+     * `migration: image: app`), or Compose refuses with `pull access denied`.
+     *
+     * @param array<string, mixed> $service
+     * @param array<string, mixed> $decision
+     * @return array<string, mixed>
+     */
+    private static function withBuiltImageTag(array $service, array $decision): array
+    {
+        $image = self::builtImageName($decision['build_image'] ?? null);
+        if ($image !== null) {
+            $service['image'] = $image;
+        }
+
+        return $service;
+    }
+
+    /**
+     * The volumes the file's own app service mounted, each declared: the replacement
+     * serves the same app, and Compose refuses a mount of an undeclared volume.
+     *
+     * @param array<string, mixed> $service
+     * @param array<string, mixed> $decision
+     * @return array{0: array<string, mixed>, 1: array<string, mixed>}
+     */
+    private static function withAppMounts(array $service, array $decision): array
+    {
+        $appMounts = self::stringMounts($decision['app_mounts'] ?? null);
+        if ($appMounts === []) {
+            return [$service, $decision];
+        }
+
+        $service['volumes'] = $appMounts;
+        $carried = is_array($decision['volumes'] ?? null) ? $decision['volumes'] : [];
+        foreach ($appMounts as $mount) {
+            $carried[explode(':', $mount)[0]] ??= null;
+        }
+        $decision['volumes'] = $carried;
+
+        return [$service, $decision];
+    }
+
+    /**
+     * `tty` / `stdin_open` as the repository's own service set them: a CMD ending
+     * in `exec bash` exits at once without a terminal.
+     *
+     * @param array<string, mixed> $service
+     * @param array<string, mixed> $decision
+     * @return array<string, mixed>
+     */
+    private static function withTerminal(array $service, array $decision): array
+    {
+        foreach (['tty', 'stdin_open'] as $key) {
+            if (($decision[$key] ?? null) === true) {
+                $service[$key] = true;
+            }
+        }
+
+        return $service;
     }
 
     /**
@@ -214,21 +237,30 @@ class DeployCompose
      */
     public static function builtImageNameFromYaml(string $composeYaml): ?string
     {
-        try {
-            $parsed = Yaml::parse($composeYaml);
-        } catch (\Throwable) {
+        $services = self::parsedServices($composeYaml);
+
+        return self::appServiceImageName($services) ?? self::referencedBuildImageName($services);
+    }
+
+    /** @param array<mixed> $services */
+    private static function appServiceImageName(array $services): ?string
+    {
+        $app = $services[GeneratedCompose::APP_SERVICE] ?? null;
+        if (!is_array($app) || !isset($app['build'])) {
             return null;
         }
-        $services = is_array($parsed) && is_array($parsed['services'] ?? null) ? $parsed['services'] : [];
 
-        $app = $services[GeneratedCompose::APP_SERVICE] ?? null;
-        if (is_array($app) && isset($app['build'])) {
-            $declared = self::builtImageName($app['image'] ?? null);
-            if ($declared !== null) {
-                return $declared;
-            }
-        }
+        return self::builtImageName($app['image'] ?? null);
+    }
 
+    /**
+     * The tag of the first build service a sibling's `image:` refers to. Both sides
+     * are normalised, so an untagged name and `:latest` compare equal.
+     *
+     * @param array<mixed> $services
+     */
+    private static function referencedBuildImageName(array $services): ?string
+    {
         $referenced = [];
         foreach ($services as $service) {
             if (!is_array($service) || isset($service['build'])) {
@@ -244,8 +276,6 @@ class DeployCompose
                 continue;
             }
             $declared = self::builtImageName($service['image'] ?? null);
-            // Normalised like the references, so an untagged name and `:latest`
-            // compare equal.
             $normalized = $declared === null ? null : ImageTransfer::normalizeImageRef($declared);
             if ($normalized !== null && isset($referenced[strtolower($normalized)])) {
                 return $declared;
@@ -276,7 +306,8 @@ class DeployCompose
     /**
      * Distinct pullable images a compose file references, seeded from the host
      * cache instead of pulled through the inner daemon's nested NAT. Capped so a
-     * dozen sidecars do not serialise a dozen host pulls.
+     * dozen sidecars do not serialise a dozen host pulls. A name the file builds
+     * itself is the build's own tag, not something a registry has.
      *
      * @param list<string>|null $activeProfiles when given, a service behind
      *        any other `profiles:` is skipped: `compose up` will not start it
@@ -287,10 +318,6 @@ class DeployCompose
     public static function imageRefs(string $composeYaml, int $limit = self::IMAGE_REF_LIMIT, ?array $activeProfiles = null, ?array $env = null): array
     {
         $services = self::servicesIn($composeYaml);
-        // A name the same file builds is the image this build produces, not a
-        // registry to fetch (dpaste's `migration: image: app`): pre-pulling it
-        // asked Docker Hub for `app:latest`. The only reliable signal that an
-        // image is local is that the file builds it.
         $builtHere = self::imagesBuiltHere($services, $env);
 
         $images = [];
@@ -298,9 +325,7 @@ class DeployCompose
             if (isset($service['build']) || !self::isActive($service, $activeProfiles)) {
                 continue;
             }
-            $image = $env === null
-                ? ImageTransfer::normalizeImageRef($service['image'] ?? null)
-                : self::resolvedImageRef($service['image'] ?? null, $env);
+            $image = self::serviceImageRef($service, $env);
             if ($image === null || in_array(strtolower($image), $builtHere, true) || in_array($image, $images, true)) {
                 continue;
             }
@@ -341,15 +366,26 @@ class DeployCompose
             if (!is_array($service) || !isset($service['build'])) {
                 continue;
             }
-            $image = $env === null
-                ? ImageTransfer::normalizeImageRef($service['image'] ?? null)
-                : self::resolvedImageRef($service['image'] ?? null, $env);
+            $image = self::serviceImageRef($service, $env);
             if ($image !== null) {
                 $names[] = strtolower($image);
             }
         }
 
         return array_values(array_unique($names));
+    }
+
+    /**
+     * A service's `image:`, interpolated when $env is given, else only normalised.
+     *
+     * @param array<string, mixed> $service
+     * @param array<string, list<?string>|string>|null $env
+     */
+    private static function serviceImageRef(array $service, ?array $env): ?string
+    {
+        return $env === null
+            ? ImageTransfer::normalizeImageRef($service['image'] ?? null)
+            : self::resolvedImageRef($service['image'] ?? null, $env);
     }
 
     /**
@@ -439,6 +475,9 @@ class DeployCompose
     }
 
     /**
+     * `environment`, `depends_on` and `extra_hosts`, each only when set. Extra hosts
+     * pin the account's own MySQL server, whose name resolves only on the host.
+     *
      * @param array<string, mixed> $decision
      * @return array<string, mixed>
      */
@@ -453,9 +492,6 @@ class DeployCompose
         if ($depends !== []) {
             $service['depends_on'] = $depends;
         }
-        // A database on the account's own MySQL server resolves on the host and
-        // nowhere inside the account's nested Docker, so the name is pinned to an
-        // address here.
         $extraHosts = ComposeValues::stringList($decision['extra_hosts'] ?? null);
         if ($extraHosts !== []) {
             $service['extra_hosts'] = $extraHosts;
@@ -465,13 +501,10 @@ class DeployCompose
     }
 
     /**
-     * Give every `VOLUME` the Dockerfile declares a named volume: Docker's
-     * anonymous ones are not in `~/project`, not backed up, and orphaned by a
-     * container recreate. A bind mount would hide what the image ships at that
-     * path, where a volume copies it out on first use. Vaultwarden also refuses to
-     * start on the anonymous form, which it recognises in `/proc/self/mountinfo`.
-     *
-     * A path something already mounts is left as it is.
+     * Give every `VOLUME` the Dockerfile declares a named volume: anonymous ones are
+     * orphaned by a recreate, and a bind mount would hide what the image ships there.
+     * A path something already mounts is left as it is; two paths folding onto one
+     * slug get a volume each.
      *
      * @param array<string, mixed> $service
      * @param array<string, mixed> $decision
@@ -485,20 +518,14 @@ class DeployCompose
         }
 
         $mounts = ComposeValues::stringList($service['volumes'] ?? null);
-        $taken = [];
-        foreach ($mounts as $mount) {
-            $parts = explode(':', $mount);
-            if (isset($parts[1])) {
-                $taken[$parts[1]] = true;
-            }
-        }
-
+        $taken = self::mountTargets($mounts);
         $volumes = is_array($decision['volumes'] ?? null) ? $decision['volumes'] : [];
+        $names = GeneratedCompose::volumeNamesFor($declared);
         foreach ($declared as $path) {
             if (isset($taken[$path])) {
                 continue;
             }
-            $name = GeneratedCompose::volumeNameFor($path);
+            $name = $names[$path];
             $mounts[] = $name . ':' . $path;
             $volumes[$name] ??= null;
         }
@@ -509,6 +536,23 @@ class DeployCompose
         $decision['volumes'] = $volumes;
 
         return [$service, $decision];
+    }
+
+    /**
+     * @param list<string> $mounts
+     * @return array<string, true> container path => true
+     */
+    private static function mountTargets(array $mounts): array
+    {
+        $taken = [];
+        foreach ($mounts as $mount) {
+            $parts = explode(':', $mount);
+            if (isset($parts[1])) {
+                $taken[$parts[1]] = true;
+            }
+        }
+
+        return $taken;
     }
 
     private static function withoutEmptyVolumes(array $decision): array
@@ -526,13 +570,22 @@ class DeployCompose
      */
     private static function servicesIn(string $composeYaml): array
     {
+        return array_values(array_filter(self::parsedServices($composeYaml), 'is_array'));
+    }
+
+    /**
+     * The `services:` map as written; empty when there is none or the YAML does not parse.
+     *
+     * @return array<mixed>
+     */
+    private static function parsedServices(string $composeYaml): array
+    {
         try {
             $parsed = Yaml::parse($composeYaml);
         } catch (\Throwable) {
             return [];
         }
-        $services = is_array($parsed) && is_array($parsed['services'] ?? null) ? $parsed['services'] : [];
 
-        return array_values(array_filter($services, 'is_array'));
+        return is_array($parsed) && is_array($parsed['services'] ?? null) ? $parsed['services'] : [];
     }
 }

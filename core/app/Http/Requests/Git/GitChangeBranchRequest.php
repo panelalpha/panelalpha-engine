@@ -2,12 +2,14 @@
 
 namespace App\Http\Requests\Git;
 
-use App\System\Project\Git\Ref as GitRef;
+use App\Http\Requests\Concerns\ChecksGitRefName;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Validator;
 
 class GitChangeBranchRequest extends FormRequest
 {
+    use ChecksGitRefName;
+
     public function authorize(): bool
     {
         return true;
@@ -23,11 +25,6 @@ class GitChangeBranchRequest extends FormRequest
 
     public function withValidator(Validator $validator): void
     {
-        $validator->after(function (Validator $validator): void {
-            $branch = $validator->getData()['branch'] ?? null;
-            if (is_string($branch) && $branch !== '' && !GitRef::isValidName($branch)) {
-                $validator->errors()->add('branch', 'Invalid git ref name.');
-            }
-        });
+        $this->checkGitRefName($validator, 'branch');
     }
 }

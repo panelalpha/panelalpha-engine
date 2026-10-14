@@ -2,10 +2,18 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\ResolvesVaultFields;
 use Illuminate\Foundation\Http\FormRequest;
 
 class MysqlUserChangePasswordRequest extends FormRequest
 {
+    use ResolvesVaultFields;
+
+    protected function prepareForValidation(): void
+    {
+        $this->resolveVaultFields(['password']);
+    }
+
     /**
      * Determine if the user is authorized to make this request.
      *

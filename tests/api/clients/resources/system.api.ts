@@ -1,12 +1,17 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import {
+  type ApiAccessAllowRequest,
+  type ApiAccessEntry,
+  type ApiAccessRemoval,
+  type ApiAccessRotation,
   type ApiResponse,
   type EngineCertificateRequest,
   type Ipv4NatMap,
   type SslConfig,
   type SystemInfo,
 } from '@/types';
+import { describeAttempts, httpReason, recordAttempts } from '@/helpers/attempts';
 import { ModSecurityApi } from './modsec.api';
 
 export class SystemApi extends ModSecurityApi {
@@ -53,9 +58,12 @@ export class SystemApi extends ModSecurityApi {
     const maxAttempts = 5;
     const retryDelayMs = 2000;
 
+    const reasons: string[] = [];
+
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       const response = await this.api.put('system/network-config', { data: payload });
       if (response.ok()) {
+        recordAttempts('PUT system/network-config', attempt, reasons);
         return response.json();
       }
 
@@ -64,15 +72,19 @@ export class SystemApi extends ModSecurityApi {
       const shouldRetry =
         status === 422 && this.isContainerRestartingError(body) && attempt < maxAttempts;
 
+      reasons.push(httpReason(status, body));
       if (shouldRetry) {
         await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
         continue;
       }
 
+      recordAttempts('PUT system/network-config', attempt, reasons);
       await this.assertStatus(response, 200);
     }
 
-    throw new Error('PUT /system/network-config did not return 200');
+    throw new Error(
+      `PUT /system/network-config did not return 200 (${describeAttempts(maxAttempts, reasons)})`
+    );
   }
 
   async getCurrentMetrics(): Promise<ApiResponse<any>> {
@@ -208,5 +220,54 @@ export class SystemApi extends ModSecurityApi {
   }): Promise<{ status: number; body: unknown }> {
     const response = await this.api.put('system/network-config', { data: payload });
     return this.rawCall(response);
+  }
+
+  /** The projects allowed to call this engine's API. Panel-facing. */
+  async listApiAccess(): Promise<ApiResponse<ApiAccessEntry[]>> {
+    const response = await this.api.get('system/api-access');
+    await this.assertStatus(response, 200);
+    return response.json();
+  }
+
+  async listApiAccessRaw(): Promise<{ status: number; body: unknown }> {
+    return this.rawCall(await this.api.get('system/api-access'));
+  }
+
+  async allowApiAccess(
+    project: string,
+    payload: ApiAccessAllowRequest
+  ): Promise<ApiResponse<ApiAccessEntry>> {
+    const response = await this.api.put(`system/api-access/${project}`, { data: payload });
+    await this.assertStatus(response, 200);
+    return response.json();
+  }
+
+  async allowApiAccessRaw(
+    project: string,
+    payload: Record<string, unknown>
+  ): Promise<{ status: number; body: unknown }> {
+    const response = await this.api.put(`system/api-access/${project}`, { data: payload });
+    return this.rawCall(response);
+  }
+
+  async denyApiAccess(project: string): Promise<ApiResponse<ApiAccessRemoval>> {
+    const response = await this.api.delete(`system/api-access/${project}`);
+    await this.assertStatus(response, 200);
+    return response.json();
+  }
+
+  async denyApiAccessRaw(project: string): Promise<{ status: number; body: unknown }> {
+    return this.rawCall(await this.api.delete(`system/api-access/${project}`));
+  }
+
+  /** Replaces an allowed project's token; the apply that delivers it is asynchronous. */
+  async rotateApiAccess(project: string): Promise<ApiAccessRotation> {
+    const response = await this.api.post(`system/api-access/${project}/rotate`);
+    await this.assertStatus(response, 202);
+    return response.json();
+  }
+
+  async rotateApiAccessRaw(project: string): Promise<{ status: number; body: unknown }> {
+    return this.rawCall(await this.api.post(`system/api-access/${project}/rotate`));
   }
 }

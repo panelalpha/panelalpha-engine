@@ -84,14 +84,15 @@ final class NewDomain
     }
 
     /**
-     * The `details` a new domain starts with.
+     * The `details` a new domain starts with; a subdomain records its parent, which
+     * is what keeps the parent from being deleted under it.
      *
      * @param  array<mixed> $aliases
      * @return array<string, mixed>
      */
-    public static function details(string $domain, bool $sslDisabled, array $aliases): array
+    public static function details(string $domain, bool $sslDisabled, array $aliases, ?string $parentDomain = null): array
     {
-        return [
+        $details = [
             'document_root' => "/{$domain}/public_html",
             'redirect_enabled' => false,
             'redirect_url' => null,
@@ -99,5 +100,7 @@ final class NewDomain
             'ssl_disabled' => $sslDisabled,
             'aliases' => $aliases,
         ];
+
+        return $parentDomain === null ? $details : $details + ['parent_domain' => $parentDomain];
     }
 }

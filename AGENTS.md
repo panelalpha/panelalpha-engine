@@ -34,6 +34,8 @@ cd core
 ./vendor/bin/phpunit --testsuite Unit
 ```
 
+The PHPUnit tests (Unit and Feature) live in [`tests/unit/`](tests/unit/README.md); `core/phpunit.xml` points at them.
+
 Report a failure as pre-existing **only after proving it** — `git stash`, re-run,
 confirm the same tests fail on the baseline, `git stash pop`. Never wave a failure
 away as "probably pre-existing".
@@ -54,10 +56,11 @@ How to run the suite, and which group does what, is in
 
 ```bash
 cd tests/api
-npm install
-npm test                  # unit, the API, and the supported-app deploys
-npm run test:unit         # pure logic, no engine
-npm run check             # typecheck + lint + format — run before pushing
+bun install
+bun run test              # unit tests and the API; application deploys are not run
+bun run test:full         # everything in test, plus every application deploy
+bun run test:unit         # pure logic, no engine
+bun run check             # typecheck + lint + format — run before pushing
 ```
 
 Three things an agent gets wrong here:
@@ -77,9 +80,9 @@ running `tests/mcp/`.**
 
 **Only the engine host runs the whole thing.** The `cli`,
 `webserver-change`, `update`, `engine-cert` and `network-mutation` projects
-reconfigure the host, and are excluded from `npm test`. Naming them in a
+reconfigure the host, and are excluded from `bun run test`. Naming them in a
 result means having run them explicitly. The supported-app deploys are part
-of `npm test`.
+of `bun run test:full`.
 
 ---
 
@@ -101,7 +104,7 @@ Runs the **real** engine code (`Dind`, `DetectProjectStrategy`,
 | `--reuse-container` | Redeploy into the running container | **Required for any warm measurement** — see §4 |
 | `--keep-cache` | Keep the host build cache (node_modules/npm/pnpm/yarn/bun) | Measuring host-compile reuse |
 | `--name=NAME` | Account name (container is `dind-test-NAME`) | Reusing one prepared `/home` dir for many apps |
-| `--timeout=N` | Seconds to wait for the app | Slow builds |
+| `--timeout=N` | Length of the test-only settle pause before the status check, capped at 5s | Shortening that pause. It does not wait longer for a slow build or app: the build runs under the engine's own limits, and the HTTP check always polls 15 rounds |
 
 Two traps worth knowing before you stage anything: a **cold run wipes the
 account directory**, and a **local path is cloned with git, so it deploys
@@ -213,15 +216,25 @@ in a Docker layer. Reusing an account across different apps overlays one app's
 
 Say which one you are measuring.
 
-**1. Shared registry cache** (`panelalpha-cache-registry:5000`) — 7 pre-warmed
-stack tags (`railpack-node-20/22`, `python-3.11/3.12`, `ruby-3.3.6/3.4.1`,
-`go-1.22`). Every recipe build imports these manifests. Tenant builds are
-**read-only** against it by design: `BuildCache::tenantFlags()` documents
-that `--cache-to` would export layers containing customer source into a
-`registry:2` with no per-repository ACL, and that this was *observed in
-practice* — an app's `app.rb` and `Gemfile` retrievable from an unrelated
-account. Only synthetic warm projects write those tags. **A fresh account
-showing 0 cached app layers is correct, not a bug.**
+**1. Shared registry cache** — the prewarmed base images the engine builds and
+keeps, served by **two containers over one storage**. `panelalpha-cache-registry`
+is the name every account pulls from (`panelalpha-cache-registry:5000`): it runs
+`REGISTRY_STORAGE_MAINTENANCE_READONLY` with the storage mounted `:ro` and no
+published port, so anything but GET/HEAD answers 405.
+`panelalpha-cache-registry-writer` is the one that writes: `network_mode: host`,
+listening on the host's `127.0.0.1:5000` only, on no docker network an account is
+on. Core pushes and deletes through it (`CacheRegistry::hostArgv()`, which
+`nsenter`s into the host's netns); `system:image:prewarm` fills it and the
+weekly trim removes what no catalogue tag needs. That reader/writer split is
+asserted by `tests/unit/Unit/Deploy/Dind/DindImageStoreTest.php::
+test_the_registry_accounts_reach_is_read_only_and_the_writer_is_not_theirs`,
+and the probe that decides whether either is up (`DindImageStore::REGISTRY_DOWN`)
+is `docker inspect` of the container, not a request over the network.
+
+**The engine keeps no per-tag cache statistics**, and **Railpack tenants do not
+write to this registry at all**: a Railpack build runs with no `--cache-from`
+and no `--cache-to` (see §6a). The registry serves base *images* by tag; a fresh
+account showing 0 cached app layers is correct, not a bug.
 
 **2. The account's own BuildKit cache** — inside the account's DinD container.
 This is production's warm path.
@@ -237,19 +250,20 @@ package-manager caches for host compiles.
 
 ## 6a. Railpack
 
-> Baseline: [`docs/07-supported-projects/how-detection-works.md`](docs/07-supported-projects/how-detection-works.md)
-> (order, Deno/Elixir gap). This section is the cache path and how to verify it.
+> Baseline: [`docs/07-supported-projects/how-detection-works.md`](docs/07-supported-projects/how-detection-works.md).
+> This section is what reaches Railpack and how its build runs.
 
-Railpack is the catch-all just before `static`/`fallback`, so it is reached only
-when nothing earlier claims the repo. It is gated by
-`DetectProjectStrategy::RAILPACK_MANIFESTS`, which today lists
-`package.json`, `composer.json`, `go.mod`, `Cargo.toml`, `requirements.txt`,
-`pyproject.toml`, `Gemfile`, `pom.xml`, `build.gradle[.kts]`.
+Railpack is the catch-all just before `static`/`fallback`. It is reached when no
+platform manifest claims the project (`PlatformSelector::forContext()`) but some
+toolchain the engine knows recognises it (`RuntimeRegistry::anyRecognises()`).
+There is no `DetectProjectStrategy::RAILPACK_MANIFESTS` list in this tree: what
+counts is whatever the `<Something>Runtime` classes resolve to, plus
+`RuntimeRegistry::RAILPACK_ONLY_MARKERS` (`cmakelists.txt`, `meson.build`) for the
+toolchains Railpack has and the engine does not.
 
-**Gap worth knowing:** Railpack itself supports Deno and Elixir, but neither
-`deno.json` nor `mix.exs` is in that list, so those projects land on `fallback`
-and are never offered to Railpack. Verified: `denoland/fresh`, `oakserver/oak`
-and `denoland/deno_std` all detect as `fallback`.
+**Deno and Elixir reach it too — they are not a gap.** `deno.json`/`deno.jsonc`
+and `mix.exs` are read by a runtime, so a Deno or Elixir project is offered to
+Railpack; only a project with none of the markers lands on `fallback`.
 
 ### Real repos that do reach it
 
@@ -264,55 +278,40 @@ A repo with dependencies but **no `start` script and no server** (`koajs/example
 `lodash/lodash`) makes the Railpack build fail, and the chain falls back to
 `fallback`/static and still serves — degradation is graceful, and the recorded
 strategy becomes `fallback`, not `railpack`. Do not read that as "railpack was
-never tried": it was, and `DeployStrategy::…` logged the fallback.
+never tried": it was, and the build logged the failure.
 
-### Does Railpack use our host cache? Yes — read-only
+### How a Railpack build runs — and why it does not use the registry cache
 
-`DeployStrategy.php:688` builds the buildx command with
-`BuildCache::tenantFlags()`, which emits one
-`--cache-from type=registry,ref=panelalpha-cache-registry:5000/panelalpha-cache:railpack-<stack>`
-per stack and an empty `--cache-to`.
+`RailpackStrategy::build()` runs `railpack prepare . --plan-out <plan>` inside
+the account, then `docker buildx build --build-arg BUILDKIT_SYNTAX=<frontend>
+-f <plan> --output type=docker,name=<image>` — a script under the account's home
+via `Shell::execAsUser()`. **There is no `--cache-from` and no `--cache-to`.**
+Railpack tenants therefore neither read nor write `panelalpha-cache-registry`
+(the reader/writer split in §5 is not about Railpack). What is preloaded is the
+*base images* the plan names: `RailpackCache::preloadImages()` (the frontend plus
+`RailpackPlan::imageRefs()`) is handed to
+`InnerDocker::preloadRailpackBaseImages()` after `prepare` writes the plan,
+because the builder and runtime tags follow Railpack's own release calendar and
+the plan is the only thing that knows which it resolved to.
 
-The deploy log will **not** show this: the Railpack build runs through
-`Shell::execAsUser()` and its buildx progress never reaches the tester's stdout.
-Prove it from the registry's own access log instead:
-
-```bash
-before=$(docker logs panelalpha-cache-registry 2>&1 | wc -l)
-# ... run the deploy ...
-docker logs panelalpha-cache-registry 2>&1 | tail -n +$((before+1)) > reg.log
-grep -oP 'railpack-[a-z]+-?[0-9.]*' reg.log | sort -u     # which stack tags were read
-grep -oP '"(GET|HEAD|PUT|POST|PATCH) ' reg.log | sort | uniq -c
-```
-
-What a correct run shows:
-
-- the build reads the `railpack-*` stack tags it was given (all seven unless
-  narrowed — see "Narrowing `--cache-from`" in §6b)
-- a warm build makes fewer requests and fetches fewer blobs than a cold one,
-  because BuildKit already holds them
-- **GET and HEAD only, no PUT/POST/PATCH.** Not one write. That is
-  `tenantFlags()`'s empty `--cache-to` doing its job: a tenant build must
-  never export layers holding customer source into a registry every other
-  account can read.
-
-If a Railpack timing looks suspiciously slow, check `lookUpCacheRegistry()`
-resolved at all — it returns null when `docker inspect panelalpha-cache-registry`
-fails on the host, and the build then runs correctly but with no cache.
+The build's buildx progress never reaches the tester's stdout — it runs through
+`Shell::execAsUser()`. Read the account's own build result, not a registry log.
 
 ---
+
 
 ## 6b. Cache usage — what exists, and how to count it
 
 **The engine tracks nothing.** There are no hit counters, no per-tag metrics, no
-cache statistics anywhere in `app/`. The only cache signal in the whole codebase
-is a shell `echo "node_modules cache hit"` inside the host-compile script
-(`HostNodeBuild::innerScript()`), emitted when `node_modules/.pa-lock` still
-matches the project's lockfile — and nothing counts or stores it. So "how often
-was this cache used" cannot be answered from the product today.
+cache statistics anywhere in `core/app/`. The only cache signal in the whole
+codebase is a shell `echo "node_modules cache hit"` inside the host-compile
+script (`HostNodeBuild::innerScript()`), emitted when `node_modules/.pa-lock`
+still matches the project's lockfile — and nothing counts or stores it. So "how
+often was this cache used" cannot be answered from the product today.
 
-It *can* be measured from the cache registry's access log, which is what
-`scripts/tools/dind-test/cache-usage.php` does:
+What the shared registry *does* serve is base images by tag, and its access is
+observable from the registry container's own log — that is what
+`scripts/tools/dind-test/cache-usage.php` reads:
 
 ```bash
 MARK=$(php scripts/tools/dind-test/cache-usage.php --mark)
@@ -322,104 +321,29 @@ php scripts/tools/dind-test/cache-usage.php --from=$MARK
 
 Distinguish the two columns; conflating them is the easy mistake:
 
-- **MANIFEST READS** — the build asked about a tag. Every Railpack build asks
-  about *every* stack, because `BuildCache::tenantFlags()` attaches one
-  `--cache-from` per stack unconditionally. A read means "considered".
+- **MANIFEST READS** — the build asked the registry about a tag. A read means
+  "considered", not "used".
 - **BLOB PULLS / MB** — cached layer data actually transferred. This is real
   usage. A tag with reads and ~0 MB did nothing for that build.
 
-The report has one row per tag:
+**Railpack does not use this script's railpack-* rows any more.** A Railpack
+build issues no `--cache-from` (§6a), so it neither reads nor writes those tags;
+if an old report showed them, it was measuring a build from before that change.
+The report is still useful for the base-image pulls an account makes when an
+image is loaded from the registry (`DindImageStore`), which is the transfer the
+registry exists for today.
 
-```
-CACHE TAG                  MANIFEST READS   BLOB PULLS         MB   VERDICT
-railpack-node-22                      <n>          <n>        <n>   USED
-railpack-node-20                      <n>          <n>        <n>   consulted, no payload
-...
-
-Writes during this window: <n>
-```
-
-**For a Node project, one cache of seven does the work.** The non-Node tags
-cost a manifest round trip each and deliver nothing. That is what motivated
-narrowing `--cache-from` (below).
-
-Do **not** read this as "the other six tags are useless". They are unused *by a
-Node build*, and Node is all Railpack normally sees because the recipes claim
-the other languages first. When a project does fall through to Railpack, those
-tags are worth a great deal. See "Does the shared cache make Railpack faster?"
-below for how to run the per-stack A/B.
-
-### Does the shared cache make Railpack faster?
-
-How to A/B it: the same fixtures, a fresh container every run (so the account's
-own BuildKit cache is never what is measured), and the cache disabled by
-renaming or stopping the registry container so `lookUpCacheRegistry()` resolves
-null. Stopping is safe now that `deploy.php` removes only its own container by
-name; with the old unscoped `docker container prune -f` a *stopped* registry
-container was deleted outright. Metric is `clone/detect`, because for a Railpack
-app the build runs inside `prepareUserAppFromSources()`, not in `start`.
-
-The cache works, and the size of the win tracks what `mise install` costs per
-language: ruby compiles from source and gains the most, python and node download
-prebuilt binaries and gain less, go's toolchain is cheap enough that the cache
-is noise.
-
-**Reproducing this needs the recipes bypassed.** `RailsDockerfile::isRubyApp()`,
-`PythonRecipe` and `GoRecipe` claim `Gemfile` / `requirements.txt` / `go.mod`
-before Railpack is reached, so Railpack normally only ever sees Node and the
-ruby/python/go tags cannot be exercised at all. Add this at the top of
-`DetectProjectStrategy::detect()`, run the benchmark, then remove it:
-
-```php
-if (getenv('PANELALPHA_FORCE_RAILPACK') === '1'
-    && self::firstExisting($projectDir, self::RAILPACK_MANIFESTS, $files) !== null) {
-    return self::result(self::STRATEGY_RAILPACK, 'Railpack', null, null, null);
-}
-```
-
-**The tension this exposes.** The ruby recipe exists *because* Railpack's ruby
-path was slow. The cache narrows that gap, but the recipe is still faster, so
-bypassing it would be wrong; it does mean the ruby/python/go warm tags are
-insurance for projects the recipes decline, not everyday load. Whether that
-insurance is worth its registry disk is a product call, and it should be made
-against an A/B like the one above rather than against the assumption that the
-tags are simply dead.
-
-### Narrowing `--cache-from` to the stack Railpack picked
-
-`BuildCache::tenantFlags()` now takes an optional stack list.
-`DeployStrategy` reads the plan *after* `railpack prepare` has written it,
-extracts the resolved runtimes from the mise `[tools]` block
-(`RailpackPlan::pinnedTools()`), maps them onto warmed tags
-(the shared layer cache this fed is gone; only the base images are preloaded)
-flags. Anything it cannot resolve — unreadable plan, unpinned `latest`, a
-runtime or version we do not warm — returns null and every tag is read exactly
-as before. Guessing a narrower list wrong costs a full rebuild; a spare round
-trip costs milliseconds, so the fallback is always the safe direction.
-
-Narrowing does not change the payload: the cache does exactly as much work, and
-only the round trips to tags the build cannot use are gone. The decision is
-logged, so you can tell which path a deploy took:
-
-```
-Railpack cache narrowed for <account>: node-22
-Railpack plan for <account> names no warmed runtime; reading every cache tag.
-```
-
-A repo that pins a warmed version narrows (`feathers-chat/quick-start` to
-`node-22`); one whose range resolves to a version we do not warm
-(`expressjs/express`, `"node": ">= 18"`) falls back to all seven. **A repo
-pinning an unwarmed runtime gets no cache benefit at all, narrowing or not.**
-Warming that runtime (`node-18` here) would help those repos more than
-narrowing does.
-
-Writes are expected over the whole log (cache warming writes these tags from
-synthetic projects) and must be **zero inside a deploy window**. The script
-distinguishes the two: unscoped it reports warming writes as normal, and with
-`--from` a non-zero count means a tenant build exported layers into a registry
-every other account can read, which `tenantFlags()` exists to prevent.
+Writes over the whole log are `system:image:prewarm` (and the weekly `--refresh`)
+filling the registry from synthetic projects, plus a deploy push of one of our
+own images built on demand. **A tenant deploy must not export layers holding
+customer source** into a registry every account can read; the reader/writer split
+(§5) is what makes that safe — a push is answered 405 on the instance accounts
+reach, and only the host-loopback writer accepts it. With `--from`, a non-zero
+write count inside a deploy window is therefore a finding to investigate, not
+routine warming.
 
 ---
+
 
 ## 7. Host gotchas
 
@@ -501,7 +425,7 @@ cache regression look identical from the outside.
 it correlates `#N [x/y] <cmd>` with `#N DONE <s>` / `#N CACHED`, drops BuildKit's
 own `internal` bookkeeping steps, keeps the largest of a step's repeated `DONE`
 reports, and scores a `CACHED` step as costing zero. Unit tests in
-`core/tests/Unit/Deploy/DeployLog/DeployTimingsTest.php` use real Matomo output.
+`tests/unit/Unit/Deploy/DeployLog/DeployTimingsTest.php` use real Matomo output.
 
 ---
 

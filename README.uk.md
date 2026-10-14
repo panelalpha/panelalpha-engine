@@ -38,7 +38,7 @@ Open source. Self-hosted. Просто для будь-кого, не лише �
 <p>
 <a href="#крок-1-встановіть-engine-на-своєму-vps"><img src="https://img.shields.io/badge/install-one--liner-2f8f46" alt="Встановлення однією командою"></a>
 <a href="#крок-1-встановіть-engine-на-своєму-vps"><img src="https://img.shields.io/badge/Debian_12%2F13-Ubuntu_22.04%2F24.04%2F26.04-a80030" alt="Підтримувані системи"></a>
-<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-204_tools-6f42c1" alt="204 інструментів MCP"></a>
+<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-225_tools-6f42c1" alt="225 інструментів MCP"></a>
 <a href="#ліцензія"><img src="https://img.shields.io/badge/license-Apache_2.0-0b7285" alt="Apache 2.0"></a>
 <a href="https://discord.gg/9twHWR7xGX"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Приєднуйтесь до Discord"></a>
 </p>
@@ -96,7 +96,7 @@ PanelAlpha Engine - це програмне забезпечення, яке в�
 Наприклад, щоб встановити Engine і водночас розгорнути n8n, потрібно лише це:
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
 ```
 
 Наприкінці він виведе адресу вашого нового сайту і, якщо ви не вказали `--no-password`, пароль, який його відкриває. Про приватні репозиторії, власний пароль або запуск застосунку на сервері, де Engine вже є, див.: [One-line app installation command](docs/02-getting-started/install.md#one-line-app-installation-command).
@@ -104,7 +104,7 @@ curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.co
 Хочете виконати ці два кроки окремо? Скористайтеся командою нижче, щоб встановити лише Engine, а застосунок розгорніть пізніше через свого асистента (див. крок 2):
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 Це все. Сервер готовий. Про власну назву, власний сертифікат TLS чи сервер за NAT див.: [опції встановлення](docs/02-getting-started/install.md).
@@ -174,7 +174,7 @@ pae connect
 | `Налаштуй тунель Cloudflare для n8n.mydomain.com.` | DNS і тунель налаштовано, і це ж спосіб віддавати сайт із сервера за NAT. |
 | `Скільки трафіку ми отримали минулого тижня?` | Використання, логи й ліміти цього проєкту, а також усього сервера. |
 
-Більше готових прикладів: [про що просити](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). Повний перелік того, до чого має доступ ваш асистент: [204 інструментів](docs/04-connecting-your-ai/your-assistant.md).
+Більше готових прикладів: [про що просити](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). Повний перелік того, до чого має доступ ваш асистент: [225 інструментів](docs/04-connecting-your-ai/your-assistant.md).
 
 ---
 
@@ -319,7 +319,7 @@ PanelAlpha Engine безкоштовний і з відкритим кодом �
 ## Ваш сервер на відстані однієї команди
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 ## Безпека

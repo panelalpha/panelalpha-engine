@@ -4,6 +4,7 @@ namespace App\Lib\Usage;
 
 use App\Exceptions\NotFoundException;
 use App\Integrations\Statistics\Statistics;
+use App\Lib\Host\ProjectDisk;
 use App\Models\Domain;
 use App\Models\User;
 use App\System;
@@ -23,7 +24,11 @@ class ProjectUsage
     public function summary(User $user, ?System $system = null): array
     {
         $project = $user->project($system);
-        $diskUsage = $project->fileManager()->diskUsage();
+        // The background measurement; `du` here only before the first one.
+        $disk = ProjectDisk::latest((string) $user->username);
+        $diskUsage = $disk !== null && $disk['files_bytes'] !== null
+            ? (int) ceil($disk['files_bytes'] / 1048576)
+            : $project->fileManager()->diskUsage();
         // Only a DinD account keeps its containers' logs inside its own home.
         $logBytes = $project->runtime() instanceof Dind ? $project->fileManager()->containerLogBytes() : 0;
 
@@ -47,6 +52,10 @@ class ProjectUsage
             ],
             'logs' => [
                 'usage' => $logBytes,
+                'maximum' => null,
+            ],
+            'docker' => [
+                'usage' => $disk['docker_bytes'] ?? null,
                 'maximum' => null,
             ],
             'bandwidth' => [

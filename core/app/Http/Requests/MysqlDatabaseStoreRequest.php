@@ -2,10 +2,13 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\ValidatesMysqlName;
 use Illuminate\Foundation\Http\FormRequest;
 
 class MysqlDatabaseStoreRequest extends FormRequest
 {
+    use ValidatesMysqlName;
+
     /**
      * Determine if the user is authorized to make this request.
      *
@@ -24,7 +27,7 @@ class MysqlDatabaseStoreRequest extends FormRequest
     public function rules()
     {
         return [
-            'name' => 'string|required|regex:/^[A-Za-z_-][A-Za-z0-9_-]*$/|min:1|max:64',
+            'name' => $this->mysqlNameRule(64),
         ];
     }
 
@@ -35,9 +38,6 @@ class MysqlDatabaseStoreRequest extends FormRequest
      */
     public function messages()
     {
-        return [
-            'name.max' => 'Database name cannot exceed 64 characters (MySQL limit).',
-            'name.regex' => 'Database name must start with a letter or underscore and can only contain letters, numbers, and underscores.',
-        ];
+        return $this->mysqlNameMessages('Database name', 64);
     }
 }

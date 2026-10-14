@@ -5,7 +5,10 @@ import {
   type ApiResponse,
   type MySqlDatabase,
   type MySqlUser,
+  type TaskSnapshot,
 } from '@/types';
+import { Timeouts } from '@/config/timeouts';
+import { taskIdFromBody, waitForTask } from '@/helpers/task-helpers';
 import { PhpApi } from './php.api';
 
 export class MySqlApi extends PhpApi {
@@ -26,6 +29,38 @@ export class MySqlApi extends PhpApi {
   async deleteMySqlDatabase(username: string, name: string): Promise<void> {
     const response = await this.api.delete(`projects/${username}/mysql/databases/${name}`);
     await this.assertStatus(response, [200, 204]);
+  }
+
+  /**
+   * PUT .../rename answers 202 with the task that moves the data, the grants and
+   * the row. Polls it until it is terminal and throws unless it completed.
+   */
+  async renameMySqlDatabase(
+    username: string,
+    database: string,
+    newName: string
+  ): Promise<TaskSnapshot> {
+    const response = await this.api.put(
+      `projects/${username}/mysql/databases/${encodeURIComponent(database)}/rename`,
+      { data: { name: newName } }
+    );
+    await this.assertStatus(response, 202);
+    const body: unknown = await response.json();
+    const taskId = taskIdFromBody(body);
+    if (taskId === undefined) {
+      throw new Error('PUT mysql database rename returned 202 without a task id');
+    }
+    const task = await waitForTask(
+      { getTaskRaw: async (id) => this.rawCall(await this.api.get(`tasks/${id}`)) },
+      taskId,
+      { timeout: Timeouts.deploy }
+    );
+    if (task.status !== 'completed') {
+      throw new Error(
+        `mysql database rename task ${taskId} ended ${task.status}: ${JSON.stringify(task.details)}`
+      );
+    }
+    return task;
   }
 
   async listMySqlUsers(username: string): Promise<ApiListResponse<MySqlUser>> {

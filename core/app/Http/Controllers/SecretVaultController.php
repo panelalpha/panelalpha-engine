@@ -27,6 +27,8 @@ use OpenApi\Attributes as OA;
  */
 class SecretVaultController extends Controller
 {
+    private const TYPE_PATTERN = 'regex:/^[a-z][a-z0-9_]*$/D';
+
     #[OA\Post(
         path: '/vault/secrets',
         summary: 'Create a vault slot for a secret that will be pasted in a browser',
@@ -122,31 +124,8 @@ class SecretVaultController extends Controller
     )]
     public function store(Request $request): JsonResponse
     {
-        // The type is the request field the ref will be passed in -- free
-        // form, by design: any snake_case field an API call wants a vault
-        // secret for is valid. Help for the paste form is found by
-        // convention (resources/vault/<type>.md, else default.md), not by a
-        // list here, so a type nobody planned for still works and still
-        // explains itself.
-        $validated = $request->validate([
-            'type' => ['required', 'string', 'max:64', 'regex:/^[a-z][a-z0-9_]*$/'],
-            'scope' => ['nullable', 'string', 'in:' . implode(',', SecretVaultEntry::SCOPES)],
-            'purpose' => ['nullable', 'string', 'max:255'],
-            'verify_with' => ['nullable', 'array'],
-            'project' => ['nullable', 'string'],
-            'expires_in' => ['nullable', 'integer'],
-        ]);
-
-        // One place decides what minting means, because the console mints too
-        // and the sealing rule must not differ between them.
-        [$entry, $ref] = SecretMinter::mint(
-            $validated['type'],
-            $validated['scope'] ?? SecretVaultEntry::SCOPE_PROJECT,
-            $validated['purpose'] ?? null,
-            $validated['verify_with'] ?? null,
-            $validated['project'] ?? null,
-            isset($validated['expires_in']) ? (int) $validated['expires_in'] : null,
-        );
+        $validated = $request->validate($this->storeRules());
+        [$entry, $ref] = $this->mint($validated);
 
         return new JsonResponse(['data' => [
             ...$this->format($entry),
@@ -180,8 +159,8 @@ class SecretVaultController extends Controller
     public function index(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'type' => ['nullable', 'string', 'max:64', 'regex:/^[a-z][a-z0-9_]*$/'],
-            'scope' => ['nullable', 'string', 'in:' . implode(',', SecretVaultEntry::SCOPES)],
+            'type' => ['nullable', 'string', 'max:64', self::TYPE_PATTERN],
+            'scope' => $this->scopeRule(),
         ]);
 
         $query = SecretVaultEntry::query()->orderByDesc('id')->limit(100);
@@ -273,6 +252,48 @@ class SecretVaultController extends Controller
     }
 
     /**
+     * The type is the request field the ref will be passed in, free form by design: help for the
+     * paste form is found by convention (resources/vault/<type>.md, else default.md), not by a list.
+     *
+     * @return array<string, list<string>>
+     */
+    private function storeRules(): array
+    {
+        return [
+            'type' => ['required', 'string', 'max:64', self::TYPE_PATTERN],
+            'scope' => $this->scopeRule(),
+            'purpose' => ['nullable', 'string', 'max:255'],
+            'verify_with' => ['nullable', 'array'],
+            'project' => ['nullable', 'string'],
+            'expires_in' => ['nullable', 'integer'],
+        ];
+    }
+
+    /** @return list<string> */
+    private function scopeRule(): array
+    {
+        return ['nullable', 'string', 'in:' . implode(',', SecretVaultEntry::SCOPES)];
+    }
+
+    /**
+     * Minting goes through SecretMinter, which the console uses too, so the sealing rule cannot differ.
+     *
+     * @param array<string, mixed> $validated
+     * @return array{0: SecretVaultEntry, 1: string}
+     */
+    private function mint(array $validated): array
+    {
+        return SecretMinter::mint(
+            $validated['type'],
+            $validated['scope'] ?? SecretVaultEntry::SCOPE_PROJECT,
+            $validated['purpose'] ?? null,
+            $validated['verify_with'] ?? null,
+            $validated['project'] ?? null,
+            isset($validated['expires_in']) ? (int) $validated['expires_in'] : null,
+        );
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function configPayload(): array
@@ -309,7 +330,11 @@ class SecretVaultController extends Controller
     }
 
     /**
-     * @return array<string, mixed> everything an agent may know; never the secret
+     * Everything an agent may know, never the secret. `project` is null until a project claims the entry,
+     * `purpose` tells two entries of one type apart, a null `expires_at` never expires, and
+     * `url_expires_at` is when the paste form closes.
+     *
+     * @return array<string, mixed>
      */
     private function format(SecretVaultEntry $entry): array
     {
@@ -318,10 +343,7 @@ class SecretVaultController extends Controller
             'ref' => $entry->reference(),
             'type' => $entry->type,
             'scope' => $entry->scope,
-            // Who a `project` entry belongs to; null until the first project claims it.
             'project' => $entry->project,
-            // Why it was asked for. The one field that tells two entries of
-            // the same type apart, since the secret is never readable.
             'purpose' => $entry->purpose,
             'verify_with' => $entry->verify_with,
             'verification' => $entry->verification,
@@ -329,9 +351,7 @@ class SecretVaultController extends Controller
             'used_count' => $entry->use_count,
             'last_used_at' => $entry->last_used_at?->toIso8601String(),
             'created_at' => $entry->created_at?->toIso8601String(),
-            // Null: the secret never expires.
             'expires_at' => $entry->expires_at?->toIso8601String(),
-            // When the paste form closes.
             'url_expires_at' => $entry->link_expires_at?->toIso8601String(),
         ];
     }

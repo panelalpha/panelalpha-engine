@@ -14,6 +14,9 @@ class DeployFailureExplainer
     /** Leads the failure of a redeploy whose new version the switch refused for an empty page. */
     public const EMPTY_NEW_VERSION = 'The new version answers with an empty page';
 
+    /** Leads the failure of a deploy whose submodules could not be fetched. */
+    public const SUBMODULE_FAILURE = "The repository's submodules could not be fetched";
+
     private const REGISTRY_ERROR = '/(?:manifest unknown|manifest for \S+ not found|pull access denied'
         . '|failed to resolve source metadata|failed to do request'
         . '|failed to resolve reference (?:"([^"\n]+)"|(\S+)))/i';
@@ -67,6 +70,18 @@ class DeployFailureExplainer
     private static function clip(string $line): string
     {
         return mb_strlen($line) > 320 ? rtrim(mb_substr($line, 0, 320)) . '…' : $line;
+    }
+
+    /** A quote ends with a full stop unless it already ends a sentence or was clipped. */
+    private static function sentence(string $quote): string
+    {
+        return preg_match('/[.!?…]$/u', $quote) === 1 ? $quote : $quote . '.';
+    }
+
+    /** The line git explained itself in, or the first one when it did not. */
+    private static function gitFailureLine(string $output, string $first): string
+    {
+        return preg_match('/^\s*(?:fatal|error): ([^\n]+)/m', $output, $m) === 1 ? trim($m[1]) : trim($first);
     }
 
     private static function duration(int $seconds): string
@@ -273,6 +288,17 @@ class DeployFailureExplainer
                         . 'administrator to raise DEPLOY_CLONE_TIMEOUT.',
             ],
 
+            // A submodule fetch after the clone or a pull. Early: the git output it quotes names
+            // authentication and remotes, which the clone rules below would claim.
+            'submodule-fetch-failed' => [
+                '/' . preg_quote(self::SUBMODULE_FAILURE, '/') . ': ([^\n]*)/',
+                static fn (array $m, string $output): string =>
+                    "The repository's submodules could not be fetched: " . self::clip(self::gitFailureLine($output, $m[1]))
+                        . '. A private submodule needs a git token that can read it, and the commit the checkout '
+                        . 'records must still exist in its repository. When the application needs only some of '
+                        . 'them, name those under `git: {submodules: [...]}` in the app config.',
+            ],
+
             'build-timed-out' => [
                 "/The process \"[^\n]*'up'[^\n]*'--build'[^\n]*\" exceeded the timeout of (\\d+) seconds/",
                 static fn (array $m): string =>
@@ -292,10 +318,14 @@ class DeployFailureExplainer
             // ({@see DependencyFailure}). Early for the same reason: the quote is another
             // program's output, which rules below could otherwise match.
             'dependency-failed' => [
-                '/^' . preg_quote(DependencyFailure::PREFIX, '/') . '(\S+) did not start \(([^)]*)\)(?:: ([^\n]*))?/m',
+                '/^' . preg_quote(DependencyFailure::PREFIX, '/') . '(\S+) did not start \(([^)]*)\)(?: \[health check: ([^\]\n]*)\])?(?:: ([^\n]*))?/m',
                 static function (array $m): string {
-                    $said = trim($m[3] ?? '');
+                    $probe = trim($m[3] ?? '');
+                    $said = trim($m[4] ?? '');
                     $sentence = "The service {$m[1]} did not start ({$m[2]}), so the application was not started either.";
+                    if ($probe !== '') {
+                        $sentence .= ' Its health check said: ' . self::sentence(self::clip($probe));
+                    }
 
                     return $said === ''
                         ? $sentence . ' The full output is in the deploy log.'

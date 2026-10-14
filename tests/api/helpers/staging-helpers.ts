@@ -65,3 +65,13 @@ export async function waitUntilStagingActive(
     }
   );
 }
+
+/** The error the Engine stored on the target when a push failed (`details.error`). */
+export function stagingPushError(body: unknown): string | undefined {
+  if (body === null || typeof body !== 'object' || !('data' in body)) {
+    return undefined;
+  }
+  const data = (body as { data?: { details?: { error?: unknown } } }).data;
+  const error = data?.details?.error;
+  return typeof error === 'string' && error.length > 0 ? error : undefined;
+}

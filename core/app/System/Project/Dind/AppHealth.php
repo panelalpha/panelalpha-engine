@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Dind;
 
+use App\Exceptions\DeployCancelledException;
 use App\System\Project\Dind;
 use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\DeployLog\DeployLogger;
@@ -12,7 +13,6 @@ use App\Lib\Deploy\Health\CheckRunner;
 use App\Lib\Deploy\Health\HealthCheck;
 use App\Lib\Deploy\Health\ProbedResponse;
 use App\Lib\Deploy\Platform\PlatformManifest;
-use App\Lib\Deploy\Port\PortMapping;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -167,7 +167,7 @@ class AppHealth
      *
      * @return array{healthy: bool|null, ports: list<array{port: int, scheme: ?string, status: string, http_code: ?int, time: ?float, detail: string}>, error?: string}
      */
-    public function check(int $timeout = 5, int $attempts = 3, int $delay = 2, bool $waitOnServerError = false): array
+    public function check(int $timeout = 5, int $attempts = 3, int $delay = 2, bool $waitOnServerError = false, ?DeployLogger $deploy = null): array
     {
         try {
             $ports = $this->ports();
@@ -188,11 +188,13 @@ class AppHealth
         }
 
         try {
-            $raw = $this->dind->shell()->execQuiet(
-                ['bash', '-c', self::probeScript($ports, $timeout, $attempts, $delay, $this->mainDomain(), $waitOnServerError, $this->httpsPorts())],
-                [],
-                self::timeBudget($ports, $timeout, $attempts, $delay)
+            $raw = $this->runProbe(
+                self::probeScript($ports, $timeout, $attempts, $delay, $this->mainDomain(), $waitOnServerError, $this->httpsPorts()),
+                self::timeBudget($ports, $timeout, $attempts, $delay),
+                $deploy
             );
+        } catch (DeployCancelledException $e) {
+            throw $e;
         } catch (\Exception $e) {
             // Could not reach the account container at all — a wedged sysbox
             // container is the case seen in practice. Reporting each port as
@@ -229,6 +231,18 @@ class AppHealth
             'domain' => $this->reachability($results, $timeout),
             'checks' => $checks,
         ];
+    }
+
+    /**
+     * Within a deploy, its cancel stops the probe at once rather than after every attempt has run out.
+     */
+    private function runProbe(string $script, int $budget, ?DeployLogger $deploy): string
+    {
+        $shell = $this->dind->shell();
+
+        return $deploy === null
+            ? $shell->execQuiet(['bash', '-c', $script], [], $budget)
+            : $shell->execQuietUntilCancelled(['bash', '-c', $script], $deploy, $budget);
     }
 
     /**
@@ -980,7 +994,7 @@ SH;
      * Run the check, write one line per port into the running deploy log, and
      * remember the verdict on the account.
      *
-     * Still never throws and still never fails a deploy. Remembering is not
+     * Never fails a deploy, and throws only when the deploy was cancelled. Remembering is not
      * gating: what reads the verdict afterwards decides what it is worth, and
      * an app that answers nothing on HTTP is a legitimate deploy for a queue
      * consumer.
@@ -998,7 +1012,7 @@ SH;
         $before = $this->containerSnapshot();
         // Right after `compose up` a 500 may be a frontend whose backend is
         // still booting (Pingvin Share X), so keep asking until the budget runs out.
-        $report = $this->observe(self::DEPLOY_TIMEOUT, self::DEPLOY_ATTEMPTS, self::DEPLOY_DELAY, true);
+        $report = $this->observe(self::DEPLOY_TIMEOUT, self::DEPLOY_ATTEMPTS, self::DEPLOY_DELAY, true, $logger);
         if ($report === null) {
             return null;
         }
@@ -1122,7 +1136,7 @@ SH;
         }
 
         // Something bound: give it the deploy's full probe. Otherwise one look for the verdict.
-        $again = $this->observe(self::DEPLOY_TIMEOUT, $bound ? self::DEPLOY_ATTEMPTS : 1, self::DEPLOY_DELAY, true);
+        $again = $this->observe(self::DEPLOY_TIMEOUT, $bound ? self::DEPLOY_ATTEMPTS : 1, self::DEPLOY_DELAY, true, $logger);
 
         return $again === null || isset($again['error']) ? $report : $again;
     }
@@ -1176,23 +1190,7 @@ SH;
      */
     private function appServices(): ?array
     {
-        $port = $this->dind->userModel()->getAppPort();
-        try {
-            $compose = $port === null ? null : ComposeYaml::parseFile($this->dind->userAppComposeFileToRun());
-        } catch (\Throwable) {
-            return null;
-        }
-        $names = [];
-        foreach (is_array($compose['services'] ?? null) ? $compose['services'] : [] as $name => $service) {
-            foreach (is_array($service) && is_array($service['ports'] ?? null) ? $service['ports'] : [] as $entry) {
-                if (PortMapping::parse($entry)?->hostPort === $port) {
-                    $names[] = (string) $name;
-                    break;
-                }
-            }
-        }
-
-        return $names === [] ? null : $names;
+        return AppPortServices::names($this->dind);
     }
 
     /** `docker inspect` of the stack in {@see INSPECT_FORMAT}; null when it could not be asked. */
@@ -1395,10 +1393,12 @@ SH;
      *
      * @return array<string, mixed>|null
      */
-    public function observe(int $timeout = 5, int $attempts = 3, int $delay = 2, bool $waitOnServerError = false): ?array
+    public function observe(int $timeout = 5, int $attempts = 3, int $delay = 2, bool $waitOnServerError = false, ?DeployLogger $deploy = null): ?array
     {
         try {
-            $report = $this->check($timeout, $attempts, $delay, $waitOnServerError);
+            $report = $this->check($timeout, $attempts, $delay, $waitOnServerError, $deploy);
+        } catch (DeployCancelledException $e) {
+            throw $e;
         } catch (\Throwable $e) {
             Log::warning('App health check failed to run: ' . $e->getMessage());
 

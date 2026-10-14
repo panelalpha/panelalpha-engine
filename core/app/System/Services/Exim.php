@@ -77,7 +77,7 @@ class Exim
             ...$this->networkSettings(),
         ];
         $updateConf = Blade::render($updateConfTemplate, $templateVars);
-        $this->system->filesystem()->filePutContents($updateConfPath, $updateConf);
+        $this->writeConfigFile($updateConfPath, $updateConf);
 
         // passwd.client
         $passwdPath = $this->system->engineDirPath() . '/config/exim/passwd.client';
@@ -110,7 +110,7 @@ class Exim
             'password' => $password,
         ];
         $passwd = Blade::render($passwdTemplate, $templateVars);
-        $this->system->filesystem()->filePutContents($passwdPath, $passwd);
+        $this->writeConfigFile($passwdPath, $passwd);
 
         // rewrite.conf
         $rewritePath = $this->system->engineDirPath() . '/config/exim/rewrite.conf';
@@ -121,7 +121,7 @@ class Exim
             'sender_domain' => $config['sender_domain'],
         ];
         $rewrite = Blade::render($rewriteTemplate, $templateVars);
-        $this->system->filesystem()->filePutContents($rewritePath, $rewrite);
+        $this->writeConfigFile($rewritePath, $rewrite);
 
         $transportPath = $this->system->engineDirPath() . '/config/exim/transport.conf';
         $transportTemplatePath = $this->system->engineDirPath() . '/templates/config/exim-transport.blade.php';
@@ -131,7 +131,7 @@ class Exim
             'smtp_implicit_tls' => !empty($config['smtp_implicit_tls']),
         ];
         $transport = Blade::render($transportTemplate, $templateVars);
-        $this->system->filesystem()->filePutContents($transportPath, $transport);
+        $this->writeConfigFile($transportPath, $transport);
 
         $this->applyConfig();
     }
@@ -166,7 +166,7 @@ class Exim
         foreach ($this->networkSettings() as $key => $value) {
             $lines[] = "{$key}='{$value}'";
         }
-        $this->system->filesystem()->filePutContents($path, implode("\n", $lines) . "\n");
+        $this->writeConfigFile($path, implode("\n", $lines) . "\n");
 
         $this->applyConfig();
     }
@@ -232,6 +232,18 @@ class Exim
         }
 
         return [];
+    }
+
+    /**
+     * The mail container bind-mounts each file, and Docker leaves a directory where one was missing;
+     * `cp` would write into it and report success, so a directory there is refused.
+     */
+    private function writeConfigFile(string $path, string $contents): void
+    {
+        if ($this->system->filesystem()->directoryExists($path)) {
+            throw new \RuntimeException("Cannot write the Exim config {$path}: it is a directory, not a file.");
+        }
+        $this->system->filesystem()->filePutContents($path, $contents);
     }
 
     private function applyConfig(): void

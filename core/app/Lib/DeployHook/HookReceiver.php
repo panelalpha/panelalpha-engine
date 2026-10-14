@@ -7,6 +7,7 @@ use App\Models\DeployHook;
 use App\Models\HookDelivery;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
 
 /**
@@ -31,7 +32,8 @@ use Illuminate\Support\Facades\RateLimiter;
  *     looked at yet, and nothing the request said is written down beyond the
  *     provider's name.
  *  3. Only now is the body read, because only now is it the sender's.
- *  4. Have we already acted on this delivery? A redelivery is a no-op.
+ *  4. Have we already acted on this delivery, or on this signed push body?
+ *     A redelivery is a no-op, and so is a replay under a new delivery id.
  *  5. What does it say, and is it for the branch this checkout tracks? A push
  *     can name several refs (Bitbucket sends them in one delivery); it deploys,
  *     once, if any of them is the tracked branch moving forward.
@@ -59,79 +61,130 @@ class HookReceiver
 
     public function receive(DeployHook $hook, Request $request): HookResponse
     {
-        $throttleKey = $this->throttleKey($hook);
-        if (RateLimiter::tooManyAttempts($throttleKey, self::MAX_UNVERIFIED_REQUESTS_PER_MINUTE)) {
-            // Not recorded as a delivery: this is the flood itself, not a
-            // request worth a row, and recording it would let the flood fill
-            // the table it is already trying to burn CPU against.
+        if ($this->tooManyUnverified($hook)) {
             return new HookResponse(429, ['message' => 'Too many failed signatures for this hook.']);
         }
 
         $provider = $this->recognise($request);
         if ($provider === null) {
-            // Costs the sender nothing (no headers to fake, no HMAC to
-            // compute) and would otherwise write a row on every attempt, so
-            // it counts against the same throttle as a bad signature.
-            RateLimiter::hit($throttleKey, 60);
-            $this->record($hook, 'unknown', null, HookDelivery::OUTCOME_REJECTED, 'unsupported provider');
-
-            return new HookResponse(400, ['message' => 'Unsupported provider.']);
+            return $this->rejectUnproven($hook, 'unknown', 'unsupported provider', 400, 'Unsupported provider.');
         }
 
         $secret = $hook->secret();
         if ($secret === null || !$provider->verify($request, $secret)) {
-            RateLimiter::hit($throttleKey, 60);
-            $this->record($hook, $provider->name(), null, HookDelivery::OUTCOME_REJECTED, 'missing or invalid signature');
-
-            return new HookResponse(401, ['message' => 'Invalid signature.']);
+            return $this->rejectUnproven($hook, $provider->name(), 'missing or invalid signature', 401, 'Invalid signature.');
         }
 
         try {
             $event = $provider->parse($request);
-        } catch (InvalidPayload $e) {
+        } catch (InvalidPayload) {
             $this->record($hook, $provider->name(), null, HookDelivery::OUTCOME_REJECTED, 'invalid payload');
 
             return new HookResponse(400, ['message' => 'Invalid payload.']);
         }
 
         if ($event->deliveryId !== null && $this->alreadyRecorded($hook, $event->deliveryId)) {
-            return new HookResponse($event->kind === HookEvent::PING ? 200 : 202, ['outcome' => 'duplicate']);
+            return $this->duplicate($event);
         }
 
+        return $this->accept($hook, $provider, $request, $event);
+    }
+
+    /**
+     * A throttled request is not recorded: it is the flood itself, and a row per
+     * request would let it fill the table it is burning CPU against.
+     */
+    private function tooManyUnverified(DeployHook $hook): bool
+    {
+        return RateLimiter::tooManyAttempts($this->throttleKey($hook), self::MAX_UNVERIFIED_REQUESTS_PER_MINUTE);
+    }
+
+    /**
+     * Records a request that did not prove its sender and counts it against the hook's throttle.
+     * An unrecognised provider costs the sender nothing to fake, so it counts like a bad signature.
+     */
+    private function rejectUnproven(DeployHook $hook, string $provider, string $reason, int $status, string $message): HookResponse
+    {
+        RateLimiter::hit($this->throttleKey($hook), 60);
+        $this->record($hook, $provider, null, HookDelivery::OUTCOME_REJECTED, $reason);
+
+        return new HookResponse($status, ['message' => $message]);
+    }
+
+    private function accept(DeployHook $hook, HookProvider $provider, Request $request, HookEvent $event): HookResponse
+    {
         [$outcome, $reason, $change] = $this->decide($hook, $event);
 
-        if ($outcome === HookDelivery::OUTCOME_QUEUED && $hook->user !== null && Coalescing::isRunning($hook->user)) {
-            // The tracked branch would deploy, but this project already has a
-            // deploy running -- from this hook, another one, a manual
-            // rebuild, or the account's own creation. It waits rather than
-            // races: Coalescing::runPendingFor() picks it up once that
-            // deploy finishes, wherever DeployLogger::finish() is called --
-            // or Coalescing::defer() runs it itself, if that deploy finished
-            // before the mark went down.
+        if ($outcome === HookDelivery::OUTCOME_QUEUED && $this->deployAlreadyRunning($hook)) {
             $outcome = HookDelivery::OUTCOME_COALESCED;
             $reason = 'a deploy is already running for this project';
         }
 
-        try {
-            $delivery = $this->record($hook, $provider->name(), $event, $outcome, $reason, $change);
-        } catch (UniqueConstraintViolationException) {
-            // The same delivery, twice, at once: the other request got the
-            // row and is the one that queues the work.
-            return new HookResponse($event->kind === HookEvent::PING ? 200 : 202, ['outcome' => 'duplicate']);
+        $delivery = $this->recordOnce($hook, $provider, $request, $event, $outcome, $reason, $change);
+        if ($delivery === null) {
+            return $this->duplicate($event);
         }
 
-        if ($outcome === HookDelivery::OUTCOME_QUEUED) {
-            RunHookDelivery::dispatch($delivery->id);
-        } elseif ($outcome === HookDelivery::OUTCOME_COALESCED && $hook->user !== null) {
-            Coalescing::defer($delivery, $hook->user);
-        }
+        $this->startWork($hook, $delivery, $outcome);
 
         $body = ['outcome' => $outcome];
         if ($reason !== null) {
             $body['reason'] = $reason;
         }
 
-        return new HookResponse($event->kind === HookEvent::PING ? 200 : 202, $body);
+        return new HookResponse($this->statusFor($event), $body);
+    }
+
+    /**
+     * A push for the tracked branch waits for a deploy already running on the project (from any
+     * source) rather than racing it; Coalescing picks it up once that deploy finishes.
+     */
+    private function deployAlreadyRunning(DeployHook $hook): bool
+    {
+        return $hook->user !== null && Coalescing::isRunning($hook->user);
+    }
+
+    /**
+     * Records the delivery, or returns null when it was already recorded. The delivery id is not
+     * signed, so a signed push body is acted on once too, in the same transaction as the row so a
+     * failed write does not burn the body. A concurrent request for the same delivery gets the row.
+     */
+    private function recordOnce(
+        DeployHook $hook,
+        HookProvider $provider,
+        Request $request,
+        HookEvent $event,
+        string $outcome,
+        ?string $reason,
+        ?RefChange $change,
+    ): ?HookDelivery {
+        $guardBody = $event->kind === HookEvent::PUSH && $provider->signsTheBody();
+        try {
+            return DB::transaction(fn () => !$guardBody || $this->firstSeen($hook, $request)
+                ? $this->record($hook, $provider->name(), $event, $outcome, $reason, $change)
+                : null);
+        } catch (UniqueConstraintViolationException) {
+            return null;
+        }
+    }
+
+    private function startWork(DeployHook $hook, HookDelivery $delivery, string $outcome): void
+    {
+        if ($outcome === HookDelivery::OUTCOME_QUEUED) {
+            RunHookDelivery::dispatch($delivery->id);
+        } elseif ($outcome === HookDelivery::OUTCOME_COALESCED && $hook->user !== null) {
+            Coalescing::defer($delivery, $hook->user);
+        }
+    }
+
+    private function duplicate(HookEvent $event): HookResponse
+    {
+        return new HookResponse($this->statusFor($event), ['outcome' => 'duplicate']);
+    }
+
+    private function statusFor(HookEvent $event): int
+    {
+        return $event->kind === HookEvent::PING ? 200 : 202;
     }
 
     private function recognise(Request $request): ?HookProvider
@@ -159,6 +212,15 @@ class HookReceiver
             ->exists();
     }
 
+    private function firstSeen(DeployHook $hook, Request $request): bool
+    {
+        return DB::table('hook_payload_digests')->insertOrIgnore([
+            'deploy_hook_id' => $hook->id,
+            'digest' => hash('sha256', $request->getContent()),
+            'created_at' => now(),
+        ]) === 1;
+    }
+
     /**
      * @return array{0: string, 1: ?string, 2: ?RefChange} outcome, why when
      *         ignored, and the change it rests on: the one that deploys or, for
@@ -178,7 +240,14 @@ class HookReceiver
             return [HookDelivery::OUTCOME_IGNORED, 'the push changed no refs', null];
         }
 
-        $tracked = $this->trackedBranch($hook);
+        return $this->decidePush($event, $this->trackedBranch($hook));
+    }
+
+    /**
+     * @return array{0: string, 1: ?string, 2: ?RefChange}
+     */
+    private function decidePush(HookEvent $event, ?string $tracked): array
+    {
         $reasons = [];
         foreach ($event->changes as $change) {
             $why = $this->whyNotDeployed($change, $tracked);
@@ -240,11 +309,12 @@ class HookReceiver
         return $branch !== '' ? $branch : null;
     }
 
+    /**
+     * `event` and `delivery_id` are only written for a delivery that proved who sent it. Older
+     * deliveries are pruned here, where a row was just added, so the history stays a bounded window.
+     */
     private function record(DeployHook $hook, string $provider, ?HookEvent $event, string $outcome, ?string $reason, ?RefChange $change = null): HookDelivery
     {
-        // `event` (like `delivery_id`) is only written for a delivery that
-        // proved who sent it. A rejected request's headers are whatever the
-        // sender typed.
         /** @var HookDelivery */
         $delivery = HookDelivery::create([
             'deploy_hook_id' => $hook->id,
@@ -257,11 +327,6 @@ class HookReceiver
             'reason' => $reason !== null ? substr($reason, 0, 255) : null,
         ]);
 
-        // A hook's history is a bounded window, not an archive: keep the
-        // newest accepted and rejected deliveries, each in a window of its
-        // own, and let older ones go, right here
-        // where a row was just added rather than on a schedule that could
-        // fall behind.
         HookDelivery::pruneOldest($hook->id);
 
         return $delivery;

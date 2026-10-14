@@ -8,7 +8,8 @@
 #
 # Options:
 #   --file=FILE    Read repos from file (one per line, # comments allowed)
-#   --timeout=N    Seconds to wait per app (default: 30)
+#   --timeout=N    deploy.php's settle pause before the status check, capped
+#                  at 5s; it does not wait longer for an app (default: 30)
 #   --clean        Remove all test containers after each run
 #   --verbose      Show full build output
 #

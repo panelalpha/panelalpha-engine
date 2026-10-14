@@ -11,12 +11,23 @@
 #   firewall.sh --unhook      remove the engine's hooks, leave the firewall on
 #                             (uninstalling the engine)
 #   firewall.sh --uninstall   turn the provider off and remove the engine's hooks
+#   firewall.sh --refused     the stored rules the provider would not load, one per
+#                             line: the rule, a tab, why (the firewall status API)
 set -u
 
 ENGINE_DIR=${PA_ENGINE_DIR:-/opt/panelalpha/shared-hosting}
-provider=$(sed -n 's/^FIREWALL_PROVIDER=//p' "$ENGINE_DIR/.env" 2>/dev/null | tail -n 1)
-provider=${provider:-ufw}
 
+# FIREWALL_PROVIDER from the engine's .env, read as core reads it: Compose
+# strips the quotes, then FirewallFactory::configuredName() trims and lowercases.
+configured_provider() {
+    local provider
+    provider=$(sed -n 's/^FIREWALL_PROVIDER=//p' "$ENGINE_DIR/.env" 2>/dev/null | tail -n 1)
+    provider=$(printf '%s' "$provider" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+        -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/" -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')
+    printf '%s' "${provider:-ufw}"
+}
+
+provider=$(configured_provider)
 script="$(cd "$(dirname "$0")" && pwd)/firewall/$provider.sh"
 if [ ! -f "$script" ]; then
     echo "firewall: no provider script for '$provider' ($script)" >&2
@@ -24,13 +35,9 @@ if [ ! -f "$script" ]; then
 fi
 
 case "${1:-}" in
---install) exec bash "$script" install ;;
---apply) exec bash "$script" apply ;;
---fail2ban) exec bash "$script" fail2ban ;;
---unhook) exec bash "$script" unhook ;;
---uninstall) exec bash "$script" uninstall ;;
+--install | --apply | --fail2ban | --unhook | --uninstall | --refused) exec bash "$script" "${1#--}" ;;
 *)
-    echo "Usage: $0 --install|--apply|--fail2ban|--unhook|--uninstall" >&2
+    echo "Usage: $0 --install|--apply|--fail2ban|--unhook|--uninstall|--refused" >&2
     exit 1
     ;;
 esac

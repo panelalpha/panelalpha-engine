@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import { type EngineApi } from '@/clients/engine-api';
 import { type FtpAccount, type SftpAccount } from '@/types';
 import { getSettings } from '@/config/settings';
+import { registerSecret } from '@/helpers/secret-registry';
 
 export class FtpFactory {
   private settings = getSettings();
@@ -122,11 +123,13 @@ export class FtpFactory {
   }
 
   private generatePassword(): string {
-    return faker.internet.password({
+    const password = faker.internet.password({
       length: 16,
       memorable: false,
       pattern: /[a-zA-Z0-9!@#$%]/,
     });
+    registerSecret(password);
+    return password;
   }
 
   private getSshPublicKey(): string {

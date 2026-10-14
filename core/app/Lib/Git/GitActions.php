@@ -4,10 +4,13 @@ namespace App\Lib\Git;
 
 use App\Exceptions\DeployBusyException;
 use App\Exceptions\ProblemException;
+use App\Exceptions\ProjectBusyException;
+use App\Lib\Deploy\DeployLog\DeployLock;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Source\GitRepoInput;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Lib\DeployHook\DeployHooks;
+use App\Lib\Net\EgressGuard;
 use App\Jobs\DeployProject;
 use App\Lib\Project\ProjectRebuild;
 use App\Models\Task;
@@ -28,6 +31,12 @@ use Illuminate\Validation\ValidationException;
  */
 class GitActions
 {
+    /**
+     * Most commits one `git_commits` / GET /git/commits may ask for: the output
+     * is read whole into memory, and core runs with `memory_limit = -1`.
+     */
+    public const MAX_COMMITS = 1000;
+
     public function __construct(private readonly DeployHooks $hooks)
     {
     }
@@ -69,6 +78,7 @@ class GitActions
         $this->refuseWhileCreating($user);
 
         $this->assertSshRemoteUsable($user, (string) ($params['repo_url'] ?? ''));
+        $this->assertRemoteAllowed((string) ($params['repo_url'] ?? ''));
 
         return $this->run($user, $params['path'] ?? null, fn (Git $git) => $git->connect(
             $params['repo_url'] ?? '',
@@ -159,6 +169,29 @@ class GitActions
     }
 
     /**
+     * The connect runs `git ls-remote` and `git fetch` on the host, whose
+     * network reaches the metadata service and internal services. A host the
+     * egress guard refuses is a 422 before anything is connected.
+     *
+     * @throws ProblemException
+     */
+    private function assertRemoteAllowed(string $repoUrl): void
+    {
+        if ($repoUrl === '' || GitRepoInput::isSsh($repoUrl)) {
+            return;
+        }
+
+        try {
+            $problem = EgressGuard::problem('repo_url', $repoUrl);
+        } catch (\InvalidArgumentException) {
+            return;
+        }
+        if ($problem !== null) {
+            throw ProblemException::of([$problem]);
+        }
+    }
+
+    /**
      * An SSH remote clones only with the project's deploy key, and only from a
      * host whose key is pinned. Refused here, before anything is connected.
      */
@@ -207,7 +240,7 @@ class GitActions
                     : ValidationException::withMessages(['git' => $e->getMessage()]);
             }
 
-            throw new GitException(GitUrl::sanitize($e->getMessage()), $e->httpStatus);
+            throw new GitException(GitUrl::sanitize($e->getMessage()), $e->httpStatus, $e->problemCode, $e->taskId);
         }
     }
 
@@ -236,6 +269,55 @@ class GitActions
     }
 
     /**
+     * Refuse a change made in this process while the project lock is held: a
+     * hook delivery is not a queued deploy task, and changing the checkout
+     * under it would settle its tree mid-build. A `$logger` is the queued
+     * path's own deploy, which holds this very lock.
+     *
+     * @throws GitException
+     */
+    private function refuseWhileTheLockIsHeld(ProjectAggregate $project, ?DeployLogger $logger): void
+    {
+        if ($logger !== null || !DeployLogger::isLockedFor($project->username())) {
+            return;
+        }
+
+        throw self::lockHeldRefusal($project->username());
+    }
+
+    /** What holds the lock, decided as {@see ProjectRebuild::assertIdle()} does: a backup or restore task, else a deploy. */
+    private static function lockHeldRefusal(string $username): GitException
+    {
+        $backup = ProjectRebuild::pendingBackupTask($username);
+        if ($backup !== null) {
+            return new GitException(ProjectBusyException::taskRunning($username, $backup)->plainMessage(), 409, taskId: $backup->id);
+        }
+
+        $holder = DeployLock::heldBy($username);
+        if ($holder === DeployLock::HOLDER_BACKUP || $holder === DeployLock::HOLDER_RESTORE) {
+            return new GitException(
+                "A {$holder} of project '{$username}' is running; try again when it has finished.",
+                409,
+            );
+        }
+        if ($holder === DeployLock::HOLDER_DELETE) {
+            return new GitException(
+                "Project '{$username}' is being deleted; try again when it has finished.",
+                409,
+            );
+        }
+
+        $task = ProjectRebuild::pendingTask($username);
+
+        return new GitException(
+            "A deploy of project '{$username}' is running" . ($task !== null ? " (task {$task->id})" : '')
+                . '; try again when it has finished.',
+            409,
+            taskId: $task?->id,
+        );
+    }
+
+    /**
      * On a Deploy-managed DinD checkout, check a pull, branch change or revert
      * here and queue it with the rebuild after it; the task, or null when the
      * checkout has nothing to rebuild and the caller runs the action itself.
@@ -248,27 +330,56 @@ class GitActions
      */
     public function queueRedeploy(User $user, string $action, array $params): ?Task
     {
-        return $this->onCheckout($user, $params['path'] ?? null, function (Git $git, ProjectAggregate $project) use ($user, $action, $params): ?Task {
-            if (!$git->isDeployManaged() || !$project->runtime() instanceof Dind) {
-                return null;
-            }
-            $rebuild = app(ProjectRebuild::class);
-            // Before the checks below, which must not read a checkout a deploy is moving aside.
-            $rebuild->assertIdle($user);
-            match ($action) {
-                ProjectRebuild::GIT_PULL => $git->assertPullable($params['strategy'] ?? null),
-                ProjectRebuild::CHANGE_BRANCH => $git->assertBranchChangeable((string) $params['branch']),
-                ProjectRebuild::REVERT => $git->assertRevertable($params['ref'] ?? null),
-            };
-            $input = array_filter([
-                'path' => $git->pathKey(),
-                'strategy' => $action === ProjectRebuild::GIT_PULL ? ($params['strategy'] ?? Git::STRATEGY_FF) : null,
-                'branch' => $action === ProjectRebuild::CHANGE_BRANCH ? (string) $params['branch'] : null,
-                'ref' => $action === ProjectRebuild::REVERT ? ($params['ref'] ?? 'HEAD') : null,
-            ], static fn (?string $v): bool => $v !== null);
+        return $this->onCheckout(
+            $user,
+            $params['path'] ?? null,
+            fn (Git $git, ProjectAggregate $project): ?Task => $this->queueIfRebuildable($user, $git, $project, $action, $params),
+        );
+    }
 
-            return $rebuild->whileIdle($user, fn (): Task => $rebuild->queue($user, $action, null, null, null, $input));
-        });
+    /**
+     * The project is checked idle before the change is, since those checks must not read a
+     * checkout a deploy is moving aside.
+     *
+     * @param array<string, mixed> $params
+     */
+    private function queueIfRebuildable(User $user, Git $git, ProjectAggregate $project, string $action, array $params): ?Task
+    {
+        if (!$git->isDeployManaged() || !$project->runtime() instanceof Dind) {
+            return null;
+        }
+        $rebuild = app(ProjectRebuild::class);
+        $rebuild->assertIdle($user);
+        $this->assertChangeAllowed($git, $action, $params);
+        $input = $this->queuedInput($git, $action, $params);
+
+        return $rebuild->whileIdle($user, fn (): Task => $rebuild->queue($user, $action, null, null, null, $input));
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     */
+    private function assertChangeAllowed(Git $git, string $action, array $params): void
+    {
+        match ($action) {
+            ProjectRebuild::GIT_PULL => $git->assertPullable($params['strategy'] ?? null),
+            ProjectRebuild::CHANGE_BRANCH => $git->assertBranchChangeable((string) $params['branch']),
+            ProjectRebuild::REVERT => $git->assertRevertable($params['ref'] ?? null),
+        };
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     * @return array<string, string> what the queued job hands back to redeploy()
+     */
+    private function queuedInput(Git $git, string $action, array $params): array
+    {
+        return array_filter([
+            'path' => $git->pathKey(),
+            'strategy' => $action === ProjectRebuild::GIT_PULL ? ($params['strategy'] ?? Git::STRATEGY_FF) : null,
+            'branch' => $action === ProjectRebuild::CHANGE_BRANCH ? (string) $params['branch'] : null,
+            'ref' => $action === ProjectRebuild::REVERT ? ($params['ref'] ?? 'HEAD') : null,
+        ], static fn (?string $v): bool => $v !== null);
     }
 
     /**
@@ -281,22 +392,39 @@ class GitActions
      */
     public function redeploy(User $user, string $action, array $input, ?DeployLogger $logger): array
     {
-        $logger?->info(match ($action) {
-            ProjectRebuild::GIT_PULL => 'Pulling the connected branch (' . ($input['strategy'] ?? Git::STRATEGY_FF) . ') before the rebuild',
-            ProjectRebuild::CHANGE_BRANCH => "Changing the branch to {$input['branch']} before the rebuild",
-            ProjectRebuild::REVERT => 'Reverting the checkout to ' . ($input['ref'] ?? 'HEAD') . ' before the rebuild',
-        });
-        $change = match ($action) {
-            ProjectRebuild::GIT_PULL => fn (Git $git): array => $git->pull($input['strategy'] ?? null),
-            ProjectRebuild::CHANGE_BRANCH => fn (Git $git): array => $git->changeBranch($input['branch']),
-            ProjectRebuild::REVERT => fn (Git $git): array => $git->revert($input['ref'] ?? null),
-        };
+        $logger?->info($this->redeployAnnouncement($action, $input));
+        $change = $this->checkoutChange($action, $input);
 
         return $this->onCheckout(
             $user,
             $input['path'] ?? null,
             fn (Git $git, ProjectAggregate $project): array => $this->changeAndRebuild($git, $project, $change, $logger),
         );
+    }
+
+    /**
+     * @param array<string, string> $input
+     */
+    private function redeployAnnouncement(string $action, array $input): string
+    {
+        return match ($action) {
+            ProjectRebuild::GIT_PULL => 'Pulling the connected branch (' . ($input['strategy'] ?? Git::STRATEGY_FF) . ') before the rebuild',
+            ProjectRebuild::CHANGE_BRANCH => "Changing the branch to {$input['branch']} before the rebuild",
+            ProjectRebuild::REVERT => 'Reverting the checkout to ' . ($input['ref'] ?? 'HEAD') . ' before the rebuild',
+        };
+    }
+
+    /**
+     * @param array<string, string> $input
+     * @return callable(Git): array<mixed>
+     */
+    private function checkoutChange(string $action, array $input): callable
+    {
+        return match ($action) {
+            ProjectRebuild::GIT_PULL => fn (Git $git): array => $git->pull($input['strategy'] ?? null),
+            ProjectRebuild::CHANGE_BRANCH => fn (Git $git): array => $git->changeBranch($input['branch']),
+            ProjectRebuild::REVERT => fn (Git $git): array => $git->revert($input['ref'] ?? null),
+        };
     }
 
     /**
@@ -326,27 +454,43 @@ class GitActions
      */
     private function changeAndRebuild(Git $git, ProjectAggregate $project, callable $action, ?DeployLogger $logger): array
     {
+        if ($git->isDeployManaged() && $project->runtime() instanceof Dind) {
+            $this->refuseWhileTheLockIsHeld($project, $logger);
+        }
+
         $redeploy = app(CheckoutRedeploy::class);
 
-        return $redeploy->keepingTheServedTree($git, $project, function () use ($action, $git, $project, $redeploy, $logger): array {
-            try {
-                $data = $action($git);
-            } catch (\Throwable $e) {
-                // Unfinished, not only running: a cancel request sets `cancelled` without
-                // finishing, and the lock it keeps would stop the served tree coming back.
-                if ($logger !== null && !$logger->isFinished()) {
-                    $logger->finish(DeployLogger::STATUS_FAILED, 'Could not change the checkout: ' . GitUrl::sanitize($e->getMessage()));
-                }
-                throw $e;
-            }
-            $commit = $git->readHeadCommit();
-            $redeploy->afterMutation($git, $project, 'git', $commit, $logger);
-            if ($logger?->isRunning()) {
-                // Nothing to rebuild: the runtime returned without finishing it.
-                $logger->finish(DeployLogger::STATUS_SUCCESS);
-            }
+        return $redeploy->keepingTheServedTree(
+            $git,
+            $project,
+            fn (): array => $this->changeThenRebuild($git, $project, $redeploy, $action, $logger),
+        );
+    }
 
-            return ['commit' => $commit, 'checkout' => $data];
-        });
+    /**
+     * Unfinished, not only running, is what a refused change closes: a cancel sets `cancelled`
+     * without finishing, and the lock it keeps would stop the served tree coming back. A runtime
+     * with nothing to rebuild returns with the deploy still running, so it is finished here.
+     *
+     * @param callable(Git): array<mixed> $action
+     * @return array{commit: ?string, checkout: array<mixed>}
+     */
+    private function changeThenRebuild(Git $git, ProjectAggregate $project, CheckoutRedeploy $redeploy, callable $action, ?DeployLogger $logger): array
+    {
+        try {
+            $data = $action($git);
+        } catch (\Throwable $e) {
+            if ($logger !== null && !$logger->isFinished()) {
+                $logger->finish(DeployLogger::STATUS_FAILED, 'Could not change the checkout: ' . GitUrl::sanitize($e->getMessage()));
+            }
+            throw $e;
+        }
+        $commit = $git->readHeadCommit();
+        $redeploy->afterMutation($git, $project, 'git', $commit, $logger);
+        if ($logger?->isRunning()) {
+            $logger->finish(DeployLogger::STATUS_SUCCESS);
+        }
+
+        return ['commit' => $commit, 'checkout' => $data];
     }
 }

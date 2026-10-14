@@ -79,11 +79,12 @@ final class PortMapping
         return is_string($value) ? self::portOf(EnvVarDefault::resolve($value)) : 0;
     }
 
+    /**
+     * Env-var defaults are resolved before the split, so `${APP_PORT:-8090}:8000` reads as `8090:8000`.
+     */
     private static function fromString(string $mapping): ?self
     {
-        // Env-var defaults are resolved before the split, so
-        // "${APP_PORT:-8090}:8000" becomes "8090:8000" rather than nonsense.
-        $parts = explode(':', trim(EnvVarDefault::resolve(self::withRequiredHostPortDefaulted($mapping))));
+        $parts = self::splitFields(trim(EnvVarDefault::resolve(self::withRequiredHostPortDefaulted($mapping))));
         if (self::isLoopbackBinding($parts)) {
             return null;
         }
@@ -113,11 +114,51 @@ final class PortMapping
     }
 
     /**
+     * A compose port or volume entry's colon-separated fields. A colon inside
+     * `${VAR:-default}` or a bracketed IPv6 host (`[::]:8080:80`) is not one.
+     *
+     * @return list<string>
+     */
+    public static function splitFields(string $port): array
+    {
+        $fields = [];
+        $field = '';
+        $depth = 0;
+        $bracket = 0;
+        foreach (str_split($port) as $char) {
+            if ($char === '{') {
+                $depth++;
+            } elseif ($char === '}') {
+                $depth = max(0, $depth - 1);
+            } elseif ($char === '[') {
+                $bracket++;
+            } elseif ($char === ']') {
+                $bracket = max(0, $bracket - 1);
+            } elseif ($char === ':' && $depth === 0 && $bracket === 0) {
+                $fields[] = $field;
+                $field = '';
+
+                continue;
+            }
+            $field .= $char;
+        }
+        $fields[] = $field;
+
+        return $fields;
+    }
+
+    /**
      * @param list<string> $parts
      */
     private static function isLoopbackBinding(array $parts): bool
     {
-        return count($parts) >= 2 && in_array($parts[0], self::LOOPBACK_HOSTS, true);
+        return count($parts) >= 2 && self::isLoopbackHost($parts[0]);
+    }
+
+    /** Whether a host is loopback, with an IPv6 address given bracketed or bare. */
+    public static function isLoopbackHost(string $host): bool
+    {
+        return in_array(trim($host, '[] '), self::LOOPBACK_HOSTS, true);
     }
 
     private static function portOf(string $value): int

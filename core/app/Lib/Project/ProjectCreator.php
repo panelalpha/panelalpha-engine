@@ -7,19 +7,21 @@ use App\Http\Requests\DeployPlanInput;
 use App\Http\Requests\RecipeChoiceInput;
 use App\Integrations\Tunnels\PanelAlphaConnect;
 use App\Jobs\DeployProject;
+use App\Lib\Deploy\DeployLog\DeployLock;
 use App\Lib\Deploy\DeployLog\DeployLogger;
-use App\Lib\Deploy\Dind\TenantNetwork;
 use App\Lib\Deploy\EnvVarOverrides;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Lib\Deploy\ProjectName;
 use App\Lib\Deploy\Source\GitRemoteProbe;
-use App\Lib\Deploy\Source\GitRepoInput;
 use App\Lib\Deploy\Source\GitUrl;
+use App\Lib\Deploy\Source\RepositoryAddress;
+use App\Lib\Domains\AllocatedDomain;
 use App\Lib\Domains\DomainAllocationException;
 use App\Lib\Domains\DomainAllocator;
 use App\Lib\Domains\DomainPlan;
 use App\Lib\Helper;
+use App\Lib\Task\TaskTrigger;
 use App\Lib\Vault\RequestVault;
 use App\Models\Domain;
 use App\Models\Task;
@@ -74,7 +76,7 @@ class ProjectCreator
     /** The deploy log for a project that has something to deploy, or null. */
     public function startDeployLog(User $user): ?DeployLogger
     {
-        if (!$user->hasGitProject() && $user->getTemplate() !== 'dind') {
+        if (!self::writesDeployLog($user)) {
             return null;
         }
 
@@ -101,22 +103,33 @@ class ProjectCreator
 
     /**
      * Throws ValidationException after finishing the deploy log
-     * (cancelled/failed) and cleaning up on errors.
+     * (cancelled/failed) and cleaning up on errors. A deploy log holds the account's
+     * lock; a plain template writes none, so the lock is taken here, or a delete
+     * would see this create as idle and tear the account down under it.
      */
     public function deploy(User $user, ?DeployLogger $deployLogger): void
     {
-        $user->project()->runDeployment($deployLogger, null);
+        $lock = self::writesDeployLog($user) ? null : DeployLock::acquireFor($user->username);
+        try {
+            $user->project()->runDeployment($deployLogger, null);
+        } finally {
+            $lock?->release();
+        }
+    }
+
+    private static function writesDeployLog(User $user): bool
+    {
+        return $user->hasGitProject() || $user->getTemplate() === 'dind';
     }
 
     /**
-     * Provision here and leave the deploy to a DeployProject job.
+     * Provision here and leave the deploy to a DeployProject job. The plan and recipe
+     * are parsed before provision, so a malformed one leaves no account behind.
      *
      * @throws ValidationException
      */
     public function queue(NewProjectInput $input): Task
     {
-        // Parsed before provision: a malformed plan or recipe id must not
-        // leave an account behind with no deploy queued for it.
         $plan = DeployPlanInput::parse($input->stages);
         $stages = $plan?->toArray();
         $recipe = RecipeChoiceInput::parse($input->recipe);
@@ -131,6 +144,7 @@ class ProjectCreator
                 'username' => $user->username,
                 'domain' => $user->domain,
                 'action' => 'deploy',
+                'trigger' => TaskTrigger::current(),
             ],
         );
         DeployProject::dispatch($user->username, $stages, $recipe, $this->inspection?->toArray(), (int) $user->getKey())
@@ -147,38 +161,72 @@ class ProjectCreator
     {
         $this->inspection = null;
 
-        /** @var array{
-         *   username?: ?string,
-         *   domain?: ?string,
-         *   domain_redirect_url?: ?string,
-         *   email: string,
-         *   disk_space_limit?: int,
-         *   memory_limit?: int,
-         *   cpu_limit?: float,
-         *   device_read_bps?: int,
-         *   device_write_bps?: int,
-         *   bandwidth_limit?: int,
-         *   mysql_databases_limit?: int,
-         *   ftp_accounts_limit?: int,
-         *   sftp_accounts_limit?: int,
-         *   addon_domains_limit?: int,
-         *   subdomains_limit?: int,
-         *   inodes_limit?: int,
-         *   php_fpm_pool_settings?: string,
-         *   lsphp_settings?: string,
-         *   redis_config?: string,
-         *   dedicated_ipv4?: bool,
-         *   dedicated_ipv6?: bool,
-         *   template?: string,
-         *   tunnel?: ?string,
-         *   git_repo?: string,
-         *   git_branch?: string,
-         *   git_token?: string,
-         *   env_vars?: array<string, string>,
-         * } $params
-         */
+        $params = self::namedParams($input);
+        self::assertRequestChecksPass($params, $input->nameField);
+        $params = self::resolvedSource($params, $input);
+
+        if (!empty($params['git_repo'])) {
+            $this->inspection = self::inspectRepository($params, $input);
+        }
+
+        $allocated = self::allocateDomain($params);
+        $params['domain'] = $allocated->domain;
+        self::assertAllocatedDomainFree($params['domain']);
+
+        if (!empty($params['git_repo']) && empty($params['template'])) {
+            $params['template'] = 'dind';
+        }
+
+        $user = self::newUser($params, $allocated);
+        self::assertNameStillFree($user, $params['domain']);
+
+        $domain = self::saveNewProject($user, self::mainDomainFor($params), $input->nameField);
+
+        self::assignDedicatedIps($user, $params);
+        self::recordOnlineTunnel($user, $domain, $allocated);
+
+        return $user;
+    }
+
+    /**
+     * The validated params with a project name. A create need not name itself: it is
+     * named after the repository, domain or recipe it carries, or a plain "app" when it
+     * carries none, which the one-line installer (`--repo`) relies on.
+     *
+     * @return array{
+     *   username: string,
+     *   domain?: ?string,
+     *   domain_redirect_url?: ?string,
+     *   email: string,
+     *   disk_space_limit?: int,
+     *   memory_limit?: int,
+     *   cpu_limit?: float,
+     *   device_read_bps?: int,
+     *   device_write_bps?: int,
+     *   bandwidth_limit?: int,
+     *   mysql_databases_limit?: int,
+     *   ftp_accounts_limit?: int,
+     *   sftp_accounts_limit?: int,
+     *   addon_domains_limit?: int,
+     *   subdomains_limit?: int,
+     *   inodes_limit?: int,
+     *   php_fpm_pool_settings?: string,
+     *   lsphp_settings?: string,
+     *   redis_config?: string,
+     *   dedicated_ipv4?: bool,
+     *   dedicated_ipv6?: bool,
+     *   template?: string,
+     *   tunnel?: ?string,
+     *   git_repo?: string,
+     *   git_branch?: string,
+     *   git_token?: string,
+     *   env_vars?: array<string, string>,
+     * }
+     * @throws ProblemException username_required
+     */
+    private static function namedParams(NewProjectInput $input): array
+    {
         $params = $input->params;
-        $nameField = $input->nameField;
 
         if (
             !empty($params['domain'])
@@ -187,19 +235,25 @@ class ProjectCreator
             $params['domain'] = Str::after($params['domain'], 'www.');
         }
 
-        // Nothing here is required of the caller: a create with no body at all
-        // names itself after whatever the request does carry -- the repository,
-        // the domain, the recipe -- and takes a plain "app" when it carries
-        // nothing. The one-line installer (`--repo`) relies on it, and so does
-        // every agent that has a repository and no opinion about the name.
         if (empty($params['username'])) {
-            $params['username'] = Helper::generateUsernameFrom(ProjectName::base(
-                $params['git_repo'] ?? null,
-                $params['domain'] ?? null,
-                $params['recipe'] ?? null,
-            ));
+            $params['username'] = self::generatedName($params, $input->nameField);
         }
-        if (empty($params['username'])) {
+
+        return $params;
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     * @throws ProblemException username_required
+     */
+    private static function generatedName(array $params, string $nameField): string
+    {
+        $name = Helper::generateUsernameFrom(ProjectName::base(
+            $params['git_repo'] ?? null,
+            $params['domain'] ?? null,
+            $params['recipe'] ?? null,
+        ));
+        if (empty($name)) {
             throw ProblemException::one(
                 $nameField,
                 'username_required',
@@ -208,65 +262,115 @@ class ProjectCreator
             );
         }
 
-        // Everything knowable from the request alone, asked at once and
-        // answered at once. {@see ProvisionChecks}
+        return $name;
+    }
+
+    /**
+     * Everything knowable from the request alone, asked at once and answered at once.
+     *
+     * @param array<string, mixed> $params
+     * @throws ProblemException
+     */
+    private static function assertRequestChecksPass(array $params, string $nameField): void
+    {
         $problems = (new ProvisionChecks(new SystemProvisionEnvironment()))->problems($params, $nameField);
 
         if ($problems !== []) {
             throw ProblemException::of($problems);
         }
+    }
 
-        // Vault references are read once the name is known to be free, so a
-        // project entry is assigned to this project, and before the allocator
-        // spends a label on a create that would fail here. The project stores
-        // the secrets themselves; nothing reads the vault on its behalf later.
+    /**
+     * The source a deploy will clone: its `vault:` references read for this
+     * project, and the remote checked before anything is created or changed.
+     *
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     * @throws ProblemException
+     */
+    public static function resolvedSource(array $params, NewProjectInput $input): array
+    {
+        $params = self::withVaultResolved($params, $input);
+        if (!empty($params['git_repo'])) {
+            self::assertRepositoryReachable($params);
+        }
+
+        return $params;
+    }
+
+    /**
+     * Vault references are read once the name is known to be free, so an entry is assigned to
+     * this project, and before the allocator spends a label on a create that would fail here.
+     * The project stores the secrets themselves; nothing reads the vault on its behalf later.
+     *
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
+    private static function withVaultResolved(array $params, NewProjectInput $input): array
+    {
         $params['git_token'] = RequestVault::resolve('git_token', $input->gitToken, $params['username']);
         if (isset($params['env_vars']) && is_array($params['env_vars'])) {
             $params['env_vars'] = RequestVault::resolve('env_vars', $input->envVars, $params['username']);
         }
 
-        // After the local checks because it is the only one that leaves the
-        // machine; before the allocator because everything past it spends a
-        // panelalpha.online label, and those are never released.
-        if (!empty($params['git_repo'])) {
-            // The probe runs in core, which reaches addresses the project's own network refuses.
-            $refused = self::refusedRepositoryAddress($params['git_repo']);
-            if ($refused !== null) {
-                throw ProblemException::one('git_repo', 'git_repo_private_address', $refused);
-            }
-            $probe = (new GitRemoteProbe())->problem(
-                'git_repo',
-                $params['git_repo'],
-                // The token the clone will use. None sent means an anonymous
-                // probe, as the clone will be.
-                $params['git_token'],
-                'git_token',
-                // Asked in the same round trip: a branch the remote lacks
-                // used to be accepted here and fail the deploy at clone.
-                $params['git_branch'] ?? null,
-            );
-            if ($probe !== null) {
-                throw ProblemException::of([$probe]);
-            }
+        return $params;
+    }
 
-            // Seconds, and never a refusal: what it finds is reported in the
-            // response and the deploy log, and the create goes ahead.
-            $this->inspection = app(CreateInspector::class)->inspect(
-                $params['git_repo'],
-                $params['git_branch'] ?? null,
-                $params['git_token'] ?? null,
-                RecipeChoiceInput::parse($input->recipe),
-                DeployPlanInput::parse($input->stages),
-            );
+    /**
+     * The only check that leaves the machine, so it runs after the local ones and before the
+     * allocator spends a panelalpha.online label, which is never released. The probe runs in
+     * core, which reaches addresses the project's own network refuses, so those are refused
+     * first. It uses the token the clone will (none: anonymous) and asks for the branch too.
+     *
+     * @param array<string, mixed> $params
+     * @throws ProblemException
+     */
+    private static function assertRepositoryReachable(array $params): void
+    {
+        $refused = self::refusedRepositoryAddress($params['git_repo']);
+        if ($refused !== null) {
+            throw ProblemException::one('git_repo', 'host_refused', $refused);
         }
+        $probe = app(GitRemoteProbe::class)->problem(
+            'git_repo',
+            $params['git_repo'],
+            $params['git_token'],
+            'git_token',
+            $params['git_branch'] ?? null,
+        );
+        if ($probe !== null) {
+            throw ProblemException::of([$probe]);
+        }
+    }
 
-        // The name, and everything about it worth reporting. Chosen before
-        // anything is created: a panelalpha.online label is bought from the
-        // licensing proxy, and a label that turns out to be taken has to be
-        // discovered while another one can still be picked -- not after an
-        // account has been built around the first guess.
+    /**
+     * Seconds, and never a refusal: what it finds is reported in the response and the
+     * deploy log, and the create goes ahead.
+     *
+     * @param array<string, mixed> $params
+     */
+    private static function inspectRepository(array $params, NewProjectInput $input): CreateInspection
+    {
+        return app(CreateInspector::class)->inspect(
+            $params['git_repo'],
+            $params['git_branch'] ?? null,
+            $params['git_token'] ?? null,
+            RecipeChoiceInput::parse($input->recipe),
+            DeployPlanInput::parse($input->stages),
+        );
+    }
+
+    /**
+     * Chosen before anything is created: a panelalpha.online label is bought from the
+     * licensing proxy, and a taken one must be found while another can still be picked.
+     *
+     * @param array<string, mixed> $params
+     * @throws ProblemException
+     */
+    private static function allocateDomain(array $params): AllocatedDomain
+    {
         try {
-            $allocated = (new DomainAllocator())->allocate(
+            return (new DomainAllocator())->allocate(
                 $params['username'],
                 $params['domain'] ?? null,
                 $params['tunnel'] ?? null,
@@ -274,27 +378,30 @@ class ProjectCreator
         } catch (DomainAllocationException $e) {
             throw ProblemException::one('domain', $e->reason, $e->getMessage());
         }
-        $params['domain'] = $allocated->domain;
+    }
 
-        // The allocator only offers a name it has just found free, so this
-        // catches a race rather than a mistake -- kept because losing one is
-        // worth a 422 rather than a duplicate.
-        if (Domain::existsByName($params['domain'])) {
+    /**
+     * The allocator only offers a name it has just found free, so this catches a race,
+     * which is worth a 422 rather than a duplicate.
+     *
+     * @throws ProblemException domain_taken
+     */
+    private static function assertAllocatedDomainFree(string $domain): void
+    {
+        if (Domain::existsByName($domain)) {
             throw ProblemException::one(
                 'domain',
                 'domain_taken',
-                "{$params['domain']} is already on this engine."
+                "{$domain} is already on this engine."
             );
         }
+    }
 
-        // Auto-set template to 'dind' for Git repo users
-        if (!empty($params['git_repo']) && empty($params['template'])) {
-            $params['template'] = 'dind';
-        }
-
-        $dedicatedIpv4 = !empty($params['dedicated_ipv4']);
-        $dedicatedIpv6 = !empty($params['dedicated_ipv6']);
-
+    /**
+     * @param array<string, mixed> $params
+     */
+    private static function newUser(array $params, AllocatedDomain $allocated): User
+    {
         /** @var User */
         $user = User::make([
             'username' => $params['username'],
@@ -308,36 +415,51 @@ class ProjectCreator
         ]);
 
         if (!empty($params['password']) && is_string($params['password'])) {
-            $details = $user->getDetails();
-            $details['site_password_enabled'] = true;
-            $details['site_password_hash'] = password_hash($params['password'], PASSWORD_BCRYPT);
-            $details['site_password_version'] = 1;
-            $user->details = $details;
+            self::enableSitePassword($user, $params['password']);
         }
 
-        // Asked again with the username on the model, which the check above
-        // cannot see: that one builds a fresh `System` from `$params` while
-        // this row is only in memory, so a username that already has a home
-        // directory or an OS user passes it and is caught here instead -- as a
-        // bare \Exception thrown inside the deploy pipeline's `preparing`
-        // stage, surfacing as `code: deploy_failed` rather than as a 422 about
-        // the name.
-        //
-        // What leaves such debris is a deploy that failed *after* createDirs()
-        // and whose rollback did not finish: suroi's test found `/home/suroi`
-        // with no database row and no container at all. Naming it here means
-        // the caller hears "that name is taken" and can choose another, which
-        // is the only thing it can do about it either way.
+        return $user;
+    }
+
+    private static function enableSitePassword(User $user, string $password): void
+    {
+        $details = $user->getDetails();
+        $details['site_password_enabled'] = true;
+        $details['site_password_hash'] = password_hash($password, PASSWORD_BCRYPT);
+        $details['site_password_version'] = 1;
+        $user->details = $details;
+    }
+
+    /**
+     * Asked again with the username on the model, which ProvisionChecks cannot see: a name
+     * left with a home directory or OS user by a failed deploy whose rollback did not finish
+     * would otherwise fail inside the deploy instead of as a 422 the caller can act on.
+     *
+     * @throws ProblemException
+     */
+    private static function assertNameStillFree(User $user, string $domain): void
+    {
         if ($user->project()->hostingExists()) {
             throw ProblemException::one('username', 'name_unavailable', 'Username not available.');
         }
 
         if (
-            Domain::domainOrAliasExists($params['domain'])
+            Domain::domainOrAliasExists($domain)
         ) {
             throw ProblemException::one('domain', 'domain_taken', 'Domain name not available.');
         }
+    }
 
+    /**
+     * The main domain row, built once the user is saved. A name whose zone answers only for
+     * the exact label registered gets no `www.`: it would reach something that has never heard
+     * of it and fail TLS on the way.
+     *
+     * @param array<string, mixed> $params
+     * @return \Closure(User): Domain
+     */
+    private static function mainDomainFor(array $params): \Closure
+    {
         $redirectEnabled = false;
         $redirectUrl = null;
         if (!empty($params['domain_redirect_url'])) {
@@ -345,13 +467,10 @@ class ProjectCreator
             $redirectUrl = $params['domain_redirect_url'];
         }
 
-        // Free to take, and worth taking. A name whose zone answers only for
-        // the exact label registered gets no `www.`: it would resolve, reach
-        // something that has never heard of it, and fail TLS on the way.
         $aliasAvailable = DomainPlan::wwwAliasWouldAnswer($params['domain'])
             && !Domain::domainOrAliasExists('www.' . $params['domain']);
 
-        $domain = self::saveNewProject($user, fn (User $user): Domain => Domain::make([
+        return fn (User $user): Domain => Domain::make([
             'user_id' => $user->id,
             'domain' => $params['domain'],
             'type' => 'main',
@@ -361,25 +480,33 @@ class ProjectCreator
                 'redirect_url' => $redirectUrl,
                 'aliases' => $aliasAvailable ? ['www.' . $params['domain']] : [],
             ],
-        ]), $nameField);
+        ]);
+    }
 
-        if ($dedicatedIpv4 && !$user->assignFreeDedicatedIpv4()) {
+    /**
+     * @param array<string, mixed> $params
+     */
+    private static function assignDedicatedIps(User $user, array $params): void
+    {
+        if (!empty($params['dedicated_ipv4']) && !$user->assignFreeDedicatedIpv4()) {
             self::dropUnassignedDedicatedIp($user, 'dedicated_ipv4');
         }
 
-        if ($dedicatedIpv6 && !$user->assignFreeDedicatedIpv6()) {
+        if (!empty($params['dedicated_ipv6']) && !$user->assignFreeDedicatedIpv6()) {
             self::dropUnassignedDedicatedIp($user, 'dedicated_ipv6');
         }
+    }
 
-        // The public name was bought before the account existed; this is the
-        // row that ties it to the domain it now serves. Attached to the
-        // project's own domain by construction, which is the one arrangement
-        // where the Host the proxy forwards is the name a visitor typed.
+    /**
+     * Ties the public name bought before the account existed to the domain it now serves:
+     * the project's own domain, the one arrangement where the Host the proxy forwards is
+     * the name a visitor typed.
+     */
+    private static function recordOnlineTunnel(User $user, Domain $domain, AllocatedDomain $allocated): void
+    {
         if ($allocated->tunnelProvider === Tunnel::PROVIDER_PANELALPHA && $allocated->allocation !== null) {
             PanelAlphaConnect::recordPanelAlphaTunnel($user, $domain, $allocated->allocation);
         }
-
-        return $user;
     }
 
     /**
@@ -417,31 +544,15 @@ class ProjectCreator
     }
 
     /**
-     * Why the project could not reach the repository's host, when every IPv4
-     * address it has is one the tenant network refuses; null otherwise, or
-     * when it does not resolve (the probe says that).
+     * Why core must not contact the repository's host, when an address it has
+     * is one the tenant network refuses; null otherwise, or when it does not
+     * resolve (the probe says that).
      */
     private static function refusedRepositoryAddress(string $repoUrl): ?string
     {
-        $host = parse_url(GitRepoInput::normalise($repoUrl), PHP_URL_HOST);
-        if (!is_string($host) || $host === '') {
-            return null;
-        }
+        $problem = RepositoryAddress::problem($repoUrl, 'git_repo');
 
-        $literal = filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false;
-        $addresses = $literal ? [$host] : gethostbynamel($host);
-        if (!is_array($addresses) || $addresses === []) {
-            return null;
-        }
-        foreach ($addresses as $address) {
-            if (!TenantNetwork::refuses($address)) {
-                return null;
-            }
-        }
-
-        return ($literal ? "{$host} is" : "{$host} resolves to {$addresses[0]},")
-            . ' a private, loopback, link-local or reserved address. A project\'s network does not reach those, '
-            . 'so the clone would fail. Use a repository on a public address.';
+        return isset($problem['message']) ? (string) $problem['message'] : null;
     }
 
     /**

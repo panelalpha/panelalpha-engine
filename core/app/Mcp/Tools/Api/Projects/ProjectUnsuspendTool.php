@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('project_unsuspend')]
 #[Description(<<<'MARKDOWN'
     Unsuspend a project
+
+    Only an unscoped token may call this: a token limited to some projects is refused with 403, even on its own project.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

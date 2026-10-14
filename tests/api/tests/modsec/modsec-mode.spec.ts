@@ -1,14 +1,15 @@
 import { expect, test } from '@/fixtures/test-options';
+import { CleanupSteps } from '@/helpers/cleanup-step';
 import { expectOneOf } from '@/helpers/expect-one-of';
 import {
   INVALID_MODES,
-  MODSEC_PROPAGATION_DELAY_MS,
   VALID_MODES,
   modsecUnavailableReason,
   snapshotModSec,
   type ModSecSnapshot,
 } from '@/helpers/modsec-helpers';
-import { delay } from '@/helpers/retry';
+import { waitForCondition } from '@/helpers/retry';
+import { waitForSiteHttpReady } from '@/helpers/webserver-helpers';
 
 /**
  * Mode is engine-wide: leaving it on `on` with an unexpected ruleset set would
@@ -28,15 +29,31 @@ test.describe('ModSecurity mode', () => {
     mutated = false;
   });
 
-  test.afterEach(async ({ api }) => {
+  test.afterEach(async ({ api, anonymousRequest, setupUser }) => {
     // beforeEach can skip before it takes the snapshot, and Playwright still
     // runs this hook — dereferencing it would turn the skip into a failure.
     if (!snapshot || !mutated) {
       return;
     }
 
-    await api.setModSecurityConfig({ mode: snapshot.mode }).catch(() => undefined);
-    await delay(MODSEC_PROPAGATION_DELAY_MS);
+    const cleanup = new CleanupSteps();
+    await cleanup.run(
+      'restore the ModSecurity mode',
+      () => api.setModSecurityConfig({ mode: snapshot.mode }),
+      {
+        verify: async () => (await api.getModSecurityConfig()).data.mode === snapshot.mode,
+        describe: () => `the mode is not back to "${snapshot.mode}"`,
+      }
+    );
+    // The restore is verified through the API; what is left is the reload
+    // reaching the webserver, which shows as the site serving again.
+    await cleanup.run('wait for the site to serve again', () =>
+      waitForSiteHttpReady(anonymousRequest, setupUser.url ?? `https://${setupUser.domain}/`, {
+        timeout: 30_000,
+        interval: 1_000,
+      })
+    );
+    await cleanup.finish();
   });
 
   test('the current mode is one of the three valid ones', { tag: ['@smoke'] }, async ({ api }) => {
@@ -52,7 +69,19 @@ test.describe('ModSecurity mode', () => {
 
     for (const mode of VALID_MODES) {
       await api.setModSecurityConfig({ mode });
-      await delay(MODSEC_PROPAGATION_DELAY_MS);
+      await waitForCondition(async () => (await api.getModSecurityConfig()).data.mode === mode, {
+        timeout: 10_000,
+        interval: 500,
+        message: `the mode never reported as "${mode}"`,
+      });
+      await waitForSiteHttpReady(
+        anonymousRequest,
+        setupUser.url ?? `https://${setupUser.domain}/`,
+        {
+          timeout: 30_000,
+          interval: 1_000,
+        }
+      );
       expect((await api.getModSecurityConfig()).data.mode).toBe(mode);
     }
 

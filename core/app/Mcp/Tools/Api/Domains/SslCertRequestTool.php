@@ -72,7 +72,7 @@ class SslCertRequestTool extends ApiTool
             'name' => $schema->string()->required(),
             'domain' => $schema->string()->required(),
             'staging' => $schema->boolean()->description('Untrusted test certificate; spends no rate limit.'),
-            'dry_run' => $schema->boolean()->description('Only report whether a request would work.'),
+            'dry_run' => $schema->boolean()->description('Check eligibility only (issuable name, shared zone); does NOT verify DNS. A name that does not resolve to this host still reports no reason here.'),
         ];
     }
 }

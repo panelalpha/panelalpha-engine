@@ -38,7 +38,7 @@
 <p>
 <a href="#第-1-步在自己的-vps-上安装-engine"><img src="https://img.shields.io/badge/install-one--liner-2f8f46" alt="一行命令安装"></a>
 <a href="#第-1-步在自己的-vps-上安装-engine"><img src="https://img.shields.io/badge/Debian_12%2F13-Ubuntu_22.04%2F24.04%2F26.04-a80030" alt="支持的系统"></a>
-<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-204_tools-6f42c1" alt="204 个 MCP 工具"></a>
+<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-225_tools-6f42c1" alt="225 个 MCP 工具"></a>
 <a href="#许可证"><img src="https://img.shields.io/badge/license-Apache_2.0-0b7285" alt="Apache 2.0"></a>
 <a href="https://discord.gg/9twHWR7xGX"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="加入 Discord"></a>
 </p>
@@ -96,7 +96,7 @@ AI 已经把软件创造从旧的限制里解放出来。更多人能把想法�
 例如，想同时安装 Engine 并部署 n8n，只需这一条：
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
 ```
 
 完成后，它会显示新网站的地址；如果你没有传 `--no-password`，还会显示打开网站用的密码。私有仓库、自定义密码，或在已经装有 Engine 的服务器上运行应用，请参阅：[One-line app installation command](docs/02-getting-started/install.md#one-line-app-installation-command)。
@@ -104,7 +104,7 @@ curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.co
 想把这两步分开做？用下面的命令只安装 Engine，稍后再通过你的助手部署应用（见第 2 步）：
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 就这样，服务器已经就绪。如需自定义名称、自备 TLS 证书，或服务器在 NAT 后面，请参阅：[安装选项](docs/02-getting-started/install.md)。
@@ -174,7 +174,7 @@ pae connect
 | `给 n8n.mydomain.com 配一个 Cloudflare 隧道。` | DNS 和隧道都配好，这也是从 NAT 后面的服务器对外提供服务的办法。 |
 | `上周我们有多少流量？` | 该项目以及整台服务器的用量、日志和限额。 |
 
-更多现成的例子：[该怎么问](docs/04-connecting-your-ai/your-assistant.md#what-to-ask)。助手能够触达的完整清单：[204 个工具](docs/04-connecting-your-ai/your-assistant.md)。
+更多现成的例子：[该怎么问](docs/04-connecting-your-ai/your-assistant.md#what-to-ask)。助手能够触达的完整清单：[225 个工具](docs/04-connecting-your-ai/your-assistant.md)。
 
 ---
 
@@ -319,7 +319,7 @@ PanelAlpha Engine 是免费开源的，采用 Apache 2.0 许可证。你付的�
 ## 你的服务器只差一条命令
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 ## 安全

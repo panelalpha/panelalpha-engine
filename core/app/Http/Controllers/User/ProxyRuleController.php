@@ -22,6 +22,8 @@ use OpenApi\Attributes as OA;
 
 class ProxyRuleController extends Controller
 {
+    private const DUPLICATE_RULE = 'A rule with the same transport, port, and server_name already exists';
+
     #[OA\Get(
         path: '/proxy-rules',
         summary: 'List all proxy rules',
@@ -64,12 +66,7 @@ class ProxyRuleController extends Controller
      */
     public function show(int $id): ProxyRuleResource
     {
-        $rule = ProxyRule::find($id);
-        if (!$rule) {
-            abort(new JsonResponse([
-                'message' => 'Rule not found',
-            ], 404));
-        }
+        $rule = $this->ruleOr404($id);
 
         return new ProxyRuleResource($rule);
     }
@@ -118,69 +115,20 @@ class ProxyRuleController extends Controller
          *   metadata?: ?array
          * } $validated
          */
-        $validated = $request->validate([
-            'owner_scope' => ['nullable', Rule::in(['system', 'user'])],
-            'username' => ['nullable', 'string', 'exists:users,username'],
-            'transport' => ['required', Rule::in(['http', 'tcp', 'udp'])],
-            // These four are written into the shared nginx-proxy config verbatim.
-            'listen_ip' => ['nullable', 'string', new ListenIp()],
-            'listen_port' => ['required', 'integer', 'min:1', 'max:65535'],
-            'server_name' => ['nullable', 'string', new ProxyServerName()],
-            'upstream_host' => ['required', 'string', new UpstreamHost()],
-            'upstream_port' => ['required', 'integer', 'min:1', 'max:65535'],
-            'upstream_protocol' => ['nullable', Rule::in(['http', 'https'])],
-            'enabled' => ['boolean'],
-            'metadata' => ['nullable', 'array'],
-        ]);
+        $validated = $request->validate(self::newRuleRules());
 
         $ownerScope = $validated['owner_scope'] ?? $request->input('owner_scope', 'user');
-        $username = $validated['username'] ?? $request->input('username');
-        if ($ownerScope === 'system') {
-            $username = null;
-        } elseif (empty($username)) {
-            // User-owned rules must be tied to a project username so deletion
-            // (ProxyRule::forUser / FK cascade) can remove them.
-            throw ValidationException::withMessages([
-                'username' => 'username is required when owner_scope is user',
-            ]);
-        }
+        $username = $this->ownerUsername($ownerScope, $validated['username'] ?? $request->input('username'));
         $this->refuseForeignUpstream($ownerScope, $username, $validated['upstream_host']);
 
-        // Validation: HTTP rules should have server_name be either null or valid
-        if ($validated['transport'] === 'http' && !empty($validated['server_name'])) {
-            if (!$this->isValidServerName($validated['server_name'])) {
-                throw ValidationException::withMessages([
-                    'server_name' => 'server_name must be a valid domain or wildcard'
-                ]);
-            }
-        }
-
-        // Validation: stream rules should not have server_name
         if (in_array($validated['transport'], ['tcp', 'udp'])) {
             $validated['server_name'] = null;
             $validated['upstream_protocol'] = null;
         }
         $this->refuseForeignServerName($ownerScope, $username, $validated['server_name'] ?? null);
 
-        // Check for conflicts with existing rules
-        /** @var ?ProxyRule $existing */
-        $existing = ProxyRule::query()
-            ->where('enabled', true)
-            ->where('transport', $validated['transport'])
-            ->where('listen_port', $validated['listen_port'])
-            ->where('listen_ip', $validated['listen_ip'] ?? '*')
-            ->where('server_name', $validated['server_name'] ?? null)
-            ->first();
-
-        if ($existing) {
-            // Keyed, or the 422 names field 0 instead of the port the twin already holds.
-            throw ValidationException::withMessages([
-                'listen_port' => 'A rule with the same transport, port, and server_name already exists'
-            ]);
-        }
-
         if ($validated['enabled'] ?? true) {
-            $this->refuseUnusablePort($validated['transport'], $validated['listen_ip'] ?? '*', $validated['listen_port']);
+            $this->refuseClashingRule($validated);
         }
 
         /** @var ProxyRule */
@@ -199,9 +147,7 @@ class ProxyRuleController extends Controller
             'metadata' => $validated['metadata'] ?? null,
         ]);
 
-        $system = app(System::class);
-        $system->webserver()->rebuildConfig();
-        $system->webserver()->scheduleWebserverReloadInBackground();
+        $this->rebuildProxyConfig();
 
         return new ProxyRuleResource($rule);
     }
@@ -231,13 +177,7 @@ class ProxyRuleController extends Controller
      */
     public function update(int $id, Request $request): ProxyRuleResource
     {
-        $rule = ProxyRule::find($id);
-        if (!$rule) {
-            abort(new JsonResponse([
-                'message' => 'Rule not found',
-            ], 404));
-        }
-
+        $rule = $this->ruleOr404($id);
 
         $validated = $request->validate([
             'upstream_host' => ['nullable', 'string', new UpstreamHost()],
@@ -247,21 +187,16 @@ class ProxyRuleController extends Controller
             'metadata' => ['nullable', 'array'],
         ]);
 
-        // Its port is the rule's own while it is enabled; only switching it on takes a new one.
         if (($validated['enabled'] ?? false) && !$rule->enabled) {
-            $this->refuseUnusablePort($rule->transport, $rule->listen_ip ?? '*', $rule->listen_port);
+            $this->refuseReenabling($rule);
         }
-        // A live rule stored before this check must be fixed or switched off.
         if ($validated['enabled'] ?? $rule->enabled) {
-            $this->refuseForeignUpstream($rule->owner_scope, $rule->username, $validated['upstream_host'] ?? $rule->upstream_host);
-            $this->refuseForeignServerName($rule->owner_scope, $rule->username, $rule->server_name);
+            $this->refuseForeignTargets($rule, $validated['upstream_host'] ?? $rule->upstream_host);
         }
 
         $rule->update($validated);
 
-        $system = app(System::class);
-        $system->webserver()->rebuildConfig();
-        $system->webserver()->scheduleWebserverReloadInBackground();
+        $this->rebuildProxyConfig();
 
         return new ProxyRuleResource($rule);
     }
@@ -282,19 +217,126 @@ class ProxyRuleController extends Controller
      */
     public function destroy(int $id): ProxyRuleResource
     {
+        $rule = $this->ruleOr404($id);
+        $rule->delete();
+
+        $this->rebuildProxyConfig();
+
+        return new ProxyRuleResource($rule);
+    }
+
+    private function ruleOr404(int $id): ProxyRule
+    {
         $rule = ProxyRule::find($id);
         if (!$rule) {
             abort(new JsonResponse([
                 'message' => 'Rule not found',
             ], 404));
         }
-        $rule->delete();
 
+        return $rule;
+    }
+
+    private function rebuildProxyConfig(): void
+    {
         $system = app(System::class);
         $system->webserver()->rebuildConfig();
         $system->webserver()->scheduleWebserverReloadInBackground();
+    }
 
-        return new ProxyRuleResource($rule);
+    /**
+     * The address and name fields are written into the shared nginx-proxy config verbatim.
+     *
+     * @return array<string, list<mixed>>
+     */
+    private static function newRuleRules(): array
+    {
+        return [
+            'owner_scope' => ['nullable', Rule::in(['system', 'user'])],
+            'username' => ['nullable', 'string', 'exists:users,username'],
+            'transport' => ['required', Rule::in(['http', 'tcp', 'udp'])],
+            'listen_ip' => ['nullable', 'string', new ListenIp()],
+            'listen_port' => ['required', 'integer', 'min:1', 'max:65535'],
+            'server_name' => ['nullable', 'string', new ProxyServerName()],
+            'upstream_host' => ['required', 'string', new UpstreamHost()],
+            'upstream_port' => ['required', 'integer', 'min:1', 'max:65535'],
+            'upstream_protocol' => ['nullable', Rule::in(['http', 'https'])],
+            'enabled' => ['boolean'],
+            'metadata' => ['nullable', 'array'],
+        ];
+    }
+
+    /**
+     * A system rule has no owner; a user rule must name its project, so deleting the project
+     * (ProxyRule::forUser, the FK cascade) removes it.
+     *
+     * @throws ValidationException
+     */
+    private function ownerUsername(mixed $ownerScope, mixed $username): mixed
+    {
+        if ($ownerScope === 'system') {
+            return null;
+        }
+        if (empty($username)) {
+            throw ValidationException::withMessages([
+                'username' => 'username is required when owner_scope is user',
+            ]);
+        }
+
+        return $username;
+    }
+
+    /**
+     * Checks an enabled new rule against the rules already live and the host's ports. A disabled
+     * one is stored unchecked and checked when switched on, in update().
+     *
+     * @param array<string, mixed> $validated
+     * @throws ValidationException
+     */
+    private function refuseClashingRule(array $validated): void
+    {
+        if ($validated['transport'] === 'http') {
+            $this->refuseDuplicateHttpRule($validated['server_name'] ?? null, (int) $validated['listen_port']);
+        } else {
+            $this->refuseDuplicateStreamRule($validated);
+        }
+
+        $this->refuseUnusablePort($validated['transport'], $validated['listen_ip'] ?? '*', $validated['listen_port']);
+    }
+
+    /**
+     * Keyed on listen_port, or the 422 would name field 0 instead of the port the twin already holds.
+     *
+     * @param array<string, mixed> $validated
+     */
+    private function refuseDuplicateStreamRule(array $validated): void
+    {
+        if (ProxyRule::query()
+            ->where('enabled', true)
+            ->where('transport', $validated['transport'])
+            ->where('listen_port', $validated['listen_port'])
+            ->where('listen_ip', $validated['listen_ip'] ?? '*')
+            ->where('server_name', $validated['server_name'] ?? null)
+            ->exists()
+        ) {
+            throw ValidationException::withMessages(['listen_port' => self::DUPLICATE_RULE]);
+        }
+    }
+
+    /** Re-enabling a disabled rule runs the checks a fresh one gets. */
+    private function refuseReenabling(ProxyRule $rule): void
+    {
+        $this->refuseUnusablePort($rule->transport, $rule->listen_ip ?? '*', $rule->listen_port);
+        if ($rule->transport === 'http') {
+            $this->refuseDuplicateHttpRule($rule->server_name, (int) $rule->listen_port, (int) $rule->id);
+        }
+    }
+
+    /** A live rule, one stored before these checks included, must be fixed or switched off. */
+    private function refuseForeignTargets(ProxyRule $rule, string $upstreamHost): void
+    {
+        $this->refuseForeignUpstream($rule->owner_scope, $rule->username, $upstreamHost);
+        $this->refuseForeignServerName($rule->owner_scope, $rule->username, $rule->server_name);
     }
 
     /** 422 for a port the engine or something else on the host already listens on. */
@@ -315,6 +357,17 @@ class ProxyRuleController extends Controller
         }
     }
 
+    /**
+     * 422 for a second enabled HTTP rule on one name and port, across every
+     * listen IP and owner: the vhost renders one entry per port.
+     */
+    private function refuseDuplicateHttpRule(?string $serverName, int $listenPort, ?int $ignoreId = null): void
+    {
+        if (ProxyRule::conflictingHttpRule($serverName, $listenPort, $ignoreId) !== null) {
+            throw ValidationException::withMessages(['listen_port' => self::DUPLICATE_RULE]);
+        }
+    }
+
     /** 422 for another project's domain on a project's rule. */
     private function refuseForeignServerName(?string $ownerScope, ?string $username, ?string $serverName): void
     {
@@ -324,14 +377,4 @@ class ProxyRuleController extends Controller
         }
     }
 
-    /**
-     * Validate server_name format.
-     */
-    private function isValidServerName(string $name): bool
-    {
-        if ($name === '*' || strpos($name, '*') === 0) {
-            return true;
-        }
-        return preg_match('/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i', $name) === 1;
-    }
 }

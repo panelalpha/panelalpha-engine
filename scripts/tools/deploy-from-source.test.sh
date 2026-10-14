@@ -32,6 +32,8 @@ echo 'EXAMPLE=new' >"$WORK_DIR/src/tests/api/env/.env.example"
 echo 'API_TOKEN=host-only' >"$WORK_DIR/remote/tests/api/env/.env"
 echo 'APP_KEY=before-last-configure' >"$WORK_DIR/remote/core/.env.pae-backup"
 echo 'stale0000' >"$WORK_DIR/remote/version"
+mkdir -p "$WORK_DIR/remote/tests/coverage/123/dumps"
+echo 'coverage-dump' >"$WORK_DIR/remote/tests/coverage/123/dumps/request.rawcov"
 
 failures=0
 expect() { # expect <label> <expected> <actual>
@@ -54,6 +56,8 @@ expect "the .env.example template is still uploaded" \
     'EXAMPLE=new' "$(cat "$WORK_DIR/remote/tests/api/env/.env.example" 2>/dev/null)"
 expect "pae configure's core/.env.pae-backup survives the upload" \
     'APP_KEY=before-last-configure' "$(cat "$WORK_DIR/remote/core/.env.pae-backup" 2>/dev/null)"
+expect "runtime coverage survives the upload" \
+    'coverage-dump' "$(cat "$WORK_DIR/remote/tests/coverage/123/dumps/request.rawcov" 2>/dev/null)"
 
 rm -f "$WORK_DIR/argv"
 PATH="$WORK_DIR/bin:$PATH" bash "$WORK_DIR/src/scripts/tools/deploy-from-source.sh" fakehost \

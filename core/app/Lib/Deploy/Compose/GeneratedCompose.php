@@ -14,11 +14,9 @@ final class GeneratedCompose
     public const APP_SERVICE = 'app';
 
     /**
-     * The image the application service runs, read back out of a file this
-     * class produced — here because this class decided where that image sits.
-     *
-     * Null for anything unparseable or without an app service; callers read
-     * that as "no better answer than the one I already had".
+     * The image the application service runs, read back out of a file this class
+     * produced. Null for anything unparseable, without an app service, or for a
+     * service that builds: its `image:` is a local tag no registry has.
      */
     public static function appImage(string $yaml): ?string
     {
@@ -29,13 +27,6 @@ final class GeneratedCompose
         }
 
         $service = $parsed['services'][self::APP_SERVICE] ?? null;
-        // A service that builds has no pullable runtime image. Its `image:` is
-        // only the local tag the build is given — there is nothing at that
-        // name on any registry — and reading it back would have the snapshot
-        // provision a tag only this deploy can create, so the pre-pull it
-        // drives asks Docker Hub for the project's own build and is refused.
-        // Null here means "no better answer than the one already frozen",
-        // which for a build service is the honest one.
         if (!is_array($service) || isset($service['build'])) {
             return null;
         }
@@ -50,10 +41,7 @@ final class GeneratedCompose
      * {@see ComposeFileInspector} recognises a generated file by.
      *
      * The value says which generator wrote it — 'railpack', 'dockerfile',
-     * 'framework-db'. The key is what must not drift: seven places wrote it
-     * out by hand, and renaming it anywhere but all of them at once would
-     * leave the inspector treating engine output as a file the customer
-     * wrote.
+     * 'framework-db'.
      */
     public const LABEL = 'panelalpha.generated';
 
@@ -73,43 +61,85 @@ final class GeneratedCompose
     private const INDENT = 2;
 
     /**
+     * The whole file: the app service, the decision's sidecars and its volumes.
+     * Empty arrays are dumped as `[]` (`entrypoint: []`), since Compose rejects `{}`.
+     *
      * @param array<string, mixed> $appService
      * @param array<string, mixed> $decision
      */
     public static function render(array $appService, array $decision = []): string
     {
-        // Defaulted here rather than in each generator, because forgetting it
-        // fails silently: Docker's own default is `no`, so the app comes up
-        // on the deploy that created it and never again. staticNginx() was
-        // the one caller that forgot, and its sites stayed down after a host
-        // reboot while every other platform's came back. Same rule as the
-        // hardener: only a service that publishes a port gets the default.
+        $sidecars = self::sidecars($decision);
+        $compose = ['services' => [self::APP_SERVICE => self::appService($appService, $decision, $sidecars)] + $sidecars];
+        $volumes = $decision['volumes'] ?? null;
+        if (is_array($volumes)) {
+            $compose['volumes'] = self::volumeDefinitions($volumes);
+        }
+
+        return Yaml::dump($compose, self::INLINE_DEPTH, self::INDENT, Yaml::DUMP_EMPTY_ARRAY_AS_SEQUENCE);
+    }
+
+    /**
+     * The app service with the restart policy and log rotation every generator needs
+     * (Docker's default `no` keeps an app down after a reboot), the aliases of the
+     * service it replaced, and long-form `depends_on` on its sidecars.
+     *
+     * @param array<string, mixed> $appService
+     * @param array<string, mixed> $decision
+     * @param array<string, array<string, mixed>> $sidecars
+     * @return array<string, mixed>
+     */
+    private static function appService(array $appService, array $decision, array $sidecars): array
+    {
         $appService = ServiceHardener::withRestartPolicy($appService);
         $appService = ServiceHardener::withLogRotation($appService);
-        // The names the project's own kept services reach the application by.
-        // The file's app service was dropped and this one replaced it under
-        // the name `app`, so a proxy in front — which names the old service in
-        // its own nginx config and not through `depends_on` — would otherwise
-        // refuse to start with `host not found in upstream`. Docker's network
-        // aliases are put on the app service here, in the one place every
-        // generator goes through, because the alternative is rewriting a
-        // configuration we do not own. {@see ServiceAliases}
-        $aliases = ServiceAliases::fromDecision($decision);
-        if ($aliases !== []) {
-            $appService['networks'] = ServiceAliases::withAliases($appService['networks'] ?? null, $aliases);
-        }
-        $sidecars = self::sidecars($decision);
+        $appService = self::withReplacedServiceAliases($appService, $decision);
         if (is_array($appService['depends_on'] ?? null) && array_is_list($appService['depends_on'])) {
             $appService['depends_on'] = self::dependsOn($appService['depends_on'], $sidecars);
         }
 
-        $compose = ['services' => [self::APP_SERVICE => $appService] + $sidecars];
-        $volumes = $decision['volumes'] ?? null;
-        if (is_array($volumes)) {
-            $compose['volumes'] = $volumes;
+        return $appService;
+    }
+
+    /**
+     * The names the project's kept services reached the dropped app service by, as
+     * network aliases: a proxy naming it in its own nginx config would otherwise
+     * fail with `host not found in upstream`. {@see ServiceAliases}
+     *
+     * @param array<string, mixed> $appService
+     * @param array<string, mixed> $decision
+     * @return array<string, mixed>
+     */
+    private static function withReplacedServiceAliases(array $appService, array $decision): array
+    {
+        $aliases = ServiceAliases::fromDecision($decision);
+        if ($aliases !== []) {
+            $appService['networks'] = ServiceAliases::withAliases($appService['networks'] ?? null, $aliases);
         }
 
-        return Yaml::dump($compose, self::INLINE_DEPTH, self::INDENT);
+        return $appService;
+    }
+
+    /**
+     * An empty definition (`db_data: {}` parses to `[]`) as null, since Compose
+     * rejects `[]` for a volume.
+     *
+     * @param array<mixed> $volumes
+     * @return array<mixed>
+     */
+    private static function volumeDefinitions(array $volumes): array
+    {
+        return array_map(static fn (mixed $v): mixed => $v === [] ? null : $v, $volumes);
+    }
+
+    /**
+     * Dump a document we did not write, keeping its own `[]` vs `{}`.
+     *
+     * @param array<mixed> $compose
+     */
+    private static function dumpKeeping(string $yaml, array $compose): string
+    {
+        return ComposeYaml::dump($compose, $yaml, self::INLINE_DEPTH, self::INDENT);
     }
 
     /**
@@ -132,6 +162,53 @@ final class GeneratedCompose
         }
 
         $mounts = is_array($service['volumes'] ?? null) ? array_values($service['volumes']) : [];
+        $volumes = is_array($compose['volumes'] ?? null) ? $compose['volumes'] : [];
+        $persisted = self::persistedMounts($paths, $mounts, $volumes);
+        if ($persisted === null) {
+            return $yaml;
+        }
+
+        [$compose['services'][self::APP_SERVICE]['volumes'], $compose['volumes']] = $persisted;
+
+        return self::dumpKeeping($yaml, $compose);
+    }
+
+    /**
+     * The mounts and volume definitions with a named volume for every path not yet
+     * mounted, never reusing a volume name the file already has. Null when none is added.
+     *
+     * @param list<string> $paths
+     * @param list<mixed> $mounts
+     * @param array<mixed> $volumes
+     * @return array{0: list<mixed>, 1: array<mixed>}|null
+     */
+    private static function persistedMounts(array $paths, array $mounts, array $volumes): ?array
+    {
+        $taken = self::mountedTargets($mounts);
+        $names = self::volumeNamesFor($paths, array_map('strval', array_keys($volumes)));
+        $added = false;
+        foreach ($paths as $path) {
+            if (isset($taken[$path])) {
+                continue;
+            }
+            $name = $names[$path];
+            $mounts[] = $name . ':' . $path;
+            $volumes[$name] ??= null;
+            $taken[$path] = true;
+            $added = true;
+        }
+
+        return $added ? [$mounts, $volumes] : null;
+    }
+
+    /**
+     * Container paths the mounts cover, short or long syntax, without a trailing slash.
+     *
+     * @param list<mixed> $mounts
+     * @return array<string, true>
+     */
+    private static function mountedTargets(array $mounts): array
+    {
         $taken = [];
         foreach ($mounts as $mount) {
             $target = is_string($mount) ? (explode(':', $mount)[1] ?? null) : ($mount['target'] ?? null);
@@ -140,26 +217,7 @@ final class GeneratedCompose
             }
         }
 
-        $volumes = is_array($compose['volumes'] ?? null) ? $compose['volumes'] : [];
-        $added = false;
-        foreach ($paths as $path) {
-            if (isset($taken[$path])) {
-                continue;
-            }
-            $name = self::volumeNameFor($path);
-            $mounts[] = $name . ':' . $path;
-            $volumes[$name] ??= null;
-            $taken[$path] = true;
-            $added = true;
-        }
-        if (!$added) {
-            return $yaml;
-        }
-
-        $compose['services'][self::APP_SERVICE]['volumes'] = $mounts;
-        $compose['volumes'] = $volumes;
-
-        return Yaml::dump($compose, self::INLINE_DEPTH, self::INDENT);
+        return $taken;
     }
 
     /**
@@ -183,37 +241,59 @@ final class GeneratedCompose
             return $yaml;
         }
 
-        $base = $app;
-        unset($base['ports'], $base['healthcheck'], $base['networks'], $base['container_name'], $base['hostname']);
-        // Its own build of the same Dockerfile, cached: a tag the app builds is
-        // not there yet when `run` asks for the release.
-        if (isset($base['build'])) {
-            unset($base['image']);
-        }
-
+        $base = self::processBase($app);
         $added = false;
         foreach ($processes as $name => $command) {
             if (isset($compose['services'][$name])) {
                 continue;
             }
-            $service = $base;
-            $service['labels'] = [self::LABEL => self::PROCESS_LABEL_PREFIX . $name];
-            // In a shell of its own, as Heroku runs a Procfile line: an image
-            // entrypoint like Railpack's `bash -c` would otherwise take `sh` for
-            // the whole script.
-            $service['entrypoint'] = ['sh', '-c'];
-            $service['command'] = ['export PATH=' . self::PROCESS_PATH . ':$$PATH && ' . FrameworkService::shellCommand($command)];
-            if ($name === self::RELEASE_PROCESS) {
-                $service['restart'] = 'no';
-                $service['profiles'] = [self::RELEASE_PROFILE];
-            } else {
-                $service['restart'] = 'unless-stopped';
-            }
-            $compose['services'][$name] = $service;
+            $compose['services'][$name] = self::processService($base, $name, $command);
             $added = true;
         }
 
-        return $added ? Yaml::dump($compose, self::INLINE_DEPTH, self::INDENT) : $yaml;
+        return $added ? self::dumpKeeping($yaml, $compose) : $yaml;
+    }
+
+    /**
+     * The app service without what belongs to the app alone. A service that builds
+     * loses its `image:` and gets its own cached build, since the app's tag does not
+     * exist yet when `run` asks for the release.
+     *
+     * @param array<string, mixed> $app
+     * @return array<string, mixed>
+     */
+    private static function processBase(array $app): array
+    {
+        $base = $app;
+        unset($base['ports'], $base['healthcheck'], $base['networks'], $base['container_name'], $base['hostname']);
+        if (isset($base['build'])) {
+            unset($base['image']);
+        }
+
+        return $base;
+    }
+
+    /**
+     * One Procfile process, run in a shell of its own as Heroku does: an image
+     * entrypoint like Railpack's `bash -c` would otherwise take `sh` for the script.
+     *
+     * @param array<string, mixed> $base
+     * @return array<string, mixed>
+     */
+    private static function processService(array $base, string $name, string $command): array
+    {
+        $service = $base;
+        $service['labels'] = [self::LABEL => self::PROCESS_LABEL_PREFIX . $name];
+        $service['entrypoint'] = ['sh', '-c'];
+        $service['command'] = ['export PATH=' . self::PROCESS_PATH . ':$$PATH && ' . FrameworkService::shellCommand($command)];
+        if ($name === self::RELEASE_PROCESS) {
+            $service['restart'] = 'no';
+            $service['profiles'] = [self::RELEASE_PROFILE];
+        } else {
+            $service['restart'] = 'unless-stopped';
+        }
+
+        return $service;
     }
 
     /**
@@ -239,6 +319,31 @@ final class GeneratedCompose
         $slug = strtolower(trim((string) preg_replace('/[^A-Za-z0-9]+/', '-', $path), '-'));
 
         return 'data-' . ($slug === '' ? 'root' : $slug);
+    }
+
+    /**
+     * One name per path, in the order given. A path folding onto a slug already
+     * used (`/app/Uploads` after `/app/uploads`) gets a short hash appended, so
+     * it does not share that volume; the first keeps the plain name.
+     *
+     * @param list<string> $paths
+     * @param list<string> $reserved names another source (a Dockerfile `VOLUME`) already uses
+     * @return array<string, string> path => volume name
+     */
+    public static function volumeNamesFor(array $paths, array $reserved = []): array
+    {
+        $names = [];
+        $used = array_fill_keys($reserved, true);
+        foreach ($paths as $path) {
+            $name = self::volumeNameFor($path);
+            if (isset($used[$name])) {
+                $name .= '-' . substr(hash('sha256', $path), 0, 8);
+            }
+            $used[$name] = true;
+            $names[$path] = $name;
+        }
+
+        return $names;
     }
 
     /**
@@ -278,6 +383,9 @@ final class GeneratedCompose
     }
 
     /**
+     * The decision's sidecars, each restarting unless it says otherwise: the app
+     * needs them whether or not they publish a port.
+     *
      * @param array<string, mixed> $decision
      * @return array<string, array<string, mixed>>
      */
@@ -286,8 +394,6 @@ final class GeneratedCompose
         $sidecars = [];
         foreach ((array) ($decision['sidecars'] ?? []) as $name => $sidecar) {
             if (is_string($name) && $name !== '' && is_array($sidecar)) {
-                // The app needs what the engine put beside it, port or not; a
-                // one-shot the hardener marked `no` keeps that.
                 if (in_array($sidecar['restart'] ?? null, [null, '', false], true)) {
                     $sidecar['restart'] = 'unless-stopped';
                 }

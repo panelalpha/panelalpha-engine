@@ -29,7 +29,7 @@ RUN sed -i 's/^logfile/#&/' /etc/redis/redis.conf
 RUN mkdir -p /var/log/cron
 
 # Add repo PHP 8.X from Ondřeja Surý
-RUN wget -O /etc/apt/trusted.gpg.d/php.gpg https://packages.sury.org/php/apt.gpg && \
+RUN wget --https-only --max-redirect=0 -O /etc/apt/trusted.gpg.d/php.gpg https://packages.sury.org/php/apt.gpg && \
   echo "deb https://packages.sury.org/php/ $(lsb_release -sc) main" >/etc/apt/sources.list.d/php.list
 
 # Update repo 

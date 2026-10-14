@@ -52,12 +52,15 @@ Come back here when you want to look up the sentence yourself. If none of the ro
 |---|---|---|
 | The repository could not be read | The engine could not access the repository. | Check the URL. If it is private, supply an access token. |
 | The repository was not found | Wrong address, or private with no access. | Paste the URL into a browser in a private window - if you cannot see it, neither can the engine. |
+| The repository's submodules could not be fetched | A submodule is private, no longer exists at the commit the repository records, or sits on a host the git token does not cover. The reason from git follows the sentence. | Give the engine a token that can read the submodule. If the application does not need it, name the ones it does under `git: {submodules: [...]}` in `.panelalpha/panelalpha.yaml`: [Connecting with Git](../05-capabilities/connecting-with-git.md#troubleshooting). |
+| The repository is refused with `host_refused` | The address leads to the engine's own machine or a private network, which the engine does not fetch from. | The server operator can allow a private git server: [Connecting with Git](../05-capabilities/connecting-with-git.md#troubleshooting). |
 
 ## The application refuses to start
 
 | The message | What it means | What to do |
 |---|---|---|
-| The application refused to start because one of its settings is missing or still has a placeholder value | Your app needs an environment variable that is missing or still says something like `changeme`. | Set the real value and rebuild: [Environment variables](../05-capabilities/projects.md#environment-variables). |
+| The application refused to start because one of its settings is missing or still has a placeholder value | Your app needs an environment variable that is missing or still says something like `changeme`. | Set the real value: [Environment variables](../05-capabilities/projects.md#environment-variables). On a container project the assistant can apply it in place; a value the build reads needs a rebuild. |
+| The service … did not start (…) … Its health check said: … | A service the application depends on, often a database, never became healthy. The quote is the answer its own health check gave. | Read the quote: a refused login or a timeout points at the password or at a service that needs longer to start. The full output is in the deploy log. |
 | The application could not sign in to its database | The application's password and the database's password no longer match. | The password is stored inside the database from when it was first created, so changing the setting does not change it. Either set the setting back to the original password, or delete the database's stored data and let it be recreated. |
 
 ## Build tooling

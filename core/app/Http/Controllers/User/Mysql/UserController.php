@@ -11,12 +11,16 @@ use App\Http\Resources\MysqlUserResource;
 use App\Models\MysqlUser;
 use App\Models\User;
 use App\System;
+use App\System\Project\Dind\AppDatabase;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Str;
 use OpenApi\Attributes as OA;
 
 class UserController extends Controller
 {
+    /** MySQL's limit on a user name's length. */
+    private const MAX_NAME_LENGTH = 32;
+
     #[OA\Get(
         path: '/projects/{username}/mysql/users',
         summary: 'List MySQL users of a project',
@@ -71,11 +75,7 @@ class UserController extends Controller
     {
         $user = $this->projectOr404($username);
 
-        /** @var ?MysqlUser $dbuser */
-        $dbuser = $user->mysqlUsers()->getQuery()->where('user', $user->qualifyMysqlUser($dbuser))->first();
-        if (!$dbuser) {
-            abort(404, 'Not found');
-        }
+        $dbuser = $this->mysqlUserOr404($user, $dbuser);
 
         return new MysqlUserResource($dbuser);
     }
@@ -100,7 +100,6 @@ class UserController extends Controller
     )]
     /**
      * @param string $username
-     * @param MysqlUserStoreRequest $request
      * @return MysqlUserResource
      */
     public function store($username, MysqlUserStoreRequest $request)
@@ -115,26 +114,7 @@ class UserController extends Controller
             $dbuser = $user->getMysqlPrefix() . $dbuser;
         }
 
-        // Check for reserved MySQL user names
-        $reservedNames = ['root', 'mysql', 'admin', 'administrator', 'sys'];
-        if (in_array(strtolower($dbuser), $reservedNames)) {
-            throw ValidationException::withMessages([
-                'name' => 'This username is reserved by MySQL and cannot be used.',
-            ]);
-        }
-
-        // Validate final MySQL user name length (MySQL limit is 32 characters)
-        if (strlen($dbuser) > 32) {
-            throw ValidationException::withMessages([
-                'name' => 'MySQL user name with prefix exceeds 32 characters (MySQL limit). Current length: ' . strlen($dbuser) . ' characters.',
-            ]);
-        }
-
-        if ($user->mysqlUsers()->getQuery()->where('user', $dbuser)->exists()) {
-            throw ValidationException::withMessages([
-                'name' => 'User with given name already exists.',
-            ]);
-        }
+        $this->refuseUnusableName($user, $dbuser);
 
         $mysql = (new System())->mysql();
         $mysql->users()->createUser($dbuser, $params['password']);
@@ -171,11 +151,7 @@ class UserController extends Controller
     {
         $user = $this->projectOr404($username);
 
-        /** @var ?MysqlUser $dbuser */
-        $dbuser = $user->mysqlUsers()->getQuery()->where('user', $user->qualifyMysqlUser($dbuser))->first();
-        if (!$dbuser) {
-            abort(404, 'Not found');
-        }
+        $dbuser = $this->mysqlUserOr404($user, $dbuser);
 
         $mysql = (new System())->mysql();
         $mysql->users()->deleteUser($dbuser->user);
@@ -205,18 +181,13 @@ class UserController extends Controller
     /**
      * @param string $username
      * @param string $dbuser
-     * @param MysqlUserRenameRequest $request
      * @return MysqlUserResource
      */
     public function rename($username, $dbuser, MysqlUserRenameRequest $request)
     {
         $user = $this->projectOr404($username);
 
-        /** @var ?MysqlUser $dbuser */
-        $dbuser = $user->mysqlUsers()->getQuery()->where('user', $user->qualifyMysqlUser($dbuser))->first();
-        if (!$dbuser) {
-            abort(404, 'Not found');
-        }
+        $dbuser = $this->mysqlUserOr404($user, $dbuser);
 
         /**
          * @var array{
@@ -224,23 +195,10 @@ class UserController extends Controller
          * } $params
          */
         $params = $request->validated();
-        
-        $newName = $user->getMysqlPrefix() . $params['name'];
 
-        // Check for reserved MySQL user names
-        $reservedNames = ['root', 'mysql', 'admin', 'administrator', 'sys'];
-        if (in_array(strtolower($params['name']), $reservedNames)) {
-            throw ValidationException::withMessages([
-                'name' => 'This username is reserved by MySQL and cannot be used.',
-            ]);
-        }
+        $newName = $user->qualifyMysqlUser($params['name']);
 
-        // Validate final MySQL user name length (MySQL limit is 32 characters)
-        if (strlen($newName) > 32) {
-            throw ValidationException::withMessages([
-                'name' => 'MySQL user name with prefix exceeds 32 characters (MySQL limit). Current length: ' . strlen($newName) . ' characters.',
-            ]);
-        }
+        $this->refuseUnusableName($user, $newName, $dbuser->user);
 
         $mysql = (new System())->mysql();
         $mysql->users()->renameUser($dbuser->user, $newName);
@@ -272,18 +230,13 @@ class UserController extends Controller
     /**
      * @param string $username
      * @param string $dbuser
-     * @param MysqlUserChangePasswordRequest $request
      * @return MysqlUserResource
      */
     public function changePassword($username, $dbuser, MysqlUserChangePasswordRequest $request)
     {
         $user = $this->projectOr404($username);
 
-        /** @var ?MysqlUser $dbuser */
-        $dbuser = $user->mysqlUsers()->getQuery()->where('user', $user->qualifyMysqlUser($dbuser))->first();
-        if (!$dbuser) {
-            abort(404, 'Not found');
-        }
+        $dbuser = $this->mysqlUserOr404($user, $dbuser);
 
         /**
          * @var array{
@@ -295,7 +248,54 @@ class UserController extends Controller
         $mysql = (new System())->mysql();
         $mysql->users()->changeUserPassword($dbuser->user, $params['password']);
         $dbuser->touch();
+        $this->keepAppDatabasePassword($user, $dbuser, $params['password']);
 
         return new MysqlUserResource($dbuser);
+    }
+
+    private function mysqlUserOr404(User $user, string $dbuser): MysqlUser
+    {
+        /** @var ?MysqlUser $mysqlUser */
+        $mysqlUser = $user->mysqlUsers()->getQuery()->where('user', $user->qualifyMysqlUser($dbuser))->first();
+        if (!$mysqlUser) {
+            abort(404, 'Not found');
+        }
+
+        return $mysqlUser;
+    }
+
+    /** AppDatabase::provision() re-sets the app user's stored password on every deploy, so the stored copy changes with it. */
+    private function keepAppDatabasePassword(User $user, MysqlUser $dbuser, string $password): void
+    {
+        if ($dbuser->user === AppDatabase::nameFor($user)) {
+            $user->setDetails([AppDatabase::PASSWORD_DETAIL => $password]);
+            $user->save();
+        }
+    }
+
+    /**
+     * 422 for a prefixed name MySQL reserves, cannot hold, or another of the
+     * project's users has (RENAME USER would fail as a 500). `$current` is the
+     * user being renamed, which may keep its name.
+     */
+    private function refuseUnusableName(User $user, string $name, ?string $current = null): void
+    {
+        if (in_array(strtolower($name), ['root', 'mysql', 'admin', 'administrator', 'sys'])) {
+            throw ValidationException::withMessages([
+                'name' => 'This username is reserved by MySQL and cannot be used.',
+            ]);
+        }
+
+        if (strlen($name) > self::MAX_NAME_LENGTH) {
+            throw ValidationException::withMessages([
+                'name' => 'MySQL user name with prefix exceeds ' . self::MAX_NAME_LENGTH . ' characters (MySQL limit). Current length: ' . strlen($name) . ' characters.',
+            ]);
+        }
+
+        if ($name !== $current && $user->mysqlUsers()->getQuery()->where('user', $name)->exists()) {
+            throw ValidationException::withMessages([
+                'name' => 'User with given name already exists.',
+            ]);
+        }
     }
 }

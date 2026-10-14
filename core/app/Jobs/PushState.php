@@ -2,7 +2,9 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Concerns\AttachTask;
 use App\Models\User;
+use App\Support\JobBudget;
 use App\System;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -13,59 +15,118 @@ use Illuminate\Support\Facades\Log;
 
 class PushState implements ShouldQueue
 {
+    use AttachTask;
     use Dispatchable;
     use InteractsWithQueue;
     use Queueable;
     use SerializesModels;
 
+    public const string CANCELLED_BEFORE_START = 'Push cancelled before it started.';
+
     public int $tries = 1;
 
-    public int $timeout = 7200;
+    public int $timeout = JobBudget::SECONDS;
 
-    public function __construct(public string $fromUsername, public string $toUsername)
-    {
+    /**
+     * @param list<array{database: string, name: string}>|null $tables
+     */
+    public function __construct(
+        public string $fromUsername,
+        public string $toUsername,
+        public bool $files = true,
+        public bool $databases = true,
+        public ?array $tables = null,
+    ) {
         $this->onQueue('default');
     }
 
     public function handle(): void
     {
-        (new System())->projects()->pushToApp($this->fromUsername, $this->toUsername);
+        $this->runTask(function (): void {
+            $result = (new System())->projects()->pushToApp(
+                $this->fromUsername,
+                $this->toUsername,
+                $this->files,
+                $this->databases,
+                $this->tables,
+            );
+
+            $this->task()?->mergeDetails([
+                'files' => $this->files,
+                'databases' => $this->databases,
+                'tables' => $this->tables,
+                'databases_copied' => $result->databasePairs(),
+                'warnings' => $result->warnings,
+            ]);
+        });
+    }
+
+    /**
+     * Nothing was paused or copied yet: only the target's push flag, set when
+     * the push was accepted, is settled so the target is no longer busy.
+     */
+    protected function cancelledBeforeWork(): void
+    {
+        $to = User::findByUsername($this->toUsername);
+        if ($to !== null && $this->pushStillRunning($to)) {
+            $this->markPushFailed($to, self::CANCELLED_BEFORE_START);
+        }
+    }
+
+    private function pushStillRunning(User $to): bool
+    {
+        return ($to->asyncStatus()['push'] ?? null) === 'running';
     }
 
     public function failed(\Throwable $e): void
     {
+        $task = $this->task();
+        if ($task !== null && !$task->isTerminal()) {
+            $this->markFailed($e);
+        }
+
         $from = User::findByUsername($this->fromUsername);
         $to = User::findByUsername($this->toUsername);
         $system = new System();
 
         if ($to !== null) {
-            $to->mergeAsyncStatus(['push' => 'failed']);
-            $to->setDetails(['error' => $e->getMessage()]);
-            $to->save();
-
-            try {
-                $incoming = rtrim($system->project($to)->homeDirPath(), '/') . '/.incoming';
-                $system->runProcess(['sudo', 'rm', '-rf', $incoming]);
-            } catch (\Throwable $cleanup) {
-                Log::warning('PushState failed cleanup could not remove .incoming', [
-                    'target'    => $this->toUsername,
-                    'exception' => $cleanup->getMessage(),
-                ]);
-            }
+            $this->markPushFailed($to, $e->getMessage());
+            $this->removeIncoming($system, $to);
         }
 
-        if ($from !== null) {
-            try {
-                $system->project($from)->copyVolumesForClone()?->resumeAfterCopy();
-            } catch (\Throwable $ignored) {
-            }
+        $this->resumeAfterCopy($system, $from);
+        $this->resumeAfterCopy($system, $to);
+    }
+
+    private function markPushFailed(User $to, string $error): void
+    {
+        $to->mergeAsyncStatus(['push' => 'failed']);
+        $to->setDetails(['error' => $error]);
+        $to->save();
+    }
+
+    private function removeIncoming(System $system, User $to): void
+    {
+        try {
+            $home = rtrim($system->project($to)->homeDirPath(), '/');
+            $system->runProcess(['sudo', 'rm', '-rf', $home . '/.incoming']);
+        } catch (\Throwable $cleanup) {
+            Log::warning('PushState failed cleanup could not remove .incoming', [
+                'target'    => $this->toUsername,
+                'exception' => $cleanup->getMessage(),
+            ]);
+        }
+    }
+
+    private function resumeAfterCopy(System $system, ?User $user): void
+    {
+        if ($user === null) {
+            return;
         }
 
-        if ($to !== null) {
-            try {
-                $system->project($to)->copyVolumesForClone()?->resumeAfterCopy();
-            } catch (\Throwable $ignored) {
-            }
+        try {
+            $system->project($user)->copyVolumesForClone()?->resumeAfterCopy();
+        } catch (\Throwable $ignored) {
         }
     }
 }

@@ -29,56 +29,33 @@ class Filesystem
     ) {
     }
 
+    /** Copies with argv, not a shell string, since $target is often a path a caller chose. */
     public function copyFile(string $source, string $target, ?string $chown = null, ?string $chmod = null): void
     {
         $this->makeDirWithParents(dirname($target), $chown);
-        // argv, not a shell string: $target is often a path a caller chose.
         $this->system->exec(['sudo', 'cp', $source, $target]);
-        if ($chown) {
-            $this->system->exec(['sudo', 'chown', $chown, $target]);
-        }
-        if ($chmod) {
-            $this->system->exec(['sudo', 'chmod', $chmod, $target]);
-        }
+        $this->setOwnerAndMode($target, $chown, $chmod);
     }
 
     /**
-     * Write $contents at $path without ever opening whatever is already
-     * there: a temp file next to $path, then `mv -T` it into place.
-     *
-     * `cp`/`copyFile()` write through a symlink at $path to wherever it
-     * points -- fine when $path is ours alone, not when a directory holding
-     * it is (or used to be) writable from inside a tenant's account.
-     * `mv` replaces the directory entry for $path directly, so
-     * a symlink there is swapped out, never followed; `-T` keeps that true
-     * even if $path currently is a directory or a symlink to one.
+     * Write $contents at $path without ever opening what is already there: a
+     * temp file next to $path, then `mv -T` over it, so a symlink at $path
+     * (one a tenant could plant) is replaced, never followed or entered.
      */
     public function writeFileReplacingPath(string $path, string $contents, ?string $chown = null, ?string $chmod = null): void
     {
         $dir = dirname($path);
         $this->makeDirWithParents($dir, $chown);
         $tmp = $path . '.tmp-' . bin2hex(random_bytes(8));
-        $local = tempnam(sys_get_temp_dir(), 'tmp_');
-        file_put_contents($local, $contents);
-        $this->system->exec(['sudo', 'cp', $local, $tmp]);
-        @unlink($local);
-        if ($chown) {
-            $this->system->exec(['sudo', 'chown', $chown, $tmp]);
-        }
-        if ($chmod) {
-            $this->system->exec(['sudo', 'chmod', $chmod, $tmp]);
-        }
+        $this->copyContents($contents, $tmp);
+        $this->setOwnerAndMode($tmp, $chown, $chmod);
         $this->system->exec(['sudo', 'mv', '-T', $tmp, $path]);
     }
 
     /**
-     * Overwrite $path's content in place -- same inode -- refusing when
-     * $path is a symlink. For the one caller that cannot use {@see
-     * writeFileReplacingPath()}: a file a running container bind-mounts
-     * pins that inode, so a rename would not be visible until the container
-     * is recreated, and only an in-place write keeps it live. That is also
-     * why this one checks first instead of just renaming: it is the single
-     * remaining write that would follow a symlink if it is wrong.
+     * Overwrite $path in place, keeping its inode, unless it is a symlink. For a
+     * file a running container bind-mounts, where a rename would stay invisible
+     * until the container is recreated.
      *
      * @return bool whether it wrote
      */
@@ -87,12 +64,31 @@ class Filesystem
         if ($this->system->runProcess(['sudo', 'test', '-L', $path])->getExitCode() === 0) {
             return false;
         }
-        $local = tempnam(sys_get_temp_dir(), 'tmp_');
-        file_put_contents($local, $contents);
-        $this->system->exec(['sudo', 'cp', $local, $path]);
-        @unlink($local);
+        $this->copyContents($contents, $path);
 
         return true;
+    }
+
+    /** Stage $contents in a local temp file and `sudo cp` it to $target; the temp file is removed either way. */
+    private function copyContents(string $contents, string $target): void
+    {
+        $local = tempnam(sys_get_temp_dir(), 'tmp_');
+        try {
+            file_put_contents($local, $contents);
+            $this->system->exec(['sudo', 'cp', $local, $target]);
+        } finally {
+            @unlink($local);
+        }
+    }
+
+    private function setOwnerAndMode(string $path, ?string $chown, ?string $chmod): void
+    {
+        if ($chown) {
+            $this->system->exec(['sudo', 'chown', $chown, $path]);
+        }
+        if ($chmod) {
+            $this->system->exec(['sudo', 'chmod', $chmod, $path]);
+        }
     }
 
     public function isDir(string $target): bool
@@ -103,23 +99,33 @@ class Filesystem
 
     public function makeDirWithParents(string $target, ?string $chown = null): void
     {
-        $toCreate = [];
-        $dir = $target;
-        while (!$this->isDir($dir)) {
-            // dirname('/') is '/': stop there, or a failing `sudo test` spins forever.
-            if (dirname($dir) === $dir) {
-                throw new \RuntimeException("Cannot create {$target}: '{$dir}' does not read as a directory (is sudo working?)");
-            }
-            $toCreate[] = $dir;
-            $dir = dirname($dir);
-        }
-        for ($i = count($toCreate) - 1; $i >= 0; $i--) {
-            $d = $toCreate[$i];
+        foreach (array_reverse($this->missingDirs($target)) as $d) {
             $this->system->exec(["sudo", "mkdir", $d]);
             if ($chown) {
                 $this->system->exec(["sudo", "chown", $chown, $d]);
             }
         }
+    }
+
+    /**
+     * $target and each missing parent, deepest first. Stops with an error at
+     * the root, where dirname('/') is '/' and a failing `sudo test` would loop forever.
+     *
+     * @return list<string>
+     */
+    private function missingDirs(string $target): array
+    {
+        $missing = [];
+        $dir = $target;
+        while (!$this->isDir($dir)) {
+            if (dirname($dir) === $dir) {
+                throw new \RuntimeException("Cannot create {$target}: '{$dir}' does not read as a directory (is sudo working?)");
+            }
+            $missing[] = $dir;
+            $dir = dirname($dir);
+        }
+
+        return $missing;
     }
 
     public function makeFileFromTemplate(string $filePath, string $templatePath, array $templateVars, ?string $chown = null, ?string $chmod = null): void
@@ -137,34 +143,7 @@ class Filesystem
      */
     public function makeDirFromTemplate(string $dir, string $templateDir, array $templateVars, ?string $chown = null, ?string $chmod = null, array $exclude = []): void
     {
-        $excludeFullPaths = [];
-        foreach ($exclude as $relPath) {
-            $excludeFullPaths[] = "{$dir}/{$relPath}";
-        }
-        $copy = [];
-        $render = [];
-        $files = File::allFiles($templateDir, true);
-
-        foreach ($files as $file) {
-            $filename = $file->getFilename();
-            $path = $file->getPath();
-            $relPath = $file->getRelativePath();
-            $source = "{$path}/{$filename}";
-            $target = $dir;
-            if ($relPath) {
-                $target .= "/{$relPath}";
-            }
-            $target .= "/{$filename}";
-
-            if (in_array($target, $excludeFullPaths)) {
-                continue;
-            }
-            if (Str::endsWith($filename, '.blade.php')) {
-                $render[$source] = Str::beforeLast($target, '.blade.php');
-                continue;
-            }
-            $copy[$source] = $target;
-        }
+        [$copy, $render] = $this->templateTargets($dir, $templateDir, $exclude);
 
         foreach ($copy as $source => $target) {
             $this->copyFile($source, $target, $chown);
@@ -181,21 +160,65 @@ class Filesystem
         }
     }
 
+    /**
+     * Where each template file lands under $dir: plain files are copied, and
+     * `.blade.php` files rendered to the name without that suffix.
+     *
+     * @param array<string> $exclude paths relative to $dir
+     * @return array{0: array<string, string>, 1: array<string, string>} copy and render, source => target
+     */
+    private function templateTargets(string $dir, string $templateDir, array $exclude): array
+    {
+        $excludeFullPaths = [];
+        foreach ($exclude as $relPath) {
+            $excludeFullPaths[] = "{$dir}/{$relPath}";
+        }
+        $copy = [];
+        $render = [];
+
+        foreach (File::allFiles($templateDir, true) as $file) {
+            $filename = $file->getFilename();
+            $relPath = $file->getRelativePath();
+            $source = "{$file->getPath()}/{$filename}";
+            $target = $dir . ($relPath ? "/{$relPath}" : '') . "/{$filename}";
+
+            if (in_array($target, $excludeFullPaths)) {
+                continue;
+            }
+            if (Str::endsWith($filename, '.blade.php')) {
+                $render[$source] = Str::beforeLast($target, '.blade.php');
+                continue;
+            }
+            $copy[$source] = $target;
+        }
+
+        return [$copy, $render];
+    }
+
+    /** The temporary copy often holds a secret, so it is removed even when the copy fails. */
     public function fileGetContents(string $path): string
     {
         $tmpFile = tempnam(sys_get_temp_dir(), 'tmp_');
-        $this->system->exec(['sudo', 'cp', $path, $tmpFile]);
-        $contents = file_get_contents($tmpFile);
-        unlink($tmpFile);
-        return $contents;
+
+        try {
+            $this->system->exec(['sudo', 'cp', $path, $tmpFile]);
+
+            return (string) file_get_contents($tmpFile);
+        } finally {
+            @unlink($tmpFile);
+        }
     }
 
     public function filePutContents(string $path, string $contents, ?string $chown = null, ?string $chmod = null): void
     {
         $tmpFile = tempnam(sys_get_temp_dir(), 'tmp_');
         file_put_contents($tmpFile, $contents);
-        $this->copyFile($tmpFile, $path, $chown, $chmod);
-        unlink($tmpFile);
+
+        try {
+            $this->copyFile($tmpFile, $path, $chown, $chmod);
+        } finally {
+            @unlink($tmpFile);
+        }
     }
 
     public function fileExists(string $path): bool
@@ -266,30 +289,20 @@ class Filesystem
 
     public function cat(string $path): ?string
     {
-        $process = $this->system->runProcess([
-            'sudo',
-            'cat',
-            $path,
-        ]);
-        if ($process->getExitCode() !== 0) {
-            return null;
-        }
-        return $process->getOutput();
+        return $this->outputOrNull(['sudo', 'cat', $path]);
     }
 
     public function tail(string $path, int $lines): ?string
     {
-        $process = $this->system->runProcess([
-            'sudo',
-            'tail',
-            '-n',
-            (string)$lines,
-            $path,
-        ]);
-        if ($process->getExitCode() !== 0) {
-            return null;
-        }
-        return $process->getOutput();
+        return $this->outputOrNull(['sudo', 'tail', '-n', (string)$lines, $path]);
+    }
+
+    /** @param list<string> $argv */
+    private function outputOrNull(array $argv): ?string
+    {
+        $process = $this->system->runProcess($argv);
+
+        return $process->getExitCode() === 0 ? $process->getOutput() : null;
     }
 
     /**
@@ -318,15 +331,42 @@ class Filesystem
         return $this->getHomeFilesystemInfo()['mount_point'];
     }
 
+    /**
+     * The block device an I/O limit throttles. Throws for a filesystem that is
+     * not a block device (zfs) rather than render a compose file that cannot start.
+     */
     public function getHomeFilesystemParentBlockDevice(): string
     {
         if (self::$homeFilesystemParentBlockDevice === null) {
             $fs = $this->getHomeFilesystemInfo()['filesystem'];
-            $parent = $this->system->execOnHost(["lsblk", "-no", "PKNAME", $fs]);
-
-            self::$homeFilesystemParentBlockDevice = '/dev/' . trim($parent);
+            $device = $this->resolveBlockDevice($fs);
+            if ($device === null) {
+                throw new \RuntimeException(
+                    "The /home filesystem's block device could not be found (df reports '{$fs}'), "
+                    . 'so an I/O limit cannot be set. Remove device_read_bps/device_write_bps for it.'
+                );
+            }
+            self::$homeFilesystemParentBlockDevice = $device;
         }
         return self::$homeFilesystemParentBlockDevice;
+    }
+
+    /**
+     * Its parent device, the device itself for a whole disk, or null for no
+     * block device (df reports a name, not a device, for zfs, btrfs and tmpfs).
+     */
+    private function resolveBlockDevice(string $filesystem): ?string
+    {
+        if (!str_starts_with($filesystem, '/dev/')) {
+            return null;
+        }
+        $parent = trim($this->system->execOnHost(['lsblk', '-no', 'PKNAME', $filesystem]));
+        if ($parent !== '') {
+            return '/dev/' . $parent;
+        }
+        $type = trim($this->system->execOnHost(['lsblk', '-no', 'TYPE', $filesystem]));
+
+        return $type !== '' ? '/dev/' . basename($filesystem) : null;
     }
 
     /**

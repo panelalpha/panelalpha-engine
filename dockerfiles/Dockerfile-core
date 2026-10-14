@@ -17,7 +17,7 @@ RUN apt-get update -y \
         git \
         rsync \
         sqlite3 \
-    && wget -O /etc/apt/trusted.gpg.d/php.gpg https://packages.sury.org/php/apt.gpg \
+    && wget --https-only --max-redirect=0 -O /etc/apt/trusted.gpg.d/php.gpg https://packages.sury.org/php/apt.gpg \
     && echo "deb https://packages.sury.org/php/ $(lsb_release -sc) main" >/etc/apt/sources.list.d/php.list \
     && apt-get update -y \
     && apt-get install -y \
@@ -41,7 +41,7 @@ RUN apt-get update -y \
 # install docker
 RUN apt-get install -y gnupg
 RUN mkdir -p /etc/apt/keyrings
-RUN curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+RUN curl --proto '=https' -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 RUN echo \
   "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
   $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
@@ -77,7 +77,7 @@ RUN apt-get update -y \
         lsb-release \
         debian-archive-keyring
 
-RUN curl https://nginx.org/keys/nginx_signing.key | gpg --dearmor \
+RUN curl --proto '=https' https://nginx.org/keys/nginx_signing.key | gpg --dearmor \
     > /usr/share/keyrings/nginx-archive-keyring.gpg
 
 RUN echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] \

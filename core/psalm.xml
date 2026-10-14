@@ -2,6 +2,7 @@
 <psalm>
     <projectFiles>
         <directory name="./" />
+        <directory name="../tests/unit" />
         <ignoreFiles allowMissingFiles="true">
             <directory name="vendor"/>
             <directory name="custom-vendor"/>

@@ -1,6 +1,9 @@
+import { registerSecret } from './secret-registry';
+
 export const TEST_PRIVILEGES = ['SELECT', 'INSERT', 'UPDATE', 'DELETE'] as const;
 export const LIMITED_PRIVILEGES = ['SELECT', 'INSERT'] as const;
 export const UPDATED_DB_PASSWORD = 'UpdatedDbPass456!';
+registerSecret(UPDATED_DB_PASSWORD);
 
 /**
  * Flattens whatever the privileges endpoint returned into one searchable string.

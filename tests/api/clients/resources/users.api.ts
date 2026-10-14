@@ -3,7 +3,10 @@
 import {
   type ApiListResponse,
   type ApiResponse,
+  type AttachSourceRequest,
   type CreateUserRequest,
+  type PushDiff,
+  type PushTable,
   type TaskSnapshot,
   type UpdateUserRequest,
   type User,
@@ -11,6 +14,7 @@ import {
 } from '@/types';
 import { type APIResponse, type TestInfo, test } from '@playwright/test';
 import { Timeouts } from '@/config/timeouts';
+import { httpReason, recordAttempts, recordRetryNote } from '@/helpers/attempts';
 import { delay } from '@/helpers/retry';
 import { taskIdFromBody, waitForTask } from '@/helpers/task-helpers';
 import { type ApiTransport } from '../api-transport';
@@ -116,6 +120,16 @@ export class UsersApi extends EngineApiBase {
   }
 
   /**
+   * DELETE /projects/{username} without the busy-project retry: whatever the
+   * engine answers comes straight back, which is what a protected project's
+   * 409 refusal needs.
+   */
+  async deleteUserRaw(username: string): Promise<{ status: number; body: any }> {
+    const response = await this.api.delete(`projects/${username}`);
+    return this.rawCall(response);
+  }
+
+  /**
    * Deletes a project in cleanup, where it may never have been created: a 404
    * is fine. Throws when the project is still there afterwards, so a cleanup
    * that did not happen is not silent.
@@ -206,7 +220,7 @@ export class UsersApi extends EngineApiBase {
 
   async cloneUser(
     username: string,
-    data: { new_username?: string; domain?: string } = {}
+    data: { new_username?: string; domain?: string; copy_databases?: boolean } = {}
   ): Promise<ApiResponse<User>> {
     const response = await this.api.post(`projects/${username}/clone`, { data });
     // A clone creates a user, so the engine answers 201; 200 is accepted too
@@ -217,7 +231,7 @@ export class UsersApi extends EngineApiBase {
 
   async cloneUserRaw(
     username: string,
-    data: { new_username?: string; domain?: string } = {}
+    data: { new_username?: string; domain?: string; copy_databases?: boolean } = {}
   ): Promise<{ status: number; body: any }> {
     const response = await this.api.post(`projects/${username}/clone`, { data });
     return this.rawCall(response);
@@ -244,9 +258,27 @@ export class UsersApi extends EngineApiBase {
     return this.rawCall(response);
   }
 
+  /**
+   * POST /projects/{username}/source answers 202 with a task. Polls it until
+   * it is terminal and throws unless it completed; see rebuildUser().
+   */
+  async attachSource(username: string, data: AttachSourceRequest): Promise<TaskSnapshot> {
+    const response = await this.api.post(`projects/${username}/source`, { data });
+    await this.assertStatus(response, 202);
+    return this.followDeployTask(await response.json(), `POST /projects/${username}/source`);
+  }
+
+  async attachSourceRaw(
+    username: string,
+    data: Record<string, unknown>
+  ): Promise<{ status: number; body: any }> {
+    const response = await this.api.post(`projects/${username}/source`, { data });
+    return this.rawCall(response);
+  }
+
   async createStaging(
     username: string,
-    data: { new_username?: string; domain?: string } = {}
+    data: { new_username?: string; domain?: string; copy_databases?: boolean } = {}
   ): Promise<ApiResponse<User>> {
     const response = await this.api.post(`projects/${username}/staging`, { data });
     await this.assertStatus(response, 202);
@@ -255,20 +287,47 @@ export class UsersApi extends EngineApiBase {
 
   async createStagingRaw(
     username: string,
-    data: { new_username?: string; domain?: string } = {}
+    data: { new_username?: string; domain?: string; copy_databases?: boolean } = {}
   ): Promise<{ status: number; body: any }> {
     const response = await this.api.post(`projects/${username}/staging`, { data });
     return this.rawCall(response);
   }
 
-  async pushProject(username: string, target: string): Promise<ApiResponse<User>> {
-    const response = await this.api.post(`projects/${username}/push`, { data: { target } });
+  async pushProject(
+    username: string,
+    target: string,
+    flags: { files?: boolean; databases?: boolean; tables?: PushTable[] } = {}
+  ): Promise<ApiResponse<User>> {
+    const response = await this.api.post(`projects/${username}/push`, {
+      data: { target, ...flags },
+    });
     await this.assertStatus(response, 202);
     return response.json();
   }
 
-  async pushProjectRaw(username: string, target: string): Promise<{ status: number; body: any }> {
-    const response = await this.api.post(`projects/${username}/push`, { data: { target } });
+  async pushProjectRaw(
+    username: string,
+    target: string,
+    flags: { files?: boolean; databases?: boolean; tables?: PushTable[] } = {}
+  ): Promise<{ status: number; body: any }> {
+    const response = await this.api.post(`projects/${username}/push`, {
+      data: { target, ...flags },
+    });
+    return this.rawCall(response);
+  }
+
+  async pushDiff(username: string, target: string): Promise<ApiResponse<PushDiff>> {
+    const response = await this.api.get(
+      `projects/${username}/push/diff?target=${encodeURIComponent(target)}`
+    );
+    await this.assertStatus(response, 200);
+    return response.json();
+  }
+
+  async pushDiffRaw(username: string, target: string): Promise<{ status: number; body: any }> {
+    const response = await this.api.get(
+      `projects/${username}/push/diff?target=${encodeURIComponent(target)}`
+    );
     return this.rawCall(response);
   }
 
@@ -326,21 +385,36 @@ export class UsersApi extends EngineApiBase {
  */
 async function deleteProject(api: ApiTransport, username: string): Promise<APIResponse> {
   let deadline: number | undefined;
+  let attempts = 0;
+  const reasons: string[] = [];
   const cancelled = new Set<string>();
+  const operation = `DELETE projects/${username}`;
   for (;;) {
     const response = await api.delete(`projects/${username}`);
+    attempts += 1;
     if (response.status() !== 409 || (deadline !== undefined && Date.now() >= deadline)) {
+      if (response.status() === 409) {
+        reasons.push(`gave up after ${Math.round(Timeouts.projectDelete / 1000)}s`);
+      }
+      recordAttempts(operation, attempts, reasons);
       return response;
     }
     if (deadline === undefined) {
       deadline = Date.now() + Timeouts.projectDelete;
-      makeRoomInTheTest(Timeouts.projectDelete + 15_000);
+      const extended = Timeouts.projectDelete + 15_000;
+      if (makeRoomInTheTest(extended)) {
+        recordRetryNote(operation, `test timeout extended by ${extended} ms`);
+      }
     }
-    const { message } = (await response.json().catch(() => ({}))) as { message?: unknown };
+    const body = (await response.json().catch(() => ({}))) as { message?: unknown };
+    const { message } = body;
     const task =
       typeof message === 'string' ? /\/tasks\/(\d+)\/cancel/.exec(message)?.[1] : undefined;
+    const named = typeof message === 'string' ? /\btask (\d+)\b/.exec(message)?.[1] : undefined;
+    reasons.push(named ? `HTTP 409 task ${named}` : httpReason(409, body));
     if (task !== undefined && !cancelled.has(task)) {
       cancelled.add(task);
+      recordRetryNote(operation, `running task ${task} cancelled`);
       await api.post(`tasks/${task}/cancel`);
     } else {
       await delay(2_000);
@@ -353,14 +427,16 @@ async function deleteProject(api: ApiTransport, username: string): Promise<APIRe
  * up fails with its own message, not as the test's timeout. Outside a test
  * there is nothing to lengthen.
  */
-function makeRoomInTheTest(ms: number): void {
+function makeRoomInTheTest(ms: number): boolean {
   let info: TestInfo;
   try {
     info = test.info();
   } catch {
-    return;
+    return false;
   }
   if (info.timeout > 0) {
     info.setTimeout(info.timeout + ms);
+    return true;
   }
+  return false;
 }

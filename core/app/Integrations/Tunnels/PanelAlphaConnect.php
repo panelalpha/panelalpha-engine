@@ -274,8 +274,15 @@ class PanelAlphaConnect
     /**
      * Register *.panelalpha.online via Connect's WithoutDNS proxy (no DinD / CF token).
      * Caller must have already run {@see TunnelManager::assertCreatable}.
+     *
+     * The name is forwarded as its own Host: on the domain of the same name
+     * that is the domain, and a sibling (`api-<name>`) reaches the app as the
+     * name its visitor typed. A preview is forwarded as the domain instead, so
+     * an app that canonicalises its host (WordPress) answers rather than
+     * redirecting to a domain that does not resolve yet; the proxy rewrites
+     * the domain to the tunnel name in the answer's links, headers and cookies.
      */
-    public static function createTunnel(User $user, Domain $domain, string $hostname): Tunnel
+    public static function createTunnel(User $user, Domain $domain, string $hostname, bool $forwardDomain = false): Tunnel
     {
         $path = self::assertPanelAlphaOnlineHostname($hostname);
 
@@ -286,12 +293,10 @@ class PanelAlphaConnect
             );
         }
 
-        // Forwarded with its own name as Host: on the domain of the same name
-        // that is the domain, and a sibling (`api-<name>`) reaches the app as
-        // the name its visitor typed.
-        $created = (new self())->createSite(self::pathFqdnFromHostname($hostname), $targetIp, $path);
+        $targetDomain = $forwardDomain ? strtolower(trim((string) $domain->domain)) : self::pathFqdnFromHostname($hostname);
+        $created = (new self())->createSite($targetDomain, $targetIp, $path);
 
-        return self::recordPanelAlphaTunnel($user, $domain, $created + ['target_ip' => $targetIp]);
+        return self::recordPanelAlphaTunnel($user, $domain, $created + ['target_ip' => $targetIp, 'target_domain' => $targetDomain]);
     }
 
     /**
@@ -306,7 +311,7 @@ class PanelAlphaConnect
      * the recording, so there is still one place that decides what a
      * PanelAlpha Online tunnel row looks like.
      *
-     * @param array{path: string, path_fqdn: string, wdns_site_id?: ?int, valid_until?: ?string, target_ip: string} $created
+     * @param array{path: string, path_fqdn: string, wdns_site_id?: ?int, valid_until?: ?string, target_ip: string, target_domain?: string} $created
      */
     public static function recordPanelAlphaTunnel(User $user, Domain $domain, array $created): Tunnel
     {
@@ -314,6 +319,9 @@ class PanelAlphaConnect
             'path' => $created['path'],
             'target_ip' => $created['target_ip'],
         ];
+        if (($created['target_domain'] ?? $created['path_fqdn']) !== $created['path_fqdn']) {
+            $details['target_domain'] = $created['target_domain'];
+        }
         if (($created['wdns_site_id'] ?? null) !== null) {
             $details['wdns_site_id'] = $created['wdns_site_id'];
         }

@@ -49,6 +49,7 @@ class ProjectStagingTool extends ApiTool
         return [
             'new_username',
             'domain',
+            'copy_databases',
         ];
     }
 
@@ -72,6 +73,7 @@ class ProjectStagingTool extends ApiTool
             'name' => $schema->string()->required(),
             'new_name' => $schema->string()->description('Sent to the API as `new_username`.'),
             'domain' => $schema->string(),
+            'copy_databases' => $schema->boolean()->description('Copy the source project\'s MySQL databases under the destination prefix. Defaults to true.'),
         ];
     }
 }

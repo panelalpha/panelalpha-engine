@@ -28,6 +28,7 @@ use App\System\Project\Runtime;
 use App\System\Project\Settings;
 use App\System\Project\Sftp;
 use Illuminate\Support\Facades\Log;
+use Symfony\Component\Process\Process;
 
 class Project
 {
@@ -75,6 +76,12 @@ class Project
     public function kind(): string
     {
         return $this->runtime->kind();
+    }
+
+    /** A DinD runtime: the `dind` template or any git project, whatever its template. */
+    public function runsInDind(): bool
+    {
+        return $this->runtime instanceof Dind;
     }
 
     public function runtime(): Runtime
@@ -152,9 +159,9 @@ class Project
         return $this->fileManager()->resolvePath($path);
     }
 
+    /** A dind account has no `php` service and never reads this crontab. */
     public function reloadCron(): void
     {
-        // A dind account has no `php` service and never reads this crontab.
         if ($this->runtime instanceof PhpHosting) {
             $this->runtime->reloadCron();
         }
@@ -268,9 +275,72 @@ class Project
      * Product delete: every resource owned by this Project, including the users row.
      * Distinct from delete()/deprovision(), which tear down host isolation only.
      */
+    public function destroy(): void
+    {
+        $this->assertDeletable();
+        $user = $this->model;
+
+        $this->deleteBackups($user);
+        $this->tearDownCloudflare($user);
+        $this->deleteProxyRules($user->username);
+        $this->deleteDomains($user);
+        $this->tearDownHosting();
+        $this->deleteFtpLogins($user);
+        $this->deleteSftpLogins($user);
+        $this->deleteMysqlDatabasesAndUsers($user);
+        $this->deleteOwnedRows($user);
+        DeployLogger::deleteUserLogs($user->username);
+        $this->deleteAccountRow($user);
+    }
+
+    private function deleteBackups(ModelsUser $user): void
+    {
+        foreach ($user->backups()->with('container')->get() as $record) {
+            $backupId = $record->id;
+            $this->backup($record)->delete();
+
+            if (BackupRecord::query()->find($backupId) !== null) {
+                throw new \RuntimeException("Backup {$backupId} storage delete failed");
+            }
+        }
+    }
+
+    /** Runs while the API token and the domains still exist; a failure is only logged. */
+    private function tearDownCloudflare(ModelsUser $user): void
+    {
+        try {
+            Cloudflare::teardownProject($user);
+        } catch (\Throwable $e) {
+            Log::warning(
+                "Cloudflare project teardown failed for {$user->username}: " . $e->getMessage()
+            );
+        }
+    }
+
     /**
-     * Domain::delete() forgets a domain's statistics; the bulk delete here did
-     * not, so the next project given the same domain inherited its traffic.
+     * Runs before the heavy teardown, so a failed later step cannot leave the rules
+     * behind once the user row is gone (the FK cascade needs the username set).
+     */
+    private function deleteProxyRules(string $username): void
+    {
+        ProxyRule::forUser($username)->delete();
+        ProxyRule::pruneOrphanUserRules();
+    }
+
+    private function deleteDomains(ModelsUser $user): void
+    {
+        $domainNames = $user->domains->pluck('domain')->all();
+        $user->domains()->delete();
+        $this->system->webserver()->deleteDomainsConfigs($domainNames);
+        $this->forgetDomainsStatistics($domainNames);
+        if (!config('env.KEEP_WEBSERVER_LOGS_FOR_DELETED_DOMAINS')) {
+            $this->system->webserver()->deleteDomainsLogsDirs($domainNames);
+        }
+    }
+
+    /**
+     * Forgets each domain's statistics so the next project given the same domain
+     * starts without its traffic. A failure for one domain is logged and skipped.
      *
      * @param list<string> $domainNames
      */
@@ -285,92 +355,72 @@ class Project
         }
     }
 
-    public function destroy(): void
+    /**
+     * Not best-effort: a login left behind would open the home of the next
+     * project with this name. A failure keeps the rows for a second delete.
+     */
+    private function deleteFtpLogins(ModelsUser $user): void
     {
-        $this->assertDeletable();
-        $user = $this->model;
-
-        foreach ($user->backups()->with('container')->get() as $record) {
-            $backupId = $record->id;
-            $this->backup($record)->delete();
-
-            if (BackupRecord::query()->find($backupId) !== null) {
-                throw new \RuntimeException("Backup {$backupId} storage delete failed");
-            }
-        }
-
-        $username = $user->username;
-
-        // Tear down Cloudflare tunnel/DNS while the API token and domains still exist.
-        try {
-            Cloudflare::teardownProject($user);
-        } catch (\Throwable $e) {
-            Log::warning(
-                "Cloudflare project teardown failed for {$username}: " . $e->getMessage()
-            );
-        }
-
-        // Drop proxy rules before heavy teardown so a failed mid-step cannot leave
-        // them behind if the user row is removed later (FK cascade needs username set).
-        ProxyRule::forUser($username)->delete();
-        ProxyRule::pruneOrphanUserRules();
-
-        $domainNames = $user->domains->pluck('domain')->all();
-        $user->domains()->delete();
-        $this->system->webserver()->deleteDomainsConfigs($domainNames);
-        $this->forgetDomainsStatistics($domainNames);
-        if (!config('env.KEEP_WEBSERVER_LOGS_FOR_DELETED_DOMAINS')) {
-            $this->system->webserver()->deleteDomainsLogsDirs($domainNames);
-        }
-
-        $this->tearDownHosting();
-
         /** @var string[] $ftpAccounts */
         $ftpAccounts = $user->ftpAccounts->pluck('user')->all();
         $this->ftp()->deleteMany($ftpAccounts);
+    }
 
-        // SFTP logins live in one host-wide logins.conf, so dropping the rows
-        // is only half of it -- the file has to be rebuilt without them. Left
-        // undone, the deleted account's credential stayed valid against a uid
-        // and home directory the next account gets handed straight back.
-        // Rebuilding is best-effort: the sftp service is behind a compose
-        // profile, and a host that does not run it must still delete projects.
+    /**
+     * SFTP logins live in one host-wide logins.conf, rebuilt without these rows so none stays valid for the
+     * next account given this uid and home. Best-effort: a host without the sftp profile must still delete.
+     */
+    private function deleteSftpLogins(ModelsUser $user): void
+    {
         $hadSftpAccounts = $user->sftpAccounts()->exists();
         $user->sftpAccounts()->delete();
-        if ($hadSftpAccounts) {
-            try {
-                $this->sftp()->rebuild();
-            } catch (\Throwable $e) {
-                Log::warning(
-                    "SFTP logins rebuild failed after deleting {$username}: " . $e->getMessage()
-                );
-            }
+        if (!$hadSftpAccounts) {
+            return;
+        }
+
+        try {
+            $this->sftp()->rebuild();
+        } catch (\Throwable $e) {
+            Log::warning(
+                "SFTP logins rebuild failed after deleting {$user->username}: " . $e->getMessage()
+            );
+        }
+    }
+
+    /**
+     * Not best-effort: AppDatabase adopts an existing `<prefix>app` database,
+     * so one left behind is handed to the next project with this name.
+     */
+    private function deleteMysqlDatabasesAndUsers(ModelsUser $user): void
+    {
+        /** @var string[] $mysqlDatabases */
+        $mysqlDatabases = $user->mysqlDatabases->pluck('database')->all();
+        /** @var string[] $mysqlUsers */
+        $mysqlUsers = $user->mysqlUsers->pluck('user')->all();
+        if ($mysqlDatabases === [] && $mysqlUsers === []) {
+            return;
         }
 
         $mysql = $this->system->mysql();
-        /** @var string[] $mysqlDatabases */
-        $mysqlDatabases = $user->mysqlDatabases->pluck('database')->all();
         foreach ($mysqlDatabases as $database) {
             if ($mysql->databases()->databaseExists($database)) {
                 $mysql->databases()->deleteDatabase($database);
             }
         }
-
-        /** @var string[] $mysqlUsers */
-        $mysqlUsers = $user->mysqlUsers->pluck('user')->all();
         foreach ($mysqlUsers as $mysqlUser) {
             if ($mysql->users()->userExists($mysqlUser)) {
                 $mysql->users()->deleteUser($mysqlUser);
             }
         }
+    }
 
+    /** The hook_deliveries rows go with deploy_hooks through the DB-level cascade. */
+    private function deleteOwnedRows(ModelsUser $user): void
+    {
         $user->mysqlUsers()->delete();
         $user->mysqlDatabases()->delete();
         $user->ftpAccounts()->delete();
-        // hook_deliveries cascades from deploy_hooks at the DB level.
         $user->deployHooks()->delete();
-        DeployLogger::deleteUserLogs($username);
-        $this->deleteAccountRow($user);
     }
 
     /** A live project goes after its staging copy, never before it. */
@@ -385,14 +435,13 @@ class Project
     }
 
     /**
-     * The row goes before the proxy rebuild, and the rebuild is best-effort: a
-     * sites-http that is down or restarting left the deleted project's row behind.
+     * The row goes before the proxy rebuild, and the rebuild is best-effort (it defers
+     * the reload when sites-http is not running), so a down proxy cannot keep the row.
      */
     public function deleteAccountRow(ModelsUser $user): void
     {
         $user->delete();
         try {
-            // Defers the reload to the background when the container is not running.
             $this->system->rebuildDomains();
         } catch (\Throwable $e) {
             Log::warning("Webserver rebuild after deleting '{$user->username}' failed: " . $e->getMessage());
@@ -414,18 +463,24 @@ class Project
             );
         }
 
-        if ($this->runtime instanceof Dind) {
-            try {
-                $this->runtime->remove();
-            } catch (\Exception $e) {
-                Log::warning(
-                    "Could not remove DinD runtime for user '{$this->username()}': " . $e->getMessage(),
-                    ['exception' => $e],
-                );
-            }
+        $this->removeDindRuntimeQuietly();
+        $this->tearDownLinuxIsolation();
+    }
+
+    private function removeDindRuntimeQuietly(): void
+    {
+        if (!$this->runtime instanceof Dind) {
+            return;
         }
 
-        $this->tearDownLinuxIsolation();
+        try {
+            $this->runtime->remove();
+        } catch (\Exception $e) {
+            Log::warning(
+                "Could not remove DinD runtime for user '{$this->username()}': " . $e->getMessage(),
+                ['exception' => $e],
+            );
+        }
     }
 
     /** The DinD deploy pipeline; null for a project on a plain template. */
@@ -453,11 +508,8 @@ class Project
     }
 
     /**
-     * Rebuild the project from its source.
-     *
-     * Only a DinD project has a source to re-ingest; a template project has
-     * its host side recreated instead. Every caller used to write that branch
-     * out for itself, keyed on deployment() returning null.
+     * Rebuild the project from its source. Only a DinD project has a source to
+     * re-ingest; a template project has its host side recreated instead.
      */
     public function rebuildFromSource(?DeployLogger $deployLogger = null, ?string $zipPath = null): void
     {
@@ -467,8 +519,15 @@ class Project
             return;
         }
 
-        // The lock a DinD rebuild takes through its deploy log: a delete holds
-        // it, and this would otherwise recreate the account it is removing.
+        $this->recreateHostSideUnderDeployLock();
+    }
+
+    /**
+     * Holds the lock a DinD rebuild takes through its deploy log: a delete holds it
+     * too, and this would otherwise recreate the account that delete is removing.
+     */
+    private function recreateHostSideUnderDeployLock(): void
+    {
         $lock = DeployLock::acquireFor($this->username());
         try {
             $this->prepareLinuxIsolation();
@@ -651,10 +710,17 @@ class Project
         }
     }
 
+    public function cancelRunningDeploy(): void
+    {
+        if ($this->runtime instanceof Dind) {
+            $this->runtime->cancelRunningDeploy();
+        }
+    }
+
     public function copyVolumeDataFrom(self $source): int
     {
         $volumes = $this->copyVolumesForClone();
-        if ($volumes === null || $this->runtime()->kind() !== 'dind') {
+        if ($volumes === null) {
             return 0;
         }
 
@@ -664,7 +730,7 @@ class Project
     public function copyVolumeDataToIncoming(self $source): int
     {
         $volumes = $this->copyVolumesForClone();
-        if ($volumes === null || $this->runtime()->kind() !== 'dind') {
+        if ($volumes === null) {
             return 0;
         }
 
@@ -693,20 +759,11 @@ class Project
         $src = rtrim($source->homeDirPath(), '/') . '/';
         $dest = rtrim($this->homeDirPath(), '/') . '/';
 
-        if ($this->model->getTemplate() === 'dind') {
-            $this->runCopyProcess([
-                'sudo', 'rsync', '-a', '--delete',
-                '--exclude=docker/',
-                $src,
-                $dest,
-            ], 'Failed to rsync home directory from source');
-        } else {
-            $this->runCopyProcess([
-                'sudo', 'rsync', '-a', '--delete',
-                $src,
-                $dest,
-            ], 'Failed to rsync home directory from source');
-        }
+        $excludes = $this->isDindTemplate() ? ['--exclude=docker/'] : [];
+        $this->runCopyProcess(
+            ['sudo', 'rsync', '-a', '--delete', ...$excludes, $src, $dest],
+            'Failed to rsync home directory from source'
+        );
 
         $this->fixPermissions();
     }
@@ -809,16 +866,8 @@ class Project
      */
     public function configureQuota(): bool
     {
-        $limitMb = $this->model->getDiskSpaceLimit();
-        $limitBlocks = 0;
-        if (is_int($limitMb) && $limitMb > 0) {
-            $limitBlocks = $limitMb * 1024;
-        }
-        $userLimitInodes = $this->model->getInodesLimit();
-        $limitInodes = 0;
-        if (is_int($userLimitInodes) && $userLimitInodes > 0) {
-            $limitInodes = $userLimitInodes;
-        }
+        $limitBlocks = self::positiveOrZero($this->model->getDiskSpaceLimit()) * 1024;
+        $limitInodes = self::positiveOrZero($this->model->getInodesLimit());
 
         $mountPoint = $this->system->filesystem()->getHomeFilesystemMountPoint();
         $process = $this->system->runProcessOnHost([
@@ -832,11 +881,23 @@ class Project
             $mountPoint,
         ]);
 
-        // Unlimited on a filesystem without quota is still unlimited.
-        if ($process->getExitCode() === 0 || ($limitBlocks === 0 && $limitInodes === 0)) {
+        $unlimitedNeedsNoQuota = $limitBlocks === 0 && $limitInodes === 0;
+        if ($process->getExitCode() === 0 || $unlimitedNeedsNoQuota) {
             return true;
         }
 
+        $this->warnQuotaNotEnforced($limitBlocks, $limitInodes, $mountPoint, $process);
+
+        return false;
+    }
+
+    private static function positiveOrZero(mixed $limit): int
+    {
+        return is_int($limit) && $limit > 0 ? $limit : 0;
+    }
+
+    private function warnQuotaNotEnforced(int $limitBlocks, int $limitInodes, string $mountPoint, Process $process): void
+    {
         Log::warning(sprintf(
             'Disk limit for project %s (%d MB, %d inodes) is NOT enforced: setquota on %s failed: %s. '
             . 'Turn quota on with scripts/configure-quota.sh.',
@@ -846,10 +907,12 @@ class Project
             $mountPoint,
             trim($process->getErrorOutput()) ?: 'exit ' . (string) $process->getExitCode(),
         ));
-
-        return false;
     }
 
+    /**
+     * Hands the home to the account: its ancestors stay root-owned and not group/world
+     * writable, the contents go to the account, and the protected dirs are restored.
+     */
     public function fixPermissions(): void
     {
         $uid = $this->model->getUid();
@@ -861,40 +924,55 @@ class Project
         }
         $home = rtrim($this->homeDirPath(), '/');
 
-        $dir = $home;
-        $toCheck = [];
-        while ($dir !== '/' && $dir !== '' && !in_array($dir, $toCheck, true)) {
-            $toCheck[] = $dir;
+        foreach (self::pathAndAncestorsTopDown($home) as $dir) {
+            $this->secureRootOwnedDirectory($dir);
+        }
+        $this->chownHomeContents($home, $uid, $gid);
+        $this->restoreProtectedDirectories($home);
+        $this->chownLscacheDirectories($home, $uid);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function pathAndAncestorsTopDown(string $path): array
+    {
+        $dir = $path;
+        $dirs = [];
+        while ($dir !== '/' && $dir !== '' && !in_array($dir, $dirs, true)) {
+            $dirs[] = $dir;
             $dir = dirname($dir);
         }
-        $toCheck = array_reverse($toCheck);
 
-        foreach ($toCheck as $d) {
-            $info = @stat($d);
-            if ($info === false) {
-                throw new \RuntimeException("Directory does not exist: $d");
-            }
-            $owner = $info['uid'];
-            $group = $info['gid'];
-            $mode = $info['mode'] & 0777;
-            if ($owner !== 0 || $group !== 0) {
-                $this->system->runProcess(sprintf(
-                    'sudo chown root:root %s',
-                    escapeshellarg($d)
-                ));
-            }
-            if (($mode & 022) !== 0) {
-                $this->system->runProcess(sprintf(
-                    'sudo chmod 755 %s',
-                    escapeshellarg($d)
-                ));
-            }
+        return array_reverse($dirs);
+    }
+
+    private function secureRootOwnedDirectory(string $dir): void
+    {
+        $info = @stat($dir);
+        if ($info === false) {
+            throw new \RuntimeException("Directory does not exist: $dir");
         }
+        if ($info['uid'] !== 0 || $info['gid'] !== 0) {
+            $this->system->runProcess(sprintf(
+                'sudo chown root:root %s',
+                escapeshellarg($dir)
+            ));
+        }
+        if (($info['mode'] & 022) !== 0) {
+            $this->system->runProcess(sprintf(
+                'sudo chmod 755 %s',
+                escapeshellarg($dir)
+            ));
+        }
+    }
 
-        $dockerDir = "{$home}/docker";
+    /** A dind account's `docker/` tree is the inner daemon's and is left alone. */
+    private function chownHomeContents(string $home, int $uid, int $gid): void
+    {
         $excludeArgs = '';
-        if ($this->model->getTemplate() === 'dind') {
-            $excludeArgs = sprintf(' -not \( -path %s -prune \)', escapeshellarg("{$dockerDir}/*"));
+        if ($this->isDindTemplate()) {
+            $excludeArgs = sprintf(' -not \( -path %s -prune \)', escapeshellarg("{$home}/docker/*"));
         }
 
         $this->system->runProcess(sprintf(
@@ -904,20 +982,32 @@ class Project
             $uid,
             $gid
         ));
+    }
 
-        if ($this->model->getTemplate() === 'dind' && $this->system->filesystem()->directoryExists($dockerDir)) {
+    private function restoreProtectedDirectories(string $home): void
+    {
+        $dockerDir = "{$home}/docker";
+        if ($this->isDindTemplate() && $this->system->filesystem()->directoryExists($dockerDir)) {
             $this->system->runProcess("sudo chown root:root {$dockerDir}");
         }
         if ($this->system->filesystem()->directoryExists("{$home}/.panelalpha")) {
             $this->system->runProcess(['sudo', 'chmod', '700', "{$home}/.panelalpha"]);
         }
+    }
 
+    private function chownLscacheDirectories(string $home, int $uid): void
+    {
         foreach ($this->model->getDomains() as $domain) {
             $lscacheDir = $home . '/' . $domain->domain . '/.lscache';
             if ($this->system->filesystem()->directoryExists($lscacheDir)) {
                 $this->system->runProcess(['sudo', 'chown', '-R', 'nobody:' . $uid, $lscacheDir]);
             }
         }
+    }
+
+    private function isDindTemplate(): bool
+    {
+        return $this->model->getTemplate() === 'dind';
     }
 
     public function tearDownLinuxIsolation(): void
@@ -948,22 +1038,22 @@ class Project
         return is_dir($this->projectDirPath());
     }
 
+    /** `.panelalpha` holds generated secrets and tunnel tokens, so it is closed to all but its owner. */
     private function createHomeDirectory(): void
     {
         $home = $this->homeDirPath();
-        $this->system->exec("sudo mkdir -p {$home}");
-        $this->system->exec("sudo chown root:root {$home}");
-        $this->system->exec("sudo mkdir -p {$home}/.panelalpha");
-        // Generated secrets and tunnel tokens: the account only.
-        $this->system->exec("sudo chmod 700 {$home}/.panelalpha");
-        $this->system->exec("sudo mkdir -p {$home}/.wp-cli");
+        $this->system->exec(['sudo', 'mkdir', '-p', $home]);
+        $this->system->exec(['sudo', 'chown', 'root:root', $home]);
+        $this->system->exec(['sudo', 'mkdir', '-p', "{$home}/.panelalpha"]);
+        $this->system->exec(['sudo', 'chmod', '700', "{$home}/.panelalpha"]);
+        $this->system->exec(['sudo', 'mkdir', '-p', "{$home}/.wp-cli"]);
     }
 
     private function createEngineDirectory(): void
     {
         $dir = $this->projectDirPath();
-        $this->system->exec("sudo mkdir -p {$dir}");
-        $this->system->exec("sudo chown -R www-data:www-data {$dir}");
+        $this->system->exec(['sudo', 'mkdir', '-p', $dir]);
+        $this->system->exec(['sudo', 'chown', '-R', 'www-data:www-data', $dir]);
     }
 
     private function deleteLinuxUser(): void
@@ -976,12 +1066,12 @@ class Project
 
     private function deleteHomeDirectory(): void
     {
-        $this->system->exec("sudo rm -rf {$this->homeDirPath()}");
+        $this->system->exec(['sudo', 'rm', '-rf', $this->homeDirPath()]);
     }
 
     private function deleteEngineDirectory(): void
     {
-        $this->system->exec("sudo rm -rf {$this->projectDirPath()}");
+        $this->system->exec(['sudo', 'rm', '-rf', $this->projectDirPath()]);
     }
 
     private function requireDindRuntime(): Dind

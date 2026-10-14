@@ -143,6 +143,8 @@ trait AttachTask
 
         $this->markRunning();
         if ($this->isCancelled()) {
+            $this->cancelledBeforeWork();
+
             return null;
         }
 
@@ -161,6 +163,14 @@ trait AttachTask
         } finally {
             $this->trimAttachedTaskLogs();
         }
+    }
+
+    /**
+     * Releases what was reserved for this job when it was queued, once its task
+     * turns out cancelled before the work began. Nothing by default.
+     */
+    protected function cancelledBeforeWork(): void
+    {
     }
 
     private function trimAttachedTaskLogs(): void

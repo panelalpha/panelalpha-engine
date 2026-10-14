@@ -10,6 +10,7 @@ import {
   unassignAllFrom,
 } from '@/helpers/ipam-helpers';
 import { expectOneOf } from '@/helpers/expect-one-of';
+import { expectStatus } from '@/helpers/expect-status';
 
 test.describe('IP assignments', () => {
   test.beforeEach(async ({ api }) => {
@@ -30,7 +31,7 @@ test.describe('IP assignments', () => {
         ip_subnet_id: subnetId,
         ip_address: ipAddress,
       });
-      expect(assigned.status).toBe(201);
+      await expectStatus(assigned, 201);
       expect((assigned.body as { data: { ip_address: string } }).data.ip_address).toBe(ipAddress);
 
       const released = await api.unassignIpRaw({
@@ -38,7 +39,7 @@ test.describe('IP assignments', () => {
         ip_subnet_id: subnetId,
         ip_address: ipAddress,
       });
-      expect(released.status).toBe(200);
+      await expectStatus(released, 200);
     } finally {
       await removeSubnet(api, subnetId);
     }
@@ -62,7 +63,7 @@ test.describe('IP assignments', () => {
         ip_subnet_id: subnetId,
         ip_address: ipAddress,
       });
-      expect(assigned.status).toBe(201);
+      await expectStatus(assigned, 201);
 
       const listed = (await api.listAssignedIps()).data.find(
         (assignment) => assignment.ip_address === ipAddress
@@ -75,7 +76,7 @@ test.describe('IP assignments', () => {
         ip_subnet_id: subnetId,
         ip_address: ipAddress,
       });
-      expect(released.status).toBe(200);
+      await expectStatus(released, 200);
     } finally {
       await removeSubnet(api, subnetId);
     }
@@ -115,7 +116,7 @@ test.describe('IP assignments', () => {
         ip_subnet_id: subnetId,
         ip_address: ipAddress!,
       });
-      expect(released.status).toBe(200);
+      await expectStatus(released, 200);
       expect((released.body as { data: { ip_address: string } }).data.ip_address).toBe(ipAddress);
     } finally {
       await removeSubnet(api, subnetId);
@@ -137,7 +138,7 @@ test.describe('IP assignment validation', () => {
         ip_address: '192.168.100.12',
       });
 
-      expect(response.status).toBe(422);
+      await expectStatus(response, 422);
       expect((response.body as { message?: string }).message).toContain(
         'user_id or username is required'
       );
@@ -155,7 +156,7 @@ test.describe('IP assignment validation', () => {
         ip_subnet_id: subnetId,
         ip_address: '192.168.100.13',
       });
-      expect(response.status).toBe(422);
+      await expectStatus(response, 422);
     } finally {
       await removeSubnet(api, subnetId);
     }
@@ -167,7 +168,7 @@ test.describe('IP assignment validation', () => {
       ip_subnet_id: 999999,
       ip_address: '192.168.0.1',
     });
-    expect(response.status).toBe(422);
+    await expectStatus(response, 422);
   });
 
   test('assigning a malformed address is refused', async ({ api, setupUser }) => {
@@ -179,7 +180,7 @@ test.describe('IP assignment validation', () => {
         ip_subnet_id: subnetId,
         ip_address: 'invalid-ip',
       });
-      expect(response.status).toBe(422);
+      await expectStatus(response, 422);
     } finally {
       await removeSubnet(api, subnetId);
     }
@@ -195,7 +196,7 @@ test.describe('IP assignment validation', () => {
         ip_address: '192.168.200.1',
       });
 
-      expect(response.status).toBe(422);
+      await expectStatus(response, 422);
       expect((response.body as { message?: string }).message).toContain('not within');
     } finally {
       await removeSubnet(api, subnetId);
@@ -219,7 +220,7 @@ test.describe('IP assignment validation', () => {
         ip_address: ipAddress,
       });
 
-      expect(duplicate.status).toBe(422);
+      await expectStatus(duplicate, 422);
       expect((duplicate.body as { message?: string }).message).toContain('already assigned');
     } finally {
       await removeSubnet(api, subnetId);
@@ -251,7 +252,7 @@ test.describe('IP assignment validation', () => {
 
       try {
         const response = await api.unassignIpRaw(buildPayload(subnetId, setupUser.username));
-        expect(response.status).toBe(422);
+        await expectStatus(response, 422);
       } finally {
         await removeSubnet(api, subnetId);
       }
@@ -267,7 +268,7 @@ test.describe('IP assignment validation', () => {
         ip_address: '192.168.100.10',
       });
 
-      expect(response.status).toBe(422);
+      await expectStatus(response, 422);
       expect((response.body as { message?: string }).message).toContain(
         'user_id or username is required'
       );
@@ -283,7 +284,7 @@ test.describe('IP assignment validation', () => {
       ip_address: '192.168.100.10',
     });
 
-    expect(response.status).toBe(422);
+    await expectStatus(response, 422);
     expect((response.body as { message?: string }).message).toMatch(
       /IP subnet not found|Project not found/
     );

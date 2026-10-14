@@ -1,6 +1,6 @@
 # Configure the engine
 
-`pae configure` on your VPS walks through the engine's own settings: the address assistants use, what those assistants are allowed to do, tokens for your own software, how many jobs run at once, the Docker Hub login image downloads go out under, which base images are kept ready, the memory the site database keeps for caches, the firewall's web interface, and what the engine reports about itself. You pick one area, change it, and come back for the next.
+`pae configure` on your VPS walks through the engine's own settings: the address assistants use, which projects may call the engine's own API, what those assistants are allowed to do, tokens for your own software, how many jobs run at once, the Docker Hub login image downloads go out under, which base images are kept ready, the memory the site database keeps for caches, the firewall's web interface, and what the engine reports about itself. You pick one area, change it, and come back for the next.
 
 ```bash
 pae configure
@@ -14,7 +14,8 @@ When you leave, the wizard prints what it wrote. If you changed nothing, it says
 
 ## What each choice does
 
-- **Address and certificate.** The address an assistant is told to connect to, including `https://` and the port, and the certificate on that name. The certificate has to cover the name in the address, or the assistant refuses the connection. Asking for a certificate takes the engine's own address down for a moment.
+- **Address and certificate.** The address an assistant is told to connect to, including `https://` and the port, and the certificate on that name. The certificate has to cover the name in the address, or the assistant refuses the connection. Asking for a certificate takes the engine's own address down for a moment. **New project tunnel** sets how a project created without a tunnel is published. `panelalpha` is the default: under your base domain if you have set one, otherwise under a free `panelalpha.online` name. `none` publishes it under the engine's own name and registers nothing with PanelAlpha Online. A tunnel named in a request always wins.
+- **Engine API access.** Which projects may call this engine's API, for an application that manages the engine itself. Allowing a project makes a token for it, with a scope of that project only, every project, or a list. You can add assistant tools to the token, replace a token, or take the access away. Only container projects can be allowed. The commands for the same work: [Engine API for projects](../06-commands/pae-cli.md#engine-api-for-projects).
 - **MCP tokens.** Connect an assistant, decide which commands every assistant is offered, or give one assistant fewer of those. A token can only receive commands the engine is offering to everyone.
 - **API tokens.** A token for software you run yourself, not for an assistant. You can limit which parts of the engine that token may call, or revoke it.
 - **Queue.** How many deploys, backups, or staging copies run at the same time. They share one queue. The wizard asks for a number from 1 to 32 and applies it.
@@ -31,7 +32,7 @@ To open one area without the menu, name it:
 pae configure mcp-tokens
 ```
 
-The names are `address`, `mcp-tokens`, `api-tokens`, `queue`, `docker-hub`, `prewarm`, `sites-db`, and `telemetry`. Add `--dry-run` to see what would be written and write nothing.
+The names are `address`, `api-access`, `mcp-tokens`, `api-tokens`, `queue`, `docker-hub`, `prewarm`, `sites-db`, and `telemetry`. Add `--dry-run` to see what would be written and write nothing.
 
 The wizard needs the terminal you have over SSH. It will not run from a script.
 
@@ -61,6 +62,18 @@ Reconnect it. It keeps the command list from when it connected.
 
 **I asked for a certificate and could not reach the engine for a moment.**
 That is the request. The engine's own address on port 2011 stops briefly while the certificate is fetched, then comes back.
+
+## More requests to try
+
+**Mode** is the lowest permission mode that allows it: read, modify or full ([Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do)).
+
+**What this engine is**
+
+```text
+Tell me about this engine: version, webserver, address and what it runs on.
+```
+
+Mode: read. Tools: `system_info`. Check: the version matches `pae system:version` on the server, and the webserver is nginx-proxy.
 
 ## From the server
 

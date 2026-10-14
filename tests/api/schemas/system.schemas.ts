@@ -15,6 +15,7 @@ export const systemInfoSchema = z
     php_versions: z.array(z.unknown()).optional(),
     default_ipv4: z.string().nullable().optional(),
     default_ipv6: z.string().nullable().optional(),
+    default_tunnel: z.enum(['panelalpha', 'none']).nullable().optional(),
     ipv4_nat_mode: z.boolean().optional(),
     ipv4_nat_maps: z.array(ipv4NatMapSchema).optional(),
     latest_webserver_change: z
@@ -34,6 +35,8 @@ export const systemInfoSchema = z
         finished_at: z.number().nullable().optional(),
         pid: z.number().nullable().optional(),
         exit_code: z.number().nullable().optional(),
+        failed: z.boolean().optional(),
+        reason: z.string().nullable().optional(),
         from_version: z.string().nullable().optional(),
         to_version: z.string().nullable().optional(),
       })
@@ -97,4 +100,31 @@ export const systemMetricsSchema = z
 
 export const systemMetricsResponseSchema = z.object({
   data: systemMetricsSchema,
+});
+
+export const apiAccessEntrySchema = z.object({
+  project: z.string(),
+  scope: z.union([z.enum(['self', 'all']), z.array(z.string())]),
+  mcp: z.boolean(),
+  token_id: z.number(),
+  allowed_at: z.string().nullable(),
+  pending_revoke_token_id: z.number().nullable(),
+  warning: z.string().nullable(),
+});
+
+export const apiAccessListResponseSchema = z.object({
+  data: z.array(apiAccessEntrySchema),
+});
+
+export const apiAccessEntryResponseSchema = z.object({
+  data: apiAccessEntrySchema,
+});
+
+export const apiAccessRemovalResponseSchema = z.object({
+  data: z.object({ project: z.string(), removed: z.boolean() }),
+});
+
+export const apiAccessRotationResponseSchema = z.object({
+  data: apiAccessEntrySchema,
+  task_id: z.number(),
 });

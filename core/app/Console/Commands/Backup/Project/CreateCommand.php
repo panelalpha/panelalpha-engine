@@ -39,11 +39,6 @@ class CreateCommand extends Command
             return 1;
         }
 
-        if ($user->getTemplate() !== 'dind') {
-            $this->error('not supported');
-            return 1;
-        }
-
         $backup = BackupRecord::prepare($user, $container, 'artisan');
 
         try {

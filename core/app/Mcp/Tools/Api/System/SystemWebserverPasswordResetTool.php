@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('system_webserver_password_reset')]
 #[Description(<<<'MARKDOWN'
     Reset the webserver panel password
+
+    (Open)LiteSpeed only; answers 422 on nginx-proxy.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

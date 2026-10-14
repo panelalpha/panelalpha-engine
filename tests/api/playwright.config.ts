@@ -9,6 +9,8 @@ import {
   isThirdPartyIpZone,
   resolveSiteBaseDomain,
 } from './config/site-domain';
+import { parallelismFromEnv } from './config/parallelism';
+import { API_SUITE_IGNORE, SERIAL_SPEC_MATCHERS } from './config/serial-specs';
 import { insecureFetch } from './helpers/insecure-fetch';
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
@@ -52,7 +54,7 @@ if (baseURL) {
 // Resolving here, once, is what lets config/settings.ts stay synchronous —
 // which every fixture and factory depends on. An explicit DOMAIN always wins
 // unless it is an sslip.io leftover. A hostname that locally maps to 127.0.1.1
-// is replaced with the engine's panelalpha.direct zone so npm test does not
+// is replaced with the engine's panelalpha.direct zone so bun run test does not
 // need DOMAIN set, and API_BASE_URL is rewritten to the engine's own api_url
 // when the configured host only works on this box.
 const configuredDomain = process.env.DOMAIN?.trim();
@@ -79,19 +81,21 @@ if (baseURL && (!configuredDomain || isThirdPartyIpZone(configuredDomain))) {
   }
 }
 
-const envSuffix = testEnv ? `-${testEnv}` : '';
-const outputDir = path.resolve(rootDir, '.playwright', `test-results${envSuffix}`);
-const reportDir = path.resolve(rootDir, '.playwright', `report${envSuffix}`);
+// Set by scripts/run-tests.ts when TEST_PARALLEL chose more than one worker; unset otherwise,
+// and then nothing below differs from a single-worker run.
+const parallel = parallelismFromEnv();
+const split = parallel.apiWorkers > 1;
+const phase = split ? parallel.phase : undefined;
 
-const apiSuiteIgnore = [
-  /tests\/unit\//,
-  /tests\/cli\//,
-  /tests\/deploy\//,
-  /system\/webserver-change\.spec\.ts/,
-  /system\/update\//,
-  /system\/engine-certificate\.spec\.ts/,
-  /system\/network-config-mutation\.spec\.ts/,
-];
+const envSuffix = testEnv ? `-${testEnv}` : '';
+const phaseSuffix = phase ? `-${phase}` : '';
+const outputDir = path.resolve(rootDir, '.playwright', `test-results${envSuffix}${phaseSuffix}`);
+const reportDir = path.resolve(rootDir, '.playwright', `report${envSuffix}${phaseSuffix}`);
+
+/** Projects other than the parallel ones stay on one worker when the global limit is raised. */
+const single = split ? { workers: 1 } : {};
+
+const apiSuiteIgnore = [...API_SUITE_IGNORE];
 
 export default defineConfig({
   testDir: './tests',
@@ -104,7 +108,7 @@ export default defineConfig({
    * parallelism is not safe here. Retries are off for the same reason: a retried
    * destructive test would replay against state its first attempt already changed.
    */
-  workers: 1,
+  workers: phase === 'serial' ? 1 : parallel.apiWorkers,
   fullyParallel: false,
   retries: 0,
   forbidOnly: !!process.env.CI,
@@ -113,7 +117,18 @@ export default defineConfig({
     ['list'],
     // Prints what was skipped and why; fails the run when MAX_SKIPPED is set
     // and exceeded. A green run that executed half the suite is not a pass.
-    ['./reporters/skip-budget.ts'],
+    // In a split run each phase only reports; run-tests.ts judges MAX_SKIPPED over both.
+    phase
+      ? ['./reporters/skip-budget.ts', { env: { ...process.env, MAX_SKIPPED: '999999999' } }]
+      : ['./reporters/skip-budget.ts'],
+    // Failed tests, kept projects, skips by category and the leak check, in one block
+    // and in .playwright/summary.md. Reports only; it never changes the status.
+    phase
+      ? [
+          './reporters/run-summary.ts',
+          { dir: path.resolve(rootDir, '.playwright', `summary${phaseSuffix}`) },
+        ]
+      : ['./reporters/run-summary.ts'],
     ['html', { outputFolder: reportDir, open: 'never' }],
     ...(process.env.JUNIT_REPORT_FILE
       ? ([['junit', { outputFile: process.env.JUNIT_REPORT_FILE }]] as const)
@@ -135,11 +150,13 @@ export default defineConfig({
   projects: [
     {
       name: 'setup',
+      ...single,
       testMatch: /tests\/setup\/test-user\.setup\.ts/,
       timeout: Timeouts.setup,
     },
     {
       name: 'setup-dind',
+      ...single,
       testMatch: /tests\/setup\/dind-user\.setup\.ts/,
       timeout: Timeouts.deploy,
     },
@@ -154,15 +171,42 @@ export default defineConfig({
     },
     {
       name: 'api',
+      ...single,
       dependencies: ['setup'],
       testMatch: /.*\.spec\.ts/,
       // Host-wide disable/enable, full PHP matrix, DinD provision — tagged
-      // @slow and run via `npm run test:slow`.
+      // @slow and run via `bun run test:slow`.
       grepInvert: /@slow/,
       testIgnore: apiSuiteIgnore,
     },
+    ...(split
+      ? [
+          {
+            // The API suite minus the specs in config/serial-specs.ts, one setup user per worker.
+            // Files run on separate workers; the tests inside one file stay in order.
+            name: 'api-parallel',
+            dependencies: ['setup'],
+            testMatch: /.*\.spec\.ts/,
+            grepInvert: /@slow/,
+            testIgnore: [...apiSuiteIgnore, ...SERIAL_SPEC_MATCHERS],
+            workers: parallel.apiWorkers,
+          },
+          {
+            // What config/serial-specs.ts lists, alone on one worker. The runner's second phase
+            // reuses the setup users of the first, so it has no dependencies of its own there;
+            // in a single invocation it waits for api-parallel so the two never overlap.
+            name: 'api-serial',
+            dependencies: phase === 'serial' ? [] : ['api-parallel'],
+            testMatch: [...SERIAL_SPEC_MATCHERS],
+            grepInvert: /@slow/,
+            testIgnore: apiSuiteIgnore,
+            workers: 1,
+          },
+        ]
+      : []),
     {
       name: 'slow',
+      ...single,
       dependencies: ['setup'],
       testMatch: /.*\.spec\.ts/,
       grep: /@slow/,
@@ -170,6 +214,7 @@ export default defineConfig({
     },
     {
       name: 'cli',
+      ...single,
       testMatch: /tests\/cli\/.*\.spec\.ts/,
     },
     {
@@ -177,25 +222,31 @@ export default defineConfig({
       // backup, hook, a missing front page). Hours for the whole catalogue.
       // SUPPORTED_APPS=slug,slug narrows the catalogue only.
       name: 'supported-apps',
+      // The catalogue file splits its tests over these workers; the checks file stays in order.
+      ...(split ? { workers: parallel.appsWorkers } : {}),
       testMatch: /tests\/deploy\/supported-apps.*\.spec\.ts/,
       timeout: Timeouts.supportedApp,
     },
     {
       name: 'webserver-change',
+      ...single,
       testMatch: /system\/webserver-change\.spec\.ts/,
       timeout: Timeouts.webserverChange + Timeouts.webserverChangePlaywrightBuffer,
     },
     {
       name: 'update',
+      ...single,
       testMatch: /system\/update\/.*\.spec\.ts/,
     },
     {
       name: 'engine-cert',
+      ...single,
       testMatch: /system\/engine-certificate\.spec\.ts/,
       timeout: Timeouts.deploy,
     },
     {
       name: 'network-mutation',
+      ...single,
       testMatch: /system\/network-config-mutation\.spec\.ts/,
     },
   ],

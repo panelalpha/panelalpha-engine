@@ -36,14 +36,13 @@ final class CsfRenames
         'PUT /csf/disable' => 'PUT /firewall/disable',
     ];
 
-    /** A tool name or a `csf_*` style pattern. */
+    /** A tool name, or a `csf_*` style pattern renamed so it keeps matching what it matched. */
     public static function tool(string $name): string
     {
         $name = trim($name);
         if (isset(self::TOOLS[$name])) {
             return self::TOOLS[$name];
         }
-        // A pattern: csf_* and csf_rule_* keep matching what they matched.
         if (str_contains($name, '*') && str_starts_with($name, 'csf_')) {
             return 'firewall_' . substr($name, strlen('csf_'));
         }
@@ -78,10 +77,27 @@ final class CsfRenames
         return self::mapList($csv, static fn (string $t): string => self::TOOLSETS[strtolower(trim($t))] ?? trim($t));
     }
 
-    /** MCP_DENIED_TOOLS_REGEX: csf_restart is firewall_reload, every other csf name keeps its suffix. */
+    /**
+     * MCP_DENIED_TOOLS_REGEX: csf_restart is firewall_reload, every other csf name
+     * keeps its suffix. A pattern such as `^csf_(restart|disable)$` has no literal
+     * csf_restart to replace, so firewall_reload is appended to keep it denied.
+     */
     public static function regex(string $regex): string
     {
-        return str_replace('csf', 'firewall', str_replace('csf_restart', 'firewall_reload', $regex));
+        $renamed = str_replace('csf', 'firewall', str_replace('csf_restart', 'firewall_reload', $regex));
+        if (self::matches('csf_restart', $regex) && !self::matches('firewall_reload', $renamed)) {
+            $renamed .= '|^firewall_reload$';
+        }
+
+        return $renamed;
+    }
+
+    /** Whether $pattern matches $subject, as {@see \App\Mcp\ToolPolicy} reads it. */
+    private static function matches(string $subject, string $pattern): bool
+    {
+        $delimited = '/' . str_replace('/', '\\/', $pattern) . '/i';
+
+        return @preg_match($delimited, $subject) === 1;
     }
 
     /** @param callable(string): string $map */

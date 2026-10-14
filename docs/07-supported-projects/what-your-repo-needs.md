@@ -79,6 +79,18 @@ Whichever lockfile is present is the package manager that gets used:
 
 A `start` script in your `package.json` takes precedence over the default the engine would use.
 
+## Git submodules
+
+Submodules are fetched with the repository, and again on every pull, branch change and push, at the commit the repository records. A submodule that cannot be fetched fails the deploy. If the application needs only some of them, for example because the others are private, name those in `.panelalpha/panelalpha.yaml` at the top of the repository:
+
+```yaml
+git:
+  submodules:
+    - vendor/shared-lib
+```
+
+An empty list fetches none. Without this setting, every submodule is fetched. A private submodule needs a git token that can read it: [Connecting with Git](../05-capabilities/connecting-with-git.md#troubleshooting).
+
 ## Troubleshooting
 
 **It says `static` or `html`, but this is an application.**

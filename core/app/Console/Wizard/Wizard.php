@@ -3,6 +3,7 @@
 namespace App\Console\Wizard;
 
 use App\Console\Wizard\Sections\ApiTokensSection;
+use App\Console\Wizard\Sections\ApiAccessSection;
 use App\Console\Wizard\Sections\DockerHubSection;
 use App\Console\Wizard\Sections\EngineAddressSection;
 use App\Console\Wizard\Sections\McpTokensSection;
@@ -22,6 +23,7 @@ class Wizard
     /** @var array<int, class-string<Section>> */
     public const SECTIONS = [
         EngineAddressSection::class,
+        ApiAccessSection::class,
         McpTokensSection::class,
         ApiTokensSection::class,
         QueueSection::class,

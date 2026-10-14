@@ -5,7 +5,7 @@ ARG NGINX_SHA256=9fcaaeb8f22544b09a19a761f3412c4112215422401634bebdd1296a403cc4b
 ARG NGX_BROTLI_COMMIT=a71f9312c2deb28875acc7bacfdd5695a111aa53
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates cmake curl git gcc make libc6-dev libpcre2-dev zlib1g-dev \
-    && curl -fsSL -o /tmp/nginx.tar.gz "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
+    && curl --proto '=https' -fsSL -o /tmp/nginx.tar.gz "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
     && echo "${NGINX_SHA256}  /tmp/nginx.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/nginx.tar.gz -C /usr/src \
     && git clone https://github.com/google/ngx_brotli /usr/src/ngx_brotli \

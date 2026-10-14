@@ -7,9 +7,10 @@ namespace App\Lib\Deploy\Engine;
  *
  * Two stores are in play: the **host** store, shared by every account and
  * where an image is pulled or built exactly once, and an **account** store
- * private to one tenant. The engine decides whether that is a stream between
- * two daemons (DinD), a no-op because both halves are the same store (rootless
- * Docker), or a `skopeo copy` (Podman).
+ * private to one tenant. The engine decides the route: for DinD, registries
+ * only (the host pushes to the cache registry and the account pulls, or the
+ * account pulls from the image's own registry), never a stream between the two
+ * daemons; an engine whose halves share one store would make it a no-op.
  *
  * Every method returns a command for {@see \App\System} to run: `host*` runs on
  * the host, everything else inside the account.
@@ -17,12 +18,8 @@ namespace App\Lib\Deploy\Engine;
 interface ImageStore
 {
     /**
-     * Build a context-free Dockerfile on the **host** under $tag, once.
-     *
-     * How the shared bases the engine owns come into existence — nothing is
-     * COPYed in, so the Dockerfile is all the input there is. Must be
-     * idempotent: a deploy calls it on every run. $pull false builds FROM an
-     * image only this host has.
+     * Build a context-free Dockerfile on the **host** under $tag, once; idempotent,
+     * since a deploy calls it on every run. $pull false builds FROM an image only this host has.
      */
     public function hostBuildCommand(string $tag, string $dockerfile, bool $rebuild = false, bool $pull = true): string;
 
@@ -121,7 +118,7 @@ interface ImageStore
 
     /**
      * On the host: succeed iff the host store already holds $image, i.e.
-     * whether providing it to an account is a stream, not a build.
+     * whether providing it to an account is a registry transfer, not a build.
      *
      * @return list<string>
      */
@@ -135,4 +132,14 @@ interface ImageStore
      * @return list<string>
      */
     public function hostImageExposedPortsArgv(string $image): array;
+
+    /**
+     * On the host: get $image onto the host store when it is not there, pulling
+     * one of ours from where accounts pull shared images. A host build runs the
+     * image by name, and docker.io does not publish our tags. Never fatal, so a
+     * deploy chains it before every host build.
+     *
+     * @return list<string>
+     */
+    public function hostEnsureImageArgv(string $image): array;
 }

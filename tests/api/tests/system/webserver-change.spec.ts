@@ -12,9 +12,9 @@ import {
  * actually serves traffic.
  *
  * This reconfigures the host underneath everything else and takes tens of
- * minutes, so it has its own project and never runs as part of `npm test`:
+ * minutes, so it has its own project and never runs as part of `bun run test`:
  *
- *     WEBSERVER=nginx npm run test:webserver-change
+ *     WEBSERVER=nginx bun run test:webserver-change
  */
 test('the engine changes to the webserver named in WEBSERVER', async ({
   api,
@@ -43,7 +43,9 @@ test('the engine changes to the webserver named in WEBSERVER', async ({
       timeoutMs: settings.timing.webserverChangeTimeout,
     });
   } catch (error) {
-    // The engine's 422 for a switch it refuses on purpose, as webserver.spec.ts skips it.
+    // Engine v2.x answers every switch away from nginx-proxy with a 422
+    // (SystemController::changeWebserver :441-446), so this test can only be
+    // refused there; webserver.spec.ts pins that refusal. Any other failure fails the test.
     const disabled = switchingDisabledReason(
       error instanceof Error ? error.message : String(error)
     );

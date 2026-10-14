@@ -2,10 +2,14 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\LowercasesInput;
+use App\Rules\RedirectUrl;
 use Illuminate\Foundation\Http\FormRequest;
 
 class DomainUpdateRequest extends FormRequest
 {
+    use LowercasesInput;
+
     public function authorize(): bool
     {
         return true;
@@ -13,37 +17,46 @@ class DomainUpdateRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        if ($this->has('aliases')) {
-            $this->merge(['aliases' => array_map('strtolower', $this->aliases ?? [])]);
-        }
+        $this->lowercaseInput('aliases');
     }
 
     public function rules(): array
     {
         return [
-            // Concatenated straight into the vhost's DocumentRoot
-            // ("/home/<user>" . $document_root), so it has to be a path under
-            // the account and nothing else. A full URL lands in the config as
-            // "/var/wwwhttps:/example.com/wp-admin", which Apache then denies
-            // for the whole account; a ".." segment would point the site
-            // outside the account altogether. The vhost templates write it
-            // unquoted (Blade escapes HTML only), so whitespace, `;`, `{`, `"`,
-            // `$` and newlines would end the directive: only plain path
-            // characters are taken.
-            'document_root' => [
-                'sometimes',
-                'string',
-                'max:4096',
-                'regex:/^\\/(?:[A-Za-z0-9._~@+,=-]+\\/?)*$/D',
-                'not_regex:/(?:^|\\/)\\.\\.(?:\\/|$)/',
-            ],
+            'document_root' => self::documentRootRules(),
             'redirect_enabled' => 'sometimes|boolean',
-            // Written into nginx's `return 301 "<url>"` verbatim: `$` is a
-            // variable there (`$http_cookie`), a quote or space ends the string.
-            'redirect_url' => ['url', 'nullable', 'max:2048', 'not_regex:/[\s"\'\\\\$;{}`]/'],
+            'redirect_url' => self::redirectUrlRules(),
             'force_https_redirect' => 'sometimes|boolean',
             'aliases' => 'array|nullable',
             'aliases.*' => 'string|nullable',
         ];
+    }
+
+    /**
+     * Concatenated unquoted into the vhost's DocumentRoot under /home/<user>: only a
+     * plain path under the account, no URL, no `..` segment, nothing that ends the directive.
+     *
+     * @return list<string>
+     */
+    private static function documentRootRules(): array
+    {
+        return [
+            'sometimes',
+            'string',
+            'max:4096',
+            'regex:/^\\/(?:[A-Za-z0-9._~@+,=-]+\\/?)*$/D',
+            'not_regex:/(?:^|\\/)\\.\\.(?:\\/|$)/',
+        ];
+    }
+
+    /**
+     * Written verbatim into nginx's `return 301 "<url>"`, where `$` is a variable
+     * and a quote or space ends the string.
+     *
+     * @return list<mixed>
+     */
+    private static function redirectUrlRules(): array
+    {
+        return ['url', 'nullable', 'max:2048', new RedirectUrl()];
     }
 }

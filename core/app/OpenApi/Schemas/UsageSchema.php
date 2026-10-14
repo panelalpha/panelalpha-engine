@@ -15,11 +15,20 @@ use OpenApi\Attributes as OA;
 #[OA\Schema(
     schema: 'Usage',
     properties: [
-        new OA\Property(property: 'storage', ref: '#/components/schemas/UsageQuota'),
+        new OA\Property(
+            property: 'storage',
+            ref: '#/components/schemas/UsageQuota',
+            description: 'MB the project\'s files take: its home without ~/docker. Read from the measurement taken every 15 minutes (GET /projects/{username} `disk`), so it can lag that much; measured on the spot only before the first one. maximum is disk_space_limit in MB.',
+        ),
         new OA\Property(
             property: 'logs',
             ref: '#/components/schemas/UsageQuota',
             description: 'Bytes the project\'s container logs take on its disk, rotated files included. Not part of storage.usage; 0 for a project without containers of its own. maximum is null.',
+        ),
+        new OA\Property(
+            property: 'docker',
+            ref: '#/components/schemas/UsageQuota',
+            description: 'Bytes the project\'s own Docker keeps in ~/docker: images, build cache, containers and volumes, its databases\' data included. Not part of storage.usage. Null before the first measurement or without Docker data; maximum is null.',
         ),
         new OA\Property(
             property: 'bandwidth',

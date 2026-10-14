@@ -2,12 +2,14 @@
 
 namespace App\Http\Requests\Git;
 
-use App\System\Project\Git\Ref as GitRef;
+use App\Http\Requests\Concerns\ChecksGitRefName;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Validator;
 
 class GitRevertRequest extends FormRequest
 {
+    use ChecksGitRefName;
+
     public function authorize(): bool
     {
         return true;
@@ -23,14 +25,6 @@ class GitRevertRequest extends FormRequest
 
     public function withValidator(Validator $validator): void
     {
-        $validator->after(function (Validator $validator): void {
-            $ref = $validator->getData()['ref'] ?? null;
-            if (!is_string($ref) || $ref === '' || $ref === 'HEAD') {
-                return;
-            }
-            if (!GitRef::isValidName($ref)) {
-                $validator->errors()->add('ref', 'Invalid git ref name.');
-            }
-        });
+        $this->checkGitRefName($validator, 'ref');
     }
 }

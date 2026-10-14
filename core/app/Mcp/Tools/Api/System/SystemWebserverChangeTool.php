@@ -47,7 +47,7 @@ class SystemWebserverChangeTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'new_webserver' => $schema->string()->description('One of: nginx, nginx-proxy, apache, litespeed, openlitespeed.')->required(),
+            'new_webserver' => $schema->string()->description('Only nginx-proxy is accepted on this engine; every other webserver is temporarily refused. One of: nginx-proxy.')->required(),
         ];
     }
 }

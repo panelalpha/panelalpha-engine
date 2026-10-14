@@ -1,4 +1,5 @@
 import { expect, test } from '@/fixtures/test-options';
+import { expectStatus } from '@/helpers/expect-status';
 import { randomDomain, randomUsername } from '@/helpers/random';
 import { Timeouts } from '@/config/timeouts';
 import { expectOneOf } from '@/helpers/expect-one-of';
@@ -14,35 +15,51 @@ test.describe('async project create', () => {
     const domain = randomDomain(settings.requireDomain());
 
     try {
-      const created = await api.createUserRaw({ username, domain });
-      expect(created.status).toBe(PROJECT_CREATE_ACCEPTED);
-      const taskId = taskIdFromBody(created.body);
-      expect(taskId).toBeGreaterThan(0);
+      const taskId = await test.step('create the project', async () => {
+        const created = await api.createUserRaw({ username, domain });
+        await expectStatus(created, PROJECT_CREATE_ACCEPTED);
+        const id = taskIdFromBody(created.body);
+        expect(id, 'the create response carries a task id').toBeGreaterThan(0);
+        return id;
+      });
 
-      const polled = await api.getTask(taskId!);
-      expect(polled.data.id).toBe(taskId);
-      expect(['queued', 'running', 'completed', 'failed', 'cancelled']).toContain(
-        polled.data.status
-      );
-      expect(polled.data.username).toBe(username);
+      await test.step('poll the task', async () => {
+        const polled = await api.getTask(taskId!);
+        expect(polled.data.id, 'task id').toBe(taskId);
+        expect(
+          ['queued', 'running', 'completed', 'failed', 'cancelled'],
+          'the task status is a known one'
+        ).toContain(polled.data.status);
+        expect(polled.data.username, 'task project').toBe(username);
+      });
 
-      const logs = await api.listTaskLogs(taskId!);
-      expect(Array.isArray(logs.data)).toBe(true);
-      expect(typeof logs.meta?.task_status).toBe('string');
-      expect(typeof logs.meta?.next_after_id).toBe('number');
+      await test.step('read the task logs', async () => {
+        const logs = await api.listTaskLogs(taskId!);
+        expect(Array.isArray(logs.data), 'logs data is an array').toBe(true);
+        expect(typeof logs.meta?.task_status, 'logs meta carries task_status').toBe('string');
+        expect(typeof logs.meta?.next_after_id, 'logs meta carries next_after_id').toBe('number');
 
-      const sinceLogs = await api.listTaskLogs(taskId!, { since: 0 });
-      expect(Array.isArray(sinceLogs.data)).toBe(true);
+        const sinceLogs = await api.listTaskLogs(taskId!, { since: 0 });
+        expect(Array.isArray(sinceLogs.data), 'logs since 0 is an array').toBe(true);
+      });
 
-      const task = await waitForTask(api, taskId!);
-      expect(['completed', 'failed', 'cancelled']).toContain(task.status);
+      await test.step('wait for the task to finish', async () => {
+        const task = await waitForTask(api, taskId!);
+        expect(['completed', 'failed', 'cancelled'], 'the task reached a final status').toContain(
+          task.status
+        );
+      });
 
-      const account = await api.getUserRaw(username);
-      expect(account.status).toBe(200);
+      await test.step('read the account', async () => {
+        const account = await api.getUserRaw(username);
+        await expectStatus(account, 200);
+      });
 
-      const stream = await api.streamTaskLogsRaw(taskId!);
-      expect(stream.status).toBe(200);
-      expect(stream.body).toMatch(/"type":"finish"/);
+      await test.step('stream the task logs', async () => {
+        const stream = await api.streamTaskLogsRaw(taskId!);
+        await expectStatus(stream, 200);
+        expect(stream.body, 'the log stream ends with a finish event').toMatch(/"type":"finish"/);
+      });
     } finally {
       await api.deleteUserSafe(username);
     }
@@ -54,17 +71,24 @@ test.describe('async project create', () => {
     const domain = randomDomain(settings.requireDomain());
 
     try {
-      const created = await api.createUserRaw({ username, domain });
-      expect(created.status).toBe(PROJECT_CREATE_ACCEPTED);
-      const taskId = taskIdFromBody(created.body);
-      expect(taskId).toBeGreaterThan(0);
+      const taskId = await test.step('create the project', async () => {
+        const created = await api.createUserRaw({ username, domain });
+        await expectStatus(created, PROJECT_CREATE_ACCEPTED);
+        const id = taskIdFromBody(created.body);
+        expect(id, 'the create response carries a task id').toBeGreaterThan(0);
+        return id;
+      });
 
-      const cancel = await api.cancelTaskRaw(taskId!);
-      // 200 = cancelled while queued/running. 409 = DeployProject already finished.
-      expectOneOf(cancel.status, [200, 409]);
+      await test.step('cancel the task', async () => {
+        const cancel = await api.cancelTaskRaw(taskId!);
+        // 200 = cancelled while queued/running. 409 = DeployProject already finished.
+        expectOneOf(cancel.status, [200, 409]);
+      });
 
-      const task = await waitForTask(api, taskId!);
-      expectOneOf(task.status, ['completed', 'failed', 'cancelled']);
+      await test.step('wait for the task to finish', async () => {
+        const task = await waitForTask(api, taskId!);
+        expectOneOf(task.status, ['completed', 'failed', 'cancelled']);
+      });
     } finally {
       await api.deleteUserSafe(username);
     }

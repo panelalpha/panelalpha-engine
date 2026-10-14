@@ -1,19 +1,29 @@
 import { expect, test } from '@/fixtures/test-options';
+import { CleanupSteps } from '@/helpers/cleanup-step';
 import { expectOneOf } from '@/helpers/expect-one-of';
 import {
   expectFileContentEquals,
   getDomainBasePath,
   randomFileContent,
+  removeFileIfPresent,
   randomFileName,
 } from '@/helpers/file-path-helpers';
+import { expectStatus } from '@/helpers/expect-status';
+import { uniqueId } from '@/helpers/random';
+import { validateParsedApiResponse } from '@/helpers/validate-parsed-response';
+import { fileListResponseSchema } from '@/schemas';
 
 test.describe('file operations', () => {
-  test('the document root exists and can be stat-ed', async ({ api, setupUser }) => {
-    const basePath = getDomainBasePath(setupUser.domain);
+  test(
+    'the document root exists and can be stat-ed',
+    { tag: ['@smoke'] },
+    async ({ api, setupUser }) => {
+      const basePath = getDomainBasePath(setupUser.domain);
 
-    expect((await api.fileExists(setupUser.username, basePath)).exists).toBe(true);
-    expect((await api.getFileStat(setupUser.username, basePath)).file_name).toBeTruthy();
-  });
+      expect((await api.fileExists(setupUser.username, basePath)).exists).toBe(true);
+      expect((await api.getFileStat(setupUser.username, basePath)).name).toBeTruthy();
+    }
+  );
 
   test('WordPress left an index.php in the document root', async ({ api, setupUser }) => {
     const indexPath = `${getDomainBasePath(setupUser.domain)}/index.php`;
@@ -26,37 +36,49 @@ test.describe('file operations', () => {
   });
 
   /** Write, read, copy, rename, delete — the whole path a file takes. */
-  test('a file can be written, copied, renamed and deleted', async ({ api, setupUser }) => {
-    const basePath = getDomainBasePath(setupUser.domain);
-    const content = randomFileContent();
-    const path = `${basePath}/${randomFileName('txt')}`;
-    const copyPath = path.replace('.txt', '_copy.txt');
-    const renamedPath = path.replace('.txt', '_renamed.txt');
+  test(
+    'a file can be written, copied, renamed and deleted',
+    { tag: ['@smoke'] },
+    async ({ api, setupUser }) => {
+      const basePath = getDomainBasePath(setupUser.domain);
+      const content = randomFileContent();
+      const path = `${basePath}/${randomFileName('txt')}`;
+      const copyPath = path.replace('.txt', '_copy.txt');
+      const renamedPath = path.replace('.txt', '_renamed.txt');
 
-    try {
-      await api.putFileContents(setupUser.username, path, content);
-      expect((await api.fileExists(setupUser.username, path)).exists).toBe(true);
-      expectFileContentEquals(await api.getFileContent(setupUser.username, path), content);
+      const cleanup = new CleanupSteps();
+      try {
+        await api.putFileContents(setupUser.username, path, content);
+        expect((await api.fileExists(setupUser.username, path)).exists).toBe(true);
+        expectFileContentEquals(await api.getFileContent(setupUser.username, path), content);
 
-      await api.copyFile(setupUser.username, path, copyPath);
-      expect((await api.fileExists(setupUser.username, copyPath)).exists).toBe(true);
+        await api.copyFile(setupUser.username, path, copyPath);
+        expect((await api.fileExists(setupUser.username, copyPath)).exists).toBe(true);
 
-      await api.moveFile(setupUser.username, path, renamedPath);
-      expect((await api.fileExists(setupUser.username, path)).exists).toBe(false);
-      expect((await api.fileExists(setupUser.username, renamedPath)).exists).toBe(true);
+        await api.moveFile(setupUser.username, path, renamedPath);
+        expect((await api.fileExists(setupUser.username, path)).exists).toBe(false);
+        expect((await api.fileExists(setupUser.username, renamedPath)).exists).toBe(true);
 
-      await api.removeFile(setupUser.username, renamedPath);
-      expect((await api.fileExists(setupUser.username, renamedPath)).exists).toBe(false);
-    } finally {
-      for (const leftover of [path, copyPath, renamedPath]) {
-        await api.removeFile(setupUser.username, leftover).catch(() => undefined);
+        await api.removeFile(setupUser.username, renamedPath);
+        expect((await api.fileExists(setupUser.username, renamedPath)).exists).toBe(false);
+      } catch (error) {
+        cleanup.bodyFailed(error);
+        throw error;
+      } finally {
+        for (const leftover of [path, copyPath, renamedPath]) {
+          await cleanup.run(`remove ${leftover}`, () =>
+            removeFileIfPresent(api, setupUser.username, leftover)
+          );
+        }
+        await cleanup.finish();
       }
     }
-  });
+  );
 
   test('put-contents overwrites an existing file', async ({ api, setupUser }) => {
     const path = `${getDomainBasePath(setupUser.domain)}/overwrite_${Date.now()}.txt`;
 
+    const cleanup = new CleanupSteps();
     try {
       await api.putFileContents(setupUser.username, path, 'initial-content');
 
@@ -64,19 +86,28 @@ test.describe('file operations', () => {
       await api.putFileContents(setupUser.username, path, replacement);
 
       expectFileContentEquals(await api.getFileContent(setupUser.username, path), replacement);
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
-      await api.removeFile(setupUser.username, path).catch(() => undefined);
+      await cleanup.run(`remove ${path}`, () => removeFileIfPresent(api, setupUser.username, path));
+      await cleanup.finish();
     }
   });
 
   test('stat reports the file name with its extension', async ({ api, setupUser }) => {
     const path = `${getDomainBasePath(setupUser.domain)}/mime_test_${Date.now()}.css`;
 
+    const cleanup = new CleanupSteps();
     try {
       await api.putFileContents(setupUser.username, path, 'body { margin: 0; }');
-      expect((await api.getFileStat(setupUser.username, path)).file_name).toMatch(/\.css$/);
+      expect((await api.getFileStat(setupUser.username, path)).name).toMatch(/\.css$/);
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
-      await api.removeFile(setupUser.username, path).catch(() => undefined);
+      await cleanup.run(`remove ${path}`, () => removeFileIfPresent(api, setupUser.username, path));
+      await cleanup.finish();
     }
   });
 
@@ -84,6 +115,7 @@ test.describe('file operations', () => {
     const path = `${getDomainBasePath(setupUser.domain)}/large_${Date.now()}.bin`;
     const content = 'A'.repeat(1024 * 1024);
 
+    const cleanup = new CleanupSteps();
     try {
       await api.putFileContents(setupUser.username, path, content);
 
@@ -91,19 +123,28 @@ test.describe('file operations', () => {
         content.length
       );
       expect(await api.getFileContent(setupUser.username, path)).toHaveLength(content.length);
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
-      await api.removeFile(setupUser.username, path).catch(() => undefined);
+      await cleanup.run(`remove ${path}`, () => removeFileIfPresent(api, setupUser.username, path));
+      await cleanup.finish();
     }
   });
 
   test('a dotfile such as .htaccess can be written', async ({ api, setupUser }) => {
     const path = `${getDomainBasePath(setupUser.domain)}/.htaccess`;
 
+    const cleanup = new CleanupSteps();
     try {
       await api.putFileContents(setupUser.username, path, 'RewriteEngine On');
       expect((await api.fileExists(setupUser.username, path)).exists).toBe(true);
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
-      await api.removeFile(setupUser.username, path).catch(() => undefined);
+      await cleanup.run(`remove ${path}`, () => removeFileIfPresent(api, setupUser.username, path));
+      await cleanup.finish();
     }
   });
 });
@@ -125,6 +166,7 @@ test.describe('directories', () => {
     const destinationDir = sourceDir.replace('copy_src_', 'copy_dest_');
     const nestedFile = `${sourceDir}/nested/file.txt`;
 
+    const cleanup = new CleanupSteps();
     try {
       await api.createDirectory(setupUser.username, `${sourceDir}/nested`, true);
       await api.putFileContents(setupUser.username, nestedFile, 'nested content');
@@ -137,10 +179,16 @@ test.describe('directories', () => {
         await api.getFileContent(setupUser.username, copied),
         'nested content'
       );
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
       for (const dir of [destinationDir, sourceDir]) {
-        await api.removeFile(setupUser.username, dir, true).catch(() => undefined);
+        await cleanup.run(`remove ${dir}`, () =>
+          removeFileIfPresent(api, setupUser.username, dir, true)
+        );
       }
+      await cleanup.finish();
     }
   });
 });
@@ -153,6 +201,7 @@ test.describe('archives', () => {
     const zipPath = `${basePath}/archive_${Date.now()}.zip`;
     const destinationDir = `${basePath}/unzipped_${Date.now()}`;
 
+    const cleanup = new CleanupSteps();
     try {
       await api.createDirectory(setupUser.username, sourceDir, true);
       await api.putFileContents(setupUser.username, sourceFile, 'zip source content');
@@ -180,10 +229,16 @@ test.describe('archives', () => {
         found.find(Boolean),
         `the archive extracted to none of ${candidates.join(' or ')}`
       ).toBeTruthy();
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
       for (const path of [destinationDir, zipPath, sourceDir]) {
-        await api.removeFile(setupUser.username, path, true).catch(() => undefined);
+        await cleanup.run(`remove ${path}`, () =>
+          removeFileIfPresent(api, setupUser.username, path, true)
+        );
       }
+      await cleanup.finish();
     }
   });
 });
@@ -198,6 +253,7 @@ test.describe('HTTP access to files', () => {
     const content = randomFileContent();
     const path = `${getDomainBasePath(setupUser.domain)}/${fileName}`;
 
+    const cleanup = new CleanupSteps();
     try {
       await api.putFileContents(setupUser.username, path, content);
 
@@ -205,10 +261,14 @@ test.describe('HTTP access to files', () => {
         ignoreHTTPSErrors: true,
       });
 
-      expect(response.status()).toBe(200);
+      await expectStatus(response, 200);
       expect((await response.text()).trim()).toBe(content);
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
-      await api.removeFile(setupUser.username, path).catch(() => undefined);
+      await cleanup.run(`remove ${path}`, () => removeFileIfPresent(api, setupUser.username, path));
+      await cleanup.finish();
     }
   });
 
@@ -240,11 +300,11 @@ test.describe('download endpoint', () => {
       });
 
       const full = await authedRequest.get(endpoint);
-      expect(full.status()).toBe(200);
+      await expectStatus(full, 200);
       expect(await full.text()).toBe('Hello World');
 
       const ranged = await authedRequest.get(endpoint, { headers: { Range: 'bytes=0-4' } });
-      expect(ranged.status()).toBe(206);
+      await expectStatus(ranged, 206);
       expect(ranged.headers()['content-range']).toMatch(/^bytes\s+0-4\//);
       expect(await ranged.text()).toBe('Hello');
     } finally {
@@ -259,7 +319,7 @@ test.describe('download endpoint', () => {
     const response = await authedRequest.get(
       `projects/${setupUser.username}/files/download?path=${encodeURIComponent(path)}`
     );
-    expect(response.status()).toBe(404);
+    await expectStatus(response, 404);
   });
 });
 
@@ -298,6 +358,7 @@ test.describe('multipart uploads', () => {
       const body = upload.body();
       const path = `${basePath}/${fileName}`;
 
+      const cleanup = new CleanupSteps();
       try {
         const result = await api.uploadFileFromBuffer(
           setupUser.username,
@@ -310,8 +371,14 @@ test.describe('multipart uploads', () => {
 
         expect((await api.fileExists(setupUser.username, path)).exists).toBe(true);
         expect(Number((await api.getFileStat(setupUser.username, path)).size)).toBe(body.length);
+      } catch (error) {
+        cleanup.bodyFailed(error);
+        throw error;
       } finally {
-        await api.removeFile(setupUser.username, path).catch(() => undefined);
+        await cleanup.run(`remove ${path}`, () =>
+          removeFileIfPresent(api, setupUser.username, path)
+        );
+        await cleanup.finish();
       }
     });
   }
@@ -328,14 +395,19 @@ test.describe('multipart uploads', () => {
       Buffer.alloc(0),
       'text/plain'
     );
-    expectOneOf(result.status, [200, 201, 400, 422]);
-
-    if (result.status === 200 || result.status === 201) {
-      try {
-        expect(Number((await api.getFileStat(setupUser.username, path)).size)).toBe(0);
-      } finally {
-        await api.removeFile(setupUser.username, path).catch(() => undefined);
-      }
+    // UploadRequest only requires `file` to be present (File::default() has no
+    // minimum size) and FileManager::moveUploadedFile copies it with cat, so an
+    // empty upload is stored as a zero-byte file; the controller answers 200.
+    const cleanup = new CleanupSteps();
+    try {
+      await expectStatus(result, 200);
+      expect(Number((await api.getFileStat(setupUser.username, path)).size)).toBe(0);
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
+    } finally {
+      await cleanup.run(`remove ${path}`, () => removeFileIfPresent(api, setupUser.username, path));
+      await cleanup.finish();
     }
   });
 
@@ -349,11 +421,191 @@ test.describe('multipart uploads', () => {
       fileName,
       Buffer.from('test content', 'utf-8')
     );
-    // Creating the directory on the fly and refusing outright are both defensible.
-    expectOneOf(result.status, [200, 201, 400, 404, 422]);
+    // FileManager::writeAsUser runs `mkdir -p` on the target's parent before
+    // writing, so FileController::upload creates the missing directory and
+    // answers 200. A refusal or a 5xx is a regression.
+    const cleanup = new CleanupSteps();
+    try {
+      await expectStatus(result, 200);
+      expect((await api.fileExists(setupUser.username, `${directory}/${fileName}`)).exists).toBe(
+        true
+      );
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
+    } finally {
+      await cleanup.run(`remove ${directory}`, () =>
+        removeFileIfPresent(api, setupUser.username, directory, true)
+      );
+      await cleanup.finish();
+    }
+  });
+});
 
-    if (result.status === 200 || result.status === 201) {
-      await api.removeFile(setupUser.username, directory, true).catch(() => undefined);
+test.describe('directory listing', () => {
+  test('the document root lists its entries with type, size and mode', async ({
+    api,
+    setupUser,
+  }) => {
+    const dir = getDomainBasePath(setupUser.domain);
+    const fileName = randomFileName('txt');
+    const filePath = `${dir}/${fileName}`;
+    const dirName = uniqueId('list_dir_');
+    const dirPath = `${dir}/${dirName}`;
+
+    const cleanup = new CleanupSteps();
+    try {
+      await api.putFileContents(setupUser.username, filePath, 'listing content');
+      await api.createDirectory(setupUser.username, dirPath);
+
+      const listing = validateParsedApiResponse(
+        await api.listFiles(setupUser.username, dir),
+        fileListResponseSchema
+      );
+
+      expect(listing.meta.path).toBe(dir);
+      expect(listing.meta.truncated).toBe(false);
+
+      const file = listing.data.find((entry) => entry.name === fileName);
+      expect(file?.type, `${fileName} should be a file`).toBe('file');
+      expect(file?.size).toBe('listing content'.length);
+      expect(file?.mode).toMatch(/^0[0-7]{3}$/);
+      expect(file?.path).toBe(filePath);
+
+      const folder = listing.data.find((entry) => entry.name === dirName);
+      expect(folder?.type).toBe('dir');
+      expect(folder?.has_subdirectories).toBe(false);
+
+      const kinds = listing.data.map((entry) => (entry.type === 'dir' ? 0 : 1));
+      expect(kinds).toEqual([...kinds].sort((a, b) => a - b));
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
+    } finally {
+      for (const path of [dirPath, filePath]) {
+        await cleanup.run(`remove ${path}`, () =>
+          removeFileIfPresent(api, setupUser.username, path, true)
+        );
+      }
+      await cleanup.finish();
+    }
+  });
+
+  test('names with a space and UTF-8 characters survive listing', async ({ api, setupUser }) => {
+    const dir = getDomainBasePath(setupUser.domain);
+    const id = uniqueId('list_name_');
+    const names = [`spaced name ${id}.txt`, `ünïcode_${id}.txt`];
+
+    const cleanup = new CleanupSteps();
+    try {
+      for (const name of names) {
+        await api.putFileContents(setupUser.username, `${dir}/${name}`, 'utf8');
+      }
+
+      const listing = await api.listFiles(setupUser.username, dir);
+
+      for (const name of names) {
+        const entry = listing.data.find((candidate) => candidate.name === name);
+        expect(entry?.name, `${JSON.stringify(name)} should be listed intact`).toBe(name);
+        expect(entry?.path).toBe(`${dir}/${name}`);
+        expect(entry?.size).toBe('utf8'.length);
+      }
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
+    } finally {
+      for (const name of names) {
+        await cleanup.run(`remove ${JSON.stringify(name)}`, () =>
+          removeFileIfPresent(api, setupUser.username, `${dir}/${name}`)
+        );
+      }
+      await cleanup.finish();
+    }
+  });
+
+  test('show_hidden=false omits dot entries', async ({ api, setupUser }) => {
+    const dir = getDomainBasePath(setupUser.domain);
+    const hiddenName = `.list_hidden_${uniqueId()}`;
+    const visibleName = `list_visible_${uniqueId()}.txt`;
+
+    const cleanup = new CleanupSteps();
+    try {
+      await api.putFileContents(setupUser.username, `${dir}/${hiddenName}`, 'hidden');
+      await api.putFileContents(setupUser.username, `${dir}/${visibleName}`, 'visible');
+
+      const all = await api.listFiles(setupUser.username, dir);
+      expect(all.data.map((entry) => entry.name)).toContain(hiddenName);
+
+      const shown = await api.listFiles(setupUser.username, dir, { showHidden: false });
+      const shownNames = shown.data.map((entry) => entry.name);
+      expect(shownNames).not.toContain(hiddenName);
+      expect(shownNames).toContain(visibleName);
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
+    } finally {
+      for (const name of [hiddenName, visibleName]) {
+        await cleanup.run(`remove ${name}`, () =>
+          removeFileIfPresent(api, setupUser.username, `${dir}/${name}`)
+        );
+      }
+      await cleanup.finish();
+    }
+  });
+
+  test('a limit truncates the listing and reports it', async ({ api, setupUser }) => {
+    const dir = `${getDomainBasePath(setupUser.domain)}/${uniqueId('list_limit_')}`;
+
+    const cleanup = new CleanupSteps();
+    try {
+      await api.createDirectory(setupUser.username, dir, true);
+      for (const name of ['a.txt', 'b.txt', 'c.txt']) {
+        await api.putFileContents(setupUser.username, `${dir}/${name}`, 'x');
+      }
+
+      const listing = await api.listFiles(setupUser.username, dir, { limit: 2 });
+
+      expect(listing.data).toHaveLength(2);
+      expect(listing.meta.truncated).toBe(true);
+      expect(listing.meta.total).toBe(3);
+      expect(listing.data.map((entry) => entry.name)).toEqual(['a.txt', 'b.txt']);
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
+    } finally {
+      await cleanup.run(`remove ${dir}`, () =>
+        removeFileIfPresent(api, setupUser.username, dir, true)
+      );
+      await cleanup.finish();
+    }
+  });
+
+  test('a missing path is 404 and a file is not a directory', async ({ api, setupUser }) => {
+    const dir = getDomainBasePath(setupUser.domain);
+    const filePath = `${dir}/${uniqueId('list_file_')}.txt`;
+
+    const missing = await api.listFilesRaw(setupUser.username, {
+      path: `${dir}/${uniqueId('list_missing_')}`,
+    });
+    expectOneOf(missing.status, [404], 'a missing path should not be listable');
+
+    const cleanup = new CleanupSteps();
+    try {
+      await api.putFileContents(setupUser.username, filePath, 'x');
+
+      const notADirectory = await api.listFilesRaw(setupUser.username, { path: filePath });
+      expectOneOf(notADirectory.status, [422], 'a file should not be listable');
+      expect(
+        (notADirectory.body as { problems?: { field: string; code: string }[] }).problems
+      ).toContainEqual(expect.objectContaining({ field: 'path', code: 'not_a_directory' }));
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
+    } finally {
+      await cleanup.run(`remove ${filePath}`, () =>
+        removeFileIfPresent(api, setupUser.username, filePath)
+      );
+      await cleanup.finish();
     }
   });
 });

@@ -29,8 +29,15 @@ final class AccountTemplate
     {
         $model = $this->project->userModel();
         $system = $this->project->system();
-        $projectDir = $this->project->projectDirPath();
 
+        $this->renderTemplate($model, $system, $this->project->projectDirPath());
+        $this->project->system()->project($model)->cron()->ensureCrontabFile($model->getChownString());
+        $this->renderStateTheTemplateDropped($model);
+        $this->storeWelcomeAppPort($model);
+    }
+
+    private function renderTemplate(ModelsUser $model, System $system, string $projectDir): void
+    {
         $projectTemplateDir = $system->projectFilesTemplateDirPath('dind');
         $templateVars = $this->templateVars($model, $system);
         $system->filesystem()->makeDirFromTemplate($projectDir, $projectTemplateDir, $templateVars);
@@ -39,13 +46,20 @@ final class AccountTemplate
         $system->runProcess(
             "sudo test -f {$projectDir}/entrypoint.sh && sudo chmod +x {$projectDir}/entrypoint.sh"
         );
-        $this->project->system()->project($model)->cron()->ensureCrontabFile($model->getChownString());
-        // Rendered from the account's state, not off: a rebuild re-renders the
-        // template and used to leave a live tunnel with no connector.
-        Cloudflare::renderConnector($model, Cloudflare::connectorWanted($model));
-        // A re-rendered account keeps nothing of the init it ran before.
-        SupervisordServiceManager::removeLayout($this->project);
+    }
 
+    /**
+     * The tunnel connector rendered from the account's state, not off, so a live tunnel keeps its
+     * connector; and nothing kept of the init a re-rendered account ran before.
+     */
+    private function renderStateTheTemplateDropped(ModelsUser $model): void
+    {
+        Cloudflare::renderConnector($model, Cloudflare::connectorWanted($model));
+        SupervisordServiceManager::removeLayout($this->project);
+    }
+
+    private function storeWelcomeAppPort(ModelsUser $model): void
+    {
         $composePath = $this->bootstrapWelcomeApp($model);
         $portDetection = DetectAppPort::detectAllPorts($composePath);
         $model->setAppPort($portDetection['primary'] ?? 8080);
@@ -53,13 +67,16 @@ final class AccountTemplate
     }
 
     /**
+     * @param bool $apiAccess whether the project may use the Engine API, which
+     *        its own egress guard has to know about
      * @return array<string, string>
      */
-    public function entrypointInitScripts(): array
+    public function entrypointInitScripts(bool $apiAccess = false): array
     {
         $userModel = $this->project->userModel();
         $username = $userModel->username;
-        $uid = $userModel->getUid() ?? 33;
+        [$uid] = $userModel->linuxIds();
+        $dockerConfig = ShellOperations::DOCKER_CONFIG_DIR;
         $script = <<<BASH
 # /run is a tmpfs (see the account's compose), so it starts empty on every
 # boot. Debian expects the directories its packages declare to be there —
@@ -80,27 +97,22 @@ mkdir -p "/home/\$(hostname)/docker"
 mkdir -p "/home/{$username}/.docker"
 chown {$uid}:{$uid} "/home/{$username}/.docker"
 echo "[init] created /home/{$username}/.docker"
+mkdir -p -m 700 "/home/{$username}/{$dockerConfig}"
 BASH;
 
         $script .= $this->cgroupNestingScript();
 
         $scripts = ['useradd.sh' => $script];
         if (TenantEgressGuard::enabled()) {
-            $scripts[TenantEgressGuard::FILE] = TenantEgressGuard::script($this->hostIpv4Addresses());
+            $scripts[TenantEgressGuard::FILE] = TenantEgressGuard::script($this->hostIpv4Addresses(), $apiAccess);
         }
 
         return $scripts;
     }
 
     /**
-     * The account's `/etc/docker/daemon.json`, rendered on the host and
-     * bind-mounted read-only into the container — so trusting a registry
-     * never needs a shell inside the account, only a file next to
-     * entrypoint.sh and a `docker compose up`.
-     *
-     * Username is known here at render time (account creation or a registry
-     * refresh), unlike the init script this replaced, which had to read its
-     * own hostname because it ran after the container already existed.
+     * The account's `/etc/docker/daemon.json`, rendered on the host and bind-mounted read-only, so trusting
+     * a registry needs no shell inside the account. Logs rotate, or they grow inside the account's quota.
      */
     public function daemonJson(): string
     {
@@ -114,7 +126,6 @@ BASH;
             'group' => $username,
             'insecure-registries' => [DindImageStore::CACHE_REGISTRY, DindImageStore::PROXY_REGISTRY],
             'registry-mirrors' => ['http://' . DindImageStore::PROXY_REGISTRY],
-            // Unrotated, a container's log grows inside the account's quota.
             'log-driver' => 'json-file',
             'log-opts' => ServiceHardener::LOG_OPTIONS,
         ], JSON_UNESCAPED_SLASHES);
@@ -170,11 +181,13 @@ BASH;
             $blockDevice = $system->filesystem()->getHomeFilesystemParentBlockDevice();
         }
 
+        [$uid, $gid] = $user->linuxIds();
+
         return [
             'isolation' => AccountRuntime::composeIsolation(),
             'user' => $user->username,
-            'uid' => $user->getUid() ?? 33,
-            'gid' => $user->getGid() ?? 33,
+            'uid' => $uid,
+            'gid' => $gid,
             'cpu_limit' => (string) $user->getCpuLimit(),
             'memory_limit' => (string) $user->effectiveMemoryLimit(),
             'device_read_bps' => $deviceReadBps,

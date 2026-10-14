@@ -5,6 +5,7 @@ namespace App\Lib\Git;
 use App\Exceptions\ProblemException;
 use App\Models\User;
 use App\System;
+use Illuminate\Support\Facades\DB;
 
 /**
  * A project's SSH deploy key: an ed25519 pair whose public half the customer
@@ -34,28 +35,74 @@ class DeployKey
      * Create the key unless the project has one, and pin `$host` if it is not
      * pinned yet. Never rotates: a key already registered with a forge keeps working.
      *
+     * The key is re-read and written under a row lock on the project, so two
+     * concurrent calls return the same key and keep both pins.
+     *
      * @return array<string, mixed>
      */
     public function ensure(User $user, ?string $host): array
     {
-        $key = self::stored($user);
+        $host = $host !== null && trim($host) !== '' ? self::knownHostsName($host) : null;
+        [$fresh, $scanned] = $this->prepareBeforeTheLock($user, $host);
+
+        return DB::transaction(fn (): array => $this->ensureLocked($user, $host, $fresh, $scanned));
+    }
+
+    /**
+     * ssh-keygen and ssh-keyscan (10 s per address) run before the lock: on SQLite the
+     * transaction is BEGIN IMMEDIATE, the whole database's write lock.
+     *
+     * @return array{0: ?array<string, mixed>, 1: ?list<string>} a new key when there was none, and the host's scanned keys
+     */
+    private function prepareBeforeTheLock(User $user, ?string $host): array
+    {
+        $seen = self::stored($user);
+        $fresh = $seen === null ? $this->generate('panelalpha-' . $user->username) : null;
+        $scanned = self::needsPin($seen, $host) ? $this->scan($host) : null;
+
+        return [$fresh, $scanned];
+    }
+
+    /**
+     * Re-reads the key under the row lock and saves what changed. The caller's $user is
+     * refreshed from the locked row, since the response is built from it.
+     *
+     * @param ?array<string, mixed> $fresh
+     * @param ?list<string> $scanned
+     * @return array<string, mixed>
+     */
+    private function ensureLocked(User $user, ?string $host, ?array $fresh, ?array $scanned): array
+    {
+        /** @var User $locked */
+        $locked = User::query()->whereKey($user->getKey())->lockForUpdate()->firstOrFail();
+
+        $key = self::stored($locked);
         $created = false;
         if ($key === null) {
-            $key = $this->generate('panelalpha-' . $user->username);
+            $key = $fresh ?? $this->generate('panelalpha-' . $locked->username);
             $created = true;
         }
 
-        $host = $host !== null && trim($host) !== '' ? self::knownHostsName($host) : null;
-        if ($host !== null && !self::isShipped($host) && !isset($key['known_hosts'][$host])) {
-            $key['known_hosts'][$host] = $this->scan($host);
+        if (self::needsPin($key, $host)) {
+            $key['known_hosts'][$host] = $scanned ?? $this->scan($host);
         }
 
         if ($created || $host !== null) {
-            $user->setDetails([self::DETAIL => $key]);
-            $user->save();
+            $locked->setDetails([self::DETAIL => $key]);
+            $locked->save();
         }
 
+        $user->setRawAttributes($locked->getAttributes(), true);
+
         return ['created' => $created] + self::view($key);
+    }
+
+    /**
+     * @param ?array<string, mixed> $key
+     */
+    private static function needsPin(?array $key, ?string $host): bool
+    {
+        return $host !== null && !self::isShipped($host) && !isset($key['known_hosts'][$host]);
     }
 
     /** False when the project had no key. */
@@ -205,19 +252,30 @@ class DeployKey
             $output = '';
         }
 
-        $lines = [];
-        foreach (explode("\n", $output) as $line) {
-            $parts = preg_split('/\s+/', trim($line)) ?: [];
-            if (count($parts) >= 3 && !str_starts_with($parts[0], '#') && str_starts_with($parts[2], 'AAAA')) {
-                // ssh-keyscan names the host the way it was asked; pin it the way ssh will look it up.
-                $lines[] = $host . ' ' . $parts[1] . ' ' . $parts[2];
-            }
-        }
+        $lines = self::keyLines($output, $host);
         if ($lines === []) {
             throw ProblemException::one('host', 'host_unreachable',
                 "Could not read the SSH host keys of {$host}: nothing answered on port {$port}.", [
                     'expected' => 'a git host that answers SSH',
                 ]);
+        }
+
+        return $lines;
+    }
+
+    /**
+     * ssh-keyscan names the host the way it was asked; each line is pinned the way ssh will look it up.
+     *
+     * @return list<string>
+     */
+    private static function keyLines(string $output, string $host): array
+    {
+        $lines = [];
+        foreach (explode("\n", $output) as $line) {
+            $parts = preg_split('/\s+/', trim($line)) ?: [];
+            if (count($parts) >= 3 && !str_starts_with($parts[0], '#') && str_starts_with($parts[2], 'AAAA')) {
+                $lines[] = $host . ' ' . $parts[1] . ' ' . $parts[2];
+            }
         }
 
         return $lines;

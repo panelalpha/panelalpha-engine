@@ -6,6 +6,9 @@ use App\Http\Controllers\Controller;
 use App\System;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\DeployTimings;
+use App\Lib\Task\ProcessTreeKiller;
+use App\Lib\Task\TaskCanceller;
+use App\Models\Task;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,7 +21,7 @@ class DeployLogController extends Controller
     {
         $user = $this->projectOr404($username);
         if ($user->getTemplate() !== 'dind') {
-            abort(new JsonResponse(['message' => 'Deploy logs are only available for dind users'], 403));
+            abort(new JsonResponse(['message' => 'Deploy logs work only on container projects (template dind).'], 403));
         }
 
         return $user;
@@ -64,31 +67,12 @@ class DeployLogController extends Controller
 
         $logger = DeployLogger::current($username);
         if ($logger === null) {
-            return new JsonResponse(['data' => [
-                'id' => null,
-                'status' => 'none',
-                'stage' => null,
-                'stages' => [],
-                'lines' => [],
-                'next_offset' => 0,
-                'more' => false,
-                'error' => null,
-                'started_at' => null,
-                'finished_at' => null,
-                'timings' => null,
-                'problem' => null,
-            ]]);
+            return new JsonResponse(['data' => self::NO_DEPLOY]);
         }
 
         $latest = $logger->readLatest();
         $read = $logger->read($offset, maxBytes: $maxBytes);
-
-        // Stage durations come from latest.json and cost nothing. The build
-        // breakdown has to re-read the whole log — hundreds of kilobytes on a
-        // real build — so it is computed once the deploy has stopped, or when
-        // a caller asks for it outright. Polling a running deploy stays cheap.
-        $finished = ($latest['finished_at'] ?? null) !== null;
-        $wantsBuild = $finished || $request->boolean('build_timings');
+        $wantsBuild = $this->wantsBuildTimings($latest, $request);
 
         return new JsonResponse(['data' => [
             'id' => $latest['id'] ?? null,
@@ -105,14 +89,43 @@ class DeployLogController extends Controller
                 is_array($latest) ? $latest : [],
                 $wantsBuild ? $logger->entries() : []
             ),
-            // Monitoring's fix for this failure, when it has one: see DeployLogger::finish().
             'problem' => $latest['problem'] ?? null,
         ]]);
     }
 
+    /** The deploy log of a project that has never deployed. */
+    private const NO_DEPLOY = [
+        'id' => null,
+        'status' => 'none',
+        'stage' => null,
+        'stages' => [],
+        'lines' => [],
+        'next_offset' => 0,
+        'more' => false,
+        'error' => null,
+        'started_at' => null,
+        'finished_at' => null,
+        'timings' => null,
+        'problem' => null,
+    ];
+
+    /**
+     * Stage durations come from latest.json and cost nothing; the build breakdown re-reads the whole log,
+     * so it is computed only once the deploy has stopped or when asked for, keeping polling cheap.
+     *
+     * @param array<string, mixed>|null $latest
+     */
+    private function wantsBuildTimings(?array $latest, Request $request): bool
+    {
+        $finished = ($latest['finished_at'] ?? null) !== null;
+
+        return $finished || $request->boolean('build_timings');
+    }
+
     #[OA\Post(
         path: '/projects/{username}/deploy-cancel',
-        summary: 'Cancel a running deploy: mark cancelled, kill the subprocess tree, clean up',
+        summary: 'Cancel a running or queued deploy: mark cancelled, kill the subprocess tree, clean up',
+        description: 'A deploy still waiting in the queue has no process yet: its task is cancelled, and the answer names it in `task_id`.',
         security: [['bearerAuth' => []]],
         tags: ['Deploy'],
         parameters: [
@@ -122,7 +135,7 @@ class DeployLogController extends Controller
             new OA\Response(response: 200, description: 'Deploy cancellation requested', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
-            new OA\Response(response: 409, description: 'No running deploy', content: new OA\JsonContent(
+            new OA\Response(response: 409, description: 'No running or queued deploy', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'message', type: 'string')],
             )),
         ],
@@ -133,78 +146,49 @@ class DeployLogController extends Controller
 
         $result = DeployLogger::requestCancel($username);
         if (!$result['cancelled']) {
-            return new JsonResponse(['message' => 'No running deploy to cancel'], 409);
+            return $this->cancelQueuedDeploy($username);
         }
 
         if ($result['pid'] !== null) {
-            $this->killProcessTree($result['pid'], new System());
+            (new ProcessTreeKiller(new System()))->kill($result['pid']);
         }
 
-        // Best-effort teardown of the half-started app stack. Cancelling a
-        // deploy must never destroy the account itself — the same endpoint is
-        // used to cancel a rebuild of a live application. Rolling a *failed
-        // account creation* back is UserController's job, not this one's.
-        try {
-            $user->project()->abortRunningDeploy();
-        } catch (\Exception $e) {
-            Log::warning("Deploy cancel cleanup failed for {$username}: {$e->getMessage()}");
-        }
+        $this->tearDownHalfStartedApp($user, $username);
 
         return new JsonResponse(['data' => ['cancelled' => true]]);
     }
 
-    /**
-     * SIGTERM the process tree rooted at $pid, escalating to SIGKILL after a
-     * grace period. Runs inside the core container (root, pid: host) where all
-     * deploy subprocesses live.
-     */
-    private function killProcessTree(int $pid, System $system): void
+    /** A deploy waiting in the queue has opened no log yet, so it is cancelled by its task. */
+    private function cancelQueuedDeploy(string $username): JsonResponse
     {
-        $pids = $this->collectDescendants($pid, $system);
-        $pids[] = $pid;
+        $task = Task::query()
+            ->where('username', $username)
+            ->whereIn('job_type', Task::DEPLOY_JOB_TYPES)
+            ->where('status', Task::STATUS_QUEUED)
+            ->orderByDesc('id')
+            ->first();
 
-        $list = implode(' ', $pids);
-        $system->runProcess("kill -TERM {$list} 2>/dev/null; true");
-
-        $deadline = microtime(true) + 5;
-        $alive = $pids;
-        while (!empty($alive) && microtime(true) < $deadline) {
-            $alive = [];
-            foreach ($pids as $p) {
-                $check = $system->runProcess("kill -0 {$p} 2>/dev/null");
-                if ($check->getExitCode() === 0) {
-                    $alive[] = $p;
-                }
-            }
-            if (!empty($alive)) {
-                usleep(200000);
-            }
+        if (!$task instanceof Task) {
+            return new JsonResponse(['message' => 'No running or queued deploy to cancel'], 409);
         }
 
-        if (!empty($alive)) {
-            $system->runProcess('kill -KILL ' . implode(' ', $alive) . ' 2>/dev/null; true');
+        if (!(new TaskCanceller(new ProcessTreeKiller(new System())))->cancelQueued($task)) {
+            return new JsonResponse(['message' => "Deploy task {$task->id} has just started; cancel it again."], 409);
         }
+
+        return new JsonResponse(['data' => ['cancelled' => true, 'task_id' => $task->id]]);
     }
 
     /**
-     * @return array<int>
+     * Best-effort teardown of the half-started app stack. It never destroys the account: the same
+     * endpoint cancels a rebuild of a live application, and rolling back a failed creation is UserController's job.
      */
-    private function collectDescendants(int $pid, System $system): array
+    private function tearDownHalfStartedApp(User $user, string $username): void
     {
-        $result = [];
-        $queue = [$pid];
-        while (!empty($queue)) {
-            $parent = array_shift($queue);
-            $process = $system->runProcess(['ps', '-o', 'pid=', '--ppid', (string)$parent]);
-            foreach (explode("\n", trim($process->getOutput())) as $line) {
-                $child = (int)trim($line);
-                if ($child > 0 && !in_array($child, $result, true)) {
-                    $result[] = $child;
-                    $queue[] = $child;
-                }
-            }
+        try {
+            $user->project()->cancelRunningDeploy();
+        } catch (\Exception $e) {
+            Log::warning("Deploy cancel cleanup failed for {$username}: {$e->getMessage()}");
         }
-
-        return $result;
     }
 }

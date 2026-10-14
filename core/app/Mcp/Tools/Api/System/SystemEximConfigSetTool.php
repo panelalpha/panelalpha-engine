@@ -39,9 +39,17 @@ class SystemEximConfigSetTool extends ApiTool
         return [
             'smarthost_provider',
             'sendgrid_api_token',
+            'mailchannels_username',
+            'mailchannels_password',
+            'amazon_ses_smtp_endpoint',
+            'amazon_ses_starttls_port',
+            'amazon_ses_smtp_username',
+            'amazon_ses_smtp_password',
             'smtp_host',
             'smtp_port',
             'smtp_username',
+            'smtp_password',
+            'smtp_implicit_tls',
             'sender_domain',
         ];
     }
@@ -54,9 +62,17 @@ class SystemEximConfigSetTool extends ApiTool
         return [
             'smarthost_provider' => $schema->string(),
             'sendgrid_api_token' => $schema->string(),
+            'mailchannels_username' => $schema->string(),
+            'mailchannels_password' => $schema->string(),
+            'amazon_ses_smtp_endpoint' => $schema->string(),
+            'amazon_ses_starttls_port' => $schema->string(),
+            'amazon_ses_smtp_username' => $schema->string(),
+            'amazon_ses_smtp_password' => $schema->string(),
             'smtp_host' => $schema->string(),
             'smtp_port' => $schema->string(),
             'smtp_username' => $schema->string(),
+            'smtp_password' => $schema->string(),
+            'smtp_implicit_tls' => $schema->boolean(),
             'sender_domain' => $schema->string(),
         ];
     }

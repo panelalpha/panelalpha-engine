@@ -1,4 +1,6 @@
 import type { EngineApi } from '@/clients/engine-api';
+import { expectStatus } from './expect-status';
+import { skipTest } from './test-helpers';
 
 /**
  * Documentation ranges, so nothing here can collide with a real address the
@@ -13,13 +15,30 @@ export interface SubnetSpec {
   mask: number;
 }
 
-/** Whether the engine exposes IP management at all — it is an optional module. */
+/**
+ * Whether the engine exposes IP management at all. Only 404 (the route is not
+ * registered) is a definite absence; any other answer that is not 200 throws.
+ */
 export async function isIpamAvailable(api: EngineApi): Promise<boolean> {
-  try {
-    await api.listSubnets();
-    return true;
-  } catch {
+  const response = await api.listSubnetsRaw();
+  if (response.status === 404) {
     return false;
+  }
+  await expectStatus(response, 200, 'GET /ip/subnets');
+  return true;
+}
+
+/**
+ * The engine refuses a subnet the host has no route for. A host without a
+ * default IPv6 route cannot carry an IPv6 subnet at all, so that refusal is
+ * the host's precondition, not a failure.
+ */
+function skipWhenHostCannotRoute(subnet: SubnetSpec, status: number, body: unknown): void {
+  const message = (body as { message?: string } | null)?.message ?? '';
+  if (status === 422 && message.includes('No default route found for IPv6')) {
+    skipTest(
+      `The host has no default IPv6 route, so the engine refuses IPv6 subnet ${subnet.ip}/${subnet.mask}: ${message}`
+    );
   }
 }
 
@@ -44,6 +63,8 @@ export async function ensureSubnet(
   if (created.status === 201) {
     return (created.body as { data: { id: number } }).data.id;
   }
+
+  skipWhenHostCannotRoute(subnet, created.status, created.body);
 
   const existing = (await api.listSubnets()).data.find(
     (candidate) => candidate.ip === subnet.ip && candidate.mask === subnet.mask

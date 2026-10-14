@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Inspect an application source and report its stack, ports and services
 
-    Detects what an application is without deploying it. The source may be a Git repository URL, an absolute path on this server, or the username of an existing project (its files under the account home directory). A public github.com repository is read from its file list and only the files detection reads are fetched; any other Git source, or one that cannot be read that way, is cloned shallow into a temporary directory and removed again. `source.method` says which (`tree` or `clone`). Values from .env files are never returned - only the variable names. A project username returns the same report as GET /projects/{username}/inspect, including the `deployment` snapshot its last deploy froze and the `drift` between that and the files on disk - so a caller that already has a username does not need the other endpoint.
+    Detects what an application is without deploying it. The source may be a Git repository URL or the username of an existing project (its files under the account home directory); a directory on this server is refused. A public github.com repository is read from its file list and only the files detection reads are fetched; any other Git source, or one that cannot be read that way, is cloned shallow into a temporary directory and removed again. `source.method` says which (`tree` or `clone`). Values from .env files are never returned - only the variable names. A project username returns the same report as GET /projects/{username}/inspect, including the `deployment` snapshot its last deploy froze and the `drift` between that and the files on disk - so a caller that already has a username does not need the other endpoint. A token limited to some projects may name only those as a project source.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -55,8 +55,8 @@ class SourceInspectTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'source' => $schema->string()->description('Repository URL (the scheme may be left out), absolute path, or project username. Example: github.com/owner/repo.')->required(),
-            'type' => $schema->string()->description('How to read `source`. Detected from its shape when omitted. One of: git, path, project.'),
+            'source' => $schema->string()->description('Repository URL (the scheme may be left out), or the username of an existing project. Example: github.com/owner/repo.')->required(),
+            'type' => $schema->string()->description('How to read `source`. Detected from its shape when omitted. `path` is not accepted: inspecting an arbitrary server directory is not exposed over the API. One of: git, project.'),
             'branch' => $schema->string()->description('Git branch to inspect.'),
             'subdirectory' => $schema->string()->description('Inspect this directory inside the source instead of its root. For a project the source root is the account home directory, so this is a path under /home/<username> such as "project/apps/api" or "public_html".'),
             'git_token' => $schema->string()->description('Access token for a private HTTPS repository. A `vault:<id>` of a `global` vault entry is accepted here in place of the literal token. A `project` entry is accepted while no project owns it yet, and inspecting does not assign it; one a project owns is refused. Omitted, the clone is anonymous.'),

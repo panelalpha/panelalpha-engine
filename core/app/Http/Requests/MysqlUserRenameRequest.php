@@ -2,10 +2,13 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\ValidatesMysqlName;
 use Illuminate\Foundation\Http\FormRequest;
 
 class MysqlUserRenameRequest extends FormRequest
 {
+    use ValidatesMysqlName;
+
     /**
      * Determine if the user is authorized to make this request.
      *
@@ -24,7 +27,7 @@ class MysqlUserRenameRequest extends FormRequest
     public function rules()
     {
         return [
-            'name' => 'string|required|regex:/^[A-Za-z_-][A-Za-z0-9_-]*$/|min:1|max:32',
+            'name' => $this->mysqlNameRule(32),
         ];
     }
 
@@ -35,9 +38,6 @@ class MysqlUserRenameRequest extends FormRequest
      */
     public function messages()
     {
-        return [
-            'name.max' => 'MySQL user name cannot exceed 32 characters (MySQL limit).',
-            'name.regex' => 'MySQL user name must start with a letter or underscore and can only contain letters, numbers, and underscores.',
-        ];
+        return $this->mysqlNameMessages('MySQL user name', 32);
     }
 }

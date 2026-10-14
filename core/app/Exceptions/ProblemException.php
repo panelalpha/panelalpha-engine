@@ -26,6 +26,9 @@ use Illuminate\Validation\ValidationException;
  */
 class ProblemException extends ValidationException
 {
+    /** The HTTP status a refusal about the project's state answers with. */
+    public const STATUS_CONFLICT = 409;
+
     /**
      * The problems, in the order they were reported.
      *
@@ -57,6 +60,19 @@ class ProblemException extends ValidationException
     public static function one(string $field, string $code, string $message, array $extra = []): self
     {
         return self::of([['field' => $field, 'code' => $code, 'message' => $message] + $extra]);
+    }
+
+    /**
+     * One problem the caller cannot fix by sending different fields: the
+     * project's state is what refuses, so it answers 409 with the same
+     * problems[] shape.
+     */
+    public static function conflict(string $field, string $code, string $message): self
+    {
+        $e = self::one($field, $code, $message);
+        $e->status = self::STATUS_CONFLICT;
+
+        return $e;
     }
 
     /**

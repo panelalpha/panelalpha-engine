@@ -625,7 +625,7 @@ resolve_engine_version() {
     fi
 
     if [ -z "$ENGINE_REPO" ]; then
-        echo_error "No engine source configured. Set PANELALPHA_ENGINE_REPO (or use: curl -fsSL https://get.panelalpha.com/engine | sh)"
+        echo_error "No engine source configured. Set PANELALPHA_ENGINE_REPO (or use: curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh)"
     fi
 
     PANELALPHA_ENGINE_VERSION=main
@@ -723,7 +723,7 @@ refuse_engine_v1_to_v2_upgrade() {
         echo -e ">>> ${red_color}If this host is already on Engine 2.x, start the containers and retry.${default_color}"
     fi
     echo -e ">>> ${red_color}Keep Engine 1.0 on the legacy updater from license.panelalpha.com:${default_color}"
-    echo -e ">>> ${yellow_color}  wget -N -P /opt/panelalpha https://license.panelalpha.com/engine-updater.sh${default_color}"
+    echo -e ">>> ${yellow_color}  wget --https-only --max-redirect=0 -N -P /opt/panelalpha https://license.panelalpha.com/engine-updater.sh${default_color}"
     echo -e ">>> ${yellow_color}  bash /opt/panelalpha/engine-updater.sh --key 'YOUR_LICENSE_KEY'${default_color}"
     echo -e ">>> ${red_color}The get.panelalpha.com/engine command is for fresh installs and hosts already on Engine 2.x.${default_color}"
     echo -e ">>> ${red_color}See product documentation for Engine 1.0 and 2.0 install paths.${default_color}"
@@ -817,7 +817,7 @@ get_hostname() {
         if [ "$PANELALPHA_HOST" = "" ]; then
             PANELALPHA_HOST=$(hostname 2>/dev/null)
             if [ "$PANELALPHA_HOST" = "" ]; then
-                PANELALPHA_HOST=$(curl --http1.1 -s icanhazip.com)
+                PANELALPHA_HOST=$(curl --proto '=https' --http1.1 -s https://icanhazip.com)
             fi
         fi
     fi
@@ -848,7 +848,7 @@ install_docker_engine() {
     apt-get -o DPkg::Lock::Timeout=300 update -y
     ensure_packages ca-certificates curl gnupg
     mkdir -m 0755 -p /etc/apt/keyrings
-    curl --http1.1 -fsSL https://download.docker.com/linux/$SYSTEM/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg --yes
+    curl --proto '=https' --http1.1 -fsSL https://download.docker.com/linux/$SYSTEM/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg --yes
     echo \
         "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$SYSTEM \
     "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" |
@@ -895,7 +895,7 @@ install_composer_dependencies() {
 
 download_panelalpha_engine() {
     if [ -z "$ENGINE_REPO" ]; then
-        echo_error "No engine source configured. Set PANELALPHA_ENGINE_REPO (or use: curl -fsSL https://get.panelalpha.com/engine | sh)"
+        echo_error "No engine source configured. Set PANELALPHA_ENGINE_REPO (or use: curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh)"
     fi
     download_engine_from_repository
 }
@@ -915,6 +915,7 @@ ENGINE_HOST_STATE=(
     core/config/logrotate core/config/exim core/config/modsecurity
     core/config/sftp core/config/pure-ftpd
     core/vendor core/storage core/bootstrap/cache
+    tests/coverage
     tests/api/node_modules tests/api/.playwright tests/api/test-results tests/api/playwright-report
     tests/api/env/.env 'tests/api/env/.env.*'
     scripts/tools/dind-test/vendor
@@ -1053,7 +1054,7 @@ generate_ssl_cert() {
     fi
     CERT_IP=$(ip route get 8.8.8.8 | sed -n '/src/{s/.*src *\([^ ]*\).*/\1/p;q}')
     if ipcalc "$CERT_IP" | grep -q 'Private Internet' && [ "$NO_LOCAL_IP" = 1 ]; then
-        CERT_IP=$(curl -s4 icanhazip.com)
+        CERT_IP=$(curl --proto '=https' -s4 https://icanhazip.com)
     fi
     # The address has to appear in the SAN list, not just the CN: Node (so Claude
     # Code) and Go both verify the URL host against the SAN and reject a cert
@@ -1090,7 +1091,7 @@ set_default_ip() {
     else
         IPV4=$(ip route get 8.8.8.8 | sed -n '/src/{s/.*src *\([^ ]*\).*/\1/p;q}')
         if ipcalc $IPV4 | grep -q 'Private Internet' && [ "$NO_LOCAL_IP" = 1 ]; then
-            IPV4=$(curl -s4 icanhazip.com)
+            IPV4=$(curl --proto '=https' -s4 https://icanhazip.com)
         fi
         docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan settings:set default_ipv4 "${IPV4}"
     fi
@@ -1142,7 +1143,7 @@ prepare_config_files() {
     mkdir -p /opt/panelalpha/shared-hosting/config/logrotate
     cp -Rn /opt/panelalpha/shared-hosting/templates/config/logrotate/. /opt/panelalpha/shared-hosting/config/logrotate/.
     # Their postrotate reopens the webserver's logs: engine code, not host state.
-    cp /opt/panelalpha/shared-hosting/templates/config/logrotate/{apache,nginx,nginx-proxy}.conf /opt/panelalpha/shared-hosting/config/logrotate/
+    cp /opt/panelalpha/shared-hosting/templates/config/logrotate/{apache,nginx,nginx-proxy,php}.conf /opt/panelalpha/shared-hosting/config/logrotate/
     mkdir -p /opt/panelalpha/shared-hosting/config/exim
     mkdir -p /opt/panelalpha/shared-hosting/logs/exim
     cp -Rn /opt/panelalpha/shared-hosting/templates/config/exim/. /opt/panelalpha/shared-hosting/config/exim/.
@@ -1284,7 +1285,7 @@ install_panelalpha_engine() {
 
     PUBLIC_HOST=$(ip route get 8.8.8.8 | sed -n '/src/{s/.*src *\([^ ]*\).*/\1/p;q}')
     if ipcalc "$PUBLIC_HOST" | grep -q 'Private Internet' && [ "$NO_LOCAL_IP" = 1 ]; then
-        PUBLIC_HOST=$(curl -s4 icanhazip.com)
+        PUBLIC_HOST=$(curl --proto '=https' -s4 https://icanhazip.com)
     fi
     CORE_URL="https://${PUBLIC_HOST}:2011"
     API_URL="${CORE_URL}/api"
@@ -1437,6 +1438,9 @@ EOF
     # live. Already-moved and stopped ones are left alone, and one that cannot
     # move keeps working where it is, so it never fails the update.
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan project:network:move --all || true
+    # PHP errors reach a project's own file only once its ini and pool carry the
+    # directives; accounts from before that are rewritten here.
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan projects:php-config:refresh --all || true
     # Exim listens on docker0's gateway, which differs per host (bip, or a
     # 172.17 clash), and relays for pash-tenants; both are read from Docker.
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan system:exim:rebuild --networks || true
@@ -1490,7 +1494,7 @@ request_certificates() {
     if [ -z "$IPV4" ] || ipcalc "$IPV4" | grep -q 'Private Internet'; then
         private=1
         if [ "$NO_LOCAL_IP" = 1 ]; then
-            IPV4=$(curl -s4 --max-time 10 icanhazip.com || true)
+            IPV4=$(curl --proto '=https' -s4 --max-time 10 https://icanhazip.com || true)
             [ -n "$IPV4" ] && ! ipcalc "$IPV4" | grep -q 'Private Internet' && private=0
         fi
     fi
@@ -2330,7 +2334,7 @@ echo_info "Getting server hostname"
 get_hostname
 
 if [ -z "$ENGINE_REPO" ]; then
-    echo_error "No engine source configured. Set PANELALPHA_ENGINE_REPO (or use: curl -fsSL https://get.panelalpha.com/engine | sh)"
+    echo_error "No engine source configured. Set PANELALPHA_ENGINE_REPO (or use: curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh)"
 fi
 
 update_progress 15 "Installing docker engine"

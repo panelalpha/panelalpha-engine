@@ -149,7 +149,7 @@ A few other known apps worth knowing:
 
 ## Troubleshooting
 
-**"App management is only available for this kind of project."**
+**"App user management works only on container projects (template dind)."**
 The WordPress user, install and one-click-login actions work on a WordPress site in its own container. A WordPress site on traditional PHP hosting can still be managed with WP-CLI, and you can still change its PHP version.
 
 **The install was refused.**
@@ -158,8 +158,85 @@ Either the project is not one the engine can install WordPress onto, or the admi
 **WordPress is up but shows the wrong address, or redirects to the old one.**
 WordPress stores its site address in its own database. Changing the project's domain does not update it. Ask the assistant to run the WP-CLI command that updates the site URL.
 
+**The site shows a blank page or a PHP error.**
+On traditional PHP hosting, ask the assistant to read the project's PHP error log: [Monitoring and logs](monitoring-and-logs.md#3-domain-logs---what-are-visitors-doing). A WordPress site in its own container has no separate file, so the assistant reads what the app container printed instead.
+
 **Plugin installs or updates fail from inside wp-admin.**
 Usually file permissions, the account's disk quota, or PHP running out of memory. Ask the assistant to check the project's usage against its limits, raise `memory_limit` if needed, then run the update through WP-CLI instead.
+
+## More requests to try
+
+**Mode** is the lowest permission mode that allows it: read, modify or full ([Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do)). Examples assume a WordPress project named `twp`.
+
+**Fresh WordPress**
+
+```text
+Set up WordPress on a new project called twp on this PanelAlpha Engine.
+```
+
+Mode: modify. Tools: `project_create`, `task_get`, `app_info`. Check: the project is created in its own container with its own database, and the WordPress setup wizard is not finished yet.
+
+**What the engine knows about the app**
+
+```text
+What application is twp, what can the engine do with it, and has it been
+installed yet?
+```
+
+Mode: read. Tools: `app_info`, `app_role_list`. Check: the answer names WordPress, lists what the engine can manage, and the roles come from the application. Before the install is finished, the roles and users are refused with "WordPress is not installed yet."
+
+**Finish the install**
+
+```text
+Install WordPress on twp. Address: the project's address. Title: Test Site.
+Admin user: admin. Admin email: admin@example.com. Generate a strong password
+and show it to me once.
+```
+
+Mode: modify. Tools: `app_install`, `app_health_check`. Check: all five values were supplied, a password under 8 characters would be refused, and the site then serves WordPress instead of the installer.
+
+**Log in without a password**
+
+```text
+Give me a one-click login link for the admin user of twp.
+```
+
+Mode: modify (held back in `readonly`). Tools: `app_user_list`, `app_user_sso_create`. Check: the link signs in straight to the admin, works once, and expires quickly.
+
+**The generated login**
+
+```text
+What admin login did the engine create for twp?
+```
+
+Mode: modify. Tools: `app_credentials_get`. Check: the answer has the address, username and password, or says the application declares none. The password is not in the deploy log.
+
+**Users of the application**
+
+```text
+On twp: list the users, add an editor with login jdoe and email
+jdoe@example.com, reset that user's password, then delete the user.
+```
+
+Mode: full. Tools: `app_user_list`, `app_user_create` with `role`, `app_user_reset_password`, `app_user_delete`. Check: the new user has the editor role, the old password stops working after the reset, and the user is gone from the list.
+
+**WP-CLI (traditional PHP hosting)**
+
+```text
+On the traditional WordPress site tphpwp, run `wp core version`, then update
+all plugins.
+```
+
+Mode: modify. Tools: `wp_cli_run` with `args`. Check: the version comes back, the plugin update output is reported, and the same request on `twp` (a container project) is refused with the reason.
+
+**Known apps and what the engine picks**
+
+```text
+Inspect https://github.com/matomo-org/matomo and tell me whether the engine
+treats it as a known app or just as PHP.
+```
+
+Mode: read. Tools: `source_inspect`. Check: the answer names the known app and the stack, and nothing is deployed.
 
 ## From the server
 

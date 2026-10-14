@@ -41,6 +41,11 @@ class ModsecAuditLogDownloadTool extends ApiTool
         ];
     }
 
+    protected function returnsFile(): bool
+    {
+        return true;
+    }
+
     /**
      * @return array<string, \Illuminate\JsonSchema\Types\Type>
      */
@@ -48,6 +53,8 @@ class ModsecAuditLogDownloadTool extends ApiTool
     {
         return [
             'filename' => $schema->string()->required(),
+            'offset' => $schema->integer()->min(0)->description('Byte to start reading at. Default 0; pass the previous result\'s next_offset to continue.'),
+            'length' => $schema->integer()->min(1)->max(49152)->description('Bytes to read, at most 49152 (the default). The result says whether there is `more`.'),
         ];
     }
 }

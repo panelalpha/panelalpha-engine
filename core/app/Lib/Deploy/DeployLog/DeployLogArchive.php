@@ -6,13 +6,19 @@ use App\Lib\Deploy\SafeName;
 use InvalidArgumentException;
 
 /**
- * Which deploys are kept per account: the newest 10 log files.
+ * Which deploys are kept per account: the newest DEPLOY_LOG_KEEP log files.
  *
  * `latest.json` is never pruned — it is the pointer the panel polls.
  */
 final class DeployLogArchive
 {
     public const KEEP_LOGS = 10;
+
+    /** How many logs each account keeps: DEPLOY_LOG_KEEP, at least 1. */
+    public static function keep(): int
+    {
+        return max(1, (int) config('deploy.log_keep', self::KEEP_LOGS));
+    }
 
     /**
      * @return list<array{

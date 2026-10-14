@@ -4,7 +4,6 @@ namespace App\Lib\Deploy\Detect;
 
 use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
-use App\Lib\Deploy\Compose\GeneratedCompose;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
 
 /**
@@ -23,6 +22,16 @@ final class PlaceholderPage
 
     /** The nginx config the generated static compose file mounts. */
     private const NGINX_CONF = NginxConfig::FILENAME;
+
+    /** Run-file names reserved for the engine: no client compose file is ever named one. */
+    private const ENGINE_RUN_FILES = [
+        EngineArtifacts::RUN_COMPOSE,
+        EngineArtifacts::RUN_COMPOSE_OVERRIDE,
+        EngineArtifacts::RUN_CLIENT_OVERRIDE,
+        EngineArtifacts::APP_CONFIG_COMPOSE,
+        EngineArtifacts::RUN_PASSWD,
+        EngineArtifacts::RUN_GROUP,
+    ];
 
     public static function isOneOf(string $path): bool
     {
@@ -51,7 +60,7 @@ final class PlaceholderPage
         }
 
         foreach (scandir($projectDir) ?: [] as $entry) {
-            if ($entry === '.' || $entry === '..' || str_starts_with($entry, '.')) {
+            if (str_starts_with($entry, '.')) {
                 continue;
             }
             if (!self::isScaffolding($projectDir, $entry)) {
@@ -76,24 +85,12 @@ final class PlaceholderPage
             return true;
         }
 
-        // The engine's reserved run-file names are exclusively its own — no
-        // client compose file is ever named one of these — so the content
-        // check below is unnecessary.
-        if ($name === strtolower(EngineArtifacts::RUN_COMPOSE)
-            || $name === strtolower(EngineArtifacts::RUN_COMPOSE_OVERRIDE)
-            || $name === strtolower(EngineArtifacts::RUN_CLIENT_OVERRIDE)
-            || $name === strtolower(EngineArtifacts::APP_CONFIG_COMPOSE)
-            || $name === strtolower(EngineArtifacts::RUN_PASSWD)
-            || $name === strtolower(EngineArtifacts::RUN_GROUP)
-        ) {
+        if (in_array($name, array_map('strtolower', self::ENGINE_RUN_FILES), true)) {
             return true;
         }
 
         if (in_array($name, ComposeFileInspector::COMPOSE_FILE_CANDIDATES, true)) {
-            $raw = @file_get_contents($dir . '/' . $entry);
-
-            // Only the engine's own compose file.
-            return is_string($raw) && str_contains($raw, GeneratedCompose::LABEL);
+            return ComposeFileInspector::isGeneratedBootstrapCompose($dir . '/' . $entry);
         }
 
         return false;

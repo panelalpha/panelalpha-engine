@@ -6,12 +6,24 @@ export const fileExistsResponseSchema = z.object({
 });
 
 export const fileStatSchema = z.object({
-  file_name: z.string(),
-  size: z.string(),
-  user_id: z.string(),
-  group_id: z.string(),
-  access_time: z.string(),
-  modify_time: z.string(),
-  status_change_time: z.string(),
-  create_time: z.string(),
+  name: z.string(),
+  path: z.string(),
+  type: z.enum(['file', 'dir', 'link']),
+  size: z.number(),
+  mtime: z.number(),
+  mode: z.string(),
+  uid: z.number(),
+  gid: z.number(),
+  target: z.string().nullable(),
+  target_type: z.enum(['file', 'dir', 'missing']).nullable(),
+  has_subdirectories: z.boolean().nullable(),
+});
+
+export const fileListResponseSchema = z.object({
+  data: z.array(fileStatSchema),
+  meta: z.object({
+    path: z.string(),
+    truncated: z.boolean(),
+    total: z.number(),
+  }),
 });

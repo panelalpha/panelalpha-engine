@@ -22,7 +22,7 @@ RUN sed -i 's/^logfile/#&/' /etc/redis/redis.conf
 
 RUN mkdir -p /var/log/cron
 
-RUN wget -O - https://repo.litespeed.sh | bash
+RUN wget --https-only --max-redirect=0 -O - https://repo.litespeed.sh | bash
 RUN apt-get update 
 
 RUN apt-get install -y \

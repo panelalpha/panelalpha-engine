@@ -38,7 +38,7 @@ Open Source. Self-hosted. Einfach für alle, nicht nur für Sysadmins.
 <p>
 <a href="#schritt-1-engine-auf-deinem-vps-installieren"><img src="https://img.shields.io/badge/install-one--liner-2f8f46" alt="Installation mit einem Befehl"></a>
 <a href="#schritt-1-engine-auf-deinem-vps-installieren"><img src="https://img.shields.io/badge/Debian_12%2F13-Ubuntu_22.04%2F24.04%2F26.04-a80030" alt="Unterstützte Systeme"></a>
-<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-204_tools-6f42c1" alt="204 MCP-Werkzeuge"></a>
+<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-225_tools-6f42c1" alt="225 MCP-Werkzeuge"></a>
 <a href="#lizenz"><img src="https://img.shields.io/badge/license-Apache_2.0-0b7285" alt="Apache 2.0"></a>
 <a href="https://discord.gg/9twHWR7xGX"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Discord beitreten"></a>
 </p>
@@ -96,7 +96,7 @@ Du brauchst einen **frischen** Server mit Debian 12/13 oder Ubuntu 22.04/24.04/2
 Wenn du zum Beispiel Engine installieren und gleichzeitig n8n bereitstellen willst, brauchst du nur das:
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
 ```
 
 Am Ende zeigt er die Adresse deiner neuen Seite und, wenn du nicht `--no-password` angibst, das Passwort, das sie öffnet. Für private Repositories, ein eigenes Passwort oder eine Anwendung auf einem Server, auf dem Engine schon läuft, siehe: [One-line app installation command](docs/02-getting-started/install.md#one-line-app-installation-command).
@@ -104,7 +104,7 @@ Am Ende zeigt er die Adresse deiner neuen Seite und, wenn du nicht `--no-passwor
 Lieber die zwei Schritte getrennt? Mit dem folgenden Befehl installierst du nur Engine und stellst deine Anwendung später über deinen Assistenten bereit (siehe Schritt 2):
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 Das war's. Dein Server ist bereit. Für einen eigenen Namen, ein eigenes TLS-Zertifikat oder einen Server hinter NAT, siehe: [Installationsoptionen](docs/02-getting-started/install.md).
@@ -174,7 +174,7 @@ Keine Befehle zu lernen, und auch keine Zauberformeln. Das hier zeigt nur, wie d
 | `Richte einen Cloudflare-Tunnel für n8n.mydomain.com ein.` | DNS und Tunnel konfiguriert, und genau so lieferst du auch von einem Server hinter NAT aus. |
 | `Wie viel Traffic hatten wir letzte Woche?` | Verbrauch, Logs und Limits für dieses Projekt und für den ganzen Server. |
 
-Mehr ausgearbeitete Beispiele: [worum du bitten kannst](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). Die vollständige Liste dessen, was dein Assistent erreichen kann: [204 Werkzeuge](docs/04-connecting-your-ai/your-assistant.md).
+Mehr ausgearbeitete Beispiele: [worum du bitten kannst](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). Die vollständige Liste dessen, was dein Assistent erreichen kann: [225 Werkzeuge](docs/04-connecting-your-ai/your-assistant.md).
 
 ---
 
@@ -319,7 +319,7 @@ Nicht so der Discord-Typ? [Unser Forum](https://community.panelalpha.com/) ist g
 ## Dein Server ist nur einen Befehl entfernt
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 ## Sicherheit

@@ -4,7 +4,11 @@ namespace App\System\Project\Dind;
 
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Dind\DindAccountCleanup;
+use App\Lib\Deploy\Platform\PlatformStage;
 use App\System\Project\Dind as DindProject;
+use App\System\Project\Dind\Generation\CancelledGeneration;
+use App\System\Project\Dind\Generation\GenerationState;
+use App\System\Project\Dind\Generation\RoutingSnapshot;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -22,19 +26,37 @@ final class AccountTeardown
     public function delete(): void
     {
         $username = $this->project->username();
-        $neighbourRefs = $this->otherAccountImageRefs($username);
-        $sidecarRefs = $neighbourRefs === null ? [] : DindAccountCleanup::hostSidecarRefsToRemove(
-            $this->accountImageRefsForHostCleanup(),
-            array_merge($this->hostContainerImageRefs(), $neighbourRefs)
-        );
+        $sidecarRefs = $this->hostSidecarRefsToRemove($username);
 
         $storage = $this->project->engine()->storage();
         $this->abortRunningDeploy(false, removeVolumes: true);
         $this->tryStep($storage->pruneAllArgv(), 300, true);
+        $this->wipeInnerDockerStore($username);
 
-        // Stops dockerd through the account's init, then removes its store.
-        // With the account container stopped there is no dockerd to reach,
-        // and the store goes with the home.
+        $this->purgeHostDockerCache($sidecarRefs);
+    }
+
+    /**
+     * Host sidecar images only this account uses; none when the other accounts could not be scanned.
+     *
+     * @return list<string>
+     */
+    private function hostSidecarRefsToRemove(string $username): array
+    {
+        $neighbourRefs = $this->otherAccountImageRefs($username);
+
+        return $neighbourRefs === null ? [] : DindAccountCleanup::hostSidecarRefsToRemove(
+            $this->accountImageRefsForHostCleanup(),
+            array_merge($this->hostContainerImageRefs(), $neighbourRefs)
+        );
+    }
+
+    /**
+     * Stops dockerd through the account's init, then removes its store. A stopped account
+     * has no dockerd to reach, and its store goes with the home.
+     */
+    private function wipeInnerDockerStore(string $username): void
+    {
         try {
             if ($this->project->isRunning()) {
                 $this->project->innerDocker()->wipeDataRoot();
@@ -44,8 +66,43 @@ final class AccountTeardown
                 "Could not wipe inner Docker data-root for {$username}: " . $e->getMessage(),
             );
         }
+    }
 
-        $this->purgeHostDockerCache($sidecarRefs);
+    /**
+     * A cancelled deploy. A first deploy has its half-started stack taken down; a redeploy loses only the
+     * containers it created, and what it moved is put back by its settle or the sweep. The account's dockerd stays.
+     */
+    public function cancelRunningDeploy(): void
+    {
+        if (!$this->isRedeploy()) {
+            $this->abortRunningDeploy(stopInnerDocker: false);
+
+            return;
+        }
+        (new CancelledGeneration($this->project))->remove();
+        if ($this->stoppedWhenTheRedeployStarted()) {
+            $this->stopRestartedApp();
+        }
+    }
+
+    /** The app ran nothing when this redeploy started: whatever it started goes back to stopped. */
+    private function stoppedWhenTheRedeployStarted(): bool
+    {
+        return (new GenerationState($this->project->username()))->get(GenerationState::STOPPED) !== null;
+    }
+
+    private function stopRestartedApp(): void
+    {
+        $this->tryStep($this->project->userAppComposeCommand(['stop']), 120, true);
+    }
+
+    /** Decided from the project, not only the routing snapshot, which a redeploy takes a while after it started. */
+    private function isRedeploy(): bool
+    {
+        $user = $this->project->userModel();
+
+        return PlatformStage::phaseFor($user->getDeploymentStatus(), $user->hasDeployedBefore()) === PlatformStage::UPGRADE
+            || (new RoutingSnapshot($this->project))->entry() !== null;
     }
 
     /**
@@ -70,6 +127,18 @@ final class AccountTeardown
      */
     private function accountImageRefsForHostCleanup(): array
     {
+        $refs = array_merge($this->composeFileImageRefs(), $this->innerDaemonImageRefs());
+
+        return array_values(array_unique($refs));
+    }
+
+    /**
+     * Images named by the run file and the client's own compose file.
+     *
+     * @return list<string>
+     */
+    private function composeFileImageRefs(): array
+    {
         $refs = [];
         $system = $this->project->system();
         $filesystem = $system->filesystem();
@@ -90,18 +159,27 @@ final class AccountTeardown
             }
         }
 
+        return $refs;
+    }
+
+    /**
+     * Images the inner daemon holds; none when it is already down, where the compose refs are enough.
+     *
+     * @return list<string>
+     */
+    private function innerDaemonImageRefs(): array
+    {
         try {
             $out = $this->project->shell()->execAsUserQuiet(
                 $this->project->engine()->images()->listImagesArgv(),
                 [],
                 60
             );
-            $refs = array_merge($refs, DindAccountCleanup::parseImageRefLines((string) $out));
         } catch (\Exception) {
-            // Compose refs are enough when the inner daemon is already down.
+            return [];
         }
 
-        return array_values(array_unique($refs));
+        return DindAccountCleanup::parseImageRefLines((string) $out);
     }
 
     /**

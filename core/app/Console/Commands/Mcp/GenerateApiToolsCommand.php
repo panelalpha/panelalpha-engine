@@ -47,6 +47,9 @@ class GenerateApiToolsCommand extends Command
         // Clones into a temp directory it deletes again, and reports what it
         // read. Nothing is deployed and no account is touched.
         'POST /source/inspect',
+        // Lists a remote's branches and tags over ls-remote. Creates nothing
+        // and touches no account.
+        'POST /source/refs',
         // Answers whether a name is free. POST only because the name travels
         // in a body; it reserves nothing and writes nothing, and calling it a
         // write hid it from read-only clients and made every caller ask
@@ -79,6 +82,7 @@ class GenerateApiToolsCommand extends Command
         ],
         'POST /projects/{username}/mysql/databases' => ['name' => 'dbname'],
         'POST /projects/{username}/mysql/users' => ['name' => 'dbuser'],
+        'PUT /projects/{username}/mysql/databases/{dbname}/rename' => ['name' => 'new_dbname'],
         'PUT /projects/{username}/mysql/users/{dbuser}/rename' => ['name' => 'new_dbuser'],
         // A bug report names the project it is about in its body, and the API
         // spells that `project` because next to `title` and `contact` a bare
@@ -526,6 +530,14 @@ class GenerateApiToolsCommand extends Command
 
             $in = $p['in'] ?? 'query';
             $name = $p['name'];
+
+            // x-mcp-hide: a parameter the API keeps that the tool does not
+            // offer. Marked seen so a body field of the same name is dropped
+            // too rather than becoming the argument.
+            if (($p['x-mcp-hide'] ?? false) === true) {
+                $seen[$name] = true;
+                continue;
+            }
 
             if ($in === 'path') {
                 $path[] = $name;

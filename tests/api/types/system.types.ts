@@ -23,13 +23,29 @@ export interface SystemInfo {
   default_ipv4?: string | null;
   default_ipv6?: string | null;
   cert_domain?: string | null;
+  /** What a project created without `tunnel` is published under (setting default_tunnel); null while unset. */
+  default_tunnel?: 'panelalpha' | 'none' | null;
   sites_base_domain?: string | null;
   url?: string | null;
   api_url?: string | null;
+  /** The certificate `:2011` presents, judged against the host in `url`; null when none is readable. */
+  served_certificate?: ServedCertificate | null;
   ipv4_nat_mode?: boolean;
   ipv4_nat_maps?: Ipv4NatMap[];
   latest_webserver_change?: SystemChangeStatus | null;
   latest_update?: SystemChangeStatus | null;
+}
+
+export interface ServedCertificate {
+  names?: string[];
+  status?: string;
+  issuer?: string;
+  self_signed?: boolean;
+  chain_trusted?: boolean | null;
+  covers_domain?: boolean;
+  valid_from?: string | null;
+  expires_at?: string | null;
+  days_remaining?: number | null;
 }
 
 export interface SystemChangeStatus {
@@ -37,6 +53,8 @@ export interface SystemChangeStatus {
   finished_at?: number | null;
   pid?: number | null;
   exit_code?: number | null;
+  failed?: boolean;
+  reason?: string | null;
   tail_stdout?: string | null;
   tail_stderr?: string | null;
   from_version?: string | null;

@@ -5,6 +5,7 @@ namespace App\Console\Wizard\Sections;
 use App\Console\Prompts\Screen;
 use App\Console\Wizard\KeepsAReceipt;
 use App\Console\Wizard\Section;
+use App\Lib\Domains\DomainPlan;
 use App\Lib\Ssl\EngineCertificateRequest;
 use App\Lib\Ssl\ServedCertificate;
 use App\Models\Setting;
@@ -88,11 +89,12 @@ class EngineAddressSection implements Section
                     'url' => 'Address        — what clients are told to connect to',
                     'name' => 'Certificate name — what the certificate is issued for',
                     'request' => 'Request or renew the certificate',
+                    'tunnel' => 'New project tunnel — where a project created without one is published',
                     'check' => 'Check it again',
                     'back' => 'Back',
                 ],
                 default: $this->suggestion($url, $served),
-                scroll: 5,
+                scroll: 6,
                 hint: 'The certificate has to cover the name in the address, or clients refuse it.',
             )) {
                 case 'url':
@@ -109,6 +111,13 @@ class EngineAddressSection implements Section
                 case 'request':
                     if ($this->database) {
                         $this->request($dryRun);
+                    }
+
+                    break;
+
+                case 'tunnel':
+                    if ($this->database) {
+                        $this->setTunnel($dryRun);
                     }
 
                     break;
@@ -144,6 +153,10 @@ class EngineAddressSection implements Section
                 !$this->database => '(unknown — the database could not be read)',
                 $certDomain === '' => '(default — the .panelalpha.direct name for this address)',
                 default => $certDomain,
+            }),
+            sprintf('New project tunnel: %s', match (true) {
+                !$this->database => '(unknown — the database could not be read)',
+                default => self::tunnelLabel($this->setting('default_tunnel')),
             }),
         ];
 
@@ -414,6 +427,59 @@ class EngineAddressSection implements Section
         }
 
         pause('Press enter to carry on...');
+    }
+
+    private function setTunnel(bool $dryRun): void
+    {
+        Screen::draw(self::label() . '  ·  New project tunnel');
+        note(
+            "What a project created without naming a tunnel is published under.\n\n"
+            . "panelalpha: the default, and what an unset setting does. The project gets the best\n"
+            . "            public name this engine has: a configured base domain, or a free\n"
+            . '            panelalpha.online label with a trusted certificate.\n'
+            . 'none:      PanelAlpha Online is never used. The project takes the name under the\n'
+            . '            certificate name above, and nothing is registered.'
+        );
+
+        $choice = (string) select(
+            label: 'The tunnel a project created without one gets',
+            options: [
+                DomainPlan::TUNNEL_PANELALPHA => 'panelalpha — the default: a base domain first, else a free panelalpha.online name',
+                DomainPlan::TUNNEL_NONE => "none — this engine's own name, nothing registered",
+            ],
+            default: $this->setting('default_tunnel') === DomainPlan::TUNNEL_NONE
+                ? DomainPlan::TUNNEL_NONE
+                : DomainPlan::TUNNEL_PANELALPHA,
+            scroll: 2,
+            hint: 'An explicit `tunnel` in a create request always wins over this.',
+        );
+
+        if ($dryRun) {
+            note(sprintf('Dry run: the new project tunnel would become %s.', $choice), 'warning');
+            pause('Press enter to carry on...');
+
+            return;
+        }
+
+        try {
+            Setting::set(DomainPlan::SETTING_DEFAULT_TUNNEL, $choice);
+        } catch (Throwable $e) {
+            error($e->getMessage());
+            pause('Press enter to carry on...');
+
+            return;
+        }
+
+        $this->receipt[] = sprintf('New projects without a tunnel will use: %s.', $choice);
+        note(end($this->receipt), 'info');
+        pause('Press enter to carry on...');
+    }
+
+    private static function tunnelLabel(?string $value): string
+    {
+        return $value === DomainPlan::TUNNEL_NONE
+            ? DomainPlan::TUNNEL_NONE
+            : DomainPlan::TUNNEL_PANELALPHA;
     }
 
     /**

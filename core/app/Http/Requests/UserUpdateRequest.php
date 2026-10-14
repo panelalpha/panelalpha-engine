@@ -2,15 +2,20 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\LowercasesInput;
 use App\Http\Requests\Concerns\ReportsProblems;
 use App\Rules\AccountMemoryLimit;
+use App\Rules\DomainName;
 use App\Rules\FreeMainDomain;
 use Illuminate\Foundation\Http\FormRequest;
 
+/**
+ * Reports problems so a refused memory_limit carries its code, as on create.
+ */
 class UserUpdateRequest extends FormRequest
 {
-    // A refused memory_limit carries its code, as on create.
     use ReportsProblems;
+    use LowercasesInput;
 
     public function authorize(): bool
     {
@@ -19,38 +24,36 @@ class UserUpdateRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        if ($this->has('domain')) {
-            $this->merge(['domain' => strtolower($this->domain)]);
-        }
+        $this->lowercaseInput('domain');
     }
 
+    /**
+     * The domain takes UserStoreRequest's hostname grammar: it becomes a vhost filename,
+     * a certificate path and a directory under the account.
+     * -1 means unlimited for disk space, device I/O and the count limits; memory and CPU
+     * have no negative meaning to docker. memory_limit can be changed, never removed.
+     */
     public function rules(): array
     {
         return [
-            // Same hostname grammar as UserStoreRequest: the domain becomes a vhost
-            // filename, a certificate path and a directory under the account.
             'domain' => [
                 'string',
-                'regex:/^(?!:\/\/)(?=.{1,255}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i',
+                'regex:' . DomainName::REGEX,
                 new FreeMainDomain((string) $this->route('username')),
             ],
             'email' => 'nullable|email',
-            // -1 is the documented "unlimited" sentinel for disk space only;
-            // the other limits have no negative meaning, and a negative one
-            // reaches docker as an invalid mem_limit/cpus value.
             'disk_space_limit' => 'nullable|integer|min:-1',
-            // Can be changed, never removed: every project has one.
             'memory_limit' => ['sometimes', 'integer', 'min:1', new AccountMemoryLimit()],
             'cpu_limit' => 'nullable|numeric|min:0',
-            'device_read_bps' => 'integer|nullable',
-            'device_write_bps' => 'integer|nullable',
+            'device_read_bps' => 'integer|nullable|min:-1',
+            'device_write_bps' => 'integer|nullable|min:-1',
             'bandwidth_limit' => 'integer|nullable|min:0',
-            'mysql_databases_limit' => 'integer|nullable',
-            'ftp_accounts_limit' => 'integer|nullable',
-            'sftp_accounts_limit' => 'integer|nullable',
-            'addon_domains_limit' => 'integer|nullable',
-            'subdomains_limit' => 'integer|nullable',
-            'inodes_limit' => 'integer|nullable',
+            'mysql_databases_limit' => 'integer|nullable|min:-1',
+            'ftp_accounts_limit' => 'integer|nullable|min:-1',
+            'sftp_accounts_limit' => 'integer|nullable|min:-1',
+            'addon_domains_limit' => 'integer|nullable|min:-1',
+            'subdomains_limit' => 'integer|nullable|min:-1',
+            'inodes_limit' => 'integer|nullable|min:-1',
             'php_fpm_pool_settings' => 'nullable|string',
             'lsphp_settings' => 'nullable|string',
             'redis_config' => 'nullable|string',

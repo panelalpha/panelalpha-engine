@@ -35,7 +35,21 @@ To browse a database in a web interface, ask for a sign-on link. A new install e
 Give me a phpMyAdmin sign-on link for this project.
 ```
 
-You get a URL that logs you straight in. **It expires after five minutes.** Do not bookmark it - when it stops working, ask for a new one, which takes a second.
+You get a URL that logs you straight in. **It expires after five minutes.** Do not bookmark it - when it stops working, ask for a new one, which takes a second. A suspended project gets no sign-on link.
+
+## Renaming a database
+
+```text
+Rename the database shop on this project to store.
+```
+
+The new name gets the project's prefix, like any new database. The data is moved, every user keeps the access it had, and the old name disappears. If anything fails along the way, the old database is kept as it was. Update your application to the new prefixed name afterwards, and rebuild.
+
+The application database that the engine creates for a container project (its name ends in `app`) cannot be renamed. A name that another database of the project already uses is refused.
+
+## Copies of a project
+
+On a traditional PHP project, a staging copy or a clone brings the databases with it, under the new project's prefix, with new users and passwords and the same permissions. A push between the two replaces the databases on the other side, or only the tables you pick, and keeps that side's users and passwords. A container project's databases are not copied. See [Staging](projects.md#staging) and [Cloning](projects.md#cloning).
 
 ## Limits
 
@@ -61,11 +75,87 @@ The user exists but has no permission on that database, or the password does not
 **The application cannot log in after a rebuild, and used to work.**
 The database still holds the password it was first created with, while your application now has a different one. Changing the environment variable does not change the password inside the database. See [Reading errors](../02-getting-started/reading-errors.md).
 
+**A rename is refused.**
+The name is already used by another database of the project, is reserved, or is too long once the prefix is added. A container project's own application database (ending in `app`) cannot be renamed.
+
 **"Database limit reached".**
 The project has used up its plan's database allowance. Either raise the limit ([Limits](projects.md#limits)) or delete a database it no longer needs.
 
 **phpMyAdmin gives a 404, or loops back to the login page.**
 The sign-on link has expired - they last five minutes. Ask for a fresh one. If a new link does the same, the project's database user is missing; recreate it, then request the link again.
+
+## More requests to try
+
+**Mode** is the lowest permission mode that allows it: read, modify or full ([Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do)). Examples assume a project named `tshop`.
+
+**A working database**
+
+```text
+Create a MySQL database named shop on tshop, create a user shopuser for it with
+a strong password, and give that user full access. Then give me the details my
+application needs.
+```
+
+Mode: modify. Tools: `mysql_database_create`, `mysql_user_create`, `mysql_privileges_set`, `mysql_server_info`. Check: the database and user names come back with the project's prefix, and the assistant hands over those prefixed names and the host and port, not `localhost`.
+
+**Look at what exists**
+
+```text
+List the databases and database users of tshop. Show the details of the
+database shop and of the user shopuser, and what shopuser may do on shop.
+```
+
+Mode: read. Tools: `mysql_database_list`, `mysql_database_get`, `mysql_user_list`, `mysql_user_get`, `mysql_privileges_get`. Check: the privileges read back as the ones granted when the database was created.
+
+**Narrow, then remove, access**
+
+```text
+Make shopuser read-only on shop. Then take all its access to shop away.
+```
+
+Mode: full. Tools: `mysql_privileges_set` with a read-only list, `mysql_privileges_get`, `mysql_privileges_revoke`. Check: after the first call the user can read and not write. After the revoke the user exists and has no access.
+
+**Password and name of a user**
+
+```text
+Change the password of shopuser to a new strong one, rename the user to
+shopowner, and tell me what my application must change.
+```
+
+Mode: modify. Tools: `mysql_user_change_password`, `mysql_user_rename`. Check: the assistant says the application's settings must be updated and a rebuild is needed, and that changing the variable alone does not change the password inside the database. A password under 8 characters is refused.
+
+**Browse in phpMyAdmin**
+
+```text
+Give me a phpMyAdmin sign-on link for tshop.
+```
+
+Mode: modify. Tools: `phpmyadmin_sso_token_create`. Check: the link logs in straight away and the assistant says it expires after five minutes.
+
+**The limit**
+
+```text
+Set tshop's database limit to 1, then create a second database.
+```
+
+Mode: modify. Tools: `project_update`, `mysql_database_create`. Check: the second database is refused as "limit reached", and the assistant points at raising the limit or deleting one.
+
+**Rename a database**
+
+```text
+Rename the database shop on tshop to store. Then list its databases and what
+shopuser may do on store.
+```
+
+Mode: full. Tools: `mysql_database_rename` with `new_dbname`, `task_get`, `mysql_database_list`, `mysql_privileges_get`. Check: the rename runs as a task, the new name has the project's prefix, shopuser keeps its access on the new name, and the old name is gone. On a container project the application's own database (ending in `app`) is refused.
+
+**Remove**
+
+```text
+Delete the user shopowner and the database shop from tshop.
+```
+
+Mode: full. Tools: `mysql_user_delete`, `mysql_database_delete`, `mysql_database_list`. Check: the assistant asks first, and both are gone from the lists.
 
 ## From the server
 

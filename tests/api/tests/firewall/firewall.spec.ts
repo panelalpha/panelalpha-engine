@@ -13,6 +13,7 @@ import {
   requireFirewall,
   restoreFirewallState,
 } from '@/helpers/firewall-helpers';
+import { expectStatus } from '@/helpers/expect-status';
 import { firewallRuleResponseSchema } from '@/schemas';
 import type { FirewallRule } from '@/types';
 
@@ -52,6 +53,7 @@ test.describe('Firewall', () => {
     expect(status.version).toBeTruthy();
     expect(status.default_incoming).toBeTruthy();
     expect(status.default_outgoing).toBeTruthy();
+    expect(status.refused_rules, 'stored rules the firewall would not load').toEqual([]);
   });
 
   test('the rules listing has unique ids', async ({ api }) => {
@@ -133,15 +135,15 @@ test.describe('Firewall rules', () => {
 
     // Clearing everything the rule matches on would make it match all traffic.
     const cleared = await api.updateFirewallRuleRaw(moved.id, { port: null, source: null });
-    expect(cleared.status).toBe(422);
+    await expectStatus(cleared, 422);
     expect(await listedIds(api)).toContain(moved.id);
 
     const deleted = (await api.deleteFirewallRule(moved.id)).data;
     expect(deleted.id).toBe(moved.id);
     expect(await listedIds(api)).not.toContain(moved.id);
 
-    expect((await api.deleteFirewallRuleRaw(moved.id)).status).toBe(404);
-    expect((await api.updateFirewallRuleRaw(moved.id, { comment: RULE_COMMENT })).status).toBe(404);
+    await expectStatus(await api.deleteFirewallRuleRaw(moved.id), 404);
+    await expectStatus(await api.updateFirewallRuleRaw(moved.id, { comment: RULE_COMMENT }), 404);
   });
 
   test('a deny rule is placed above the allow rules', async ({ api }) => {
@@ -191,6 +193,27 @@ test.describe('Firewall rules', () => {
       ],
       ['an unknown action', { action: 'reject', protocol: 'tcp', port, source }],
       ['no action', { protocol: 'tcp', port, source }],
+      // A leading zero is stored as written and breaks the next reload of the whole ruleset.
+      ['a port with a leading zero', { action: 'allow', protocol: 'tcp', port: '08080', source }],
+      [
+        'a port range with a leading zero',
+        { action: 'allow', protocol: 'tcp', port: '40000:040009', source },
+      ],
+      ['port 0', { action: 'allow', protocol: 'tcp', port: '0', source }],
+      ['a port above 65535', { action: 'allow', protocol: 'tcp', port: '65536', source }],
+      [
+        'a range running high to low',
+        { action: 'allow', protocol: 'tcp', port: '40009:40000', source },
+      ],
+      // The source keeps a regression from denying anyone but a documentation address.
+      [
+        'a deny on the engine API port',
+        { action: 'deny', protocol: 'tcp', port: ENGINE_API_PORT, source },
+      ],
+      [
+        'a deny whose port range holds the engine API port',
+        { action: 'deny', protocol: 'tcp', port: '2000:2020', source },
+      ],
       // Valid to the API, refused by ufw itself: its own words come back as a 422.
       ['addresses of two IP versions', { action: 'deny', source, destination: '2001:db8::1' }],
     ];
@@ -202,16 +225,17 @@ test.describe('Firewall rules', () => {
         if (typeof id === 'string') {
           created.add(id);
         }
-        expect(response.status, JSON.stringify(response.body)).toBe(422);
+        await expectStatus(response, 422, JSON.stringify(response.body));
       });
     }
   });
 
   test('an unknown rule id is not found', async ({ api }) => {
-    expect((await api.deleteFirewallRuleRaw(UNKNOWN_RULE_ID)).status).toBe(404);
-    expect(
-      (await api.updateFirewallRuleRaw(UNKNOWN_RULE_ID, { comment: RULE_COMMENT })).status
-    ).toBe(404);
+    await expectStatus(await api.deleteFirewallRuleRaw(UNKNOWN_RULE_ID), 404);
+    await expectStatus(
+      await api.updateFirewallRuleRaw(UNKNOWN_RULE_ID, { comment: RULE_COMMENT }),
+      404
+    );
   });
 
   test('the engine keeps its own ports open, and the API cannot change them', async ({ api }) => {
@@ -233,7 +257,7 @@ test.describe('Firewall rules', () => {
 
     // An empty edit: if the refusal regresses, nothing about the rule changes.
     const edit = await api.updateFirewallRuleRaw(sftp.id, {});
-    expect(edit.status, JSON.stringify(edit.body)).toBe(422);
+    await expectStatus(edit, 422, JSON.stringify(edit.body));
 
     const removal = await api.deleteFirewallRuleRaw(sftp.id);
     if (removal.status === 200) {
@@ -248,7 +272,7 @@ test.describe('Firewall rules', () => {
         comment: 'restored by the API suite after a managed rule was deletable',
       });
     }
-    expect(removal.status, JSON.stringify(removal.body)).toBe(422);
+    await expectStatus(removal, 422, JSON.stringify(removal.body));
     expect(await listedIds(api)).toContain(sftp.id);
   });
 });

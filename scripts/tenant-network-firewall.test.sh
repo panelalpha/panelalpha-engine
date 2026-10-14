@@ -84,13 +84,14 @@ expect() { # expect <label> <expected> <actual>
 }
 reset() {
     rm -f "$W/routes" "$W/addrs" "$W/nets" "$W/tenants" "$W/flushed" "$W/calls" \
-        "$W/members" "$W/pids" "$W/hostlinks" "$W"/ns-* "$W/nft.in" "$W/restore.in" "$W/restore.args" "$W/no-wait" "$W/units"
+        "$W/members" "$W/pids" "$W/hostlinks" "$W"/ns-* "$W/nft.in" "$W/restore.in" "$W/restore.args" "$W/no-wait" "$W/units" "$W/api-access"
     printf 'default via 192.0.2.1 dev eth0\n10.10.0.0/20 dev eth0 proto kernel scope link src 10.10.0.25\n' >"$W/routes"
     printf '1: lo    inet 127.0.0.1/8 scope host lo\n2: eth0    inet 10.10.0.25/20 brd 10.10.15.255 scope global eth0\n' >"$W/addrs"
     printf 'COMPOSE_PROFILES=full\n' >"$W/env"
 }
 run() { # run [args...] -> exit code
     PATH="$W/bin:$PATH" PA_ENV_FILE="$W/env" PA_TENANT_LOCK="$W/lock" PA_SYSTEMD_DIR="$W/units" \
+        PA_API_ACCESS_FILE="$W/api-access" \
         sh "$SCRIPT_DIR/tenant-network-firewall.sh" "$@" >"$W/out" 2>&1
     echo $?
 }
@@ -211,6 +212,38 @@ expect "on every Docker start" "0" "$(grep -c 'RemainAfterExit=yes' "$bind")"
 expect "with a full apply" "1" "$(grep -c "^ExecStart=/bin/sh $SCRIPT_DIR/tenant-network-firewall.sh$" "$bind")"
 expect "both enabled" "1" "$(grep -c '^systemctl enable panelalpha-tenant-guard.service panelalpha-tenant-bind.service' "$W/calls")"
 expect "Docker untouched" "0" "$(grep -c '^docker' "$W/calls")"
+
+# The engine's allow-list: which accounts may reach :2011, by their own
+# address on the bridge.
+reset; echo "10.200.0.0/16" >"$W/tenants"
+printf 'alice 26:e3:f2:d4:b6:68 10.200.128.1/16\nbob 26:e3:f2:d4:b6:69 10.200.128.2/16\n' >"$W/members"
+expect "no allow-list file: no account may open the engine port" "0" "$(run)"
+expect "the engine port is not opened" "0" "$(grep -c -- '--ctorigdstport 2011' "$W/restore.in")"
+: >"$W/api-access"
+expect "an empty allow-list file: no account may open the engine port" "0" "$(run)"
+expect "the engine port is not opened" "0" "$(grep -c -- '--ctorigdstport 2011' "$W/restore.in")"
+
+printf 'alice\n' >"$W/api-access"
+expect "one account listed: it may" "0" "$(run)"
+expect "its own address on the port of the DNAT" "1" \
+    "$(grep -cF -- '-A PA-TENANT-NET -i br-pa-tenants -s 10.200.128.1/32 -p tcp -m conntrack --ctstate DNAT --ctorigdstport 2011 -j ACCEPT' "$W/restore.in")"
+expect "and no one else" "0" "$(grep -c 10.200.128.2 "$W/restore.in")"
+expect "it comes before the private ranges are refused" "1" \
+    "$(awk '/ctorigdstport 2011/ { api = NR } /-j REJECT --reject-with icmp-net-prohibited/ { if (!reject) reject = NR } END { print (api && reject && api < reject) ? 1 : 0 }' "$W/restore.in")"
+
+printf 'alice\nbob\n' >"$W/api-access"
+expect "two accounts listed: both may" "0" "$(run)"
+expect "the first" "1" "$(grep -c 10.200.128.1 "$W/restore.in")"
+expect "and the second" "1" "$(grep -c 10.200.128.2 "$W/restore.in")"
+
+printf 'alice\nstopped\n' >"$W/api-access"
+expect "a listed account the network does not hold: no rule" "0" "$(run)"
+expect "the running one still may" "1" "$(grep -c 10.200.128.1 "$W/restore.in")"
+expect "one rule in all, none invented for the stopped account" "1" "$(grep -c -- '--ctorigdstport 2011' "$W/restore.in")"
+expect "and none for the account that is not on the bridge" "0" "$(grep -c 10.200.128.2 "$W/restore.in")"
+
+expect "boot: the allow-list is not read and Docker is not asked" "0" "$(run --boot)"
+expect "no engine port rule before its ports are bound" "0" "$(grep -c -- '--ctorigdstport 2011' "$W/restore.in")"
 
 echo
 [ "$failures" = 0 ] && echo "All passed." || echo "$failures failed."

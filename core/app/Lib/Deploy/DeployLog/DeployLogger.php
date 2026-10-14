@@ -45,14 +45,6 @@ class DeployLogger
 
     public const KEEP_LOGS = DeployLogArchive::KEEP_LOGS;
 
-    /** How a finished deploy announces itself, by status. */
-    private const FINISH_MESSAGE = [
-        self::STATUS_SUCCESS => 'Deploy finished successfully',
-        self::STATUS_PARTIAL => 'Deploy finished with warnings',
-        self::STATUS_CANCELLED => 'Deploy cancelled',
-        self::STATUS_FAILED => 'Deploy failed',
-    ];
-
     /** Why a deploy whose process died before finish() is closed as failed. */
     public const INTERRUPTED_MESSAGE =
         'The deploy stopped without finishing — the engine process running it is gone. '
@@ -60,9 +52,6 @@ class DeployLogger
 
     /** The line a DinD account without git ends its first deploy on, `running`, until files arrive. */
     public const WAITING_FOR_FILES = 'Environment ready, waiting for project files';
-
-    /** How far back from the end of a log to look for its finish line. */
-    private const FINISH_LINE_LOOKBACK = 60;
 
     /** Lines of a known problem's text written to the log, per section. */
     private const PROBLEM_MAX_LINES = 40;
@@ -142,7 +131,7 @@ class DeployLogger
         LogStorage::ensureDirectory($logger->paths->directory());
         $logger->lock->acquire();
         LogStorage::write($logger->getLogPath(), '');
-        DeployLogArchive::prune($username, self::KEEP_LOGS);
+        DeployLogArchive::prune($username, DeployLogArchive::keep());
         $logger->status->write(DeployStatus::started($logger->deployId));
 
         return $logger;
@@ -396,22 +385,9 @@ class DeployLogger
      */
     private function finishLine(): ?array
     {
-        foreach (array_reverse($this->tail(self::FINISH_LINE_LOOKBACK)) as $line) {
-            if (!in_array($line['level'] ?? null, [self::LEVEL_OK, self::LEVEL_ERROR], true)) {
-                continue;
-            }
-            $msg = (string) ($line['msg'] ?? '');
-            foreach (self::FINISH_MESSAGE as $status => $message) {
-                if ($msg === $message) {
-                    return [$status, null];
-                }
-                if (str_starts_with($msg, $message . ': ')) {
-                    return [$status, substr($msg, strlen($message) + 2)];
-                }
-            }
-        }
+        $finish = DeployFinishLine::find($this->tail(DeployFinishLine::LOOKBACK));
 
-        return null;
+        return $finish === null ? null : [$finish['status'], $finish['error']];
     }
 
     /**
@@ -666,8 +642,9 @@ class DeployLogger
     private function settleStatus(array $latest, string $status, ?string $error): array
     {
         $wasCancelled = ($latest['status'] ?? null) === self::STATUS_CANCELLED;
+        $cancellationOutcome = in_array($status, [self::STATUS_FAILED, self::STATUS_PARTIAL], true);
 
-        return $wasCancelled && $status === self::STATUS_FAILED
+        return $wasCancelled && $cancellationOutcome
             ? [self::STATUS_CANCELLED, null]
             : [$status, $error];
     }
@@ -728,9 +705,7 @@ class DeployLogger
 
     private static function finishMessage(string $status, ?string $error): string
     {
-        $message = self::FINISH_MESSAGE[$status] ?? self::FINISH_MESSAGE[self::STATUS_FAILED];
-
-        return $error === null || $error === '' ? $message : $message . ': ' . $error;
+        return DeployFinishLine::message($status, $error);
     }
 
     /**

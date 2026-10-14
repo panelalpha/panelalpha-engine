@@ -102,7 +102,7 @@ if [[ -f "$TMPDIR/serial.no" ]]; then
 else
     echo "Downloading trial key..."
 
-    wget -q -P /usr/local/lsws/conf/ http://license.litespeedtech.com/reseller/trial.key
+    wget --https-only --max-redirect=0 -q -P /usr/local/lsws/conf/ https://license.litespeedtech.com/reseller/trial.key
 
     echo "Running license check with trial key (lshttpd -V)..."
     echo "lshttpd output:"

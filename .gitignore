@@ -4,8 +4,8 @@
 .env-core.pae-backup
 scripts/monit.conf
 scripts/monit-script.sh
-core/tests/sessions/*/.env
-core/tests/sessions/*/cache.json
+tests/unit/sessions/*/.env
+tests/unit/sessions/*/cache.json
 users/*
 version
 crt
@@ -31,6 +31,9 @@ build/*
 # Runtime artifacts of an engine installed straight from a checkout — what
 # bootstrap-from-source.sh and scripts/tools/engine-container.sh create in place.
 logs/
+
+# Runtime coverage recordings and dumps written by core (testing:coverage)
+tests/coverage/
 
 # API test suite (tests/api) — build artifacts
 tests/api/node_modules

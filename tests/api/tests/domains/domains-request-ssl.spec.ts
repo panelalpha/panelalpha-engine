@@ -1,5 +1,6 @@
 import { expect, test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
+import { expectStatus } from '@/helpers/expect-status';
 
 test.describe('request SSL certificate', () => {
   test('dry_run returns a plan without changing the installed cert', async ({ api, setupUser }) => {
@@ -7,7 +8,7 @@ test.describe('request SSL certificate', () => {
     const planned = await api.requestSslCertificateRaw(setupUser.username, setupUser.domain, {
       dry_run: true,
     });
-    expect(planned.status).toBe(200);
+    await expectStatus(planned, 200);
     const after = await api.getInstalledSslCertificate(setupUser.username, setupUser.domain);
     expect(after.data).toEqual(before.data);
   });

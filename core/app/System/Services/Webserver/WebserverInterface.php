@@ -21,6 +21,11 @@ interface WebserverInterface
 
     public function reload(bool $rebindIpListeners = false): void;
 
+    /**
+     * Reload a vhost/upstream change without ever restarting the webserver; the traffic switch uses it.
+     */
+    public function reloadRouting(): void;
+
     public function needsIpListenerRebind(): bool;
 
     public function restart(): void;

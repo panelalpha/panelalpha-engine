@@ -554,7 +554,7 @@
       ]
     },
     "git": {
-      "description": "How the deploy clones the repository. The default is a depth-1 clone of one branch, with no history and no tags. `history: full` fetches the whole history and every tag after the clone, for a build that derives its version from them (`git describe --tags`, goreleaser, setuptools-scm); it costs the size of the history on every deploy, so set it only for a repository that needs it.",
+      "description": "How the deploy clones the repository. The default is a depth-1 clone of one branch, with no history and no tags, and every submodule the repository declares, fetched after the clone and again on every redeploy. `history: full` fetches the whole history and every tag after the clone, for a build that derives its version from them (`git describe --tags`, goreleaser, setuptools-scm); it costs the size of the history on every deploy, so set it only for a repository that needs it. `submodules` lists the only submodules to fetch, by path, each with its own; `[]` fetches none. A submodule that cannot be fetched fails the deploy.",
       "anyOf": [
         {
           "type": "object",
@@ -564,12 +564,21 @@
                 "full",
                 "shallow"
               ]
+            },
+            "submodules": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "not": {
+                  "pattern": "^(/|-)|(^|/)\\.\\.(/|$)"
+                }
+              },
+              "uniqueItems": true
             }
           },
-          "required": [
-            "history"
-          ],
-          "additionalProperties": false
+          "additionalProperties": false,
+          "minProperties": 1
         },
         {
           "type": "null"

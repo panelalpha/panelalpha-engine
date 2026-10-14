@@ -1,0 +1,197 @@
+<?php
+
+namespace Tests\Unit\System\Project;
+
+use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
+use App\Models\User as ModelsUser;
+use App\System;
+use App\System\Project as ProjectAggregate;
+use App\System\Project\Dind;
+use App\System\Project\Git\Exception as GitException;
+use Symfony\Component\Process\Process;
+use Tests\TestCase;
+
+/**
+ * Submodules come down after the clone and after every change of the checkout,
+ * limited by the app config when it names them, and one that cannot be
+ * fetched fails the deploy with its own rule.
+ */
+class DindSubmoduleFetchTest extends TestCase
+{
+    private string $root;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        config(['app.key' => 'base64:' . base64_encode(str_repeat('k', 32))]);
+        $this->app->forgetInstance('encrypter');
+        $this->root = sys_get_temp_dir() . '/pa-dind-submodules-' . bin2hex(random_bytes(4));
+        mkdir($this->root . '/home/alice/project', 0755, true);
+        file_put_contents($this->projectDir() . '/.gitmodules', "[submodule \"packages/client-area\"]\n\tpath = packages/client-area\n");
+    }
+
+    protected function tearDown(): void
+    {
+        (new \Symfony\Component\Filesystem\Filesystem())->remove($this->root);
+        parent::tearDown();
+    }
+
+    public function test_every_declared_submodule_is_fetched_by_default(): void
+    {
+        $runner = new FakeGitRunner();
+
+        $this->repository($runner)->fetchSubmodules('https://github.com/org/panel.git', 'pat');
+
+        $this->assertSame(
+            ['submodule', 'update', '--init', '--recursive', '--depth=1'],
+            array_slice($this->submoduleCommand($runner), -5)
+        );
+    }
+
+    public function test_the_app_config_limits_the_submodules(): void
+    {
+        file_put_contents($this->projectDir() . '/panelalpha.yaml', "git:\n  submodules: [packages/client-area]\n");
+        $runner = new FakeGitRunner();
+
+        $this->repository($runner)->fetchSubmodules('https://github.com/org/panel.git', 'pat');
+
+        $this->assertSame(['--depth=1', '--', 'packages/client-area'], array_slice($this->submoduleCommand($runner), -3));
+    }
+
+    public function test_an_empty_list_fetches_none(): void
+    {
+        file_put_contents($this->projectDir() . '/panelalpha.yaml', "git:\n  submodules: []\n");
+        $runner = new FakeGitRunner();
+
+        $this->repository($runner)->fetchSubmodules('https://github.com/org/panel.git', 'pat');
+
+        $this->assertSame([], $this->submoduleCommands($runner));
+    }
+
+    public function test_a_checkout_without_gitmodules_runs_nothing(): void
+    {
+        unlink($this->projectDir() . '/.gitmodules');
+        $runner = new FakeGitRunner();
+
+        $this->repository($runner)->fetchSubmodules('https://github.com/org/panel.git', 'pat');
+
+        $this->assertSame([], $runner->commands);
+    }
+
+    public function test_a_submodule_that_cannot_be_fetched_fails_the_deploy_with_its_cause(): void
+    {
+        $failing = static function (array $command): string {
+            if (in_array('submodule', $command, true)) {
+                throw new GitException(
+                    "Cloning into '/app/packages/client-area'...\nfatal: could not read Username for 'https://github.com': terminal prompts disabled",
+                    400
+                );
+            }
+
+            return "true\n";
+        };
+
+        try {
+            $this->repository($failing)->fetchSubmodules('https://github.com/org/panel.git', 'pat');
+            $this->fail('a submodule fetch failure must fail the deploy');
+        } catch (\RuntimeException $e) {
+            $this->assertStringStartsWith(DeployFailureExplainer::SUBMODULE_FAILURE . ': ', $e->getMessage());
+
+            $match = DeployFailureExplainer::match($e->getMessage());
+            $this->assertSame('submodule-fetch-failed', $match['rule'] ?? null);
+            $this->assertStringContainsString('could not read Username', $match['message']);
+            $this->assertStringContainsString('git: {submodules: [...]}', $match['message']);
+        }
+    }
+
+    /** A pull, a branch change and a push all redeploy through here, after the checkout moved. */
+    public function test_a_checkout_redeploy_fetches_submodules_before_it_prepares(): void
+    {
+        $source = (string) file_get_contents(__DIR__ . '/../../../../../core/app/System/Project/Deployment/DindDeployMechanics.php');
+        $body = substr($source, (int) strpos($source, 'public function reprepareApplicationFromCheckout('));
+        $body = substr($body, 0, (int) strpos($body, "\n    }\n"));
+
+        $fetch = strpos($body, '$this->fetchSubmodulesOfCheckout();');
+        $prepare = strpos($body, '$this->dind->prepareFromSources();');
+        $this->assertNotFalse($fetch);
+        $this->assertNotFalse($prepare);
+        $this->assertLessThan($prepare, $fetch);
+    }
+
+    /** @param (callable(list<string>, ?string, int): string)|FakeGitRunner $execute */
+    private function repository(callable|FakeGitRunner $execute): TestableGitRepository
+    {
+        if ($execute instanceof FakeGitRunner) {
+            $execute->stdout = ['rev-parse --is-inside-work-tree' => "true\n"];
+        }
+
+        return new TestableGitRepository($this->dind(), $execute);
+    }
+
+    /** @return list<string> */
+    private function submoduleCommand(FakeGitRunner $runner): array
+    {
+        $commands = $this->submoduleCommands($runner);
+        $this->assertCount(1, $commands);
+
+        return $commands[0];
+    }
+
+    /** @return list<list<string>> */
+    private function submoduleCommands(FakeGitRunner $runner): array
+    {
+        return array_values(array_filter($runner->commands, static fn (array $c): bool => in_array('submodule', $c, true)));
+    }
+
+    private function projectDir(): string
+    {
+        return $this->root . '/home/alice/project';
+    }
+
+    private function dind(): Dind
+    {
+        $model = new ModelsUser();
+        $model->username = 'alice';
+        $model->setDetails(['template' => 'dind', 'git_repo' => 'https://github.com/org/panel.git']);
+        $runtime = (new ProjectAggregate($this->system(), $model))->runtime();
+        $this->assertInstanceOf(Dind::class, $runtime);
+
+        return $runtime;
+    }
+
+    /** Runs the app config reads without sudo, against the temporary home. */
+    private function system(): System
+    {
+        return new class ($this->root) extends System {
+            public function __construct(private string $root)
+            {
+            }
+
+            public function engineDirPath(): string
+            {
+                return $this->root;
+            }
+
+            public function homesDirPath(): string
+            {
+                return $this->root . '/home';
+            }
+
+            public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
+            {
+                return parent::exec(self::withoutSudo($cmd), $env, $timeout);
+            }
+
+            public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                return parent::runProcess(self::withoutSudo($cmd), $env, $timeout);
+            }
+
+            /** @return string|list<string> */
+            private static function withoutSudo(string|array $cmd): string|array
+            {
+                return is_array($cmd) && ($cmd[0] ?? null) === 'sudo' ? array_values(array_slice($cmd, 1)) : $cmd;
+            }
+        };
+    }
+}

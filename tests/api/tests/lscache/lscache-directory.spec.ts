@@ -1,4 +1,5 @@
 import { expect, test } from '@/fixtures/test-options';
+import { CleanupSteps } from '@/helpers/cleanup-step';
 import { lscacheUnavailableReason } from '@/helpers/lscache-helpers';
 
 /**
@@ -19,17 +20,24 @@ test.describe('LiteSpeed cache directory', () => {
 
     await api.createDirectory(setupUser.username, path, true);
 
+    const cleanup = new CleanupSteps();
     try {
       const stat = await api.getFileStat(setupUser.username, path);
 
-      expect(stat.user_id).toBeDefined();
-      expect(stat.group_id).toBeDefined();
+      expect(stat.uid).toBeDefined();
+      expect(stat.gid).toBeDefined();
       expect(
-        stat.user_id,
+        stat.uid,
         'the cache directory is owned by root, so the site owner cannot clear it'
-      ).not.toBe('0');
+      ).not.toBe(0);
+    } catch (error) {
+      cleanup.bodyFailed(error);
+      throw error;
     } finally {
-      await api.removeFile(setupUser.username, path, true).catch(() => undefined);
+      await cleanup.run('remove the cache directory', () =>
+        api.removeFile(setupUser.username, path, true)
+      );
+      await cleanup.finish();
     }
   });
 

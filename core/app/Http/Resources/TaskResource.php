@@ -30,6 +30,20 @@ class TaskResource extends JsonResource
             ];
         }
 
+        return self::taskPayload($task) + [
+            'logs' => $logPayload,
+            'next_after_id' => $nextAfterId,
+        ];
+    }
+
+    /**
+     * The task fields every task representation shares; the token that started
+     * it and the worker process are never shown.
+     *
+     * @return array<string, mixed>
+     */
+    public static function taskPayload(Task $task): array
+    {
         $details = $task->details;
         if (is_array($details)) {
             $details = Arr::except($details, ['api_token_id', Task::WORKER]);
@@ -53,8 +67,6 @@ class TaskResource extends JsonResource
             'completed_at' => $task->completed_at,
             'failed_at' => $task->failed_at,
             'cancelled_at' => $task->cancelled_at,
-            'logs' => $logPayload,
-            'next_after_id' => $nextAfterId,
         ];
     }
 }

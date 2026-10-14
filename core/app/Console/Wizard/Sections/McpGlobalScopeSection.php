@@ -22,22 +22,13 @@ use function Laravel\Prompts\table;
 use function Laravel\Prompts\warning;
 
 /**
- * Which of the engine's MCP commands an AI assistant may see and call.
+ * Which of the engine's MCP commands an AI assistant may see and call. The
+ * engine API is root-equivalent, so this decides between a read-only view of
+ * the server and the ability to delete a hosting account.
  *
- * The engine API is root-equivalent by design, so this is the difference
- * between handing an assistant a read-only view of the server and handing it
- * the ability to delete a hosting account.
- *
- * **The operator ticks commands.** Underneath, four env variables express that
- * — a group list, single commands added back, a denylist, and a ceiling — and
- * which of the first three carries a given decision is a question of what
- * reads best in `.env`, not something anyone should have to answer. So this
- * asks the question the operator actually has, one checkbox per command, and
- * {@see ToolExposure::selecting()} works out how to write it down.
- *
- * The ceiling is the one thing that is not a tick, and it stays visible for
- * that reason: it is a separate promise about what a ticked command may do,
- * and no ticking can get past it.
+ * The operator ticks commands, one checkbox each, and
+ * {@see ToolExposure::selecting()} works out which env variables carry the
+ * decision. The ceiling is not a tick: it limits what any ticked command may do.
  *
  * Documented in full in docs/internal/mcp.md.
  */
@@ -61,11 +52,9 @@ class McpGlobalScopeSection implements Section
     }
 
     /**
-     * The menu an operator lands on and returns to after every answer.
-     *
-     * Answers accumulate in `$next` while `$current` stays put as the thing to
-     * compare against, so the menu can say what would change and nothing is
-     * written until the operator asks for it.
+     * The menu an operator lands on and returns to after every answer. Answers
+     * accumulate in `$next` against an unchanged `$current`, and nothing is
+     * written until the operator saves; a declined save keeps the ticks.
      */
     public function run(bool $dryRun): int
     {
@@ -88,9 +77,6 @@ class McpGlobalScopeSection implements Section
 
                 case 'save':
                     $done = $this->review($current, $next, $dryRun);
-
-                    // Null is "shown, and declined": back to the menu with the
-                    // ticks still there to be adjusted rather than re-entered.
                     if ($done !== null) {
                         return $done;
                     }
@@ -107,12 +93,23 @@ class McpGlobalScopeSection implements Section
 
     /**
      * Clear the screen and put back what stands above every prompt: what the
-     * engine is serving, and what the ticks so far would change it to.
-     *
-     * Drawn before each question rather than once at the start, because each
-     * question is drawn over the last one and would otherwise lose it.
+     * engine is serving, and what the ticks so far would change it to. Drawn
+     * before each question, because each question is drawn over the last one.
      */
     private function header(ToolExposure $current, ToolExposure $next): void
+    {
+        Screen::draw(self::label(), implode("\n", $this->statusLines($current, $next)));
+
+        $this->warnAboutDeniedRegex($current);
+    }
+
+    /**
+     * The ceiling shown is the policy's reading of the setting: a value it
+     * cannot use is a readonly engine, whatever the file says.
+     *
+     * @return list<string>
+     */
+    private function statusLines(ToolExposure $current, ToolExposure $next): array
     {
         $total = count(ToolRegistry::all());
 
@@ -120,9 +117,6 @@ class McpGlobalScopeSection implements Section
             'Serving now: %d of %d commands, ceiling %s.',
             count($current->exposed()),
             $total,
-            // The policy's reading of it, not the raw string: a value it
-            // cannot use is a readonly engine, and saying "full" because that
-            // is what the file says would be the wrong answer.
             $current->policy()->mode(),
         )];
 
@@ -135,17 +129,24 @@ class McpGlobalScopeSection implements Section
             );
         }
 
-        Screen::draw(self::label(), implode("\n", $lines));
+        return $lines;
+    }
 
-        if (trim($current->get('denied_regex')) !== '') {
-            // Not a tick, and not asked about below: it outlives this run and
-            // would otherwise look like the wizard had lost it.
-            warning(sprintf(
-                "MCP_DENIED_TOOLS_REGEX=%s is also in force, and this wizard leaves it alone.\n"
-                . 'Commands it matches stay off however they are ticked here.',
-                $current->get('denied_regex')
-            ));
+    /**
+     * The denylist regex is not a tick and is not asked about here, but it
+     * outlives this run; say so, or the wizard would look like it had lost it.
+     */
+    private function warnAboutDeniedRegex(ToolExposure $current): void
+    {
+        if (trim($current->get('denied_regex')) === '') {
+            return;
         }
+
+        warning(sprintf(
+            "MCP_DENIED_TOOLS_REGEX=%s is also in force, and this wizard leaves it alone.\n"
+            . 'Commands it matches stay off however they are ticked here.',
+            $current->get('denied_regex')
+        ));
     }
 
     /** @return string the menu key chosen */
@@ -226,7 +227,7 @@ class McpGlobalScopeSection implements Section
 
         foreach ([
             ToolPolicy::MODE_READONLY => 'Read only — the assistant can look, and change nothing',
-            ToolPolicy::MODE_MODIFY => 'Read, create and update — no deletions',
+            ToolPolicy::MODE_MODIFY => 'Read, create and update — no DELETE routes (still runs ssh_run, wp_cli_run, backups and file writes)',
             ToolPolicy::MODE_FULL => 'Everything, including deletions',
         ] as $mode => $description) {
             $options[$mode] = sprintf(
@@ -278,7 +279,10 @@ class McpGlobalScopeSection implements Section
         return $held === [] ? '' : sprintf('(%d above the ceiling)', count($held));
     }
 
-    /** What a command does to the server, and whether the ceiling allows it. */
+    /**
+     * What a command does to the server, and whether the ceiling allows it:
+     * ticking a command above the ceiling changes nothing until it is raised.
+     */
     private function commandNote(string $name, ToolExposure $next): string
     {
         $policy = $next->policy();
@@ -288,12 +292,7 @@ class McpGlobalScopeSection implements Section
                 continue;
             }
 
-            return $policy->accessOf($class)
-                // Worth saying on the row itself: ticking it here changes
-                // nothing until the ceiling is raised.
-                . ($policy->permits($class)
-                    ? ''
-                    : '  (above the ceiling)');
+            return $policy->accessOf($class) . ($policy->permits($class) ? '' : '  (above the ceiling)');
         }
 
         return '';
@@ -303,7 +302,7 @@ class McpGlobalScopeSection implements Section
     {
         return match ($next->policy()->mode()) {
             ToolPolicy::MODE_READONLY => 'readonly — they may look, and change nothing',
-            ToolPolicy::MODE_MODIFY => 'modify — they may create and update, but not delete',
+            ToolPolicy::MODE_MODIFY => 'modify — they may create and update, but no DELETE routes (ssh_run, wp_cli_run, backups and file writes still run)',
             default => 'full — they may do anything, including delete',
         };
     }
@@ -322,16 +321,7 @@ class McpGlobalScopeSection implements Section
         $env = EnvFile::current();
 
         if ($dryRun) {
-            note('Nothing was written: this was a dry run. Drop --dry-run to apply it.', 'warning');
-
-            $this->receipt = array_merge(
-                ['A dry run of ' . self::key() . ' would have written:'],
-                explode("\n", $this->envBlock($next)),
-            );
-
-            pause('Press enter to carry on...');
-
-            return 0;
+            return $this->finishDryRun($next);
         }
 
         if ($next->diff($current) === []) {
@@ -348,6 +338,29 @@ class McpGlobalScopeSection implements Section
             return null;
         }
 
+        return $this->write($env, $current, $next);
+    }
+
+    private function finishDryRun(ToolExposure $next): int
+    {
+        note('Nothing was written: this was a dry run. Drop --dry-run to apply it.', 'warning');
+
+        $this->receipt = array_merge(
+            ['A dry run of ' . self::key() . ' would have written:'],
+            explode("\n", $this->envBlock($next)),
+        );
+
+        pause('Press enter to carry on...');
+
+        return 0;
+    }
+
+    /**
+     * Write the ticks to the env file and leave the operator a receipt; the
+     * final pause lets it be read before the next screen draws over it.
+     */
+    private function write(EnvFile $env, ToolExposure $current, ToolExposure $next): int
+    {
         try {
             $changed = $env->set($next->envLines());
         } catch (Throwable $e) {
@@ -356,14 +369,7 @@ class McpGlobalScopeSection implements Section
             return 1;
         }
 
-        // The process booted with the old values and would otherwise keep
-        // answering with them: `ToolExposure::current()` reads `config()`, and
-        // the operator can walk straight back into this section from the menu.
-        // Done before the early return below, because the file agreeing
-        // already is still a reason for this process to catch up with it.
-        foreach (array_keys(ToolExposure::ENV_KEYS) as $key) {
-            config(['mcp-tools.' . $key => $next->get($key)]);
-        }
+        $this->adoptInThisProcess($next);
 
         if ($changed === []) {
             $this->receipt = [sprintf('%s already said that; nothing to do.', $env->path())];
@@ -379,37 +385,27 @@ class McpGlobalScopeSection implements Section
 
         $this->sayWhatHappensNext();
 
-        // Read before it is cleared: the next screen is drawn over this one.
         pause('Press enter to carry on...');
 
         return 0;
     }
 
+    /**
+     * Put the new values into this process's config, which booted with the old
+     * ones and is what `ToolExposure::current()` reads when the operator comes
+     * back to this section. Needed even when the file already agreed.
+     */
+    private function adoptInThisProcess(ToolExposure $next): void
+    {
+        foreach (array_keys(ToolExposure::ENV_KEYS) as $key) {
+            config(['mcp-tools.' . $key => $next->get($key)]);
+        }
+    }
+
     /** The table of what moves, and what the file would end up saying. */
     private function summarise(ToolExposure $current, ToolExposure $next): void
     {
-        $before = $current->toolsets();
-        $rows = [];
-        $unchanged = 0;
-
-        foreach ($next->toolsets() as $toolset => $count) {
-            $was = $before[$toolset]['exposed'] ?? 0;
-
-            // Only what moves: a visit that ticks one command should not make
-            // the operator find the one line that differs among thirty-seven.
-            if ($was === $count['exposed']) {
-                $unchanged++;
-
-                continue;
-            }
-
-            $rows[] = [
-                $toolset,
-                (string) $was,
-                $count['exposed'] === 0 ? 'off' : (string) $count['exposed'],
-                (string) $count['total'],
-            ];
-        }
+        [$rows, $unchanged] = $this->movedGroups($current, $next);
 
         if ($rows !== []) {
             table(['Group', 'Offered now', 'After', 'Total'], $rows);
@@ -430,8 +426,40 @@ class McpGlobalScopeSection implements Section
     }
 
     /**
-     * What the operator leaves with. Said once more on the way out, where
-     * nothing draws over it.
+     * Only the groups whose offered count moves, so one ticked command is not
+     * lost among thirty-seven unchanged lines; the rest are only counted.
+     *
+     * @return array{0: list<array{0: string, 1: string, 2: string, 3: string}>, 1: int} rows, unchanged groups
+     */
+    private function movedGroups(ToolExposure $current, ToolExposure $next): array
+    {
+        $before = $current->toolsets();
+        $rows = [];
+        $unchanged = 0;
+
+        foreach ($next->toolsets() as $toolset => $count) {
+            $was = $before[$toolset]['exposed'] ?? 0;
+            if ($was === $count['exposed']) {
+                $unchanged++;
+
+                continue;
+            }
+
+            $rows[] = [
+                $toolset,
+                (string) $was,
+                $count['exposed'] === 0 ? 'off' : (string) $count['exposed'],
+                (string) $count['total'],
+            ];
+        }
+
+        return [$rows, $unchanged];
+    }
+
+    /**
+     * What the operator leaves with, said once more on the way out. The old
+     * value is in full so it can be put back; the new one is shortened. The
+     * backup sits inside the core container, not beside .env-core on the host.
      *
      * @param  array<int, string> $changed
      * @return array<int, string>
@@ -441,8 +469,6 @@ class McpGlobalScopeSection implements Section
         $was = $current->envLines();
         $now = $next->envLines();
 
-        // The old value in full, because putting it back is what it is for;
-        // the new one shortened, being already on screen and in the file.
         $moved = array_map(
             fn (string $key): string => sprintf(
                 '  %-24s %s → %s',
@@ -461,8 +487,6 @@ class McpGlobalScopeSection implements Section
             )],
             $moved,
             [sprintf(
-                // The backup sits inside the core container, not beside
-                // .env-core on the host where an operator would look.
                 'The file as it was is at %s%s.',
                 $env->path() . EnvFile::BACKUP_SUFFIX,
                 $env->isCoreMount() ? ', inside the core container rather than next to .env-core on the host' : '',
@@ -482,11 +506,10 @@ class McpGlobalScopeSection implements Section
         return implode("\n", $lines);
     }
 
+    /** A cached config was built from the old values and would ignore the file just written. */
     private function sayWhatHappensNext(): void
     {
         if (app()->configurationIsCached()) {
-            // A cached config was built from the old values and would ignore
-            // the file that was just written.
             note('The cached configuration was built from the old values — run `pae config:cache` to rebuild it.', 'warning');
         }
 

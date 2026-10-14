@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Send a test email via Exim
 
-    exit_code 0 only means Exim accepted the message. status says what happened to it: delivered, deferred (still queued; Exim retries it), failed (bounced), not_sent (Exim did not take it) or unknown; reason is the Exim log line for a deferral or a bounce.
+    exit_code 0 only means Exim accepted the message. status says what happened to it: delivered, deferred (still queued; Exim retries it), failed (bounced), not_sent (Exim did not take it) or unknown; reason is the Exim log line for a deferral or a bounce. A `config` sent here is merged into the stored mail config and the Exim config rebuilt before the send, so it is not a throwaway: omit `config` to test the settings already stored, or expect the host's mail to run on what you send.
     MARKDOWN)]
 #[IsDestructive]
 class SystemTestEmailSendTool extends ApiTool
@@ -49,7 +49,7 @@ class SystemTestEmailSendTool extends ApiTool
     {
         return [
             'email' => $schema->string()->required(),
-            'config' => $schema->object(),
+            'config' => $schema->object()->description('Merged into the stored mail config and applied (Exim rebuilt) before the send; a field left out keeps its stored value.'),
         ];
     }
 }

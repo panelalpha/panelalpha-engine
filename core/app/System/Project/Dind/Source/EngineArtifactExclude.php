@@ -71,6 +71,17 @@ final class EngineArtifactExclude
     }
 
     /**
+     * A checkout a deploy rebuilds from, git_repo or git_connect: a push's
+     * forced pull runs `clean -fd`, which takes every unlisted artifact with it.
+     */
+    public function writeForDeploy(): void
+    {
+        if ($this->git->isDeployManaged()) {
+            $this->write();
+        }
+    }
+
+    /**
      * @return list<string>
      */
     private function untrackedGeneratedPatterns(): array
@@ -101,7 +112,22 @@ final class EngineArtifactExclude
         if (PlaceholderPage::isOneOf($checkout . '/index.html')) {
             $files[] = 'index.html';
         }
-        // `<Dockerfile>.dockerignore` next to a project's own Dockerfile.
+
+        return array_values(array_unique([
+            ...$files,
+            ...$this->engineWrittenDockerfileIgnores($checkout),
+            ...EnvExampleCopies::made($checkout),
+        ]));
+    }
+
+    /**
+     * The `<Dockerfile>.dockerignore` files the engine wrote next to a project's own Dockerfile.
+     *
+     * @return list<string>
+     */
+    private function engineWrittenDockerfileIgnores(string $checkout): array
+    {
+        $files = [];
         foreach (['*', '*/*', '*/*/*'] as $depth) {
             foreach (glob($checkout . '/' . $depth . '.dockerignore') ?: [] as $path) {
                 $head = is_file($path) ? (string) file_get_contents($path, false, null, 0, 256) : null;
@@ -111,6 +137,6 @@ final class EngineArtifactExclude
             }
         }
 
-        return array_values(array_unique([...$files, ...EnvExampleCopies::made($checkout)]));
+        return $files;
     }
 }

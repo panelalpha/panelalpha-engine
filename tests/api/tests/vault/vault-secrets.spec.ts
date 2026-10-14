@@ -2,6 +2,7 @@ import { expect, test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
 import { uniqueId } from '@/helpers/random';
 import { validateParsedApiResponse } from '@/helpers/validate-parsed-response';
+import { expectStatus } from '@/helpers/expect-status';
 import {
   createdVaultSecretResponseSchema,
   deletedVaultSecretResponseSchema,
@@ -207,7 +208,7 @@ test.describe('secret vault', () => {
     const deleted = await api.deleteVaultSecret(created.data.ref);
     validateParsedApiResponse(deleted, deletedVaultSecretResponseSchema);
 
-    expect((await api.getVaultSecretRaw(created.data.ref)).status).toBe(404);
+    await expectStatus(await api.getVaultSecretRaw(created.data.ref), 404);
   });
 
   test('deleting twice is not an error', async ({ api }) => {
@@ -216,12 +217,12 @@ test.describe('secret vault', () => {
     await api.deleteVaultSecret(created.data.ref);
     // Matches the engine's delete semantics elsewhere — see
     // tests/integration/delete-idempotency.spec.ts.
-    expect((await api.deleteVaultSecretRaw(created.data.ref)).status).toBe(200);
+    await expectStatus(await api.deleteVaultSecretRaw(created.data.ref), 200);
   });
 
   test('an unknown reference is not found', async ({ api }) => {
-    expect((await api.getVaultSecretRaw('vault:999999999')).status).toBe(404);
-    expect((await api.getVaultSecretRaw('vault:notanid')).status).toBe(404);
+    await expectStatus(await api.getVaultSecretRaw('vault:999999999'), 404);
+    await expectStatus(await api.getVaultSecretRaw('vault:notanid'), 404);
   });
 
   test('a malformed type is refused', async ({ api }) => {

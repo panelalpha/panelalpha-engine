@@ -108,6 +108,19 @@ export function wwwAliasWouldAnswer(domain: string): boolean {
   return onlineLabel(domain) === undefined;
 }
 
+/**
+ * Whether a generated project name resolves to the engine.
+ *
+ * Every rung of DomainPlan resolves somewhere, the `panelalpha.direct` one
+ * included: its zone spells the address the name answers for, private address
+ * or not, so the application is reachable wherever the engine is. Only the
+ * `.local` last rung resolves nowhere. Matches DomainPlan's non-local rungs.
+ */
+export function projectNameResolves(domain: string): boolean {
+  const normalized = domain.trim().replace(/\.+$/, '').toLowerCase();
+  return !normalized.endsWith('.local');
+}
+
 /** Inverse of {@link toPanelAlphaDirectZone} for a zone parent, not a project FQDN. */
 export function ipv4FromPanelAlphaDirectZone(domain: string): string | undefined {
   const match = /^(\d{1,3}(?:-\d{1,3}){3})\.panelalpha\.direct$/i.exec(domain.trim());

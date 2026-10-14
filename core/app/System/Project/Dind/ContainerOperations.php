@@ -11,6 +11,35 @@ use App\System\Project\Dind as DindProject;
  */
 final class ContainerOperations
 {
+    private const COMPOSE_TIMEOUT = 7200;
+
+    /** The most lines one logs read returns; rotation keeps a container's log to ~30 MB. */
+    public const MAX_LOG_LINES = 5000;
+
+    /** How long one log follow runs before it ends itself. */
+    public const FOLLOW_SECONDS = 600;
+
+    /** Silence after which a follow asks whether its reader is still there. */
+    public const FOLLOW_IDLE_SECONDS = 2;
+
+    /** The longest partial line a follow buffers before flushing it as its own line. */
+    public const MAX_LINE_BYTES = 65536;
+
+    /** How long a stream waits for compose to know the service; a slow answer refuses nothing. */
+    public const SERVICE_CHECK_SECONDS = 10;
+
+    /**
+     * A service name as a request may give it; a leading '-' would reach compose as a flag.
+     * \z, since $ also matches before a final newline.
+     */
+    public const SERVICE_NAME = '/^[a-zA-Z0-9_][a-zA-Z0-9_-]*\z/';
+
+    /** Actions that start the app again. */
+    private const STARTING_ACTIONS = ['up', 'start', 'restart', 'pull'];
+
+    /** Service actions that start the app again. */
+    private const STARTING_SERVICE_ACTIONS = ['start', 'restart'];
+
     public function __construct(
         private DindProject $project,
         private ShellOperations $shell,
@@ -29,44 +58,34 @@ final class ContainerOperations
                 'json',
                 '--all',
             ]));
-            $containers = [];
-            foreach (explode("\n", trim($output)) as $line) {
-                $line = trim($line);
-                if ($line === '') {
-                    continue;
-                }
-                /** @var mixed */
-                $item = json_decode($line, true);
-                if (is_array($item)) {
-                    $containers[] = $item;
-                }
-            }
 
-            return $containers;
+            return self::jsonLines($output);
         } catch (\Exception) {
             return [];
         }
     }
 
-    private const COMPOSE_TIMEOUT = 7200;
-
-    /** The most lines one logs read returns; rotation keeps a container's log to ~30 MB. */
-    public const MAX_LOG_LINES = 5000;
-
-    /** How long one log follow runs before it ends itself. */
-    public const FOLLOW_SECONDS = 600;
-
-    /** Silence after which a follow asks whether its reader is still there. */
-    public const FOLLOW_IDLE_SECONDS = 2;
-
-    /** How long a stream waits for compose to know the service; a slow answer refuses nothing. */
-    public const SERVICE_CHECK_SECONDS = 10;
-
     /**
-     * A service name as a request may give it; a leading '-' would reach compose as a flag.
-     * \z, since $ also matches before a final newline.
+     * The JSON objects of a one-object-per-line output; other lines are skipped.
+     *
+     * @return array<array<string, mixed>>
      */
-    public const SERVICE_NAME = '/^[a-zA-Z0-9_][a-zA-Z0-9_-]*\z/';
+    private static function jsonLines(string $output): array
+    {
+        $items = [];
+        foreach (explode("\n", trim($output)) as $line) {
+            $line = trim($line);
+            if ($line === '') {
+                continue;
+            }
+            $item = json_decode($line, true);
+            if (is_array($item)) {
+                $items[] = $item;
+            }
+        }
+
+        return $items;
+    }
 
     /**
      * Inner compose stop for backup downtime (throws on failure).
@@ -85,10 +104,8 @@ final class ContainerOperations
     }
 
     /**
-     * Inner compose start (resume, no rebuild) after backup/restore.
-     *
-     * An account made from the template and never deployed has no inner compose
-     * project, so there is nothing to resume.
+     * Inner compose start (resume, no rebuild) after backup/restore; an account never deployed
+     * has no inner compose project to resume.
      */
     public function composeStart(): void
     {
@@ -114,33 +131,12 @@ final class ContainerOperations
         }
 
         try {
+            if (in_array($action, self::STARTING_ACTIONS, true)) {
+                (new AccountMapping($this->project))->ensureMapped();
+            }
             $this->refreshRunFileBefore($action);
-
-            if ($action === 'pull') {
-                $pullOut = $this->shell->execAsUser($this->project->userAppComposeCommand(['pull']), [], 600);
-                $upOut = $this->shell->execAsUser(
-                    $this->project->userAppComposeCommand(['up', '-d', '--remove-orphans']),
-                    [],
-                    600
-                );
-
-                return ['stdout' => $pullOut . "\n" . $upOut, 'stderr' => '', 'exit_code' => 0];
-            }
-
-            $cmd = $action === 'up'
-                ? $this->project->userAppComposeCommand(['up', '-d', '--remove-orphans'])
-                : $this->project->userAppComposeCommand([$action]);
-
-            $stdout = $this->shell->execAsUser($cmd, [], 600);
+            $stdout = $action === 'pull' ? $this->pullAndUp() : $this->runProjectAction($action);
             $this->clearStoppedByRequest($action);
-            $cleanup = self::cleanupArgvAfter($action);
-            if ($cleanup !== null) {
-                try {
-                    $this->shell->execAsUser($cleanup, [], 120);
-                } catch (\Exception) {
-                    // Disk left for the next down to reclaim; the stop itself worked.
-                }
-            }
 
             return ['stdout' => $stdout, 'stderr' => '', 'exit_code' => 0];
         } catch (\Exception $e) {
@@ -148,12 +144,46 @@ final class ContainerOperations
         }
     }
 
+    private function pullAndUp(): string
+    {
+        $pullOut = $this->shell->execAsUser($this->project->userAppComposeCommand(['pull']), [], 600);
+        $upOut = $this->shell->execAsUser(
+            $this->project->userAppComposeCommand(['up', '-d', '--remove-orphans']),
+            [],
+            600
+        );
+
+        return $pullOut . "\n" . $upOut;
+    }
+
+    private function runProjectAction(string $action): string
+    {
+        $cmd = $action === 'up'
+            ? $this->project->userAppComposeCommand(['up', '-d', '--remove-orphans'])
+            : $this->project->userAppComposeCommand([$action]);
+
+        $stdout = $this->shell->execAsUser($cmd, [], 600);
+        $this->cleanUpAfter($action);
+
+        return $stdout;
+    }
+
+    /** A failed cleanup leaves the disk for the next `down` to reclaim; the action itself worked. */
+    private function cleanUpAfter(string $action): void
+    {
+        $cleanup = self::cleanupArgvAfter($action);
+        if ($cleanup === null) {
+            return;
+        }
+        try {
+            $this->shell->execAsUser($cleanup, [], 120);
+        } catch (\Exception) {
+        }
+    }
+
     /**
-     * What runs after `$action` succeeded. `down` leaves the anonymous volumes
-     * of images that declare VOLUME behind, and the next `up` makes new ones,
-     * so every rebuild leaked one (330 MB per Shinobi rebuild). Only volumes
-     * labelled anonymous: named ones are the app's data, and a daemon older
-     * than 23 (no label) prunes nothing instead of everything unused.
+     * What runs after `$action` succeeded: `down` leaves the anonymous volumes of VOLUME images behind,
+     * so prune those (by label: named ones are app data, and a pre-23 daemon then prunes nothing).
      *
      * @return list<string>|null
      */
@@ -165,15 +195,8 @@ final class ContainerOperations
     }
 
     /**
-     * Whether `$action` must regenerate the run file from the client's
-     * compose file before compose runs (ADR-0001 D7), so an edit the client
-     * made over SSH or the file tools takes effect, with the hosting
-     * hardening applied to it.
-     *
-     * Only where the run file is derived from the client's compose: the
-     * compose strategies, and a welcome account (no git, no strategy) whose
-     * client has created a compose file. A recipe's run file is generated,
-     * not derived, so `up` leaves it alone.
+     * Whether `$action` must regenerate the hardened run file from the client's compose file first:
+     * only where the run file derives from it (compose strategies, or a welcome account with one).
      */
     public static function regeneratesRunFile(
         string $action,
@@ -224,6 +247,9 @@ final class ContainerOperations
         self::assertServiceName($service);
 
         try {
+            if (in_array($action, self::STARTING_SERVICE_ACTIONS, true)) {
+                (new AccountMapping($this->project))->ensureMapped();
+            }
             $output = $this->shell->execAsUser(
                 $this->project->userAppComposeCommand([$action, '--', $service]),
                 [],
@@ -239,16 +265,18 @@ final class ContainerOperations
         }
     }
 
-    /** Whatever starts the app again ends a stop that was asked for. */
+    /**
+     * Whatever starts the app again ends a stop that was asked for. A failure only loses
+     * health-sweep bookkeeping; the action itself worked.
+     */
     private function clearStoppedByRequest(string $action): void
     {
-        if (!in_array($action, ['up', 'start', 'restart', 'pull'], true)) {
+        if (!in_array($action, self::STARTING_ACTIONS, true)) {
             return;
         }
         try {
             $this->project->userModel()->markAppStoppedByRequest(false);
         } catch (\Throwable) {
-            // Bookkeeping for the health sweep; the action itself worked.
         }
     }
 
@@ -301,48 +329,64 @@ final class ContainerOperations
             return;
         }
 
-        $services = [];
+        $services = $this->listedServices();
+        $listedAfterAll = in_array($service, $services, true);
+        if ($listedAfterAll) {
+            return;
+        }
+
+        throw self::serviceNotFound($service, $services);
+    }
+
+    /**
+     * Every profile's services (logs and actions take a profiled one too), sorted because compose
+     * orders them differently per call; empty when compose cannot list them.
+     *
+     * @return list<string>
+     */
+    private function listedServices(): array
+    {
         try {
-            // Every profile, since logs and the actions take a profiled service as well.
             $listed = $this->shell->execAsUser(
                 $this->project->userAppComposeCommand(['--profile', '*', 'config', '--services']),
                 [],
                 60
             );
-            $names = array_map('trim', explode("\n", $listed));
-            $services = array_values(array_filter($names, static fn (string $s): bool => $s !== ''));
-            // Compose lists them in a different order on every call; sorted, the same ten show each time.
-            sort($services, SORT_NATURAL);
         } catch (\Exception) {
-            // The refusal stands without the list.
+            return [];
         }
-        // Listed after all, so the refusal meant something else; the caller keeps compose's error.
-        if (in_array($service, $services, true)) {
-            return;
-        }
+        $names = array_map('trim', explode("\n", $listed));
+        $services = array_values(array_filter($names, static fn (string $s): bool => $s !== ''));
+        sort($services, SORT_NATURAL);
 
+        return $services;
+    }
+
+    /**
+     * `expected` names every service; the message shows ten (as a missing git branch does)
+     * and `examples` five (as the `in` rule does).
+     *
+     * @param list<string> $services
+     */
+    private static function serviceNotFound(string $service, array $services): ProblemException
+    {
         $message = "The project has no service named '{$service}'.";
         if ($services === []) {
-            throw ProblemException::one('service', 'service_not_found', $message);
+            return ProblemException::one('service', 'service_not_found', $message);
         }
 
-        // Every service is a valid value, so expected names them all; the message
-        // shows ten, as a missing git branch does, and examples five, as the `in` rule does.
         $more = count($services) - 10;
         $message .= ' Its services: ' . implode(', ', array_slice($services, 0, 10))
             . ($more > 0 ? " and {$more} more" : '') . '.';
 
-        throw ProblemException::one('service', 'service_not_found', $message, [
+        return ProblemException::one('service', 'service_not_found', $message, [
             'expected' => 'one of: ' . implode(', ', $services),
             'examples' => array_slice($services, 0, 5),
         ]);
     }
 
     /**
-     * Follow a service's log, handing each line and its timestamp to $onLine,
-     * until the stream has run FOLLOW_SECONDS. Stopping the outer exec does not
-     * stop the follow inside the account, so `timeout` bounds it there, and when
-     * $onLine or $onIdle throws (the client went away) it is killed by its tag at once.
+     * Follow a service's log for FOLLOW_SECONDS, handing each line and its timestamp to $onLine;
      * $onIdle runs after every FOLLOW_IDLE_SECONDS without a line.
      *
      * @param callable(string, ?string): void $onLine
@@ -353,9 +397,7 @@ final class ContainerOperations
         self::assertServiceName($service);
 
         $tag = 'PANELALPHA_LOG_FOLLOW=' . bin2hex(random_bytes(6));
-        $compose = $this->project->userAppComposeCommand(self::logsArgs($service, $lines, $since, null, true));
-        // composeCommand() starts with `env`; the tag rides along as one more variable.
-        $command = ['timeout', (string) self::FOLLOW_SECONDS, 'env', $tag, ...array_slice($compose, 1)];
+        $command = $this->followCommand($tag, $service, $lines, $since);
 
         $buffer = '';
         try {
@@ -363,30 +405,66 @@ final class ContainerOperations
                 $command,
                 self::FOLLOW_SECONDS + 10,
                 function (string $type, string $data) use (&$buffer, $onLine): void {
-                    $buffer .= $data;
-                    while (($end = strpos($buffer, "\n")) !== false) {
-                        $raw = rtrim(substr($buffer, 0, $end), "\r");
-                        $buffer = (string) substr($buffer, $end + 1);
-                        $onLine(...self::splitTimestamp($raw));
-                    }
+                    $buffer = self::emitBufferedLines($buffer . $data, $onLine);
                 },
                 $onIdle,
                 self::FOLLOW_IDLE_SECONDS,
             );
         } catch (\Throwable $e) {
-            try {
-                $this->shell->execAsUser(['pkill', '-TERM', '-f', $tag], [], 30);
-            } catch (\Throwable) {
-                // Nothing left to stop; `timeout` ends it otherwise.
-            }
+            $this->stopFollow($tag);
             throw $e;
         }
         if ($buffer !== '') {
-            $onLine(...self::splitTimestamp(rtrim($buffer, "\r")));
+            $onLine(...self::splitTimestamp(rtrim(substr($buffer, 0, self::MAX_LINE_BYTES), "\r")));
         }
     }
 
     /**
+     * The follow, tagged so it can be killed: the compose command starts with `env`, so the tag rides
+     * along as one more variable, and `timeout` bounds it inside the account, which the outer exec cannot.
+     *
+     * @return list<string>
+     */
+    private function followCommand(string $tag, string $service, int $lines, ?string $since): array
+    {
+        $compose = $this->project->userAppComposeCommand(self::logsArgs($service, $lines, $since, null, true));
+
+        return ['timeout', (string) self::FOLLOW_SECONDS, 'env', $tag, ...array_slice($compose, 1)];
+    }
+
+    /**
+     * Hand every complete line to $onLine, and a partial one once it reaches MAX_LINE_BYTES so output
+     * without newlines cannot grow the worker's memory; returns what is left over.
+     *
+     * @param callable(string, ?string): void $onLine
+     */
+    private static function emitBufferedLines(string $buffer, callable $onLine): string
+    {
+        while (($end = strpos($buffer, "\n")) !== false) {
+            $raw = rtrim(substr($buffer, 0, $end), "\r");
+            $buffer = (string) substr($buffer, $end + 1);
+            $onLine(...self::splitTimestamp($raw));
+        }
+        while (strlen($buffer) >= self::MAX_LINE_BYTES) {
+            $onLine(...self::splitTimestamp(substr($buffer, 0, self::MAX_LINE_BYTES)));
+            $buffer = (string) substr($buffer, self::MAX_LINE_BYTES);
+        }
+
+        return $buffer;
+    }
+
+    /** Kill the follow inside the account by its tag; if nothing is left, `timeout` ends it anyway. */
+    private function stopFollow(string $tag): void
+    {
+        try {
+            $this->shell->execAsUser(['pkill', '-TERM', '-f', $tag], [], 30);
+        } catch (\Throwable) {
+        }
+    }
+
+    /**
+     * Arguments of `compose logs`; `--` makes compose read any name as a service, never an option.
+     *
      * @return list<string>
      */
     public static function logsArgs(string $service, int $lines, ?string $since, ?string $until, bool $follow): array
@@ -401,7 +479,6 @@ final class ContainerOperations
         if ($until !== null && $until !== '') {
             $args[] = '--until=' . $until;
         }
-        // Whatever the name, compose reads it as a service, never as an option.
         array_push($args, '--', $service);
 
         return $args;

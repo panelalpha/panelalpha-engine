@@ -45,16 +45,12 @@ class FileStreamWrapper
     }
 
     /**
-     * Refuse any path that does not resolve to a file under $root. The check
-     * runs in the helper, on the real path, so a symlink planted inside an
-     * account that points at /etc/shadow or another account's home is turned
-     * away. $runAs is the command prefix the helper runs under: the account's,
-     * or a file under the home that only root can read, such as ~/docker,
-     * would be read as root.
+     * Refuse any path whose real path (checked by the helper, so planted symlinks count) is not under
+     * $root. $runAs is the helper's command prefix, required so reading as root is never a default.
      *
      * @param list<string> $runAs
      */
-    public static function confineTo(?string $root, array $runAs = ['sudo']): void
+    public static function confineTo(?string $root, array $runAs): void
     {
         self::$root = $root === null ? null : rtrim($root, '/');
         self::$runAs = $runAs;
@@ -62,36 +58,47 @@ class FileStreamWrapper
 
     public function stream_open(string $path, string $mode, int $options, ?string &$opened_path): bool
     {
-        $realPath = preg_replace('#^sudophp://#', '', $path);
-        $cmd = [
-            ...$this->helperCommand(),
-            $mode,
-            $realPath,
-        ];
-        if (self::$root !== null) {
-            $cmd[] = self::$root;
-        }
         $desc = [
             0 => ['pipe', 'r'],
             1 => ['pipe', 'w'],
             2 => ['pipe', 'w'],
         ];
 
-        $this->proc = proc_open($cmd, $desc, $this->pipes);
+        $this->proc = proc_open($this->helperArgv($mode, $path), $desc, $this->pipes);
         if (!is_resource($this->proc)) {
             return false;
         }
 
         if ($this->stream_stat() === false) {
-            $error = stream_get_contents($this->pipes[2]);
-            $this->cleanup();
-            trigger_error(
-                'sudophp stream failed: ' . trim($error),
-                E_USER_WARNING
-            );
+            $this->abandonWithWarning();
             return false;
         }
         return true;
+    }
+
+    /** @return list<string> */
+    private function helperArgv(string $mode, string $path): array
+    {
+        $cmd = [
+            ...$this->helperCommand(),
+            $mode,
+            preg_replace('#^sudophp://#', '', $path),
+        ];
+        if (self::$root !== null) {
+            $cmd[] = self::$root;
+        }
+
+        return $cmd;
+    }
+
+    private function abandonWithWarning(): void
+    {
+        $error = stream_get_contents($this->pipes[2]);
+        $this->cleanup();
+        trigger_error(
+            'sudophp stream failed: ' . trim($error),
+            E_USER_WARNING
+        );
     }
 
     private function cleanup(): void
@@ -119,12 +126,22 @@ class FileStreamWrapper
     {
         $this->send('READ ' . $count);
         $resp = $this->recv();
-        if (strpos($resp, 'OK') !== 0) return false;
-        // length is hex after "OK "
-        $hex = substr($resp, 3);
-        $len = hexdec($hex);
+        if (strpos($resp, 'OK') !== 0) {
+            return false;
+        }
+
+        return $this->readBytes(self::hexLengthAfterOk($resp));
+    }
+
+    private static function hexLengthAfterOk(string $resp): int|float
+    {
+        return hexdec(substr($resp, 3));
+    }
+
+    private function readBytes(int|float $length): string
+    {
         $data = '';
-        $remaining = $len;
+        $remaining = $length;
         while ($remaining > 0 && ($chunk = fread($this->pipes[1], $remaining)) !== false) {
             $data .= $chunk;
             $remaining -= strlen($chunk);
@@ -166,10 +183,11 @@ class FileStreamWrapper
         return (strpos($resp, 'OK 1') === 0);
     }
 
+    /** Waits for the helper's acknowledgement before closing the pipes. */
     public function stream_close(): void
     {
         $this->send('CLOSE');
-        $this->recv(); // discard OK
+        $this->recv();
         $this->cleanup();
     }
 

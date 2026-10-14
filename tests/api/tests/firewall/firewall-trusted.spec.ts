@@ -1,5 +1,6 @@
 import { expect, test } from '@/fixtures/test-options';
 import { randomTestNetAddress, requireFirewall } from '@/helpers/firewall-helpers';
+import { expectStatus } from '@/helpers/expect-status';
 import { trustedAddressResponseSchema, trustedAddressesResponseSchema } from '@/schemas';
 
 /**
@@ -42,9 +43,9 @@ test.describe('Firewall trusted addresses', () => {
       'api-test office, second floor',
     ]);
 
-    expect((await api.untrustAddressRaw(added.id)).status).toBe(200);
+    await expectStatus(await api.untrustAddressRaw(added.id), 200);
     trusted.delete(added.id);
-    expect((await api.untrustAddressRaw(added.id)).status).toBe(404);
+    await expectStatus(await api.untrustAddressRaw(added.id), 404);
     const after = trustedAddressesResponseSchema.parse(await api.listTrustedAddresses()).data;
     expect(after.map((a) => a.address)).not.toContain(address);
   });
@@ -55,6 +56,9 @@ test.describe('Firewall trusted addresses', () => {
       { address: 'example.com' },
       { address: '192.0.2.300' },
       { address: randomTestNetAddress(), comment: 'two\nlines' },
+      // Wider than /8 (IPv4) or /16 (IPv6) would keep much of the internet from ever being banned.
+      { address: '10.0.0.0/7' },
+      { address: '2001:db8::/15' },
     ];
     for (const body of invalid) {
       const response = await api.trustAddressRaw(body);
@@ -62,7 +66,7 @@ test.describe('Firewall trusted addresses', () => {
       if (typeof id === 'string') {
         trusted.add(id);
       }
-      expect(response.status, JSON.stringify(body)).toBe(422);
+      await expectStatus(response, 422, JSON.stringify(body));
     }
   });
 });

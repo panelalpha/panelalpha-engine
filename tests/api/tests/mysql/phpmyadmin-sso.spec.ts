@@ -12,6 +12,7 @@ import {
   ssoCredentialFrom,
 } from '@/helpers/mysql-sso-helpers';
 import { rand } from '@/helpers/random';
+import { expectStatus } from '@/helpers/expect-status';
 
 /**
  * phpMyAdmin single sign-on: the engine mints a one-shot credential, and
@@ -22,7 +23,7 @@ import { rand } from '@/helpers/random';
  * answer 404 and the affected tests skip rather than fail.
  */
 test.describe('phpMyAdmin SSO', () => {
-  test('a login URL is minted', async ({ api, setupUser }) => {
+  test('a login URL is minted', { tag: ['@smoke'] }, async ({ api, setupUser }) => {
     expect((await api.createPhpMyAdminSsoToken(setupUser.username)).data.url).toBeTruthy();
   });
 
@@ -46,25 +47,66 @@ test.describe('phpMyAdmin SSO', () => {
   });
 
   /** A single-use credential that still works on the second try is a replayable session. */
-  test('a credential cannot be exchanged twice', async ({ api, authedRequest, setupUser }) => {
-    const transport = createApiTransport(authedRequest);
+  test('a credential cannot be exchanged twice', async ({
+    api,
+    anonymousRequest,
+    playwright,
+    setupUser,
+  }) => {
+    const { url } = (await api.createPhpMyAdminSsoToken(setupUser.username)).data;
+
+    const first = await fetchPage(anonymousRequest, url);
+    test.skip(
+      first.status !== 200 || !first.body.toLowerCase().includes('phpmyadmin'),
+      'phpMyAdmin is not served on this engine.'
+    );
+    const session = await fetchPage(anonymousRequest, phpMyAdminIndexUrl(setupUser.domain));
+    expect(isPhpMyAdminLoggedIn(session.body), 'the first use did not log in').toBe(true);
+
+    // A fresh context holds no cookies, so only the credential itself can log it in.
+    const replay = await playwright.request.newContext({ ignoreHTTPSErrors: true });
+    try {
+      const second = await fetchPage(replay, url);
+      expect(isPhpMyAdminLoggedIn(second.body), 'a spent login URL logged in a second time').toBe(
+        false
+      );
+      const index = await fetchPage(replay, phpMyAdminIndexUrl(setupUser.domain));
+      expect(
+        isPhpMyAdminLoggedIn(index.body),
+        'a spent login URL established a second session'
+      ).toBe(false);
+    } finally {
+      await replay.dispose();
+    }
+  });
+
+  /**
+   * PmaSso (core/app/Http/Middleware/PmaSso.php:12-30) answers 404 to every source
+   * except the phpMyAdmin container, whatever the bearer token says.
+   */
+  test('the exchange is refused from the test runner', async ({
+    api,
+    authedRequest,
+    setupUser,
+  }) => {
     const credential = ssoCredentialFrom(
       (await api.createPhpMyAdminSsoToken(setupUser.username)).data.url
     );
     expect(credential).toBeTruthy();
 
-    const first = await exchangeSsoCredential(transport, credential!);
-    test.skip(first === 404, 'This engine does not expose the SSO exchange endpoint.');
-    expect(first, 'the first exchange should succeed').toBe(200);
-
-    const second = await exchangeSsoCredential(transport, credential!);
-    expectOneOf(second, [400, 401, 403, 404, 422], 'a spent credential was accepted again');
+    const status = await exchangeSsoCredential(createApiTransport(authedRequest), credential!);
+    expect(status, 'the exchange must only be reachable from the phpMyAdmin container').toBe(404);
   });
 
   const invalidCredentials = ['', 'x', 'invalid-token-value', '@@@', 'token with spaces', '%%%'];
 
   for (const credential of invalidCredentials) {
     test(`exchanging ${JSON.stringify(credential)} is refused`, async ({ authedRequest }) => {
+      test.info().annotations.push({
+        type: 'limitation',
+        description:
+          'From the test runner PmaSso answers 404 before token validation (PmaSso.php:12-30); these cases only prove the source restriction',
+      });
       const response = await authedRequest.put(SSO_EXCHANGE_PATH, {
         data: { token: credential },
       });
@@ -86,7 +128,7 @@ test.describe('phpMyAdmin SSO', () => {
     );
 
     const index = await fetchPage(anonymousRequest, phpMyAdminIndexUrl(setupUser.domain));
-    expect(index.status).toBe(200);
+    await expectStatus(index, 200);
     expect(isPhpMyAdminLoggedIn(index.body), 'phpMyAdmin still shows a login form after SSO').toBe(
       true
     );
@@ -141,10 +183,13 @@ test.describe('phpMyAdmin SSO', () => {
   }) => {
     const { url } = (await api.createPhpMyAdminSsoToken(setupUser.username)).data;
     const login = await fetchPage(anonymousRequest, url);
-    test.skip(login.status !== 200, 'phpMyAdmin is not served on this engine.');
+    test.skip(
+      login.status !== 200 || !login.body.toLowerCase().includes('phpmyadmin'),
+      'phpMyAdmin is not served on this engine.'
+    );
 
     const index = await fetchPage(anonymousRequest, phpMyAdminIndexUrl(setupUser.domain));
-    expect(index.status).toBe(200);
+    await expectStatus(index, 200);
     expect(index.body).not.toMatch(/server version/i);
     expect(index.body).not.toMatch(/protocol version/i);
   });

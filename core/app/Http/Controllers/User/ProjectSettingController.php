@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\User;
 
+use App\Auth\RequestToken;
 use App\Http\Controllers\Controller;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Lib\Vault\RequestVault;
@@ -100,6 +101,7 @@ class ProjectSettingController extends Controller
                     new OA\Property(property: 'account_name', type: 'string'),
                 ],
             )),
+            new OA\Response(response: 403, description: 'The `protected` setting is read-only over the API', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 422, description: 'Rejected', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
@@ -109,6 +111,10 @@ class ProjectSettingController extends Controller
      */
     public function update(string $username, string $key, Request $request): JsonResponse
     {
+        if ($refusal = $this->readOnlyRefusal($request, $username, $key)) {
+            return $refusal;
+        }
+
         $settings = $this->settingsFor($username);
         $validated = $request->validate(['value' => ['required', 'string']]);
 
@@ -157,6 +163,7 @@ class ProjectSettingController extends Controller
             new OA\Response(response: 200, description: 'Setting cleared', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'success', type: 'boolean', example: true)],
             )),
+            new OA\Response(response: 403, description: 'The `protected` setting is read-only over the API', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 422, description: 'Refused', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
@@ -166,6 +173,10 @@ class ProjectSettingController extends Controller
      */
     public function destroy(string $username, string $key, Request $request): JsonResponse
     {
+        if ($refusal = $this->readOnlyRefusal($request, $username, $key)) {
+            return $refusal;
+        }
+
         $force = $request->boolean('force');
 
         try {
@@ -182,5 +193,21 @@ class ProjectSettingController extends Controller
         $user = $this->projectOr404($username);
 
         return $user->project()->settings();
+    }
+
+    /**
+     * `protected` is the operator's: a token able to clear it would lift the
+     * refusal it is being held by. The console writes it without a token.
+     */
+    private function readOnlyRefusal(Request $request, string $username, string $key): ?JsonResponse
+    {
+        if (Settings::normalizeKey($key) !== Settings::KEY_PROTECTED || RequestToken::of($request) === null) {
+            return null;
+        }
+
+        return new JsonResponse([
+            'message' => "The 'protected' setting is read-only over the API. An operator changes it on the "
+                . "host: pae project:settings:set protected on --project={$username}, or unset it the same way.",
+        ], 403);
     }
 }

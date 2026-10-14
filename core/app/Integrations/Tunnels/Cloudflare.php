@@ -289,7 +289,7 @@ class Cloudflare
     /**
      * Tear down Cloudflare tunnels + connector for a project.
      * PanelAlpha Online rows are removed via domain/account delete
-     * ({@see TunnelManager::deleteTunnel} → remote DELETE on the license proxy).
+     * ({@see TunnelManager::removeTunnel} → remote DELETE on the license proxy).
      */
     public static function teardownProject(User $user): void
     {

@@ -16,6 +16,11 @@ export interface SftpAccount {
   created_at: string;
 }
 
+/** How many SFTP sessions a kill-sessions call found open. */
+export interface SftpSessionsKilled {
+  killed: number;
+}
+
 export interface CreateFtpAccountRequest {
   user: string;
   domain: string;

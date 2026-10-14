@@ -11,6 +11,7 @@ use App\System;
 use App\Models\SftpAccount;
 use App\Models\User;
 use Symfony\Component\HttpFoundation\JsonResponse;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
@@ -77,7 +78,6 @@ class SftpAccountController extends Controller
     )]
     /**
      * @param string $username
-     * @param SftpAccountStoreRequest $request
      * @return SftpAccountResource
      */
     public function store($username, SftpAccountStoreRequest $request)
@@ -90,13 +90,7 @@ class SftpAccountController extends Controller
             ], 404));
         }
 
-        $limit = $user->getSftpAccountsLimit();
-        if ($limit !== null && $limit <= $user->sftp_accounts_count) {
-            abort(new JsonResponse([
-                'message' => "SFTP accounts limit of {$limit} reached.",
-                'error_type' => 'sftp_accounts_limit_reached',
-            ], 422));
-        }
+        $this->refuseOverLimit($user);
 
         /**
          * @var array{
@@ -108,54 +102,12 @@ class SftpAccountController extends Controller
          */
         $params = $request->validated();
 
-        if (
-            !Str::startsWith($params['username'], $user->username . '_')
-            || !Str::after($params['username'], $user->username . '_')
-        ) {
-            throw ValidationException::withMessages([
-                'Username must start with ' . $user->username . '_',
-            ]);
-        }
+        $this->assertAccountNameFree($user, $params['username']);
 
-        if (SftpAccount::query()->where('username', $params['username'])->exists()) {
-            throw ValidationException::withMessages([
-                'Username not available',
-            ]);
-        }
-
-        $authPassword = false;
-        $authKey = false;
-        $authMethods = explode(',', $params['auth_method']);
-        foreach ($authMethods as $authMethod) {
-            if (!in_array($authMethod, ['password', 'public_key'])) {
-                throw ValidationException::withMessages([
-                    'Invalid auth_method',
-                ]);
-            }
-            if ($authMethod == 'password') {
-                $authPassword = true;
-                continue;
-            }
-            if ($authMethod == 'public_key') {
-                $authKey = true;
-            }
-        }
-
-        if ($authPassword && empty($params['password'])) {
-            throw ValidationException::withMessages([
-                'Password is required',
-            ]);
-        }
-
-        if ($authKey && empty($params['public_key'])) {
-            throw ValidationException::withMessages([
-                'Public key is required',
-            ]);
-        }
+        $this->authMethods($params);
 
         if (!empty($params['password'])) {
-            $salt = '$6$rounds=5000$' . bin2hex(random_bytes(16)) . '$';
-            $params['password'] = crypt($params['password'], $salt);
+            $params['password'] = $this->hashPassword($params['password']);
         }
 
         $sftpAccount = SftpAccount::create([
@@ -183,7 +135,12 @@ class SftpAccountController extends Controller
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             required: ['auth_method'],
             properties: [
-                new OA\Property(property: 'auth_method', type: 'string', example: 'password', enum: ['password', 'public_key']),
+                new OA\Property(
+                    property: 'auth_method',
+                    type: 'string',
+                    example: 'password',
+                    description: 'Comma-separated list of "password" and/or "public_key". Each method listed requires its credential below; a method left out is turned off.'
+                ),
                 new OA\Property(property: 'password', type: 'string', format: 'password', nullable: true),
                 new OA\Property(property: 'public_key', type: 'string', nullable: true),
             ],
@@ -195,8 +152,6 @@ class SftpAccountController extends Controller
     )]
     /**
      * @param string $username
-     * @param string $sftpUsername
-     * @param SftpAccountUpdateRequest $request
      * @return SftpAccountResource
      */
     public function update($username, string $sftpUsername, SftpAccountUpdateRequest $request)
@@ -212,52 +167,13 @@ class SftpAccountController extends Controller
          */
         $params = $request->validated();
 
-        /** @var ?SftpAccount */
-        $sftpAccount = SftpAccount::query()
-            ->where('user_id', $user->id)
-            ->where('username', $sftpUsername)
-            ->first();
+        $sftpAccount = $this->accountOr404($user, $sftpUsername);
 
-        if (!$sftpAccount) {
-            abort(new JsonResponse([
-                'message' => 'Account not found',
-            ], 404));
-        }
-
-        $authPassword = false;
-        $authKey = false;
-        $authMethods = explode(',', $params['auth_method']);
-        foreach ($authMethods as $authMethod) {
-            if (!in_array($authMethod, ['password', 'public_key'])) {
-                throw ValidationException::withMessages([
-                    'Invalid auth_method',
-                ]);
-            }
-            if ($authMethod == 'password') {
-                $authPassword = true;
-                continue;
-            }
-            if ($authMethod == 'public_key') {
-                $authKey = true;
-            }
-        }
-
-        if ($authPassword && empty($params['password'])) {
-            throw ValidationException::withMessages([
-                'Password is required',
-            ]);
-        }
-
-        if ($authKey && empty($params['public_key'])) {
-            throw ValidationException::withMessages([
-                'Public key is required',
-            ]);
-        }
+        [$authPassword, $authKey] = $this->authMethods($params);
 
         $newParams = ['auth_method' => $params['auth_method']];
         if ($authPassword) {
-            $salt = '$6$rounds=5000$' . bin2hex(random_bytes(16)) . '$';
-            $newParams['password'] = crypt($params['password'], $salt);
+            $newParams['password'] = $this->hashPassword($params['password']);
         }
         if ($authKey) {
             $newParams['public_key'] = $params['public_key'];
@@ -269,7 +185,6 @@ class SftpAccountController extends Controller
 
         return new SftpAccountResource($sftpAccount);
     }
-
 
     #[OA\Delete(
         path: '/projects/{username}/sftp-accounts/{sftpUser}',
@@ -285,15 +200,100 @@ class SftpAccountController extends Controller
             new OA\Response(response: 404, description: 'Not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
-    /**
-     * @param string $username
-     * @param string $sftpUsername
-     * @return SftpAccountResource
-     */
-    public function destroy(string $username, string $sftpUsername): SftpAccountResource
+    public function destroy(string $username, string $sftpUsername, System $system): SftpAccountResource
     {
         $user = $this->projectOr404($username);
 
+        $sftpAccount = $this->accountOr404($user, $sftpUsername);
+
+        $this->endSessions($system, $sftpAccount->username);
+
+        $sftpAccount->delete();
+
+        $system->sftp()->rebuildSftpAccounts();
+
+        return new SftpAccountResource($sftpAccount);
+    }
+
+    #[OA\Post(
+        path: '/projects/{username}/sftp-accounts/{sftpUser}/kill-sessions',
+        summary: 'End the open SFTP sessions of one account',
+        description: 'Works for any project that has SFTP accounts, classic or container. Only the named account is '
+            . 'affected: the project\'s other accounts share its Linux uid, so killing by uid would end their '
+            . 'sessions too. A project or account that does not exist is a 404; an account with no open session '
+            . 'answers 0, so the call is safe to repeat.',
+        security: [['bearerAuth' => []]],
+        tags: ['SFTP Accounts'],
+        parameters: [
+            new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'sftpUser', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Sessions ended', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', type: 'object', properties: [
+                    new OA\Property(property: 'killed', type: 'integer', example: 2, description: 'How many sessions were open when the call arrived.'),
+                ])],
+            )),
+            new OA\Response(response: 404, description: 'Project or account not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+        ],
+    )]
+    public function killSessions(string $username, string $sftpUsername, System $system): JsonResponse
+    {
+        $user = $this->projectOr404($username);
+
+        $sftpAccount = $this->accountOr404($user, $sftpUsername);
+
+        return new JsonResponse([
+            'data' => ['killed' => $system->sftp()->killSessions([$sftpAccount->username])],
+        ]);
+    }
+
+    #[OA\Post(
+        path: '/projects/{username}/sftp-accounts/kill-sessions',
+        summary: 'End every open SFTP session of a project',
+        description: 'Works for any project that has SFTP accounts, classic or container. Ends the sessions of '
+            . 'every account of the project and answers how many were open; a project with no SFTP account or no '
+            . 'open session answers 0.',
+        security: [['bearerAuth' => []]],
+        tags: ['SFTP Accounts'],
+        parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
+        responses: [
+            new OA\Response(response: 200, description: 'Sessions ended', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', type: 'object', properties: [
+                    new OA\Property(property: 'killed', type: 'integer', example: 3, description: 'How many sessions were open when the call arrived.'),
+                ])],
+            )),
+            new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+        ],
+    )]
+    public function killSessionsAll(string $username, System $system): JsonResponse
+    {
+        $user = $this->projectOr404($username);
+
+        $logins = array_map(
+            static fn (SftpAccount $account): string => $account->username,
+            $user->getSftpAccounts(),
+        );
+
+        return new JsonResponse([
+            'data' => ['killed' => $system->sftp()->killSessions($logins)],
+        ]);
+    }
+
+    /**
+     * Best-effort: a host whose sftp container is down must still delete the account.
+     */
+    private function endSessions(System $system, string $login): void
+    {
+        try {
+            $system->sftp()->killSessions([$login]);
+        } catch (\Throwable $e) {
+            Log::warning("SFTP session kill failed for {$login}: " . $e->getMessage());
+        }
+    }
+
+    private function accountOr404(User $user, string $sftpUsername): SftpAccount
+    {
         /** @var ?SftpAccount */
         $sftpAccount = SftpAccount::query()
             ->where('user_id', $user->id)
@@ -306,10 +306,84 @@ class SftpAccountController extends Controller
             ], 404));
         }
 
-        $sftpAccount->delete();
+        return $sftpAccount;
+    }
 
-        (new System())->sftp()->rebuildSftpAccounts();
+    private function refuseOverLimit(User $user): void
+    {
+        $limit = $user->getSftpAccountsLimit();
+        if ($limit !== null && $limit <= $user->sftp_accounts_count) {
+            abort(new JsonResponse([
+                'message' => "SFTP accounts limit of {$limit} reached.",
+                'error_type' => 'sftp_accounts_limit_reached',
+            ], 422));
+        }
+    }
 
-        return new SftpAccountResource($sftpAccount);
+    /**
+     * An account name is the project's username, an underscore and a non-empty suffix, and is unique on the host.
+     *
+     * @throws ValidationException
+     */
+    private function assertAccountNameFree(User $user, string $name): void
+    {
+        if (
+            !Str::startsWith($name, $user->username . '_')
+            || !Str::after($name, $user->username . '_')
+        ) {
+            throw ValidationException::withMessages([
+                'username' => 'Username must start with ' . $user->username . '_',
+            ]);
+        }
+
+        if (SftpAccount::query()->where('username', $name)->exists()) {
+            throw ValidationException::withMessages([
+                'username' => 'Username not available',
+            ]);
+        }
+    }
+
+    /**
+     * Which of password and public-key auth the comma-separated `auth_method` asks for, each with its secret present.
+     *
+     * @param array{auth_method: string, password: ?string, public_key: ?string} $params
+     * @return array{0: bool, 1: bool} password auth, key auth
+     * @throws ValidationException
+     */
+    private function authMethods(array $params): array
+    {
+        $authPassword = false;
+        $authKey = false;
+        foreach (explode(',', $params['auth_method']) as $authMethod) {
+            if (!in_array($authMethod, ['password', 'public_key'])) {
+                throw ValidationException::withMessages([
+                    'auth_method' => 'Invalid auth_method',
+                ]);
+            }
+            $authPassword = $authPassword || $authMethod == 'password';
+            $authKey = $authKey || $authMethod == 'public_key';
+        }
+
+        if ($authPassword && empty($params['password'])) {
+            throw ValidationException::withMessages([
+                'password' => 'Password is required',
+            ]);
+        }
+
+        if ($authKey && empty($params['public_key'])) {
+            throw ValidationException::withMessages([
+                'public_key' => 'Public key is required',
+            ]);
+        }
+
+        return [$authPassword, $authKey];
+    }
+
+    /** SHA-512 crypt (`$6$`, 5000 rounds) with a random salt. */
+    private function hashPassword(string $password): string
+    {
+        $salt = '$6$rounds=5000$' . bin2hex(random_bytes(16)) . '$';
+
+        return crypt($password, $salt);
     }
 }

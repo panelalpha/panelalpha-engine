@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Platform;
 
+use App\Support\JobBudget;
+
 /**
  * The commands one deploy was told to run, per stage: the request's `stages`
  * field. A stage named here replaces that stage outright, in the order given;
@@ -21,8 +23,8 @@ final class DeployPlan
     /** Characters of one command line. */
     public const MAX_RUN_LENGTH = 4096;
 
-    /** Upper bound on a per-command timeout, in seconds. */
-    public const MAX_TIMEOUT = 7200;
+    /** Upper bound on a per-command timeout, in seconds: below the job budget. */
+    public const MAX_TIMEOUT = JobBudget::COMMAND_SECONDS;
 
     /**
      * @param array<string, list<PlatformCommand>> $stages stage => commands,
@@ -64,11 +66,31 @@ final class DeployPlan
     }
 
     /**
-     * @param mixed $commands
      * @return list<PlatformCommand>
      * @throws ManifestException
      */
     private static function readStage(string $stage, mixed $commands): array
+    {
+        self::assertCommandList($stage, $commands);
+
+        $parsed = [];
+        $seen = [];
+        foreach ($commands as $index => $command) {
+            $where = "stages.{$stage}[{$index}]";
+            $parsed[$index] = self::readCommand($stage, $index, $command, $where);
+            $id = $parsed[$index]->id;
+            if (isset($seen[$id])) {
+                throw new ManifestException("{$where}: '{$id}' is already used by another command in this stage");
+            }
+            $seen[$id] = true;
+        }
+        self::assertAtMostOneServe($stage, $parsed);
+
+        return array_values($parsed);
+    }
+
+    /** @throws ManifestException */
+    private static function assertCommandList(string $stage, mixed $commands): void
     {
         if (!is_array($commands) || !array_is_list($commands)) {
             throw new ManifestException(
@@ -80,44 +102,39 @@ final class DeployPlan
                 "stages.{$stage}: at most " . self::MAX_COMMANDS_PER_STAGE . ' commands'
             );
         }
+    }
 
-        $parsed = [];
-        $seen = [];
-        $serves = 0;
-
-        foreach ($commands as $index => $command) {
-            $where = "stages.{$stage}[{$index}]";
-            if (!is_array($command)) {
-                throw new ManifestException("{$where}: must be an object with a 'run'");
-            }
-
-            // The stage comes from the key the caller wrote it under, so a
-            // command cannot claim to belong elsewhere.
-            $command['stage'] = $stage;
-            self::assertBounds($command, $where);
-
-            // The parser labels its errors "<id>.commands[N]", so the id it is
-            // given is what tells a caller which stage the bad command was in.
-            $parsed[$index] = PlatformCommand::fromArray($command, "stages.{$stage}", $index);
-            $id = $parsed[$index]->id;
-
-            if (isset($seen[$id])) {
-                throw new ManifestException("{$where}: '{$id}' is already used by another command in this stage");
-            }
-            $seen[$id] = true;
-
-            if ($parsed[$index]->serve) {
-                $serves++;
-            }
+    /**
+     * One command, its stage taken from the key it was written under so it cannot
+     * claim another. Parsed under the id `stages.<stage>` so its errors name the stage.
+     *
+     * @throws ManifestException
+     */
+    private static function readCommand(string $stage, int $index, mixed $command, string $where): PlatformCommand
+    {
+        if (!is_array($command)) {
+            throw new ManifestException("{$where}: must be an object with a 'run'");
         }
 
-        // Two serve commands would race for one port. Zero is allowed: an
-        // emptied start stage means the container runs nothing.
+        $command['stage'] = $stage;
+        self::assertBounds($command, $where);
+
+        return PlatformCommand::fromArray($command, "stages.{$stage}", $index);
+    }
+
+    /**
+     * Two serve commands would race for one port. None is allowed: an emptied
+     * start stage means the container runs nothing.
+     *
+     * @param array<int, PlatformCommand> $commands
+     * @throws ManifestException
+     */
+    private static function assertAtMostOneServe(string $stage, array $commands): void
+    {
+        $serves = count(array_filter($commands, static fn (PlatformCommand $command): bool => $command->serve));
         if ($serves > 1) {
             throw new ManifestException("stages.{$stage}: only one command may be the serve command");
         }
-
-        return array_values($parsed);
     }
 
     /**

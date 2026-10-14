@@ -15,6 +15,9 @@ final class DeployLogReader
 {
     public const MAX_READ_LINES = 2000;
 
+    /** Bytes from the end of a log that last() reads: room for the finish line's lookback. */
+    public const LAST_WINDOW = 262144;
+
     public function __construct(private readonly string $path)
     {
     }
@@ -84,6 +87,52 @@ final class DeployLogReader
         }
 
         return $this->parse(array_slice($this->rawLines(), -$limit));
+    }
+
+    /**
+     * The first `$limit` lines, read without loading the rest of the file.
+     *
+     * @return list<array{ts: int, stage: ?string, level: string, msg: string}>
+     */
+    public function head(int $limit): array
+    {
+        $handle = $limit > 0 && is_file($this->path) ? @fopen($this->path, 'rb') : false;
+        if ($handle === false) {
+            return [];
+        }
+
+        $raw = [];
+        while (count($raw) < $limit && ($line = fgets($handle)) !== false) {
+            $line = rtrim($line, "\r\n");
+            if ($line !== '') {
+                $raw[] = $line;
+            }
+        }
+        fclose($handle);
+
+        return $this->parse($raw);
+    }
+
+    /**
+     * The last `$limit` lines that fit in the last `$window` bytes, read
+     * without loading the rest of the file.
+     *
+     * @return list<array{ts: int, stage: ?string, level: string, msg: string}>
+     */
+    public function last(int $limit, int $window = self::LAST_WINDOW): array
+    {
+        $size = $limit > 0 && is_file($this->path) ? (int) @filesize($this->path) : 0;
+        $chunk = $size > 0 ? @file_get_contents($this->path, false, null, max(0, $size - $window)) : false;
+        if (!is_string($chunk) || $chunk === '') {
+            return [];
+        }
+
+        $raw = array_values(array_filter(explode("\n", $chunk), static fn (string $l): bool => $l !== ''));
+        if ($size > $window) {
+            array_shift($raw);
+        }
+
+        return $this->parse(array_slice($raw, -$limit));
     }
 
     /**

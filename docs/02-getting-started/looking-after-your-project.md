@@ -50,7 +50,25 @@ You can also push live to staging to refresh the test copy with real data. A pro
 Rebuild this project.
 ```
 
-Use this after you push new commits, change files over FTP, or change an environment variable. A rebuild replays the last successful plan: [How a deploy works](how-a-deploy-works.md).
+Use this after you push new commits, or change files over FTP on a project that has no repository. A project connected to git is cloned again from its branch on a rebuild, so files changed on the server are lost; commit them to the repository instead. A rebuild replays the last successful plan: [How a deploy works](how-a-deploy-works.md). An environment variable does not need one, see below.
+
+## Change an environment variable
+
+On a project that runs in its own container, the assistant can show and change its environment variables without a rebuild. Values are hidden when listed.
+
+```text
+Show the environment variables of this project, then set APP_MODE to staging.
+```
+
+The application is restarted in place with the new value. A value the build itself reads, as Vite and Next.js do, still needs a rebuild. A removed variable is gone at once, but a default the project type sets for it comes back at the next deploy. Some names are the engine's own (the ones starting `PANELALPHA_ENGINE_`) and cannot be set. A project on traditional PHP hosting does not have this. Details: [Environment variables](../05-capabilities/projects.md#environment-variables).
+
+## See what was deployed before
+
+```text
+List the recent deploys of this project.
+```
+
+The engine keeps the last 10 by default: [How a deploy works](how-a-deploy-works.md#past-deploys).
 
 ## See why a page is broken
 

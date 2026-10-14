@@ -28,7 +28,7 @@ class SshController extends Controller
             properties: [
                 new OA\Property(property: 'command', type: 'string', example: 'ls -la && cat composer.json'),
                 new OA\Property(property: 'cwd', type: 'string', nullable: true, description: 'Directory to run in; defaults to the account home directory.', example: '/home/demo/project'),
-                new OA\Property(property: 'timeout', type: 'integer', nullable: true, description: 'Seconds before the command is killed (1-900, default 300).', example: 300),
+                new OA\Property(property: 'timeout', type: 'integer', nullable: true, description: 'Seconds before the command is killed (1-900, default 300); a killed command answers exit_code 124, or 137 when it ignored SIGTERM.', example: 300),
             ],
         )),
         responses: [

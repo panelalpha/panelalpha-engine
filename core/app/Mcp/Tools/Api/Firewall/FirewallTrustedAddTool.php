@@ -48,7 +48,7 @@ class FirewallTrustedAddTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'address' => $schema->string()->description('IPv4/IPv6 address or CIDR. Example: 203.0.113.7.')->required(),
+            'address' => $schema->string()->description('IPv4/IPv6 address or CIDR, no wider than /8 (IPv4) or /16 (IPv6). Example: 203.0.113.7.')->required(),
             'comment' => $schema->string()->description('Example: office.'),
         ];
     }

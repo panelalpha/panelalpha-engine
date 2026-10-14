@@ -101,6 +101,46 @@ export const deployLogSnapshotSchema = z
   })
   .passthrough();
 
+/** One kept deploy, as GET /projects/{u}/deploys lists it. */
+export const deployHistoryItemSchema = z
+  .object({
+    id: z.string(),
+    status: z.enum(['running', 'success', 'partial', 'failed', 'cancelled', 'unknown']),
+    error: z.string().nullable(),
+    started_at: z.number().nullable(),
+    finished_at: z.number().nullable(),
+    kind: z.enum(['install', 'redeploy']).nullable(),
+    source: z.string().nullable(),
+    branch: z.string().nullable(),
+    commit: z.string().nullable(),
+    trigger: z.enum(['api', 'mcp', 'cli', 'hook']).nullable(),
+    action: z.string().nullable(),
+    task_id: z.number().nullable(),
+  })
+  .strict();
+
+export const deployHistoryListResponseSchema = z.object({
+  data: z.array(deployHistoryItemSchema),
+});
+
+/** A page of one kept deploy's log, with that deploy's item beside it. */
+export const deployHistoryLogResponseSchema = z.object({
+  data: deployHistoryItemSchema
+    .extend({
+      lines: z.array(
+        z.object({
+          ts: z.number(),
+          stage: z.string().nullable(),
+          level: z.string(),
+          msg: z.string(),
+        })
+      ),
+      next_offset: z.number(),
+      more: z.boolean(),
+    })
+    .strict(),
+});
+
 /**
  * One-word answers `GET /projects/{u}/app/health` and `project:deploy:check --json`
  * use for what answered on `/`. Keep in lockstep with CheckRunner / the operator
@@ -150,3 +190,18 @@ export const appHealthSchema = z
     checks: z.array(appHealthCheckSchema),
   })
   .passthrough();
+
+/** `POST /source/refs`: a remote's branches and tags, without cloning it. */
+export const sourceRefsSchema = z
+  .object({
+    repository: z.string(),
+    default_branch: z.string().nullable(),
+    branches: z.array(z.string()),
+    tags: z.array(z.string()),
+    truncated: z.boolean(),
+  })
+  .passthrough();
+
+export const sourceRefsResponseSchema = z.object({
+  data: sourceRefsSchema,
+});

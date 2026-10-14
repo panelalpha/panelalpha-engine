@@ -38,8 +38,9 @@ return [
             'driver' => 'database',
             'table' => 'jobs',
             'queue' => 'default',
-            // Above the worker's --timeout (86500s), or a long deploy is handed to a second worker.
-            'retry_after' => 86600,
+            // Above the worker's --timeout (App\Support\JobBudget::WORKER_SECONDS),
+            // or a long job is handed to a second worker while the first still runs.
+            'retry_after' => \App\Support\JobBudget::RETRY_AFTER_SECONDS,
             'after_commit' => false,
         ],
 
@@ -67,7 +68,7 @@ return [
             'driver' => 'redis',
             'connection' => 'default',
             'queue' => env('REDIS_QUEUE', 'default'),
-            'retry_after' => 86600,
+            'retry_after' => \App\Support\JobBudget::RETRY_AFTER_SECONDS,
             'block_for' => null,
             'after_commit' => false,
         ],

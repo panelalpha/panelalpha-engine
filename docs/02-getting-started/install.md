@@ -27,7 +27,7 @@ The installer checks the operating system and refuses anything else. It does not
 ## 1. Run the installer
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
 A few minutes later the engine is running. It prints its addresses and a command to connect your assistant. Want a name of your own, or a VPS the internet cannot reach by IP? Read [Troubleshooting](#troubleshooting) before you install.
@@ -39,7 +39,7 @@ You can install the engine and put an application from a git repository online i
 Pass flags after `sh -s --` so they reach the installer:
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh -s -- \
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- \
   --repo https://github.com/n8n-io/n8n
 ```
 
@@ -157,14 +157,14 @@ On a VPS with a public IPv4 address, the engine gets a trusted certificate by it
 Install with it and you skip the self-signed step entirely. Set the DNS record up before you install, or the certificate request will fail.
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh -s -- --domain panel.example.com
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --domain panel.example.com
 ```
 
 **My VPS has no public IPv4 address.**
 This covers offices, home connections, some cloud providers, and a VPS with only an IPv6 address. Point a name at the VPS, then tell the installer that the address on its network card is not how the world reaches it. The `--domain` part is what gets you a real certificate.
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh -s -- --domain panel.example.com --no-local-ip --enable-nat
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --domain panel.example.com --no-local-ip --enable-nat
 ```
 
 **I want a real certificate on an engine that is already self-signed.**
@@ -187,6 +187,16 @@ The installer turns on disk quota for the disk that holds `/home`, so a project'
 Disk quota counts the files a project writes as its own user. The images and build layers of a container project are written by its own Docker, which quota does not count. The engine covers that during a deploy instead: it measures every 15 seconds, and stops the deploy when the project passes its disk limit or the server falls below `DEPLOY_HOST_MIN_FREE` (3G by default). It then clears the project's unused Docker storage. A running application that grows its own data after the deploy is still bounded only by quota.
 
 For a hard limit that also covers Docker storage, use ext4 project quota. It needs the `project` feature, which can only be turned on while the disk is unmounted, so plan it on a fresh server before you install, with `/home` on its own ext4 disk: `tune2fs -O project,quota -Q prjquota /dev/<disk>`, then mount it with `prjquota` in `/etc/fstab`. Per project, tag its home and set the limit, in KB: `chattr -R -p <uid> +P /home/<project>` and `setquota -P <uid> 0 <limit-in-KB> 0 0 /home`. The engine does not do these two steps itself.
+
+**A repository or download address on my own network is refused with `host_refused`.**
+The engine will not fetch from an address that stays inside a network: the engine's own host, the private ranges (`10.x`, `172.16.x` to `172.31.x`, `192.168.x`) and similar internal addresses. This keeps a public link from reaching services inside your server. If your Git server or file server is one of those on purpose, add one of these lines to `.env-core` and reload, with the three steps in [Change a setting](#change-a-setting):
+
+```bash
+EGRESS_ALLOW_PRIVATE=true
+EGRESS_ALLOW_HOSTS=git.internal,files.internal
+```
+
+The first allows every private address. The second allows only the names you list, and it takes names, not addresses. Loopback, link-local and other reserved addresses stay refused either way.
 
 **I want a different webserver.**
 Not supported. Sites are served through nginx-proxy only.

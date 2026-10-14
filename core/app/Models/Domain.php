@@ -296,7 +296,7 @@ class Domain extends Model
     /**
      * panelalpha.online names a project added beside this domain, such as
      * `api-<name>`: the front forwards each with its own Host, so the site
-     * has to answer to them.
+     * has to answer to them. A preview is forwarded as the domain itself.
      *
      * @return list<string>
      */
@@ -311,7 +311,10 @@ class Domain extends Model
             ->where('provider', Tunnel::PROVIDER_PANELALPHA)
             ->where('hostname', '!=', strtolower((string) $this->domain))
             ->orderBy('hostname')
+            ->get()
+            ->filter(static fn (Tunnel $tunnel): bool => $tunnel->forwardedHost() === strtolower($tunnel->hostname))
             ->pluck('hostname')
+            ->values()
             ->all();
     }
 

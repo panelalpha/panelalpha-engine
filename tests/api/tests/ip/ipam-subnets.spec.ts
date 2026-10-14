@@ -10,6 +10,7 @@ import {
   isIpamAvailable,
   removeSubnet,
 } from '@/helpers/ipam-helpers';
+import { expectStatus } from '@/helpers/expect-status';
 
 /**
  * IP management is an optional module; where it is absent every endpoint answers
@@ -71,7 +72,7 @@ test.describe('IP subnet validation', () => {
     try {
       const duplicate = await api.addSubnetRaw({ ip: IPV4_SUBNET.ip, mask: IPV4_SUBNET.mask });
 
-      expect(duplicate.status).toBe(422);
+      await expectStatus(duplicate, 422);
       expect((duplicate.body as { message?: string }).message).toContain('already exist');
     } finally {
       await removeSubnet(api, subnetId);
@@ -95,13 +96,13 @@ test.describe('IP subnet validation', () => {
     test(`${label} is refused`, async ({ api }) => {
       const response = await api.addSubnetRaw(subnet);
 
-      expect(response.status).toBe(422);
+      await expectStatus(response, 422);
       expect((response.body as { message?: string }).message).toContain(message);
     });
   }
 
   test('deleting an unknown subnet returns 404', async ({ api }) => {
-    expect((await api.deleteSubnetRaw(999999)).status).toBe(404);
+    await expectStatus(await api.deleteSubnetRaw(999999), 404);
   });
 
   /** Deleting a subnet out from under a live assignment would strand the user's IP. */
@@ -117,7 +118,7 @@ test.describe('IP subnet validation', () => {
       });
 
       const deletion = await api.deleteSubnetRaw(subnetId);
-      expect(deletion.status).toBe(422);
+      await expectStatus(deletion, 409);
       expect((deletion.body as { message?: string }).message).toContain('assigned');
     } finally {
       await removeSubnet(api, subnetId);

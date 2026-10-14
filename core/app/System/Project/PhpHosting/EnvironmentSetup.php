@@ -9,43 +9,19 @@ final class EnvironmentSetup
     public function createFromTemplate(PhpHosting $project, PhpStack $stack): void
     {
         $system = $project->system();
-        $user = $project->userModel();
         $projectDir = $system->projectDirPath($project->username());
 
-        $blockDevice = '';
-        $deviceReadBps = $user->getDeviceReadBps();
-        $deviceWriteBps = $user->getDeviceWriteBps();
-        if ($deviceReadBps !== null || $deviceWriteBps !== null) {
-            $blockDevice = $system->filesystem()->getHomeFilesystemParentBlockDevice();
-        }
-
-        $templateVars = [
-            'user' => $user->username,
-            'uid' => $user->getUid() ?? 33,
-            'gid' => $user->getGid() ?? 33,
-            'cpu_limit' => (string) $user->getCpuLimit(),
-            'memory_limit' => (string) $user->effectiveMemoryLimit(),
-            'device_read_bps' => $deviceReadBps,
-            'device_write_bps' => $deviceWriteBps,
-            'block_device' => $blockDevice,
-            'php_versions' => $system->php()->listAvailablePhpVersions(),
-        ];
-        $templatesDir = $system->projectFilesTemplateDirPath($user->getTemplate());
-        $exclude = ['crontabs/www-data'];
-        $system->filesystem()->makeDirFromTemplate($projectDir, $templatesDir, $templateVars, null, null, $exclude);
-
-        $dockerfile = $stack->dockerfileTemplateName();
-        $dockercompose = $stack->composeTemplateName();
-        $system->exec("sudo cp {$projectDir}/{$dockerfile} {$projectDir}/Dockerfile");
-        $system->exec("sudo cp {$projectDir}/{$dockercompose} {$projectDir}/docker-compose.yml");
+        $templateVars = $this->templateVars($project);
+        $templatesDir = $system->projectFilesTemplateDirPath($project->userModel()->getTemplate());
+        $system->filesystem()->makeDirFromTemplate($projectDir, $templatesDir, $templateVars, null, null, ['crontabs/www-data']);
+        $this->selectStackFiles($project, $stack, $projectDir);
 
         $stack->applySettings($project);
-        $manager = $project->services();
-        $services = $stack->services($project);
-        $this->setupEntrypointInitScripts($project, $stack, $manager->bootScripts($services));
-        $manager->write($services);
+        $this->writeServices($project, $stack);
 
         $system->exec("sudo chown -R www-data:www-data {$projectDir}");
+
+        (new PhpErrorLogConfig())->apply($project);
 
         $this->setupCrontabFile($project);
     }
@@ -53,16 +29,9 @@ final class EnvironmentSetup
     public function applyRedisSettings(PhpHosting $project): void
     {
         $system = $project->system();
-        $user = $project->userModel();
-        $settings = $user->getRedisConfig();
         $projectDir = $system->projectDirPath($project->username());
         $confFile = "{$projectDir}/redis/conf.d/custom.conf";
-
-        $lines = [];
-        foreach ($settings as $key => $value) {
-            $lines[] = "{$key} {$value}";
-        }
-        $conf = implode("\n", $lines) . "\n";
+        $conf = $this->redisConf($project->userModel()->getRedisConfig());
 
         $system->runProcess("sudo mkdir -p {$projectDir}/redis/conf.d");
 
@@ -82,7 +51,7 @@ final class EnvironmentSetup
     {
         $userModel = $project->userModel();
         $username = $userModel->username;
-        $uid = $userModel->getUid() ?? 33;
+        [$uid] = $userModel->linuxIds();
         $passwdEntryScript = <<<BASH
 if getent passwd {$uid} >/dev/null 2>&1 || getent passwd {$username} >/dev/null 2>&1; then
   echo "[init] passwd entry already exists for UID={$uid} or user={$username}, skipping"
@@ -96,6 +65,64 @@ BASH;
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    private function templateVars(PhpHosting $project): array
+    {
+        $system = $project->system();
+        $user = $project->userModel();
+        $deviceReadBps = $user->getDeviceReadBps();
+        $deviceWriteBps = $user->getDeviceWriteBps();
+        $blockDevice = '';
+        if ($deviceReadBps !== null || $deviceWriteBps !== null) {
+            $blockDevice = $system->filesystem()->getHomeFilesystemParentBlockDevice();
+        }
+
+        [$uid, $gid] = $user->linuxIds();
+
+        return [
+            'user' => $user->username,
+            'uid' => $uid,
+            'gid' => $gid,
+            'cpu_limit' => (string) $user->getCpuLimit(),
+            'memory_limit' => (string) $user->effectiveMemoryLimit(),
+            'device_read_bps' => $deviceReadBps,
+            'device_write_bps' => $deviceWriteBps,
+            'block_device' => $blockDevice,
+            'php_versions' => $system->php()->listAvailablePhpVersions(),
+        ];
+    }
+
+    /** Copies the stack's Dockerfile and compose template over the names Docker reads. */
+    private function selectStackFiles(PhpHosting $project, PhpStack $stack, string $projectDir): void
+    {
+        $system = $project->system();
+        $system->exec("sudo cp {$projectDir}/{$stack->dockerfileTemplateName()} {$projectDir}/Dockerfile");
+        $system->exec("sudo cp {$projectDir}/{$stack->composeTemplateName()} {$projectDir}/docker-compose.yml");
+    }
+
+    private function writeServices(PhpHosting $project, PhpStack $stack): void
+    {
+        $manager = $project->services();
+        $services = $stack->services($project);
+        $this->setupEntrypointInitScripts($project, $stack, $manager->bootScripts($services));
+        $manager->write($services);
+    }
+
+    /**
+     * @param array<string, string> $settings
+     */
+    private function redisConf(array $settings): string
+    {
+        $lines = [];
+        foreach ($settings as $key => $value) {
+            $lines[] = "{$key} {$value}";
+        }
+
+        return implode("\n", $lines) . "\n";
+    }
+
+    /**
      * @param array<string, string> $bootScripts
      */
     private function setupEntrypointInitScripts(PhpHosting $project, PhpStack $stack, array $bootScripts): void
@@ -105,8 +132,8 @@ BASH;
             $stack->entrypointInitScripts($project),
             $bootScripts,
         );
-        $dir = $project->system()->projectDirPath($project->username()) . '/entrypoint-init.d';
         $system = $project->system();
+        $dir = $system->projectDirPath($project->username()) . '/entrypoint-init.d';
         $system->runProcess("sudo rm {$dir}/*.sh");
         foreach ($scriptFiles as $name => $script) {
             $file = "{$dir}/{$name}";
@@ -116,14 +143,13 @@ BASH;
 
     private function setupCrontabFile(PhpHosting $project): void
     {
-        $projectDir = $project->system()->projectDirPath($project->username());
-        $file = "{$projectDir}/crontabs/www-data";
+        $system = $project->system();
+        $file = $system->projectDirPath($project->username()) . '/crontabs/www-data';
         if (!is_file($file)) {
-            $project->system()->exec(['sudo', 'touch', $file]);
+            $system->exec(['sudo', 'touch', $file]);
         }
-        $user = $project->userModel();
-        $chown = $user->getChownString() ?? '33:33';
-        $project->system()->exec(['sudo', 'chown', $chown, $file]);
-        $project->system()->exec(['sudo', 'chmod', '600', $file]);
+        $chown = $project->userModel()->getChownString() ?? '33:33';
+        $system->exec(['sudo', 'chown', $chown, $file]);
+        $system->exec(['sudo', 'chmod', '600', $file]);
     }
 }

@@ -13,6 +13,9 @@ use Illuminate\Support\Carbon;
  * @property int $user_id
  * @property string $username
  * @property int $container_id
+ * @property string $kind
+ * @property ?string $note
+ * @property ?array $contents
  * @property ?array $async_status
  * @property ?array $restore_details
  * @property ?string $error
@@ -29,12 +32,16 @@ class Backup extends Model
         'user_id',
         'username',
         'container_id',
+        'kind',
+        'note',
+        'contents',
         'async_status',
         'restore_details',
         'error',
     ];
 
     protected $casts = [
+        'contents' => 'array',
         'async_status' => 'array',
         'restore_details' => 'array',
     ];
@@ -54,12 +61,24 @@ class Backup extends Model
         return $this->hasMany(BackupItem::class);
     }
 
-    public static function prepare(User $user, BackupContainer $container, string $source = 'api'): self
-    {
+    /**
+     * @param array{files?: bool, databases?: bool} $contents
+     */
+    public static function prepare(
+        User $user,
+        BackupContainer $container,
+        string $source = 'api',
+        array $contents = [],
+        ?string $note = null,
+        string $kind = 'manual',
+    ): self {
         $backup = new self();
         $backup->user_id = $user->id;
         $backup->username = $user->username;
         $backup->container_id = $container->id;
+        $backup->kind = $kind;
+        $backup->note = $note;
+        $backup->contents = self::normalizeContents($contents);
         $backup->async_status = [
             'backup' => 'pending',
             'source' => $source,
@@ -68,6 +87,33 @@ class Backup extends Model
         $backup->save();
 
         return $backup;
+    }
+
+    public function includeFiles(): bool
+    {
+        return ($this->contents['files'] ?? true) === true;
+    }
+
+    public function includeDatabases(): bool
+    {
+        return ($this->contents['databases'] ?? true) === true;
+    }
+
+    public function isScheduled(): bool
+    {
+        return $this->kind === 'scheduled';
+    }
+
+    /**
+     * @param array{files?: bool, databases?: bool} $contents
+     * @return array{files: bool, databases: bool}
+     */
+    private static function normalizeContents(array $contents): array
+    {
+        return [
+            'files' => ($contents['files'] ?? true) === true,
+            'databases' => ($contents['databases'] ?? true) === true,
+        ];
     }
 
     public function backupStatus(): ?string

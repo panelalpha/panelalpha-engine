@@ -65,6 +65,8 @@ List the tunnel hostnames on this project's domain.
 
 ## Remove a hostname or the token
 
+A hostname stays until you remove it, unless you gave it a lifetime when you attached it ("for 7 days", from 5 minutes to 30 days). The engine then removes it, including the DNS record at Cloudflare. For a short-lived address without a Cloudflare account, ask for a preview address instead: [A preview address](domains-and-ssl.md#a-preview-address).
+
 To stop serving a name through Cloudflare:
 
 ```text
@@ -103,6 +105,36 @@ Ask the assistant for a new one. Links last one hour.
 
 **The assistant asked me to paste the token in the chat.**
 Do not. Ask it to send a paste link on the engine instead.
+
+## More requests to try
+
+These need a Cloudflare account with a zone and a token with the two permissions named above. **Mode** is the lowest permission mode that allows it: read, modify or full ([Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do)).
+
+**Save the token without pasting it**
+
+```text
+Save a Cloudflare API token on tshop. Send me the page to paste it, do not ask
+for it here.
+```
+
+Mode: modify. Tools: `vault_secret_create`, `project_setting_set`, `project_setting_get`. Check: the token is verified against Cloudflare when stored, the account it belongs to comes back, and a later read shows the token redacted.
+
+**Attach, check, remove**
+
+```text
+Attach shop.example.com to tshop through a Cloudflare tunnel. Show the tunnel
+hostnames on that domain. Then remove the hostname.
+```
+
+Mode: full. Tools: `tunnel_create` with `provider` cloudflare, `tunnel_list`, `tunnel_delete`. Check: the site opens through Cloudflare, and after the delete the DNS record and ingress rule are gone.
+
+**The token cannot be cleared under live tunnels**
+
+```text
+Clear the Cloudflare token on tshop while a tunnel hostname still exists.
+```
+
+Mode: full. Tools: `project_setting_delete`. Check: the call is refused, and the assistant offers removing the hostnames first. `force` is used only when asked for.
 
 ## From the server
 
