@@ -100,14 +100,7 @@ class AbstractApplication extends BaseApplication
      */
     public function runSshCommand(string $command, ?string $cwd = null, int $timeout = 300): array
     {
-        $process = $this->shell()->runShellAsUser($command, $cwd, $timeout);
-        $exitCode = $process->getExitCode();
-
-        return [
-            'stdout' => $process->getOutput(),
-            'stderr' => $process->getErrorOutput(),
-            'exit_code' => $exitCode ?? 124,
-        ];
+        return $this->shell()->runShellCommand($command, $cwd, $timeout);
     }
 
     /**

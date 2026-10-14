@@ -21,6 +21,22 @@ class PhpErrorLogTemplatesTest extends TestCase
         }
     }
 
+    public function test_from_php_8_4_no_jit_buffer_is_reserved_next_to_ioncube(): void
+    {
+        $checked = 0;
+        foreach (['user/default/project/php', 'user-config/php'] as $dir) {
+            foreach ($this->phpTemplates('default.ini', $dir) as $version => $file) {
+                if (version_compare($version, '8.4', '<')) {
+                    continue;
+                }
+                $this->assertMatchesRegularExpression('/^opcache\.jit_buffer_size = 0$/m', (string) file_get_contents($file), $file);
+                $checked++;
+            }
+        }
+
+        $this->assertGreaterThanOrEqual(2, $checked);
+    }
+
     public function test_every_fpm_pool_catches_worker_output(): void
     {
         foreach ($this->phpTemplates('fpm/pool.d/www.conf.blade.php') as $version => $file) {
@@ -42,9 +58,9 @@ class PhpErrorLogTemplatesTest extends TestCase
     /**
      * @return array<string, string> PHP version => template path
      */
-    private function phpTemplates(string $relative): array
+    private function phpTemplates(string $relative, string $dir = 'user/default/project/php'): array
     {
-        $files = glob(dirname(base_path()) . "/templates/user/default/project/php/*/{$relative}") ?: [];
+        $files = glob(dirname(base_path()) . "/templates/{$dir}/*/{$relative}") ?: [];
         $this->assertNotEmpty($files);
 
         $templates = [];

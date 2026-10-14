@@ -27,6 +27,12 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+// WP-CLI reports REMOTE_ADDR 127.0.0.1; like the plugins this stands in for,
+// only web requests are judged, or the probe run through wp eval-file is blocked.
+if (defined('WP_CLI') && WP_CLI) {
+    return;
+}
+
 add_action('plugins_loaded', static function (): void {
     $remote = $_SERVER['REMOTE_ADDR'] ?? '';
     if ($remote !== '') {
@@ -331,11 +337,12 @@ export interface EngineIpChain {
 
 /**
  * Requests `scheme://engineHost/` with the site's Host header and follows redirects
- * to the same engine address, keeping the Host and taking scheme and path from each
- * Location (so a force-HTTPS 301 continues over https, not at the site's public name).
+ * to the same engine address, taking scheme, Host and path from each Location (so a
+ * force-HTTPS 301 continues over https, and a canonical redirect to `www.` asks for
+ * the www host, both still at the engine address rather than at a public name).
  */
 export async function followViaEngineIp(
-  fetchOnce: (url: string) => Promise<EngineIpResponse>,
+  fetchOnce: (url: string, hostHeader: string) => Promise<EngineIpResponse>,
   scheme: string,
   engineHost: string,
   siteDomain: string,
@@ -346,7 +353,7 @@ export async function followViaEngineIp(
   let sentAs = `${scheme}://${siteDomain}/`;
 
   for (let attempt = 0; attempt <= maxHops; attempt += 1) {
-    const response = await fetchOnce(url);
+    const response = await fetchOnce(url, new URL(sentAs).host);
     const location = response.location ? resolveLocation(sentAs, response.location) : null;
     hops.push({ url, status: response.status, location, remoteAddr: response.remoteAddr });
 

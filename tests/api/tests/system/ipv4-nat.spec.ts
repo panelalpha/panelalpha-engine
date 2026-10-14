@@ -25,6 +25,7 @@ test.describe('IPv4 NAT maps', () => {
     expect(id, 'the engine returned no id for the new NAT map').toBeDefined();
 
     const cleanup = new CleanupSteps();
+    let deleted = false;
     try {
       const listed = (await api.getIpv4NatMaps()).data;
       expect(
@@ -33,13 +34,16 @@ test.describe('IPv4 NAT maps', () => {
       ).toBe(true);
 
       await api.deleteIpv4NatMap(id!);
+      deleted = true;
 
       expect((await api.getIpv4NatMaps()).data.some((map) => map.id === id)).toBe(false);
     } catch (error) {
       cleanup.bodyFailed(error);
       throw error;
     } finally {
-      await cleanup.run('delete the NAT map the test created', () => api.deleteIpv4NatMap(id!));
+      if (!deleted) {
+        await cleanup.run('delete the NAT map the test created', () => api.deleteIpv4NatMap(id!));
+      }
       await cleanup.finish();
     }
   });

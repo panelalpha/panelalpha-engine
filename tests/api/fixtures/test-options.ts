@@ -23,6 +23,7 @@ import {
   readSetupState,
   type SetupDindState,
 } from './helper/setup-state';
+import { workerCleanupInfo } from '@/helpers/cleanup-step';
 import { expectStatus } from '@/helpers/expect-status';
 import { withRequestMethods } from '@/helpers/request-method';
 import { resolveHostExec, type HostExec } from '@/helpers/host-exec';
@@ -166,7 +167,7 @@ export const test = base.extend<EngineFixtures, WorkerFixtures>({
     async ({}, use) => {
       const shared = sharedProject('dind');
       await use(shared);
-      await shared.dispose();
+      await shared.dispose(workerCleanupInfo());
     },
     { scope: 'worker' },
   ],

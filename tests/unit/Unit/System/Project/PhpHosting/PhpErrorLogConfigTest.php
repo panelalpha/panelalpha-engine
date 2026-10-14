@@ -21,7 +21,7 @@ class PhpErrorLogConfigTest extends TestCase
 
         $this->root = sys_get_temp_dir() . '/pa-php-error-log-' . bin2hex(random_bytes(4));
         mkdir($this->root . '/engine/templates/user/default/project/php', 0777, true);
-        file_put_contents($this->root . '/engine/templates/user/default/project/php/versions-available', "8.3\n8.2\n");
+        file_put_contents($this->root . '/engine/templates/user/default/project/php/versions-available', "8.4\n8.3\n8.2\n");
     }
 
     protected function tearDown(): void
@@ -49,6 +49,46 @@ class PhpErrorLogConfigTest extends TestCase
         $this->assertContains(['sudo', 'mkdir', '-p', $logDir], $system->commands);
         $this->assertContains(['sudo', 'chown', '1001:1001', $logDir], $system->commands);
         $this->assertContains(['sudo', 'chmod', '755', $logDir], $system->commands);
+    }
+
+    public function test_php_8_4_gets_no_jit_buffer_and_older_versions_are_not_touched(): void
+    {
+        $this->account('8.4', "max_execution_time = 600\n", "[www]\n");
+        $this->account('8.3', "max_execution_time = 600\n", "[www]\n");
+        [$system, $project] = $this->hostingProject();
+
+        (new PhpErrorLogConfig())->apply($project);
+        (new PhpErrorLogConfig())->apply($project);
+
+        $this->assertSame(1, substr_count($this->accountFile('8.4', 'default.ini'), "\nopcache.jit_buffer_size = 0\n"));
+        $this->assertStringNotContainsString('opcache.jit', $this->accountFile('8.3', 'default.ini'));
+    }
+
+    public function test_a_jit_buffer_the_project_sets_itself_is_kept(): void
+    {
+        $this->account('8.4', "opcache.jit_buffer_size = 128M\n", "[www]\n");
+        [$system, $project] = $this->hostingProject();
+
+        (new PhpErrorLogConfig())->apply($project);
+
+        $ini = $this->accountFile('8.4', 'default.ini');
+        $this->assertStringContainsString("opcache.jit_buffer_size = 128M\n", $ini);
+        $this->assertSame(1, substr_count($ini, 'opcache.jit_buffer_size'));
+    }
+
+    public function test_the_shipped_default_ini_of_every_version_is_already_complete(): void
+    {
+        $shipped = dirname(__DIR__, 6) . '/templates/user/default/project/php';
+        foreach (['8.4', '8.3', '8.2'] as $version) {
+            $this->account($version, (string) file_get_contents("{$shipped}/{$version}/default.ini"), "[www]\n");
+        }
+        [$system, $project] = $this->hostingProject();
+
+        (new PhpErrorLogConfig())->apply($project);
+
+        foreach (['8.4', '8.3', '8.2'] as $version) {
+            $this->assertSame(file_get_contents("{$shipped}/{$version}/default.ini"), $this->accountFile($version, 'default.ini'), $version);
+        }
     }
 
     public function test_applying_twice_does_not_repeat_a_directive(): void

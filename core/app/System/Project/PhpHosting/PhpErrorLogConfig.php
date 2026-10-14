@@ -9,7 +9,7 @@ use App\System\Project\PhpHosting;
  * Every installed PHP version of a project logs its errors into the project's
  * own `log/php`. New projects copy the templates with those lines already;
  * this is what writes them into an existing project and makes the directory
- * the account's worker can write to.
+ * the account's worker can write to, and keeps a start-up warning out of it.
  */
 final class PhpErrorLogConfig
 {
@@ -21,6 +21,18 @@ final class PhpErrorLogConfig
         'log_errors' => 'log_errors = On',
         'error_log' => 'error_log = /var/log/php/php_error.log',
     ];
+
+    /**
+     * From 8.4 PHP reserves a JIT buffer by default, and with the ionCube loader
+     * installed it then warns at every start that the JIT is disabled.
+     *
+     * @var array<string, string>
+     */
+    private const JIT_LINES = [
+        'opcache.jit_buffer_size' => 'opcache.jit_buffer_size = 0',
+    ];
+
+    private const JIT_BUFFER_DEFAULT_SINCE = '8.4';
 
     /** @var array<string, string> */
     private const POOL_LINES = [
@@ -45,12 +57,24 @@ final class PhpErrorLogConfig
         $projectDir = $system->projectDirPath($project->username());
 
         foreach ($system->php()->listAvailablePhpVersions() as $version) {
-            $this->appendMissingLines("{$projectDir}/php/{$version}/" . self::INI_FILE, self::INI_LINES);
+            $this->appendMissingLines("{$projectDir}/php/{$version}/" . self::INI_FILE, $this->iniLines($version));
             $this->appendMissingLines("{$projectDir}/php/{$version}/" . self::POOL_FILE, self::POOL_LINES);
         }
 
         $this->ensureLogDir($project, "{$projectDir}/log/php");
         $this->ensureLogFile($project, "{$projectDir}/log/php");
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function iniLines(string $version): array
+    {
+        if (version_compare($version, self::JIT_BUFFER_DEFAULT_SINCE, '<')) {
+            return self::INI_LINES;
+        }
+
+        return self::INI_LINES + self::JIT_LINES;
     }
 
     /**

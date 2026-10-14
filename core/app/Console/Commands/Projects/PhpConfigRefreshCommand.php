@@ -11,9 +11,10 @@ use App\System\Project\PhpHosting\PhpErrorLogConfig;
 
 /**
  * Accounts created before PHP errors reached a project file keep sending them
- * only to the webserver. Safe to run again: a project that already has the
- * directives is left as it is. A running handler keeps the ini it started with,
- * so the new error_log is read at that handler's next restart.
+ * only to the webserver, and on PHP 8.4 log a JIT warning into it at every
+ * start. Safe to run again: a project that already has the directives is left
+ * as it is. A running handler keeps the ini it started with, so the new lines
+ * are read at that handler's next restart.
  */
 class PhpConfigRefreshCommand extends ProjectFleetCommand
 {

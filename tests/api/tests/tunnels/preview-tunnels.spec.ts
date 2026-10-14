@@ -69,7 +69,7 @@ test.describe('preview tunnels', () => {
     const { data } = await api.getUser(user.username);
     skipUnless(
       data.details.domain?.source === 'panelalpha_online',
-      `PanelAlpha Online was not offered (${data.details.domain?.source ?? 'unknown'}: ${user.domain})`
+      `PanelAlpha Online was not offered (${data.details.domain?.source ?? 'unknown'}: ${data.details.domain?.fallback_reason ?? user.domain})`
     );
 
     const created = await api.createTunnel(user.username, user.domain, { purpose: 'preview' });
@@ -96,7 +96,7 @@ test.describe('preview tunnels', () => {
     const { data } = await api.getUser(user.username);
     skipUnless(
       data.details.domain?.source === 'panelalpha_online',
-      `PanelAlpha Online was not offered (${data.details.domain?.source ?? 'unknown'}: ${user.domain})`
+      `PanelAlpha Online was not offered (${data.details.domain?.source ?? 'unknown'}: ${data.details.domain?.fallback_reason ?? user.domain})`
     );
 
     const created = await api.createTunnel(user.username, user.domain, { purpose: 'default' });

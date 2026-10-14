@@ -131,6 +131,27 @@ test.describe('followViaEngineIp', () => {
     expect(chain.remoteAddr).toBe('172.17.0.1');
   });
 
+  test('a canonical redirect to www asks the engine address for the www host', async () => {
+    const seen: string[] = [];
+    const chain = await followViaEngineIp(
+      (url, hostHeader) => {
+        seen.push(`${hostHeader} ${url}`);
+        return Promise.resolve(
+          hostHeader === 'site.test'
+            ? reply({ status: 301, location: 'https://www.site.test/', remoteAddr: '198.51.100.9' })
+            : reply({ status: 403, remoteAddr: '172.17.0.1', body: 'Forbidden' })
+        );
+      },
+      'https',
+      '203.0.113.7',
+      'site.test'
+    );
+
+    expect(seen).toEqual(['site.test https://203.0.113.7/', 'www.site.test https://203.0.113.7/']);
+    expect(chain.final.status).toBe(403);
+    expect(chain.remoteAddr).toBe('172.17.0.1');
+  });
+
   test('reports no REMOTE_ADDR when PHP never answered', async () => {
     const chain = await followViaEngineIp(
       () => Promise.resolve(reply({ status: 404 })),

@@ -11,8 +11,11 @@ use App\System\Filesystem;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AppCertificate;
+use App\System\Project\Dind\ShellOperations;
 use App\System\Project\Dind\Generation\GenerationState;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Symfony\Component\Process\Exception\ProcessTimedOutException;
+use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
 class DindApplicationOperationsTest extends TestCase
@@ -304,6 +307,88 @@ class DindApplicationOperationsTest extends TestCase
         $result = $runtime->app()->runSshCommand('echo hi');
 
         $this->assertSame(0, $result['exit_code']);
+    }
+
+    /**
+     * The host backstop firing used to escape as a ProcessTimedOutException, which the
+     * SSH endpoint answered as a 500. A killed command is a result, not an error.
+     */
+    public function test_a_shell_command_killed_by_the_host_backstop_reports_exit_124(): void
+    {
+        $runtime = $this->sshRuntime(function (string|array $cmd, int $timeout): Process {
+            throw new ProcessTimedOutException(FakeProcess::of(137, "before\n", 'partial'), ProcessTimedOutException::TYPE_GENERAL);
+        });
+
+        $result = $runtime->runSshCommand('sleep 30', '/tmp', 1);
+
+        $this->assertSame(['stdout' => "before\n", 'stderr' => 'partial', 'exit_code' => ShellOperations::SHELL_TIMED_OUT_EXIT], $result);
+    }
+
+    /**
+     * Killing `docker compose exec` on the host leaves the command running inside the
+     * account, so the timeout is enforced there and the host only waits longer.
+     */
+    public function test_a_shell_command_is_timed_inside_the_account_before_the_host_gives_up(): void
+    {
+        $seen = [];
+        $runtime = $this->sshRuntime(function (string|array $cmd, int $timeout) use (&$seen): Process {
+            $seen = ['cmd' => $cmd, 'timeout' => $timeout];
+
+            return FakeProcess::of(124, "before\n");
+        });
+
+        $result = $runtime->runSshCommand('sleep 30', '/tmp', 7);
+
+        $this->assertSame(124, $result['exit_code']);
+        $this->assertSame(
+            ShellOperations::timedShellCommand(ShellOperations::composeShellCommand('sleep 30', '/tmp'), 7),
+            $seen['cmd'][array_key_last($seen['cmd'])]
+        );
+        $this->assertGreaterThan(7, $seen['timeout']);
+    }
+
+    public function test_the_timed_shell_command_keeps_the_command_one_argument(): void
+    {
+        $this->assertSame(
+            'exec timeout -k 5 3 bash -c ' . escapeshellarg("cd '/tmp' && echo 'a b' | wc -l"),
+            ShellOperations::timedShellCommand("cd '/tmp' && echo 'a b' | wc -l", 3)
+        );
+    }
+
+    /**
+     * @param \Closure(string|list<string>, int): Process $run
+     */
+    private function sshRuntime(\Closure $run): Dind
+    {
+        file_put_contents($this->tmpRoot . '/users/alice/docker-compose.yml', "services:\n  dind:\n    image: test\n");
+        $system = new class ($this->tmpRoot, $this->homeRoot, $run) extends System {
+            public function __construct(
+                private string $engineRoot,
+                private string $homesRoot,
+                private \Closure $run,
+            ) {
+            }
+
+            public function engineDirPath(): string
+            {
+                return $this->engineRoot;
+            }
+
+            public function homesDirPath(): string
+            {
+                return $this->homesRoot;
+            }
+
+            public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                return ($this->run)($cmd, $timeout);
+            }
+        };
+
+        $runtime = (new ProjectAggregate($system, $this->dindModel()))->runtime();
+        $this->assertInstanceOf(Dind::class, $runtime);
+
+        return $runtime;
     }
 
     private function dind(ModelsUser $model): Dind

@@ -555,7 +555,7 @@ class FileAndSshCommandsTest extends TestCase
         ]);
         $this->assertSame([[
             'docker', 'compose', '-f', (new System())->projectDirPath(self::USER) . '/docker-compose.yml', 'exec', '-T', 'dind',
-            'su', '-s', '/bin/bash', '-l', self::USER, '-c', "cd '/home/clidemo/project' && ls | wc -l",
+            'su', '-s', '/bin/bash', '-l', self::USER, '-c', 'exec timeout -k 5 30 bash -c ' . escapeshellarg("cd '/home/clidemo/project' && ls | wc -l"),
         ]], $this->calls());
     }
 

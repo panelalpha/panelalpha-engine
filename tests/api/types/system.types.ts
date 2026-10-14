@@ -28,10 +28,24 @@ export interface SystemInfo {
   sites_base_domain?: string | null;
   url?: string | null;
   api_url?: string | null;
+  /** The certificate `:2011` presents, judged against the host in `url`; null when none is readable. */
+  served_certificate?: ServedCertificate | null;
   ipv4_nat_mode?: boolean;
   ipv4_nat_maps?: Ipv4NatMap[];
   latest_webserver_change?: SystemChangeStatus | null;
   latest_update?: SystemChangeStatus | null;
+}
+
+export interface ServedCertificate {
+  names?: string[];
+  status?: string;
+  issuer?: string;
+  self_signed?: boolean;
+  chain_trusted?: boolean | null;
+  covers_domain?: boolean;
+  valid_from?: string | null;
+  expires_at?: string | null;
+  days_remaining?: number | null;
 }
 
 export interface SystemChangeStatus {
