@@ -167,7 +167,7 @@ Deploy https://github.com/opencart/opencart as project topencart. Tell me if the
 engine recognised it as a known app, and what the first page asks for.
 ```
 
-Check: the inspection reports a known app, and the first page is the installer or the login.
+Check: the inspection reports a known app, and the first page is served by OpenCart: its storefront, its installer or its login.
 
 **Laravel: Firefly III**
 
@@ -185,7 +185,7 @@ Deploy https://github.com/alexta69/metube as project tmetube and tell me how it
 is started.
 ```
 
-Check: the assistant names the start command from the inspection, not a guess.
+Check: the assistant says how it is started from what the inspection reports, not a guess. For an app built from its own Dockerfile the inspection names no start command: the image's own entrypoint starts it.
 
 **Node.js: Umami**
 
@@ -203,7 +203,7 @@ Deploy https://github.com/binwiederhier/ntfy as project tntfy2 and tell me which
 port it listens on.
 ```
 
-Check: `project_inspect` lists the published port, and the assistant names it.
+Check: `project_inspect` lists the published port and the application's own port, and the assistant names both.
 
 **Go: Memos**
 

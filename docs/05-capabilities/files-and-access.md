@@ -52,7 +52,7 @@ Create an FTP account on this project for user ftpuser1 on shop.example.com,
 with directory /project.
 ```
 
-You get credentials to hand over. Prefer SFTP where the software at the other end supports it - plain FTP sends the password unencrypted. A quota of 0, or no quota, means unlimited.
+An FTP account needs a password of at least 8 characters, and the engine does not make one up. Do not type it into the chat: the assistant sends a paste page for it. An SFTP account takes a password the same way, or a public key. You get credentials to hand over. Prefer SFTP where the software at the other end supports it - plain FTP sends the password unencrypted. A quota of 0, or no quota, means unlimited.
 
 An SFTP login can only move files. It cannot open a shell, and it sees only that project's files.
 
@@ -168,7 +168,7 @@ Give tshop an SFTP account sftpuser1 with a password. Then change it to key
 login using this public key: ssh-ed25519 AAAA...example. Delete it afterwards.
 ```
 
-Mode: full. Tools: `sftp_account_create`, `sftp_account_list`, `sftp_account_update` with `auth_method`, `sftp_account_delete`. Check: after the update the account accepts the key and not the password. Prefer SFTP in the answer over plain FTP.
+Mode: full. Tools: `sftp_account_create`, `sftp_account_list`, `sftp_account_update` with `auth_method`, `sftp_account_delete`. Check: the account name starts with the project name, here `tshop_sftpuser1`, since a name without that prefix is refused. After the update the account accepts the key and not the password. Prefer SFTP in the answer over plain FTP.
 
 **End SFTP sessions**
 

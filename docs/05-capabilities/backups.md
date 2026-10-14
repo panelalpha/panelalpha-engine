@@ -116,7 +116,7 @@ Both were switched off. Leave at least one on.
 **A local store**
 
 ```text
-Create a backup store called local-test on this host at /var/backups/test.
+Create a backup store called local-test on this host at /home/backups/test.
 Test that it works, then list the stores.
 ```
 
@@ -134,7 +134,7 @@ Mode: modify. Tools: `backup_container_create` with `driver` s3 and `credentials
 **Change or remove a store**
 
 ```text
-Rename the store local-test to local-main, point it at /var/backups/main, then
+Rename the store local-test to local-main, point it at /home/backups/main, then
 delete the store s3-test.
 ```
 

@@ -297,7 +297,7 @@ On tmemos: show git status, list the branches and the last five commits.
 Then switch to the branch release and pull the latest commit.
 ```
 
-Mode: modify. Tools: `git_status`, `git_branches`, `git_commits`, `git_change_branch`, `git_pull`, `task_get`. Check: `git_status` is called first and says the project is deployed by the engine. Both the branch change and the pull return a task and rebuild the app. A dirty tree or a missing branch is refused.
+Mode: modify. Tools: `git_status`, `git_branches`, `git_commits`, `git_change_branch`, `git_pull`, `task_get`. Check: a deploy clones only the latest commit, so right after it `git_commits` can list fewer than five. `git_status` is called first and says the project is deployed by the engine. Both the branch change and the pull return a task and rebuild the app. A dirty tree or a missing branch is refused.
 
 **Go back**
 

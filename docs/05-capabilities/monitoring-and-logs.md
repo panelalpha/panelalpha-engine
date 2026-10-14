@@ -44,6 +44,8 @@ themselves properly.
 
 Suspended projects are skipped, because a site stopped on purpose is not a fault.
 
+The check, the six-hourly sweep and the deploy log cover projects that run in their own container. Traditional PHP hosting is not checked this way: open its address, and read its domain logs and PHP error log (section 3).
+
 How to read the result: [What the engine checks](#what-the-engine-checks).
 
 To see whether anything is running on a project right now, such as a deploy, a push or a restore, ask for its tasks:
@@ -271,7 +273,7 @@ Mode: modify. Tools: `bug_report_create` with `attach_log` and `attach_health`. 
 List the tasks that are running on tshop. Then list the latest ten, newest first.
 ```
 
-Mode: read. Tools: `task_list` with `project`, `status` active, `since`, `task_get`. Check: only tasks of tshop come back, a push appears as a task, and a token limited to some projects cannot ask for every project's tasks.
+Mode: read. Tools: `task_list` with `name`, `status` active, `since`, `task_get`. Check: only tasks of tshop come back, a push appears as a task, and a token limited to some projects cannot ask for every project's tasks.
 
 **Tasks**
 

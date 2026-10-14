@@ -183,7 +183,7 @@ What application is twp, what can the engine do with it, and has it been
 installed yet?
 ```
 
-Mode: read. Tools: `app_info`, `app_role_list`. Check: the answer names WordPress, lists what the engine can manage, and the roles come from the application.
+Mode: read. Tools: `app_info`, `app_role_list`. Check: the answer names WordPress, lists what the engine can manage, and the roles come from the application. Before the install is finished, the roles and users are refused with "WordPress is not installed yet."
 
 **Finish the install**
 
