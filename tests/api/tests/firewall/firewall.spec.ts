@@ -193,6 +193,27 @@ test.describe('Firewall rules', () => {
       ],
       ['an unknown action', { action: 'reject', protocol: 'tcp', port, source }],
       ['no action', { protocol: 'tcp', port, source }],
+      // A leading zero is stored as written and breaks the next reload of the whole ruleset.
+      ['a port with a leading zero', { action: 'allow', protocol: 'tcp', port: '08080', source }],
+      [
+        'a port range with a leading zero',
+        { action: 'allow', protocol: 'tcp', port: '40000:040009', source },
+      ],
+      ['port 0', { action: 'allow', protocol: 'tcp', port: '0', source }],
+      ['a port above 65535', { action: 'allow', protocol: 'tcp', port: '65536', source }],
+      [
+        'a range running high to low',
+        { action: 'allow', protocol: 'tcp', port: '40009:40000', source },
+      ],
+      // The source keeps a regression from denying anyone but a documentation address.
+      [
+        'a deny on the engine API port',
+        { action: 'deny', protocol: 'tcp', port: ENGINE_API_PORT, source },
+      ],
+      [
+        'a deny whose port range holds the engine API port',
+        { action: 'deny', protocol: 'tcp', port: '2000:2020', source },
+      ],
       // Valid to the API, refused by ufw itself: its own words come back as a 422.
       ['addresses of two IP versions', { action: 'deny', source, destination: '2001:db8::1' }],
     ];

@@ -220,7 +220,7 @@ export class UsersApi extends EngineApiBase {
 
   async cloneUser(
     username: string,
-    data: { new_username?: string; domain?: string } = {}
+    data: { new_username?: string; domain?: string; copy_databases?: boolean } = {}
   ): Promise<ApiResponse<User>> {
     const response = await this.api.post(`projects/${username}/clone`, { data });
     // A clone creates a user, so the engine answers 201; 200 is accepted too
@@ -231,7 +231,7 @@ export class UsersApi extends EngineApiBase {
 
   async cloneUserRaw(
     username: string,
-    data: { new_username?: string; domain?: string } = {}
+    data: { new_username?: string; domain?: string; copy_databases?: boolean } = {}
   ): Promise<{ status: number; body: any }> {
     const response = await this.api.post(`projects/${username}/clone`, { data });
     return this.rawCall(response);

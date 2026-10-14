@@ -332,7 +332,7 @@ export const PR_RULES: readonly PrRule[] = [
       'core/app/System/Project/SitePasswordProtection.php',
       'core/app/Console/Commands/Users/ProjectSettings/**',
     ],
-    specs: ['project-settings/*'],
+    specs: ['project-settings/*', 'system/internal-routes'],
   },
   {
     id: 'tunnels',
@@ -359,8 +359,9 @@ export const PR_RULES: readonly PrRule[] = [
       'core/app/Console/Commands/Usage/**',
       'core/app/Console/Commands/Stats/**',
       'core/app/Console/Commands/Geolocation/**',
+      'core/app/Lib/Host/ProjectDisk.php',
     ],
-    specs: ['users/usage-*', 'users/users-limits'],
+    specs: ['users/usage-*', 'users/users-limits', 'users/disk-usage'],
   },
   {
     id: 'projects',

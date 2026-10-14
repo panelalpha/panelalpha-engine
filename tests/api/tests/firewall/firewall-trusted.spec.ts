@@ -56,6 +56,9 @@ test.describe('Firewall trusted addresses', () => {
       { address: 'example.com' },
       { address: '192.0.2.300' },
       { address: randomTestNetAddress(), comment: 'two\nlines' },
+      // Wider than /8 (IPv4) or /16 (IPv6) would keep much of the internet from ever being banned.
+      { address: '10.0.0.0/7' },
+      { address: '2001:db8::/15' },
     ];
     for (const body of invalid) {
       const response = await api.trustAddressRaw(body);

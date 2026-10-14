@@ -66,7 +66,11 @@ SUPPORTED_APPS=koel,ntfy bun run test:supported-apps # only these apps
 
 Use `bun run test`, not `bun test`: `bun test` starts Bun's own test runner, not this suite.
 
-**Groups that change the engine for everyone on it** are never in `bun run test`: `slow` (firewall off and on, every PHP version), `cli`, `webserver-change`, `update`, `engine-cert`, `network-mutation`. Run one only when the user names it, and say in the result that you did. Leave `ALLOW_BUG_REPORT_SHIP` unset: it files a real bug report to PanelAlpha.
+**Groups that change the engine for everyone on it** are never in `bun run test`: `slow` (firewall off and on, every PHP version, Engine API access for a project, which changes the tenant firewall and issues tokens), `cli`, `webserver-change`, `update`, `engine-cert`, `network-mutation`. Run one only when the user names it, and say in the result that you did. Leave `ALLOW_BUG_REPORT_SHIP` unset: it files a real bug report to PanelAlpha.
+
+**Engine host access.** Some specs in `bun run test` run `pae` or read `sites-db` and account containers on the engine host: locally when the suite runs there, otherwise over SSH (`ENGINE_SSH_HOST`, default the `API_BASE_URL` host; `ENGINE_SSH_USER`, default `root`; `ENGINE_SSH_KEY`). Without that access they skip with an expected reason. Say in the result that they did not run.
+
+**DinD tests.** `bun run test` does not create the shared DinD project. Tests on it (deploy log and deploy history, a DinD database rename) skip with "No DinD setup state" until you run `bunx playwright test --project=setup-dind` once. Run it before the suite when the change touches deploys or DinD projects.
 
 **MCP.** `tests/mcp/` compares `tools/list` with `core/app/Mcp/tool-names.php` and calls every read-only tool. After any change to `tool-names.php` or `core/app/Mcp/`, run `bun run test -- tests/mcp`.
 

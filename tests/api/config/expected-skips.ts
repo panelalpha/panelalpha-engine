@@ -198,6 +198,13 @@ export const EXPECTED_SKIPS: readonly ExpectedSkip[] = [
     why: 'CLI tests need the engine host.',
   },
   {
+    id: 'host-services-unreachable',
+    match:
+      /^the (?:sites-db service|account containers) (?:is|are) not reachable from this runner\./,
+    category: 'environment',
+    why: 'Reading sites-db or an account container needs the engine host.',
+  },
+  {
     id: 'engine-checkout-unreadable',
     match:
       /^(?:core\/app\/Mcp\/tool-names\.php is not readable from this checkout\.|The engine templates directory is not present\.)/,
