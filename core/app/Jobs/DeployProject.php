@@ -66,7 +66,9 @@ class DeployProject implements ShouldQueue
             DeployLogger::streamTo($sink);
 
             try {
-                $this->deploy($user, $this->startDeployLog($user), $sink);
+                $logger = $this->startDeployLog($user);
+                $this->recordDeployId($logger);
+                $this->deploy($user, $logger, $sink);
 
                 $user->refresh();
                 $this->recordOutcome($user);
@@ -123,6 +125,20 @@ class DeployProject implements ShouldQueue
         CreateInspection::fromArray($this->inspection)?->writeTo($logger);
 
         return $logger;
+    }
+
+    /**
+     * The deploy this task runs, so the reconciler, a cancel and an API client
+     * can tie the create to its log as they do a rebuild.
+     */
+    private function recordDeployId(?DeployLogger $logger): void
+    {
+        $task = $this->task();
+        if ($task === null || $logger === null) {
+            return;
+        }
+        $task->details = array_merge($task->details ?? [], ['deploy_id' => $logger->getDeployId()]);
+        $task->save();
     }
 
     /**
