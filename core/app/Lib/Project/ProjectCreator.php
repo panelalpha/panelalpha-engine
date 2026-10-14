@@ -21,6 +21,7 @@ use App\Lib\Domains\DomainAllocationException;
 use App\Lib\Domains\DomainAllocator;
 use App\Lib\Domains\DomainPlan;
 use App\Lib\Helper;
+use App\Lib\Task\TaskTrigger;
 use App\Lib\Vault\RequestVault;
 use App\Models\Domain;
 use App\Models\Task;
@@ -143,6 +144,7 @@ class ProjectCreator
                 'username' => $user->username,
                 'domain' => $user->domain,
                 'action' => 'deploy',
+                'trigger' => TaskTrigger::current(),
             ],
         );
         DeployProject::dispatch($user->username, $stages, $recipe, $this->inspection?->toArray(), (int) $user->getKey())

@@ -328,6 +328,20 @@ abstract class WorkTree
         }
     }
 
+    /** The checked-out branch, null when HEAD is detached or git cannot say. */
+    public function readHeadBranch(): ?string
+    {
+        return $this->quietly(function (): ?string {
+            try {
+                $branch = $this->currentBranchName();
+
+                return $branch !== '' ? $branch : null;
+            } catch (GitException) {
+                return null;
+            }
+        });
+    }
+
     public function status(bool $fetch = false): array
     {
         return $this->quietly(fn (): array => $this->readStatus($fetch));

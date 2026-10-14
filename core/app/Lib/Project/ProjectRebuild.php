@@ -21,6 +21,7 @@ use App\Lib\Deploy\Source\GitUrl;
 use App\Lib\Deploy\Source\UploadedArchive;
 use App\Lib\Domains\PublicUrl;
 use App\Lib\Git\GitActions;
+use App\Lib\Task\TaskTrigger;
 use App\Models\Task;
 use App\Models\User;
 use App\System\Project as ProjectAggregate;
@@ -71,6 +72,7 @@ class ProjectRebuild
                 'domain' => $user->domain,
                 'action' => $action,
                 'zip_path' => $zipPath,
+                'trigger' => TaskTrigger::current(),
                 ...$git,
             ], static fn (mixed $v): bool => $v !== null),
         );

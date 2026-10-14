@@ -62,6 +62,8 @@ return [
     // Deploy
     'POST /projects/{username}/deploy-cancel' => 'deploy_cancel',
     'GET /projects/{username}/deploy-log' => 'deploy_log_get',
+    'GET /projects/{username}/deploys' => 'deploy_list',
+    'GET /projects/{username}/deploys/{deploy}/log' => 'deploy_log_read',
     // Not tied to a project: it reads a repository, a path or an account's
     // files and reports what would be deployed.
     'POST /source/inspect' => 'source_inspect',

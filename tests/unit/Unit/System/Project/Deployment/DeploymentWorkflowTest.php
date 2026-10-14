@@ -246,6 +246,17 @@ class DeploymentWorkflowTest extends TestCase
         $this->assertSame("Deploy started (source: push, commit: {$commit})", $started);
     }
 
+    public function test_rebuild_from_checkout_names_the_branch_after_the_commit(): void
+    {
+        $commit = 'c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00';
+
+        $started = $this->rebuildFromCheckoutAndCollectStart(
+            fn (DeploymentWorkflow $w, DeployLogger $l) => $w->rebuildFromCheckout($l, 'git', $commit, 'main'),
+        );
+
+        $this->assertSame("Deploy started (source: git, commit: {$commit}, branch: main)", $started);
+    }
+
     /** A failed release started nothing, so a git or push redeploy leaves the running app up. */
     public function test_a_failed_release_on_a_checkout_redeploy_does_not_tear_the_running_app_down(): void
     {

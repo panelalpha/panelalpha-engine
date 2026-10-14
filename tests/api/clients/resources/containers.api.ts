@@ -125,6 +125,22 @@ export class ContainersApi extends EngineApiBase {
     return this.rawCall(response);
   }
 
+  async listDeploysRaw(username: string): Promise<{ status: number; body: any }> {
+    const response = await this.api.get(`projects/${username}/deploys`);
+    return this.rawCall(response);
+  }
+
+  async readDeployLogRaw(
+    username: string,
+    deployId: string,
+    options: { offset?: number } = {}
+  ): Promise<{ status: number; body: any }> {
+    const response = await this.api.get(
+      `projects/${username}/deploys/${encodeURIComponent(deployId)}/log${deployLogQuery(options)}`
+    );
+    return this.rawCall(response);
+  }
+
   async cancelDeploy(username: string): Promise<ApiResponse<{ cancelled: boolean }>> {
     const response = await this.api.post(`projects/${username}/deploy-cancel`);
     await this.assertStatus(response, [200, 409]);

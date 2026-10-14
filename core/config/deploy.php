@@ -58,6 +58,13 @@ return [
     'clone_timeout' => (int) env('DEPLOY_CLONE_TIMEOUT', 600),
 
     /*
+     * Deploy logs kept per project, newest first: the history GET
+     * /projects/{username}/deploys lists. Older logs are deleted when a
+     * deploy starts. At least 1.
+     */
+    'log_keep' => (int) env('DEPLOY_LOG_KEEP', 10),
+
+    /*
      * Free disk the engine host must have for a deploy to start, checked on
      * the Docker root and /home. Below it the deploy is refused with that
      * reason instead of failing later on ENOSPC. A size (3G, 512M); 0 or `off`

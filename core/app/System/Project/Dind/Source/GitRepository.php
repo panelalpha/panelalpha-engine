@@ -73,7 +73,7 @@ class GitRepository extends WorkTree
         $logger?->info($this->cloningMessage($gitRepo, $branch));
 
         $this->cloneAndAdopt($gitRepo, $branch, $gitToken, $gitProjectDir, $beforeReplacing);
-        $logger?->ok('Repository cloned');
+        $logger?->ok(self::clonedMessage($branch ?? $this->readHeadBranch()));
         if ($this->wantsFullHistory($gitRepo)) {
             $logger?->info('Fetching the full history and tags (the recipe sets git: {history: full})');
             $this->rethrowingGitFailure(fn () => $this->fetchFullHistory($gitToken));
@@ -88,6 +88,12 @@ class GitRepository extends WorkTree
         return $branch !== null
             ? "Cloning repository {$safeRepo} (branch: {$branch})"
             : "Cloning repository {$safeRepo}";
+    }
+
+    /** Names the branch the clone landed on, so the deploy history can tell a default-branch create's branch. */
+    private static function clonedMessage(?string $branch): string
+    {
+        return $branch !== null ? "Repository cloned (branch: {$branch})" : 'Repository cloned';
     }
 
     private function cloneAndAdopt(

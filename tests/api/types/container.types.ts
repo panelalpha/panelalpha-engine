@@ -31,7 +31,7 @@ export interface DeployTimings {
 }
 
 export interface DeployLogSnapshot {
-  id: number | null;
+  id: string | null;
   status: string;
   stage: string | null;
   stages: unknown[];

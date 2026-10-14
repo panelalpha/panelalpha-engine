@@ -98,6 +98,8 @@ return [
     \App\Mcp\Tools\Api\Projects\ProjectDeployArchiveTool::class,
     \App\Mcp\Tools\Api\Deploy\DeployCancelTool::class,
     \App\Mcp\Tools\Api\Deploy\DeployLogGetTool::class,
+    \App\Mcp\Tools\Api\Deploy\DeployListTool::class,
+    \App\Mcp\Tools\Api\Deploy\DeployLogReadTool::class,
     \App\Mcp\Tools\Api\Domains\DomainListTool::class,
     \App\Mcp\Tools\Api\Domains\DomainCreateTool::class,
     \App\Mcp\Tools\Api\SSLCertificates\SslCertListTool::class,

@@ -24,6 +24,8 @@ import {
 } from '@/helpers/staging-helpers';
 import { skipUnless, skipUnlessResolvableSite } from '@/helpers/test-helpers';
 import {
+  deployHistoryListResponseSchema,
+  deployHistoryLogResponseSchema,
   deployHookCreateResponseSchema,
   deployHookRotateResponseSchema,
   deployHookShowResponseSchema,
@@ -37,7 +39,7 @@ import { APPLICATION_DEPLOY_USER } from '@/test-data/factories';
  * Once-per-run checks that the catalogue does not repeat for every application:
  * a refused create, an archive with no zip, a working copy pushed back to live,
  * a backup, stopping and starting the containers, a site that lost its front
- * page, a git hook, and WordPress on an ordinary account.
+ * page, a git project's deploy history and hook, and WordPress on an ordinary account.
  */
 
 const PING_BODY = '{"zen":"ping"}';
@@ -323,6 +325,46 @@ test.describe('around a deployed application', () => {
     skipUnless(user, 'Could not create a git-deployed user on this engine.');
 
     const failures: Error[] = [];
+
+    await collectingFailure(
+      failures,
+      'the first deploy is in the deploy history and its log reads by id',
+      async () => {
+        const listedRaw = await api.listDeploysRaw(user.username);
+        await expectStatus(listedRaw, 200);
+        const listed = validateParsedApiResponse(listedRaw.body, deployHistoryListResponseSchema);
+        expect(listed.data, 'a new project has deployed exactly once').toHaveLength(1);
+        const first = listed.data[0];
+        expect(first).toMatchObject({
+          kind: 'install',
+          source: 'git',
+          trigger: 'api',
+          action: 'deploy',
+        });
+        expect(first.branch, 'the create names the branch it cloned').toEqual(expect.any(String));
+        expectOneOf(first.status, ['success', 'partial']);
+        expect(first.finished_at).toEqual(expect.any(Number));
+
+        const createTaskId = userFactory.createTaskOf(user.username)?.taskId;
+        if (createTaskId !== undefined) {
+          expect(first.task_id).toBe(createTaskId);
+          const createTask = await api.getTask(createTaskId);
+          expect((createTask.data.details as { deploy_id?: unknown }).deploy_id).toBe(first.id);
+        }
+        expect((await api.getDeployLog(user.username)).data.id).toBe(first.id);
+
+        const pageRaw = await api.readDeployLogRaw(user.username, first.id);
+        await expectStatus(pageRaw, 200);
+        const page = validateParsedApiResponse(pageRaw.body, deployHistoryLogResponseSchema);
+        expect(page.data.id).toBe(first.id);
+        expect(page.data.lines[0]?.msg ?? '').toMatch(/^Deploy started \(source: git/);
+
+        await expectStatus(
+          await api.readDeployLogRaw(user.username, '20000101-000000-000000'),
+          404
+        );
+      }
+    );
 
     await collectingFailure(
       failures,

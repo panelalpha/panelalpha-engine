@@ -34,6 +34,7 @@ use App\Http\Controllers\User\AppCredentialsController;
 use App\Http\Controllers\User\AppHealthController;
 use App\Http\Controllers\User\AppUserController;
 use App\Http\Controllers\User\ContainerController;
+use App\Http\Controllers\User\DeployHistoryController;
 use App\Http\Controllers\User\DeployLogController;
 use App\Http\Controllers\User\ProxyRuleController;
 use App\Http\Controllers\User\UsageController;
@@ -290,6 +291,8 @@ $projectRoutes = function (): void {
 
     Route::get('/{username}/deploy-log', [DeployLogController::class, 'show']);
     Route::post('/{username}/deploy-cancel', [DeployLogController::class, 'cancel']);
+    Route::get('/{username}/deploys', [DeployHistoryController::class, 'index']);
+    Route::get('/{username}/deploys/{deploy}/log', [DeployHistoryController::class, 'log']);
 
     Route::get('/{username}/app/users', [AppUserController::class, 'index']);
     Route::post('/{username}/app/users', [AppUserController::class, 'store']);

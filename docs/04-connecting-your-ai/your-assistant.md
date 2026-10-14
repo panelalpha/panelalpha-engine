@@ -585,6 +585,8 @@ pae mcp:tool:list
 |---|---|
 | `deploy_cancel` | Cancel a running deploy: mark cancelled, kill the subprocess tree, clean up |
 | `deploy_log_get` | Poll the deploy log (JSON-lines) from a byte-like line offset |
+| `deploy_list` | List the deploys the project still has a log of, newest first |
+| `deploy_log_read` | Read a page of one kept deploy's log by its id |
 | `project_inspect` | Inspect a project's deployed application files |
 | `source_inspect` | Inspect an application source and report its stack, ports and services |
 

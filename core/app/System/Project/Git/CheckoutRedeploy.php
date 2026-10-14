@@ -18,6 +18,9 @@ use App\System\Project\Git as ProjectGit;
  */
 class CheckoutRedeploy
 {
+    /** The branch the checkout is on, named in the deploy log the rebuild opens. */
+    protected ?string $branch = null;
+
     /**
      * @param string  $source what the deploy log says started it (`git` for a manual porcelain call, `push` for a Deploy Hook)
      * @param ?string $commit the commit the checkout is at, named in the log when known
@@ -30,6 +33,7 @@ class CheckoutRedeploy
             return;
         }
 
+        $this->branch = $git->readHeadBranch();
         $this->rebuild($project, $source, $commit, $deployLogger);
     }
 
@@ -63,7 +67,7 @@ class CheckoutRedeploy
             return;
         }
 
-        $runtime->deployment()->rebuildFromCheckout($deployLogger, $source, $commit);
+        $runtime->deployment()->rebuildFromCheckout($deployLogger, $source, $commit, $this->branch);
         $project->system()->webserver()->rebuildDomains();
 
         $user = $project->model();

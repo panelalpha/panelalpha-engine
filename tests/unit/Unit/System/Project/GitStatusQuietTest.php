@@ -39,6 +39,15 @@ class GitStatusQuietTest extends TestCase
         }
     }
 
+    public function test_a_branch_read_is_quiet_and_answers_null_without_a_repository(): void
+    {
+        $git = new QuietRecordingWorkTree(repositoryExists: false);
+
+        $this->assertNull($git->readHeadBranch());
+        $this->assertNotEmpty($git->quiet, 'the branch read ran no git command');
+        $this->assertSame([], $git->logged, 'a branch read streamed git into the deploy log');
+    }
+
     public function test_a_command_after_a_status_read_is_logged_again(): void
     {
         $git = new QuietRecordingWorkTree(repositoryExists: false);

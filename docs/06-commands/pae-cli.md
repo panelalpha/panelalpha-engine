@@ -112,7 +112,7 @@ More project commands:
 
 | Command | What it does |
 |---|---|
-| `pae project:deploy:list` | Lists every project that has deploy logs. Pass a name for one project. |
+| `pae project:deploy:list` | Lists every project that has deploy logs. Pass a name for that project's kept deploys: status, install or redeploy, source, branch, trigger, commit and times. `DEPLOY_LOG_KEEP` in `.env-core` sets how many each project keeps (10). |
 | `pae project:attach {project}` | Opens a shell inside the project's container. `--u=root` to attach as another user. |
 
 ## Environment variables and settings

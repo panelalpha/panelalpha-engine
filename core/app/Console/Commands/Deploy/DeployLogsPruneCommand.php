@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Deploy;
 
+use App\Lib\Deploy\DeployLog\DeployLogArchive;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Console\Commands\Concerns\ResolvesProject;
 use Illuminate\Console\Command;
@@ -15,7 +16,7 @@ class DeployLogsPruneCommand extends Command
 
     protected $signature = 'deploy:log:prune
                             {--project= : Limit prune to a single engine username} {--user= : Deprecated alias for --project}
-                            {--keep=10 : How many newest .log files to keep per user}
+                            {--keep= : How many newest .log files to keep per user (default DEPLOY_LOG_KEEP)}
                             {--dry-run : List files that would be deleted without deleting}';
 
     protected $description = 'Prune old deploy *.log files (keeps latest.json)';
@@ -24,7 +25,7 @@ class DeployLogsPruneCommand extends Command
     {
         $this->foldProjectOption('user');
 
-        $keep = (int)$this->option('keep');
+        $keep = $this->option('keep') === null ? DeployLogArchive::keep() : (int)$this->option('keep');
         if ($keep < 1) {
             $this->error('--keep must be >= 1');
             return 1;

@@ -38,6 +38,34 @@ class ProjectGitCheckoutRedeployTest extends TestCase
         $this->assertSame(['alice'], $redeploy->usernames);
     }
 
+    public function test_the_rebuild_names_the_branch_the_checkout_is_on(): void
+    {
+        $model = new ModelsUser();
+        $model->username = 'alice';
+        $model->setDetails(['git_repo' => 'https://github.com/org/repo.git', 'git_branch' => 'main', 'template' => 'dind']);
+        $project = new Project(new System(), $model);
+        $runner = new FakeGitRunner();
+        $runner->stdout['branch --show-current'] = "release\n";
+        $redeploy = new RecordingProjectCheckoutRedeploy();
+
+        $redeploy->afterMutation(new TestableProjectGit($project, 'project', $runner), $project);
+
+        $this->assertSame(['release'], $redeploy->branches);
+    }
+
+    public function test_a_detached_checkout_names_no_branch(): void
+    {
+        $model = new ModelsUser();
+        $model->username = 'alice';
+        $model->setDetails(['git_repo' => 'https://github.com/org/repo.git', 'git_branch' => 'main', 'template' => 'dind']);
+        $project = new Project(new System(), $model);
+        $redeploy = new RecordingProjectCheckoutRedeploy();
+
+        $redeploy->afterMutation(new TestableProjectGit($project, 'project', new FakeGitRunner()), $project);
+
+        $this->assertSame([null], $redeploy->branches);
+    }
+
     public function test_site_git_mutation_does_not_rebuild(): void
     {
         $model = new ModelsUser();
@@ -63,8 +91,12 @@ final class RecordingProjectCheckoutRedeploy extends CheckoutRedeploy
     /** @var list<string> */
     public array $usernames = [];
 
+    /** @var list<?string> */
+    public array $branches = [];
+
     protected function rebuild(Project $project, string $source = 'git', ?string $commit = null, ?DeployLogger $deployLogger = null): void
     {
         $this->usernames[] = $project->username();
+        $this->branches[] = $this->branch;
     }
 }
