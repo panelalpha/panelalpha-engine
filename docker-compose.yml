@@ -12,7 +12,7 @@ services:
       context: ./dockerfiles
       dockerfile: Dockerfile-core
       target: php_nginx_prod
-    image: ghcr.io/panelalpha/engine-core:v2.0.2
+    image: ghcr.io/panelalpha/engine-core:v2.1.2-20261021
     pull_policy: missing
     restart: always
     post_start:
