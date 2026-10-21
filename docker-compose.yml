@@ -251,6 +251,7 @@ services:
     volumes:
       - ./phpmyadmin-users/config.user.inc.php:/etc/phpmyadmin/config.user.inc.php
       - ./phpmyadmin-users/signon.php:/var/www/html/signon.php
+      - ./phpmyadmin-users/php-session.ini:/usr/local/etc/php/conf.d/99-session.ini
     links:
       - sites-db:db
     environment:
