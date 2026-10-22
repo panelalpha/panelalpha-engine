@@ -47,7 +47,7 @@ class ImageSeeding
             if (!is_string($image) || $image === '' || !ImageTransfer::isSafeImageRef($image)) {
                 continue;
             }
-            $this->ensure($image);
+            $this->ensureCurrent($image);
         }
     }
 
@@ -300,10 +300,53 @@ class ImageSeeding
 
     public function ensure(string $image): void
     {
-        if ($this->hasImage($image)) {
+        if (!$this->hasImage($image)) {
+            $this->fetch($image);
+        }
+    }
+
+    /**
+     * {@see ensure()} for a base image the engine picks itself, such as
+     * `node:22-bookworm-slim` or `nginx:alpine`. Its tag moves with every
+     * upstream patch release, security fixes included, and nothing else
+     * refreshes the account's copy, so one it already holds is pulled again.
+     * A failed pull keeps that copy and the deploy goes on.
+     */
+    public function ensureCurrent(string $image): void
+    {
+        if (!$this->hasImage($image)) {
+            $this->fetch($image);
+
+            return;
+        }
+        if (!DindImageStore::followsUpstream($image) || $this->inner->dind()->registryLogin()->covers($image)) {
             return;
         }
 
+        $host = $this->inner->host();
+        try {
+            $output = $this->inner->dind()->system()->exec(
+                $this->inner->imageStore()->refreshCommand($this->inner->dind()->engineAccount(), $image),
+                [],
+                self::SEED_TIMEOUT_SECONDS
+            );
+        } catch (\Exception $e) {
+            $host->failDeployIfDiskFull($e->getMessage());
+            $host->logDim("Could not refresh base image {$image}, using the copy this account has: " . trim($e->getMessage()));
+
+            return;
+        }
+
+        $line = trim((string) $output);
+        if (str_starts_with($line, 'Updated')) {
+            $host->logInfo($line);
+        } elseif ($line !== '') {
+            $host->logDim($line);
+        }
+    }
+
+    private function fetch(string $image): void
+    {
         // Ours, and never on a public registry: the cache registry, the host,
         // or a rebuild. Which images those are comes from the catalogue.
         if (BuiltImage::isOurs($image)) {
