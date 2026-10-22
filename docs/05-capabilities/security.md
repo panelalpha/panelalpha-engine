@@ -147,6 +147,8 @@ Disabling ModSecurity entirely to fix one form is a large step backwards for a s
 
 Security fixes reach your VPS through engine updates. An engine nobody has updated in a year is running a year-old version of everything it installed. [Updating](../02-getting-started/updating.md).
 
+A project built on an official image, such as Node.js 22, gets the newest release of that version every time it deploys. A project that is already running keeps the release it was built with, so after a security release, rebuild it: [Rebuild after you change files](../02-getting-started/looking-after-your-project.md#rebuild-after-you-change-files). Versions that are no longer supported upstream, such as PHP 7.4, 8.0 and 8.1 or Node.js 18 and 20, get no more fixes. Move those projects to a supported version.
+
 ## Reporting a vulnerability
 
 **Disclose privately. Do not open a public issue.**
