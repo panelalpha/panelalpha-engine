@@ -116,6 +116,61 @@ class ImageSeedingLogTest extends TestCase
     }
 
     /**
+     * A Node base the account already holds is pulled again, so a redeploy
+     * picks up a patch release such as the Node.js security fix of 21.10.2026.
+     */
+    public function test_a_base_image_the_engine_picks_is_refreshed_when_present(): void
+    {
+        $seeding = $this->seeding("Updated base image node:22-bookworm-slim\n", true);
+
+        $seeding->ensureCurrent('node:22-bookworm-slim');
+
+        $this->assertCount(1, $this->system->scripts);
+        $this->assertStringContainsString("docker pull -q 'node:22-bookworm-slim'", $this->system->scripts[0]);
+        $this->assertSame([['info', 'Updated base image node:22-bookworm-slim']], $this->logged);
+    }
+
+    public function test_an_unchanged_base_image_is_one_dim_line(): void
+    {
+        $seeding = $this->seeding("Base image node:22-bookworm-slim is current\n", true);
+
+        $seeding->ensureCurrent('node:22-bookworm-slim');
+
+        $this->assertSame([['dim', 'Base image node:22-bookworm-slim is current']], $this->logged);
+    }
+
+    public function test_a_failed_refresh_keeps_the_copy_and_does_not_warn(): void
+    {
+        $seeding = $this->seeding(new \Exception('registry-proxy: connection refused'), true);
+
+        $seeding->ensureCurrent('node:22-bookworm-slim');
+
+        $this->assertSame(
+            [['dim', 'Could not refresh base image node:22-bookworm-slim, using the copy this account has: registry-proxy: connection refused']],
+            $this->logged
+        );
+    }
+
+    public function test_plain_ensure_leaves_a_present_image_alone(): void
+    {
+        $seeding = $this->seeding("unused\n", true);
+
+        $seeding->ensure('redis:alpine');
+
+        $this->assertSame([], $this->system->scripts);
+    }
+
+    public function test_ours_and_private_images_are_not_refreshed(): void
+    {
+        $seeding = $this->seeding("unused\n", true, 'ghcr.io acme ghp_abcdefghijklmnop');
+
+        $seeding->ensureCurrent(self::IMAGE);
+        $seeding->ensureCurrent('ghcr.io/acme/app:1.0');
+
+        $this->assertSame([], $this->system->scripts);
+    }
+
+    /**
      * @param string|\Exception $seedResult what the seed script prints, or how it fails
      */
     private function seeding(string|\Exception $seedResult, bool $presentAfter, ?string $registryAuth = null): ImageSeeding

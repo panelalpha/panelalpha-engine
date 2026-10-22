@@ -103,6 +103,12 @@ class InnerDocker
         $this->seeding()->ensure($image);
     }
 
+    /** {@see ImageSeeding::ensureCurrent()}: a base image the engine picks, kept on upstream's latest patch. */
+    public function ensureCurrentImage(string $image): void
+    {
+        $this->seeding()->ensureCurrent($image);
+    }
+
     /**
      * @return list<int>
      */
