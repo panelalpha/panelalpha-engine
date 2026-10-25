@@ -44,6 +44,15 @@ def protects(patterns):
     return ['--filter=P ' + pattern for pattern in patterns]
 
 
+niceness = values.optional(values.one_of(tuple(str(n) for n in range(20)), 'niceness'))
+io_class = values.optional(values.one_of(('2', '3'), 'IO class'))
+
+
+def at_priority(nice, io_class):
+    """`nice` and `ionice` lowering what follows; an empty value leaves that one as it is."""
+    return [*(['nice', '-n', nice] if nice else []), *(['ionice', '-c', io_class] if io_class else [])]
+
+
 def contents(operand):
     return operand if operand.endswith('/') else operand + '/'
 
@@ -179,6 +188,16 @@ ACTIONS = {
     'createArchive': Action(
         (path(EXISTING, HOMES), path(CREATE, ('backup',)), plain(values.archive_entry), every(values.archive_pattern)),
         lambda d, archive, entry, patterns: ['tar', '-C', d, '-czf', archive, *excludes(patterns), '--', entry],
+        use_cwd=False,
+    ),
+    'createArchiveAtPriority': Action(
+        (
+            path(EXISTING, HOMES), path(CREATE, ('backup',)), plain(niceness), plain(io_class),
+            plain(values.archive_entry), every(values.archive_pattern),
+        ),
+        lambda d, archive, nice, io, entry, patterns: [
+            *at_priority(nice, io), 'tar', '-C', d, '-czf', archive, *excludes(patterns), '--', entry,
+        ],
         use_cwd=False,
     ),
     'extractArchive': Action(

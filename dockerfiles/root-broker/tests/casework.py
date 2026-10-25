@@ -22,7 +22,7 @@ SHAPES = {
     'makeDirectoryWithMode': '-', 'makeDirectories': '-', 'makeDirectoriesWithMode': '-', 'move': 'dd',
     'moveOverwriting': 'f-', 'rename': 'd-', 'copy': 'ff', 'replaceWithPreservedCopy': 'ff', 'copyTree': 'dd',
     'install': 'f-', 'changeMode': 'ff', 'touch': '-', 'read': 'f', 'lastLines': 'f', 'isFile': 'f', 'isSymlink': 'f',
-    'modificationTime': 'f', 'permissionBits': 'f', 'existingRealPaths': 'df', 'createArchive': 'd-',
+    'modificationTime': 'f', 'permissionBits': 'f', 'existingRealPaths': 'df', 'createArchive': 'd-', 'createArchiveAtPriority': 'd-',
     'extractArchive': 'fd', 'move@host': 'd-',
 }
 

@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Backup;
 
+use App\Lib\Backup\ArchivePriority;
 use App\Support\JobBudget;
 use App\System\Privileged;
 use Illuminate\Support\Facades\Log;
@@ -18,7 +19,7 @@ class ProjectFiles extends AccountHome
     /** Runs on the job budget: a large ~/project outlasts exec()'s 600 s default. */
     public function archive(string $dest): void
     {
-        $this->project->system()->exec(Privileged::hostFiles()->createArchive($this->home(), $dest, 'project'), [], $this->deadline->stepSeconds());
+        $this->project->system()->exec(ArchivePriority::configured()->createArchive($this->home(), $dest, 'project'), [], $this->deadline->stepSeconds());
     }
 
     /**

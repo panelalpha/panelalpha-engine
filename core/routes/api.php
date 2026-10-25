@@ -18,6 +18,7 @@ use App\Http\Controllers\SitePasswordGateController;
 use App\Http\Controllers\SourceInspectionController;
 use App\Http\Controllers\SourceRefsController;
 use App\Http\Controllers\SystemApiAccessController;
+use App\Http\Controllers\SystemBackupSettingsController;
 use App\Http\Controllers\SystemBuildCacheController;
 use App\Http\Controllers\SystemController;
 use App\Http\Controllers\SystemEgressController;
@@ -559,6 +560,8 @@ Route::put('/system/webserver-config', [SystemController::class, 'updateWebserve
 Route::get('/system/overlay', [SystemOverlayController::class, 'show']);
 Route::put('/system/overlay', [SystemOverlayController::class, 'update']);
 Route::delete('/system/overlay', [SystemOverlayController::class, 'destroy']);
+Route::get('/system/backup-settings', [SystemBackupSettingsController::class, 'index']);
+Route::put('/system/backup-settings', [SystemBackupSettingsController::class, 'update']);
 Route::get('/system/exim-config', [SystemController::class, 'getEximConfig']);
 Route::put('/system/exim-config', [SystemController::class, 'updateEximConfig']);
 Route::post('/system/exim-send-test-email', [SystemController::class, 'sendTestEmail']);

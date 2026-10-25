@@ -292,6 +292,30 @@ final class RootFiles
     }
 
     /**
+     * createArchive() with tar at a lower CPU and disk priority: `nice -n $nice`, `ionice -c $ioClass`, either left out when null.
+     *
+     * @param  array<int, string>  $excluded
+     * @return list<string>
+     */
+    public function createArchiveAtPriority(string $dir, string $archive, ?int $nice, ?int $ioClass, string $entry, array $excluded = []): array
+    {
+        if ($nice !== null && ($nice < 0 || $nice > 19)) {
+            throw InvalidArgument::of('niceness', (string) $nice);
+        }
+        if ($ioClass !== null && ! in_array($ioClass, [2, 3], true)) {
+            throw InvalidArgument::of('IO class', (string) $ioClass);
+        }
+
+        return $this->root(__FUNCTION__, [
+            ...Arguments::paths([$dir, $archive]),
+            $nice === null ? '' : (string) $nice,
+            $ioClass === null ? '' : (string) $ioClass,
+            Arguments::archiveEntry($entry),
+            ...array_map(Arguments::archivePattern(...), array_values($excluded)),
+        ]);
+    }
+
+    /**
      * Unpacks a gzipped tar.
      *
      * @return list<string>

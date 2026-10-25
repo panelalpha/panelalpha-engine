@@ -366,6 +366,8 @@ return [
     'GET /system/overlay' => 'system_overlay_get',
     'PUT /system/overlay' => 'system_overlay_set',
     'DELETE /system/overlay' => 'system_overlay_delete',
+    'GET /system/backup-settings' => 'system_backup_settings_get',
+    'PUT /system/backup-settings' => 'system_backup_settings_set',
     'GET /system/ssl-config' => 'system_ssl_config_get',
     'PUT /system/ssl-config' => 'system_ssl_config_set',
     'PUT /system/engine-certificate' => 'system_engine_cert_request',

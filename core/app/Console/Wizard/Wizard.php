@@ -4,6 +4,7 @@ namespace App\Console\Wizard;
 
 use App\Console\Wizard\Sections\ApiAccessSection;
 use App\Console\Wizard\Sections\ApiTokensSection;
+use App\Console\Wizard\Sections\BackupPrioritySection;
 use App\Console\Wizard\Sections\DockerHubSection;
 use App\Console\Wizard\Sections\EngineAddressSection;
 use App\Console\Wizard\Sections\McpTokensSection;
@@ -27,6 +28,7 @@ class Wizard
         McpTokensSection::class,
         ApiTokensSection::class,
         QueueSection::class,
+        BackupPrioritySection::class,
         DockerHubSection::class,
         PrewarmSection::class,
         SitesDbSection::class,

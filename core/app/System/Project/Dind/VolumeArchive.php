@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Dind;
 
+use App\Lib\Backup\ArchivePriority;
 use App\Lib\Deploy\Compose\NamedVolumes;
 use App\Support\JobBudget;
 use App\System\Privileged;
@@ -100,7 +101,7 @@ final class VolumeArchive
 
         $this->runTarImage(
             [[$dockerName, '/data', 'ro'], [$scratchDir, '/out', 'rw']],
-            ['tar', '-C', '/data', '-czf', '/out/'.$basename, '.'],
+            [...ArchivePriority::configured()->prefix(), 'tar', '-C', '/data', '-czf', '/out/'.$basename, '.'],
         );
 
         $this->project->system()->exec(Privileged::hostFiles()->moveOverwriting($scratchFile, $dest));
@@ -210,7 +211,7 @@ SH);
 
         $this->runTarImage(
             [[$dockerName, '/data', 'rw'], [$scratchArchive, '/archive', 'ro']],
-            ['sh', '-c', self::volumeRestoreScript()],
+            [...ArchivePriority::configured()->prefix(), 'sh', '-c', self::volumeRestoreScript()],
         );
 
         $this->project->system()->exec(Privileged::hostFiles()->removeIfExists($scratchArchive));

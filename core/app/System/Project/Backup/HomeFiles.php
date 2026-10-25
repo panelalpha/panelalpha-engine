@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Backup;
 
+use App\Lib\Backup\ArchivePriority;
 use App\Support\JobBudget;
 use App\System\Privileged;
 use App\System\Project\HomeMerge;
@@ -17,7 +18,7 @@ class HomeFiles extends AccountHome
     public function archive(string $dest): void
     {
         $this->project->system()->exec(
-            Privileged::hostFiles()->createArchive($this->home(), $dest, '.', ['./.incoming', './.pre-push']),
+            ArchivePriority::configured()->createArchive($this->home(), $dest, '.', ['./.incoming', './.pre-push']),
             [],
             $this->deadline->stepSeconds(),
         );

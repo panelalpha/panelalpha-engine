@@ -135,6 +135,22 @@ To look at the schedule, or turn it off:
 Show the backup schedule of this project. Then remove it.
 ```
 
+## Backups and the live sites on the same server
+
+A backup reads the whole project and compresses it, on the same server that serves every site. On a large project that is minutes of CPU and a lot of disk reading, at the same priority as the sites themselves.
+
+You can put it out of the way instead:
+
+```bash
+pae configure backups
+```
+
+Two numbers. The **CPU priority** is `nice`, 0 to 19: a higher number means the archive waits longer for the CPU and the sites get it first. The **disk priority** is an `ionice` class, either 2 (best-effort) or 3 (idle): idle gives a backup the disk only when nothing else is asking for it. Both are off by default, which is how every engine starts; answer empty or `off` to switch either back off. The next archive runs at the new priority - one already running keeps the priority it started with.
+
+It covers the archives: the `tar` of a project, of a home directory or of a stored volume, and the extraction of a volume archive on restore. Database dumps are not included.
+
+Over the API the same two values are `GET /system/backup-settings` and `PUT /system/backup-settings`, and with an assistant, `system_backup_settings_get` and `system_backup_settings_set`. All three read and write the same stored setting, so they always agree.
+
 ## Troubleshooting
 
 **A 404 error when creating a backup.**
