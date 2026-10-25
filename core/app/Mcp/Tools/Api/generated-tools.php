@@ -270,6 +270,8 @@ return [
     \App\Mcp\Tools\Api\System\SystemApiAccessDenyTool::class,
     \App\Mcp\Tools\Api\System\SystemApiAccessAllowTool::class,
     \App\Mcp\Tools\Api\System\SystemApiAccessRotateTool::class,
+    \App\Mcp\Tools\Api\System\SystemBackupSettingsGetTool::class,
+    \App\Mcp\Tools\Api\System\SystemBackupSettingsSetTool::class,
     \App\Mcp\Tools\Api\System\SystemBuildCacheRemoveTool::class,
     \App\Mcp\Tools\Api\System\SystemBuildCacheListTool::class,
     \App\Mcp\Tools\Api\System\SystemBuildCacheBuildTool::class,

@@ -108,7 +108,7 @@ A tool has to be in an enabled group (or named in `MCP_TOOLS`), allowed by the p
 
 ### How many tools the assistant loads
 
-The full list is 321 tools, and an assistant loads every listed tool's description when it connects. That is about 95 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
+The full list is 323 tools, and an assistant loads every listed tool's description when it connects. That is about 95 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
 
 - `search_tools` finds any other tool by what it does, for example `mysql user` or `cron`.
 - `execute_tools` runs the tool it found.
