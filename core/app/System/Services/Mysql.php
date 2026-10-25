@@ -106,6 +106,17 @@ class Mysql
         $this->runInCore('gunzip -c '.escapeshellarg($sqlGzPath).' | '.$this->sitesDb()->sitesDbRestore($name), 'database restore failed');
     }
 
+    /** A dump of $from loaded into $to, with the schema name and each DEFINER rewritten as copyInSitesDb() does. */
+    public function restoreCopyFromGzip(string $from, string $to, string $sqlGzPath, DefinerMap $definers): void
+    {
+        self::assertDatabaseName($from);
+        self::assertDatabaseName($to);
+        $this->runInCore(
+            'gunzip -c '.escapeshellarg($sqlGzPath).' | '.$this->sitesDb()->sitesDbRestoreCopy($from, $to, $definers->orphan(), $definers->accounts()),
+            'database restore failed',
+        );
+    }
+
     private function pdo(): PDO
     {
         if ($this->pdo !== null) {

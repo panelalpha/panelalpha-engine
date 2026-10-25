@@ -16,6 +16,7 @@ use App\System\Project\Backup\BackupRestore;
 use App\System\Project\Backup\BackupTransfer;
 use App\System\Project\Backup\ItemFilter;
 use App\System\Project\Backup\ProjectContent;
+use App\System\Project\Backup\RestoreCopy;
 use App\System\Project\Backup\StagingDirectory;
 use App\System\Project\Backup\StoppedStack;
 use Throwable;
@@ -28,6 +29,8 @@ class Backup
     private ?ProjectContent $content = null;
 
     private ?AppStack $stack = null;
+
+    private ?RestoreCopy $copy = null;
 
     public function __construct(
         private UserProject $project,
@@ -93,6 +96,24 @@ class Backup
         }
     }
 
+    /**
+     * Restore the whole backup into $target, an account of its own, and leave the project that owns
+     * the backup and its backups untouched. Databases are restored under $target's prefix.
+     */
+    public function restoreInto(UserProject $target): void
+    {
+        $source = $this->project;
+        $this->copy = new RestoreCopy($source, $target);
+        $this->aimAt($target);
+
+        try {
+            $this->restore();
+        } finally {
+            $this->copy = null;
+            $this->aimAt($source);
+        }
+    }
+
     /** Holds the deploy lock as run() does, so no rebuild lands between the two moves of ProjectFiles::swap(). */
     public function restore(array $only = [], array $exclude = [], bool $deleteExistingFiles = true): void
     {
@@ -108,12 +129,7 @@ class Backup
         $lock = DeployLock::acquireFor($this->project->username(), DeployLock::HOLDER_RESTORE);
 
         try {
-            $this->record->restore_details = [
-                'only' => $only,
-                'exclude' => $exclude,
-                'delete_existing_files' => $deleteExistingFiles,
-            ];
-            $this->record->saveRestoreStatus('running');
+            $this->recordRestoreStart($only, $exclude, $deleteExistingFiles);
 
             if ($this->project->runsInDind()) {
                 $this->restorer()->restoreDind($only, $exclude);
@@ -157,6 +173,30 @@ class Backup
     protected function stack(): AppStack
     {
         return $this->stack ??= new AppStack($this->project);
+    }
+
+    private function aimAt(UserProject $project): void
+    {
+        $this->project = $project;
+        $this->content = null;
+        $this->stack = null;
+    }
+
+    /** A copy's progress belongs to the new project; the backup it was made from records nothing. */
+    private function recordRestoreStart(array $only, array $exclude, bool $deleteExistingFiles): void
+    {
+        if ($this->copy !== null) {
+            $this->copy->saveStatus('running');
+
+            return;
+        }
+
+        $this->record->restore_details = [
+            'only' => $only,
+            'exclude' => $exclude,
+            'delete_existing_files' => $deleteExistingFiles,
+        ];
+        $this->record->saveRestoreStatus('running');
     }
 
     private function assertRoomForBackup(): void
@@ -250,6 +290,7 @@ class Backup
             $this->content(),
             $this->stack(),
             fn (): BackupStorage => $this->resolveStorage($this->requireContainer()),
+            $this->copy,
         );
     }
 }

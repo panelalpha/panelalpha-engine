@@ -94,6 +94,20 @@ The parts are chosen with `only` or `exclude`, never both. Each is an object wit
 
 **Deleting a backup removes its files, and that copy of the project can never be restored.** Deleting a store that still holds backups is refused unless you ask to delete the backups with it, and then they are gone for good. The assistant says what will be lost and asks you to confirm first.
 
+### Into a new project
+
+A backup can also be restored into a **new project**, under a new name and domain, without touching the project it was taken from. The new project is created, the backup's files, volumes and databases are restored into it under its own database prefix, and the application is started on its own domain. The original project keeps running and keeps its backups.
+
+```text
+Restore the newest backup of tshop into a new project called tshop2.
+```
+
+Only a backup of a container project can be restored this way. A traditional PHP hosting backup carries an application configuration that names the original project's databases, so restoring it beside the original would leave both projects sharing one database. Use a container project, or the WordPress migration for a traditional PHP site.
+
+A restore into a new project runs as a task: the call answers with the new project and a task ID, and the project's `async_status.restore` becomes `completed` or `failed`. A failed one leaves the new project in place with the reason in its error, so it can be inspected and deleted.
+
+A token limited to some projects can restore only its own projects' backups, and only into a new project name that is in its list.
+
 ## Download one part
 
 A backup is stored as separate items, for example the home folder and one dump per database. To take one item off the server:
@@ -262,6 +276,14 @@ Back up tshop while a push to its staging copy is running.
 
 Mode: modify. Tools: `backup_create`, `project_push`, `task_get`. Check: the backup is refused as busy, and works once the push has finished. After any backup the app is running again. Skip when you cannot start both within the push's run time.
 
+**Restore into a new project**
+
+```text
+Restore the newest backup of tshop into a new project called tshop2.
+```
+
+Mode: modify. Tools: `backup_restore_into` with `name` (the source project), `id`, `new_name` and `domain`, `task_get`, `project_get`. Check: the call answers 202 with the new project and a `task_id`; poll until `details.async_status.restore` is `completed`; `tshop` still serves and its backup list is unchanged; `tshop2` answers on its own domain.
+
 **Delete a backup**
 
 ```text
@@ -272,4 +294,4 @@ Mode: full. Tools: `backup_delete`, `backup_list`. Check: only that backup is go
 
 ## From the server
 
-Creating and restoring backups, setting up a store, scheduling and downloading: [CLI commands](../06-commands/pae-cli.md#backups). The schedule and the download have their own commands, `pae project:backup:schedule` and `pae project:backup:download`.
+Creating and restoring backups, setting up a store, scheduling and downloading: [CLI commands](../06-commands/pae-cli.md#backups). The schedule and the download have their own commands, `pae project:backup:schedule` and `pae project:backup:download`. A restore into a new project is `pae project:backup:restore-into`.

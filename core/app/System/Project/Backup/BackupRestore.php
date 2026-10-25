@@ -38,6 +38,7 @@ final class BackupRestore
         private ProjectContent $content,
         private AppStack $stack,
         private \Closure $storage,
+        private ?RestoreCopy $copy = null,
     ) {
         $this->staging = new StagingDirectory($project);
         $this->transfer = new BackupTransfer($record, $deadline);
@@ -56,15 +57,14 @@ final class BackupRestore
                 $this->sumSelectedBytes($selectedItems),
             );
 
-            (new StoppedStack($this->project, $this->stack, $this->staging))->run(
+            $this->withStackStopped(
                 $record->id,
                 fn (string $stagingDir) => $this->restoreWhileStopped($selectedItems, $storage, $stagingDir),
-                fn (): bool => ! $this->rollbackFailed(),
             );
 
-            $record->saveRestoreStatus('completed');
+            $this->saveStatus('completed');
         } catch (Throwable $e) {
-            $record->saveRestoreStatus('failed', $e->getMessage());
+            $this->saveStatus('failed', $e->getMessage());
         }
     }
 
@@ -87,9 +87,9 @@ final class BackupRestore
             $stagedPaths = $this->transfer->download($selectedItems, $storage, $stagingDir);
             $this->restoreClassicItems($selectedItems, $stagedPaths, $stagingDir, $deleteExistingFiles);
 
-            $record->saveRestoreStatus('completed');
+            $this->saveStatus('completed');
         } catch (Throwable $e) {
-            $record->saveRestoreStatus('failed', $e->getMessage());
+            $this->saveStatus('failed', $e->getMessage());
         } finally {
             $this->staging->clean($stagingDir);
         }
@@ -234,7 +234,9 @@ final class BackupRestore
             $this->content->files->discardAside(self::PROJECT_PRE_RESTORE);
         }
 
-        $this->stack->start();
+        if ($this->copy === null) {
+            $this->stack->start();
+        }
     }
 
     private function swapInProjectArchive(string $archivePath): void
@@ -271,8 +273,7 @@ final class BackupRestore
                 if ($type === 'volume') {
                     $restoredVolumes[] = $this->restoreVolumeItem($item, $stagedPaths[$item->id]);
                 } elseif ($type === 'database') {
-                    $name = (string) ($item->details['name'] ?? '');
-                    $databases->restore($name, $stagedPaths[$item->id]);
+                    $this->restoreDatabaseItem($databases, (string) ($item->details['name'] ?? ''), $stagedPaths[$item->id]);
                 }
             }
         } catch (Throwable $e) {
@@ -280,6 +281,20 @@ final class BackupRestore
 
             throw $this->restoreFailure($e);
         }
+    }
+
+    /** A copy loads each dump under the new project's prefix, with the source's names rewritten out of it. */
+    private function restoreDatabaseItem(DatabaseRestore $databases, string $name, string $sqlGzPath): void
+    {
+        if ($this->copy === null) {
+            $databases->restore($name, $sqlGzPath);
+
+            return;
+        }
+
+        $target = $this->copy->databaseName($name);
+        $this->content->databases->ensureRow($target);
+        $databases->restoreCopy($name, $target, $sqlGzPath, $this->copy->definers());
     }
 
     private function restoreFailure(Throwable $e): \RuntimeException
@@ -323,6 +338,44 @@ final class BackupRestore
         if ($filesSwapped) {
             $this->rollBackProjectFiles(' after component restore error');
         }
+    }
+
+    /**
+     * A copy's new account has never run, so there is no stack to stop or start again.
+     *
+     * @param  callable(string): void  $work
+     */
+    private function withStackStopped(int $backupId, callable $work): void
+    {
+        if ($this->copy === null) {
+            (new StoppedStack($this->project, $this->stack, $this->staging))->run(
+                $backupId,
+                $work,
+                fn (): bool => ! $this->rollbackFailed(),
+            );
+
+            return;
+        }
+
+        $stagingDir = $this->staging->path($this->project->username(), $backupId);
+        try {
+            $this->staging->ensure($stagingDir);
+            $work($stagingDir);
+        } finally {
+            $this->staging->clean($stagingDir);
+        }
+    }
+
+    /** A copy's progress belongs to the new project; the backup it was made from records nothing. */
+    private function saveStatus(string $status, ?string $error = null): void
+    {
+        if ($this->copy !== null) {
+            $this->copy->saveStatus($status, $error);
+
+            return;
+        }
+
+        $this->record->saveRestoreStatus($status, $error);
     }
 
     private function startDatabaseRestore(string $stagingDir): DatabaseRestore

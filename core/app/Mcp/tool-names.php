@@ -449,6 +449,7 @@ return [
     'GET /projects/{username}/backups/{id}' => 'backup_get',
     'GET /projects/{username}/backups/{id}/items/{item}/download' => 'backup_item_download',
     'POST /projects/{username}/backups/{id}/restore' => 'backup_restore',
+    'POST /projects/{username}/backups/{id}/restore-into' => 'backup_restore_into',
     'DELETE /projects/{username}/backups/{id}' => 'backup_delete',
     'GET /projects/{username}/backup-schedule' => 'backup_schedule_get',
     'PUT /projects/{username}/backup-schedule' => 'backup_schedule_set',

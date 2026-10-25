@@ -109,6 +109,14 @@ SITES_DB_COPY = [
     '-e \'/^INSERT INTO /!{/^(/!s/DEFINER=`\\([^`]\\|``\\)*`\\(@`\\([^`]\\|``\\)*`\\)\\{0,1\\}/DEFINER=`bob_no.definer`@`%`/g}\' '
     '-e \'/^INSERT INTO /!{/^(/!s/DEFINER\\n/DEFINER=/g}\' | mariadb -uroot -- \'bob_wp\'',
 ]
+SITES_DB_RESTORE_COPY = [
+    'bash', '-c', 'export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; set -o pipefail; sed '
+    '-e \'/^INSERT INTO /!{/^(/!s/`alice_wp`\\./`bob_wp`./g}\' '
+    '-e \'/^INSERT INTO /!{/^(/!s/\\balice_wp\\./bob_wp./g}\' '
+    '-e \'/^INSERT INTO /!{/^(/!s/DEFINER=`alice_wp`@`%`/DEFINER\\n`bob_wp`@`%`/g}\' '
+    '-e \'/^INSERT INTO /!{/^(/!s/DEFINER=`\\([^`]\\|``\\)*`\\(@`\\([^`]\\|``\\)*`\\)\\{0,1\\}/DEFINER=`bob_no.definer`@`%`/g}\' '
+    '-e \'/^INSERT INTO /!{/^(/!s/DEFINER\\n/DEFINER=/g}\' | mariadb -uroot -- \'bob_wp\'',
+]
 # (action, 'file' or 'dir' first value, the rest of the values, on the host, service, Cmd, Env, passing)
 EXECS = [
     ('nginxConfigTest', 'file', [], True, 'sites-http', ['nginx', '-t'], [], ()),
@@ -158,6 +166,8 @@ EXECS = [
      ['bash', '-c', 'export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; mariadb -uroot -- \'bob_wp\''], [], ()),
     ('sitesDbCopy', 'dir', ['alice_wp', 'bob_wp', '', 'bob_no.definer', '2', 'alice_wp', 'bob_wp', 'alice_shop',
                             'bob_shop'], False, 'sites-db', SITES_DB_COPY, [], ()),
+    ('sitesDbRestoreCopy', 'dir', ['alice_wp', 'bob_wp', 'bob_no.definer', '1', 'alice_wp', 'bob_wp'], False,
+     'sites-db', SITES_DB_RESTORE_COPY, [], ()),
     ('sitesDbDropTable', 'dir', ['bob_wp', 'wp_posts'], False, 'sites-db',
      ['bash', '-c', 'export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; mariadb -uroot -e '
                     '\'DROP TABLE IF EXISTS `wp_posts`\' -- \'bob_wp\''], [], ()),
@@ -261,7 +271,7 @@ class ExecTest(EngineTest):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout, b'')
                 self.assertEqual(self.bodies(f'/containers/{container}/exec')[-1], {
-                    'AttachStdout': True, 'AttachStderr': True, 'AttachStdin': name == 'sitesDbRestore',
+                    'AttachStdout': True, 'AttachStderr': True, 'AttachStdin': name in ('sitesDbRestore', 'sitesDbRestoreCopy'),
                     'Tty': False, 'Cmd': expected, 'Env': environment,
                 })
 

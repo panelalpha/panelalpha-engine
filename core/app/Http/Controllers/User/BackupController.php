@@ -4,15 +4,18 @@ namespace App\Http\Controllers\User;
 
 use App\Exceptions\ProblemException;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\BackupRestoreIntoRequest;
 use App\Http\Requests\BackupRestoreRequest;
 use App\Http\Requests\BackupStoreRequest;
 use App\Http\Resources\BackupCollection;
 use App\Http\Resources\BackupResource;
+use App\Http\Resources\UserResource;
 use App\Integrations\Storage\BackupStorage;
 use App\Integrations\Storage\Local;
 use App\Jobs\CreateBackup;
 use App\Jobs\DeleteBackup;
 use App\Jobs\RestoreBackup;
+use App\Lib\Project\ProjectRestore;
 use App\Models\Backup as BackupRecord;
 use App\Models\Task;
 use App\Models\User;
@@ -213,6 +216,63 @@ class BackupController extends Controller
         RestoreBackup::dispatch($backup->id, $only, $exclude, $deleteExistingFiles)->attachTask($task);
 
         return (new BackupResource($backup->fresh(['container', 'items'])))
+            ->response()
+            ->setStatusCode(202);
+    }
+
+    #[OA\Post(
+        path: '/projects/{username}/backups/{id}/restore-into',
+        summary: 'Restore a project backup into a new project',
+        description: 'Creates a new project and restores this backup into it, leaving the project that owns '
+            .'the backup and its backups untouched. The databases are restored under the new project\'s '
+            .'prefix. Answers 202 with the new project and a `task_id`; poll `GET /projects/{new_username}` '
+            .'until `details.async_status.restore` is `completed` or `failed`. Only a container project\'s '
+            .'backup can be restored this way. CLI equivalent: `php artisan project:backup:restore-into`.',
+        security: [['bearerAuth' => []]],
+        requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
+            required: ['new_username'],
+            properties: [
+                new OA\Property(
+                    property: 'new_username',
+                    type: 'string',
+                    example: 'shop2',
+                    description: 'The new project\'s account name. It must be free on this engine.',
+                ),
+                new OA\Property(
+                    property: 'domain',
+                    type: 'string',
+                    nullable: true,
+                    description: 'The new project\'s main domain. Omitted, the engine allocates one.',
+                ),
+                new OA\Property(property: 'email', type: 'string', nullable: true),
+            ],
+        )),
+        tags: ['Backups'],
+        parameters: [
+            new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
+        ],
+        responses: [
+            new OA\Response(response: 202, description: 'Restore accepted; the new project is in the body', content: new OA\JsonContent(ref: '#/components/schemas/User')),
+            new OA\Response(response: 404, description: 'Not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 409, description: 'Backup is not completed', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+        ],
+    )]
+    public function restoreInto(string $username, int $id, BackupRestoreIntoRequest $request, ProjectRestore $restore): JsonResponse
+    {
+        $user = $this->projectOr404($username);
+
+        $backup = $this->backupOr404($user, $id);
+
+        if ($backup->backupStatus() !== 'completed' || $backup->items->isEmpty()) {
+            return $this->notCompleted();
+        }
+
+        $task = $restore->queue($user, $backup, $request->newProjectInput());
+
+        return (new UserResource($restore->target()))
+            ->additional(['task_id' => $task->id])
             ->response()
             ->setStatusCode(202);
     }

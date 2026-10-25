@@ -189,6 +189,7 @@ Context: [Connecting with Git](../05-capabilities/connecting-with-git.md), [Push
 | `pae project:backup:download {project} {id} {item} --output=/opt/panelalpha/file` | Copies one item of a finished backup to a file. Write it under `/opt/panelalpha`, which the engine's container can reach. Without `--output` the file contents go to the screen. `pae project:backup:show {project} {id}` lists the item numbers. |
 | `pae project:backup:show {project} {id}` | Shows one backup's details. |
 | `pae project:backup:restore {project} {id}` | Restores a backup. **This overwrites the live site.** |
+| `pae project:backup:restore-into {project} {id} --as={new project} [--domain={domain}]` | Restores a backup into a new project, leaving the original project and its backups alone. Container projects only. |
 | `pae project:backup:delete {project} {id}` | Deletes one backup. |
 | `pae backup:container:show {store}` | Shows a store's settings, and whether it is the default. |
 | `pae backup:container:update {store}` | Changes a store's connection details. `--default` makes it the store a panel uses when nobody configured one. |

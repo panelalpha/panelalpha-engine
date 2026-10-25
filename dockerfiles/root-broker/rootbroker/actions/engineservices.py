@@ -300,6 +300,11 @@ def sites_db_copy(source, target, only, orphan_user, definers):
     return f'set -o pipefail; {sites_db_dump(source, only)} | {rewrite} | mariadb -uroot -- {escapeshellarg(target)}'
 
 
+def sites_db_restore_copy(source, target, orphan_user, definers):
+    rewrite = schema_rewrite(source, target, definers, orphan_user)
+    return f'set -o pipefail; {rewrite} | {sites_db_restore(target)}'
+
+
 def sites_db_drop_table(name, only):
     drop = 'DROP TABLE IF EXISTS `' + only + '`'
     return 'mariadb -uroot -e ' + escapeshellarg(drop) + ' -- ' + escapeshellarg(name)
@@ -311,6 +316,10 @@ ACTIONS = {
     'sitesDbRestore': sites_db(database, sites_db_restore, stdin=dockerapi.CLIENT),
     'sitesDbCopy': sites_db(
         reads(database, database, values.optional(table), orphan, group(mysql_account, mysql_account)), sites_db_copy,
+    ),
+    'sitesDbRestoreCopy': sites_db(
+        reads(database, database, orphan, group(mysql_account, mysql_account)), sites_db_restore_copy,
+        stdin=dockerapi.CLIENT,
     ),
     'sitesDbDropTable': sites_db(reads(database, table), sites_db_drop_table),
     'nginxConfigTest': fixed(SITES_HTTP, 'nginx', '-t', on_host=True),

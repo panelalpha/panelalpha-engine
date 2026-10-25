@@ -206,6 +206,14 @@ class User extends Authenticatable
         $this->save();
     }
 
+    /** The same for a backup restored into a new project, whose progress is recorded here. */
+    public function markRestoreFailed(string $error): void
+    {
+        $this->mergeAsyncStatus(['restore' => 'failed']);
+        $this->setDetails(['error' => $error]);
+        $this->save();
+    }
+
     /**
      * Frozen deploy fields a clone/staging mirror needs to start the copied
      * app without re-running detection. `Dind::app()` keys off

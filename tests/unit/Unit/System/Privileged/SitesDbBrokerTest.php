@@ -25,6 +25,7 @@ final class SitesDbBrokerTest extends TestCase
             '/usr/local/lib/panelalpha/pa-root compose.sitesDbRestore -- '.self::ENGINE.' bob_wp',
             '/usr/local/lib/panelalpha/pa-root compose.sitesDbCopy -- '.self::ENGINE.' alice_wp bob_wp \'\' bob_no.definer 2 alice_wp bob_wp alice_shop bob_shop',
             '/usr/local/lib/panelalpha/pa-root compose.sitesDbCopy -- '.self::ENGINE.' alice-wp bob-wp wp_posts no.definer 0',
+            '/usr/local/lib/panelalpha/pa-root compose.sitesDbRestoreCopy -- '.self::ENGINE.' alice_wp bob_wp bob_no.definer 2 alice_wp bob_wp alice_shop bob_shop',
             '/usr/local/lib/panelalpha/pa-root compose.sitesDbDropTable -- '.self::ENGINE.' bob_wp wp_posts',
         ], [
             $lines->sitesDbDump('alice_wp', null),
@@ -32,6 +33,7 @@ final class SitesDbBrokerTest extends TestCase
             $lines->sitesDbRestore('bob_wp'),
             $lines->sitesDbCopy('alice_wp', 'bob_wp', null, $map->orphan(), $map->accounts()),
             $lines->sitesDbCopy('alice-wp', 'bob-wp', 'wp_posts', $none->orphan(), $none->accounts()),
+            $lines->sitesDbRestoreCopy('alice_wp', 'bob_wp', $map->orphan(), $map->accounts()),
             $lines->sitesDbDropTable('bob_wp', 'wp_posts'),
         ]);
     }
@@ -55,6 +57,9 @@ final class SitesDbBrokerTest extends TestCase
         yield 'definer with a backtick' => [fn (RootEngineComposeLines $l) => $l->sitesDbCopy('a', 'b', null, 'no.definer', ['a_u' => 'b`u'])];
         yield 'source user with a quote' => [fn (RootEngineComposeLines $l) => $l->sitesDbCopy('a', 'b', null, 'no.definer', ["a'u" => 'b_u'])];
         yield 'orphan that is root' => [fn (RootEngineComposeLines $l) => $l->sitesDbCopy('a', 'b', null, 'root', [])];
+        yield 'restored copy into a database with a quote' => [fn (RootEngineComposeLines $l) => $l->sitesDbRestoreCopy('a', "b'", 'no.definer', [])];
+        yield 'restored copy definer with a backtick' => [fn (RootEngineComposeLines $l) => $l->sitesDbRestoreCopy('a', 'b', 'no.definer', ['a_u' => 'b`u'])];
+        yield 'restored copy orphan that is root' => [fn (RootEngineComposeLines $l) => $l->sitesDbRestoreCopy('a', 'b', 'root', [])];
         yield 'relative project directory' => [fn (RootEngineComposeLines $l) => Privileged::engineComposeLines('opt/engine')->sitesDbRestore('a')];
         yield 'project directory climbing out' => [fn (RootEngineComposeLines $l) => Privileged::engineComposeLines('/opt/engine/..')->sitesDbRestore('a')];
     }

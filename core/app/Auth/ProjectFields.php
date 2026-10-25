@@ -23,6 +23,7 @@ class ProjectFields
         'GET /projects/{username}/push/diff' => ['target'],
         'POST /projects/{username}/clone' => ['new_username'],
         'POST /projects/{username}/staging' => ['new_username'],
+        'POST /projects/{username}/backups/{id}/restore-into' => ['new_username'],
         'GET /tasks' => ['username'],
         self::SOURCE_INSPECT => ['source'],
     ];
@@ -34,6 +35,7 @@ class ProjectFields
     private const CREATING = [
         'POST /projects/{username}/clone',
         'POST /projects/{username}/staging',
+        'POST /projects/{username}/backups/{id}/restore-into',
     ];
 
     /**

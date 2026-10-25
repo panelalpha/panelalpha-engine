@@ -269,6 +269,7 @@ $projectRoutes = function (): void {
     Route::get('/{username}/backups/{id}', [BackupController::class, 'show']);
     Route::get('/{username}/backups/{id}/items/{item}/download', [BackupController::class, 'download']);
     Route::post('/{username}/backups/{id}/restore', [BackupController::class, 'restore']);
+    Route::post('/{username}/backups/{id}/restore-into', [BackupController::class, 'restoreInto']);
     Route::delete('/{username}/backups/{id}', [BackupController::class, 'destroy']);
 
     Route::get('/{username}/backup-schedule', [BackupScheduleController::class, 'show']);

@@ -19,6 +19,8 @@ class LeadingDashTest(unittest.TestCase):
             ('compose.sitesDbRestore', ['-patest'], engineservices.sites_db_restore),
             ('compose.sitesDbDropTable', ['-patest', 't'], engineservices.sites_db_drop_table),
             ('compose.sitesDbCopy', ['-patest', '-pbtest', '', 'no.definer', '0'], engineservices.sites_db_copy),
+            ('compose.sitesDbRestoreCopy', ['alice_wp', '-patest', 'no.definer', '0'],
+             engineservices.sites_db_restore_copy),
         ):
             with self.subTest(action=name):
                 script = build(*registry()[name].check([ENGINE, *given])[1:])
@@ -47,6 +49,8 @@ class RefusalTest(unittest.TestCase):
                 self.refused('compose.sitesDbRestore', name)
                 self.refused('compose.sitesDbCopy', name, 'bob_wp', '', 'bob_no.definer', '0')
                 self.refused('compose.sitesDbCopy', 'alice_wp', name, '', 'bob_no.definer', '0')
+                self.refused('compose.sitesDbRestoreCopy', name, 'bob_wp', 'bob_no.definer', '0')
+                self.refused('compose.sitesDbRestoreCopy', 'alice_wp', name, 'bob_no.definer', '0')
 
     def test_a_table_that_could_leave_its_quotes_or_backticks_is_refused(self):
         for name in ("t'", 't`', 't;x', 't\n', 't x', '-t'):
@@ -60,9 +64,11 @@ class RefusalTest(unittest.TestCase):
         for pair in (["a'b", 'bob_wp'], ['alice_wp', 'b`b'], ['alice_wp', 'b@%'], ['alice_wp', '']):
             with self.subTest(pair=pair):
                 self.refused('compose.sitesDbCopy', 'alice_wp', 'bob_wp', '', 'bob_no.definer', '1', *pair)
+                self.refused('compose.sitesDbRestoreCopy', 'alice_wp', 'bob_wp', 'bob_no.definer', '1', *pair)
         for orphan in ('root', 'bob_no.definerx', "b'no.definer", ''):
             with self.subTest(orphan=orphan):
                 self.refused('compose.sitesDbCopy', 'alice_wp', 'bob_wp', '', orphan, '0')
+                self.refused('compose.sitesDbRestoreCopy', 'alice_wp', 'bob_wp', orphan, '0')
         self.refused('compose.sitesDbCopy', 'alice_wp', 'bob_wp', '', 'bob_no.definer', '2', 'alice_wp', 'bob_wp')
 
     def test_only_the_engines_project_directory_is_accepted(self):

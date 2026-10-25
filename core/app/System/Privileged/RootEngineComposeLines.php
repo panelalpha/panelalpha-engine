@@ -49,6 +49,26 @@ final class RootEngineComposeLines
         ]);
     }
 
+    /**
+     * sitesDbRestore() of a dump taken from $from, with the schema name and each DEFINER rewritten as sitesDbCopy() does.
+     *
+     * @param  array<string, string>  $definers  source user => destination user
+     */
+    public function sitesDbRestoreCopy(string $from, string $to, string $orphan, array $definers): string
+    {
+        foreach ($definers as $source => $destination) {
+            self::account((string) $source);
+            self::account($destination);
+        }
+
+        return $this->line(__FUNCTION__, [
+            self::database($from),
+            self::database($to),
+            self::orphan($orphan),
+            ...ActionValues::pairs($definers),
+        ]);
+    }
+
     public function sitesDbDropTable(string $database, string $table): string
     {
         return $this->line(__FUNCTION__, [self::database($database), self::table($table)]);
