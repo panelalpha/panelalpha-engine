@@ -86,6 +86,7 @@ return [
     \App\Mcp\Tools\Api\Backups\BackupGetTool::class,
     \App\Mcp\Tools\Api\Backups\BackupItemDownloadTool::class,
     \App\Mcp\Tools\Api\Backups\BackupRestoreTool::class,
+    \App\Mcp\Tools\Api\Backups\BackupRestoreIntoTool::class,
     \App\Mcp\Tools\Api\Usage\ProjectBandwidthTool::class,
     \App\Mcp\Tools\Api\Projects\ProjectCloneTool::class,
     \App\Mcp\Tools\Api\Containers\ContainerListTool::class,
