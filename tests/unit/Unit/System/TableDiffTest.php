@@ -62,6 +62,16 @@ class TableDiffTest extends TestCase
         $this->assertSame([], $diff['tables_data_diff']);
     }
 
+    public function test_a_different_auto_increment_counter_is_not_a_structure_diff(): void
+    {
+        $diff = (new TableDiff($this->mysqlReturning($this->tablesDouble(identical: true, autoIncrement: true))))->between(
+            $this->userWithDatabase('alice', 'alice_wp'),
+            $this->userWithDatabase('bob', 'bob_wp'),
+        );
+
+        $this->assertSame([], $diff['tables_structure_diff']);
+    }
+
     private function userWithDatabase(string $name, string $database): User
     {
         $user = $this->makeUser($name, ['mysql_prefix' => $name . '_']);
@@ -88,19 +98,20 @@ class TableDiffTest extends TestCase
     /**
      * A source and a target table named `wp_posts`: the source definition is
      * always A, the target's is B unless `$identical`, and the source checksum
-     * is 1 while the target's is 2.
+     * is 1 while the target's is 2. With `$autoIncrement` each side carries its
+     * own next counter value in the table options.
      *
      * @param list<string>|null $targetNames
      */
-    private function tablesDouble(?array $targetNames = null, bool $identical = false): Tables
+    private function tablesDouble(?array $targetNames = null, bool $identical = false, bool $autoIncrement = false): Tables
     {
         $targetNames ??= ['wp_posts'];
 
-        return new class ($targetNames, $identical) extends Tables {
+        return new class ($targetNames, $identical, $autoIncrement) extends Tables {
             /**
              * @param list<string> $targetNames
              */
-            public function __construct(private array $targetNames, private bool $identical)
+            public function __construct(private array $targetNames, private bool $identical, private bool $autoIncrement)
             {
                 parent::__construct(new PDO('sqlite::memory:'));
             }
@@ -112,7 +123,14 @@ class TableDiffTest extends TestCase
 
             public function createStatement(string $database, string $table): ?string
             {
-                return $database === 'alice_wp' || $this->identical ? 'CREATE A' : 'CREATE B';
+                $definition = $database === 'alice_wp' || $this->identical ? 'CREATE A' : 'CREATE B';
+                if (! $this->autoIncrement) {
+                    return $definition;
+                }
+
+                return "{$definition} (\n  `ID` bigint(20) unsigned NOT NULL AUTO_INCREMENT,\n  PRIMARY KEY (`ID`)\n)"
+                    .' ENGINE=InnoDB AUTO_INCREMENT='.($database === 'alice_wp' ? '5120' : '4980')
+                    .' DEFAULT CHARSET=utf8mb4';
             }
 
             public function checksum(string $database, string $table): ?string

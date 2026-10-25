@@ -18,6 +18,7 @@ use App\Models\Task;
 use App\Models\User;
 use App\System;
 use App\System\Project\Dind\AppDatabase;
+use App\System\Projects;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -224,7 +225,11 @@ class DatabaseController extends Controller
         description: 'Renames one of a project\'s MySQL databases: copies its data, moves the grants of every project '
             .'MySQL user to the new name, updates the stored row and drops the old database. Works for classic and '
             .'dind projects. Refuses the deploy-managed dind application database (<prefix>app) and a name another '
-            .'database of the project already uses. Returns HTTP 202 with the rename Task; poll `GET /tasks/{id}`.',
+            .'database of the project already uses. A database of base tables only is renamed in one atomic step; one '
+            .'that also holds views, triggers, routines or events is copied by a dump, and the project\'s MySQL users '
+            .'lose access to the old name and have their open connections closed before the copy starts, so writes '
+            .'made during it fail instead of being lost. Access is put back if the rename fails. Returns HTTP 202 '
+            .'with the rename Task; poll `GET /tasks/{id}`.',
         security: [['bearerAuth' => []]],
         tags: ['MySQL Databases'],
         parameters: [
@@ -240,7 +245,7 @@ class DatabaseController extends Controller
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
             new OA\Response(response: 404, description: 'Project or database not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: 'Project busy with another job', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 409, description: 'Project busy with another job, or a push of its staging pair is in progress', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
@@ -326,10 +331,12 @@ class DatabaseController extends Controller
     }
 
     /**
-     * 409 while another job of the project is queued or running, or a deploy holds the account lock.
+     * 409 while another job of the project is queued or running, a deploy holds
+     * the account lock, or a push into its staging pair is queued or running.
      */
     private function assertIdle(User $user): void
     {
+        Projects::assertNoPushInPair($user);
         $busy = Task::query()
             ->where('username', $user->username)
             ->whereIn('status', [Task::STATUS_QUEUED, Task::STATUS_RUNNING])

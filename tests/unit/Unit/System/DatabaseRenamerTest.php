@@ -8,9 +8,12 @@ use App\System\Services\Mysql;
 use App\System\Services\Mysql\DatabaseCopier;
 use App\System\Services\Mysql\DatabaseRenamer;
 use App\System\Services\Mysql\Databases;
+use App\System\Services\Mysql\DefinerMap;
 use App\System\Services\Mysql\Privileges;
+use App\System\Services\Mysql\Users;
 use PDO;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\SitesDbRequest;
 use Tests\TestCase;
 
 class DatabaseRenamerTest extends TestCase
@@ -52,13 +55,35 @@ class DatabaseRenamerTest extends TestCase
 
         $this->assertSame([], $record->renamed);
         $this->assertCount(1, $record->scripts);
-        $this->assertStringContainsString('mariadb-dump', $record->scripts[0]);
+        $this->assertStringEndsWith(
+            "compose.sitesDbCopy -- /opt/panelalpha/shared-hosting shop_old shop_new '' shop_no.definer 1 shop_user shop_user",
+            $record->scripts[0],
+        );
         $this->assertSame(['shop_new'], $record->created);
         $this->assertSame(['shop_old'], $record->deleted);
         $this->assertSame([['shop_user', 'shop_new', 'SELECT, INSERT']], $record->grants);
         $this->assertSame('shop_new', $row->fresh()->database);
-        $this->assertStringContainsString('s/DEFINER=`shop_user`@`%`/DEFINER\n`shop_user`@`%`/g', $record->scripts[0]);
-        $this->assertStringContainsString('/DEFINER=`shop_no.definer`@`%`/g', $record->scripts[0]);
+    }
+
+    public function test_the_project_users_lose_the_old_database_and_their_sessions_before_the_dump(): void
+    {
+        $record = $this->recorder(tables: ['posts'], beyondTables: true, privileges: ['shop_old' => 'ALL PRIVILEGES']);
+        [$user, $row] = $this->projectWithDatabase('shop', 'shop_old', 'shop_user');
+
+        $this->renamer($record)->rename($user, $row, 'shop_new');
+
+        $this->assertSame(['revoke shop_user shop_old', 'kill shop_user', 'copy'], array_slice($record->steps, 0, 3));
+        $this->assertSame(['shop_user'], $record->killed);
+    }
+
+    public function test_a_tables_only_rename_leaves_the_sessions_open(): void
+    {
+        $record = $this->recorder(tables: ['posts'], privileges: ['shop_old' => 'ALL PRIVILEGES']);
+        [$user, $row] = $this->projectWithDatabase('shop', 'shop_old', 'shop_user');
+
+        $this->renamer($record)->rename($user, $row, 'shop_new');
+
+        $this->assertSame([], $record->killed);
     }
 
     public function test_a_copy_failure_leaves_the_old_database_and_its_grants(): void
@@ -215,6 +240,8 @@ class DatabaseRenamerTest extends TestCase
             'scripts'        => [],
             'grants'         => [],
             'revokes'        => [],
+            'killed'         => [],
+            'steps'          => [],
         ];
     }
 
@@ -311,11 +338,40 @@ class DatabaseRenamerTest extends TestCase
                     public function revokeIfExists(string $user, string $database): void
                     {
                         $this->record->revokes[] = [$user, $database];
+                        $this->record->steps[] = "revoke {$user} {$database}";
                     }
                 };
             }
 
-            public function runSitesDbScript(string $script, string $failurePrefix): void
+            public function users(): Users
+            {
+                $record = $this->record;
+
+                return new class ($record) extends Users {
+                    public function __construct(private object $record)
+                    {
+                        parent::__construct(new PDO('sqlite::memory:'), '%');
+                    }
+
+                    public function killSessions(string $name): void
+                    {
+                        $this->record->killed[] = $name;
+                        $this->record->steps[] = "kill {$name}";
+                    }
+                };
+            }
+
+            public function copyInSitesDb(string $from, string $to, ?string $table, DefinerMap $definers, string $failurePrefix): void
+            {
+                $this->recordScript(SitesDbRequest::copy($from, $to, $table, $definers), $failurePrefix);
+            }
+
+            public function dropTableInSitesDb(string $database, string $table): void
+            {
+                $this->recordScript(SitesDbRequest::drop($database, $table), 'table drop failed');
+            }
+
+            private function recordScript(string $script, string $failurePrefix): void
             {
                 if ($this->record->failStream) {
                     throw new \RuntimeException('copy exploded');
@@ -323,6 +379,7 @@ class DatabaseRenamerTest extends TestCase
 
                 $this->record->scripts[] = $script;
                 $this->record->copies[] = $script;
+                $this->record->steps[] = 'copy';
             }
         };
     }
