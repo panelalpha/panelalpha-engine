@@ -497,6 +497,40 @@ class EnsureTokenMayUseApiTest extends TestCase
         }
     }
 
+
+    /** The project a backup is restored into is created by the call, so it must be one the token covers. */
+    public function test_a_backup_restored_into_a_new_project_is_held_to_the_scope(): void
+    {
+        $abilities = TokenAbilities::build(api: true, mcp: false, projects: ['alice', 'alicecopy']);
+        $route = ['POST', 'api/projects/{username}/backups/{id}/restore-into'];
+        $own = ['username' => 'alice', 'id' => '7'];
+
+        $this->assertSame(200, $this->through($abilities, route: $route, params: $own, body: ['new_username' => 'alicecopy']));
+
+        $response = $this->dispatched($abilities, route: $route, params: $own, body: ['new_username' => 'bob']);
+        $this->assertSame(403, $response->getStatusCode());
+        $this->assertSame(
+            'This token is limited to projects alice, alicecopy; POST /projects/{username}/backups/{id}/restore-into is outside it.',
+            $response->getData(true)['message'],
+        );
+
+        $this->assertSame(403, $this->through($abilities, route: $route, params: ['username' => 'bob', 'id' => '7'], body: ['new_username' => 'alicecopy']));
+    }
+
+    public function test_a_backup_restored_into_a_new_project_is_held_to_the_scope_on_a_tool_call(): void
+    {
+        $abilities = TokenAbilities::build(api: false, mcp: true, projects: ['alice']);
+        $route = ['POST', 'api/projects/{username}/backups/{id}/restore-into'];
+
+        $this->assertSame(403, $this->through(
+            $abilities,
+            internal: true,
+            route: $route,
+            params: ['username' => 'alice', 'id' => '7'],
+            body: ['new_username' => 'bob'],
+        ));
+    }
+
     public function test_an_unscoped_token_may_inspect_any_project(): void
     {
         $abilities = TokenAbilities::build(api: true, mcp: false);

@@ -5,6 +5,7 @@ namespace Tests\Integration\System;
 use App\Support\JobBudget;
 use App\System;
 use App\System\Services\Mysql;
+use App\System\Services\Mysql\DefinerMap;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
@@ -115,6 +116,20 @@ class MysqlDumpRestoreTest extends TestCase
         $this->assertSame(
             self::CLIENT.' compose.sitesDbRestore -- /opt/panelalpha/shared-hosting alice_app',
             self::request($recorded[0]['cmd'][2]),
+        );
+    }
+
+    public function test_a_dump_of_another_database_is_rewritten_in_sites_db_as_it_is_loaded(): void
+    {
+        $recorded = [];
+        $mysql = new Mysql($this->recordingSystem($recorded, successful: true));
+
+        $mysql->restoreCopyFromGzip('alice_app', 'bob_app', '/tmp/alice_app.sql.gz', DefinerMap::map('alice_', 'bob_', ['alice_app'], ['bob_app']));
+
+        $this->assertCount(1, $recorded);
+        $this->assertSame(
+            ['bash', '-c', "set -o pipefail; gunzip -c '/tmp/alice_app.sql.gz' | ".self::CLIENT.' compose.sitesDbRestoreCopy -- /opt/panelalpha/shared-hosting alice_app bob_app bob_no.definer 1 alice_app bob_app'],
+            $recorded[0]['cmd'],
         );
     }
 

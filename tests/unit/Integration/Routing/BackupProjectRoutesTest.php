@@ -46,8 +46,9 @@ class BackupProjectRoutesTest extends TestCase
         $this->assertArrayHasKey('GET /{username}/backups/{id}', $routes);
         $this->assertArrayHasKey('GET /{username}/backups/{id}/items/{item}/download', $routes);
         $this->assertArrayHasKey('POST /{username}/backups/{id}/restore', $routes);
+        $this->assertArrayHasKey('POST /{username}/backups/{id}/restore-into', $routes);
         $this->assertArrayHasKey('DELETE /{username}/backups/{id}', $routes);
-        $this->assertCount(6, $routes);
+        $this->assertCount(7, $routes);
     }
 
     public function test_project_backup_schedule_routes_are_registered(): void
