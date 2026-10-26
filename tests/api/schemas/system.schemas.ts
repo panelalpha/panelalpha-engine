@@ -8,9 +8,21 @@ export const ipv4NatMapSchema = z.object({
   updated_at: z.string().optional(),
 });
 
+export const hostInfoSchema = z.object({
+  hostname: z.string().nullable(),
+  os: z.string().nullable(),
+  kernel: z.string().nullable(),
+  uptime_seconds: z.number().int().nonnegative().nullable(),
+  cpu_cores: z.number().int().positive().nullable(),
+  memory_total_bytes: z.number().int().positive().nullable(),
+  disk_total_bytes: z.number().int().positive().nullable(),
+  ipv4: z.string().nullable(),
+});
+
 export const systemInfoSchema = z
   .object({
     version: z.string(),
+    host: hostInfoSchema,
     webserver: z.union([z.string(), z.record(z.string(), z.unknown())]),
     php_versions: z.array(z.unknown()).optional(),
     default_ipv4: z.string().nullable().optional(),
@@ -55,6 +67,7 @@ export const currentMetricsSchema = z.object({
   ram_free: z.number(),
   ram_used: z.number(),
   ram_usage_percent: z.number(),
+  disk_path: z.string(),
   disk_total: z.number(),
   disk_free: z.number(),
   disk_used: z.number(),
@@ -85,6 +98,20 @@ export const historicalMetricsEntrySchema = z.object({
 
 export const historicalMetricsResponseSchema = z.object({
   data: z.array(historicalMetricsEntrySchema),
+});
+
+export const metricsHistoryRanges = ['1h', '24h', '7d', '30d'] as const;
+
+export const metricsHistoryResponseSchema = z.object({
+  data: z.array(
+    historicalMetricsEntrySchema.extend({ disk_percent: z.number().nullable().optional() })
+  ),
+  meta: z.object({
+    range: z.enum(metricsHistoryRanges),
+    bucket_seconds: z.number().int().positive(),
+    from: z.string(),
+    to: z.string(),
+  }),
 });
 
 export const systemMetricsSchema = z

@@ -366,7 +366,9 @@ expect "and the jail says it too, over a distribution's own [sshd]" "journalmatc
 expect "SFTP is facility local5" "1" "$(grep -c '^journalmatch = SYSLOG_IDENTIFIER=sshd SYSLOG_FACILITY=21$' "$W/etc/fail2ban/filter.d/panelalpha-sftp.conf")"
 expect "FTP by its syslog name" "1" "$(grep -c '^journalmatch = SYSLOG_IDENTIFIER=pure-ftpd$' "$W/etc/fail2ban/filter.d/panelalpha-ftp.conf")"
 expect "the API filter counts 401s on /api and /mcp" "1" "$(grep -c '"\[A-Z\]+ /(?:api|mcp)' "$W/etc/fail2ban/filter.d/panelalpha-api.conf")"
-expect "with CSF's trusted addresses ignored" "1" "$(grep -c '^ignoreip = 127.0.0.1/8 ::1 1.2.3.4 203.0.113.5$' "$jail")"
+expect "with CSF's trusted addresses ignored" "ignoreip = 127.0.0.1/8 ::1 1.2.3.4 203.0.113.5" "$(section DEFAULT | grep '^ignoreip')"
+expect "by the API jail too, which has its own ignoreip" "ignoreip = 127.0.0.1/8 ::1 1.2.3.4 203.0.113.5" "$(section engine-api | grep '^ignoreip')"
+expect "and an API list to read it from" "yes" "$([ -f "$W/etc/fail2ban/panelalpha-api-ignoreip" ] && echo yes)"
 expect "fail2ban restarted, its ban action being new" "1:0" "$(calls 'systemctl restart fail2ban'):$(calls 'fail2ban-client reload')"
 
 # fail2ban's ban action writes both rules under the ufw lock.
@@ -452,6 +454,12 @@ printf '# trusted\n198.51.100.7 # office\n\n2001:db8::/32 # vpn\n198.51.100.7\n'
 expect "fail2ban alone: done" "0" "$(run fail2ban)"
 expect "comments stay out of ignoreip" "ignoreip = 127.0.0.1/8 ::1 198.51.100.7 2001:db8::/32" "$(grep -m1 '^ignoreip' "$W/etc/fail2ban/jail.d/panelalpha.local")"
 expect "and nothing else is touched" "0" "$(calls '^ufw')"
+printf '2.28.195.31 # PanelAlpha Connect\n' >"$W/etc/fail2ban/panelalpha-api-ignoreip"
+run fail2ban >/dev/null
+expect "PanelAlpha Connect's caller is ignored by the API jail" "ignoreip = 127.0.0.1/8 ::1 198.51.100.7 2001:db8::/32 2.28.195.31" "$(section engine-api | grep '^ignoreip')"
+expect "and by no other jail" "ignoreip = 127.0.0.1/8 ::1 198.51.100.7 2001:db8::/32" "$(section DEFAULT | grep '^ignoreip')"
+expect "which keep [DEFAULT]'s" "3" "$(grep -c '^ignoreip' "$W/etc/fail2ban/jail.d/panelalpha.local")"
+: >"$W/etc/fail2ban/panelalpha-api-ignoreip"
 rm -f "$W/calls"
 run fail2ban >/dev/null
 expect "only the trusted list changed: a plain reload, which keeps every ban" "1:0:0" "$(calls 'fail2ban-client reload$'):$(calls 'reload --restart'):$(calls 'systemctl restart fail2ban')"

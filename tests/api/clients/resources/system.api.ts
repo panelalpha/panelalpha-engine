@@ -8,6 +8,8 @@ import {
   type ApiResponse,
   type EngineCertificateRequest,
   type Ipv4NatMap,
+  type MetricsHistory,
+  type MetricsHistoryRange,
   type SslConfig,
   type SystemInfo,
 } from '@/types';
@@ -107,6 +109,12 @@ export class SystemApi extends ModSecurityApi {
 
   async getLast12HoursMetrics(): Promise<ApiResponse<any>> {
     const response = await this.api.get('metrics/last-12-hours');
+    await this.assertOk(response);
+    return response.json();
+  }
+
+  async getMetricsHistory(range?: MetricsHistoryRange): Promise<MetricsHistory> {
+    const response = await this.api.get('metrics/history', range ? { params: { range } } : {});
     await this.assertOk(response);
     return response.json();
   }

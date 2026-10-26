@@ -14,6 +14,18 @@ test.describe('system info', () => {
     expect(parsed.success, parsed.error?.message).toBe(true);
   });
 
+  test('describes the host it runs on', async ({ api }) => {
+    const { host, default_ipv4 } = (await api.getSystemInfo()).data;
+
+    expect(host.cpu_cores).toBeGreaterThan(0);
+    expect(host.memory_total_bytes).toBeGreaterThan(0);
+    expect(host.disk_total_bytes).toBeGreaterThan(0);
+    expect(host.uptime_seconds).toBeGreaterThan(0);
+    expect(host.hostname).toBeTruthy();
+    expect(host.os).toBeTruthy();
+    expect(host.ipv4).toBe(default_ipv4 ?? null);
+  });
+
   test('exposes the IPv4 NAT fields', async ({ api }) => {
     const { data } = await api.getSystemInfo();
 

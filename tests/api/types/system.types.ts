@@ -8,7 +8,26 @@ export interface Ipv4NatMap {
   updated_at?: string;
 }
 
+export interface HostInfo {
+  hostname: string | null;
+  os: string | null;
+  kernel: string | null;
+  uptime_seconds: number | null;
+  cpu_cores: number | null;
+  memory_total_bytes: number | null;
+  disk_total_bytes: number | null;
+  ipv4: string | null;
+}
+
+export type MetricsHistoryRange = '1h' | '24h' | '7d' | '30d';
+
+export interface MetricsHistory {
+  data: Record<string, number | string | null>[];
+  meta: { range: MetricsHistoryRange; bucket_seconds: number; from: string; to: string };
+}
+
 export interface SystemInfo {
+  host: HostInfo;
   webserver:
     | string
     | {

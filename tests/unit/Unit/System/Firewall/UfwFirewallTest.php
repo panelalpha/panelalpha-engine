@@ -13,6 +13,7 @@ use App\System\Firewall\Ufw\UfwRules;
 use App\System\ProcessRunner;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\Fail2banHost;
 use Tests\Support\FakeProcess;
 
 class UfwFirewallTest extends TestCase
@@ -1129,6 +1130,32 @@ class UfwFirewallTest extends TestCase
 
         /** @var object{ran: list<list<string>>} $host */
         $this->assertSame([['fail2ban-client', 'unban', '203.0.113.0/24']], array_values(array_filter($host->ran, fn (array $c): bool => $c[0] === 'fail2ban-client')));
+    }
+
+    public function test_api_callers_are_exempted_in_their_own_list_applied_only_when_it_changes(): void
+    {
+        $host = new Fail2banHost();
+        $host->files['/etc/fail2ban/panelalpha-ignoreip'] = self::TRUSTED_FILE;
+        $firewall = $this->firewall($host);
+        $held = [];
+        $wanted = function () use (&$held): array {
+            $held[] = self::lockHeld($this->trustedLock);
+
+            return [new TrustedAddress('2.28.195.31', 'PanelAlpha Connect')];
+        };
+
+        $firewall->exemptApiCallers($wanted);
+        $firewall->exemptApiCallers($wanted);
+
+        $this->assertSame("2.28.195.31 # PanelAlpha Connect\n", $host->files['/etc/fail2ban/panelalpha-api-ignoreip']);
+        $this->assertSame(self::TRUSTED_FILE, $host->files['/etc/fail2ban/panelalpha-ignoreip'], 'the list every jail reads is left alone');
+        $this->assertSame(1, $host->reloads, 'an unchanged list is not applied again');
+        $this->assertSame([true, true], $held, 'decided under the trusted lock');
+
+        $firewall->exemptApiCallers(fn (): array => []);
+
+        $this->assertSame('', $host->files['/etc/fail2ban/panelalpha-api-ignoreip']);
+        $this->assertSame(2, $host->reloads);
     }
 
     public function test_untrusting_removes_it_and_an_unknown_id_is_not_found(): void

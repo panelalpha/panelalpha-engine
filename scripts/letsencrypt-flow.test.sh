@@ -124,6 +124,8 @@ check "webserver stopped for the challenge and stack restored" \
 check "certbot answers the challenge on the host network, not a published port" \
     "grep -q -- 'run .*--network host .*certbot/certbot certonly' '$FAKE_DOCKER_LOG' && ! grep -q -- '-p 80:80' '$FAKE_DOCKER_LOG'"
 check "core's nginx reloaded so it loads the new pair" "grep -q 'exec -T core nginx -s reload' '$FAKE_DOCKER_LOG'"
+check "the new key announced to PanelAlpha Connect before the reload" \
+    "grep -n -e 'hub:tls-announce /root/crt/server.cert' -e 'nginx -s reload' '$FAKE_DOCKER_LOG' | head -1 | grep -q hub:tls-announce"
 check "core is never restarted" "! grep -qE 'restart( [a-z-]+)* core( |\$)' '$FAKE_DOCKER_LOG'"
 check "queue workers told to reread APP_URL" "grep -q 'exec -T core php artisan queue:restart' '$FAKE_DOCKER_LOG'"
 check "renewal scheduled" "grep -q 'letsencrypt-renew.sh' '$LE_CRON_FILE'"

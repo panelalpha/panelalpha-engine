@@ -1,7 +1,8 @@
 #!/bin/bash
 # Exercises installer.sh's `--repo` half: the label it prints, the field it
 # reads back out of `project:create --json`, what it does when the deploy
-# fails, and decide_repo_deploy_mode (update vs deploy-only).
+# fails, and decide_repo_deploy_mode (update vs deploy-only); and the
+# `--hub-code` connect, which reports the same way.
 #
 # installer.sh cannot be sourced -- the bottom of the file installs an engine --
 # so the function block is cut out and sourced on its own. That is also why the
@@ -398,6 +399,61 @@ expect 'commit short from version file' '25699b74' \
         }
         detect_installed_engine_commit
     ')"
+
+# ---- connect_hub / report_hub_connection (--hub-code) -----------------------
+
+HUB_BIN="${WORK_DIR}/hubbin"
+mkdir -p "$HUB_BIN"
+cat >"${HUB_BIN}/docker" <<'STUB'
+#!/bin/bash
+printf '%s\n' "$*" >"${HUB_ARGS_FILE}"
+if [ "${STUB_FAIL:-0}" = 1 ]; then
+    echo 'Connect code accepted by https://hub.panelalpha.com.'
+    echo 'This engine is already connected to Acme Ltd. Add --replace to replace that connection.'
+    exit 1
+fi
+printf 'Connect code accepted by https://hub.panelalpha.com.\r\n'
+echo 'Account: Acme Ltd (code created by j***@acme.com)'
+echo 'Connected to Acme Ltd.'
+echo 'Not your account? Disconnect with: pae hub:disconnect'
+STUB
+chmod +x "${HUB_BIN}/docker"
+export HUB_ARGS_FILE="${WORK_DIR}/hub_args"
+
+HUB_CODE='WDJB-MJHT'
+HUB_FAILED=0
+HUB_ERROR=''
+HUB_ACCOUNT=''
+PANELALPHA_HUB=''
+out=$(PATH="${HUB_BIN}:${PATH}" connect_hub; printf 'account=%s failed=%s' "$HUB_ACCOUNT" "$HUB_FAILED")
+expect 'hub connect passes the code' \
+    'compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan hub:connect WDJB-MJHT' \
+    "$(cat "$HUB_ARGS_FILE")"
+expect 'hub account read back' 'account=Acme Ltd failed=0' "$(printf '%s' "$out" | tail -n1)"
+
+PATH="${HUB_BIN}:${PATH}" PANELALPHA_HUB='https://hub.test' connect_hub >/dev/null
+expect 'PANELALPHA_HUB reaches the container' \
+    'compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T -e PANELALPHA_HUB=https://hub.test core php artisan hub:connect WDJB-MJHT' \
+    "$(cat "$HUB_ARGS_FILE")"
+
+PATH="${HUB_BIN}:${PATH}" connect_hub >/dev/null
+report=$(report_hub_connection)
+expect 'hub report names the account' 'info:Connected to PanelAlpha Connect: Acme Ltd' "$(printf '%s\n' "$report" | head -n1)"
+expect 'hub report says how to undo' '1' "$(printf '%s\n' "$report" | grep -c '^outro:pae hub:disconnect$')"
+
+HUB_ACCOUNT=''
+STUB_FAIL=1 PATH="${HUB_BIN}:${PATH}" connect_hub >/dev/null
+expect 'hub failure flagged' '1' "$HUB_FAILED"
+expect 'hub failure keeps the reason' \
+    'This engine is already connected to Acme Ltd. Add --replace to replace that connection.' "$HUB_ERROR"
+report=$(report_hub_connection)
+expect 'hub failure report' \
+    'warn:Not connected to PanelAlpha Connect: This engine is already connected to Acme Ltd. Add --replace to replace that connection.' \
+    "$(printf '%s\n' "$report" | head -n1)"
+expect 'hub report never prints the code' '0' "$(printf '%s\n' "$report" | grep -c 'WDJB-MJHT')"
+
+HUB_CODE=''
+expect 'no code, no connect' '' "$(PATH="${HUB_BIN}:${PATH}" connect_hub; report_hub_connection)"
 
 echo
 if [ "$failures" -eq 0 ]; then

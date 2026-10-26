@@ -67,6 +67,8 @@ Or connect an assistant and ask in chat: [Put your project online](../README.md#
 
 **The engine is already on this VPS.** Run the same `curl` line with `--repo` again. If a newer engine build is available, the installer asks whether to update the engine and deploy, or only deploy the project. Without an interactive terminal it deploys the project only. Pass `--update-engine` to update and deploy without being asked, or `--deploy-only` to deploy without updating.
 
+**Connect it to PanelAlpha Connect in the same run.** Add `--hub-code CODE` with the code from **Connect engine** in PanelAlpha Connect: [Install and connect in one step](connect-to-panelalpha-connect.md#install-and-connect-in-one-step).
+
 ## 2. Connect your AI assistant
 
 Connecting happens on **your own computer**, not on your VPS. After install you get a screen like this, with a ready-made command for Claude Code. Copy that command and run it on your computer.

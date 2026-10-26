@@ -10,6 +10,31 @@ const userLimitsSchema = z
   })
   .passthrough();
 
+export const projectAppSchema = z.object({
+  type: z
+    .enum([
+      'wordpress',
+      'laravel',
+      'php',
+      'node',
+      'python',
+      'ruby',
+      'go',
+      'rust',
+      'java',
+      'dotnet',
+      'docker',
+      'static',
+      'other',
+    ])
+    .nullable(),
+  framework: z.string().nullable(),
+  label: z.string().nullable(),
+  status: z.enum(['live', 'building', 'failed', 'down', 'suspended', 'none']),
+  public_url: z.string().url().nullable(),
+  admin_sso: z.boolean(),
+});
+
 export const userSchema = z
   .object({
     id: z.number(),
@@ -23,6 +48,7 @@ export const userSchema = z
     updated_at: z.string().optional(),
     details: userLimitsSchema.optional(),
     config: userLimitsSchema.optional(),
+    app: projectAppSchema,
   })
   .passthrough();
 

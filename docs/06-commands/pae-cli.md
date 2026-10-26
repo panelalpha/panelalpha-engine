@@ -74,7 +74,7 @@ The settings themselves are ordinary lines in `.env-core` and you can still edit
 | `pae project:staging {project}` | Creates a linked staging copy. |
 | `pae project:push {project} {target}` | Pushes state between a staging pair. |
 | `pae project:limit:get --project={project}` | Shows disk, memory and CPU limits. |
-| `pae project:limit:set --project={project} --memory-limit=512` | Changes a limit. Memory is in megabytes and may not exceed what projects may have on this server. Every project has a memory limit, so it can be changed but not removed. |
+| `pae project:limit:set --project={project} --memory-limit=512` | Changes a limit. Memory is in megabytes and may not exceed what projects may have on this server. Every project has a memory limit, so it can be changed but not removed. Any other limit takes `-1` for unlimited. |
 | `pae project:network:move --all` | Moves running projects created before this version onto the isolated network. The project container stays up. An application using the server's MySQL may restart, and its site is unavailable until it answers again. A stopped project is left alone; start it and run the command again. `--project={project}` moves one. |
 | `pae project:ssh {project} '{command}'` | Runs one command inside the project. |
 | `pae project:delete {project}` | Deletes the project and everything in it. Asks you to confirm. Without a terminal, such as in a script, it refuses and changes nothing unless you add `--force`. Work still queued for the project is cancelled first. While a deploy or rebuild, staging copy, push, backup or restore is running on it, the delete is refused and changes nothing; cancel that task or wait for it, then delete again. |
@@ -181,6 +181,7 @@ A remote store needs its own connection details. `pae backup:container:create --
 | `pae domain:delete {domain}` | Removes a hostname. |
 | `pae ssl:project-cert:request {domain}` | Requests a Let's Encrypt certificate for a site. |
 | `pae ssl:project-cert:renew --domain={domain} --force` | Renews a site's certificate now. |
+| `pae ssl:check {domain}` | Connects to the site over HTTPS and reports the certificate it really serves. Exits 1 unless visitors get a trusted one. `--json` prints everything. |
 | `pae ssl:engine-cert:request --domain={domain}` | Requests a certificate for the engine itself. |
 | `pae domain:tunnel:create {hostname} --project={project} --domain={domain}` | Attaches a public hostname through a tunnel. |
 | `pae domain:tunnel:delete {hostname}` | Removes a tunnel hostname. |
@@ -207,7 +208,7 @@ Context: [Domains and HTTPS](../05-capabilities/domains-and-ssl.md) · [Cloudfla
 | `pae mcp:check` | Checks HTTPS, the token, and that an assistant can connect. Asks for the token, or reads it with `--stdin`. |
 | `pae mcp:tool:list` | Lists what a connected assistant is currently allowed to do. |
 | `pae configure mcp-tokens` | Changes that, by asking. See [Configuring the engine](#configuring-the-engine). |
-| `pae mcp:log:list` | Lists recent assistant requests. `--limit=` sets how many (20 by default). |
+| `pae mcp:log:list` | Lists recent assistant requests. `--limit=` sets how many (20 by default). `--token-id=` keeps the requests made with that token, even one deleted since; repeat it for several. `--token-name=` keeps the requests whose token name contains that text, ignoring case. `--project=` keeps the requests that named that project. |
 | `pae api:token:create {name}` | Creates a token for your own software. Not for assistants. It is refused at the assistant endpoint unless you pass `--mcp`. `--expires=90d` makes it temporary. |
 | `pae api:token:list` | Lists those software tokens. |
 | `pae api:token:delete {id}` | Removes a software token. |
@@ -233,10 +234,10 @@ A paste link for a Git or Cloudflare token. The value is never printed back.
 
 | Command | What it does |
 |---|---|
-| `pae vault:secret:create {type} --purpose=` | Prints a paste link and the reference (`vault:<id>`). `{type}` is `git_token` or `cloudflare_api_token`. By default the secret belongs to the first project given it; `--project=NAME` makes it that project's from the start (the project need not exist yet); `--scope=global` lets any project use it. `--expires-in=SECONDS` makes the secret expire and be deleted automatically; without it the secret is kept until deleted. The link expires in an hour. |
+| `pae vault:secret:create {type} --purpose=` | Prints a paste link and the reference (`vault:<key>`). `{type}` is `git_token` or `cloudflare_api_token`. By default the secret belongs to the first project given it; `--project=NAME` makes it that project's from the start (the project need not exist yet); `--scope=global` lets any project use it. `--expires-in=SECONDS` makes the secret expire and be deleted automatically; without it the secret is kept until deleted. The link expires in an hour. |
 | `pae vault:secret:list` | Lists entries: reference, type, purpose, scope, the project that owns it, and whether it is filled. Never the secret. `--scope=` or `--type=` narrows the list. |
-| `pae vault:secret:delete {ref}` | Deletes one entry and its secret. `{ref}` is `vault:<id>` or the id from the list. Projects that already used it keep their copy. Asks you to confirm. `--force` skips that. |
-| `pae vault:config` | Lists the global secrets. A project uses one only when it is given that secret's `vault:<id>`. |
+| `pae vault:secret:delete {ref}` | Deletes one entry and its secret. `{ref}` is the `vault:<key>` from the list. Projects that already used it keep their copy. Asks you to confirm. `--force` skips that. |
+| `pae vault:config` | Lists the global secrets. A project uses one only when it is given that secret's `vault:<key>`. |
 
 Context: [A token shared by several projects](../05-capabilities/connecting-with-git.md#a-token-shared-by-several-projects) · [Cloudflare](../05-capabilities/cloudflare.md).
 
@@ -286,6 +287,16 @@ Context: [Security](../05-capabilities/security.md).
 | `pae settings:set default_tunnel none` | A new project created without naming a tunnel is published under the engine's own name (the certificate name, or the base domain if one is set), and nothing is registered with PanelAlpha Online. `panelalpha` is the default: a base domain if there is one, otherwise a free `panelalpha.online` name. Any other value is refused. A tunnel named in the request always wins. |
 
 Context: [Telemetry](../02-getting-started/what-is-collected.md).
+
+## PanelAlpha Connect
+
+| Command | What it does |
+|---|---|
+| `pae hub:connect CODE` | Connects this engine to the PanelAlpha Connect account that created the code (**Connect engine** in Connect). `--ip`, `--replace`. |
+| `pae hub:status` | Shows the connection, Connect's own view of it, and the last calls Connect made. `--local` skips asking Connect. |
+| `pae hub:disconnect` | Revokes Connect's access at once, then tells Connect. |
+
+Context: [Connect to PanelAlpha Connect](../02-getting-started/connect-to-panelalpha-connect.md).
 
 ## Docker Hub login
 

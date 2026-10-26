@@ -2,9 +2,10 @@
 
 namespace App\System\Firewall\Ufw;
 
+use App\System\Firewall\ExemptsApiCallers;
 use App\System\Firewall\Firewall;
-use App\System\Firewall\FirewallClash;
 use App\System\Firewall\FirewallBusy;
+use App\System\Firewall\FirewallClash;
 use App\System\Firewall\FirewallCommandFailed;
 use App\System\Firewall\FirewallException;
 use App\System\Firewall\FirewallFactory;
@@ -25,39 +26,54 @@ use Symfony\Component\Process\Process;
  * scripts/firewall/ufw.sh sends them through ufw's route rules from
  * DOCKER-USER, which are the rules here with the scope `published`.
  */
-class UfwFirewall implements Firewall
+class UfwFirewall implements ExemptsApiCallers, Firewall
 {
     private const RULES = '/etc/ufw/user.rules';
+
     private const RULES6 = '/etc/ufw/user6.rules';
+
     private const CONF = '/etc/ufw/ufw.conf';
+
     /** The rule files as they were before a write, kept there while it holds {@see self::LOCK}. */
     public const SNAPSHOT = '/opt/panelalpha/shared-hosting/data/ufw-snapshot';
+
     /** How far back the logs are read: lines, per source. */
     private const SCAN = 5000;
+
     /** fail2ban's ignore list, which scripts/firewall/ufw.sh turns into jail config. */
     private const TRUSTED = '/etc/fail2ban/panelalpha-ignoreip';
+    /** The same, read by the engine-api jail alone: where PanelAlpha Connect calls from. */
+    private const API_TRUSTED = '/etc/fail2ban/panelalpha-api-ignoreip';
+
     private const SCRIPT = '/opt/panelalpha/shared-hosting/scripts/firewall.sh';
+
     /**
      * ufw rewrites user.rules whole on every call, so two writers at once lose
      * or resurrect each other's rules. Every ufw write on the host takes this
      * lock: the engine's, scripts/firewall/ufw.sh's and fail2ban's ban action.
      */
     public const LOCK = '/opt/panelalpha/shared-hosting/data/ufw.lock';
+
     /**
      * Serialises read-modify-writes of the trusted list, here and in ufw.sh's CSF import.
      * Not {@see self::LOCK}: saving the list reloads fail2ban, whose ban action waits for that one.
      */
     public const TRUSTED_LOCK = '/opt/panelalpha/shared-hosting/data/ufw-trusted.lock';
+
     private const LOCK_WAIT = 30;
+
     /** ufw output that means the host failed, not that the rule was refused. */
     private const HOST_FAULT = '/problem running|ufw-init|ip6?tables|Permission denied|No such file|Could not (load|update|open|read|write)|^ERROR:\s*$/mi';
 
     /** @var resource|null the lock, while a write holds it */
     private $held = null;
+
     /** @var resource|null the trusted-list lock, while a trusted write holds it */
     private $heldTrusted = null;
+
     /** Whether ufw was on when this hold of the lock first wrote; null before its first write. */
     private ?bool $snapshot = null;
+
     /** @var list<callable(): void> */
     private array $afterUnlock = [];
 
@@ -66,8 +82,7 @@ class UfwFirewall implements Firewall
         private string $lockFile = self::LOCK,
         private int $lockWait = self::LOCK_WAIT,
         private string $trustedLockFile = self::TRUSTED_LOCK,
-    ) {
-    }
+    ) {}
 
     public function name(): string
     {
@@ -77,12 +92,12 @@ class UfwFirewall implements Firewall
     public function status(): FirewallStatus
     {
         $version = $this->system->runProcessOnHost(['ufw', 'version']);
-        if (!$version->isSuccessful()) {
+        if (! $version->isSuccessful()) {
             return new FirewallStatus($this->name(), null, error: trim($version->getErrorOutput() ?: $version->getOutput()) ?: 'ufw is not installed');
         }
         $status = $this->system->runProcessOnHost(['ufw', 'status', 'verbose']);
         $out = $status->getOutput();
-        if (!$status->isSuccessful()) {
+        if (! $status->isSuccessful()) {
             return new FirewallStatus($this->name(), null, error: trim($status->getErrorOutput() ?: $out));
         }
 
@@ -121,7 +136,7 @@ class UfwFirewall implements Firewall
      * One line of `firewall.sh --refused`: the stored tuple line, or a place in a
      * rule file outside any rule, a tab, and iptables' error.
      *
-     * @param list<FirewallRule> $rules
+     * @param  list<FirewallRule>  $rules
      * @return array{id: ?string, rule: string, error: string}
      */
     private static function refusedRule(string $line, array $rules): array
@@ -150,8 +165,8 @@ class UfwFirewall implements Firewall
     public function rules(): array
     {
         $v4 = $this->system->runProcessOnHost(['cat', self::RULES]);
-        if (!$v4->isSuccessful()) {
-            throw new FirewallCommandFailed('Could not read ' . self::RULES . ': ' . trim($v4->getErrorOutput()));
+        if (! $v4->isSuccessful()) {
+            throw new FirewallCommandFailed('Could not read '.self::RULES.': '.trim($v4->getErrorOutput()));
         }
         $v6 = $this->system->runProcessOnHost(['cat', self::RULES6]);
 
@@ -184,7 +199,7 @@ class UfwFirewall implements Firewall
      * action or comment, or skip this one for it: a managed rule would lose
      * its prefix, a deny would turn into an allow, or half a rule would go in.
      *
-     * @param list<FirewallRule> $rules
+     * @param  list<FirewallRule>  $rules
      */
     private static function refuseClash(FirewallRule $rule, array $rules): void
     {
@@ -207,7 +222,7 @@ class UfwFirewall implements Firewall
      * The rule would be listed as one with a rule already there, under an id
      * neither has: the API would answer that it does not exist.
      *
-     * @param list<FirewallRule> $rules
+     * @param  list<FirewallRule>  $rules
      */
     private static function refusePair(FirewallRule $rule, array $rules): void
     {
@@ -228,8 +243,8 @@ class UfwFirewall implements Firewall
     {
         return $rule->raw ?? implode(' ', array_filter([
             $rule->action, $rule->direction, $rule->protocol, $rule->port,
-            $rule->source === null ? null : 'from ' . $rule->source,
-            $rule->destination === null ? null : 'to ' . $rule->destination,
+            $rule->source === null ? null : 'from '.$rule->source,
+            $rule->destination === null ? null : 'to '.$rule->destination,
             match ($rule->scope) {
                 FirewallRule::PUBLISHED => 'on published ports',
                 FirewallRule::BOTH => 'on host and published ports',
@@ -259,7 +274,7 @@ class UfwFirewall implements Firewall
      * Take out the halves of a two-way rule that went in before the rest failed:
      * half of it is not the rule that was asked for.
      *
-     * @param list<list<string>> $halves
+     * @param  list<list<string>>  $halves
      */
     private function deleteHalves(array $halves): void
     {
@@ -281,13 +296,13 @@ class UfwFirewall implements Firewall
 
     /**
      * @return array{0: FirewallRule, 1: ?FirewallRule, 2: ?list<FirewallRule>} the old rule, the new one,
-     *         and the other rules when the new one still waits for a lock of its own
+     *                                                                          and the other rules when the new one still waits for a lock of its own
      */
     private function updateUnderLock(string $id, FirewallRule $rule): array
     {
         $old = $this->rule($id);
         $others = $this->others($id);
-        if (!self::fitsBeside($old, $rule)) {
+        if (! self::fitsBeside($old, $rule)) {
             return $this->replaceOldFirst($old, $rule, $others);
         }
 
@@ -301,7 +316,7 @@ class UfwFirewall implements Firewall
     /** Whether ufw can hold $rule next to $old, so it can be added before $old goes. */
     private static function fitsBeside(FirewallRule $old, FirewallRule $rule): bool
     {
-        return !$old->sameMatch($rule)
+        return ! $old->sameMatch($rule)
             && UfwRules::clash($rule, [$old]) === null
             && UfwRules::pairsWith($rule, [$old]) === null;
     }
@@ -313,7 +328,7 @@ class UfwFirewall implements Firewall
      * ban's new rule waits for a lock of its own: fail2ban's unban, run once this
      * one is released, would take it too.
      *
-     * @param list<FirewallRule> $others
+     * @param  list<FirewallRule>  $others
      * @return array{0: FirewallRule, 1: ?FirewallRule, 2: ?list<FirewallRule>}
      */
     private function replaceOldFirst(FirewallRule $old, FirewallRule $rule, array $others): array
@@ -335,7 +350,7 @@ class UfwFirewall implements Firewall
      * Adds $rule in place of $old, which is out already, or puts $old back when it
      * cannot go in; a new rule that does not read back is a failed edit too.
      *
-     * @param list<FirewallRule>|null $seen the other rules when $old went out, if fail2ban has had its turn since
+     * @param  list<FirewallRule>|null  $seen  the other rules when $old went out, if fail2ban has had its turn since
      */
     private function replace(FirewallRule $old, FirewallRule $rule, ?array $seen = null): FirewallRule
     {
@@ -345,7 +360,7 @@ class UfwFirewall implements Firewall
             }
 
             return $this->add($rule);
-        } catch (FirewallException | FirewallNotFound $e) {
+        } catch (FirewallException|FirewallNotFound $e) {
             $this->putBack($old);
             throw $e;
         }
@@ -371,7 +386,7 @@ class UfwFirewall implements Firewall
      * clash: ufw skips those and writes the rest. fail2ban usually bans again
      * with the comment it banned with before.
      *
-     * @param list<FirewallRule> $seen
+     * @param  list<FirewallRule>  $seen
      */
     private function refuseNewBan(FirewallRule $rule, array $seen): void
     {
@@ -380,7 +395,7 @@ class UfwFirewall implements Firewall
         $parts = UfwRules::partsOf($rule, $rules);
         self::refuseClash($rule, array_values(array_filter(
             $rules,
-            static fn (FirewallRule $r): bool => !in_array($r->toArray(), $known, true) && !in_array($r, $parts, true),
+            static fn (FirewallRule $r): bool => ! in_array($r->toArray(), $known, true) && ! in_array($r, $parts, true),
         )));
     }
 
@@ -458,7 +473,23 @@ class UfwFirewall implements Firewall
 
     public function trustedAddresses(): array
     {
-        $file = $this->system->runProcessOnHost(['cat', self::TRUSTED]);
+        return $this->readList(self::TRUSTED);
+    }
+
+    public function exemptApiCallers(callable $wanted): void
+    {
+        $this->trustedLocked(function () use ($wanted): void {
+            $list = $wanted();
+            if (TrustedAddress::formatList($list) !== TrustedAddress::formatList($this->readList(self::API_TRUSTED))) {
+                $this->saveTrusted($list, self::API_TRUSTED);
+            }
+        });
+    }
+
+    /** @return list<TrustedAddress> */
+    private function readList(string $path): array
+    {
+        $file = $this->system->runProcessOnHost(['cat', $path]);
 
         return TrustedAddress::parseList($file->isSuccessful() ? $file->getOutput() : '');
     }
@@ -503,16 +534,16 @@ class UfwFirewall implements Firewall
      * The list file, then fail2ban's jails rewritten from it and reloaded by
      * the same host script the installer runs.
      *
-     * @param list<TrustedAddress> $list
+     * @param  list<TrustedAddress>  $list
      */
-    private function saveTrusted(array $list): void
+    private function saveTrusted(array $list, string $path = self::TRUSTED): void
     {
-        $write = $this->system->runProcessOnHost(['sh', '-c', 'mkdir -p "$(dirname "$0")" && printf "%s" "$1" > "$0"', self::TRUSTED, TrustedAddress::formatList($list)]);
-        if (!$write->isSuccessful()) {
-            throw new FirewallCommandFailed('Could not write ' . self::TRUSTED . ': ' . trim($write->getErrorOutput()));
+        $write = $this->system->runProcessOnHost(['sh', '-c', 'mkdir -p "$(dirname "$0")" && printf "%s" "$1" > "$0"', $path, TrustedAddress::formatList($list)]);
+        if (! $write->isSuccessful()) {
+            throw new FirewallCommandFailed('Could not write '.$path.': '.trim($write->getErrorOutput()));
         }
         $apply = $this->system->runProcessOnHost(['bash', self::SCRIPT, '--fail2ban']);
-        if (!$apply->isSuccessful()) {
+        if (! $apply->isSuccessful()) {
             throw new FirewallCommandFailed(trim($apply->getErrorOutput() ?: $apply->getOutput()) ?: 'fail2ban did not take the new list');
         }
     }
@@ -521,7 +552,8 @@ class UfwFirewall implements Firewall
      * Runs $write holding the host-wide ufw lock, for its whole read-modify-write.
      *
      * @template T
-     * @param callable(): T $write
+     *
+     * @param  callable(): T  $write
      * @return T
      */
     private function locked(callable $write): mixed
@@ -554,7 +586,8 @@ class UfwFirewall implements Firewall
      * Runs $write holding the trusted list's lock, for its whole read-modify-write.
      *
      * @template T
-     * @param callable(): T $write
+     *
+     * @param  callable(): T  $write
      * @return T
      */
     private function trustedLocked(callable $write): mixed
@@ -582,7 +615,7 @@ class UfwFirewall implements Firewall
     {
         $lock = $this->openLockFile($file);
         $deadline = microtime(true) + $this->lockWait;
-        while (!flock($lock, LOCK_EX | LOCK_NB)) {
+        while (! flock($lock, LOCK_EX | LOCK_NB)) {
             if (microtime(true) >= $deadline) {
                 fclose($lock);
                 throw new FirewallBusy(sprintf('Another firewall change held %s for over %d s; nothing was changed', $file, $this->lockWait));
@@ -616,7 +649,7 @@ class UfwFirewall implements Firewall
             $lock = @fopen($file, 'r');
         }
         if ($lock === false) {
-            throw new FirewallCommandFailed('Could not open the firewall lock ' . $file);
+            throw new FirewallCommandFailed('Could not open the firewall lock '.$file);
         }
 
         return $lock;
@@ -637,8 +670,8 @@ class UfwFirewall implements Firewall
     /**
      * `ufw <verb> allow ...`, or `ufw route <verb> allow ...` for a route rule.
      *
-     * @param list<string> $verb
-     * @param list<string> $spec
+     * @param  list<string>  $verb
+     * @param  list<string>  $spec
      * @return list<string>
      */
     private static function withVerb(array $verb, array $spec): array
@@ -653,8 +686,8 @@ class UfwFirewall implements Firewall
     private function snapshot(): bool
     {
         $copy = $this->system->runProcessOnHost(['sh', '-c', 'rm -rf "$0" && mkdir -p "$0" && for f; do [ ! -e "$f" ] || cp -p "$f" "$0/" || exit 1; done && sed -n "s/^ENABLED=//p" "$0/ufw.conf"', self::SNAPSHOT, self::RULES, self::RULES6, self::CONF]);
-        if (!$copy->isSuccessful()) {
-            throw new FirewallCommandFailed('Could not copy ufw\'s rules aside before changing them, so nothing was changed: ' . trim($copy->getErrorOutput() ?: $copy->getOutput()));
+        if (! $copy->isSuccessful()) {
+            throw new FirewallCommandFailed('Could not copy ufw\'s rules aside before changing them, so nothing was changed: '.trim($copy->getErrorOutput() ?: $copy->getOutput()));
         }
 
         return trim($copy->getOutput(), " \t\n\r\"'") === 'yes';
@@ -671,17 +704,17 @@ class UfwFirewall implements Firewall
     private function rollBack(): ?string
     {
         $put = $this->system->runProcessOnHost(['sh', '-c', 'for f; do b="$0/${f##*/}"; [ ! -e "$b" ] || cp -p "$b" "$f" || exit 1; done', self::SNAPSHOT, self::RULES, self::RULES6, self::CONF]);
-        if (!$put->isSuccessful()) {
-            return $this->turnOffAfterRollBack('could not put the rule files back: ' . trim($put->getErrorOutput() ?: $put->getOutput()));
+        if (! $put->isSuccessful()) {
+            return $this->turnOffAfterRollBack('could not put the rule files back: '.trim($put->getErrorOutput() ?: $put->getOutput()));
         }
-        if (!$this->snapshot) {
+        if (! $this->snapshot) {
             $this->system->runProcessOnHost(['ufw', 'disable']);
 
             return null;
         }
 
         $reload = $this->system->runProcessOnHost(['ufw', 'reload']);
-        $why = trim($reload->getOutput() . "\n" . $reload->getErrorOutput());
+        $why = trim($reload->getOutput()."\n".$reload->getErrorOutput());
         if ($reload->isSuccessful() && preg_match('/^ERROR/mi', $why) !== 1) {
             return null;
         }
@@ -693,8 +726,8 @@ class UfwFirewall implements Firewall
     {
         $this->system->runProcessOnHost(['ufw', 'disable']);
 
-        return 'ufw could not load its rules again, so it was turned off to keep the host reachable: ' . $why
-            . '. Fix the rules in ' . self::RULES . ' and enable the firewall again.';
+        return 'ufw could not load its rules again, so it was turned off to keep the host reachable: '.$why
+            .'. Fix the rules in '.self::RULES.' and enable the firewall again.';
     }
 
     /**
@@ -702,7 +735,7 @@ class UfwFirewall implements Firewall
      * exit 0: iptables refusing a stored rule prints its error, then "Rule
      * added", and ufw's "Invalid syntax" style refusals do too.
      *
-     * @param list<string> $args
+     * @param  list<string>  $args
      */
     private function ufw(array $args, bool $rule = false, bool $guarded = true): string
     {
@@ -710,7 +743,7 @@ class UfwFirewall implements Firewall
             $this->snapshot ??= $this->snapshot();
         }
         $process = $this->system->runProcessOnHost(['ufw', ...$args]);
-        $out = trim($process->getOutput() . "\n" . $process->getErrorOutput());
+        $out = trim($process->getOutput()."\n".$process->getErrorOutput());
         preg_match_all('/^ip6?tables.*$/mi', $out, $refusals);
         if ($process->isSuccessful() && $refusals[0] === [] && preg_match('/^(ERROR|Invalid|Bad)/mi', $out) !== 1) {
             return $out;
@@ -725,23 +758,23 @@ class UfwFirewall implements Firewall
      * (502) first rolls back what ufw may have written, since what is live may
      * differ from the files, or be nothing.
      *
-     * @param list<string> $args
-     * @param list<string> $refusals iptables lines in the output
+     * @param  list<string>  $args
+     * @param  list<string>  $refusals  iptables lines in the output
      */
     private function fail(Process $process, array $args, string $out, array $refusals, bool $rule, bool $guarded): never
     {
-        $message = self::errorText($process) ?: 'ufw ' . implode(' ', $args) . ' failed';
+        $message = self::errorText($process) ?: 'ufw '.implode(' ', $args).' failed';
         if ($rule && preg_match(self::HOST_FAULT, $out) !== 1) {
             throw new FirewallException($message);
         }
-        if (!$guarded) {
+        if (! $guarded) {
             throw new FirewallCommandFailed($message);
         }
         $left = $this->rollBack();
         if ($left === null && $rule && $refusals !== [] && $process->isSuccessful() && preg_match('/^ERROR/mi', $out) !== 1) {
             throw new FirewallException(implode("\n", array_unique($refusals)));
         }
-        throw new FirewallCommandFailed($left === null ? $message : $message . "\n" . $left);
+        throw new FirewallCommandFailed($left === null ? $message : $message."\n".$left);
     }
 
     /**
@@ -751,7 +784,7 @@ class UfwFirewall implements Firewall
      */
     private static function errorText(Process $process): string
     {
-        $kept = trim(self::beforeUsage($process->getOutput()) . "\n" . self::beforeUsage($process->getErrorOutput()));
+        $kept = trim(self::beforeUsage($process->getOutput())."\n".self::beforeUsage($process->getErrorOutput()));
 
         return trim(preg_replace('/^ERROR:[ \t]*/m', '', $kept) ?? $kept);
     }
