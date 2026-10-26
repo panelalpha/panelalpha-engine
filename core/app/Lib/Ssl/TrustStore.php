@@ -26,12 +26,12 @@ final class TrustStore
     /**
      * Whether a chain leads to a root this host trusts.
      *
-     * @param string $pem the leaf, optionally followed by its intermediates
+     * @param  string  $pem  the leaf, optionally followed by its intermediates
      * @return ?bool null when no root store could be read
      */
     public static function verifies(string $pem, ?string $caBundle = null): ?bool
     {
-        if (trim($pem) === '' || !function_exists('openssl_x509_checkpurpose')) {
+        if (trim($pem) === '' || ! function_exists('openssl_x509_checkpurpose')) {
             return null;
         }
 
@@ -53,7 +53,7 @@ final class TrustStore
         if ($blocks !== []) {
             $untrusted = tempnam(sys_get_temp_dir(), 'pa-chain-');
             if (is_string($untrusted)) {
-                file_put_contents($untrusted, implode(PHP_EOL, $blocks) . PHP_EOL);
+                file_put_contents($untrusted, implode(PHP_EOL, $blocks).PHP_EOL);
             } else {
                 $untrusted = null;
             }
@@ -64,7 +64,7 @@ final class TrustStore
                 $leaf,
                 X509_PURPOSE_SSL_SERVER,
                 [$bundle],
-                $untrusted === null ? '' : $untrusted
+                $untrusted
             );
         } finally {
             if ($untrusted !== null) {

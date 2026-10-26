@@ -98,9 +98,11 @@ Do not add a rule that opens a public port for an application that already has a
 
 Two rules cannot serve the same hostname on the same port: the second one is refused. A rule that belongs to a project can only send traffic to that project's own app, named by the project's name. The engine refuses any other destination: another project, an address, the engine's own services (its database server, its API, its image registries) or the server itself. Its hostname, if it has one, must be one of the project's own domains or aliases: a project cannot answer for another project's site, on any port. A rule that belongs to the engine (a system rule) is yours as the server's administrator and may point anywhere the server reaches, the engine's own services included. Its port is opened in the firewall like any other, so a system rule to the database server puts that database on the internet.
 
+On port 443 only a rule named after one of the engine's domains or aliases is served with that domain's certificate. Any other HTTPS rule, a wildcard such as `*.example.com` or one without a hostname, is served with the server's default self-signed certificate, so visitors get a certificate warning. The answer that creates or switches on such a rule says so in `warnings`.
+
 ## Removing and renaming a domain
 
-A project's main domain cannot be deleted. To change it, ask for it to be renamed. If the rename fails part way, the engine puts the routing back as it was. A subdomain remembers the domain it belongs to, so the domain above it cannot be removed while the subdomain exists: remove the subdomain first.
+A project's main domain cannot be deleted. To change it, ask for it to be renamed. If the rename fails part way, the engine puts the routing back as it was. A main domain is not renamed to a name under `panelalpha.online`: add that name as a tunnel instead. Renaming a main domain that is a `panelalpha.online` name releases that name on PanelAlpha Online; any other tunnel of the main domain has to be deleted before the rename. A subdomain remembers the domain it belongs to, so the domain above it cannot be removed while the subdomain exists: remove the subdomain first.
 
 ## Mail from a domain
 
@@ -114,13 +116,31 @@ Each record comes back as ok, missing, wrong or unknown, with the value to publi
 
 The engine does not sign mail itself. A DKIM signature comes from a relay (SendGrid, Amazon SES, MailChannels or your own SMTP server) that signs for the domain. Give the assistant the relay's DKIM selector to check that record too.
 
+## Checking what visitors really get
+
+The installed certificate is the file the webserver was told to load. What a browser receives can differ: DNS may point somewhere else, a CDN may sit in front, or a renewal may be waiting for a webserver reload. `ssl_check` (or `pae ssl:check shop.example.com`) connects to the site over HTTPS, as a browser does, and reads the certificate it is given:
+
+- **public** is the server the domain's DNS points to, which is what visitors get. Its verdict is the overall `status`: `trusted`, `self_signed`, `untrusted_issuer`, `expired`, `not_yet_valid` or `domain_mismatch`; or `not_resolving`, `unreachable` and `refused_address` when there was no certificate to judge.
+- **engine** is this server, whatever DNS says. `serves_installed: false` means it serves something other than the installed certificate.
+- **dns** shows where the name points and whether that is this server (`points_here`).
+
+The top of the answer repeats what matters most about the certificate visitors get: `issuer`, `signer` (the authority's name, organization and country), `valid_from`, `expires_at` and `days_remaining`. Each certificate also carries its serial number, signature algorithm, key type and size, SHA-256 fingerprint and the `chain` of certificates the server sent with it.
+
+`refused_address` means DNS points at a private or reserved address that is not this server's. The engine does not connect there.
+
+```text
+Is the certificate on shop.example.com really working for visitors?
+```
+
+Mode: read. Tools: `ssl_check`. Check: `status` is `trusted`, `dns.points_here` is true, `engine.serves_installed` is true, and the assistant names the signer and the expiry date.
+
 ## Troubleshooting
 
 **The certificate request fails with a DNS error.**
 The A record is not pointing here yet. Confirm with `nslookup shop.example.com` from somewhere other than your VPS. Also check nothing is blocking port 80 - Let's Encrypt uses it to verify ownership, even though your site will run on 443.
 
 **The browser warns that the connection is not private.**
-Either DNS is not pointing here yet, or the certificate was never issued. Confirm DNS first, then ask the assistant to request the certificate again.
+Either DNS is not pointing here yet, or the certificate was never issued. Ask the assistant to run `ssl_check` on the domain: `dns.points_here` answers the first, `engine.certificate.status` the second. Then ask it to request the certificate again.
 
 **The browser trusts my site, but my AI assistant still cannot connect.**
 Different certificates. Your site has a good one; the engine itself does not. See [Install](../02-getting-started/install.md#if-connecting-asks-you-to-trust-a-certificate).

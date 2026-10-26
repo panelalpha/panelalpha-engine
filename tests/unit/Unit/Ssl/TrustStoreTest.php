@@ -57,6 +57,18 @@ class TrustStoreTest extends TestCase
         $this->assertSame(CertificateStatus::SELF_SIGNED, $status['status']);
     }
 
+    /** A leaf served without its chain used to read as "could not check", and so as trusted. */
+    public function test_a_lone_leaf_from_an_unknown_authority_is_not_trusted(): void
+    {
+        if (TrustStore::defaultBundle() === null) {
+            $this->markTestSkipped('no CA bundle on this image');
+        }
+
+        $leaf = TestCertificates::signedBy(['shop.example.com'], TestCertificates::authority());
+
+        $this->assertFalse(TrustStore::verifies($leaf));
+    }
+
     public function test_nothing_is_not_a_certificate(): void
     {
         $this->assertNull(TrustStore::verifies(''));
