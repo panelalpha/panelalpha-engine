@@ -124,9 +124,14 @@ class ToolNamesTest extends TestCase
     public function test_no_name_still_calls_a_project_a_user(): void
     {
         foreach ($this->map() as $operation => $name) {
-            // mysql_user_* and app_user_* are genuinely other things: MySQL
-            // accounts, and accounts inside the deployed application.
-            if (str_starts_with($name, 'mysql_user') || str_starts_with($name, 'app_user')) {
+            // mysql_user_*, app_user_* and wp_user_* are genuinely other things:
+            // MySQL accounts, and accounts inside the deployed application or
+            // its WordPress install.
+            if (
+                str_starts_with($name, 'mysql_user')
+                || str_starts_with($name, 'app_user')
+                || str_starts_with($name, 'wp_user')
+            ) {
                 continue;
             }
 

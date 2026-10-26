@@ -7,14 +7,15 @@ use App\Integrations\GeoLocation\GeoLocation;
 use App\Integrations\Statistics\Awstats;
 use App\Integrations\Statistics\Statistics;
 use App\Lib\Deploy\Platform\DeployPlanContext;
+use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Lib\DeployHook\CheckoutSync;
 use App\Lib\DeployHook\GitCheckoutSync;
-use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Models\PersonalAccessToken;
 use App\Models\Setting;
 use App\System;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull;
+use Illuminate\Foundation\Http\Middleware\TrimStrings;
 use Illuminate\Http\Request;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Support\Facades\Event;
@@ -33,7 +34,7 @@ class AppServiceProvider extends ServiceProvider
         // and kept working against the whole REST API.
         Sanctum::authenticateAccessTokensUsing(
             static fn (PersonalAccessToken $token, bool $isValid): bool => $isValid
-                && !$token->isRevoked()
+                && ! $token->isRevoked()
         );
 
         // One per request, which is one per deploy: the plan a deploy request
@@ -65,8 +66,8 @@ class AppServiceProvider extends ServiceProvider
             $root = $app->make(System::class)->engineDirPath();
 
             return new Awstats(
-                $root . '/awstats-data',
-                $root . '/awstats-config',
+                $root.'/awstats-data',
+                $root.'/awstats-config',
                 $app->make(GeoLocation::class),
             );
         });
@@ -74,19 +75,15 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot()
     {
-        // WP-CLI arguments are passed through verbatim, and an empty one is
-        // meaningful: `wp rewrite structure ''` is how the plain permalink
-        // structure is set. The global ConvertEmptyStringsToNull would turn it
-        // into null, which the controller then rejects as a non-string.
-        //
-        // Both prefixes, because routes/api.php registers the project route
-        // group under `projects` and `users` alike -- matching only the old one
-        // left this broken on the path new clients and the generated wp_cli_run
-        // MCP tool actually call.
-        ConvertEmptyStringsToNull::skipWhen(static function (Request $request): bool {
-            return $request->is('api/projects/*/wp-cli/command')
-                || $request->is('api/users/*/wp-cli/command');
-        });
+        // WP-CLI arguments and WordPress values are passed through verbatim.
+        // An empty one is meaningful (`wp rewrite structure ''` sets plain
+        // permalinks, `wp option update blogname ''` clears an option), and so
+        // is surrounding whitespace. The global TrimStrings and
+        // ConvertEmptyStringsToNull would change both; ConvertEmptyStringsToNull
+        // turns '' into null, which the request then rejects as a non-string.
+        // MCP tools dispatch in-process and never pass these middleware.
+        TrimStrings::skipWhen(static fn (Request $request): bool => self::takesVerbatimWordPressInput($request));
+        ConvertEmptyStringsToNull::skipWhen(static fn (Request $request): bool => self::takesVerbatimWordPressInput($request));
 
         // A queue worker holds the settings table in a static for the life of the
         // process, and an allowance is written by the CLI or the API in another
@@ -95,5 +92,29 @@ class AppServiceProvider extends ServiceProvider
         Event::listen(JobProcessing::class, static function (): void {
             Setting::clearRuntimeSettings();
         });
+    }
+
+    /**
+     * Raw WP-CLI (`wp/command` and the legacy `wp-cli/command`), and the named
+     * operations that write a value: config constants and variables, a new
+     * wp-config.php (its database password), options, search-replace. Both prefixes, because routes/api.php registers the
+     * project route group under `projects` and `users` alike.
+     */
+    private static function takesVerbatimWordPressInput(Request $request): bool
+    {
+        foreach (['projects', 'users'] as $prefix) {
+            if ($request->is(
+                "api/{$prefix}/*/wp/command",
+                "api/{$prefix}/*/wp-cli/command",
+                "api/{$prefix}/*/wp/config",
+                "api/{$prefix}/*/wp/config/*",
+                "api/{$prefix}/*/wp/options/*",
+                "api/{$prefix}/*/wp/search-replace",
+            )) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

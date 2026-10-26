@@ -4,15 +4,16 @@ namespace App\Mcp\Servers;
 
 use App\Auth\TokenAbilities;
 use App\Mcp\ToolPolicy;
-use App\Mcp\ToolSearch\PagedToolSearch;
 use App\Mcp\Tools\MetricsLatestTool;
 use App\Mcp\Tools\ProjectListSummaryTool;
+use App\Mcp\ToolSearch\PagedToolSearch;
 use Laravel\Mcp\Server;
-use Laravel\Mcp\Server\Contracts\Transport;
 use Laravel\Mcp\Server\Attributes\Instructions;
 use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Attributes\Version;
+use Laravel\Mcp\Server\Contracts\Transport;
 use Laravel\Mcp\Server\ServerContext;
+use Laravel\Mcp\Server\Tool;
 use Laravel\Mcp\Server\Tools\ToolSearch;
 use Laravel\Mcp\Transport\JsonRpcRequest;
 
@@ -46,6 +47,16 @@ use Laravel\Mcp\Transport\JsonRpcRequest;
     above; `project_rebuild` redeploys without changing the checkout. On
     `site_git` the git tools change the checkout and rebuild nothing. `git_push`
     commits a dirty tree itself; confirm first.
+
+    WordPress migrations (`wordpress_migration_*`) are queued and slow: minutes
+    to hours. Poll `wordpress_migration_get` every 1-2 minutes until `status`
+    is `completed`, `failed` or `cancelled`; `progress.percent` covers the
+    whole run. Do not start a second one while one is `running`;
+    `wordpress_migration_resume` accepts `failed` or `stale` ones,
+    `wordpress_migration_cancel` removes what an import made. Run
+    `wordpress_migration_test` with the same arguments first; on
+    `login_failed` offer `method: manual_plugin` with a token from
+    `wordpress_migration_package_create`.
 
     Only the everyday tools are listed. Find any other (MySQL, FTP, cron,
     backups, firewall, system settings, ...) with `search_tools`, e.g.
@@ -82,7 +93,7 @@ class EngineServer extends Server
      * ToolSearch::class (see ToolPolicy::layout()). The default value stays a
      * plain list, since ToolRegistry reads it.
      *
-     * @var array<int|string, class-string<\Laravel\Mcp\Server\Tool>|\Laravel\Mcp\Server\Tool|array<int, class-string<\Laravel\Mcp\Server\Tool>>>
+     * @var array<int|string, class-string<Tool>|Tool|array<int, class-string<Tool>>>
      */
     protected array $tools = [
         MetricsLatestTool::class,
@@ -102,7 +113,7 @@ class EngineServer extends Server
     {
         parent::__construct($transport);
 
-        $generated = __DIR__ . '/../Tools/Api/generated-tools.php';
+        $generated = __DIR__.'/../Tools/Api/generated-tools.php';
 
         if (is_file($generated)) {
             $this->tools = array_merge($this->tools, require $generated);
@@ -111,7 +122,7 @@ class EngineServer extends Server
         // Applied before registration, not at listing time: a tool that config
         // switches off is absent from the server, so calling it by name fails
         // rather than merely being hidden from tools/list.
-        $this->tools = (new ToolPolicy())->filter($this->tools);
+        $this->tools = (new ToolPolicy)->filter($this->tools);
 
         // Then what this token may reach. The package resolves this class
         // inside the route's own middleware pipeline, so the caller is already
@@ -120,7 +131,7 @@ class EngineServer extends Server
         $this->tools = TokenAbilities::forCurrentRequest()->filterTools($this->tools);
 
         // Last, so the catalogue holds exactly what the filters above left.
-        $this->tools = (new ToolPolicy())->layout($this->tools);
+        $this->tools = (new ToolPolicy)->layout($this->tools);
 
         // The package builds a plain ToolSearch from that key, whose
         // search_tools cannot page; register the paged pair in its place.
@@ -136,7 +147,7 @@ class EngineServer extends Server
         // The areas come from what this caller's catalogue holds, so the list
         // cannot go stale and never names tools the token cannot reach.
         if ($this->catalogue !== null) {
-            $context->instructions = rtrim($context->instructions) . "\n" . $this->catalogue->areasLine();
+            $context->instructions = rtrim($context->instructions)."\n".$this->catalogue->areasLine();
         }
 
         parent::handleInitializeMessage($request, $context);

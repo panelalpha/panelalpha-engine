@@ -22,15 +22,18 @@ use Illuminate\Support\Carbon;
  *   aliases?: array<string>,
  *   is_example_domain?: bool,
  * }
- * 
+ *
  * @property int $id
  * @property int $user_id
  * @property string $domain
  * @property string $type
  * @property Carbon $created_at
  * @property Carbon $updated_at
+ *
  * @psalm-property ?DomainDetails $details
+ *
  * @property ?User $user
+ *
  * @method static \Illuminate\Database\Eloquent\Collection<Domain> get()
  */
 class Domain extends Model
@@ -120,7 +123,7 @@ class Domain extends Model
      */
     public function isExampleDomain(): bool
     {
-        return !empty($this->getDetails()['is_example_domain']);
+        return ! empty($this->getDetails()['is_example_domain']);
     }
 
     /**
@@ -162,7 +165,7 @@ class Domain extends Model
         );
     }
 
-    public function projectDomain(): \App\System\Project\Domain
+    public function projectDomain(): System\Project\Domain
     {
         return $this->getUser()->project()->domain($this);
     }
@@ -179,18 +182,19 @@ class Domain extends Model
 
     public function redirectEnabled(): bool
     {
-        return !empty($this->getDetails()['redirect_enabled']);
+        return ! empty($this->getDetails()['redirect_enabled']);
     }
 
     public function getRedirectUrl(): ?string
     {
-        if (!$this->redirectEnabled()) {
+        if (! $this->redirectEnabled()) {
             return null;
         }
         $details = $this->getDetails();
-        if (!isset($details['redirect_url']) || $details['redirect_url'] === '') {
+        if (! isset($details['redirect_url']) || $details['redirect_url'] === '') {
             return null;
         }
+
         return $details['redirect_url'];
     }
 
@@ -198,7 +202,7 @@ class Domain extends Model
     {
         $this->setDetails([
             'redirect_enabled' => true,
-            'redirect_url' => $url
+            'redirect_url' => $url,
         ]);
     }
 
@@ -216,6 +220,7 @@ class Domain extends Model
         if (isset($details['document_root']) && $details['document_root'] !== '') {
             return $details['document_root'];
         }
+
         return "/{$this->domain}/public_html";
     }
 
@@ -226,7 +231,7 @@ class Domain extends Model
 
     public function forceHttpsRedirectEnabled(): bool
     {
-        return !empty($this->getDetails()['force_https_redirect']);
+        return ! empty($this->getDetails()['force_https_redirect']);
     }
 
     public function setForceHttpsRedirect(bool $force): void
@@ -242,12 +247,7 @@ class Domain extends Model
             return $details['php_version'];
         }
 
-        $versions = (new System())->php()->listAvailablePhpVersions();
-        if (!empty($versions)) {
-            return reset($versions);
-        }
-
-        return null;
+        return (new System)->php()->defaultPhpVersion();
     }
 
     public function setPhpVersion(string $version): void
@@ -273,7 +273,7 @@ class Domain extends Model
         }
 
         /** @var bool */
-        return !self::query()
+        return ! self::query()
             ->where('domain', '<>', $this->domain)
             ->where(function (Builder $q) use ($domainName) {
                 $q->where('domain', $domainName);
@@ -288,8 +288,9 @@ class Domain extends Model
     {
         $names = [...$this->getAliases(), ...$this->siblingTunnelHostnames()];
         if ($this->domain == Setting::get('vhost-default-ip-domain')) {
-            $names[] = (string)Setting::get('default_ipv4');
+            $names[] = (string) Setting::get('default_ipv4');
         }
+
         return $names;
     }
 
@@ -302,7 +303,7 @@ class Domain extends Model
      */
     public function siblingTunnelHostnames(): array
     {
-        if (!$this->exists) {
+        if (! $this->exists) {
             return [];
         }
 
@@ -325,7 +326,7 @@ class Domain extends Model
     {
         $details = $this->getDetails();
 
-        if (!isset($details['aliases']) || $details['aliases'] === []) {
+        if (! isset($details['aliases']) || $details['aliases'] === []) {
             return [];
         }
 
@@ -334,15 +335,15 @@ class Domain extends Model
 
     public function addAlias(string $domainName): void
     {
-        if (!$this->isAliasAvailable($domainName)) {
+        if (! $this->isAliasAvailable($domainName)) {
             throw new \Exception('Domain already exists');
         }
 
         $details = $this->getDetails();
-        if (!isset($details['aliases']) || $details['aliases'] === []) {
+        if (! isset($details['aliases']) || $details['aliases'] === []) {
             $details['aliases'] = [];
         }
-        if (!in_array($domainName, $details['aliases'])) {
+        if (! in_array($domainName, $details['aliases'])) {
             $details['aliases'][] = $domainName;
         }
         $this->setDetails($details);

@@ -7,49 +7,66 @@ use App\Http\Controllers\FirewallController;
 use App\Http\Controllers\HttpAcmeChallengeController;
 use App\Http\Controllers\IpController;
 use App\Http\Controllers\LighthouseController;
+use App\Http\Controllers\McpActivityLogController;
+use App\Http\Controllers\McpTokenController;
 use App\Http\Controllers\ModsecController;
 use App\Http\Controllers\PhpController;
-use App\Http\Controllers\SystemController;
-use App\Http\Controllers\User\CronJobController;
-use App\Http\Controllers\User\DeployHookController;
-use App\Http\Controllers\User\Domain\LogFileController;
-use App\Http\Controllers\User\EnvVarsController;
-use App\Http\Controllers\User\DomainController as UserDomainController;
-use App\Http\Controllers\User\ProjectSettingController;
-use App\Http\Controllers\User\ProjectPasswordController;
+use App\Http\Controllers\SecretVaultController;
+use App\Http\Controllers\ServerMetricsController;
 use App\Http\Controllers\SitePasswordGateController;
-use App\Http\Controllers\User\TunnelController;
+use App\Http\Controllers\SourceInspectionController;
+use App\Http\Controllers\SourceRefsController;
+use App\Http\Controllers\SystemApiAccessController;
+use App\Http\Controllers\SystemController;
+use App\Http\Controllers\TaskController;
+use App\Http\Controllers\TokenController;
+use App\Http\Controllers\User\AppCredentialsController;
+use App\Http\Controllers\User\AppHealthController;
+use App\Http\Controllers\User\AppUserController;
+use App\Http\Controllers\User\BackupController;
+use App\Http\Controllers\User\BackupScheduleController;
+use App\Http\Controllers\User\CdnController;
+use App\Http\Controllers\User\ContainerController;
+use App\Http\Controllers\User\CronJobController;
+use App\Http\Controllers\User\DeployHistoryController;
+use App\Http\Controllers\User\DeployHookController;
+use App\Http\Controllers\User\DeployLogController;
+use App\Http\Controllers\User\Domain\LogFileController;
+use App\Http\Controllers\User\DomainController as UserDomainController;
+use App\Http\Controllers\User\EnvVarsController;
 use App\Http\Controllers\User\FileController;
-use App\Http\Controllers\User\GitController;
 use App\Http\Controllers\User\FtpAccountController;
+use App\Http\Controllers\User\GitController;
 use App\Http\Controllers\User\Mysql\DatabaseController;
 use App\Http\Controllers\User\Mysql\PrivilegesController;
 use App\Http\Controllers\User\Mysql\UserController as MysqlUserController;
 use App\Http\Controllers\User\MysqlController;
-use App\Http\Controllers\User\StagingController;
 use App\Http\Controllers\User\PhpController as UserPhpController;
-use App\Http\Controllers\User\BackupController;
-use App\Http\Controllers\User\BackupScheduleController;
-use App\Http\Controllers\User\AppCredentialsController;
-use App\Http\Controllers\User\AppHealthController;
-use App\Http\Controllers\User\AppUserController;
-use App\Http\Controllers\User\ContainerController;
-use App\Http\Controllers\User\DeployHistoryController;
-use App\Http\Controllers\User\DeployLogController;
+use App\Http\Controllers\User\ProjectMetricsController;
+use App\Http\Controllers\User\ProjectPasswordController;
+use App\Http\Controllers\User\ProjectSettingController;
 use App\Http\Controllers\User\ProxyRuleController;
-use App\Http\Controllers\User\UsageController;
-use App\Http\Controllers\User\SshController;
-use App\Http\Controllers\User\WpCliController;
-use App\Http\Controllers\McpTokenController;
-use App\Http\Controllers\McpActivityLogController;
-use App\Http\Controllers\ServerMetricsController;
-use App\Http\Controllers\SecretVaultController;
-use App\Http\Controllers\SourceInspectionController;
-use App\Http\Controllers\SourceRefsController;
-use App\Http\Controllers\SystemApiAccessController;
-use App\Http\Controllers\TaskController;
 use App\Http\Controllers\User\SftpAccountController;
+use App\Http\Controllers\User\SshController;
+use App\Http\Controllers\User\StagingController;
+use App\Http\Controllers\User\TunnelController;
+use App\Http\Controllers\User\UsageController;
+use App\Http\Controllers\User\Wp\WpApplicationPasswordController;
+use App\Http\Controllers\User\Wp\WpAutoUpdateController;
+use App\Http\Controllers\User\Wp\WpCacheController;
+use App\Http\Controllers\User\Wp\WpCliController;
+use App\Http\Controllers\User\Wp\WpConfigController;
+use App\Http\Controllers\User\Wp\WpCoreController;
+use App\Http\Controllers\User\Wp\WpDatabaseController;
+use App\Http\Controllers\User\Wp\WpLanguageController;
+use App\Http\Controllers\User\Wp\WpMaintenanceController;
+use App\Http\Controllers\User\Wp\WpOptionController;
+use App\Http\Controllers\User\Wp\WpPluginController;
+use App\Http\Controllers\User\Wp\WpSearchReplaceController;
+use App\Http\Controllers\User\Wp\WpThemeController;
+use App\Http\Controllers\User\Wp\WpUserController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\WordpressMigrationController;
 use App\Http\Middleware\PmaSso;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -79,6 +96,11 @@ Route::get('/internal/site-password/{username}/gate', [SitePasswordGateControlle
 Route::post('/internal/site-password/{username}/login', [SitePasswordGateController::class, 'login'])
     ->withoutMiddleware('auth:api');
 
+// What any token may do to itself. PanelAlpha Connect rotates and ends its
+// token through these; nothing here reaches another token.
+Route::post('/tokens/current/rotate', [TokenController::class, 'rotate']);
+Route::delete('/tokens/current', [TokenController::class, 'destroy']);
+
 Route::get('/mcp-tokens', [McpTokenController::class, 'index']);
 Route::post('/mcp-tokens', [McpTokenController::class, 'store']);
 Route::put('/mcp-tokens/{id}/revoke', [McpTokenController::class, 'revoke']);
@@ -90,7 +112,7 @@ Route::post('/mcp-activity-logs', [McpActivityLogController::class, 'store']);
 
 /*
  * Secret vault: a secret is pasted into a browser form and then referenced
- * from API calls as `vault:<id>` in the field that would otherwise carry it
+ * from API calls as `vault:<key>` in the field that would otherwise carry it
  * (git_token, env_vars values). The secret never passes through the API
  * caller -- see SecretVaultController.
  *
@@ -99,7 +121,7 @@ Route::post('/mcp-activity-logs', [McpActivityLogController::class, 'store']);
 Route::get('/vault/config', [SecretVaultController::class, 'config']);
 Route::get('/vault/secrets', [SecretVaultController::class, 'index']);
 Route::post('/vault/secrets', [SecretVaultController::class, 'store']);
-// `{ref}` is `vault:<id>` or the bare id.
+// `{ref}` is `vault:<key>`.
 Route::get('/vault/secrets/{ref}', [SecretVaultController::class, 'show']);
 Route::delete('/vault/secrets/{ref}', [SecretVaultController::class, 'destroy']);
 
@@ -108,6 +130,20 @@ Route::get('/tasks/{id}', [TaskController::class, 'show']);
 Route::get('/tasks/{id}/logs', [TaskController::class, 'logs']);
 Route::get('/tasks/{id}/logs/stream', [TaskController::class, 'streamLogs']);
 Route::post('/tasks/{id}/cancel', [TaskController::class, 'cancel']);
+
+Route::post('/wordpress/migrations', [WordpressMigrationController::class, 'store']);
+Route::post('/wordpress/migrations/test', [WordpressMigrationController::class, 'test']);
+Route::post('/wordpress/migrations/plugin-package', [WordpressMigrationController::class, 'pluginPackage']);
+// Unauthenticated: the signature is the capability, and the link outlives the
+// panel request that minted it (the Client Area's download button follows it).
+Route::get('/wordpress/migrations/plugin-package/download', [WordpressMigrationController::class, 'downloadPluginPackage'])
+    ->name(WordpressMigrationController::PLUGIN_PACKAGE_ROUTE)
+    ->withoutMiddleware('auth:api')
+    ->middleware(['signed', 'throttle:plugin-package-download']);
+Route::get('/wordpress/migrations/{id}', [WordpressMigrationController::class, 'show']);
+Route::post('/wordpress/migrations/{id}/resume', [WordpressMigrationController::class, 'resume']);
+Route::post('/wordpress/migrations/{id}/cancel', [WordpressMigrationController::class, 'cancel']);
+Route::delete('/wordpress/migrations/{id}', [WordpressMigrationController::class, 'destroy']);
 
 /*
  * Project routes.
@@ -149,6 +185,7 @@ $projectRoutes = function (): void {
     Route::put('/{username}/env-vars', [EnvVarsController::class, 'update']);
 
     Route::get('/{username}/usage', [UsageController::class, 'getUsage']);
+    Route::get('/{username}/metrics/history', [ProjectMetricsController::class, 'history']);
     Route::get('/{username}/bandwidth', [UsageController::class, 'getBandwidth']);
     Route::get('/{username}/domains/{domain}/bandwidth', [UsageController::class, 'getDomainBandwidth']);
     Route::get('/{username}/domains/{domain}/visitors', [UsageController::class, 'getDomainVisitors']);
@@ -158,6 +195,7 @@ $projectRoutes = function (): void {
     Route::get('/{username}/domains/installed-ssl-certs', [UserDomainController::class, 'indexInstalledSslCerts']);
     Route::get('/{username}/domains/{domain}', [UserDomainController::class, 'show']);
     Route::get('/{username}/domains/{domain}/installed-ssl-cert', [UserDomainController::class, 'installedSslCert']);
+    Route::get('/{username}/domains/{domain}/ssl-check', [UserDomainController::class, 'sslCheck']);
     Route::get('/{username}/domains/{domain}/mail-dns', [UserDomainController::class, 'mailDns']);
     Route::post('/{username}/domains', [UserDomainController::class, 'store']);
     Route::put('/{username}/domains/{domain}', [UserDomainController::class, 'update']);
@@ -177,6 +215,12 @@ $projectRoutes = function (): void {
     Route::get('/{username}/domains/{domain}/tunnels', [TunnelController::class, 'index']);
     Route::post('/{username}/domains/{domain}/tunnels', [TunnelController::class, 'store']);
     Route::delete('/{username}/domains/{domain}/tunnels/{hostname}', [TunnelController::class, 'destroy']);
+
+    // Cloudflare cache and zone settings for a domain, over the project's own
+    // API token. Pure Cloudflare API work, so classic and dind alike.
+    Route::get('/{username}/domains/{domain}/cdn', [CdnController::class, 'show']);
+    Route::post('/{username}/domains/{domain}/cdn/purge', [CdnController::class, 'purge']);
+    Route::put('/{username}/domains/{domain}/cdn/security-level', [CdnController::class, 'setSecurityLevel']);
 
     Route::get('/{username}/domains/{domain}/log-files', [LogFileController::class, 'index']);
     Route::get('/{username}/domains/{domain}/log-files/{filename}', [LogFileController::class, 'download']);
@@ -264,6 +308,71 @@ $projectRoutes = function (): void {
     Route::post('/{username}/git/deploy-hook/rotate', [DeployHookController::class, 'rotate']);
     Route::delete('/{username}/git/deploy-hook', [DeployHookController::class, 'destroy']);
 
+    Route::post('/{username}/wp/command', [WpCliController::class, 'run']);
+
+    Route::get('/{username}/wp/plugins/search', [WpPluginController::class, 'search']);
+    Route::get('/{username}/wp/plugins', [WpPluginController::class, 'index']);
+    Route::get('/{username}/wp/plugins/{plugin}', [WpPluginController::class, 'show']);
+    Route::get('/{username}/wp/plugins/{plugin}/installed', [WpPluginController::class, 'installed']);
+    Route::post('/{username}/wp/plugins/install', [WpPluginController::class, 'install']);
+    Route::post('/{username}/wp/plugins/{plugin}/activate', [WpPluginController::class, 'activate']);
+    Route::post('/{username}/wp/plugins/{plugin}/deactivate', [WpPluginController::class, 'deactivate']);
+    Route::post('/{username}/wp/plugins/{plugin}/update', [WpPluginController::class, 'update']);
+    Route::delete('/{username}/wp/plugins/{plugin}', [WpPluginController::class, 'destroy']);
+
+    Route::get('/{username}/wp/themes/search', [WpThemeController::class, 'search']);
+    Route::get('/{username}/wp/themes', [WpThemeController::class, 'index']);
+    Route::get('/{username}/wp/themes/{theme}', [WpThemeController::class, 'show']);
+    Route::get('/{username}/wp/themes/{theme}/installed', [WpThemeController::class, 'installed']);
+    Route::post('/{username}/wp/themes/install', [WpThemeController::class, 'install']);
+    Route::post('/{username}/wp/themes/{theme}/activate', [WpThemeController::class, 'activate']);
+    Route::post('/{username}/wp/themes/{theme}/update', [WpThemeController::class, 'update']);
+    Route::delete('/{username}/wp/themes/{theme}', [WpThemeController::class, 'destroy']);
+
+    Route::get('/{username}/wp/users', [WpUserController::class, 'index']);
+    Route::post('/{username}/wp/users', [WpUserController::class, 'store']);
+    Route::put('/{username}/wp/users/{user}', [WpUserController::class, 'update']);
+    Route::put('/{username}/wp/users/{user}/password', [WpUserController::class, 'setPassword']);
+    Route::delete('/{username}/wp/users/{user}', [WpUserController::class, 'destroy']);
+
+    Route::get('/{username}/wp/users/{user}/application-passwords', [WpApplicationPasswordController::class, 'index']);
+    Route::post('/{username}/wp/users/{user}/application-passwords', [WpApplicationPasswordController::class, 'store']);
+    Route::delete('/{username}/wp/users/{user}/application-passwords/{uuid}', [WpApplicationPasswordController::class, 'destroy']);
+
+    Route::post('/{username}/wp/users/{user}/sso', [WpUserController::class, 'createSso']);
+
+    Route::get('/{username}/wp/core', [WpCoreController::class, 'status']);
+    Route::get('/{username}/wp/core/updates', [WpCoreController::class, 'updates']);
+    Route::post('/{username}/wp/core/download', [WpCoreController::class, 'download']);
+    Route::post('/{username}/wp/core/install', [WpCoreController::class, 'install']);
+    Route::post('/{username}/wp/core/update', [WpCoreController::class, 'update']);
+
+    Route::get('/{username}/wp/maintenance', [WpMaintenanceController::class, 'show']);
+    Route::put('/{username}/wp/maintenance', [WpMaintenanceController::class, 'update']);
+    Route::post('/{username}/wp/cache/flush', [WpCacheController::class, 'flush']);
+
+    Route::get('/{username}/wp/config', [WpConfigController::class, 'index']);
+    Route::post('/{username}/wp/config', [WpConfigController::class, 'store']);
+    Route::get('/{username}/wp/config/{constant}', [WpConfigController::class, 'show']);
+    Route::put('/{username}/wp/config/{constant}', [WpConfigController::class, 'update']);
+    Route::delete('/{username}/wp/config/{constant}', [WpConfigController::class, 'destroy']);
+
+    Route::get('/{username}/wp/auto-update', [WpAutoUpdateController::class, 'show']);
+    Route::put('/{username}/wp/auto-update', [WpAutoUpdateController::class, 'update']);
+
+    Route::get('/{username}/wp/options', [WpOptionController::class, 'index']);
+    Route::get('/{username}/wp/options/{option}', [WpOptionController::class, 'show']);
+    Route::put('/{username}/wp/options/{option}', [WpOptionController::class, 'update']);
+
+    Route::post('/{username}/wp/search-replace', [WpSearchReplaceController::class, 'run']);
+    Route::put('/{username}/wp/language', [WpLanguageController::class, 'update']);
+    Route::post('/{username}/wp/database/export', [WpDatabaseController::class, 'export']);
+    Route::post('/{username}/wp/database/import', [WpDatabaseController::class, 'import']);
+
+    // Deprecated spelling of the line above, kept for one release so existing
+    // integrations do not break on a rename. Deliberately undocumented: an
+    // alias in the OpenAPI document would generate a second MCP tool for the
+    // one operation, and clients would have two names for one answer.
     Route::post('/{username}/wp-cli/command', [WpCliController::class, 'run']);
 
     Route::post('/{username}/ssh/command', [SshController::class, 'run']);
@@ -273,6 +382,7 @@ $projectRoutes = function (): void {
     Route::get('/{username}/php/error-log', [UserPhpController::class, 'errorLog']);
 
     Route::get('/{username}/containers', [ContainerController::class, 'index']);
+    Route::get('/{username}/containers/metrics', [ProjectMetricsController::class, 'containers']);
     Route::post('/{username}/containers/action', [ContainerController::class, 'projectAction']);
     Route::post('/{username}/containers/{service}/action', [ContainerController::class, 'serviceAction']);
     Route::get('/{username}/containers/{service}/logs', [ContainerController::class, 'logs']);
@@ -304,7 +414,7 @@ $projectRoutes = function (): void {
     // floor should, so this route keeps its own tighter one.
     Route::get('/{username}/app/sso-token', [AppUserController::class, 'useAppSsoToken'])
         ->withoutMiddleware('auth:api')
-        ->middleware('throttle:60,1');
+        ->middleware('throttle:app-sso-token');
     Route::get('/{username}/app/health', [AppHealthController::class, 'show']);
     // The login the engine generated for the app from its recipe's `credentials:`.
     Route::get('/{username}/app-credentials', [AppCredentialsController::class, 'show']);
@@ -336,7 +446,7 @@ Route::post('/backup-containers/{id}/test', [BackupContainerController::class, '
 // address may redeem (services.phpmyadmin.sso_sources).
 Route::put('/mysql/phpmyadmin-sso-token', [MysqlController::class, 'usePhpmyadminSsoToken'])
     ->withoutMiddleware('auth:api')
-    ->middleware([PmaSso::class, 'throttle:60,1']);
+    ->middleware([PmaSso::class, 'throttle:phpmyadmin-sso-token']);
 
 Route::get('/proxy-rules', [ProxyRuleController::class, 'index']);
 Route::get('/proxy-rules/{id}', [ProxyRuleController::class, 'show']);
@@ -411,6 +521,7 @@ Route::get('/metrics/last-5-minutes', [ServerMetricsController::class, 'last5Min
 Route::get('/metrics/last-hour', [ServerMetricsController::class, 'lastHour']);
 Route::get('/metrics/last-12-hours', [ServerMetricsController::class, 'last12Hours']);
 Route::get('/metrics/last-hour-averages', [ServerMetricsController::class, 'lastHourAverages']);
+Route::get('/metrics/history', [ServerMetricsController::class, 'history']);
 
 Route::get('/ip/subnets', [IpController::class, 'listSubnets']);
 Route::post('/ip/subnets', [IpController::class, 'addSubnet']);

@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Project\PhpHosting;
 
+use App\Models\Domain;
 use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Project as ProjectAggregate;
@@ -10,7 +11,9 @@ use App\System\Project\PhpHosting;
 use App\System\Project\PhpHosting\FpmStack;
 use App\System\Project\PhpHosting\Services\RunnerServiceManager;
 use App\System\Services\Webserver;
+use Mockery;
 use PHPUnit\Framework\TestCase;
+use App\System\Project\PhpHosting\WordPress\MustUsePlugin;
 
 class PhpHostingApplicationTest extends TestCase
 {
@@ -26,6 +29,7 @@ class PhpHostingApplicationTest extends TestCase
 
     protected function tearDown(): void
     {
+        Mockery::close();
         $this->setCurrentWebserver(null);
         $this->removeTree($this->tmpRoot);
         parent::tearDown();
@@ -100,7 +104,11 @@ class PhpHostingApplicationTest extends TestCase
     public function test_run_wp_cli_builds_compose_exec_command(): void
     {
         $system = $this->system();
-        $project = $this->phpHosting($this->userModel(), $system);
+        $user = $this->userModel();
+        $user->shouldReceive('getMainDomain')->andReturn(
+            $this->domain('example.test', '/example.test/public_html', '8.3')
+        );
+        $project = $this->phpHosting($user, $system);
         file_put_contents($project->composeFilePath(), "services:\n  php:\n    image: test\n");
 
         $result = $project->phpRuntime()->runWpCli(['plugin', 'list']);
@@ -112,8 +120,59 @@ class PhpHostingApplicationTest extends TestCase
         $this->assertSame('-d', $command[11]);
         $this->assertSame('memory_limit=384M', $command[12]);
         $this->assertSame('/opt/wp-cli.phar', $command[13]);
-        $this->assertSame('plugin', $command[14]);
-        $this->assertSame('list', $command[15]);
+        $this->assertSame('--exec='.MustUsePlugin::MEND_ON_LOAD, $command[14], 'an old must-use plugin is mended first');
+        $this->assertSame('plugin', $command[15]);
+        $this->assertSame('list', $command[16]);
+    }
+
+    /** A --path that names a subdirectory of a document root still picks that domain's PHP. */
+    public function test_wp_cli_binary_follows_a_domain_matched_by_a_subdirectory_path(): void
+    {
+        $path = '/home/alice/example.test/public_html/wp-content';
+        $domain = $this->domain('example.test', '/example.test/public_html', '8.1');
+        $project = $this->phpHosting($this->userModelForPath($path, $domain));
+
+        $this->assertSame('/usr/bin/php8.1', $project->phpRuntime()->phpBinaryPath($path));
+    }
+
+    public function test_wp_cli_binary_follows_a_domain_matched_by_a_trailing_slash(): void
+    {
+        $path = '/home/alice/example.test/public_html/';
+        $domain = $this->domain('example.test', '/example.test/public_html', '7.4');
+        $project = $this->phpHosting($this->userModelForPath($path, $domain));
+
+        $this->assertSame('/usr/bin/php7.4', $project->phpRuntime()->phpBinaryPath($path));
+    }
+
+    public function test_wp_cli_binary_follows_a_domain_matched_by_a_relative_path(): void
+    {
+        $path = 'example.test/public_html';
+        $domain = $this->domain('example.test', '/example.test/public_html', '8.2');
+        $project = $this->phpHosting($this->userModelForPath($path, $domain));
+
+        $this->assertSame('/usr/bin/php8.2', $project->phpRuntime()->phpBinaryPath($path));
+    }
+
+    /** With no path, WP-CLI runs the account's main-domain PHP, not a hard-coded minor. */
+    public function test_wp_cli_binary_without_a_path_uses_the_main_domain_version(): void
+    {
+        $user = $this->userModel();
+        $user->shouldReceive('getMainDomain')->andReturn(
+            $this->domain('example.test', '/example.test/public_html', '7.4')
+        );
+        $project = $this->phpHosting($user);
+
+        $this->assertSame('/usr/bin/php7.4', $project->phpRuntime()->phpBinaryPath());
+    }
+
+    /** The version comes from whatever domain the lookup returns; the prefix rule is the model's. */
+    public function test_wp_cli_binary_uses_the_version_of_the_domain_the_lookup_returns(): void
+    {
+        $path = '/home/alice/example.test/shop/public';
+        $domain = $this->domain('shop.example.test', '/example.test/shop', '8.0');
+        $project = $this->phpHosting($this->userModelForPath($path, $domain));
+
+        $this->assertSame('/usr/bin/php8.0', $project->phpRuntime()->phpBinaryPath($path));
     }
 
     public function test_php_runtime_does_not_expose_shell_or_containers(): void
@@ -135,7 +194,7 @@ class PhpHostingApplicationTest extends TestCase
 
     private function userModel(): ModelsUser
     {
-        $model = new ModelsUser();
+        $model = Mockery::mock(ModelsUser::class)->makePartial();
         $model->username = 'alice';
         $model->setDetails([
             'template' => 'default',
@@ -145,6 +204,24 @@ class PhpHostingApplicationTest extends TestCase
         ]);
 
         return $model;
+    }
+
+    private function userModelForPath(string $path, Domain $domain): ModelsUser
+    {
+        $model = $this->userModel();
+        $model->shouldReceive('findDomainByDocumentRoot')->with($path)->andReturn($domain);
+
+        return $model;
+    }
+
+    private function domain(string $name, string $documentRoot, string $phpVersion): Domain
+    {
+        $domain = new Domain();
+        $domain->domain = $name;
+        $domain->type = 'main';
+        $domain->setDetails(['document_root' => $documentRoot, 'php_version' => $phpVersion]);
+
+        return $domain;
     }
 
     private function system(): System

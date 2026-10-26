@@ -21,7 +21,7 @@ From there you can add a domain, take a backup, change PHP, run WP-CLI, or manag
 There are two kinds of WordPress on this engine, and they are not the same:
 
 - **Traditional PHP hosting.** Files live in `public_html`. Uploads show up on the site without a rebuild. You can change that domain's PHP version, set PHP memory, use FTP, backups, domains and WP-CLI. WordPress users, the install wizard and one-click login are not available on this kind. Neither is a Cloudflare tunnel.
-- **Its own container.** Files live in `project/`. This is what you get when the engine sets WordPress up for you, or when you deploy it from git. WordPress users, one-click login and the install wizard work here, as do backups and domains. WP-CLI does not: the engine runs it only on traditional PHP hosting. Ask the assistant to run a command in the project instead.
+- **Its own container.** Files live in `project/`. This is what you get when the engine sets WordPress up for you, or when you deploy it from git. WordPress users, one-click login and the install wizard work here, as do WP-CLI, backups and domains. That includes WordPress from a Docker Compose file of your own, such as the official `wordpress` image next to a database.
 
 If an action is refused, see [Troubleshooting](#troubleshooting). Older versions called a project a "user". If output still says `username`, that is the project's name.
 
@@ -113,7 +113,19 @@ Run `wp core version` on this site.
 Update all plugins on this site.
 ```
 
-Commands run as that site's own user, in the right directory, so you do not need to know where the files are. This works on traditional PHP hosting only. On WordPress in its own container the engine refuses it; use the WordPress user and install actions above, or ask the assistant to run a command in the project.
+Commands run as that site's own user, in the right directory, so you do not need to know where the files are.
+
+On WordPress in its own container, the engine finds the container that runs WordPress and runs the command there, as the owner of `wp-content`, so plugins it installs can be updated from wp-admin later. The container needs PHP and a WordPress directory. That holds for the engine's own WordPress and for the official `wordpress` image in a Compose file of your own.
+
+WordPress does not have to be at the top of the project. Two settings point the engine at it:
+
+- **path**: the WordPress directory as the container sees it. Give it in full, such as `/var/www/html/blog`, or relative to the container's working directory, such as `blog`.
+- **service**: the Compose service whose container runs WordPress. Use it when more than one container has PHP and WordPress.
+
+```text
+Run `wp core version` on this site, with WordPress in the blog directory.
+List the plugins of the WordPress in the shop service.
+```
 
 ## Deploying a WordPress project from your own repository
 
@@ -152,6 +164,23 @@ A few other known apps worth knowing:
 **"App user management works only on container projects (template dind)."**
 The WordPress user, install and one-click-login actions work on a WordPress site in its own container. A WordPress site on traditional PHP hosting can still be managed with WP-CLI, and you can still change its PHP version.
 
+**"No WordPress install was found in this project's containers."**
+The project is running, but no container has both PHP and a WordPress directory the engine knows to look in. Pass the WordPress directory as the container sees it, for example `/var/www/html/blog`. A site served by nginx with PHP in a second container works; WP-CLI runs in the PHP one.
+
+**The core status says WordPress is not installed.**
+The status also names why, in its `state`:
+
+| State | What it means | What to do |
+|---|---|---|
+| `not_installed` | The files, `wp-config.php` and the database are all fine; WordPress was never installed into that database. | Finish the install. |
+| `no_config` | WordPress's files are there, but there is no `wp-config.php`. | Create one, or ask the assistant to run `wp config create`. |
+| `db_unreachable` | `wp-config.php` is there, but WordPress cannot connect to the database it names. | Check the database name, user, password and host in `wp-config.php`, and that the database is running. |
+| `no_core` | There is no WordPress at that path. | Check the path, or the service on a project with its own containers. |
+| `unknown` | WordPress is not installed, for a reason the engine cannot tell, for example output it does not recognise or no MySQL client to check the database with. | Run `wp core is-installed` through the assistant and read its output. |
+
+**"No running container of this project belongs to service …"**
+The service name is not one the project runs. Use the service name from the project's Compose file.
+
 **The install was refused.**
 Either the project is not one the engine can install WordPress onto, or the admin password is shorter than 8 characters.
 
@@ -160,6 +189,12 @@ WordPress stores its site address in its own database. Changing the project's do
 
 **The site shows a blank page or a PHP error.**
 On traditional PHP hosting, ask the assistant to read the project's PHP error log: [Monitoring and logs](monitoring-and-logs.md#3-domain-logs---what-are-visitors-doing). A WordPress site in its own container has no separate file, so the assistant reads what the app container printed instead.
+
+**Every WordPress action fails with a PHP fatal error from one plugin or theme.**
+WordPress loads all active plugins first, so one broken plugin stops the rest. Ask the assistant to do it again without loading plugins and themes: listing plugins, themes, users or options, reading or changing `wp-config.php`, maintenance mode, the database and the core status all work that way. Then deactivate or delete the broken plugin. A site that fails to load is reported as an error, never as "WordPress is not installed".
+
+**The site still shows old pages after flushing the cache.**
+The flush empties WordPress's object cache, then asks WP Super Cache, LiteSpeed Cache, W3 Total Cache, WP Rocket and WP Fastest Cache to purge their page caches. If the result says the page caches failed, purge them from that plugin's own settings. Another caching plugin, or a CDN in front of the site, is not covered.
 
 **Plugin installs or updates fail from inside wp-admin.**
 Usually file permissions, the account's disk quota, or PHP running out of memory. Ask the assistant to check the project's usage against its limits, raise `memory_limit` if needed, then run the update through WP-CLI instead.
@@ -228,6 +263,15 @@ all plugins.
 ```
 
 Mode: modify. Tools: `wp_cli_run` with `args`. Check: the version comes back, the plugin update output is reported, and the same request on `twp` (a container project) is refused with the reason.
+
+**New WordPress on traditional PHP hosting**
+
+```text
+On the traditional PHP hosting project tphp, download WordPress in Polish,
+create a database and a user for it, write wp-config.php, then install it.
+```
+
+Mode: modify. Tools: `wp_core_download` with `locale`, `mysql_database_create`, `mysql_user_create`, `mysql_privileges_set`, `wp_config_create`, `wp_core_install`, `wp_language_set`. Check: the download reports the version and language it fetched, and the same request on a directory that already holds WordPress is refused rather than overwritten. A project in its own containers is refused too: its WordPress comes from its image.
 
 **Known apps and what the engine picks**
 

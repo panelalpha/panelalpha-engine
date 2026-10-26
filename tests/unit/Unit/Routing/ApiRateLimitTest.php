@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Routing;
 
+use App\Providers\RouteServiceProvider;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Cache\RateLimiting\Unlimited;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
@@ -39,6 +40,16 @@ class ApiRateLimitTest extends TestCase
 
         $this->assertSame(120, $limit->maxAttempts);
         $this->assertSame('ip:203.0.113.7', $limit->key);
+    }
+
+    public function test_an_internal_cli_dispatch_is_never_throttled(): void
+    {
+        // It runs from the CLI as root; counting it would write root-owned
+        // files into the file cache that www-data cannot open.
+        $request = Request::create('/api/projects', 'POST');
+        $request->attributes->set(RouteServiceProvider::INTERNAL_DISPATCH_ATTRIBUTE, true);
+
+        $this->assertInstanceOf(Unlimited::class, $this->limitFor($request));
     }
 
     public function test_zero_turns_a_limit_off(): void

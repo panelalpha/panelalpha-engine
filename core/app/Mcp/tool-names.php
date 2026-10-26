@@ -54,6 +54,7 @@ return [
     'PUT /projects/{username}/password' => 'project_password_set',
     'DELETE /projects/{username}/password' => 'project_password_unset',
     'GET /projects/{username}/usage' => 'project_usage',
+    'GET /projects/{username}/metrics/history' => 'project_metrics_history',
     'GET /projects/{username}/bandwidth' => 'project_bandwidth',
     'GET /projects/{username}/domains/{domain}/bandwidth' => 'domain_bandwidth',
     'GET /projects/{username}/domains/{domain}/visitors' => 'domain_visitors',
@@ -98,6 +99,11 @@ return [
     'GET /projects/{username}/domains/{domain}/tunnels' => 'tunnel_list',
     'POST /projects/{username}/domains/{domain}/tunnels' => 'tunnel_create',
     'DELETE /projects/{username}/domains/{domain}/tunnels/{hostname}' => 'tunnel_delete',
+    // CDN -- Cloudflare's cache and zone settings for one domain, driven with
+    // the project's own API token.
+    'GET /projects/{username}/domains/{domain}/cdn' => 'cdn_get',
+    'POST /projects/{username}/domains/{domain}/cdn/purge' => 'cdn_purge',
+    'PUT /projects/{username}/domains/{domain}/cdn/security-level' => 'cdn_security_level_set',
     // Looks a domain up server-wide, without knowing which project owns it --
     // hence "find" rather than "get".
     'GET /domains/{domain}' => 'domain_find',
@@ -118,6 +124,7 @@ return [
     // SSL certificates
     'GET /projects/{username}/domains/installed-ssl-certs' => 'ssl_cert_list',
     'GET /projects/{username}/domains/{domain}/installed-ssl-cert' => 'ssl_cert_get',
+    'GET /projects/{username}/domains/{domain}/ssl-check' => 'ssl_check',
     'PUT /projects/{username}/domains/{domain}/install-ssl-cert' => 'ssl_cert_install',
     'POST /projects/{username}/domains/{domain}/request-ssl-cert' => 'ssl_cert_request',
 
@@ -196,7 +203,67 @@ return [
     'DELETE /projects/{username}/git/deploy-hook' => 'git_deploy_hook_delete',
 
     // WP-CLI
-    'POST /projects/{username}/wp-cli/command' => 'wp_cli_run',
+    'POST /projects/{username}/wp/command' => 'wp_cli_run',
+
+    // WP-CLI named plugin operations
+    'GET /projects/{username}/wp/plugins' => 'wp_plugin_list',
+    'GET /projects/{username}/wp/plugins/search' => 'wp_plugin_search',
+    'GET /projects/{username}/wp/plugins/{plugin}' => 'wp_plugin_get',
+    'GET /projects/{username}/wp/plugins/{plugin}/installed' => 'wp_plugin_is_installed',
+    'POST /projects/{username}/wp/plugins/install' => 'wp_plugin_install',
+    'POST /projects/{username}/wp/plugins/{plugin}/activate' => 'wp_plugin_activate',
+    'POST /projects/{username}/wp/plugins/{plugin}/deactivate' => 'wp_plugin_deactivate',
+    'POST /projects/{username}/wp/plugins/{plugin}/update' => 'wp_plugin_update',
+    'DELETE /projects/{username}/wp/plugins/{plugin}' => 'wp_plugin_delete',
+
+    // WP-CLI named theme operations
+    'GET /projects/{username}/wp/themes' => 'wp_theme_list',
+    'GET /projects/{username}/wp/themes/search' => 'wp_theme_search',
+    'GET /projects/{username}/wp/themes/{theme}' => 'wp_theme_get',
+    'GET /projects/{username}/wp/themes/{theme}/installed' => 'wp_theme_is_installed',
+    'POST /projects/{username}/wp/themes/install' => 'wp_theme_install',
+    'POST /projects/{username}/wp/themes/{theme}/activate' => 'wp_theme_activate',
+    'POST /projects/{username}/wp/themes/{theme}/update' => 'wp_theme_update',
+    'DELETE /projects/{username}/wp/themes/{theme}' => 'wp_theme_delete',
+
+    // WP-CLI named user operations
+    'GET /projects/{username}/wp/users' => 'wp_user_list',
+    'POST /projects/{username}/wp/users' => 'wp_user_create',
+    'PUT /projects/{username}/wp/users/{user}' => 'wp_user_update',
+    'PUT /projects/{username}/wp/users/{user}/password' => 'wp_user_password_set',
+    'DELETE /projects/{username}/wp/users/{user}' => 'wp_user_delete',
+    'GET /projects/{username}/wp/users/{user}/application-passwords' => 'wp_app_password_list',
+    'POST /projects/{username}/wp/users/{user}/application-passwords' => 'wp_app_password_create',
+    'DELETE /projects/{username}/wp/users/{user}/application-passwords/{uuid}' => 'wp_app_password_delete',
+    'POST /projects/{username}/wp/users/{user}/sso' => 'wp_user_sso_create',
+
+    // WP-CLI named core operations
+    'GET /projects/{username}/wp/core' => 'wp_core_status',
+    'GET /projects/{username}/wp/core/updates' => 'wp_core_check_update',
+    'POST /projects/{username}/wp/core/download' => 'wp_core_download',
+    'POST /projects/{username}/wp/core/install' => 'wp_core_install',
+    'POST /projects/{username}/wp/core/update' => 'wp_core_update',
+
+    // WP-CLI named maintenance and cache operations
+    'GET /projects/{username}/wp/maintenance' => 'wp_maintenance_get',
+    'PUT /projects/{username}/wp/maintenance' => 'wp_maintenance_set',
+    'POST /projects/{username}/wp/cache/flush' => 'wp_cache_flush',
+
+    // WP-CLI named configuration operations
+    'GET /projects/{username}/wp/config' => 'wp_config_list',
+    'POST /projects/{username}/wp/config' => 'wp_config_create',
+    'GET /projects/{username}/wp/config/{constant}' => 'wp_config_get',
+    'PUT /projects/{username}/wp/config/{constant}' => 'wp_config_set',
+    'DELETE /projects/{username}/wp/config/{constant}' => 'wp_config_delete',
+    'GET /projects/{username}/wp/auto-update' => 'wp_auto_update_get',
+    'PUT /projects/{username}/wp/auto-update' => 'wp_auto_update_set',
+    'GET /projects/{username}/wp/options' => 'wp_option_list',
+    'GET /projects/{username}/wp/options/{option}' => 'wp_option_get',
+    'PUT /projects/{username}/wp/options/{option}' => 'wp_option_set',
+    'POST /projects/{username}/wp/search-replace' => 'wp_search_replace',
+    'PUT /projects/{username}/wp/language' => 'wp_language_set',
+    'POST /projects/{username}/wp/database/export' => 'wp_database_export',
+    'POST /projects/{username}/wp/database/import' => 'wp_database_import',
 
     // Shell access to a project's container: one command per call, run as the
     // project user. Dind projects only.
@@ -211,6 +278,7 @@ return [
     // Containers. The project action drives every service in the project's
     // compose stack; the service action drives one of them.
     'GET /projects/{username}/containers' => 'container_list',
+    'GET /projects/{username}/containers/metrics' => 'container_metrics',
     'POST /projects/{username}/containers/action' => 'container_project_action',
     'POST /projects/{username}/containers/{service}/action' => 'container_service_action',
     'GET /projects/{username}/containers/{service}/logs' => 'container_service_logs',
@@ -237,9 +305,9 @@ return [
 
     // Secret Vault
     // A secret pasted into a browser form, then referenced from API calls as
-    // `vault:<id>` in the field that would otherwise carry it (git_token,
+    // `vault:<key>` in the field that would otherwise carry it (git_token,
     // env_vars values). The whole point is that the secret never passes
-    // through the agent's conversation: `create` hands back a `vault:<id>`
+    // through the agent's conversation: `create` hands back a `vault:<key>`
     // plus a form URL, the customer pastes there. `status` is what an agent
     // polls to wait for the paste; `delete` is cleanup and revocation. The
     // secret itself is never returned by any of these.
@@ -281,6 +349,7 @@ return [
     'GET /metrics/last-hour' => 'metrics_last_hour',
     'GET /metrics/last-12-hours' => 'metrics_last_12_hours',
     'GET /metrics/last-hour-averages' => 'metrics_last_hour_averages',
+    'GET /metrics/history' => 'metrics_history',
 
     // Host firewall
     'GET /firewall/status' => 'firewall_status',
@@ -344,4 +413,14 @@ return [
     'GET /projects/{username}/backup-schedule' => 'backup_schedule_get',
     'PUT /projects/{username}/backup-schedule' => 'backup_schedule_set',
     'DELETE /projects/{username}/backup-schedule' => 'backup_schedule_delete',
+
+    // WordPress site migrations. username here is the wp-admin account on the
+    // source site, not a hosting project name.
+    'POST /wordpress/migrations' => 'wordpress_migration_create',
+    'POST /wordpress/migrations/test' => 'wordpress_migration_test',
+    'POST /wordpress/migrations/plugin-package' => 'wordpress_migration_package_create',
+    'GET /wordpress/migrations/{id}' => 'wordpress_migration_get',
+    'POST /wordpress/migrations/{id}/resume' => 'wordpress_migration_resume',
+    'POST /wordpress/migrations/{id}/cancel' => 'wordpress_migration_cancel',
+    'DELETE /wordpress/migrations/{id}' => 'wordpress_migration_delete',
 ];

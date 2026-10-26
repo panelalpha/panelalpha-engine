@@ -2,8 +2,11 @@
 
 namespace App\Integrations\Tunnels;
 
+use App\Integrations\Monitoring\PanelAlphaMonitoring;
 use App\Lib\Apis\PanelAlpha;
 use App\Lib\Apis\PanelAlpha\PanelAlphaException;
+use App\Lib\Domains\DomainAllocator;
+use App\Lib\Domains\DomainPlan;
 use App\Models\Domain;
 use App\Models\Setting;
 use App\Models\Tunnel;
@@ -16,7 +19,7 @@ use Illuminate\Support\Str;
  * PanelAlpha Connect: WithoutDNS names under *.panelalpha.online.
  *
  * Connect is an integration the engine *calls* — register, update, or release
- * a public label. Telemetry goes somewhere else ({@see \App\Integrations\Monitoring\PanelAlphaMonitoring}).
+ * a public label. Telemetry goes somewhere else ({@see PanelAlphaMonitoring}).
  *
  * POST create-only; PUT/DELETE require full path FQDN and ownership on Connect.
  * Licensing answers on the same host (`connect.panelalpha.com`).
@@ -29,6 +32,16 @@ class PanelAlphaConnect
     public static function base(): string
     {
         return rtrim(trim((string) config('connect.url', '')), '/');
+    }
+
+    /**
+     * Whether this engine can have *.panelalpha.online names: a Connect is
+     * configured and the proxy can reach the engine's public IPv4.
+     */
+    public static function available(): bool
+    {
+        return self::base() !== ''
+            && DomainPlan::hasPublicIpv4(['default_ipv4' => Setting::get('default_ipv4')]);
     }
 
     /**
@@ -45,7 +58,7 @@ class PanelAlphaConnect
         if ($base === '') {
             throw new PanelAlphaException(
                 'No PanelAlpha Connect is configured (PANELALPHA_CONNECT), so *.'
-                . self::PARENT_DOMAIN . ' names cannot be registered.'
+                .self::PARENT_DOMAIN.' names cannot be registered.'
             );
         }
 
@@ -59,7 +72,7 @@ class PanelAlphaConnect
     {
         $candidate = Str::lower(trim($hostname));
         $candidate = rtrim($candidate, '.');
-        $suffix = '.' . self::PARENT_DOMAIN;
+        $suffix = '.'.self::PARENT_DOMAIN;
         if (Str::endsWith($candidate, $suffix)) {
             $candidate = Str::beforeLast($candidate, $suffix);
         } elseif ($candidate === self::PARENT_DOMAIN) {
@@ -73,7 +86,7 @@ class PanelAlphaConnect
         if ($candidate === '' || Str::contains($candidate, '.')) {
             return null;
         }
-        if (!preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/', $candidate)) {
+        if (! preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/', $candidate)) {
             return null;
         }
 
@@ -85,8 +98,8 @@ class PanelAlphaConnect
         $path = self::pathFromHostname($hostname);
         if ($path === null) {
             throw new PanelAlphaException(
-                "Hostname must be a single label under *." . self::PARENT_DOMAIN
-                . " (got '{$hostname}')."
+                'Hostname must be a single label under *.'.self::PARENT_DOMAIN
+                ." (got '{$hostname}')."
             );
         }
 
@@ -97,7 +110,7 @@ class PanelAlphaConnect
     {
         $path = self::assertPanelAlphaOnlineHostname($hostname);
 
-        return $path . '.' . self::PARENT_DOMAIN;
+        return $path.'.'.self::PARENT_DOMAIN;
     }
 
     /**
@@ -126,7 +139,7 @@ class PanelAlphaConnect
             );
         }
 
-        $url = self::endpoint() . '/api/without-dns/sites';
+        $url = self::endpoint().'/api/without-dns/sites';
         $payload = [
             'target_domain' => $targetDomain,
             'target_ip' => $targetIp,
@@ -167,7 +180,7 @@ class PanelAlphaConnect
             );
         }
 
-        $url = self::endpoint() . '/api/without-dns/sites/' . rawurlencode($pathFqdn);
+        $url = self::endpoint().'/api/without-dns/sites/'.rawurlencode($pathFqdn);
         /** @var Response $response */
         $response = PanelAlpha::http()->put($url, [
             'target_domain' => $targetDomain,
@@ -184,7 +197,7 @@ class PanelAlphaConnect
     public function deleteSite(string $pathFqdn): void
     {
         $pathFqdn = self::pathFqdnFromHostname($pathFqdn);
-        $url = self::endpoint() . '/api/without-dns/sites/' . rawurlencode($pathFqdn);
+        $url = self::endpoint().'/api/without-dns/sites/'.rawurlencode($pathFqdn);
 
         /** @var Response $response */
         $response = PanelAlpha::http()->delete($url);
@@ -239,7 +252,7 @@ class PanelAlphaConnect
                 continue;
             }
             $max = str_contains($ip, ':') ? 128 : 32;
-            if ($prefix !== null && (!ctype_digit($prefix) || (int) $prefix > $max)) {
+            if ($prefix !== null && (! ctype_digit($prefix) || (int) $prefix > $max)) {
                 continue;
             }
             $valid[] = $entry;
@@ -256,7 +269,7 @@ class PanelAlphaConnect
      */
     public static function trustedFrontsFor(Domain $domain): array
     {
-        $suffix = '.' . self::PARENT_DOMAIN;
+        $suffix = '.'.self::PARENT_DOMAIN;
         $behindFront = false;
         foreach ([$domain->domain, ...$domain->getAliases()] as $name) {
             if (Str::endsWith(strtolower(rtrim(trim((string) $name), '.')), $suffix)) {
@@ -264,7 +277,7 @@ class PanelAlphaConnect
                 break;
             }
         }
-        if (!$behindFront && $domain->exists) {
+        if (! $behindFront && $domain->exists) {
             $behindFront = $domain->tunnels()->where('provider', Tunnel::PROVIDER_PANELALPHA)->exists();
         }
 
@@ -294,7 +307,7 @@ class PanelAlphaConnect
         }
 
         $targetDomain = $forwardDomain ? strtolower(trim((string) $domain->domain)) : self::pathFqdnFromHostname($hostname);
-        $created = (new self())->createSite($targetDomain, $targetIp, $path);
+        $created = (new self)->createSite($targetDomain, $targetIp, $path);
 
         return self::recordPanelAlphaTunnel($user, $domain, $created + ['target_ip' => $targetIp, 'target_domain' => $targetDomain]);
     }
@@ -307,11 +320,11 @@ class PanelAlphaConnect
      * is a domain to attach it to -- a label that turns out to be taken has
      * to be discovered while another one can still be chosen, not after the
      * project has been built around the first guess.
-     * {@see \App\Lib\Domains\DomainAllocator} does the buying; this does
+     * {@see DomainAllocator} does the buying; this does
      * the recording, so there is still one place that decides what a
      * PanelAlpha Online tunnel row looks like.
      *
-     * @param array{path: string, path_fqdn: string, wdns_site_id?: ?int, valid_until?: ?string, target_ip: string, target_domain?: string} $created
+     * @param  array{path: string, path_fqdn: string, wdns_site_id?: ?int, valid_until?: ?string, target_ip: string, target_domain?: string}  $created
      */
     public static function recordPanelAlphaTunnel(User $user, Domain $domain, array $created): Tunnel
     {
@@ -344,7 +357,7 @@ class PanelAlphaConnect
     public static function deleteTunnelRemote(Tunnel $tunnel): void
     {
         try {
-            (new self())->deleteSite($tunnel->hostname);
+            (new self)->deleteSite($tunnel->hostname);
         } catch (PanelAlphaException $e) {
             Log::warning('PanelAlpha Online remote delete failed; removing local tunnel row', [
                 'hostname' => $tunnel->hostname,
@@ -365,10 +378,10 @@ class PanelAlphaConnect
     private function parseSuccessBody(Response $response, string $path, string $action): array
     {
         $body = $response->json();
-        if (!is_array($body)) {
+        if (! is_array($body)) {
             throw new PanelAlphaException(
                 "PanelAlpha Online {$action} failed: invalid JSON response"
-                . ' (HTTP ' . $response->status() . ').'
+                .' (HTTP '.$response->status().').'
             );
         }
 
@@ -385,11 +398,11 @@ class PanelAlphaConnect
         $siteId = $data['model']['id'] ?? $data['id'] ?? null;
         $wdnsSiteId = is_numeric($siteId) ? (int) $siteId : null;
         $returnedPath = isset($data['path']) ? Str::lower((string) $data['path']) : '';
-        $pathFqdn = $path . '.' . self::PARENT_DOMAIN;
-        if ($returnedPath !== '' && Str::endsWith($returnedPath, '.' . self::PARENT_DOMAIN)) {
+        $pathFqdn = $path.'.'.self::PARENT_DOMAIN;
+        if ($returnedPath !== '' && Str::endsWith($returnedPath, '.'.self::PARENT_DOMAIN)) {
             $pathFqdn = $returnedPath;
         } elseif ($returnedPath === $path) {
-            $pathFqdn = $path . '.' . self::PARENT_DOMAIN;
+            $pathFqdn = $path.'.'.self::PARENT_DOMAIN;
         }
 
         $validUntil = null;

@@ -31,6 +31,24 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | WordPress migrator plugin release
+    |--------------------------------------------------------------------------
+    |
+    | Tag archive downloaded once per migration task and repacked so the
+    | install zip root is wordpress-migrator/ (not the GitHub tag folder).
+    | The default follows the newest release; set the variable to a
+    | .../releases/download/<tag>/wordpress-migrator.zip URL to pin one.
+    |
+    */
+    'wordpress_migrator' => [
+        'release_url' => env(
+            'WORDPRESS_MIGRATOR_RELEASE_URL',
+            'https://github.com/panelalpha/panelalpha-wordpress-migrator/releases/latest/download/wordpress-migrator.zip',
+        ),
+    ],
+
     // Who may redeem a phpMyAdmin SSO token (PmaSso): comma-separated
     // hostnames, addresses or CIDR ranges. `172.16.0.0/12` restores the old
     // "any private address" rule for a topology this default does not fit.

@@ -14,7 +14,17 @@ class Php
 
     public function __construct(
         private EngineSystem $system,
-    ) {
+    ) {}
+
+    /** The first version the host template lists, or null when it lists none. */
+    public function defaultPhpVersion(): ?string
+    {
+        $versions = $this->listAvailablePhpVersions();
+        if ($versions === []) {
+            return null;
+        }
+
+        return reset($versions);
     }
 
     /**
@@ -26,8 +36,8 @@ class Php
             return $this->availablePhpVersions;
         }
 
-        $versionsFile = $this->system->projectFilesTemplateDirPath() . '/php/versions-available';
-        if (!is_file($versionsFile)) {
+        $versionsFile = $this->system->projectFilesTemplateDirPath().'/php/versions-available';
+        if (! is_file($versionsFile)) {
             return [];
         }
         $versions = file($versionsFile, FILE_SKIP_EMPTY_LINES | FILE_IGNORE_NEW_LINES);
