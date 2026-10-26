@@ -151,6 +151,49 @@ class DindCopyVolumesTest extends TestCase
         $this->assertDirectoryExists($base . '/_data');
     }
 
+    public function test_restore_volume_backups_undoes_a_swap(): void
+    {
+        $this->mkdirVolumeData('bob', 'project_db', 'old');
+        $incoming = $this->homeRoot . '/bob/docker/volumes/project_db/_data.incoming';
+        mkdir($incoming, 0777, true);
+        file_put_contents($incoming . '/marker.txt', 'new');
+        $copyVolumes = $this->dindProject('bob')->app()->copyVolumes();
+        $copyVolumes->swapIncomingVolumes();
+
+        $copyVolumes->restoreVolumeBackups();
+
+        $base = $this->homeRoot . '/bob/docker/volumes/project_db';
+        $this->assertSame('old', file_get_contents($this->volumeDataPath('bob', 'project_db') . '/marker.txt'));
+        $this->assertDirectoryDoesNotExist($base . '/_data.pre-push');
+        $this->assertDirectoryDoesNotExist($base . '/_data.incoming');
+    }
+
+    public function test_restore_volume_backups_drops_data_that_was_only_staged(): void
+    {
+        $this->mkdirVolumeData('bob', 'project_db', 'live');
+        $base = $this->homeRoot . '/bob/docker/volumes/project_db';
+        mkdir($base . '/_data.incoming', 0777, true);
+
+        $this->dindProject('bob')->app()->copyVolumes()->restoreVolumeBackups();
+
+        $this->assertSame('live', file_get_contents($this->volumeDataPath('bob', 'project_db') . '/marker.txt'));
+        $this->assertDirectoryDoesNotExist($base . '/_data.incoming');
+    }
+
+    public function test_anonymous_volumes_are_neither_counted_nor_copied(): void
+    {
+        $this->mkdirVolumeData('alice', 'project_db', 'seed');
+        $this->mkdirVolumeData('alice', str_repeat('ab', 32), 'image volume');
+        $this->mkdirVolumeDir('bob', 'project_db');
+
+        $source = $this->dindProject('alice');
+        $copied = $this->dindProject('bob')->app()->copyVolumes()->copyVolumeDataFrom($this->homeRoot . '/alice');
+
+        $this->assertSame(1, $source->app()->copyVolumes()->countVolumeDataDirs());
+        $this->assertSame(1, $copied);
+        $this->assertSame('seed', file_get_contents($this->volumeDataPath('bob', 'project_db') . '/marker.txt'));
+    }
+
     public function test_prepare_volumes_failure_does_not_remove_project_compose(): void
     {
         $project = $this->dindProject('alice');

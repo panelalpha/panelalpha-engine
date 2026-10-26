@@ -2,11 +2,11 @@
 
 namespace App\System\Project\Dind\Strategy;
 
-use App\System\Project\Dind as DindProject;
 use App\Lib\Deploy\CacheManager\RailpackCache;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Platform\AppConfig\AppConfigDirectory;
 use App\Lib\Deploy\Platform\Strategies;
+use App\System\Project\Dind as DindProject;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -85,7 +85,7 @@ class RailpackStrategy
     private function accountScratchDir(?string $chown): string
     {
         $home = rtrim($this->dind->homeDirPath(), '/');
-        $scratch = $home . '/' . AppConfigDirectory::DIRNAME;
+        $scratch = $home.'/'.AppConfigDirectory::DIRNAME;
         $system = $this->dind->system();
 
         if ($system->directoryExists($scratch)) {
@@ -109,9 +109,34 @@ class RailpackStrategy
     private function tryBuild(string $projectDir, ?string $chown): bool
     {
         $username = $this->dind->userModel()->username;
+        $imageName = "panelalpha-{$username}-app:latest";
+        if (! $this->buildImage($projectDir, $chown, $imageName)) {
+            return false;
+        }
+
+        $port = $this->imagePort($imageName, $username);
+        $this->dind->composeWriter()->writeGeneratedCompose(
+            $projectDir,
+            DeployCompose::railpack($imageName, $port),
+            $chown
+        );
+
+        Log::info("Railpack build succeeded for {$username}; image={$imageName}, port={$port}.");
+        $this->dind->shell()->logger()?->ok('Application image built');
+
+        return true;
+    }
+
+    /**
+     * Build $projectDir into $imageName in this account. Also what a staging,
+     * clone or push uses to build the image a copied run file names, which
+     * only the source account had.
+     */
+    public function buildImage(string $projectDir, ?string $chown, string $imageName): bool
+    {
+        $username = $this->dind->userModel()->username;
         $system = $this->dind->system();
         $shell = $this->dind->shell();
-        $imageName = "panelalpha-{$username}-app:latest";
         $logger = $shell->logger();
 
         try {
@@ -145,14 +170,14 @@ class RailpackStrategy
         // context. Nothing else about the arrangement changes -- still in the
         // home, still reachable from the host.
         $scratch = $this->accountScratchDir($chown);
-        $planPath = $scratch . '/railpack-plan-tmp.json';
-        $buildScriptPath = $scratch . '/railpack-build-tmp.sh';
+        $planPath = $scratch.'/railpack-plan-tmp.json';
+        $buildScriptPath = $scratch.'/railpack-build-tmp.sh';
 
         $prepareScript =
-            '#!/bin/bash' . "\n" .
-            'set -e' . "\n" .
-            'cd ' . escapeshellarg($projectDir) . "\n" .
-            'railpack prepare . --plan-out ' . escapeshellarg($planPath) . "\n";
+            '#!/bin/bash'."\n".
+            'set -e'."\n".
+            'cd '.escapeshellarg($projectDir)."\n".
+            'railpack prepare . --plan-out '.escapeshellarg($planPath)."\n";
 
         try {
             $system->filesystem()->filePutContents($buildScriptPath, $prepareScript, $chown, '700');
@@ -168,17 +193,17 @@ class RailpackStrategy
                 RailpackCache::preloadImages((string) $planJson)
             );
             $buildScript =
-                '#!/bin/bash' . "\n" .
-                'set -e' . "\n" .
-                "cleanup() { rm -f " . escapeshellarg($planPath) . "; }" . "\n" .
-                'trap cleanup EXIT' . "\n" .
-                self::dockerConfigLine($this->dind->registryLogin()->configDir()) .
-                'cd ' . escapeshellarg($projectDir) . "\n" .
-                "timeout --foreground --kill-after=30 {$innerTimeout}" .
-                ' docker buildx build' .
-                ' --build-arg BUILDKIT_SYNTAX="' . RailpackCache::FRONTEND_IMAGE . '"' .
-                ' -f ' . escapeshellarg($planPath) .
-                ' --output ' . escapeshellarg("type=docker,name={$imageName}") .
+                '#!/bin/bash'."\n".
+                'set -e'."\n".
+                'cleanup() { rm -f '.escapeshellarg($planPath).'; }'."\n".
+                'trap cleanup EXIT'."\n".
+                self::dockerConfigLine($this->dind->registryLogin()->configDir()).
+                'cd '.escapeshellarg($projectDir)."\n".
+                "timeout --foreground --kill-after=30 {$innerTimeout}".
+                ' docker buildx build'.
+                ' --build-arg BUILDKIT_SYNTAX="'.RailpackCache::FRONTEND_IMAGE.'"'.
+                ' -f '.escapeshellarg($planPath).
+                ' --output '.escapeshellarg("type=docker,name={$imageName}").
                 ' . ';
 
             $system->filesystem()->filePutContents($buildScriptPath, $buildScript, $chown, '700');
@@ -196,16 +221,6 @@ class RailpackStrategy
             // threw), so no plan is left in the customer's home directory.
             $system->exec(['sudo', 'rm', '-f', $buildScriptPath, $planPath]);
         }
-
-        $port = $this->imagePort($imageName, $username);
-        $this->dind->composeWriter()->writeGeneratedCompose(
-            $projectDir,
-            DeployCompose::railpack($imageName, $port),
-            $chown
-        );
-
-        Log::info("Railpack build succeeded for {$username}; image={$imageName}, port={$port}.");
-        $logger?->ok('Application image built');
 
         return true;
     }
@@ -227,8 +242,6 @@ class RailpackStrategy
         return is_string($planJson) && $planJson !== '' ? $planJson : null;
     }
 
-
-
     private function imagePort(string $imageName, string $username): int
     {
         $port = self::DEFAULT_PORT;
@@ -237,7 +250,7 @@ class RailpackStrategy
                 ['docker', 'image', 'inspect', $imageName, '--format', '{{json .Config.ExposedPorts}}']
             );
             $exposedPorts = json_decode(trim($inspectJson), true);
-            if (is_array($exposedPorts) && !empty($exposedPorts)) {
+            if (is_array($exposedPorts) && ! empty($exposedPorts)) {
                 $detected = (int) explode('/', (string) array_key_first($exposedPorts))[0];
                 if ($detected > 0) {
                     $port = $detected;
@@ -256,6 +269,6 @@ class RailpackStrategy
     /** The build pulls the plan's images itself; with logins held, it reads them from there. */
     public static function dockerConfigLine(?string $configDir): string
     {
-        return $configDir === null ? '' : 'export DOCKER_CONFIG=' . escapeshellarg($configDir) . "\n";
+        return $configDir === null ? '' : 'export DOCKER_CONFIG='.escapeshellarg($configDir)."\n";
     }
 }

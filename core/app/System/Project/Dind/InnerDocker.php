@@ -2,12 +2,13 @@
 
 namespace App\System\Project\Dind;
 
+use App\Lib\Deploy\Engine\ContainerEngine;
+use App\Lib\Deploy\Engine\ImageStore;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\Inner\HostCommands;
 use App\System\Project\Dind\Inner\ImageSeeding;
 use App\System\Project\Dind\Inner\SharedBaseImages;
 use App\System\Project\Dind\Inner\StorageReclaim;
-use App\Lib\Deploy\Engine\ImageStore;
 
 /**
  * The Docker daemon running *inside* an account's dind container.
@@ -18,7 +19,7 @@ use App\Lib\Deploy\Engine\ImageStore;
  * account's disk quota at ~/docker, not the host's — from filling up.
  *
  * Every command issued comes from the account's container engine
- * ({@see \App\Lib\Deploy\Engine\ContainerEngine}) rather than being written
+ * ({@see ContainerEngine}) rather than being written
  * out here, so the policy — when to seed, when to reclaim, when to fall back
  * to the stock image — holds for whichever engine is configured.
  *
@@ -32,8 +33,11 @@ class InnerDocker
     private DindProject $project;
 
     private ?ImageSeeding $seeding = null;
+
     private ?SharedBaseImages $bases = null;
+
     private ?StorageReclaim $storage = null;
+
     private ?HostCommands $host = null;
 
     public function __construct(DindProject $project)
@@ -86,7 +90,7 @@ class InnerDocker
     }
 
     /**
-     * @param list<string> $images
+     * @param  list<string>  $images
      */
     public function preloadRailpackBaseImages(array $images): void
     {
@@ -96,6 +100,14 @@ class InnerDocker
     public function preloadComposeImages(string $composePath): void
     {
         $this->seeding()->preloadCompose($composePath);
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function missingComposeImages(string $composePath): array
+    {
+        return $this->seeding()->missingFrom($composePath);
     }
 
     public function ensureImage(string $image): void
@@ -120,9 +132,9 @@ class InnerDocker
     }
 
     /**
-     * @param list<string> $extras
-     * @param list<string> $packages
-     * @param list<string> $required
+     * @param  list<string>  $extras
+     * @param  list<string>  $packages
+     * @param  list<string>  $required
      * @return array{tag: ?string, baked: list<string>}
      */
     public function ensurePhpBaseImage(string $phpImage, array $extras = [], array $packages = [], array $required = []): array
@@ -131,7 +143,7 @@ class InnerDocker
     }
 
     /**
-     * @param list<string> $packages
+     * @param  list<string>  $packages
      */
     public function ensureRubyBaseImage(string $rubyImage, array $packages): ?string
     {
@@ -139,7 +151,7 @@ class InnerDocker
     }
 
     /**
-     * @param list<string> $packages
+     * @param  list<string>  $packages
      */
     public function ensurePythonBaseImage(string $pythonImage, array $packages): ?string
     {

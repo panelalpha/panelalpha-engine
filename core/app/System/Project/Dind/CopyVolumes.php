@@ -14,8 +14,7 @@ final class CopyVolumes
         private DindProject $project,
         private ContainerOperations $containers,
         private Paths $paths,
-    ) {
-    }
+    ) {}
 
     public function pauseForCopy(): void
     {
@@ -23,7 +22,7 @@ final class CopyVolumes
             $this->containers->projectAction('stop');
         } catch (\Throwable $e) {
             Log::warning('Could not stop inner app before copy', [
-                'username'  => $this->project->username(),
+                'username' => $this->project->username(),
                 'exception' => $e->getMessage(),
             ]);
         }
@@ -35,7 +34,7 @@ final class CopyVolumes
             $this->containers->projectAction('up');
         } catch (\Throwable $e) {
             Log::warning('Could not start inner app after copy', [
-                'username'  => $this->project->username(),
+                'username' => $this->project->username(),
                 'exception' => $e->getMessage(),
             ]);
         }
@@ -48,16 +47,16 @@ final class CopyVolumes
         try {
             $this->project->shell()->execAsUser($cmd, [], 600);
         } catch (\Throwable $e) {
-            throw new \RuntimeException('Failed to prepare volumes: ' . $e->getMessage(), 0, $e);
+            throw new \RuntimeException('Failed to prepare volumes: '.$e->getMessage(), 0, $e);
         }
     }
 
     public function copyVolumeDataFrom(string $sourceHomeDir): int
     {
-        $srcVolumes = rtrim($sourceHomeDir, '/') . '/docker/volumes';
-        $destVolumes = rtrim($this->project->homeDirPath(), '/') . '/docker/volumes';
+        $srcVolumes = rtrim($sourceHomeDir, '/').'/docker/volumes';
+        $destVolumes = rtrim($this->project->homeDirPath(), '/').'/docker/volumes';
 
-        if (!$this->pathIsDirectoryAsRoot($srcVolumes) || !$this->pathIsDirectoryAsRoot($destVolumes)) {
+        if (! $this->pathIsDirectoryAsRoot($srcVolumes) || ! $this->pathIsDirectoryAsRoot($destVolumes)) {
             return 0;
         }
 
@@ -65,21 +64,22 @@ final class CopyVolumes
         foreach ($this->listDockerVolumeEntriesAsRoot($srcVolumes) as $entry) {
             $srcData = "{$srcVolumes}/{$entry}/_data";
             $destData = "{$destVolumes}/{$entry}/_data";
-            if (!$this->pathIsDirectoryAsRoot($srcData)) {
+            if (! $this->pathIsDirectoryAsRoot($srcData)) {
                 continue;
             }
-            if (!$this->pathIsDirectoryAsRoot($destData)) {
+            if (! $this->pathIsDirectoryAsRoot($destData)) {
                 Log::warning('Skipping volume data copy; dest volume _data missing', [
                     'volume' => $entry,
-                    'dest'   => $destData,
+                    'dest' => $destData,
                 ]);
+
                 continue;
             }
             $this->runVolumeProcess(
                 [
                     'sudo', 'rsync', '-a', '--delete',
-                    rtrim($srcData, '/') . '/',
-                    rtrim($destData, '/') . '/',
+                    rtrim($srcData, '/').'/',
+                    rtrim($destData, '/').'/',
                 ],
                 "Failed to rsync volume data for '{$entry}'"
             );
@@ -91,10 +91,10 @@ final class CopyVolumes
 
     public function copyVolumeDataToIncoming(string $sourceHomeDir): int
     {
-        $srcVolumes = rtrim($sourceHomeDir, '/') . '/docker/volumes';
-        $destVolumes = rtrim($this->project->homeDirPath(), '/') . '/docker/volumes';
+        $srcVolumes = rtrim($sourceHomeDir, '/').'/docker/volumes';
+        $destVolumes = rtrim($this->project->homeDirPath(), '/').'/docker/volumes';
 
-        if (!$this->pathIsDirectoryAsRoot($srcVolumes) || !$this->pathIsDirectoryAsRoot($destVolumes)) {
+        if (! $this->pathIsDirectoryAsRoot($srcVolumes) || ! $this->pathIsDirectoryAsRoot($destVolumes)) {
             return 0;
         }
 
@@ -104,14 +104,15 @@ final class CopyVolumes
             $destVolumeDir = "{$destVolumes}/{$entry}";
             $destIncoming = "{$destVolumeDir}/_data.incoming";
 
-            if (!$this->pathIsDirectoryAsRoot($srcData)) {
+            if (! $this->pathIsDirectoryAsRoot($srcData)) {
                 continue;
             }
-            if (!$this->pathIsDirectoryAsRoot($destVolumeDir)) {
+            if (! $this->pathIsDirectoryAsRoot($destVolumeDir)) {
                 Log::warning('Skipping push volume data copy; dest volume missing', [
                     'volume' => $entry,
-                    'dest'   => $destVolumeDir,
+                    'dest' => $destVolumeDir,
                 ]);
+
                 continue;
             }
 
@@ -122,8 +123,8 @@ final class CopyVolumes
             $this->runVolumeProcess(
                 [
                     'sudo', 'rsync', '-a', '--delete',
-                    rtrim($srcData, '/') . '/',
-                    rtrim($destIncoming, '/') . '/',
+                    rtrim($srcData, '/').'/',
+                    rtrim($destIncoming, '/').'/',
                 ],
                 "Failed to rsync volume data for '{$entry}'"
             );
@@ -135,14 +136,14 @@ final class CopyVolumes
 
     public function swapIncomingVolumes(): void
     {
-        $destVolumes = rtrim($this->project->homeDirPath(), '/') . '/docker/volumes';
-        if (!$this->pathIsDirectoryAsRoot($destVolumes)) {
+        $destVolumes = rtrim($this->project->homeDirPath(), '/').'/docker/volumes';
+        if (! $this->pathIsDirectoryAsRoot($destVolumes)) {
             return;
         }
 
         foreach ($this->listDockerVolumeEntriesAsRoot($destVolumes) as $entry) {
             $incomingData = "{$destVolumes}/{$entry}/_data.incoming";
-            if (!$this->pathIsDirectoryAsRoot($incomingData)) {
+            if (! $this->pathIsDirectoryAsRoot($incomingData)) {
                 continue;
             }
 
@@ -162,10 +163,48 @@ final class CopyVolumes
         }
     }
 
+    /**
+     * Undo swapIncomingVolumes(): every volume whose data was moved aside gets
+     * it back, and data that was only staged is dropped.
+     */
+    public function restoreVolumeBackups(): void
+    {
+        $destVolumes = rtrim($this->project->homeDirPath(), '/').'/docker/volumes';
+        if (! $this->pathIsDirectoryAsRoot($destVolumes)) {
+            return;
+        }
+
+        foreach ($this->listDockerVolumeEntriesAsRoot($destVolumes) as $entry) {
+            $this->restoreVolumeBackup("{$destVolumes}/{$entry}", $entry);
+        }
+    }
+
+    private function restoreVolumeBackup(string $volumeDir, string $entry): void
+    {
+        $backupData = "{$volumeDir}/_data.pre-push";
+        if ($this->pathIsDirectoryAsRoot($backupData)) {
+            $this->runVolumeProcess(
+                ['sudo', 'rm', '-rf', "{$volumeDir}/_data"],
+                "Failed to remove pushed volume data for '{$entry}'"
+            );
+            $this->runVolumeProcess(
+                ['sudo', 'mv', $backupData, "{$volumeDir}/_data"],
+                "Failed to restore volume data for '{$entry}'"
+            );
+        }
+
+        if ($this->pathIsDirectoryAsRoot("{$volumeDir}/_data.incoming")) {
+            $this->runVolumeProcess(
+                ['sudo', 'rm', '-rf', "{$volumeDir}/_data.incoming"],
+                "Failed to remove staged volume data for '{$entry}'"
+            );
+        }
+    }
+
     public function discardVolumeBackups(): void
     {
-        $destVolumes = rtrim($this->project->homeDirPath(), '/') . '/docker/volumes';
-        if (!$this->pathIsDirectoryAsRoot($destVolumes)) {
+        $destVolumes = rtrim($this->project->homeDirPath(), '/').'/docker/volumes';
+        if (! $this->pathIsDirectoryAsRoot($destVolumes)) {
             return;
         }
 
@@ -184,8 +223,8 @@ final class CopyVolumes
 
     public function countVolumeDataDirs(): int
     {
-        $volumes = rtrim($this->project->homeDirPath(), '/') . '/docker/volumes';
-        if (!$this->pathIsDirectoryAsRoot($volumes)) {
+        $volumes = rtrim($this->project->homeDirPath(), '/').'/docker/volumes';
+        if (! $this->pathIsDirectoryAsRoot($volumes)) {
             return 0;
         }
 
@@ -201,36 +240,45 @@ final class CopyVolumes
     }
 
     /**
-     * @param list<string> $cmd
+     * @param  list<string>  $cmd
      */
     private function runVolumeProcess(array $cmd, string $message): void
     {
         $process = $this->project->system()->runProcess($cmd);
-        if (!$process->isSuccessful()) {
-            throw new \RuntimeException($message . ': ' . trim($process->getErrorOutput() ?: $process->getOutput()));
+        if (! $process->isSuccessful()) {
+            throw new \RuntimeException($message.': '.trim($process->getErrorOutput() ?: $process->getOutput()));
         }
     }
 
     /**
+     * The named volumes under the account's docker/volumes. Anonymous volumes
+     * (64 hex characters) are left out: an image's own VOLUME the compose file
+     * never names, which a copy has nowhere to put and the image recreates.
+     *
      * @return list<string>
      */
     private function listDockerVolumeEntriesAsRoot(string $volumesDir): array
     {
         $process = $this->project->system()->runProcess(['sudo', 'ls', '-1', $volumesDir]);
-        if (!$process->isSuccessful()) {
+        if (! $process->isSuccessful()) {
             return [];
         }
 
         $entries = [];
         foreach (preg_split('/\R/', trim($process->getOutput())) ?: [] as $entry) {
             $entry = trim($entry);
-            if ($entry === '' || $entry === 'metadata.db') {
+            if ($entry === '' || $entry === 'metadata.db' || self::isAnonymousVolume($entry)) {
                 continue;
             }
             $entries[] = $entry;
         }
 
         return $entries;
+    }
+
+    private static function isAnonymousVolume(string $entry): bool
+    {
+        return preg_match('/^[0-9a-f]{64}$/', $entry) === 1;
     }
 
     private function pathIsDirectoryAsRoot(string $path): bool

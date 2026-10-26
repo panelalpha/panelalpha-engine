@@ -3,6 +3,7 @@
 namespace App\System\Project\Dind;
 
 use App\Lib\Deploy\Dind\TenantNetwork;
+use App\Lib\Deploy\Platform\Runtime\Php\DatabaseSettings;
 use App\Models\MysqlDatabase;
 use App\Models\MysqlUser;
 use App\Models\User;
@@ -47,7 +48,7 @@ final class AppDatabase
     private const FALLBACK_HOST = 'database-users.shared-hosting.palocal';
 
     /**
-     * Credentials in the shape {@see \App\Lib\Deploy\Platform\Runtime\Php\DatabaseSettings}
+     * Credentials in the shape {@see DatabaseSettings}
      * reads, so the generated compose and the app's environment are written
      * by the code that already does that for Laravel.
      *
@@ -55,7 +56,7 @@ final class AppDatabase
      */
     public static function provision(User $user, ?Mysql $mysql = null): array
     {
-        $mysql ??= new Mysql();
+        $mysql ??= new Mysql;
         $name = self::nameFor($user);
         $password = self::password($user);
 
@@ -63,6 +64,38 @@ final class AppDatabase
         self::ensureUser($mysql, $user, $name, $password);
         $mysql->privileges()->updatePrivileges($name, $name, 'ALL PRIVILEGES');
 
+        return self::credentials($name, $password);
+    }
+
+    /**
+     * Whether the deploy gave $user its application database: the row
+     * {@see ensureDatabase()} writes is what the panel lists and the teardown
+     * walks, so it is the record of one.
+     */
+    public static function isOwnedBy(User $user): bool
+    {
+        return $user->mysqlDatabases()->getQuery()->where('database', self::nameFor($user))->exists();
+    }
+
+    /**
+     * The credentials {@see provision()} handed $user's application, read
+     * without touching the server: null when no password is stored or it
+     * cannot be decoded.
+     *
+     * @return array{connection: string, host: string, port: string, database: string, username: string, password: string}|null
+     */
+    public static function credentialsOf(User $user): ?array
+    {
+        $stored = $user->getDetails()[self::PASSWORD_DETAIL] ?? null;
+
+        return is_string($stored) && $stored !== '' ? self::credentials(self::nameFor($user), $stored) : null;
+    }
+
+    /**
+     * @return array{connection: string, host: string, port: string, database: string, username: string, password: string}
+     */
+    private static function credentials(string $name, string $password): array
+    {
         return [
             'connection' => 'mysql',
             'host' => self::hostname(),
@@ -108,7 +141,7 @@ final class AppDatabase
         }
         $name = preg_quote(self::hostname(), '/');
 
-        return (string) preg_replace('/(?<=' . $name . ':)\d{1,3}(?:\.\d{1,3}){3}\b/', $address, $yaml);
+        return (string) preg_replace('/(?<='.$name.':)\d{1,3}(?:\.\d{1,3}){3}\b/', $address, $yaml);
     }
 
     /**
@@ -128,7 +161,7 @@ final class AppDatabase
 
     public static function nameFor(User $user): string
     {
-        return $user->getMysqlPrefix() . self::SUFFIX;
+        return $user->getMysqlPrefix().self::SUFFIX;
     }
 
     public static function hostname(): string
@@ -157,8 +190,8 @@ final class AppDatabase
         if ($user->hasUnreadableSecret(self::PASSWORD_DETAIL)) {
             throw new \RuntimeException(
                 "The application database password stored for '{$user->username}' cannot be decoded. "
-                    . 'It is kept, and deploys stop until it can be decoded again: a new password would lock the '
-                    . 'application out of its own database.'
+                    .'It is kept, and deploys stop until it can be decoded again: a new password would lock the '
+                    .'application out of its own database.'
             );
         }
 
@@ -171,13 +204,13 @@ final class AppDatabase
 
     private static function ensureDatabase(Mysql $mysql, User $user, string $name): void
     {
-        if (!$mysql->databases()->databaseExists($name)) {
+        if (! $mysql->databases()->databaseExists($name)) {
             $mysql->databases()->createDatabase($name);
         }
         // The row is what the panel lists and what the account's teardown
         // walks, so a database on the server without one is invisible and
         // outlives the account that owns it.
-        if (!$user->mysqlDatabases()->getQuery()->where('database', $name)->exists()) {
+        if (! $user->mysqlDatabases()->getQuery()->where('database', $name)->exists()) {
             MysqlDatabase::create(['user_id' => $user->id, 'database' => $name]);
         }
     }
@@ -194,7 +227,7 @@ final class AppDatabase
         } else {
             $mysql->users()->createUser($name, $password);
         }
-        if (!$user->mysqlUsers()->getQuery()->where('user', $name)->exists()) {
+        if (! $user->mysqlUsers()->getQuery()->where('user', $name)->exists()) {
             MysqlUser::create(['user_id' => $user->id, 'user' => $name]);
         }
     }

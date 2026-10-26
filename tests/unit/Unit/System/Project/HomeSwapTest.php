@@ -79,6 +79,50 @@ class HomeSwapTest extends TestCase
         ], $this->commands());
     }
 
+    public function test_undo_moves_back_only_what_a_half_finished_swap_moved(): void
+    {
+        $system = $this->recordingSystem(
+            [
+                '/home/alice' => "project\npublic_html\n",
+                '/home/alice/.incoming' => "project\n",
+            ],
+            failingCommand: 'mv',
+            failureMessage: 'No space left',
+            failAfter: 1,
+        );
+        $swap = new HomeSwap($system, '/home/alice', 60);
+        try {
+            $swap->swap('/home/alice/.incoming', '/home/alice/.pre-push', ['.incoming', '.pre-push'], 'push swap');
+        } catch (\RuntimeException) {
+        }
+        $this->recorded = [];
+
+        $swap->undo('/home/alice/.incoming', '/home/alice/.pre-push', 'push');
+
+        $this->assertTrue($swap->hasStarted());
+        $this->assertSame(['sudo mv /home/alice/.pre-push/project /home/alice/'], $this->commands());
+    }
+
+    public function test_undo_after_a_whole_swap_moves_the_incoming_out_and_the_aside_back(): void
+    {
+        $system = $this->recordingSystem([
+            '/home/alice' => "project\n",
+            '/home/alice/.incoming' => "project\n.htaccess\n",
+        ]);
+        $swap = new HomeSwap($system, '/home/alice', 60);
+        $swap->swap('/home/alice/.incoming', '/home/alice/.pre-push', ['.incoming', '.pre-push'], 'push swap');
+        $this->recorded = [];
+
+        $swap->undo('/home/alice/.incoming', '/home/alice/.pre-push', 'push');
+
+        $this->assertSame([
+            'sudo mkdir -p /home/alice/.incoming',
+            'sudo mv /home/alice/project /home/alice/.incoming/',
+            'sudo mv /home/alice/.htaccess /home/alice/.incoming/',
+            'sudo mv /home/alice/.pre-push/project /home/alice/',
+        ], $this->commands());
+    }
+
     /**
      * @return list<string>
      */
@@ -97,12 +141,15 @@ class HomeSwapTest extends TestCase
         array $listOutputs,
         ?string $failingCommand = null,
         string $failureMessage = '',
+        ?int $failAfter = null,
     ): System {
         $this->recorded = [];
 
-        return new class ($this->recorded, $listOutputs, $failingCommand, $failureMessage) extends System {
+        return new class ($this->recorded, $listOutputs, $failingCommand, $failureMessage, $failAfter) extends System {
             /** @var list<array{argv: list<string>, successful: bool, output: string}> */
             private array $recorded;
+
+            private int $matched = 0;
 
             /**
              * @param list<array{argv: list<string>, successful: bool, output: string}> $recorded
@@ -113,6 +160,7 @@ class HomeSwapTest extends TestCase
                 private array $listOutputs,
                 private ?string $failingCommand,
                 private string $failureMessage,
+                private ?int $failAfter,
             ) {
                 $this->recorded = &$recorded;
             }
@@ -124,7 +172,7 @@ class HomeSwapTest extends TestCase
                 if (($argv[1] ?? null) === 'ls') {
                     $output = $this->listOutputs[$argv[3] ?? ''] ?? '';
                 }
-                $fails = $this->failingCommand !== null && in_array($this->failingCommand, $argv, true);
+                $fails = $this->fails($argv);
                 $this->recorded[] = ['argv' => $argv, 'successful' => !$fails, 'output' => $output];
 
                 return new class ($fails, $output, $this->failureMessage) extends Process {
@@ -148,6 +196,16 @@ class HomeSwapTest extends TestCase
                         return $this->fails ? $this->message : '';
                     }
                 };
+            }
+
+            /** @param list<string> $argv */
+            private function fails(array $argv): bool
+            {
+                if ($this->failingCommand === null || !in_array($this->failingCommand, $argv, true)) {
+                    return false;
+                }
+
+                return $this->failAfter === null || ++$this->matched === $this->failAfter + 1;
             }
         };
     }

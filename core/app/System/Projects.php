@@ -4,14 +4,20 @@ namespace App\System;
 
 use App\Exceptions\ProblemException;
 use App\Exceptions\RollbackIncompleteException;
+use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\DetectAppPort;
 use App\Models\Domain as DomainModel;
 use App\Models\MysqlDatabase;
 use App\Models\User as ModelsUser;
 use App\System as EngineSystem;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AppDatabase;
+use App\System\Project\Dind\AppDatabaseCopy;
 use App\System\Project\Dind\Paths;
 use App\System\Project\HomeSwap;
+use App\System\Project\PhpHosting\WordPress\ContainerSiteCopy;
+use App\System\Project\PhpHosting\WordPress\KeptSite;
+use App\System\Project\PhpHosting\WordPress\SiteCopy;
 use App\System\Services\Mysql;
 use App\System\Services\Mysql\DatabaseCopier;
 use App\System\Services\Mysql\DatabaseCopyResult;
@@ -24,10 +30,11 @@ class Projects
 {
     private const int PROCESS_TIMEOUT_SECONDS = 86400;
 
+    private const array PUSH_SWAP_SKIP_ENTRIES = ['docker', '.incoming', '.pre-push', '.pre-push-db'];
+
     public function __construct(
         protected EngineSystem $system,
-    ) {
-    }
+    ) {}
 
     public function clone(string $sourceUsername, string $targetUsername, bool $copyDatabases = true): void
     {
@@ -49,7 +56,7 @@ class Projects
     }
 
     /**
-     * @param list<array{database: string, name: string}>|null $tables
+     * @param  list<array{database: string, name: string}>|null  $tables
      */
     public function pushToApp(
         string $sourceUsername,
@@ -69,14 +76,17 @@ class Projects
         $toProject = $this->system->project($to);
         $fromHome = rtrim($fromProject->homeDirPath(), '/');
         $toHome = rtrim($toProject->homeDirPath(), '/');
-        $incomingDir = $toHome . '/.incoming';
-        $prePushDir = $toHome . '/.pre-push';
-        $rollbackDir = $toHome . '/.pre-push-db';
+        $incomingDir = $toHome.'/.incoming';
+        $prePushDir = $toHome.'/.pre-push';
+        $rollbackDir = $toHome.'/.pre-push-db';
         $isDindDest = self::isDind($to);
         $rollbacks = [];
         $createdDatabases = [];
         $tableReplacement = null;
-        $result = new DatabaseCopyResult();
+        $homeSwap = $this->homeSwap($toHome);
+        $volumesSwapStarted = false;
+        $filesCommitted = false;
+        $result = new DatabaseCopyResult;
         $keptRollbacks = $this->pathExistsAsRoot($rollbackDir) || $this->pathIsSymlinkAsRoot($rollbackDir);
 
         try {
@@ -89,7 +99,7 @@ class Projects
             if ($keptRollbacks) {
                 throw new \RuntimeException(
                     'A previous push left the target\'s database rollback dumps in .pre-push-db; '
-                    . 'restore or remove them before pushing again.'
+                    .'restore or remove them before pushing again.'
                 );
             }
 
@@ -104,10 +114,17 @@ class Projects
                 $this->assertPushDiskSpace($fromProject, $fromHome, $toHome, $isDindDest);
             }
 
+            $keptSite = $this->keptWordPress($from, $to, $isDindDest);
+            $containerHosts = $isDindDest && $files && $databases ? $this->containerSiteCopy()->sourceHosts($from) : [];
+
             $this->pauseAppForCopy($fromProject);
             $this->pauseAppForCopy($toProject);
 
-            if ($databases && !$isDindDest) {
+            if ($databases && $isDindDest) {
+                $result = $this->pushAppDatabase($from, $to, $rollbackDir, $rollbacks, $createdDatabases);
+            }
+
+            if ($databases && ! $isDindDest) {
                 if ($tables === null || $tables === []) {
                     $result = $this->pushDatabases($from, $to, $rollbackDir, $rollbacks, $createdDatabases);
                 } else {
@@ -123,37 +140,135 @@ class Projects
                     'Failed to create .incoming directory'
                 );
                 $this->rsyncHomeIntoIncoming($fromHome, $incomingDir, $isDindDest);
-                if (!$isDindDest) {
+                $toProject->handStagedHomeToAccount($incomingDir);
+                if ($isDindDest) {
+                    $this->keepTargetRunFileValues($from, $to, $toProject, $incomingDir);
+                    $toProject->provideCopiedImages(self::incomingRunFile($incomingDir));
+                } else {
                     $this->rebaseIncomingDocumentRoot($from, $to, $incomingDir);
                 }
                 $this->copyVolumesToIncoming($fromProject, $toProject, $incomingDir, $isDindDest && $databases);
-                $this->swapIncomingHome($toHome, $incomingDir, $prePushDir);
+                $homeSwap->swap($incomingDir, $prePushDir, self::PUSH_SWAP_SKIP_ENTRIES, 'push swap');
+                $volumesSwapStarted = true;
                 $toProject->copyVolumesForClone()?->swapIncomingVolumes();
                 $toProject->fixPermissions();
+                if ($keptSite !== null) {
+                    $this->keepTargetConfig($to, $keptSite, $toHome, $prePushDir);
+                }
+            }
+
+            if ($keptSite !== null && $databases) {
+                $this->siteCopy()->afterPushedDatabase($to, $keptSite, self::tablesOnTarget($tableReplacement, $tables));
             }
 
             $this->startTargetAfterPush($to, $toProject);
 
             $this->resumeBoth($fromProject, $toProject);
+            $this->pointContainerWordPressAtItself($to, $containerHosts);
 
+            $filesCommitted = true;
             $this->cleanupPushSuccess($prePushDir, $incomingDir, $rollbackDir);
             $toProject->copyVolumesForClone()?->discardVolumeBackups();
             $this->markPushCompleted($to);
 
             return $result;
         } catch (\Throwable $e) {
+            $restoreFiles = ! $filesCommitted && ($homeSwap->hasStarted() || $volumesSwapStarted);
             $unrestored = [
+                ...($restoreFiles
+                    ? $this->restorePushedFiles($toProject, $homeSwap, $incomingDir, $prePushDir, $volumesSwapStarted)
+                    : []),
                 ...$this->restorePushTables($e, $tableReplacement),
                 ...$this->restorePushDatabases($rollbacks, $createdDatabases, $to),
+                ...($restoreFiles ? $this->restartTargetAfterRollback($to, $toProject) : []),
             ];
             $this->cleanupIncomingDir($incomingDir);
             $this->resumeBoth($fromProject, $toProject);
-            if ($unrestored === [] && !$keptRollbacks) {
+            if ($unrestored === [] && ! $keptRollbacks) {
                 $this->cleanupPath($rollbackDir);
             }
 
             throw $this->failPush($to, $e, $unrestored, $rollbackDir);
         }
+    }
+
+    /**
+     * Put the target's previous home back from .pre-push, and its volumes from
+     * their _data.pre-push copies, after a push swapped some of them. The aside
+     * is removed only once the home is back; a failed file rollback keeps it and
+     * names it, so the target can be restored by hand.
+     *
+     * @return list<string> every step that could not be undone
+     */
+    private function restorePushedFiles(
+        Project $toProject,
+        HomeSwap $homeSwap,
+        string $incomingDir,
+        string $prePushDir,
+        bool $volumesSwapStarted,
+    ): array {
+        try {
+            if ($volumesSwapStarted) {
+                $toProject->copyVolumesForClone()?->restoreVolumeBackups();
+            }
+            $homeSwap->undo($incomingDir, $prePushDir, 'push');
+            $this->cleanupPath($prePushDir);
+            $toProject->fixPermissions();
+        } catch (\Throwable $rollbackError) {
+            Log::error('Push file rollback failed', [
+                'pre_push' => $prePushDir,
+                'exception' => $rollbackError->getMessage(),
+            ]);
+
+            return ["restoring the files (the previous home is kept in {$prePushDir})"];
+        }
+
+        return [];
+    }
+
+    /**
+     * Start the target again on its restored files.
+     *
+     * @return list<string> every step that could not be undone
+     */
+    private function restartTargetAfterRollback(ModelsUser $to, Project $toProject): array
+    {
+        try {
+            $this->startTargetAfterPush($to, $toProject);
+        } catch (\Throwable $startError) {
+            Log::error('Starting the target after a push rollback failed', [
+                'username' => $to->username,
+                'exception' => $startError->getMessage(),
+            ]);
+
+            return ['starting the target again'];
+        }
+
+        return [];
+    }
+
+    /**
+    /**
+     * The pushed tables under the target's database names, or null when whole
+     * databases were pushed.
+     *
+     * @param  list<array{database: string, name: string}>|null  $tables
+     * @return list<array{database: string, name: string}>|null
+     */
+    private static function tablesOnTarget(?TableReplacement $replacement, ?array $tables): ?array
+    {
+        if ($replacement === null || $tables === null) {
+            return null;
+        }
+        $databases = $replacement->result->databases;
+
+        return array_map(
+            static fn (array $table): array => [
+                'database' => $databases[$table['database']] ?? $table['database'],
+                'name' => $table['name'],
+            ],
+            $tables,
+        );
     }
 
     /**
@@ -172,13 +287,13 @@ class Projects
      * A push whose rollback failed keeps its dumps, and its error says where
      * they are and what was not restored, so the target can be restored by hand.
      *
-     * @param list<string> $unrestored
+     * @param  list<string>  $unrestored
      */
     private function failPush(ModelsUser $to, \Throwable $e, array $unrestored, string $rollbackDir): \RuntimeException
     {
         if ($unrestored !== []) {
-            $error = $e->getMessage() . ' The target was not fully restored (failed: ' . implode(', ', $unrestored)
-                . "); its rollback dumps are kept in {$rollbackDir}.";
+            $error = $e->getMessage().' The target was not fully restored (failed: '.implode(', ', $unrestored)
+                .')'.($this->pathExistsAsRoot($rollbackDir) ? "; its rollback dumps are kept in {$rollbackDir}." : '.');
             $this->markPushFailed($to, $error);
 
             return new \RuntimeException($error, 0, $e);
@@ -199,8 +314,8 @@ class Projects
      * database the target does not own is created without the source's grants
      * and recorded as a warning.
      *
-     * @param array<string, string> $rollbacks destination database => rollback dump
-     * @param list<string>          $created
+     * @param  array<string, string>  $rollbacks  destination database => rollback dump
+     * @param  list<string>  $created
      */
     private function pushDatabases(
         ModelsUser $from,
@@ -216,7 +331,7 @@ class Projects
         $owned = $to->mysqlDatabases()->pluck('database')->all();
 
         if ($from->mysqlDatabases->isEmpty()) {
-            return new DatabaseCopyResult();
+            return new DatabaseCopyResult;
         }
 
         $this->prepareRollbackDir($rollbackDir);
@@ -242,8 +357,8 @@ class Projects
     }
 
     /**
-     * @param array<string, string> $rollbacks
-     * @param list<string>          $created
+     * @param  array<string, string>  $rollbacks
+     * @param  list<string>  $created
      * @return list<string> every step that could not be undone
      */
     private function restorePushDatabases(array $rollbacks, array $created, ModelsUser $to): array
@@ -255,7 +370,7 @@ class Projects
                 $mysql->restoreFromGzip($database, $dump);
             } catch (\Throwable $e) {
                 $failures[] = "restoring database '{$database}'";
-                Log::warning("Push rollback failed for database '{$database}': " . $e->getMessage());
+                Log::warning("Push rollback failed for database '{$database}': ".$e->getMessage());
             }
         }
 
@@ -267,7 +382,7 @@ class Projects
                 $to->mysqlDatabases()->where('database', $database)->delete();
             } catch (\Throwable $e) {
                 $failures[] = "dropping created database '{$database}'";
-                Log::warning("Push cleanup failed for database '{$database}': " . $e->getMessage());
+                Log::warning("Push cleanup failed for database '{$database}': ".$e->getMessage());
             }
         }
 
@@ -279,7 +394,7 @@ class Projects
         if (($to->hasGitProject() || $to->getTemplate() === 'dind') && $toProject->hasUserApp()) {
             $start = $toProject->startUserApp();
             if (($start['exit_code'] ?? 1) !== 0) {
-                $output = trim(($start['stderr'] ?? '') . ' ' . ($start['stdout'] ?? ''));
+                $output = trim(($start['stderr'] ?? '').' '.($start['stdout'] ?? ''));
                 throw new \RuntimeException(
                     $output !== '' ? $output : 'Failed to start target application after push.'
                 );
@@ -302,8 +417,8 @@ class Projects
         if ($isDindDest) {
             $cmd[] = '--exclude=docker/';
         }
-        $cmd[] = rtrim($fromHome, '/') . '/';
-        $cmd[] = rtrim($incomingDir, '/') . '/';
+        $cmd[] = rtrim($fromHome, '/').'/';
+        $cmd[] = rtrim($incomingDir, '/').'/';
 
         $this->runPushProcess($cmd, 'Failed to rsync source home into .incoming');
     }
@@ -314,11 +429,11 @@ class Projects
         string $incomingDir,
         bool $copyVolumes,
     ): void {
-        if (!$copyVolumes) {
+        if (! $copyVolumes) {
             return;
         }
 
-        $incomingProject = rtrim($incomingDir, '/') . '/project';
+        $incomingProject = rtrim($incomingDir, '/').'/project';
         $this->prepareVolumes($toProject, $incomingProject);
 
         $sourceVolumeDataCount = $this->countVolumeDataDirs($fromProject);
@@ -339,13 +454,13 @@ class Projects
 
     private function rebaseIncomingDocumentRoot(ModelsUser $from, ModelsUser $to, string $incomingDir): void
     {
-        if (!str_starts_with(self::sourceDocumentRoot($from), "/{$from->domain}/")) {
+        if (! str_starts_with(self::sourceDocumentRoot($from), "/{$from->domain}/")) {
             return;
         }
 
         $this->moveAccountDirectory(
-            rtrim($incomingDir, '/') . '/' . $from->domain,
-            rtrim($incomingDir, '/') . '/' . $to->domain,
+            rtrim($incomingDir, '/').'/'.$from->domain,
+            rtrim($incomingDir, '/').'/'.$to->domain,
         );
     }
 
@@ -360,7 +475,7 @@ class Projects
 
         if ($rebased !== $sourceRoot) {
             $home = rtrim($destProject->homeDirPath(), '/');
-            $this->moveAccountDirectory($home . '/' . $source->domain, $home . '/' . $dest->domain);
+            $this->moveAccountDirectory($home.'/'.$source->domain, $home.'/'.$dest->domain);
             $destProject->fixPermissions();
         }
 
@@ -376,11 +491,11 @@ class Projects
     public static function rebasedDocumentRoot(string $documentRoot, string $sourceDomain, string $destDomain): string
     {
         $prefix = "/{$sourceDomain}/";
-        if (!str_starts_with($documentRoot, $prefix)) {
+        if (! str_starts_with($documentRoot, $prefix)) {
             return $documentRoot;
         }
 
-        return "/{$destDomain}/" . substr($documentRoot, strlen($prefix));
+        return "/{$destDomain}/".substr($documentRoot, strlen($prefix));
     }
 
     /**
@@ -390,11 +505,11 @@ class Projects
      */
     public function moveAccountDirectory(string $from, string $to): void
     {
-        if (!$this->pathExistsAsRoot($from) && !$this->pathIsSymlinkAsRoot($from)) {
+        if (! $this->pathExistsAsRoot($from) && ! $this->pathIsSymlinkAsRoot($from)) {
             return;
         }
 
-        if ($this->pathIsSymlinkAsRoot($from) || !$this->pathIsDirectoryAsRoot($from)) {
+        if ($this->pathIsSymlinkAsRoot($from) || ! $this->pathIsDirectoryAsRoot($from)) {
             throw new \RuntimeException("Refusing to move '{$from}': it is not a directory.");
         }
 
@@ -410,9 +525,131 @@ class Projects
         return $user->hasGitProject() || $user->getTemplate() === 'dind';
     }
 
+    /**
+     * The target keeps its own wp-config.php, with its database and salts, over
+     * the pushed one. Copied as the target account, so a link in either tree
+     * reaches nothing the account could not.
+     */
+    private function keepTargetConfig(ModelsUser $to, KeptSite $kept, string $toHome, string $prePushDir): void
+    {
+        if (! str_starts_with($kept->configPath, $toHome.'/')) {
+            throw new \RuntimeException("The target's wp-config.php is outside its home: {$kept->configPath}");
+        }
+        $relative = substr($kept->configPath, strlen($toHome) + 1);
+
+        $this->runPushProcess(
+            [
+                'sudo', 'setpriv', '--reuid', (string) $to->getUid(), '--regid', (string) $to->getGid(), '--clear-groups',
+                'cp', '-P', '--remove-destination', $prePushDir.'/'.$relative, $kept->configPath,
+            ],
+            "Failed to keep the target's wp-config.php",
+        );
+    }
+
+    private function keptWordPress(ModelsUser $from, ModelsUser $to, bool $isDindDest): ?KeptSite
+    {
+        $targetConfig = $isDindDest ? null : $this->wordPressConfig($to);
+        if ($targetConfig === null || $this->wordPressConfig($from) === null) {
+            return null;
+        }
+
+        return $this->siteCopy()->beforePush($from, $to, $targetConfig);
+    }
+
+    /**
+     * The wp-config.php of a WordPress at the project's main domain: in its
+     * document root, or the directory above, where WordPress also looks.
+     */
+    private function wordPressConfig(ModelsUser $user): ?string
+    {
+        $domain = $user->getMainDomain();
+        if ($domain === null) {
+            return null;
+        }
+        $home = rtrim($this->system->project($user)->homeDirPath(), '/');
+        $documentRoot = $home.$domain->getDocumentRoot();
+        foreach ([$documentRoot, dirname($documentRoot)] as $dir) {
+            if (str_starts_with($dir, $home.'/') && $this->pathExistsAsRoot($dir.'/wp-config.php')) {
+                return $dir.'/wp-config.php';
+            }
+        }
+
+        return null;
+    }
+
+    protected function siteCopy(): SiteCopy
+    {
+        return new SiteCopy;
+    }
+
+    protected function containerSiteCopy(): ContainerSiteCopy
+    {
+        return new ContainerSiteCopy;
+    }
+
+    /**
+     * A copied or pushed WordPress in the project's own containers answers as
+     * its own domain. One on a database another project owns is left as it is.
+     *
+     * @param  list<string>  $sourceHosts  none when the source ran no WordPress
+     */
+    private function pointContainerWordPressAtItself(ModelsUser $copy, array $sourceHosts): void
+    {
+        if ($sourceHosts === [] || $this->containerSiteCopy()->pointCopyAtItself($copy, $sourceHosts)) {
+            return;
+        }
+        Log::warning(
+            "WordPress in '{$copy->username}' uses a database another project owns; its addresses were not rewritten.",
+        );
+    }
+
     private function databaseCopier(): DatabaseCopier
     {
         return new DatabaseCopier($this->system->mysql());
+    }
+
+    private function appDatabaseCopy(): AppDatabaseCopy
+    {
+        return new AppDatabaseCopy($this->system->mysql());
+    }
+
+    /**
+     * A container target's application database, replaced with the source's
+     * under the same rollback dump a classic push takes.
+     *
+     * @param  array<string, string>  $rollbacks  destination database => rollback dump
+     * @param  list<string>  $created
+     */
+    private function pushAppDatabase(
+        ModelsUser $from,
+        ModelsUser $to,
+        string $rollbackDir,
+        array &$rollbacks,
+        array &$created,
+    ): DatabaseCopyResult {
+        if (! AppDatabase::isOwnedBy($from)) {
+            return new DatabaseCopyResult;
+        }
+        $this->prepareRollbackDir($rollbackDir);
+
+        return $this->appDatabaseCopy()->intoTarget($from, $to, $rollbackDir, $rollbacks, $created);
+    }
+
+    /**
+     * The pushed run file carries the source's database and address; the target
+     * keeps its own, as a classic target keeps its wp-config.php.
+     */
+    private function keepTargetRunFileValues(ModelsUser $from, ModelsUser $to, Project $toProject, string $incomingDir): void
+    {
+        if (AppDatabase::isOwnedBy($from)) {
+            $this->appDatabaseCopy()->ensureTargetHasOne($to);
+        }
+        $toProject->repointCopiedRunFile($from, self::incomingRunFile($incomingDir));
+    }
+
+    private static function incomingRunFile(string $incomingDir): string
+    {
+        return rtrim($incomingDir, '/').'/project/'.EngineArtifacts::RUN_COMPOSE;
     }
 
     private function pathIsSymlinkAsRoot(string $path): bool
@@ -422,7 +659,7 @@ class Projects
 
     private function cleanupPath(string $path): void
     {
-        if (!$this->pathExistsAsRoot($path) && !$this->pathIsSymlinkAsRoot($path)) {
+        if (! $this->pathExistsAsRoot($path) && ! $this->pathIsSymlinkAsRoot($path)) {
             return;
         }
 
@@ -472,12 +709,14 @@ class Projects
     ): ?DatabaseCopyResult {
         $sourceProject = $this->system->project($source);
         $destProject = $this->system->project($dest);
+        $isDindDest = self::isDind($dest);
+        $databaseResult = null;
         $srcPaused = false;
 
         try {
             self::assertSameTemplate($source, $dest);
             self::assertNotPending($source);
-            if (!$asStaging) {
+            if (! $asStaging) {
                 self::assertNotPending($dest);
             } else {
                 self::assertCanCopyIntoStaging($source, $dest);
@@ -498,6 +737,7 @@ class Projects
             $destProject->fixPermissions();
             $destProject->configureQuota();
             $destProject->waitForAllRunning();
+            $containerHosts = $copyDatabases && self::isDind($dest) ? $this->containerSiteCopy()->sourceHosts($source) : [];
 
             $this->pauseAppForCopy($sourceProject);
             $srcPaused = true;
@@ -505,6 +745,11 @@ class Projects
             try {
                 $destProject->copyHomeDirFrom($sourceProject);
                 $destProject->copyProjectConfigFrom($sourceProject);
+                if ($isDindDest) {
+                    $databaseResult = $this->appDatabaseCopy()->intoCopy($source, $dest, $copyDatabases);
+                    $destProject->repointCopiedRunFile($source);
+                    $destProject->provideCopiedImages();
+                }
                 if ($copyDatabases) {
                     $this->prepareVolumes($destProject);
                     $srcCount = $this->countVolumeDataDirs($sourceProject);
@@ -538,31 +783,32 @@ class Projects
             if ($domainModel === null) {
                 throw new \RuntimeException('Destination has no domain row.');
             }
-            $isDindDest = self::isDind($dest);
-            if (!$isDindDest) {
+            if (! $isDindDest) {
                 $this->rebaseDocumentRoot($destProject, $source, $dest, $domainModel);
             }
-            $databaseResult = null;
-            if ($copyDatabases && !$isDindDest) {
+            if ($copyDatabases && ! $isDindDest) {
                 $databaseResult = $this->databaseCopier()->copyProjectDatabases(
                     $source,
                     $dest,
-                    $log ?? static function (string $line): void {
-                    }
+                    $log ?? static function (string $line): void {}
                 );
             }
             $destProject->syncGeneratedProxyRules();
             $this->system->project($dest)->domain($domainModel)->create();
+            if (! $isDindDest && $this->wordPressConfig($dest) !== null) {
+                $this->siteCopy()->pointCopyAtItself($dest, $databaseResult);
+            }
 
             if (($dest->hasGitProject() || $dest->getTemplate() === 'dind') && $destProject->hasUserApp()) {
                 $result = $destProject->startUserApp();
                 if (($result['exit_code'] ?? 1) !== 0) {
-                    $output = trim(($result['stderr'] ?? '') . ' ' . ($result['stdout'] ?? ''));
+                    $output = trim(($result['stderr'] ?? '').' '.($result['stdout'] ?? ''));
                     throw new \RuntimeException(
                         $output !== '' ? $output : 'Failed to start application.'
                     );
                 }
             }
+            $this->pointContainerWordPressAtItself($dest, $containerHosts);
 
             $dest->markDeploySucceeded();
             $dest->setDetails(['error' => null]);
@@ -589,7 +835,7 @@ class Projects
     {
         try {
             $dest->setDetails([
-                'error'             => $e->getMessage(),
+                'error' => $e->getMessage(),
                 'deployment_status' => 'failed',
             ]);
             if ($asStaging) {
@@ -674,22 +920,22 @@ class Projects
         $problems = [];
         if ($source->status === 'pending') {
             $problems[] = [
-                'field'   => 'project',
-                'code'    => 'project_pending',
+                'field' => 'project',
+                'code' => 'project_pending',
                 'message' => "Project '{$source->username}' is pending.",
             ];
         }
         if ($source->isStaging()) {
             $problems[] = [
-                'field'   => 'project',
-                'code'    => 'project_is_staging',
+                'field' => 'project',
+                'code' => 'project_is_staging',
                 'message' => "Project '{$source->username}' is a staging project and cannot create staging.",
             ];
         }
         if ($source->exists && $source->stagingUser()->exists()) {
             $problems[] = [
-                'field'   => 'project',
-                'code'    => 'project_has_staging',
+                'field' => 'project',
+                'code' => 'project_has_staging',
                 'message' => 'Project already has a staging.',
             ];
         }
@@ -718,7 +964,7 @@ class Projects
      */
     private static function databaseNameProblems(ModelsUser $source, string $destPrefix, string $field): array
     {
-        if (!$source->exists) {
+        if (! $source->exists) {
             return [];
         }
 
@@ -728,16 +974,16 @@ class Projects
         foreach ($source->mysqlDatabases as $row) {
             $name = $row->database;
             $mapped = DatabaseCopier::mapName($name, $sourcePrefix, $destPrefix);
-            if (!Mysql::isValidDatabaseName($name)) {
+            if (! Mysql::isValidDatabaseName($name)) {
                 $problems[] = [
-                    'field'   => $field,
-                    'code'    => 'database_name_unsupported',
+                    'field' => $field,
+                    'code' => 'database_name_unsupported',
                     'message' => "Database '{$name}' is outside the name grammar the engine can copy.",
                 ];
             } elseif (strlen($mapped) > 64) {
                 $problems[] = [
-                    'field'   => $field,
-                    'code'    => 'database_name_too_long',
+                    'field' => $field,
+                    'code' => 'database_name_too_long',
                     'message' => "Database '{$name}' maps to '{$mapped}', longer than 64 characters.",
                 ];
             }
@@ -748,8 +994,8 @@ class Projects
             $mapped = DatabaseCopier::mapName($name, $sourcePrefix, $destPrefix);
             if (strlen($mapped) > 32) {
                 $problems[] = [
-                    'field'   => $field,
-                    'code'    => 'database_user_name_too_long',
+                    'field' => $field,
+                    'code' => 'database_user_name_too_long',
                     'message' => "MySQL user '{$name}' maps to '{$mapped}', longer than 32 characters.",
                 ];
             }
@@ -776,38 +1022,38 @@ class Projects
             $left = $from->getTemplate() ?? 'null';
             $right = $to->getTemplate() ?? 'null';
             $problems[] = [
-                'field'   => 'target',
-                'code'    => 'target_template_mismatch',
+                'field' => 'target',
+                'code' => 'target_template_mismatch',
                 'message' => "Projects '{$from->username}' ({$left}) and '{$to->username}' ({$right}) have different templates.",
             ];
         }
         if ($from->status === 'pending') {
             $problems[] = [
-                'field'   => 'project',
-                'code'    => 'project_pending',
+                'field' => 'project',
+                'code' => 'project_pending',
                 'message' => "Project '{$from->username}' is pending.",
             ];
         }
         if ($to->status === 'pending') {
             $problems[] = [
-                'field'   => 'target',
-                'code'    => 'target_pending',
+                'field' => 'target',
+                'code' => 'target_pending',
                 'message' => "Project '{$to->username}' is pending.",
             ];
         }
         if ((int) $from->id === (int) $to->id) {
             $problems[] = [
-                'field'   => 'target',
-                'code'    => 'target_same_project',
+                'field' => 'target',
+                'code' => 'target_same_project',
                 'message' => 'Cannot push to the same project.',
             ];
         }
         $paired = (int) $from->staging === (int) $to->id
             || (int) $to->staging === (int) $from->id;
-        if (!$paired) {
+        if (! $paired) {
             $problems[] = [
-                'field'   => 'target',
-                'code'    => 'target_not_staging_pair',
+                'field' => 'target',
+                'code' => 'target_not_staging_pair',
                 'message' => "Projects '{$from->username}' and '{$to->username}' are not a staging pair.",
             ];
         }
@@ -819,7 +1065,7 @@ class Projects
      * Every selected table must name a database the source owns and a table that
      * database holds, checked before the push is queued.
      *
-     * @param list<array{database: string, name: string}> $tables
+     * @param  list<array{database: string, name: string}>  $tables
      * @return list<array{field: string, code: string, message: string}>
      */
     public static function tableProblems(ModelsUser $source, array $tables, Tables $sourceTables): array
@@ -831,24 +1077,25 @@ class Projects
         foreach ($tables as $selection) {
             $database = is_array($selection) ? ($selection['database'] ?? null) : null;
             $table = is_array($selection) ? ($selection['name'] ?? null) : null;
-            if (!is_string($database) || !is_string($table)) {
+            if (! is_string($database) || ! is_string($table)) {
                 continue;
             }
 
-            if (!in_array($database, $owned, true)) {
+            if (! in_array($database, $owned, true)) {
                 $problems[] = [
-                    'field'   => 'tables',
-                    'code'    => 'database_not_found',
+                    'field' => 'tables',
+                    'code' => 'database_not_found',
                     'message' => "The source project does not own database '{$database}'.",
                 ];
+
                 continue;
             }
 
             $known[$database] ??= $sourceTables->names($database);
-            if (!in_array($table, $known[$database], true)) {
+            if (! in_array($table, $known[$database], true)) {
                 $problems[] = [
-                    'field'   => 'tables',
-                    'code'    => 'table_not_found',
+                    'field' => 'tables',
+                    'code' => 'table_not_found',
                     'message' => "Table '{$database}.{$table}' does not exist in the source project.",
                 ];
             }
@@ -884,17 +1131,17 @@ class Projects
     private function detectAppPort(Project $project): ?int
     {
         $runtime = $project->runtime();
-        if (!$runtime instanceof Dind) {
+        if (! $runtime instanceof Dind) {
             return null;
         }
 
         $path = (new Paths($runtime))->composeFileForPorts();
-        if (!is_file($path)) {
+        if (! is_file($path)) {
             return null;
         }
 
         $ports = DetectAppPort::detectAllPorts($path);
-        if (!empty($ports['primary'])) {
+        if (! empty($ports['primary'])) {
             return (int) $ports['primary'];
         }
 
@@ -922,7 +1169,7 @@ class Projects
     }
 
     /**
-     * @param list<string> $cmd
+     * @param  list<string>  $cmd
      */
     private function runPushProcess(array $cmd, string $context): void
     {
@@ -932,7 +1179,7 @@ class Projects
             return;
         }
 
-        $output = trim($process->getErrorOutput() . ' ' . $process->getOutput());
+        $output = trim($process->getErrorOutput().' '.$process->getOutput());
         throw new \RuntimeException(
             $output !== '' ? "{$context}: {$output}" : $context
         );
@@ -954,7 +1201,7 @@ class Projects
     private function listDockerVolumeEntriesAsRoot(string $volumesDir): array
     {
         $process = $this->system->runProcess(['sudo', 'ls', '-1', $volumesDir]);
-        if (!$process->isSuccessful()) {
+        if (! $process->isSuccessful()) {
             return [];
         }
 
@@ -972,12 +1219,12 @@ class Projects
 
     private function duBytesAsRoot(string $path): int
     {
-        if (!$this->pathIsDirectoryAsRoot($path) && !$this->pathExistsAsRoot($path)) {
+        if (! $this->pathIsDirectoryAsRoot($path) && ! $this->pathExistsAsRoot($path)) {
             return 0;
         }
 
         $process = $this->system->runProcess(['sudo', 'du', '-sb', $path]);
-        if (!$process->isSuccessful()) {
+        if (! $process->isSuccessful()) {
             return 0;
         }
 
@@ -1010,13 +1257,13 @@ class Projects
                 if ($entry === '' || in_array($entry, $skipHomeEntries, true)) {
                     continue;
                 }
-                $required += $this->duBytesAsRoot($fromHome . '/' . $entry);
+                $required += $this->duBytesAsRoot($fromHome.'/'.$entry);
             }
         }
 
         $sourceVolumeDataCount = $this->countVolumeDataDirs($fromProject);
         if ($sourceVolumeDataCount > 0) {
-            $srcVolumes = $fromHome . '/docker/volumes';
+            $srcVolumes = $fromHome.'/docker/volumes';
             if ($this->pathIsDirectoryAsRoot($srcVolumes)) {
                 foreach ($this->listDockerVolumeEntriesAsRoot($srcVolumes) as $entry) {
                     $srcData = "{$srcVolumes}/{$entry}/_data";
@@ -1028,7 +1275,7 @@ class Projects
         }
 
         $dfProcess = $this->system->runProcess(['sudo', 'df', '-P', $toHome]);
-        if (!$dfProcess->isSuccessful()) {
+        if (! $dfProcess->isSuccessful()) {
             throw new \RuntimeException('Could not determine available disk space on target home.');
         }
 
@@ -1041,10 +1288,10 @@ class Projects
         if ($required > $availableBytes) {
             throw new \RuntimeException(
                 'Insufficient disk space on target for push (required '
-                . $this->formatBytes($required)
-                . ', available '
-                . $this->formatBytes($availableBytes)
-                . ').'
+                .$this->formatBytes($required)
+                .', available '
+                .$this->formatBytes($availableBytes)
+                .').'
             );
         }
     }
@@ -1052,26 +1299,18 @@ class Projects
     private function formatBytes(int $bytes): string
     {
         if ($bytes >= 1073741824) {
-            return round($bytes / 1073741824, 1) . ' GiB';
+            return round($bytes / 1073741824, 1).' GiB';
         }
         if ($bytes >= 1048576) {
-            return round($bytes / 1048576, 1) . ' MiB';
+            return round($bytes / 1048576, 1).' MiB';
         }
 
-        return $bytes . ' B';
+        return $bytes.' B';
     }
 
-    private function swapIncomingHome(
-        string $toHome,
-        string $incomingDir,
-        string $prePushDir
-    ): void {
-        (new HomeSwap($this->system, rtrim($toHome, '/'), self::PROCESS_TIMEOUT_SECONDS))->swap(
-            $incomingDir,
-            $prePushDir,
-            ['docker', '.incoming', '.pre-push', '.pre-push-db'],
-            'push swap',
-        );
+    private function homeSwap(string $toHome): HomeSwap
+    {
+        return new HomeSwap($this->system, rtrim($toHome, '/'), self::PROCESS_TIMEOUT_SECONDS);
     }
 
     private function cleanupIncomingDir(string $incomingDir): void

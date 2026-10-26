@@ -111,6 +111,59 @@ class ProjectsClonePushTest extends TestCase
         $this->assertStringContainsString('applyDeploySnapshotFrom', $pushBlock);
     }
 
+    public function test_a_container_copy_gets_its_own_app_database_and_run_file_values_before_its_volumes(): void
+    {
+        $source = (string) file_get_contents($this->coreAppRoot . '/System/Projects.php');
+        $copyBlock = substr($source, (int) strpos($source, 'function cloneOrCopy('));
+
+        $homePos = strpos($copyBlock, 'copyHomeDirFrom');
+        $databasePos = strpos($copyBlock, 'appDatabaseCopy()->intoCopy($source, $dest, $copyDatabases)');
+        $repointPos = strpos($copyBlock, 'repointCopiedRunFile($source)');
+        $volumesPos = strpos($copyBlock, 'prepareVolumes($destProject)');
+
+        $this->assertNotFalse($databasePos, 'a container copy must get its own app database');
+        $this->assertNotFalse($repointPos, 'a container copy must point its run file at itself');
+        $this->assertLessThan($databasePos, $homePos);
+        $this->assertLessThan($repointPos, $databasePos, 'the run file is pointed at a database that exists');
+        $this->assertLessThan($volumesPos, $repointPos, 'compose create must see the copy\'s own values');
+    }
+
+    public function test_the_copied_run_files_images_are_in_the_destination_before_compose_create(): void
+    {
+        $source = (string) file_get_contents($this->coreAppRoot . '/System/Projects.php');
+        $copyBlock = substr($source, (int) strpos($source, 'function cloneOrCopy('));
+        $pushBlock = substr($source, (int) strpos($source, 'function pushToApp('));
+
+        $cloneImages = strpos($copyBlock, 'provideCopiedImages()');
+        $this->assertNotFalse($cloneImages, 'a container copy must get its images');
+        $this->assertLessThan(strpos($copyBlock, 'prepareVolumes($destProject)'), $cloneImages);
+        $this->assertLessThan($cloneImages, strpos($copyBlock, 'repointCopiedRunFile($source)'));
+
+        $pushImages = strpos($pushBlock, 'provideCopiedImages(self::incomingRunFile($incomingDir))');
+        $this->assertNotFalse($pushImages, 'a container push must get its images');
+        $this->assertLessThan(strpos($pushBlock, 'copyVolumesToIncoming('), $pushImages);
+        $this->assertLessThan($pushImages, strpos($pushBlock, 'handStagedHomeToAccount('));
+    }
+
+    public function test_clone_or_copy_reads_container_wordpress_hosts_while_the_source_runs_and_rewrites_once_the_copy_runs(): void
+    {
+        $source = file_get_contents($this->coreAppRoot . '/System/Projects.php');
+        $this->assertIsString($source);
+        $copyPos = strpos($source, 'function cloneOrCopy(');
+        $this->assertNotFalse($copyPos);
+        $copyBlock = substr($source, $copyPos, strpos($source, 'function templateKey(') - $copyPos);
+
+        $hostsPos = strpos($copyBlock, 'containerSiteCopy()->sourceHosts($source)');
+        $pausePos = strpos($copyBlock, 'pauseAppForCopy($sourceProject)');
+        $startPos = strpos($copyBlock, 'startUserApp()');
+        $rewritePos = strpos($copyBlock, 'pointContainerWordPressAtItself($dest');
+
+        $this->assertNotFalse($hostsPos);
+        $this->assertNotFalse($rewritePos);
+        $this->assertLessThan($pausePos, $hostsPos, 'the source answers WP-CLI only before it is paused');
+        $this->assertLessThan($rewritePos, $startPos, 'WP-CLI runs in the copy\'s running containers');
+    }
+
     public function test_production_validation_uses_system_projects_not_lib_copy(): void
     {
         $paths = [
