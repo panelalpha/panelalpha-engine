@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -116,7 +117,7 @@ class McpActivityLog extends Model
     /**
      * Matched case-insensitively against the key, at every depth.
      *
-     * @param array<array-key, mixed> $input
+     * @param  array<array-key, mixed>  $input
      * @return array<array-key, mixed>
      */
     public static function redact(array $input): array
@@ -148,7 +149,7 @@ class McpActivityLog extends Model
         $key = strtolower($key);
 
         foreach (self::REDACT_SUFFIXES as $suffix) {
-            if ($key === $suffix || str_ends_with($key, '_' . $suffix)) {
+            if ($key === $suffix || str_ends_with($key, '_'.$suffix)) {
                 return true;
             }
         }
@@ -159,7 +160,7 @@ class McpActivityLog extends Model
     /** Keys stay, every leaf value goes; a non-array is redacted whole. */
     private static function redactValues(mixed $value): mixed
     {
-        if (!is_array($value)) {
+        if (! is_array($value)) {
             return $value === null ? null : self::REDACTED;
         }
 
@@ -182,7 +183,7 @@ class McpActivityLog extends Model
             return self::REDACTED;
         }
 
-        $value = (string) preg_replace('#([a-z][a-z0-9+.-]*://)[^\s/@]+@#i', '$1' . self::REDACTED . '@', $value);
+        $value = (string) preg_replace('#([a-z][a-z0-9+.-]*://)[^\s/@]+@#i', '$1'.self::REDACTED.'@', $value);
 
         return self::maskSecretQueryParams($value);
     }
@@ -192,17 +193,35 @@ class McpActivityLog extends Model
     {
         foreach (self::SECRET_QUERY_PARAMS as $param) {
             $pattern = in_array($param, self::SIGNATURE_QUERY_PARAMS, true)
-                ? '/([?&]' . preg_quote($param, '/') . '=)[A-Za-z0-9%._~+\/-]{16,}/i'
-                : '/([?&]' . preg_quote($param, '/') . '=)[^&\s"\']+/i';
+                ? '/([?&]'.preg_quote($param, '/').'=)[A-Za-z0-9%._~+\/-]{16,}/i'
+                : '/([?&]'.preg_quote($param, '/').'=)[^&\s"\']+/i';
 
-            $value = (string) preg_replace($pattern, '$1' . self::REDACTED, $value);
+            $value = (string) preg_replace($pattern, '$1'.self::REDACTED, $value);
         }
 
         return $value;
     }
 
+    /** Null once the token is deleted; the row keeps its `token_id`. */
     public function token(): BelongsTo
     {
         return $this->belongsTo(PersonalAccessToken::class, 'token_id');
+    }
+
+    /** @param list<int> $tokenIds */
+    public function scopeForTokenIds(Builder $query, array $tokenIds): Builder
+    {
+        return $query->whereIn('token_id', $tokenIds);
+    }
+
+    /** Case-insensitive, with `%` and `_` in `$text` taken literally. */
+    public function scopeTokenNameContains(Builder $query, string $text): Builder
+    {
+        return $query->whereRaw("LOWER(token_name) LIKE LOWER(?) ESCAPE '!'", [self::containsPattern($text)]);
+    }
+
+    private static function containsPattern(string $text): string
+    {
+        return '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $text).'%';
     }
 }

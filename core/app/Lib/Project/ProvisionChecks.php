@@ -2,6 +2,8 @@
 
 namespace App\Lib\Project;
 
+use App\Lib\Limits\ResourceLimit;
+
 /**
  * Everything knowable about a create request before anything is bought, asked
  * at once and answered at once.
@@ -14,14 +16,11 @@ namespace App\Lib\Project;
  */
 final class ProvisionChecks
 {
-    public function __construct(private readonly ProvisionEnvironment $env)
-    {
-    }
+    public function __construct(private readonly ProvisionEnvironment $env) {}
 
     /**
-     * @param array<string, mixed> $params     validated create parameters
-     * @param string               $nameField  what the caller sent the name as
-     *
+     * @param  array<string, mixed>  $params  validated create parameters
+     * @param  string  $nameField  what the caller sent the name as
      * @return list<array<string, string>>
      */
     public function problems(array $params, string $nameField = 'username'): array
@@ -51,7 +50,7 @@ final class ProvisionChecks
         // spends a label out of a namespace the whole fleet shares. A name
         // burnt on a project that was never going to be created is gone for
         // good -- PanelAlpha Online has no release.
-        if (!$this->env->usernameAvailableOnHost($username)) {
+        if (! $this->env->usernameAvailableOnHost($username)) {
             return [
                 'field' => $nameField,
                 'code' => 'name_unavailable',
@@ -63,8 +62,7 @@ final class ProvisionChecks
     }
 
     /**
-     * @param array<string, mixed> $params
-     *
+     * @param  array<string, mixed>  $params
      * @return array<string, string>|null
      */
     private function template(array $params): ?array
@@ -75,7 +73,7 @@ final class ProvisionChecks
         $template = (string) $params['template'];
 
         // dind is what a git_repo deploys into anyway, so naming it is no conflict.
-        if ($template !== 'dind' && !empty($params['git_repo'])) {
+        if ($template !== 'dind' && ! empty($params['git_repo'])) {
             return [
                 'field' => 'template',
                 'code' => 'template_conflicts_with_git',
@@ -83,7 +81,7 @@ final class ProvisionChecks
             ];
         }
 
-        if (!$this->env->templateExists($template)) {
+        if (! $this->env->templateExists($template)) {
             return [
                 'field' => 'template',
                 'code' => 'template_not_found',
@@ -95,13 +93,12 @@ final class ProvisionChecks
     }
 
     /**
-     * @param array<string, mixed> $params
-     *
+     * @param  array<string, mixed>  $params
      * @return array<string, string>|null
      */
     private function diskSpace(array $params): ?array
     {
-        if (($params['disk_space_limit'] ?? -1) >= -1) {
+        if (($params['disk_space_limit'] ?? ResourceLimit::UNLIMITED) >= ResourceLimit::UNLIMITED) {
             return null;
         }
 
@@ -118,8 +115,7 @@ final class ProvisionChecks
      * the one candidate that never has an alternative, so learning it is taken
      * is worth doing before anything is bought.
      *
-     * @param array<string, mixed> $params
-     *
+     * @param  array<string, mixed>  $params
      * @return array<string, string>|null
      */
     private function domain(array $params): ?array
@@ -128,7 +124,7 @@ final class ProvisionChecks
             return null;
         }
         $domain = (string) $params['domain'];
-        if (!$this->env->domainOrAliasExists($domain)) {
+        if (! $this->env->domainOrAliasExists($domain)) {
             return null;
         }
 
@@ -143,8 +139,7 @@ final class ProvisionChecks
      * A dedicated IP the host cannot give is refused here: the project would
      * otherwise be created on the shared IP and still report one.
      *
-     * @param array<string, mixed> $params
-     *
+     * @param  array<string, mixed>  $params
      * @return array<string, string>|null
      */
     private function dedicatedIp(array $params, int $family): ?array

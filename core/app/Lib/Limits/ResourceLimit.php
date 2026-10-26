@@ -6,13 +6,15 @@ namespace App\Lib\Limits;
  * One of a project's resource limits: where it is stored, how it is spelled on
  * the command line, and how it reads back.
  *
- * The table below is the only place the set is written down. It used to be
- * spelled out in User, SetLimits and GetLimits separately, which is how
- * disk_space_limit ended up storing -1 for "no limit" while every other limit
- * stores null.
+ * The table below is the only place the set is written down. Every limit
+ * stores UNLIMITED (-1) for "no limit" and null for "never set"; memory_limit
+ * alone refuses -1, because every project runs with one.
  */
 final class ResourceLimit
 {
+    /** "No limit", as a limit stores it and the API answers it; null means the limit was never set. */
+    public const int UNLIMITED = -1;
+
     private function __construct(
         /** Key inside User::$details. */
         public readonly string $key,
@@ -23,14 +25,13 @@ final class ResourceLimit
         /** Appended when formatting a value; empty for a bare count. */
         public readonly string $unit,
         public readonly bool $isFloat,
-        /** True for disk_space_limit alone: it stores -1 where others store null. */
-        public readonly bool $storesUnlimitedAsMinusOne,
+        /** True for disk_space_limit alone: a new project that names none starts at UNLIMITED, not null. */
+        public readonly bool $startsUnlimited,
         /** Whether changing it only takes effect after a rebuild. */
         public readonly bool $needsRebuild,
         /** True for memory_limit alone: every project has one, so it can be changed but not removed. */
         public readonly bool $alwaysApplies = false,
-    ) {
-    }
+    ) {}
 
     /** @return list<self> */
     public static function all(): array
@@ -53,6 +54,40 @@ final class ResourceLimit
         ];
     }
 
+    public static function isUnlimited(int|float|null $value): bool
+    {
+        return $value !== null && $value < 0;
+    }
+
+    /** The value to put on a container or a quota: null when the limit is unset or unlimited. */
+    public static function enforced(int|float|null $value): int|float|null
+    {
+        return self::isUnlimited($value) ? null : $value;
+    }
+
+    /**
+     * The count limit a project has reached, or null when it still has room.
+     * An unset limit and UNLIMITED never cap a count.
+     */
+    public static function reached(?int $limit, int $count): ?int
+    {
+        if ($limit === null || self::isUnlimited($limit)) {
+            return null;
+        }
+
+        return $limit <= $count ? $limit : null;
+    }
+
+    /** A stored value in another unit: UNLIMITED and null are answered as they are, never multiplied. */
+    public static function scaled(int|float|null $value, int $factor): int|float|null
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        return self::isUnlimited($value) ? self::UNLIMITED : $value * $factor;
+    }
+
     public static function byKey(string $key): self
     {
         static $byKey = null;
@@ -73,32 +108,27 @@ final class ResourceLimit
     /**
      * The stored value, cast, or null when unset.
      *
-     * @param array<string, mixed> $details
+     * @param  array<string, mixed>  $details
      */
     public function read(array $details): int|float|null
     {
-        if (!array_key_exists($this->key, $details) || $details[$this->key] === null) {
+        if (! array_key_exists($this->key, $details) || $details[$this->key] === null) {
             return null;
         }
 
         return $this->isFloat ? (float) $details[$this->key] : (int) $details[$this->key];
     }
 
-    /**
-     * A raw console value as it should be stored: clamped at -1, and turned
-     * into null unless this limit is the one that keeps -1.
-     */
-    public function normalize(string|int|float $raw): int|float|null
+    /** A raw value as it is stored: any negative value is UNLIMITED. */
+    public function normalize(string|int|float $raw): int|float
     {
         if ($this->isFloat) {
-            $value = max(-1.0, (float) $raw);
+            $value = (float) $raw;
 
-            return $value === -1.0 && !$this->storesUnlimitedAsMinusOne ? null : $value;
+            return $value < 0 ? (float) self::UNLIMITED : $value;
         }
 
-        $value = max(-1, (int) $raw);
-
-        return $value === -1 && !$this->storesUnlimitedAsMinusOne ? null : $value;
+        return max(self::UNLIMITED, (int) $raw);
     }
 
     /** Why a raw console value cannot be stored, or null when it can. */
@@ -107,20 +137,20 @@ final class ResourceLimit
         if ($this->alwaysApplies && (float) $raw < 1) {
             $name = str_replace('-', ' ', $this->option);
 
-            return 'The ' . $name . ($this->unit === '' ? '' : ' is in' . $this->unit)
-                . ' and must be a positive number.';
+            return 'The '.$name.($this->unit === '' ? '' : ' is in'.$this->unit)
+                .' and must be a positive number.';
         }
 
         return null;
     }
 
-    /** How a stored value reads back to an operator. -1 means "no limit" only where it is stored for that. */
+    /** How a stored value reads back to an operator: unset and UNLIMITED both read "no limit". */
     public function format(int|float|null $value): string
     {
-        if ($value === null || ($this->storesUnlimitedAsMinusOne && $value === -1)) {
+        if ($value === null || self::isUnlimited($value)) {
             return 'no limit';
         }
 
-        return (string) $value . $this->unit;
+        return (string) $value.$this->unit;
     }
 }

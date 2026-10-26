@@ -2,6 +2,7 @@
 
 namespace App\Lib\Domains;
 
+use App\Lib\Limits\ResourceLimit;
 use App\Models\Domain;
 use App\Models\User;
 use Illuminate\Support\Str;
@@ -14,21 +15,24 @@ use Illuminate\Support\Str;
 final class NewDomain
 {
     public const INVALID_DOMAIN = 'invalid_domain';
+
     public const DOMAIN_EXISTS = 'domain_exists';
+
     public const INVALID_ALIAS = 'invalid_alias';
+
     public const ALIAS_EXISTS = 'alias_exists';
 
     /**
      * `www.example.com` is created as `example.com`, with the www name kept
      * as one of its aliases.
      *
-     * @param  array<mixed> $aliases
+     * @param  array<mixed>  $aliases
      * @return array{0: string, 1: array<mixed>}
      */
     public static function withoutWww(string $domain, array $aliases): array
     {
         if (Str::startsWith($domain, 'www.')) {
-            if (!in_array($domain, $aliases)) {
+            if (! in_array($domain, $aliases)) {
                 $aliases[] = $domain;
             }
             $domain = Str::after($domain, 'www.');
@@ -52,19 +56,19 @@ final class NewDomain
         /** @var int $count */
         $count = $user->domains()->getQuery()->where('type', $type)->count();
 
-        return $limit <= $count ? $limit : null;
+        return ResourceLimit::reached($limit, $count);
     }
 
     /**
      * The first problem with the names, as [kind, name], or null. Checked in
      * the order both callers always used: the domain, then each alias.
      *
-     * @param  array<mixed> $aliases
+     * @param  array<mixed>  $aliases
      * @return ?array{0: string, 1: mixed}
      */
     public static function nameProblem(string $domain, array $aliases): ?array
     {
-        if (!filter_var($domain, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
+        if (! filter_var($domain, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
             return [self::INVALID_DOMAIN, $domain];
         }
         if (Domain::domainOrAliasExists($domain)) {
@@ -72,7 +76,7 @@ final class NewDomain
         }
 
         foreach ($aliases as $alias) {
-            if (!filter_var($alias, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
+            if (! filter_var($alias, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
                 return [self::INVALID_ALIAS, $alias];
             }
             if (Domain::domainOrAliasExists($alias)) {
@@ -87,7 +91,7 @@ final class NewDomain
      * The `details` a new domain starts with; a subdomain records its parent, which
      * is what keeps the parent from being deleted under it.
      *
-     * @param  array<mixed> $aliases
+     * @param  array<mixed>  $aliases
      * @return array<string, mixed>
      */
     public static function details(string $domain, bool $sslDisabled, array $aliases, ?string $parentDomain = null): array

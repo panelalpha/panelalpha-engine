@@ -2,68 +2,72 @@
 
 namespace App\Http\Controllers;
 
+use App\Auth\TokenAbilities;
 use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\DeployBusyException;
 use App\Exceptions\ProblemException;
 use App\Exceptions\ProjectBusyException;
-use App\Auth\TokenAbilities;
 use App\Http\Controllers\Concerns\StreamsNdjson;
 use App\Http\Requests\DeployPlanInput;
 use App\Http\Requests\ProjectSourceAttachRequest;
 use App\Http\Requests\RecipeChoiceInput;
 use App\Http\Requests\UserCloneRequest;
-use App\Lib\Host\ProjectMemory;
 use App\Http\Requests\UserStoreRequest;
 use App\Http\Requests\UserUpdateRequest;
 use App\Http\Requests\UserVerifyNewUsernameRequest;
 use App\Http\Resources\TaskResource;
 use App\Http\Resources\UserCollection;
 use App\Http\Resources\UserResource;
-use App\System;
-use App\System\Projects;
-use App\Lib\Helper;
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\EnvVarOverrides;
 use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
-use App\Lib\Project\CreateInspection;
-use App\Lib\Project\NewProjectInput;
-use App\Lib\Project\ProjectDeleter;
-use App\Lib\Project\ProjectCreator;
-use App\Lib\Project\ProjectRebuild;
-use App\Lib\Project\SourceAttacher;
 use App\Lib\Domains\DomainPlan;
 use App\Lib\Domains\MainDomainRename;
+use App\Lib\Helper;
+use App\Lib\Host\ProjectMemory;
 use App\Lib\Limits\ResourceLimit;
+use App\Lib\Project\CreateInspection;
+use App\Lib\Project\NewProjectInput;
+use App\Lib\Project\ProjectCreator;
+use App\Lib\Project\ProjectDeleter;
+use App\Lib\Project\ProjectRebuild;
+use App\Lib\Project\SourceAttacher;
 use App\Lib\Vault\RequestVault;
 use App\Models\Domain;
-use App\Models\Setting;
-use App\System\Project\Dind;
 use App\Models\User;
 use App\OpenApi\ApiDefinitions;
+use App\System;
+use App\System\Project\Dind;
+use App\System\Projects;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class UserController extends Controller
 {
+    private const array NAME_UNAVAILABLE_MESSAGES = [
+        'taken' => 'Project name already in use.',
+        'unavailable' => 'Project name is not available on this host.',
+    ];
+
     use StreamsNdjson;
 
     /** How a create answers with what it found in the repository before cloning it. */
-    private const INSPECTION_DOC = "A public github.com repository with no git_token is inspected from its "
-        . "file list before anything is created, as POST /source/inspect does, in seconds. It never "
-        . "refuses the create: `data.inspection` carries `verdict` and `strategy`, and when the "
-        . "repository may not deploy as it stands (`verdict` not_deployable, placeholder or "
-        . "no_start_command) also `reason` and `suggestion`, which open the deploy log as warnings. "
-        . "It is null when nothing was inspected: no git_repo, another host, a token, or a file "
-        . "list that could not be read within 20 seconds.";
+    private const INSPECTION_DOC = 'A public github.com repository with no git_token is inspected from its '
+        .'file list before anything is created, as POST /source/inspect does, in seconds. It never '
+        .'refuses the create: `data.inspection` carries `verdict` and `strategy`, and when the '
+        .'repository may not deploy as it stands (`verdict` not_deployable, placeholder or '
+        .'no_start_command) also `reason` and `suggestion`, which open the deploy log as warnings. '
+        .'It is null when nothing was inspected: no git_repo, another host, a token, or a file '
+        .'list that could not be read within 20 seconds.';
 
     #[OA\Get(
         path: '/projects',
@@ -128,42 +132,43 @@ class UserController extends Controller
             $query->whereIn('username', $projects);
         }
 
-        if (!empty($request->get('with_domain_names'))) {
+        if (! empty($request->get('with_domain_names'))) {
             $query->with('domains');
         }
 
         $users = $query->get();
+
         return new UserCollection($users);
     }
 
     #[OA\Post(
         path: '/projects',
-        description: "Creates the account synchronously, then runs the deploy in a queue job and "
-            . "returns 202 with a task. Poll GET /tasks/{id} until the task is terminal. Deploy "
-            . "log lines are teed into task_logs — poll GET /tasks/{id}/logs?since=… or stream "
-            . "GET /tasks/{id}/logs/stream. The file deploy log on "
-            . "GET /projects/{username}/deploy-log stays available for timings and archive. "
-            . "Unless the caller has a domain of its own, the name to give a project is a free "
-            . "label under panelalpha.online: the zone is a wildcard in front of the PanelAlpha Online "
-            . "proxy, so any label resolves worldwide, with a trusted certificate, and no DNS to "
-            . "configure. Pass it as `domain` here, then attach it with POST "
-            . "/projects/{username}/domains/{domain}/tunnels using the same hostname and provider "
-            . "panelalpha. The two must match: the proxy forwards with the Host of the domain the "
-            . "tunnel is attached to, so a tunnel on any other local domain makes the application "
-            . "answer under a name nobody typed. Labels are first come, first served and are not "
-            . "released when a tunnel is deleted -- add a short random suffix, and on 422 pick "
-            . "another. Where there is no license key or no public IPv4, fall back to "
-            . "<name>.<cert_domain> from GET /system/info, which resolves to this host but is served "
-            . "a self-signed certificate. "
-            . "X-Deploy-Stream is not supported here — use POST /users for a synchronous create "
-            . "with optional NDJSON streaming. " . self::INSPECTION_DOC,
+        description: 'Creates the account synchronously, then runs the deploy in a queue job and '
+            .'returns 202 with a task. Poll GET /tasks/{id} until the task is terminal. Deploy '
+            .'log lines are teed into task_logs — poll GET /tasks/{id}/logs?since=… or stream '
+            .'GET /tasks/{id}/logs/stream. The file deploy log on '
+            .'GET /projects/{username}/deploy-log stays available for timings and archive. '
+            .'Unless the caller has a domain of its own, the name to give a project is a free '
+            .'label under panelalpha.online: the zone is a wildcard in front of the PanelAlpha Online '
+            .'proxy, so any label resolves worldwide, with a trusted certificate, and no DNS to '
+            .'configure. Pass it as `domain` here, then attach it with POST '
+            .'/projects/{username}/domains/{domain}/tunnels using the same hostname and provider '
+            .'panelalpha. The two must match: the proxy forwards with the Host of the domain the '
+            .'tunnel is attached to, so a tunnel on any other local domain makes the application '
+            .'answer under a name nobody typed. Labels are first come, first served and are not '
+            .'released when a tunnel is deleted -- add a short random suffix, and on 422 pick '
+            .'another. Where there is no license key or no public IPv4, fall back to '
+            .'<name>.<cert_domain> from GET /system/info, which resolves to this host but is served '
+            .'a self-signed certificate. '
+            .'X-Deploy-Stream is not supported here — use POST /users for a synchronous create '
+            .'with optional NDJSON streaming. '.self::INSPECTION_DOC,
         summary: 'Create a new hosting project (async)',
         x: ['mcp-description' => 'Creates the account now and deploys it in the background: answers 202 with a task `id`. '
-            . 'Poll task_get until it is completed, failed or cancelled. Leave `domain` out: the engine picks '
-            . 'the best public name it can, a free panelalpha.online one when available, and project_get '
-            . 'says which (details.domain). Resource limits are set afterwards with project_update. '
-            . 'For a public github.com repository `data.inspection` in the answer is what its file list says '
-            . 'before the clone: a `reason` there means it may not deploy, and the project is created anyway.'],
+            .'Poll task_get until it is completed, failed or cancelled. Leave `domain` out: the engine picks '
+            .'the best public name it can, a free panelalpha.online one when available, and project_get '
+            .'says which (details.domain). Resource limits are set afterwards with project_update. '
+            .'For a public github.com repository `data.inspection` in the answer is what its file list says '
+            .'before the clone: a `reason` there means it may not deploy, and the project is created anyway.'],
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             // Nothing is required: validation has never demanded an email, and
@@ -175,9 +180,9 @@ class UserController extends Controller
                     example: 'johndoe',
                     nullable: true,
                     description: 'The project account name. Generated when omitted: from the repository '
-                        . 'name, else the domain, else the recipe, else "app" -- with a random numeric '
-                        . 'suffix when that name is taken. 3-15 lowercase letters and digits, starting '
-                        . 'with a letter.',
+                        .'name, else the domain, else the recipe, else "app" -- with a random numeric '
+                        .'suffix when that name is taken. 3-15 lowercase letters and digits, starting '
+                        .'with a letter.',
                     x: ['mcp-description' => '3-15 lowercase letters and digits, starting with a letter. Generated from the repository or domain when omitted.']
                 ),
                 new OA\Property(
@@ -186,16 +191,16 @@ class UserController extends Controller
                     example: 'shop-4f2a.panelalpha.online',
                     nullable: true,
                     description: 'The main domain. Omitted, it becomes <username>.<sites_base_domain>, '
-                        . 'which resolves nowhere while that setting is unset. Prefer a label under '
-                        . 'panelalpha.online and a matching tunnel -- see the description above.',
+                        .'which resolves nowhere while that setting is unset. Prefer a label under '
+                        .'panelalpha.online and a matching tunnel -- see the description above.',
                     x: ['mcp-description' => 'Only for a domain of the user\'s own, with tunnel: none. Omitted, the engine picks the best public name it can.']
                 ),
                 new OA\Property(property: 'domain_redirect_url', type: 'string', nullable: true, x: ['mcp-hide' => true]),
                 new OA\Property(property: 'email', type: 'string', format: 'email', example: 'john@example.com'),
                 new OA\Property(property: 'disk_space_limit', type: 'integer', example: 10240, description: 'MB, -1 for unlimited', x: ['mcp-hide' => true]),
                 new OA\Property(property: 'memory_limit', type: 'integer', example: 2048, description: 'MB. Omitted: memory_budget.default_project_mb, the RAM of the server less what is kept for the engine. Refused when larger than memory_budget.max_project_mb in GET /metrics/current', x: ['mcp-description' => 'MB. Default: the server\'s RAM less the engine\'s share, which is also the most allowed.']),
-                new OA\Property(property: 'cpu_limit', type: 'number', format: 'float', example: 1.0, nullable: true, x: ['mcp-hide' => true]),
-                new OA\Property(property: 'bandwidth_limit', type: 'integer', nullable: true, x: ['mcp-hide' => true]),
+                new OA\Property(property: 'cpu_limit', type: 'number', format: 'float', example: 1.0, nullable: true, description: 'CPU cores, -1 for unlimited', x: ['mcp-hide' => true]),
+                new OA\Property(property: 'bandwidth_limit', type: 'integer', nullable: true, description: 'MB a month, -1 for unlimited', x: ['mcp-hide' => true]),
                 new OA\Property(property: 'mysql_databases_limit', type: 'integer', nullable: true, x: ['mcp-hide' => true]),
                 new OA\Property(property: 'ftp_accounts_limit', type: 'integer', nullable: true, x: ['mcp-hide' => true]),
                 new OA\Property(property: 'sftp_accounts_limit', type: 'integer', nullable: true, x: ['mcp-hide' => true]),
@@ -209,8 +214,8 @@ class UserController extends Controller
                     type: 'string',
                     nullable: true,
                     description: 'dind runs an application in containers of its own, and is what a git_repo '
-                        . 'deploys into. Omitted over the REST API, the project is classic shared hosting '
-                        . '(default: Apache/PHP-FPM, for WordPress and plain PHP sites).',
+                        .'deploys into. Omitted over the REST API, the project is classic shared hosting '
+                        .'(default: Apache/PHP-FPM, for WordPress and plain PHP sites).',
                     x: ['mcp-default' => 'dind', 'mcp-description' => 'dind runs the app in containers of its own; the other templates are classic shared hosting.']
                 ),
                 new OA\Property(
@@ -219,16 +224,16 @@ class UserController extends Controller
                     enum: ['panelalpha', 'none'],
                     nullable: true,
                     description: 'How the domain reaches this host. Omitted, the Engine setting '
-                        . '`default_tunnel` decides: `none` keeps the name the domain already resolves on '
-                        . '(`<name>.<cert_domain>` or the configured sites_base_domain) and registers '
-                        . 'nothing at PanelAlpha Online; `panelalpha` and an unset setting both give the '
-                        . 'default ladder, where a configured sites_base_domain comes first and otherwise '
-                        . 'a free label under panelalpha.online is allocated, made the project domain and '
-                        . 'attached in this one call, so `domain`, if given at all, must be that same '
-                        . 'name. GET /system/info reports the setting. A Cloudflare tunnel is not '
-                        . 'available here: it needs the project\'s API token, which can only be set once '
-                        . 'the project exists -- create it, PUT '
-                        . '/projects/{username}/settings/cloudflare-api-token, then POST the tunnel.',
+                        .'`default_tunnel` decides: `none` keeps the name the domain already resolves on '
+                        .'(`<name>.<cert_domain>` or the configured sites_base_domain) and registers '
+                        .'nothing at PanelAlpha Online; `panelalpha` and an unset setting both give the '
+                        .'default ladder, where a configured sites_base_domain comes first and otherwise '
+                        .'a free label under panelalpha.online is allocated, made the project domain and '
+                        .'attached in this one call, so `domain`, if given at all, must be that same '
+                        .'name. GET /system/info reports the setting. A Cloudflare tunnel is not '
+                        .'available here: it needs the project\'s API token, which can only be set once '
+                        .'the project exists -- create it, PUT '
+                        .'/projects/{username}/settings/cloudflare-api-token, then POST the tunnel.',
                     x: ['mcp-description' => 'Omitted, the Engine setting `default_tunnel` decides: none uses `<name>.<cert_domain>` and registers nothing; panelalpha and an unset setting both use the default ladder (a configured base domain first, a free panelalpha.online name otherwise). An explicit value here wins.']
                 ),
                 new OA\Property(
@@ -237,11 +242,11 @@ class UserController extends Controller
                     nullable: true,
                     example: 'https://github.com/owner/repo.git',
                     description: 'HTTPS clone URL. An SSH remote (git@host:owner/repo.git, ssh://...) is '
-                        . 'refused here, because it clones only with the project\'s deploy key and a project '
-                        . 'has none until it exists: create the project without git_repo, POST '
-                        . '/projects/{username}/git/deploy-key, add the returned public key to the repository, '
-                        . 'then POST /projects/{username}/git/connect. A schemeless github.com/owner/repo is '
-                        . 'accepted and has the scheme filled in.',
+                        .'refused here, because it clones only with the project\'s deploy key and a project '
+                        .'has none until it exists: create the project without git_repo, POST '
+                        .'/projects/{username}/git/deploy-key, add the returned public key to the repository, '
+                        .'then POST /projects/{username}/git/connect. A schemeless github.com/owner/repo is '
+                        .'accepted and has the scheme filled in.',
                     x: ['mcp-description' => 'HTTPS clone URL; github.com/owner/repo also works. For an SSH remote, create the project without it, then git_deploy_key_create and git_connect.']
                 ),
                 new OA\Property(property: 'git_branch', type: 'string', nullable: true),
@@ -250,11 +255,11 @@ class UserController extends Controller
                     type: 'string',
                     nullable: true,
                     description: 'Optional HTTPS token injected at clone time. Never logged or returned in GET /users. '
-                        . 'A `vault:<id>` from vault_secret_create is accepted here in place of the literal token, '
-                        . 'so the token itself never passes through the calling agent. A `project` entry becomes '
-                        . 'this project\'s own and is refused to any other; a `global` one may be used by any '
-                        . 'project. Omitted, the repository is cloned anonymously.',
-                    x: ['mcp-description' => 'Token for a private repository. Prefer a `vault:<id>` from vault_secret_create over the token itself.']
+                        .'A `vault:<key>` from vault_secret_create is accepted here in place of the literal token, '
+                        .'so the token itself never passes through the calling agent. A `project` entry becomes '
+                        .'this project\'s own and is refused to any other; a `global` one may be used by any '
+                        .'project. Omitted, the repository is cloned anonymously.',
+                    x: ['mcp-description' => 'Token for a private repository. Prefer a `vault:<key>` from vault_secret_create over the token itself.']
                 ),
                 new OA\Property(
                     property: 'env_vars',
@@ -262,8 +267,8 @@ class UserController extends Controller
                     nullable: true,
                     additionalProperties: new OA\AdditionalProperties(type: 'string'),
                     description: 'Optional KEY=value overrides. Stored on the project and applied to its '
-                        . '.env and its container environment on every deploy, outranking what the platform '
-                        . 'generates. An empty value is not an override and is not stored.',
+                        .'.env and its container environment on every deploy, outranking what the platform '
+                        .'generates. An empty value is not an override and is not stored.',
                     x: ['mcp-description' => 'KEY=value applied to the app\'s .env and container on every deploy.']
                 ),
                 new OA\Property(
@@ -271,10 +276,10 @@ class UserController extends Controller
                     type: 'string',
                     nullable: true,
                     description: 'Deploy with this recipe instead of the one detection picks. Takes an id '
-                        . 'from `application.candidates` on POST /source/inspect, and inspecting with the '
-                        . 'same id previews exactly what this deploys. An id this engine does not ship '
-                        . 'fails the deploy rather than falling back to detection. Applies to this deploy '
-                        . 'only - nothing is stored, so the next deploy without it detects again.',
+                        .'from `application.candidates` on POST /source/inspect, and inspecting with the '
+                        .'same id previews exactly what this deploys. An id this engine does not ship '
+                        .'fails the deploy rather than falling back to detection. Applies to this deploy '
+                        .'only - nothing is stored, so the next deploy without it detects again.',
                     example: 'php',
                     x: ['mcp-description' => 'Recipe id to use instead of the detected one, from source_inspect\'s application.candidates. This deploy only.']
                 ),
@@ -283,10 +288,10 @@ class UserController extends Controller
                     type: 'object',
                     nullable: true,
                     description: 'Commands this deploy runs, per stage (precheck, prepare, build, install, '
-                        . 'upgrade, start). A stage named here replaces that stage entirely; a stage left '
-                        . 'out keeps the platform defaults; a stage given as [] runs nothing. Each command '
-                        . 'is {id, run, optional, serve, timeout, workdir, role}. Applies to this deploy '
-                        . 'only - nothing is stored, so the next deploy without it is back on defaults.',
+                        .'upgrade, start). A stage named here replaces that stage entirely; a stage left '
+                        .'out keeps the platform defaults; a stage given as [] runs nothing. Each command '
+                        .'is {id, run, optional, serve, timeout, workdir, role}. Applies to this deploy '
+                        .'only - nothing is stored, so the next deploy without it is back on defaults.',
                     x: ['mcp-description' => 'Replace a stage\'s commands for this deploy only: {stage: [{id, run, ...}]} for precheck, prepare, build, install, upgrade, start; [] skips a stage.']
                 ),
             ],
@@ -311,20 +316,20 @@ class UserController extends Controller
 
     #[OA\Post(
         path: '/users',
-        description: "Legacy synchronous create. Same body as POST /projects, but runs the deploy "
-            . "inside the request and returns the project resource. Supports X-Deploy-Stream: ndjson. "
-            . "Unless the caller has a domain of its own, the name to give a project is a free "
-            . "label under panelalpha.online: the zone is a wildcard in front of the PanelAlpha Online "
-            . "proxy, so any label resolves worldwide, with a trusted certificate, and no DNS to "
-            . "configure. Pass it as `domain` here, then attach it with POST "
-            . "/projects/{username}/domains/{domain}/tunnels using the same hostname and provider "
-            . "panelalpha. The two must match: the proxy forwards with the Host of the domain the "
-            . "tunnel is attached to, so a tunnel on any other local domain makes the application "
-            . "answer under a name nobody typed. Labels are first come, first served and are not "
-            . "released when a tunnel is deleted -- add a short random suffix, and on 422 pick "
-            . "another. Where there is no license key or no public IPv4, fall back to "
-            . "<name>.<cert_domain> from GET /system/info, which resolves to this host but is served "
-            . "a self-signed certificate. " . self::INSPECTION_DOC,
+        description: 'Legacy synchronous create. Same body as POST /projects, but runs the deploy '
+            .'inside the request and returns the project resource. Supports X-Deploy-Stream: ndjson. '
+            .'Unless the caller has a domain of its own, the name to give a project is a free '
+            .'label under panelalpha.online: the zone is a wildcard in front of the PanelAlpha Online '
+            .'proxy, so any label resolves worldwide, with a trusted certificate, and no DNS to '
+            .'configure. Pass it as `domain` here, then attach it with POST '
+            .'/projects/{username}/domains/{domain}/tunnels using the same hostname and provider '
+            .'panelalpha. The two must match: the proxy forwards with the Host of the domain the '
+            .'tunnel is attached to, so a tunnel on any other local domain makes the application '
+            .'answer under a name nobody typed. Labels are first come, first served and are not '
+            .'released when a tunnel is deleted -- add a short random suffix, and on 422 pick '
+            .'another. Where there is no license key or no public IPv4, fall back to '
+            .'<name>.<cert_domain> from GET /system/info, which resolves to this host but is served '
+            .'a self-signed certificate. '.self::INSPECTION_DOC,
         summary: 'Create a new hosting project (synchronous)',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
@@ -337,9 +342,9 @@ class UserController extends Controller
                     example: 'johndoe',
                     nullable: true,
                     description: 'The project account name. Generated when omitted: from the repository '
-                        . 'name, else the domain, else the recipe, else "app" -- with a random numeric '
-                        . 'suffix when that name is taken. 3-15 lowercase letters and digits, starting '
-                        . 'with a letter.',
+                        .'name, else the domain, else the recipe, else "app" -- with a random numeric '
+                        .'suffix when that name is taken. 3-15 lowercase letters and digits, starting '
+                        .'with a letter.',
                     x: ['mcp-description' => '3-15 lowercase letters and digits, starting with a letter. Generated from the repository or domain when omitted.']
                 ),
                 new OA\Property(
@@ -348,16 +353,16 @@ class UserController extends Controller
                     example: 'shop-4f2a.panelalpha.online',
                     nullable: true,
                     description: 'The main domain. Omitted, it becomes <username>.<sites_base_domain>, '
-                        . 'which resolves nowhere while that setting is unset. Prefer a label under '
-                        . 'panelalpha.online and a matching tunnel -- see the description above.',
+                        .'which resolves nowhere while that setting is unset. Prefer a label under '
+                        .'panelalpha.online and a matching tunnel -- see the description above.',
                     x: ['mcp-description' => 'Only for a domain of the user\'s own, with tunnel: none. Omitted, the engine picks the best public name it can.']
                 ),
                 new OA\Property(property: 'domain_redirect_url', type: 'string', nullable: true),
                 new OA\Property(property: 'email', type: 'string', format: 'email', example: 'john@example.com'),
                 new OA\Property(property: 'disk_space_limit', type: 'integer', example: 10240, description: 'MB, -1 for unlimited'),
                 new OA\Property(property: 'memory_limit', type: 'integer', example: 2048, description: 'MB. Omitted: memory_budget.default_project_mb, the RAM of the server less what is kept for the engine. Refused when larger than memory_budget.max_project_mb in GET /metrics/current', x: ['mcp-description' => 'MB. Default: the server\'s RAM less the engine\'s share, which is also the most allowed.']),
-                new OA\Property(property: 'cpu_limit', type: 'number', format: 'float', example: 1.0, nullable: true),
-                new OA\Property(property: 'bandwidth_limit', type: 'integer', nullable: true),
+                new OA\Property(property: 'cpu_limit', type: 'number', format: 'float', example: 1.0, nullable: true, description: 'CPU cores, -1 for unlimited'),
+                new OA\Property(property: 'bandwidth_limit', type: 'integer', nullable: true, description: 'MB a month, -1 for unlimited'),
                 new OA\Property(property: 'mysql_databases_limit', type: 'integer', nullable: true, description: '-1 for unlimited'),
                 new OA\Property(property: 'ftp_accounts_limit', type: 'integer', nullable: true, description: '-1 for unlimited'),
                 new OA\Property(property: 'sftp_accounts_limit', type: 'integer', nullable: true, description: '-1 for unlimited'),
@@ -371,8 +376,8 @@ class UserController extends Controller
                     type: 'string',
                     nullable: true,
                     description: 'dind runs an application in containers of its own, and is what a git_repo '
-                        . 'deploys into. Omitted over the REST API, the project is classic shared hosting '
-                        . '(default: Apache/PHP-FPM, for WordPress and plain PHP sites).',
+                        .'deploys into. Omitted over the REST API, the project is classic shared hosting '
+                        .'(default: Apache/PHP-FPM, for WordPress and plain PHP sites).',
                     x: ['mcp-default' => 'dind', 'mcp-description' => 'dind runs the app in containers of its own; the other templates are classic shared hosting.']
                 ),
                 new OA\Property(
@@ -381,16 +386,16 @@ class UserController extends Controller
                     enum: ['panelalpha', 'none'],
                     nullable: true,
                     description: 'How the domain reaches this host. Omitted, the Engine setting '
-                        . '`default_tunnel` decides: `none` keeps the name the domain already resolves on '
-                        . '(`<name>.<cert_domain>` or the configured sites_base_domain) and registers '
-                        . 'nothing at PanelAlpha Online; `panelalpha` and an unset setting both give the '
-                        . 'default ladder, where a configured sites_base_domain comes first and otherwise '
-                        . 'a free label under panelalpha.online is allocated, made the project domain and '
-                        . 'attached in this one call, so `domain`, if given at all, must be that same '
-                        . 'name. GET /system/info reports the setting. A Cloudflare tunnel is not '
-                        . 'available here: it needs the project\'s API token, which can only be set once '
-                        . 'the project exists -- create it, PUT '
-                        . '/projects/{username}/settings/cloudflare-api-token, then POST the tunnel.',
+                        .'`default_tunnel` decides: `none` keeps the name the domain already resolves on '
+                        .'(`<name>.<cert_domain>` or the configured sites_base_domain) and registers '
+                        .'nothing at PanelAlpha Online; `panelalpha` and an unset setting both give the '
+                        .'default ladder, where a configured sites_base_domain comes first and otherwise '
+                        .'a free label under panelalpha.online is allocated, made the project domain and '
+                        .'attached in this one call, so `domain`, if given at all, must be that same '
+                        .'name. GET /system/info reports the setting. A Cloudflare tunnel is not '
+                        .'available here: it needs the project\'s API token, which can only be set once '
+                        .'the project exists -- create it, PUT '
+                        .'/projects/{username}/settings/cloudflare-api-token, then POST the tunnel.',
                     x: ['mcp-description' => 'Omitted, the Engine setting `default_tunnel` decides: none uses `<name>.<cert_domain>` and registers nothing; panelalpha and an unset setting both use the default ladder (a configured base domain first, a free panelalpha.online name otherwise). An explicit value here wins.']
                 ),
                 new OA\Property(
@@ -399,11 +404,11 @@ class UserController extends Controller
                     nullable: true,
                     example: 'https://github.com/owner/repo.git',
                     description: 'HTTPS clone URL. An SSH remote (git@host:owner/repo.git, ssh://...) is '
-                        . 'refused here, because it clones only with the project\'s deploy key and a project '
-                        . 'has none until it exists: create the project without git_repo, POST '
-                        . '/projects/{username}/git/deploy-key, add the returned public key to the repository, '
-                        . 'then POST /projects/{username}/git/connect. A schemeless github.com/owner/repo is '
-                        . 'accepted and has the scheme filled in.',
+                        .'refused here, because it clones only with the project\'s deploy key and a project '
+                        .'has none until it exists: create the project without git_repo, POST '
+                        .'/projects/{username}/git/deploy-key, add the returned public key to the repository, '
+                        .'then POST /projects/{username}/git/connect. A schemeless github.com/owner/repo is '
+                        .'accepted and has the scheme filled in.',
                     x: ['mcp-description' => 'HTTPS clone URL; github.com/owner/repo also works. For an SSH remote, create the project without it, then git_deploy_key_create and git_connect.']
                 ),
                 new OA\Property(property: 'git_branch', type: 'string', nullable: true),
@@ -412,11 +417,11 @@ class UserController extends Controller
                     type: 'string',
                     nullable: true,
                     description: 'Optional HTTPS token injected at clone time. Never logged or returned in GET /users. '
-                        . 'A `vault:<id>` from vault_secret_create is accepted here in place of the literal token, '
-                        . 'so the token itself never passes through the calling agent. A `project` entry becomes '
-                        . 'this project\'s own and is refused to any other; a `global` one may be used by any '
-                        . 'project. Omitted, the repository is cloned anonymously.',
-                    x: ['mcp-description' => 'Token for a private repository. Prefer a `vault:<id>` from vault_secret_create over the token itself.']
+                        .'A `vault:<key>` from vault_secret_create is accepted here in place of the literal token, '
+                        .'so the token itself never passes through the calling agent. A `project` entry becomes '
+                        .'this project\'s own and is refused to any other; a `global` one may be used by any '
+                        .'project. Omitted, the repository is cloned anonymously.',
+                    x: ['mcp-description' => 'Token for a private repository. Prefer a `vault:<key>` from vault_secret_create over the token itself.']
                 ),
                 new OA\Property(
                     property: 'env_vars',
@@ -424,8 +429,8 @@ class UserController extends Controller
                     nullable: true,
                     additionalProperties: new OA\AdditionalProperties(type: 'string'),
                     description: 'Optional KEY=value overrides. Stored on the project and applied to its '
-                        . '.env and its container environment on every deploy, outranking what the platform '
-                        . 'generates. An empty value is not an override and is not stored.',
+                        .'.env and its container environment on every deploy, outranking what the platform '
+                        .'generates. An empty value is not an override and is not stored.',
                     x: ['mcp-description' => 'KEY=value applied to the app\'s .env and container on every deploy.']
                 ),
                 new OA\Property(
@@ -433,10 +438,10 @@ class UserController extends Controller
                     type: 'string',
                     nullable: true,
                     description: 'Deploy with this recipe instead of the one detection picks. Takes an id '
-                        . 'from `application.candidates` on POST /source/inspect, and inspecting with the '
-                        . 'same id previews exactly what this deploys. An id this engine does not ship '
-                        . 'fails the deploy rather than falling back to detection. Applies to this deploy '
-                        . 'only - nothing is stored, so the next deploy without it detects again.',
+                        .'from `application.candidates` on POST /source/inspect, and inspecting with the '
+                        .'same id previews exactly what this deploys. An id this engine does not ship '
+                        .'fails the deploy rather than falling back to detection. Applies to this deploy '
+                        .'only - nothing is stored, so the next deploy without it detects again.',
                     example: 'php',
                     x: ['mcp-description' => 'Recipe id to use instead of the detected one, from source_inspect\'s application.candidates. This deploy only.']
                 ),
@@ -445,10 +450,10 @@ class UserController extends Controller
                     type: 'object',
                     nullable: true,
                     description: 'Commands this deploy runs, per stage (precheck, prepare, build, install, '
-                        . 'upgrade, start). A stage named here replaces that stage entirely; a stage left '
-                        . 'out keeps the platform defaults; a stage given as [] runs nothing. Each command '
-                        . 'is {id, run, optional, serve, timeout, workdir, role}. Applies to this deploy '
-                        . 'only - nothing is stored, so the next deploy without it is back on defaults.',
+                        .'upgrade, start). A stage named here replaces that stage entirely; a stage left '
+                        .'out keeps the platform defaults; a stage given as [] runs nothing. Each command '
+                        .'is {id, run, optional, serve, timeout, workdir, role}. Applies to this deploy '
+                        .'only - nothing is stored, so the next deploy without it is back on defaults.',
                     x: ['mcp-description' => 'Replace a stage\'s commands for this deploy only: {stage: [{id, run, ...}]} for precheck, prepare, build, install, upgrade, start; [] skips a stage.']
                 ),
             ],
@@ -558,7 +563,7 @@ class UserController extends Controller
     /** @param array<string, mixed> $frame */
     private static function emitFrame(array $frame): void
     {
-        echo json_encode($frame, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
+        echo json_encode($frame, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n";
         flush();
     }
 
@@ -602,7 +607,7 @@ class UserController extends Controller
                 DeployFailureExplainer::explain($e->getMessage()) ?? $e->getMessage()
             );
         }
-        if (!($e instanceof ValidationException)) {
+        if (! ($e instanceof ValidationException)) {
             Log::error("Streamed deploy failed: {$e->getMessage()}");
         }
     }
@@ -612,7 +617,7 @@ class UserController extends Controller
      * preparing, and a finish would make the wizard treat the placeholder as deployed), otherwise
      * `finish` with the terminal status and, on success, the user data.
      *
-     * @param array<string, mixed>|null $latest
+     * @param  array<string, mixed>|null  $latest
      * @return array<string, mixed>
      */
     private static function closingFrame(?array $latest, ?callable $userFrame): array
@@ -649,29 +654,29 @@ class UserController extends Controller
         path: '/projects/{username}/rebuild',
         summary: 'Redeploy a project',
         description: 'Detects, builds and starts the application again. A project deployed from git '
-            . 'is cloned again from the tip of its branch first: the deploy picks up new commits without a '
-            . 'pull, a revert to an older commit is undone, and files written into ~/project since the last '
-            . 'deploy are discarded. Keep such changes in the repository, and data the application writes in '
-            . 'its volumes or a database, which a rebuild keeps. Any other project is built from the files '
-            . 'already in ~/project, after importing `zip_path` into it when given (refused on a project '
-            . 'deployed from git). The request is '
-            . 'checked and `env_vars` applied at once; the deploy itself runs in a queue job, and the answer '
-            . 'is 202 with a task (`details.action: rebuild`). Poll GET /tasks/{id} until it is completed, '
-            . 'failed or cancelled: a failure is on the task as `details.error`, and `details.problems` '
-            . 'carries its code, stage and deploy_log_offset. While a deploy of this project is queued or '
-            . 'running the answer is 409 with that deploy\'s `task_id`: follow it rather than calling again, '
-            . 'or cancel it with POST /tasks/{id}/cancel if it is stuck. `task_id` is null when the running '
-            . 'deploy was not started as a task (the CLI, a push); follow GET /projects/{username}/deploy-log '
-            . 'then. With X-Deploy-Stream: ndjson the deploy runs in the request instead and its log is '
-            . 'streamed as NDJSON.',
+            .'is cloned again from the tip of its branch first: the deploy picks up new commits without a '
+            .'pull, a revert to an older commit is undone, and files written into ~/project since the last '
+            .'deploy are discarded. Keep such changes in the repository, and data the application writes in '
+            .'its volumes or a database, which a rebuild keeps. Any other project is built from the files '
+            .'already in ~/project, after importing `zip_path` into it when given (refused on a project '
+            .'deployed from git). The request is '
+            .'checked and `env_vars` applied at once; the deploy itself runs in a queue job, and the answer '
+            .'is 202 with a task (`details.action: rebuild`). Poll GET /tasks/{id} until it is completed, '
+            .'failed or cancelled: a failure is on the task as `details.error`, and `details.problems` '
+            .'carries its code, stage and deploy_log_offset. While a deploy of this project is queued or '
+            .'running the answer is 409 with that deploy\'s `task_id`: follow it rather than calling again, '
+            .'or cancel it with POST /tasks/{id}/cancel if it is stuck. `task_id` is null when the running '
+            .'deploy was not started as a task (the CLI, a push); follow GET /projects/{username}/deploy-log '
+            .'then. With X-Deploy-Stream: ndjson the deploy runs in the request instead and its log is '
+            .'streamed as NDJSON.',
         x: ['mcp-description' => 'Detects, builds and starts the app again. A git project is cloned again '
-            . 'from its branch tip first, so files written into ~/project since the last deploy are lost: '
-            . 'commit them to the repository instead. Any other project builds from the files in ~/project, '
-            . 'importing `zip_path` first when given (refused on a git project). Answers at once with a task `id`: '
-            . 'follow it with task_get until completed, failed or cancelled; a failure is in details.error '
-            . 'and details.problems. A 409 means a deploy is already running: follow the task_id it names '
-            . 'with task_get (task_cancel if it is stuck), or deploy_log_get when task_id is null, instead '
-            . 'of calling again.'],
+            .'from its branch tip first, so files written into ~/project since the last deploy are lost: '
+            .'commit them to the repository instead. Any other project builds from the files in ~/project, '
+            .'importing `zip_path` first when given (refused on a git project). Answers at once with a task `id`: '
+            .'follow it with task_get until completed, failed or cancelled; a failure is in details.error '
+            .'and details.problems. A 409 means a deploy is already running: follow the task_id it names '
+            .'with task_get (task_cancel if it is stuck), or deploy_log_get when task_id is null, instead '
+            .'of calling again.'],
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -683,7 +688,7 @@ class UserController extends Controller
                     nullable: true,
                     additionalProperties: new OA\AdditionalProperties(type: 'string'),
                     description: 'KEY=value overrides, merged onto the ones the project already carries — '
-                        . 'send only what changes. An empty value removes that key; null clears them all.',
+                        .'send only what changes. An empty value removes that key; null clears them all.',
                     x: [
                         'mcp-description' => 'KEY=value changes merged onto the project\'s; an empty value removes a key, null clears them all.',
                         'mcp-nullable' => true,
@@ -700,10 +705,10 @@ class UserController extends Controller
                     type: 'string',
                     nullable: true,
                     description: 'Deploy with this recipe instead of the one detection picks. Takes an id '
-                        . 'from `application.candidates` on POST /source/inspect, and inspecting with the '
-                        . 'same id previews exactly what this deploys. An id this engine does not ship '
-                        . 'fails the deploy rather than falling back to detection. Applies to this deploy '
-                        . 'only - nothing is stored, so the next deploy without it detects again.',
+                        .'from `application.candidates` on POST /source/inspect, and inspecting with the '
+                        .'same id previews exactly what this deploys. An id this engine does not ship '
+                        .'fails the deploy rather than falling back to detection. Applies to this deploy '
+                        .'only - nothing is stored, so the next deploy without it detects again.',
                     example: 'php',
                     x: ['mcp-description' => 'Recipe id to use instead of the detected one, from source_inspect\'s application.candidates. This deploy only.']
                 ),
@@ -712,8 +717,8 @@ class UserController extends Controller
                     type: 'object',
                     nullable: true,
                     description: 'Commands this deploy runs, per stage. A stage named here replaces that '
-                        . 'stage entirely; a stage left out keeps the platform defaults; a stage given as '
-                        . '[] runs nothing. Applies to this deploy only - nothing is stored.',
+                        .'stage entirely; a stage left out keeps the platform defaults; a stage given as '
+                        .'[] runs nothing. Applies to this deploy only - nothing is stored.',
                     x: ['mcp-description' => 'Replace a stage\'s commands for this deploy only: {stage: [{id, run, ...}]} for precheck, prepare, build, install, upgrade, start; [] skips a stage.']
                 ),
             ],
@@ -722,7 +727,7 @@ class UserController extends Controller
             new OA\Response(
                 response: 200,
                 description: 'With X-Deploy-Stream: ndjson: the deploy runs in the request and its log streams as '
-                    . 'NDJSON, a `start` frame, `line` and `stage` frames, then a `finish` frame with the status',
+                    .'NDJSON, a `start` frame, `line` and `stage` frames, then a `finish` frame with the status',
                 content: new OA\MediaType(mediaType: 'application/x-ndjson'),
             ),
             new OA\Response(response: 202, description: 'Deploy queued; `data` is the task to follow', content: new OA\JsonContent(
@@ -730,7 +735,7 @@ class UserController extends Controller
             )),
             new OA\Response(response: 400, description: 'Unsupported X-Deploy-Stream value'),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: 'A deploy of this project is already queued or running. ' . ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
+            new OA\Response(response: 409, description: 'A deploy of this project is already queued or running. '.ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
             new OA\Response(response: 503, description: 'The project could not be locked to start the deploy, or, with X-Deploy-Stream: ndjson, its deploy log could not be opened to stream from'),
         ],
@@ -775,7 +780,7 @@ class UserController extends Controller
      * other deploy of the project can be queued or started. The env_vars are
      * resolved before anything starts, so a vault reference they cannot use is still a 422.
      *
-     * @param ?\Closure(): array<string, string> $envVars the env_vars to store, null to leave them
+     * @param  ?\Closure(): array<string, string>  $envVars  the env_vars to store, null to leave them
      */
     private function startRedeploy(
         ProjectRebuild $rebuild,
@@ -825,7 +830,7 @@ class UserController extends Controller
         if ($deployLogger === null) {
             abort(new JsonResponse([
                 'message' => 'The deploy log could not be opened, so there is nothing to stream. '
-                    . 'Try again, or leave out X-Deploy-Stream to queue the deploy.',
+                    .'Try again, or leave out X-Deploy-Stream to queue the deploy.',
             ], 503));
         }
 
@@ -836,22 +841,22 @@ class UserController extends Controller
         path: '/projects/{username}/deploy-archive',
         summary: 'Deploy an uploaded zip/tar into ~/project',
         description: 'Engine-only path: unwrap a single top-level directory, detect project type, apply strategy, '
-            . 'docker compose up. Upload the archive first: POST /projects/{username}/files/upload (file_upload '
-            . 'over MCP, with file_contents or file_url), or an FTP/SFTP account; zip_path is relative to the '
-            . 'account home, e.g. /project/app.zip. The archive is checked (it exists in the home and is a .zip '
-            . 'or .tar.gz) and `env_vars` applied at once; the deploy runs in a queue job, and the answer is '
-            . '202 with a task (`details.action: deploy_archive`). Poll GET /tasks/{id} until it is completed, '
-            . 'failed or cancelled: a failure is on the task as `details.error`, and `details.problems` carries '
-            . 'its code, stage and deploy_log_offset. While a deploy of this project is queued or running the '
-            . 'answer is 409 with that deploy\'s `task_id`, as POST /projects/{username}/rebuild describes. '
-            . 'With X-Deploy-Stream: ndjson the deploy runs in the request instead and its log is streamed '
-            . 'as NDJSON.',
+            .'docker compose up. Upload the archive first: POST /projects/{username}/files/upload (file_upload '
+            .'over MCP, with file_contents or file_url), or an FTP/SFTP account; zip_path is relative to the '
+            .'account home, e.g. /project/app.zip. The archive is checked (it exists in the home and is a .zip '
+            .'or .tar.gz) and `env_vars` applied at once; the deploy runs in a queue job, and the answer is '
+            .'202 with a task (`details.action: deploy_archive`). Poll GET /tasks/{id} until it is completed, '
+            .'failed or cancelled: a failure is on the task as `details.error`, and `details.problems` carries '
+            .'its code, stage and deploy_log_offset. While a deploy of this project is queued or running the '
+            .'answer is 409 with that deploy\'s `task_id`, as POST /projects/{username}/rebuild describes. '
+            .'With X-Deploy-Stream: ndjson the deploy runs in the request instead and its log is streamed '
+            .'as NDJSON.',
         x: ['mcp-description' => 'Deploys an archive already in the account (put there with file_upload or FTP), '
-            . 'e.g. zip_path /project/app.zip. A single top-level directory is unwrapped. Answers at once with a '
-            . 'task `id`: follow it with task_get until completed, failed or cancelled; a failure is in '
-            . 'details.error and details.problems. A 409 means a deploy is already running: follow the task_id '
-            . 'it names with task_get (task_cancel if it is stuck), or deploy_log_get when task_id is null, '
-            . 'instead of calling again.'],
+            .'e.g. zip_path /project/app.zip. A single top-level directory is unwrapped. Answers at once with a '
+            .'task `id`: follow it with task_get until completed, failed or cancelled; a failure is in '
+            .'details.error and details.problems. A 409 means a deploy is already running: follow the task_id '
+            .'it names with task_get (task_cancel if it is stuck), or deploy_log_get when task_id is null, '
+            .'instead of calling again.'],
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -865,7 +870,7 @@ class UserController extends Controller
                     nullable: true,
                     additionalProperties: new OA\AdditionalProperties(type: 'string'),
                     description: 'KEY=value overrides, merged onto the ones the project already carries — '
-                        . 'send only what changes. An empty value removes that key; null clears them all.',
+                        .'send only what changes. An empty value removes that key; null clears them all.',
                     x: [
                         'mcp-description' => 'KEY=value changes merged onto the project\'s; an empty value removes a key, null clears them all.',
                         'mcp-nullable' => true,
@@ -876,10 +881,10 @@ class UserController extends Controller
                     type: 'string',
                     nullable: true,
                     description: 'Deploy with this recipe instead of the one detection picks. Takes an id '
-                        . 'from `application.candidates` on POST /source/inspect, and inspecting with the '
-                        . 'same id previews exactly what this deploys. An id this engine does not ship '
-                        . 'fails the deploy rather than falling back to detection. Applies to this deploy '
-                        . 'only - nothing is stored, so the next deploy without it detects again.',
+                        .'from `application.candidates` on POST /source/inspect, and inspecting with the '
+                        .'same id previews exactly what this deploys. An id this engine does not ship '
+                        .'fails the deploy rather than falling back to detection. Applies to this deploy '
+                        .'only - nothing is stored, so the next deploy without it detects again.',
                     example: 'php',
                     x: ['mcp-description' => 'Recipe id to use instead of the detected one, from source_inspect\'s application.candidates. This deploy only.']
                 ),
@@ -888,8 +893,8 @@ class UserController extends Controller
                     type: 'object',
                     nullable: true,
                     description: 'Commands this deploy runs, per stage. A stage named here replaces that '
-                        . 'stage entirely; a stage left out keeps the platform defaults; a stage given as '
-                        . '[] runs nothing. Applies to this deploy only - nothing is stored.',
+                        .'stage entirely; a stage left out keeps the platform defaults; a stage given as '
+                        .'[] runs nothing. Applies to this deploy only - nothing is stored.',
                     x: ['mcp-description' => 'Replace a stage\'s commands for this deploy only: {stage: [{id, run, ...}]} for precheck, prepare, build, install, upgrade, start; [] skips a stage.']
                 ),
             ],
@@ -898,7 +903,7 @@ class UserController extends Controller
             new OA\Response(
                 response: 200,
                 description: 'With X-Deploy-Stream: ndjson: the deploy runs in the request and its log streams as '
-                    . 'NDJSON, a `start` frame, `line` and `stage` frames, then a `finish` frame with the status',
+                    .'NDJSON, a `start` frame, `line` and `stage` frames, then a `finish` frame with the status',
                 content: new OA\MediaType(mediaType: 'application/x-ndjson'),
             ),
             new OA\Response(response: 202, description: 'Deploy queued; `data` is the task to follow', content: new OA\JsonContent(
@@ -906,7 +911,7 @@ class UserController extends Controller
             )),
             new OA\Response(response: 400, description: 'Unsupported X-Deploy-Stream value'),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: 'A deploy of this project is already queued or running. ' . ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
+            new OA\Response(response: 409, description: 'A deploy of this project is already queued or running. '.ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
             new OA\Response(response: 503, description: 'The project could not be locked to start the deploy, or, with X-Deploy-Stream: ndjson, its deploy log could not be opened to stream from'),
         ],
@@ -945,22 +950,22 @@ class UserController extends Controller
         path: '/projects/{username}/source',
         summary: 'Attach a git source to a project that has none',
         description: 'Gives a project created before its source was known the repository it deploys from, and '
-            . 'deploys it. Only a dind project (`template: dind`) that carries no git_repo and has not produced '
-            . 'an application yet is accepted: the account a source-less create leaves waiting for files. A '
-            . 'classic shared-hosting project, and a dind project that already runs an application, are refused '
-            . 'with 409 problems[{field: git_repo, code: project_not_eligible}] -- converting a classic account '
-            . 'to dind is not supported, and an existing application is not replaced. A project that already has '
-            . 'a git_repo is refused with 409 problems[{field: git_repo, code: source_already_attached}]. The '
-            . 'repository is read as POST /projects reads it: vault references resolved, private, loopback and '
-            . 'reserved addresses refused, and the remote probed for the branch. The source is stored and the '
-            . 'deploy runs in a queue job; the answer is 202 with a task (`details.action: attach_source`, '
-            . '`details.git_repo`). Follow it as a create. While a deploy of this project is queued or running '
-            . 'the answer is 409 with that deploy\'s `task_id`. A clone or build failure leaves the project dind '
-            . 'with the source attached and a failed deploy, which POST /projects/{username}/rebuild retries.',
+            .'deploys it. Only a dind project (`template: dind`) that carries no git_repo and has not produced '
+            .'an application yet is accepted: the account a source-less create leaves waiting for files. A '
+            .'classic shared-hosting project, and a dind project that already runs an application, are refused '
+            .'with 409 problems[{field: git_repo, code: project_not_eligible}] -- converting a classic account '
+            .'to dind is not supported, and an existing application is not replaced. A project that already has '
+            .'a git_repo is refused with 409 problems[{field: git_repo, code: source_already_attached}]. The '
+            .'repository is read as POST /projects reads it: vault references resolved, private, loopback and '
+            .'reserved addresses refused, and the remote probed for the branch. The source is stored and the '
+            .'deploy runs in a queue job; the answer is 202 with a task (`details.action: attach_source`, '
+            .'`details.git_repo`). Follow it as a create. While a deploy of this project is queued or running '
+            .'the answer is 409 with that deploy\'s `task_id`. A clone or build failure leaves the project dind '
+            .'with the source attached and a failed deploy, which POST /projects/{username}/rebuild retries.',
         x: ['mcp-description' => 'Gives a dind project created without a source the git_repo it deploys from, and '
-            . 'deploys it. Answers at once with a task `id`: follow it with task_get until completed, failed or '
-            . 'cancelled; a failure is in details.error and details.problems. Refuses a project that already has a '
-            . 'git_repo, a classic project, and a dind project already running an application.'],
+            .'deploys it. Answers at once with a task `id`: follow it with task_get until completed, failed or '
+            .'cancelled; a failure is in details.error and details.problems. Refuses a project that already has a '
+            .'git_repo, a classic project, and a dind project already running an application.'],
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -972,15 +977,15 @@ class UserController extends Controller
                     type: 'string',
                     example: 'https://github.com/owner/repo.git',
                     description: 'HTTPS clone URL, the same rule POST /projects applies. A schemeless '
-                        . 'github.com/owner/repo is accepted and has the scheme filled in.',
+                        .'github.com/owner/repo is accepted and has the scheme filled in.',
                 ),
                 new OA\Property(property: 'git_branch', type: 'string', nullable: true, description: 'Branch or tag to deploy; omitted, the remote default branch.'),
                 new OA\Property(
                     property: 'git_token',
                     type: 'string',
                     nullable: true,
-                    description: 'Optional HTTPS token injected at clone time. A `vault:<id>` from vault_secret_create '
-                        . 'is accepted here in place of the literal token. Never logged or returned.',
+                    description: 'Optional HTTPS token injected at clone time. A `vault:<key>` from vault_secret_create '
+                        .'is accepted here in place of the literal token. Never logged or returned.',
                 ),
                 new OA\Property(
                     property: 'env_vars',
@@ -988,7 +993,7 @@ class UserController extends Controller
                     nullable: true,
                     additionalProperties: new OA\AdditionalProperties(type: 'string'),
                     description: 'Optional KEY=value overrides, merged onto the ones the project already carries. '
-                        . 'An empty value removes that key; null clears them all.',
+                        .'An empty value removes that key; null clears them all.',
                 ),
                 new OA\Property(
                     property: 'recipe',
@@ -1010,7 +1015,7 @@ class UserController extends Controller
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: 'A deploy of this project is already queued or running (message and task_id), or the project cannot take a source (problems: source_already_attached, project_not_eligible). ' . ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
+            new OA\Response(response: 409, description: 'A deploy of this project is already queued or running (message and task_id), or the project cannot take a source (problems: source_already_attached, project_not_eligible). '.ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
             new OA\Response(response: 503, description: 'The project could not be locked to start the attach'),
         ],
@@ -1052,6 +1057,7 @@ class UserController extends Controller
         )),
         responses: [
             new OA\Response(response: 200, description: 'Cloned project', content: new OA\JsonContent(ref: '#/components/schemas/User')),
+            new OA\Response(response: 403, description: ApiDefinitions::OUT_OF_SCOPE_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
@@ -1067,7 +1073,7 @@ class UserController extends Controller
      * Subdomains, FTP/SFTP accounts, MySQL databases/users and dedicated IP
      * addresses are NOT cloned.
      *
-     * @param string $username  Source project's name.
+     * @param  string  $username  Source project's name.
      */
     public function clone(string $username, UserCloneRequest $request): UserResource
     {
@@ -1077,21 +1083,21 @@ class UserController extends Controller
         $params = $request->validated();
         $copyDatabases = $params['copy_databases'] ?? true;
 
-        $system = new System();
+        $system = new System;
 
         $newUsername = $this->cloneUsername($srcUser, $params['new_username'] ?? null, $system);
         $cloneDomain = $this->cloneDomainName($srcUser, $params['domain'] ?? null);
         $this->assertMemoryLimitFits($srcUser);
-        Projects::assertDatabaseNamesFit($srcUser, $newUsername . '_');
+        Projects::assertDatabaseNamesFit($srcUser, $newUsername.'_');
         $newDetails = $srcUser->detailsForCopiedProject($newUsername);
         $domainAliases = $this->wwwAliasIfFree($cloneDomain);
 
         /** @var User */
         $cloneUser = User::make([
             'username' => $newUsername,
-            'domain'   => $cloneDomain,
-            'email'    => $srcUser->email,
-            'details'  => $newDetails,
+            'domain' => $cloneDomain,
+            'email' => $srcUser->email,
+            'details' => $newDetails,
         ]);
 
         if ($cloneUser->project()->hostingExists()) {
@@ -1119,7 +1125,7 @@ class UserController extends Controller
     /** @throws ValidationException when no free name can be generated, or the name is taken */
     private function cloneUsername(User $srcUser, ?string $requested, System $system): string
     {
-        $newUsername = !empty($requested) ? $requested : null;
+        $newUsername = ! empty($requested) ? $requested : null;
         if ($newUsername === null) {
             $newUsername = Helper::generateCloneUsername($srcUser->username);
             if ($newUsername === null) {
@@ -1134,7 +1140,7 @@ class UserController extends Controller
                 'new_username' => 'User already exists.',
             ]);
         }
-        if (!$system->isUsernameAvailable($newUsername)) {
+        if (! $system->isUsernameAvailable($newUsername)) {
             throw ValidationException::withMessages([
                 'new_username' => 'Username not available.',
             ]);
@@ -1150,7 +1156,7 @@ class UserController extends Controller
      */
     private function cloneDomainName(User $srcUser, ?string $requested): string
     {
-        $cloneDomain = !empty($requested) ? $requested : null;
+        $cloneDomain = ! empty($requested) ? $requested : null;
         if ($cloneDomain === null) {
             $cloneDomain = Helper::generateCloneDomain($srcUser->domain);
             if ($cloneDomain === null) {
@@ -1181,27 +1187,27 @@ class UserController extends Controller
     private function wwwAliasIfFree(string $cloneDomain): array
     {
         $wwwAliasAvailable = DomainPlan::wwwAliasWouldAnswer($cloneDomain)
-            && !Domain::domainOrAliasExists('www.' . $cloneDomain);
+            && ! Domain::domainOrAliasExists('www.'.$cloneDomain);
 
-        return $wwwAliasAvailable ? ['www.' . $cloneDomain] : [];
+        return $wwwAliasAvailable ? ['www.'.$cloneDomain] : [];
     }
 
     /**
      * The clone's main domain; its user_id is set once the user is saved.
      *
-     * @param list<string> $aliases
+     * @param  list<string>  $aliases
      */
     private function unsavedMainDomain(string $cloneDomain, array $aliases): Domain
     {
         return Domain::make([
             'user_id' => null,
-            'domain'  => $cloneDomain,
-            'type'    => 'main',
+            'domain' => $cloneDomain,
+            'type' => 'main',
             'details' => [
-                'document_root'     => "/{$cloneDomain}/public_html",
-                'redirect_enabled'  => false,
-                'redirect_url'      => null,
-                'aliases'           => $aliases,
+                'document_root' => "/{$cloneDomain}/public_html",
+                'redirect_enabled' => false,
+                'redirect_url' => null,
+                'aliases' => $aliases,
             ],
         ]);
     }
@@ -1223,7 +1229,10 @@ class UserController extends Controller
 
     #[OA\Post(
         path: '/projects/verify-new-username',
-        summary: 'Check that a project name is available',
+        summary: 'Check whether a project name is free',
+        description: 'Answers 200 for every well-formed name: `valid` is true when the name is free. When it is not, '
+            .'`valid` is false and `reason` says why: `taken` (another project uses it) or `unavailable` '
+            .'(reserved on this host). Only a name that breaks the naming rules is refused with 422.',
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
@@ -1231,10 +1240,15 @@ class UserController extends Controller
             properties: [new OA\Property(property: 'username', type: 'string', example: 'johndoe')],
         )),
         responses: [
-            new OA\Response(response: 200, description: 'Username is valid', content: new OA\JsonContent(
-                properties: [new OA\Property(property: 'valid', type: 'boolean', example: true)],
+            new OA\Response(response: 200, description: 'The name was checked', content: new OA\JsonContent(
+                required: ['valid'],
+                properties: [
+                    new OA\Property(property: 'valid', type: 'boolean', example: false),
+                    new OA\Property(property: 'reason', type: 'string', enum: ['taken', 'unavailable'], example: 'taken', description: 'Only when `valid` is false'),
+                    new OA\Property(property: 'message', type: 'string', example: 'Project name already in use.', description: 'Only when `valid` is false'),
+                ],
             )),
-            new OA\Response(response: 422, description: 'Username taken or invalid', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 422, description: 'The name breaks the naming rules', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     /**
@@ -1247,22 +1261,27 @@ class UserController extends Controller
          * }
          */
         $params = $request->validated();
+        $reason = $this->nameUnavailableReason($params['username']);
 
-        if (User::existsByUsername($params['username'])) {
-            throw ValidationException::withMessages([
-                'username' => 'User already exists.'
-            ]);
+        if ($reason === null) {
+            return new JsonResponse(['valid' => true]);
         }
 
-        $system = new System();
+        return new JsonResponse([
+            'valid' => false,
+            'reason' => $reason,
+            'message' => self::NAME_UNAVAILABLE_MESSAGES[$reason],
+        ]);
+    }
 
-        if (!$system->isUsernameAvailable($params['username'])) {
-            throw ValidationException::withMessages([
-                'username' => 'Username not available.'
-            ]);
+    /** `taken` when a project uses the name, `unavailable` when the host reserves it, null when it is free. */
+    private function nameUnavailableReason(string $username): ?string
+    {
+        if (User::existsByUsername($username)) {
+            return 'taken';
         }
 
-        return new JsonResponse(['valid' => true]);
+        return app(System::class)->isUsernameAvailable($username) ? null : 'unavailable';
     }
 
     #[OA\Get(
@@ -1277,7 +1296,7 @@ class UserController extends Controller
         ],
     )]
     /**
-     * @param string $username
+     * @param  string  $username
      * @return UserResource
      */
     public function show($username)
@@ -1292,27 +1311,28 @@ class UserController extends Controller
         path: '/projects/{username}',
         summary: 'Update a project',
         description: 'A token limited to some projects may change `domain` and `email` only. The resource '
-            . 'limits and the PHP-FPM, LSPHP and Redis settings are the operator\'s: sending any of them '
-            . 'with such a token is refused with 403, naming the fields.',
+            .'limits and the PHP-FPM, LSPHP and Redis settings are the operator\'s: sending any of them '
+            .'with such a token is refused with 403, naming the fields.',
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             properties: [
-                new OA\Property(property: 'domain', type: 'string', nullable: true),
+                new OA\Property(property: 'domain', type: 'string', nullable: true, description: 'Renames the main domain. Not to a name under panelalpha.online (add it as a tunnel instead). '
+                    .'A PanelAlpha Online tunnel that is the old name itself is deleted with it; any other tunnel of the main domain has to be deleted first.'),
                 new OA\Property(property: 'email', type: 'string', format: 'email', nullable: true),
                 new OA\Property(property: 'disk_space_limit', type: 'integer', nullable: true, description: 'MB, -1 for unlimited; null clears the limit', x: ['mcp-nullable' => true]),
                 new OA\Property(property: 'memory_limit', type: 'integer', description: 'MB. Can be changed, not removed. Refused when larger than memory_budget.max_project_mb in GET /metrics/current'),
-                new OA\Property(property: 'cpu_limit', type: 'number', format: 'float', nullable: true, description: 'null clears the limit', x: ['mcp-nullable' => true]),
-                new OA\Property(property: 'device_read_bps', type: 'integer', nullable: true, description: '-1 or null for unlimited', x: ['mcp-nullable' => true]),
-                new OA\Property(property: 'device_write_bps', type: 'integer', nullable: true, description: '-1 or null for unlimited', x: ['mcp-nullable' => true]),
-                new OA\Property(property: 'bandwidth_limit', type: 'integer', nullable: true, description: 'null clears the limit', x: ['mcp-nullable' => true]),
-                new OA\Property(property: 'mysql_databases_limit', type: 'integer', nullable: true, description: '-1 or null for unlimited', x: ['mcp-nullable' => true]),
-                new OA\Property(property: 'ftp_accounts_limit', type: 'integer', nullable: true, description: '-1 or null for unlimited', x: ['mcp-nullable' => true]),
-                new OA\Property(property: 'sftp_accounts_limit', type: 'integer', nullable: true, description: '-1 or null for unlimited', x: ['mcp-nullable' => true]),
-                new OA\Property(property: 'addon_domains_limit', type: 'integer', nullable: true, description: '-1 or null for unlimited', x: ['mcp-nullable' => true]),
-                new OA\Property(property: 'subdomains_limit', type: 'integer', nullable: true, description: '-1 or null for unlimited', x: ['mcp-nullable' => true]),
-                new OA\Property(property: 'inodes_limit', type: 'integer', nullable: true, description: '-1 or null for unlimited', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'cpu_limit', type: 'number', format: 'float', nullable: true, description: 'CPU cores, -1 for unlimited; null clears the limit', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'device_read_bps', type: 'integer', nullable: true, description: '-1 for unlimited; null clears the limit', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'device_write_bps', type: 'integer', nullable: true, description: '-1 for unlimited; null clears the limit', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'bandwidth_limit', type: 'integer', nullable: true, description: 'MB a month, -1 for unlimited; null clears the limit', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'mysql_databases_limit', type: 'integer', nullable: true, description: '-1 for unlimited; null clears the limit', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'ftp_accounts_limit', type: 'integer', nullable: true, description: '-1 for unlimited; null clears the limit', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'sftp_accounts_limit', type: 'integer', nullable: true, description: '-1 for unlimited; null clears the limit', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'addon_domains_limit', type: 'integer', nullable: true, description: '-1 for unlimited; null clears the limit', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'subdomains_limit', type: 'integer', nullable: true, description: '-1 for unlimited; null clears the limit', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'inodes_limit', type: 'integer', nullable: true, description: '-1 for unlimited; null clears the limit', x: ['mcp-nullable' => true]),
             ],
         )),
         responses: [
@@ -1320,11 +1340,11 @@ class UserController extends Controller
             new OA\Response(response: 403, description: ApiDefinitions::OPERATOR_ONLY_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 409, description: ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
-            new OA\Response(response: 422, description: 'Validation error; domain_taken when the domain is already on this engine', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 422, description: 'Validation error; on domain: domain_taken when the domain is already on this engine, domain_proxy_zone for a name under panelalpha.online, domain_has_tunnels while the main domain has tunnels other than its own PanelAlpha Online name', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     /**
-     * @param string $username
+     * @param  string  $username
      * @return UserResource
      */
     public function update($username, UserUpdateRequest $request)
@@ -1372,7 +1392,7 @@ class UserController extends Controller
     /**
      * Stored as the console stores them: -1 is "no limit", and an explicit null clears the limit.
      *
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      */
     private function applyResourceLimits(User $user, array $params): void
     {
@@ -1397,7 +1417,7 @@ class UserController extends Controller
     /**
      * A new memory limit is applied to the running account at once, not at the next rebuild.
      *
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      */
     private function applyMemoryLimitNow(User $user, array $params): void
     {
@@ -1425,14 +1445,14 @@ class UserController extends Controller
     {
         $user = $this->projectOr404($username);
 
-        $user->status = "suspended";
+        $user->status = 'suspended';
         $user->save();
 
-        $system = new System();
+        $system = new System;
         $this->rotatePhpMyAdminSsoPassword($system, $user);
         $reloaded = $system->rebuildDomains();
 
-        return (new UserResource($user))->additional(['reload_pending' => !$reloaded]);
+        return (new UserResource($user))->additional(['reload_pending' => ! $reloaded]);
     }
 
     /**
@@ -1442,12 +1462,12 @@ class UserController extends Controller
     private function rotatePhpMyAdminSsoPassword(System $system, User $user): void
     {
         try {
-            $sso = 'sso_' . $user->username;
+            $sso = 'sso_'.$user->username;
             if ($system->mysql()->users()->userExists($sso)) {
                 $system->mysql()->users()->changeUserPassword($sso, Str::random(27));
             }
         } catch (\Throwable $e) {
-            Log::warning("Could not rotate the phpMyAdmin SSO password of {$user->username}: " . $e->getMessage());
+            Log::warning("Could not rotate the phpMyAdmin SSO password of {$user->username}: ".$e->getMessage());
         }
     }
 
@@ -1468,13 +1488,13 @@ class UserController extends Controller
     {
         $user = $this->projectOr404($username);
 
-        $user->status = "active";
+        $user->status = 'active';
         $user->save();
 
-        $system = new System();
+        $system = new System;
         $reloaded = $system->rebuildDomains();
 
-        return (new UserResource($user))->additional(['reload_pending' => !$reloaded]);
+        return (new UserResource($user))->additional(['reload_pending' => ! $reloaded]);
     }
 
     #[OA\Delete(
@@ -1486,11 +1506,11 @@ class UserController extends Controller
         responses: [
             new OA\Response(response: 200, description: 'Project deleted', content: new OA\JsonContent(ref: '#/components/schemas/User')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: 'Project busy: a task, deploy or push is working on it. ' . ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
+            new OA\Response(response: 409, description: 'Project busy: a task, deploy or push is working on it. '.ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
         ],
     )]
     /**
-     * @param string $username
+     * @param  string  $username
      * @return UserResource
      */
     public function destroy($username)
@@ -1505,12 +1525,12 @@ class UserController extends Controller
     private function deleteProject(User $user): void
     {
         try {
-            (new ProjectDeleter())->delete($user);
+            (new ProjectDeleter)->delete($user);
         } catch (ProjectBusyException $e) {
             throw $e;
         } catch (\Exception $e) {
             Log::warning(
-                "Could not delete user '{$user->username}': " . $e->getMessage(),
+                "Could not delete user '{$user->username}': ".$e->getMessage(),
                 ['exception' => $e],
             );
             throw $e;

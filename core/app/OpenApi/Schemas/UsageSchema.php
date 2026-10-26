@@ -8,7 +8,7 @@ use OpenApi\Attributes as OA;
     schema: 'UsageQuota',
     properties: [
         new OA\Property(property: 'usage', type: 'integer', example: 123456),
-        new OA\Property(property: 'maximum', type: 'integer', nullable: true, example: 10485760),
+        new OA\Property(property: 'maximum', type: 'integer', nullable: true, example: 10485760, description: 'The limit, in the same unit as usage. -1 when unlimited, null when no limit is set.'),
     ],
     type: 'object',
 )]
@@ -33,7 +33,7 @@ use OpenApi\Attributes as OA;
         new OA\Property(
             property: 'bandwidth',
             ref: '#/components/schemas/UsageQuota',
-            description: 'Transfer for the current calendar month in the host timezone, in bytes. maximum is the project bandwidth_limit in bytes, or null when unlimited.',
+            description: 'Transfer for the current calendar month in the host timezone, in bytes. maximum is the project bandwidth_limit in bytes; -1 when unlimited, null when no limit is set.',
         ),
         new OA\Property(property: 'addon_domains', ref: '#/components/schemas/UsageQuota'),
         new OA\Property(property: 'subdomains', ref: '#/components/schemas/UsageQuota'),
@@ -43,6 +43,4 @@ use OpenApi\Attributes as OA;
     ],
     type: 'object',
 )]
-class UsageSchema
-{
-}
+class UsageSchema {}

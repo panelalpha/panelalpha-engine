@@ -7,6 +7,7 @@ use App\Http\Requests\FtpAccountStoreRequest;
 use App\Http\Requests\FtpAccountUpdateRequest;
 use App\Http\Resources\FtpAccountCollection;
 use App\Http\Resources\FtpAccountResource;
+use App\Lib\Limits\ResourceLimit;
 use App\Models\FtpAccount;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
@@ -35,11 +36,12 @@ class FtpAccountController extends Controller
             ->where('username', $username)
             ->with('ftpAccounts.userModel')
             ->first();
-        if (!$user) {
+        if (! $user) {
             abort(new JsonResponse([
                 'message' => 'Project not found',
             ], 404));
         }
+
         return new FtpAccountCollection($user->ftpAccounts);
     }
 
@@ -66,22 +68,21 @@ class FtpAccountController extends Controller
         ],
     )]
     /**
-     * @param string $username
-     * @param FtpAccountStoreRequest $request
+     * @param  string  $username
      * @return FtpAccountResource
      */
     public function store($username, FtpAccountStoreRequest $request)
     {
         /** @var ?User */
         $user = User::query()->withCount('ftpAccounts')->where('username', $username)->first();
-        if (!$user) {
+        if (! $user) {
             abort(new JsonResponse([
                 'message' => 'Project not found',
             ], 404));
         }
 
-        $limit = $user->getFtpAccountsLimit();
-        if ($limit !== null && $limit <= $user->ftp_accounts_count) {
+        $limit = ResourceLimit::reached($user->getFtpAccountsLimit(), $user->ftp_accounts_count);
+        if ($limit !== null) {
             abort(new JsonResponse([
                 'message' => "FTP accounts limit of {$limit} reached.",
                 'error_type' => 'ftp_accounts_limit_reached',
@@ -100,7 +101,7 @@ class FtpAccountController extends Controller
          */
         $params = $request->validated();
 
-        if (!$user->domains()->getQuery()->where('domain', $params['domain'])->exists()) {
+        if (! $user->domains()->getQuery()->where('domain', $params['domain'])->exists()) {
             throw ValidationException::withMessages([
                 'domain' => 'Invalid value.',
             ]);
@@ -115,7 +116,7 @@ class FtpAccountController extends Controller
 
         $password = $params['password'];
         $directory = '/';
-        if (!empty($params['directory'])) {
+        if (! empty($params['directory'])) {
             $directory .= trim($params['directory'], '/');
         }
         $quota = $request->getQuota();
@@ -159,9 +160,8 @@ class FtpAccountController extends Controller
         ],
     )]
     /**
-     * @param string $username
-     * @param string $ftpUser
-     * @param FtpAccountUpdateRequest $request
+     * @param  string  $username
+     * @param  string  $ftpUser
      * @return FtpAccountResource
      */
     public function update($username, $ftpUser, FtpAccountUpdateRequest $request)
@@ -170,7 +170,7 @@ class FtpAccountController extends Controller
 
         /** @var ?FtpAccount */
         $ftpAccount = $user->ftpAccounts()->getQuery()->where('user', $ftpUser)->first();
-        if (!$ftpAccount) {
+        if (! $ftpAccount) {
             abort(new JsonResponse([
                 'message' => 'FTP account not found',
             ], 404));
@@ -221,8 +221,8 @@ class FtpAccountController extends Controller
         ],
     )]
     /**
-     * @param string $username
-     * @param string $ftpUser
+     * @param  string  $username
+     * @param  string  $ftpUser
      * @return FtpAccountResource
      */
     public function destroy($username, $ftpUser)
@@ -231,7 +231,7 @@ class FtpAccountController extends Controller
 
         /** @var ?FtpAccount */
         $ftpAccount = $user->ftpAccounts()->getQuery()->where('user', $ftpUser)->first();
-        if (!$ftpAccount) {
+        if (! $ftpAccount) {
             abort(new JsonResponse([
                 'message' => 'FTP account not found',
             ], 404));

@@ -57,6 +57,15 @@ class NewDomainTest extends TestCase
         $this->assertNull(NewDomain::reachedLimit($user, 'sub'), 'one of two subdomains used');
     }
 
+    public function test_an_unlimited_limit_is_never_reached(): void
+    {
+        $user = $this->makeUser('alice', ['addon_domains_limit' => -1, 'subdomains_limit' => -1]);
+        $this->addDomain($user, 'one.test', 'addon');
+
+        $this->assertNull(NewDomain::reachedLimit($user, 'addon'));
+        $this->assertNull(NewDomain::reachedLimit($user, 'sub'));
+    }
+
     public function test_only_addon_and_sub_have_a_limit(): void
     {
         $user = $this->makeUser('alice', ['addon_domains_limit' => 0]);

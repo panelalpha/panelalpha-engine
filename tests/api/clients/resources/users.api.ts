@@ -209,10 +209,12 @@ export class UsersApi extends EngineApiBase {
   }
 
   /**
-   * Verifies if a username is available
-   * Returns { valid: true } if available, throws ValidationException if not
+   * Checks whether a project name is free: `{ valid: true }`, or `{ valid: false, reason, message }`
+   * for a taken or reserved name. A name that breaks the naming rules is a 422.
    */
-  async verifyUsername(username: string): Promise<{ valid: boolean }> {
+  async verifyUsername(
+    username: string
+  ): Promise<{ valid: boolean; reason?: 'taken' | 'unavailable'; message?: string }> {
     const response = await this.api.post('projects/verify-new-username', { data: { username } });
     await this.assertStatus(response, 200);
     return response.json();

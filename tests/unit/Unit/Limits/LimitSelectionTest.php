@@ -36,17 +36,17 @@ class LimitSelectionTest extends TestCase
 
     /**
      * The distinction the command depends on: an absent option leaves the
-     * stored value alone, while `--bandwidth-limit=-1` clears it.
+     * stored value alone, while `--bandwidth-limit=-1` sets it to unlimited.
      */
     public function test_minus_one_is_a_selection_not_an_absence(): void
     {
         $selection = LimitSelection::fromOptions($this->opts(['bandwidth-limit' => '-1']));
 
         $this->assertFalse($selection->isEmpty());
-        $this->assertSame(['bandwidth_limit' => null], $selection->all());
+        $this->assertSame(['bandwidth_limit' => -1], $selection->all());
     }
 
-    /** Checked on the raw option, before normalize() folds -1 into null. */
+    /** Checked on the raw option, before normalize() folds it into UNLIMITED. */
     public function test_a_memory_limit_that_cannot_be_stored_is_rejected(): void
     {
         $this->assertSame(
@@ -78,14 +78,15 @@ class LimitSelectionTest extends TestCase
         $this->assertFalse($selection->has('cpu_limit'));
     }
 
-    public function test_disk_space_keeps_minus_one_where_others_clear(): void
+    public function test_every_limit_keeps_minus_one(): void
     {
         $selection = LimitSelection::fromOptions($this->opts([
             'disk-space-limit' => '-1',
             'inodes-limit' => '-1',
+            'cpu-limit' => '-1',
         ]));
 
-        $this->assertSame(['disk_space_limit' => -1, 'inodes_limit' => null], $selection->all());
+        $this->assertSame(['disk_space_limit' => -1, 'cpu_limit' => -1.0, 'inodes_limit' => -1], $selection->all());
     }
 
     public function test_zero_is_a_real_limit_and_is_not_mistaken_for_absent(): void

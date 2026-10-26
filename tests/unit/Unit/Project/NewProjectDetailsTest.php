@@ -70,23 +70,33 @@ class NewProjectDetailsTest extends TestCase
         $this->assertSame(900, $details['inodes_limit']);
     }
 
-    /**
-     * -1 is the "unlimited" sentinel on every count limit, as on the console;
-     * ResourceLimit::normalize() stores it as null everywhere but
-     * disk_space_limit, which keeps -1.
-     */
-    public function test_a_minus_one_count_limit_is_stored_as_no_limit(): void
+    /** -1 is "unlimited" on every limit, as on the console, and is stored as -1. */
+    public function test_a_minus_one_limit_is_stored_as_unlimited(): void
     {
         $details = $this->build([
             'mysql_databases_limit' => -1,
             'inodes_limit' => -1,
             'device_read_bps' => -1,
+            'bandwidth_limit' => -1,
+            'cpu_limit' => -1,
         ]);
 
-        $this->assertNull($details['mysql_databases_limit']);
-        $this->assertNull($details['inodes_limit']);
-        $this->assertNull($details['device_read_bps']);
+        $this->assertSame(-1, $details['mysql_databases_limit']);
+        $this->assertSame(-1, $details['inodes_limit']);
+        $this->assertSame(-1, $details['device_read_bps']);
+        $this->assertSame(-1, $details['bandwidth_limit']);
+        $this->assertSame(-1.0, $details['cpu_limit']);
         $this->assertSame(-1, $details['disk_space_limit']);
+    }
+
+    public function test_an_unnamed_limit_stays_unset_and_only_disk_space_starts_unlimited(): void
+    {
+        $details = $this->build();
+
+        $this->assertSame(-1, $details['disk_space_limit']);
+        $this->assertNull($details['bandwidth_limit']);
+        $this->assertNull($details['inodes_limit']);
+        $this->assertNull($details['cpu_limit']);
     }
 
     public function test_the_dedicated_ip_flags_are_always_booleans(): void

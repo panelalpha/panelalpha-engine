@@ -53,6 +53,18 @@ class DomainCreateRefusalsTest extends TestCase
             ]);
     }
 
+    /** A stored -1 is no limit, so the name is what the refusal names, not the limit. */
+    public function test_http_an_unlimited_addon_limit_is_not_a_refusal(): void
+    {
+        $user = $this->makeUser('alice', ['addon_domains_limit' => -1]);
+        $this->addDomain($user, 'taken.test', 'addon');
+
+        $this->store(['domain' => 'taken.test', 'type' => 'addon'])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.domain.0', 'Domain already exists.')
+            ->assertJsonMissingPath('error_type');
+    }
+
     public function test_http_refuses_a_taken_domain_and_a_taken_alias(): void
     {
         $user = $this->makeUser('alice');

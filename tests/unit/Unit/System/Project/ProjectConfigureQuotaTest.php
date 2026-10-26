@@ -89,6 +89,16 @@ class ProjectConfigureQuotaTest extends TestCase
         $this->assertSame([], $this->log->warnings);
     }
 
+    public function test_unlimited_disk_and_inodes_set_no_quota(): void
+    {
+        $system = $this->system(0, '');
+
+        $applied = $this->project($system, -1, -1)->configureQuota();
+
+        $this->assertTrue($applied);
+        $this->assertSame(['setquota', '-u', 'alice', '0', '0', '0', '0', '/home'], $system->argv);
+    }
+
     private function project(System $system, ?int $diskMb, ?int $inodes): Project
     {
         $model = new ModelsUser();

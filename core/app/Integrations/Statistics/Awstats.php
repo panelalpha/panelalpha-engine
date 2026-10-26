@@ -4,12 +4,24 @@ namespace App\Integrations\Statistics;
 
 use App\Integrations\GeoLocation\GeoLocation;
 use App\Lib\Helpers\ContinentMap;
+use Carbon\CarbonPeriod;
 use Illuminate\Support\Carbon;
 use Symfony\Component\Process\Process;
 
 class Awstats implements Statistics
 {
     public const string LOG_FORMAT = '1';
+
+    /** Seconds each SESSION bucket stands for, as AWStats estimates them. */
+    private const array SESSION_MIDPOINTS = [
+        '0s-30s' => 15,
+        '30s-2mn' => 75,
+        '2mn-5mn' => 210,
+        '5mn-15mn' => 600,
+        '15mn-30mn' => 1350,
+        '30mn-1h' => 2700,
+        '1h+' => 3600,
+    ];
 
     private string $configDir;
 
@@ -20,7 +32,7 @@ class Awstats implements Statistics
         private string $awstatsBin = '/usr/lib/cgi-bin/awstats.pl',
         private string $mergeBin = '/usr/share/awstats/tools/logresolvemerge.pl',
     ) {
-        $this->configDir = $configDir ?? dirname($this->dataDir) . '/awstats-config';
+        $this->configDir = $configDir ?? dirname($this->dataDir).'/awstats-config';
     }
 
     public function domainBandwidth(string $domain, string $start, string $end, string $groupBy): array
@@ -89,7 +101,53 @@ class Awstats implements Statistics
                 'total' => array_sum($visits),
             ],
             'visits_length' => $visitsLength,
+            'session_length' => $this->sessionLength($domain, $start, $end),
         ];
+    }
+
+    /**
+     * Average session length per day, in seconds, from each day's SESSION
+     * section: every bucket counted at AWStats' own midpoint for it. A day
+     * without sessions, or ingested before per-day files, is null.
+     *
+     * @return array{records: array<string, ?int>, average: ?int, estimated: true}
+     */
+    private function sessionLength(string $domain, string $start, string $end): array
+    {
+        $daily = $this->dailyFiles($domain, $start, $end);
+        $records = [];
+        $seconds = 0;
+        $sessions = 0;
+        foreach (CarbonPeriod::create($start, $end) as $day) {
+            $date = $day->toDateString();
+            [$daySeconds, $daySessions] = $this->sessionTotals($daily[$date] ?? '');
+            $records[$date] = $daySessions > 0 ? (int) round($daySeconds / $daySessions) : null;
+            $seconds += $daySeconds;
+            $sessions += $daySessions;
+        }
+
+        return [
+            'records' => $records,
+            'average' => $sessions > 0 ? (int) round($seconds / $sessions) : null,
+            'estimated' => true,
+        ];
+    }
+
+    /**
+     * @return array{0: int, 1: int} estimated seconds, sessions
+     */
+    private function sessionTotals(string $contents): array
+    {
+        $seconds = 0;
+        $sessions = 0;
+        foreach ($this->parseKeyedCounts($contents, 'SESSION') as $bucket => $count) {
+            if (isset(self::SESSION_MIDPOINTS[$bucket])) {
+                $seconds += $count * self::SESSION_MIDPOINTS[$bucket];
+                $sessions += $count;
+            }
+        }
+
+        return [$seconds, $sessions];
     }
 
     public function domainVisitorBreakdown(string $domain, string $dimension, string $start, string $end): array
@@ -101,9 +159,10 @@ class Awstats implements Statistics
         $merged = [];
         foreach ($this->monthFiles($domain, $start, $end) as $contents) {
             foreach ($this->breakdownRows($contents, $dimension) as $row) {
-                $key = ($row['code'] ?? '') . "\0" . $row['label'];
-                if (!isset($merged[$key])) {
+                $key = ($row['code'] ?? '')."\0".$row['label'];
+                if (! isset($merged[$key])) {
                     $merged[$key] = $row;
+
                     continue;
                 }
                 $merged[$key]['visits'] += $row['visits'];
@@ -338,7 +397,7 @@ class Awstats implements Statistics
     }
 
     /**
-     * @param array{country?: string, country_code?: string, region?: string, region_code?: string} $record
+     * @param  array{country?: string, country_code?: string, region?: string, region_code?: string}  $record
      * @return array{label: string, code: string}|null
      */
     private function regionPlace(array $record): ?array
@@ -358,15 +417,15 @@ class Awstats implements Statistics
     public function configureDomain(string $domain, array $aliases, string $logDirectory): void
     {
         $this->ensureDirectories();
-        $logFile = rtrim($logDirectory, '/\\') . '/access.log';
+        $logFile = rtrim($logDirectory, '/\\').'/access.log';
         $hostAliases = implode(' ', $aliases);
         $body = implode("\n", [
-            'LogFile="' . $this->confEscape($logFile) . '"',
+            'LogFile="'.$this->confEscape($logFile).'"',
             'LogType=W',
-            'LogFormat=' . self::LOG_FORMAT,
-            'SiteDomain="' . $this->confEscape($domain) . '"',
-            'HostAliases="' . $this->confEscape($hostAliases) . '"',
-            'DirData="' . $this->confEscape($this->dataDir) . '"',
+            'LogFormat='.self::LOG_FORMAT,
+            'SiteDomain="'.$this->confEscape($domain).'"',
+            'HostAliases="'.$this->confEscape($hostAliases).'"',
+            'DirData="'.$this->confEscape($this->dataDir).'"',
             'DirCgi="/usr/lib/cgi-bin"',
             'DirIcons="/usr/share/awstats/icon"',
             'AllowToUpdateStatsFromBrowser=0',
@@ -381,15 +440,15 @@ class Awstats implements Statistics
         if (is_file($conf)) {
             unlink($conf);
         }
-        if (!is_dir($this->dataDir)) {
+        if (! is_dir($this->dataDir)) {
             return;
         }
-        $pattern = '/^awstats\d+\.' . preg_quote($domain, '/') . '\.txt$/';
+        $pattern = '/^awstats\d+\.'.preg_quote($domain, '/').'\.txt$/';
         foreach (scandir($this->dataDir) ?: [] as $name) {
             if ($name === '.' || $name === '..' || preg_match($pattern, $name) !== 1) {
                 continue;
             }
-            $path = $this->dataDir . '/' . $name;
+            $path = $this->dataDir.'/'.$name;
             if (is_file($path)) {
                 unlink($path);
             }
@@ -398,7 +457,7 @@ class Awstats implements Statistics
 
     public function ingestDomain(string $domain, string $logDirectory, array $aliases = []): void
     {
-        if (!is_file($this->configPath($domain))) {
+        if (! is_file($this->configPath($domain))) {
             $this->configureDomain($domain, $aliases, $logDirectory);
         }
 
@@ -422,10 +481,10 @@ class Awstats implements Statistics
             $update = [
                 'perl',
                 $this->awstatsBin,
-                '-config=' . $domain,
-                '-configdir=' . $this->configDir,
+                '-config='.$domain,
+                '-configdir='.$this->configDir,
                 '-update',
-                '-logfile=' . $merged,
+                '-logfile='.$merged,
             ];
             $this->run($update);
             $this->run(array_merge($update, ['-databasebreak=day']));
@@ -468,10 +527,10 @@ class Awstats implements Statistics
     {
         $files = [];
         foreach ($this->monthsCovering(Carbon::parse($start)->startOfDay(), Carbon::parse($end)->startOfDay()) as $month) {
-            $prefix = $this->dataDir . '/awstats' . $month->format('mY');
-            $suffix = '.' . $domain . '.txt';
-            foreach (glob($prefix . '[0-3][0-9]' . $suffix) ?: [] as $path) {
-                $date = $month->format('Y-m-') . substr($path, strlen($prefix), 2);
+            $prefix = $this->dataDir.'/awstats'.$month->format('mY');
+            $suffix = '.'.$domain.'.txt';
+            foreach (glob($prefix.'[0-3][0-9]'.$suffix) ?: [] as $path) {
+                $date = $month->format('Y-m-').substr($path, strlen($prefix), 2);
                 if ($date < $start || $date > $end) {
                     continue;
                 }
@@ -530,10 +589,10 @@ class Awstats implements Statistics
     {
         $days = [];
         foreach ($this->parseSection($contents, 'DAY') as $parts) {
-            if (count($parts) < 5 || !preg_match('/^\d{8}$/', $parts[0])) {
+            if (count($parts) < 5 || ! preg_match('/^\d{8}$/', $parts[0])) {
                 continue;
             }
-            $date = substr($parts[0], 0, 4) . '-' . substr($parts[0], 4, 2) . '-' . substr($parts[0], 6, 2);
+            $date = substr($parts[0], 0, 4).'-'.substr($parts[0], 4, 2).'-'.substr($parts[0], 6, 2);
             $days[$date] = [
                 'hits' => (int) $parts[2],
                 'bytes' => (int) $parts[3],
@@ -573,17 +632,19 @@ class Awstats implements Statistics
             if ($line === '') {
                 continue;
             }
-            if (preg_match('/^BEGIN_' . preg_quote($name, '/') . '(?:\s|$)/', $line) === 1) {
+            if (preg_match('/^BEGIN_'.preg_quote($name, '/').'(?:\s|$)/', $line) === 1) {
                 $in = true;
+
                 continue;
             }
-            if ($line === 'END_' . $name) {
+            if ($line === 'END_'.$name) {
                 if ($in) {
                     break;
                 }
+
                 continue;
             }
-            if (!$in || str_starts_with($line, '#')) {
+            if (! $in || str_starts_with($line, '#')) {
                 continue;
             }
             $parts = preg_split('/\s+/', $line) ?: [];
@@ -596,14 +657,14 @@ class Awstats implements Statistics
     }
 
     /**
-     * @param array<string, int> $days
+     * @param  array<string, int>  $days
      * @return array<string, int>
      */
     private function monthBuckets(array $days): array
     {
         $months = [];
         foreach ($days as $date => $bytes) {
-            $bucket = substr($date, 0, 7) . '-01';
+            $bucket = substr($date, 0, 7).'-01';
             $months[$bucket] = ($months[$bucket] ?? 0) + $bytes;
         }
         ksort($months);
@@ -629,20 +690,20 @@ class Awstats implements Statistics
 
     private function monthlyFile(string $domain, Carbon $month): string
     {
-        return $this->dataDir . '/awstats' . $month->format('mY') . '.' . $domain . '.txt';
+        return $this->dataDir.'/awstats'.$month->format('mY').'.'.$domain.'.txt';
     }
 
     private function configPath(string $domain): string
     {
-        return $this->configDir . '/awstats.' . $domain . '.conf';
+        return $this->configDir.'/awstats.'.$domain.'.conf';
     }
 
     private function ensureDirectories(): void
     {
-        if (!is_dir($this->configDir) && !mkdir($concurrentDirectory = $this->configDir, 0775, true) && !is_dir($concurrentDirectory)) {
+        if (! is_dir($this->configDir) && ! mkdir($concurrentDirectory = $this->configDir, 0775, true) && ! is_dir($concurrentDirectory)) {
             throw new \RuntimeException(sprintf('Directory "%s" was not created', $concurrentDirectory));
         }
-        if (!is_dir($this->dataDir) && !mkdir($concurrentDirectory = $this->dataDir, 0775, true) && !is_dir($concurrentDirectory)) {
+        if (! is_dir($this->dataDir) && ! mkdir($concurrentDirectory = $this->dataDir, 0775, true) && ! is_dir($concurrentDirectory)) {
             throw new \RuntimeException(sprintf('Directory "%s" was not created', $concurrentDirectory));
         }
     }
@@ -661,20 +722,20 @@ class Awstats implements Statistics
      */
     private function accessLogsForBackfill(string $logDirectory): array
     {
-        if (!is_dir($logDirectory)) {
+        if (! is_dir($logDirectory)) {
             return [];
         }
         $cutoff = Carbon::now()->subMonths(12)->timestamp;
         $files = [];
         foreach (scandir($logDirectory) ?: [] as $name) {
-            if (!str_starts_with($name, 'access.log') && !str_starts_with($name, 'access-')) {
+            if (! str_starts_with($name, 'access.log') && ! str_starts_with($name, 'access-')) {
                 continue;
             }
-            if ($name !== 'access.log' && !str_ends_with($name, '.gz') && !str_ends_with($name, '.log')) {
+            if ($name !== 'access.log' && ! str_ends_with($name, '.gz') && ! str_ends_with($name, '.log')) {
                 continue;
             }
-            $path = $logDirectory . '/' . $name;
-            if (!is_file($path)) {
+            $path = $logDirectory.'/'.$name;
+            if (! is_file($path)) {
                 continue;
             }
             if ($name !== 'access.log' && filemtime($path) < $cutoff) {
@@ -688,7 +749,7 @@ class Awstats implements Statistics
     }
 
     /**
-     * @param list<string> $argv
+     * @param  list<string>  $argv
      */
     protected function run(array $argv, ?string $stdoutFile = null): int
     {

@@ -59,8 +59,8 @@ test.describe('project disk usage', () => {
       expect(disk.total_bytes, 'total_bytes = files_bytes + docker_bytes').toBe(expected);
     });
 
-    await test.step('the limit is null or a non-negative number of bytes', () => {
-      if (disk.limit_bytes !== null) {
+    await test.step('the limit is null, -1 when unlimited, or a number of bytes', () => {
+      if (disk.limit_bytes !== null && disk.limit_bytes !== -1) {
         expect(disk.limit_bytes, 'limit_bytes').toBeGreaterThanOrEqual(0);
       }
     });

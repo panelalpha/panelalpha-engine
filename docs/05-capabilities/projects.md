@@ -151,6 +151,8 @@ Only the keys you name are changed; the rest are left alone. To see what is set,
 
 If your repository commits its own `.env` file, the engine leaves that file exactly as committed. Your environment variables go into a separate file, `.env.panelalpha`, which each service that loads `.env` loads after it, so your values win. Code that reads `.env` straight from disk does not see them, and neither does a build step that reads `.env` while the site is being built, as Vite and Next.js do. Only the running application's environment has them. If you need a value at build time, either stop committing `.env`, or make the build read the value from the environment rather than from the file.
 
+The `.env`, `.env.default` and `.env.panelalpha` files the engine creates in the project folder are readable only by the project's own user. A `.env` it creates in a subfolder, from that folder's `.env.example` or empty because a compose `env_file:` names it, is readable by every user on the account, secrets included, because a Docker image may copy it in and read it as a user other than root. No other project can read either kind. A file that already exists keeps its permissions and is never made more readable, so a subfolder `.env` you made private stays private.
+
 If your application refuses to start because a setting is missing or still has a placeholder value, the engine recognises that specifically and says so: [Reading errors](../02-getting-started/reading-errors.md).
 
 ### A secret of the project's own
@@ -258,7 +260,7 @@ Mode: modify. Tools: `project_get`, `project_update`, `project_rebuild`, `task_g
 How close is tshop to its limits this month? Include transfer.
 ```
 
-Mode: read. Tools: `project_usage`. Check: `bandwidth.usage` against `bandwidth.maximum` (null means unlimited), and the log disk use is shown.
+Mode: read. Tools: `project_usage`. Check: `bandwidth.usage` against `bandwidth.maximum` (-1 means unlimited, null means no limit was set), and the log disk use is shown.
 
 **Offline and back**
 

@@ -6,7 +6,7 @@ use OpenApi\Attributes as OA;
 
 #[OA\Schema(
     schema: 'VisitorOverview',
-    required: ['unique', 'total', 'visits', 'visits_length'],
+    required: ['unique', 'total', 'visits', 'visits_length', 'session_length'],
     properties: [
         new OA\Property(property: 'unique', type: 'integer', example: 10, description: 'Unique hosts for overlapping calendar months (GENERAL TotalUnique), not unique-in-range'),
         new OA\Property(property: 'total', type: 'integer', example: 63, description: 'Hits in the requested start/end day range'),
@@ -30,6 +30,23 @@ use OpenApi\Attributes as OA;
             description: 'SESSION histogram for overlapping calendar months',
             example: ['0s-30s' => 8],
         ),
+        new OA\Property(
+            property: 'session_length',
+            description: 'Average session length per day in the requested start/end range, in seconds. Each day is '
+                .'estimated from that day\'s SESSION buckets at their midpoints, so `estimated` is true.',
+            properties: [
+                new OA\Property(
+                    property: 'records',
+                    type: 'object',
+                    additionalProperties: new OA\AdditionalProperties(type: 'integer', nullable: true),
+                    description: 'Every day of the range; null for a day without sessions.',
+                    example: ['2026-09-01' => 74, '2026-09-02' => null],
+                ),
+                new OA\Property(property: 'average', type: 'integer', nullable: true, example: 81, description: 'Over every session in the range; null without any.'),
+                new OA\Property(property: 'estimated', type: 'boolean', example: true),
+            ],
+            type: 'object',
+        ),
     ],
     type: 'object',
 )]
@@ -44,6 +61,4 @@ use OpenApi\Attributes as OA;
     ],
     type: 'object',
 )]
-class VisitorSchema
-{
-}
+class VisitorSchema {}

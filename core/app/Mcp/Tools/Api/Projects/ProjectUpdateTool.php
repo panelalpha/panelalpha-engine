@@ -83,20 +83,20 @@ class ProjectUpdateTool extends ApiTool
     {
         return [
             'name' => $schema->string()->required(),
-            'domain' => $schema->string(),
+            'domain' => $schema->string()->description('Renames the main domain. Not to a name under panelalpha.online (add it as a tunnel instead). A PanelAlpha Online tunnel that is the old name itself is deleted with it; any other tunnel of the main domain has to be deleted first.'),
             'email' => $schema->string(),
             'disk_space_limit' => $schema->integer()->description('MB, -1 for unlimited; null clears the limit')->nullable(),
             'memory_limit' => $schema->integer()->description('MB. Can be changed, not removed. Refused when larger than memory_budget.max_project_mb in GET /metrics/current'),
-            'cpu_limit' => $schema->number()->description('null clears the limit')->nullable(),
-            'device_read_bps' => $schema->integer()->description('-1 or null for unlimited')->nullable(),
-            'device_write_bps' => $schema->integer()->description('-1 or null for unlimited')->nullable(),
-            'bandwidth_limit' => $schema->integer()->description('null clears the limit')->nullable(),
-            'mysql_databases_limit' => $schema->integer()->description('-1 or null for unlimited')->nullable(),
-            'ftp_accounts_limit' => $schema->integer()->description('-1 or null for unlimited')->nullable(),
-            'sftp_accounts_limit' => $schema->integer()->description('-1 or null for unlimited')->nullable(),
-            'addon_domains_limit' => $schema->integer()->description('-1 or null for unlimited')->nullable(),
-            'subdomains_limit' => $schema->integer()->description('-1 or null for unlimited')->nullable(),
-            'inodes_limit' => $schema->integer()->description('-1 or null for unlimited')->nullable(),
+            'cpu_limit' => $schema->number()->description('CPU cores, -1 for unlimited; null clears the limit')->nullable(),
+            'device_read_bps' => $schema->integer()->description('-1 for unlimited; null clears the limit')->nullable(),
+            'device_write_bps' => $schema->integer()->description('-1 for unlimited; null clears the limit')->nullable(),
+            'bandwidth_limit' => $schema->integer()->description('MB a month, -1 for unlimited; null clears the limit')->nullable(),
+            'mysql_databases_limit' => $schema->integer()->description('-1 for unlimited; null clears the limit')->nullable(),
+            'ftp_accounts_limit' => $schema->integer()->description('-1 for unlimited; null clears the limit')->nullable(),
+            'sftp_accounts_limit' => $schema->integer()->description('-1 for unlimited; null clears the limit')->nullable(),
+            'addon_domains_limit' => $schema->integer()->description('-1 for unlimited; null clears the limit')->nullable(),
+            'subdomains_limit' => $schema->integer()->description('-1 for unlimited; null clears the limit')->nullable(),
+            'inodes_limit' => $schema->integer()->description('-1 for unlimited; null clears the limit')->nullable(),
         ];
     }
 }

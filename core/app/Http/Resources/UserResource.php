@@ -4,9 +4,15 @@ namespace App\Http\Resources;
 
 use App\Lib\Deploy\Credentials\AppCredentials;
 use App\Lib\Host\ProjectDisk;
+use App\Lib\Host\ProjectStats;
+use App\Lib\Limits\ResourceLimit;
+use App\Lib\Project\ProjectOverview;
+use App\Lib\Usage\ProjectBandwidth;
 use App\Models\User;
 use App\System\Project\Dind\AppDatabase;
 use App\System\Project\Dind\Networking;
+use Illuminate\Contracts\Support\Arrayable;
+use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 class UserResource extends JsonResource
@@ -14,8 +20,8 @@ class UserResource extends JsonResource
     /**
      * Transform the resource into an array.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @return array|\Illuminate\Contracts\Support\Arrayable|\JsonSerializable
+     * @param  Request  $request
+     * @return array|Arrayable|\JsonSerializable
      */
     public function toArray($request)
     {
@@ -41,16 +47,21 @@ class UserResource extends JsonResource
             'details' => $this->publicDetails($user),
             'app_credentials' => $this->appCredentials($user),
             'disk' => $this->disk($user),
+            'bandwidth' => $this->bandwidth($user, $request),
             // Secrets stored for this project that cannot be decoded; [] when all decode.
             'unreadable_secrets' => $user->unreadableSecrets(),
             'warning' => $user->unreadableSecretsWarning(),
+            // The same facts normalized: what it is, whether it is up, where it answers.
+            'app' => ProjectOverview::for($user),
+            // CPU and memory of the project's DinD container, sampled every minute.
+            'usage' => ProjectStats::latest($user->username),
             'config' => $user->getConfig(),
             'email_verified_at' => $user->email_verified_at,
             'created_at' => $user->created_at,
             'updated_at' => $user->updated_at,
         ];
 
-        if (!empty($request->get('with_domain_names'))) {
+        if (! empty($request->get('with_domain_names'))) {
             $resource['domain_names'] = $user->listAllDomainNames();
         }
 
@@ -68,16 +79,49 @@ class UserResource extends JsonResource
         if ($disk === null) {
             return null;
         }
-        // -1 is stored for unlimited.
-        $limitMb = $user->getDiskSpaceLimit();
 
         return [
             'files_bytes' => $disk['files_bytes'],
             'docker_bytes' => $disk['docker_bytes'],
             'total_bytes' => $disk['total_bytes'],
-            'limit_bytes' => $limitMb === null || $limitMb < 0 ? null : $limitMb * 1024 * 1024,
+            'limit_bytes' => ResourceLimit::scaled($user->getDiskSpaceLimit(), 1024 * 1024),
             'measured_at' => $disk['measured_at'],
         ];
+    }
+
+    /**
+     * The stored measurement; a request never reads the statistics.
+     *
+     * @return ?array<string, mixed>
+     */
+    private function bandwidth(User $user, Request $request): ?array
+    {
+        $measured = $this->measuredBandwidth($request)[(string) $user->username] ?? null;
+        if ($measured === null) {
+            return null;
+        }
+
+        return [
+            'month' => $measured['month'],
+            'used_bytes' => $measured['used_bytes'],
+            'limit_bytes' => ResourceLimit::scaled($user->getBandwidthLimit(), 1024 * 1024),
+            'measured_at' => $measured['measured_at'],
+        ];
+    }
+
+    /**
+     * Read once per request, so a project list costs one query however long it is.
+     *
+     * @return array<string, array{month: string, used_bytes: int, measured_at: string}>
+     */
+    private function measuredBandwidth(Request $request): array
+    {
+        if (! $request->attributes->has(ProjectBandwidth::class)) {
+            $request->attributes->set(ProjectBandwidth::class, ProjectBandwidth::all());
+        }
+
+        /** @var array<string, array{month: string, used_bytes: int, measured_at: string}> */
+        return $request->attributes->get(ProjectBandwidth::class);
     }
 
     /**
@@ -102,7 +146,7 @@ class UserResource extends JsonResource
     private function publicDetails(User $user): array
     {
         $details = $user->getDetails();
-        $passwordProtected = !empty($details['site_password_enabled'])
+        $passwordProtected = ! empty($details['site_password_enabled'])
             && is_string($details['site_password_hash'] ?? null)
             && $details['site_password_hash'] !== '';
 

@@ -2,6 +2,7 @@
 
 namespace App\System\Project\PhpHosting;
 
+use App\System\Project\ContainerLimits;
 use App\System\Project\PhpHosting;
 
 final class EnvironmentSetup
@@ -21,7 +22,7 @@ final class EnvironmentSetup
 
         $system->exec("sudo chown -R www-data:www-data {$projectDir}");
 
-        (new PhpErrorLogConfig())->apply($project);
+        (new PhpErrorLogConfig)->apply($project);
 
         $this->setupCrontabFile($project);
     }
@@ -40,7 +41,7 @@ final class EnvironmentSetup
         $process = $system->runProcess(['sudo', 'cp', $tmpFile, $confFile]);
         unlink($tmpFile);
         if ($process->getExitCode() !== 0) {
-            throw new \Exception("Could not update '{$confFile}': " . ($process->getErrorOutput() ?: $process->getOutput()));
+            throw new \Exception("Could not update '{$confFile}': ".($process->getErrorOutput() ?: $process->getOutput()));
         }
     }
 
@@ -71,24 +72,13 @@ BASH;
     {
         $system = $project->system();
         $user = $project->userModel();
-        $deviceReadBps = $user->getDeviceReadBps();
-        $deviceWriteBps = $user->getDeviceWriteBps();
-        $blockDevice = '';
-        if ($deviceReadBps !== null || $deviceWriteBps !== null) {
-            $blockDevice = $system->filesystem()->getHomeFilesystemParentBlockDevice();
-        }
-
         [$uid, $gid] = $user->linuxIds();
 
         return [
             'user' => $user->username,
             'uid' => $uid,
             'gid' => $gid,
-            'cpu_limit' => (string) $user->getCpuLimit(),
-            'memory_limit' => (string) $user->effectiveMemoryLimit(),
-            'device_read_bps' => $deviceReadBps,
-            'device_write_bps' => $deviceWriteBps,
-            'block_device' => $blockDevice,
+            ...ContainerLimits::templateVars($user, $system),
             'php_versions' => $system->php()->listAvailablePhpVersions(),
         ];
     }
@@ -110,7 +100,7 @@ BASH;
     }
 
     /**
-     * @param array<string, string> $settings
+     * @param  array<string, string>  $settings
      */
     private function redisConf(array $settings): string
     {
@@ -119,11 +109,11 @@ BASH;
             $lines[] = "{$key} {$value}";
         }
 
-        return implode("\n", $lines) . "\n";
+        return implode("\n", $lines)."\n";
     }
 
     /**
-     * @param array<string, string> $bootScripts
+     * @param  array<string, string>  $bootScripts
      */
     private function setupEntrypointInitScripts(PhpHosting $project, PhpStack $stack, array $bootScripts): void
     {
@@ -133,7 +123,7 @@ BASH;
             $bootScripts,
         );
         $system = $project->system();
-        $dir = $system->projectDirPath($project->username()) . '/entrypoint-init.d';
+        $dir = $system->projectDirPath($project->username()).'/entrypoint-init.d';
         $system->runProcess("sudo rm {$dir}/*.sh");
         foreach ($scriptFiles as $name => $script) {
             $file = "{$dir}/{$name}";
@@ -144,8 +134,8 @@ BASH;
     private function setupCrontabFile(PhpHosting $project): void
     {
         $system = $project->system();
-        $file = $system->projectDirPath($project->username()) . '/crontabs/www-data';
-        if (!is_file($file)) {
+        $file = $system->projectDirPath($project->username()).'/crontabs/www-data';
+        if (! is_file($file)) {
             $system->exec(['sudo', 'touch', $file]);
         }
         $chown = $project->userModel()->getChownString() ?? '33:33';

@@ -556,6 +556,7 @@ export const PR_RULES: readonly PrRule[] = [
       'core/app/Mcp/**',
       'core/app/Http/Controllers/McpTokenController.php',
       'core/app/Http/Controllers/McpActivityLogController.php',
+      'core/app/Models/McpActivityLog.php',
       'core/app/Console/Commands/Mcp/**',
       'core/app/Console/Commands/Api/**',
     ],

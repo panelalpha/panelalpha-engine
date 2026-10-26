@@ -95,17 +95,18 @@ class ProjectLimitCommandsTest extends TestCase
         $this->assertSame(900, $user->getInodesLimit(), 'inodes was not mentioned and must not move');
     }
 
-    public function test_minus_one_clears_a_limit_but_disk_space_keeps_it(): void
+    public function test_minus_one_stores_unlimited_on_every_limit(): void
     {
-        $this->makeUser('alice', ['bandwidth_limit' => 50, 'disk_space_limit' => 1024]);
+        $this->makeUser('alice', ['bandwidth_limit' => 50, 'disk_space_limit' => 1024, 'cpu_limit' => 2]);
 
-        $this->artisan('project:limit:set --project=alice --bandwidth-limit=-1 --disk-space-limit=-1')
+        $this->artisan('project:limit:set --project=alice --bandwidth-limit=-1 --disk-space-limit=-1 --cpu-limit=-1')
             ->expectsConfirmation('Do you wish to continue?', 'yes')
             ->assertExitCode(0);
 
         $user = User::findByUsername('alice');
-        $this->assertNull($user->getBandwidthLimit());
+        $this->assertSame(-1, $user->getBandwidthLimit());
         $this->assertSame(-1, $user->getDiskSpaceLimit());
+        $this->assertSame(-1.0, $user->getCpuLimit());
     }
 
     /** Every project has a memory limit, so -1 is refused rather than stored. */
@@ -218,16 +219,16 @@ class ProjectLimitCommandsTest extends TestCase
         }
     }
 
-    /** Only disk space stores -1 for "no limit"; anywhere else a -1 reads back as stored. */
-    public function test_get_prints_a_stored_minus_one_as_stored_outside_disk_space(): void
+    public function test_get_prints_a_stored_minus_one_as_no_limit_on_every_limit(): void
     {
-        $this->makeUser('alice', ['disk_space_limit' => -1, 'cpu_limit' => -1]);
+        $this->makeUser('alice', ['disk_space_limit' => -1, 'cpu_limit' => -1, 'bandwidth_limit' => -1]);
 
         $this->assertSame(0, Artisan::call('project:limit:get', ['--project' => 'alice']));
 
         $output = Artisan::output();
         $this->assertStringContainsString("  disk_space_limit: no limit\n", $output);
-        $this->assertStringContainsString("  cpu_limit:        -1 CPUs\n", $output);
+        $this->assertStringContainsString("  cpu_limit:        no limit\n", $output);
+        $this->assertStringContainsString("  bandwidth_limit:  no limit\n", $output);
     }
 
     public function test_set_checks_its_options_before_it_looks_the_project_up(): void

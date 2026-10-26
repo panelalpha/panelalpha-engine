@@ -52,7 +52,7 @@ A token made with `pae connect` or `pae mcp:token:create` reaches every project 
 
 An assistant on a limited token sees and changes only those projects. A request that names another project is refused, project lists show only its own, and the tools that are about the whole server are not available to it, except reading general engine information and inspecting a repository. It also cannot change a project's limits or suspend and unsuspend it, because those belong to you. A project it creates by cloning or by making a staging copy is outside its projects until the limit is updated.
 
-The assistant activity log records which project each request named, and software can filter it by project.
+The assistant activity log records which project each request named and which token made it. Software can filter it by project, by a list of token ids, and by part of a token name. A request keeps its token id after that token is deleted, so the calls of tokens a user has since removed still show up under their ids.
 
 ## Next
 

@@ -175,7 +175,7 @@ class UsageCommandsTest extends TestCase
     {
         $args = ['project' => 'alice', 'domain' => 'example.com', '--start' => '2026-09-01', '--end' => '2026-09-30'];
         $this->assertCommand(0, '{"unique":10,"total":63,"visits":{"records":{"2026-09-01":5},"total":5},"visits_length":{"0s-30s":8}}', 'project:domain:visitors', $args);
-        $this->assertCommand(0, '{"unique":0,"total":0,"visits":{"records":[],"total":0},"visits_length":[]}', 'project:domain:visitors', ['domain' => 'other.com'] + $args);
+        $this->assertCommand(0, '{"unique":0,"total":0,"visits":{"records":[],"total":0},"visits_length":[],"session_length":{"records":[],"average":null,"estimated":true}}', 'project:domain:visitors', ['domain' => 'other.com'] + $args);
         $this->assertFails("Domain 'nope.com' not found for project 'alice'.\n", 'project:domain:visitors', ['domain' => 'nope.com'] + $args);
         $this->assertFails("Project 'nobody' not found.\n", 'project:domain:visitors', ['project' => 'nobody'] + $args);
         $this->assertFails("The end field is required.\n", 'project:domain:visitors', [

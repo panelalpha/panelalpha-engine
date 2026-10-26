@@ -4,6 +4,7 @@ namespace App\Lib\Project;
 
 use App\Lib\Host\ProjectMemory;
 use App\Lib\Limits\ResourceLimit;
+use App\Models\User;
 
 /**
  * The `details` blob a freshly created project starts life with.
@@ -33,11 +34,10 @@ final class NewProjectDetails
     ];
 
     /**
-     * @param array<string, mixed> $params validated create parameters
-     * @param array<string, mixed> $domainDetails what the allocator resolved: where the name came from,
-     *        whether it reaches this host from outside, and which preferred rung was skipped and why
-     * @param array<string, string> $envVars
-     *
+     * @param  array<string, mixed>  $params  validated create parameters
+     * @param  array<string, mixed>  $domainDetails  what the allocator resolved: where the name came from,
+     *                                               whether it reaches this host from outside, and which preferred rung was skipped and why
+     * @param  array<string, string>  $envVars
      * @return array<string, mixed>
      */
     public static function build(array $params, array $domainDetails, array $envVars): array
@@ -48,8 +48,8 @@ final class NewProjectDetails
             $details[$key] = $params[$key] ?? null;
         }
 
-        $details['dedicated_ipv4'] = !empty($params['dedicated_ipv4']);
-        $details['dedicated_ipv6'] = !empty($params['dedicated_ipv6']);
+        $details['dedicated_ipv4'] = ! empty($params['dedicated_ipv4']);
+        $details['dedicated_ipv6'] = ! empty($params['dedicated_ipv6']);
 
         foreach (self::SOURCE as $key) {
             $details[$key] = $params[$key] ?? null;
@@ -68,10 +68,9 @@ final class NewProjectDetails
      * Not a copy of build(): the source keys are the stored ones, the
      * dedicated-address flags are always off (a copy gets its own address or
      * none), and the git branch and token arrive through
-     * {@see \App\Models\User::copiedDeploySnapshot()} instead.
+     * {@see User::copiedDeploySnapshot()} instead.
      *
-     * @param array<string, mixed> $source the copied project's details
-     *
+     * @param  array<string, mixed>  $source  the copied project's details
      * @return array<string, mixed>
      */
     public static function forCopy(string $username, array $source): array
@@ -98,7 +97,7 @@ final class NewProjectDetails
     {
         return [
             'home_dir' => "/home/{$username}",
-            'mysql_prefix' => $username . '_',
+            'mysql_prefix' => $username.'_',
         ];
     }
 
@@ -106,7 +105,7 @@ final class NewProjectDetails
      * Every resource limit from $values. A limit that cannot be unset takes the host default,
      * which also gives a copy of a project made before every project had one the default.
      *
-     * @param array<string, mixed> $values
+     * @param  array<string, mixed>  $values
      * @return array<string, int|float|null>
      */
     private static function limits(array $values): array
@@ -129,7 +128,7 @@ final class NewProjectDetails
     private static function limitValue(ResourceLimit $limit, mixed $raw): int|float|null
     {
         if ($raw === null) {
-            return $limit->storesUnlimitedAsMinusOne ? -1 : null;
+            return $limit->startsUnlimited ? ResourceLimit::UNLIMITED : null;
         }
 
         return $limit->normalize($raw);

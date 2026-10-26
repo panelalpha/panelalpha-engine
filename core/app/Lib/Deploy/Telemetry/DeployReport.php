@@ -7,6 +7,7 @@ use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\FailureOutput;
 use App\Lib\Deploy\Platform\Metadata\AppPackage;
 use App\Lib\Deploy\Platform\PlatformStage;
+use App\Lib\Limits\ResourceLimit;
 use App\System\Project\Dind\AppHealth;
 
 /**
@@ -19,13 +20,19 @@ class DeployReport
     public const SCHEMA = 1;
 
     public const TIER_METADATA = 0;
+
     public const TIER_REPO = 1;
+
     public const TIER_LOG = 2;
 
     public const OUTCOME_FAILED = 'failed';
+
     public const OUTCOME_PARTIAL = 'partial';
+
     public const OUTCOME_CANCELLED = 'cancelled';
+
     public const OUTCOME_SUCCESS = 'success';
+
     public const OUTCOME_RECOVERED = 'recovered';
 
     /**
@@ -77,7 +84,6 @@ class DeployReport
      *   domains?: list<array<string, mixed>>,
      *   log_tail?: list<string>
      * } $input
-     *
      * @return array<string, mixed>
      */
     public static function build(array $input): array
@@ -136,7 +142,7 @@ class DeployReport
             'failure' => $failure,
             'timings' => self::timings($latest),
             'limits' => [
-                'cpu' => self::floatOrNull($details['cpu_limit'] ?? null),
+                'cpu' => ResourceLimit::enforced(self::floatOrNull($details['cpu_limit'] ?? null)),
                 'memory_mb' => self::intOrNull($details['memory_limit'] ?? null),
             ],
         ];
@@ -202,7 +208,7 @@ class DeployReport
     }
 
     /**
-     * @param array<string, mixed> $latest
+     * @param  array<string, mixed>  $latest
      */
     public static function isPreCheckRejection(array $latest): bool
     {
@@ -210,7 +216,7 @@ class DeployReport
     }
 
     /**
-     * @param array<string, mixed> $latest
+     * @param  array<string, mixed>  $latest
      * @return array{stage: ?string, rule: ?string, explained: bool, message: ?string, signature: string}
      */
     private static function failure(
@@ -259,20 +265,20 @@ class DeployReport
     /**
      * Wall-clock seconds per stage, from the stage table the logger keeps.
      *
-     * @param array<string, mixed> $latest
+     * @param  array<string, mixed>  $latest
      * @return array<string, int>
      */
     private static function timings(array $latest): array
     {
         $stages = $latest['stages'] ?? [];
-        if (!is_array($stages)) {
+        if (! is_array($stages)) {
             return [];
         }
 
         $timings = [];
         $total = 0;
         foreach ($stages as $stage) {
-            if (!is_array($stage) || !is_string($stage['name'] ?? null)) {
+            if (! is_array($stage) || ! is_string($stage['name'] ?? null)) {
                 continue;
             }
             $started = self::intOrNull($stage['started_at'] ?? null);
@@ -298,8 +304,8 @@ class DeployReport
      * still a repository — it is cloned, checked out, and can carry the submodules
      * and LFS pointers a build trips over — so `parsed: false` stands for "no remote".
      *
-     * @param array<string, mixed> $checkout as CheckoutFacts::read() returns it
-     * @param ?string $source where the URL came from: `account` or `checkout`
+     * @param  array<string, mixed>  $checkout  as CheckoutFacts::read() returns it
+     * @param  ?string  $source  where the URL came from: `account` or `checkout`
      * @return array<string, mixed>
      */
     private static function repo(
@@ -332,7 +338,7 @@ class DeployReport
 
         if ($private) {
             $repo['path_hash'] = substr(
-                hash('sha256', $installId . '|' . $parts['host'] . '/' . $parts['path']),
+                hash('sha256', $installId.'|'.$parts['host'].'/'.$parts['path']),
                 0,
                 16
             );
@@ -353,7 +359,7 @@ class DeployReport
      * submodules and lfs describe the shape of the clone and travel either way.
      * The commit date travels as an age in whole days, not as its timestamp.
      *
-     * @param array<string, mixed> $checkout
+     * @param  array<string, mixed>  $checkout
      * @return array<string, mixed> empty when no tree was there to read
      */
     private static function checkout(array $checkout, bool $private, int $occurredAt): array
@@ -376,7 +382,7 @@ class DeployReport
         }
 
         $branch = self::stringOrNull($checkout['branch'] ?? null);
-        if ($branch !== null && !$private) {
+        if ($branch !== null && ! $private) {
             $facts['branch'] = $branch;
         }
 
@@ -403,7 +409,7 @@ class DeployReport
         }
 
         $parsed = parse_url($url);
-        if (!is_array($parsed) || empty($parsed['host'])) {
+        if (! is_array($parsed) || empty($parsed['host'])) {
             return null;
         }
 
@@ -429,8 +435,8 @@ class DeployReport
      * because it is what the deploy built; the checkout answers for every source
      * the snapshot has no entry for.
      *
-     * @param array<string, mixed> $details
-     * @param array<string, mixed> $checkout
+     * @param  array<string, mixed>  $details
+     * @param  array<string, mixed>  $checkout
      */
     private static function commit(array $details, array $checkout, bool $private): ?string
     {
@@ -447,21 +453,20 @@ class DeployReport
      * Recipe ids, in the order PlatformCandidates listed them: the first is the
      * one that ran.
      *
-     * @param mixed $ids
      * @return list<string>
      */
     private static function candidates(mixed $ids): array
     {
-        if (!is_array($ids)) {
+        if (! is_array($ids)) {
             return [];
         }
 
         $found = [];
         foreach ($ids as $id) {
-            if (!is_string($id) || preg_match('/^[a-z0-9][a-z0-9-]{0,63}$/', $id) !== 1) {
+            if (! is_string($id) || preg_match('/^[a-z0-9][a-z0-9-]{0,63}$/', $id) !== 1) {
                 continue;
             }
-            if (!in_array($id, $found, true)) {
+            if (! in_array($id, $found, true)) {
                 $found[] = $id;
             }
             if (count($found) >= self::MAX_CANDIDATES) {
@@ -475,7 +480,7 @@ class DeployReport
     /**
      * Root manifest filenames only — never the customer's own file names.
      *
-     * @param list<string> $files
+     * @param  list<string>  $files
      * @return list<string>
      */
     private static function manifests(array $files): array
@@ -493,7 +498,7 @@ class DeployReport
         $found = [];
         foreach ($files as $file) {
             $lower = strtolower(trim((string) $file));
-            if ($lower !== '' && in_array($lower, $known, true) && !in_array($lower, $found, true)) {
+            if ($lower !== '' && in_array($lower, $known, true) && ! in_array($lower, $found, true)) {
                 $found[] = $lower;
             }
         }
@@ -509,7 +514,7 @@ class DeployReport
      * about an application nobody can locate is a support thread. `fallback_reason`
      * is the one free-text field and goes through the redactor.
      *
-     * @param array<string, mixed> $details
+     * @param  array<string, mixed>  $details
      * @return array<string, mixed>
      */
     public static function domainFacts(array $details, string $username, mixed $domains = []): array
@@ -557,19 +562,18 @@ class DeployReport
      * public address, not anything private, with the account name still a hash.
      * Bounded and shape-checked, since a wildcard alias can carry hundreds.
      *
-     * @param mixed $domains
      * @return array<string, mixed>
      */
     private static function names(mixed $domains): array
     {
-        if (!is_array($domains)) {
+        if (! is_array($domains)) {
             return [];
         }
 
         $names = [];
         $primary = null;
         foreach ($domains as $entry) {
-            if (!is_array($entry)) {
+            if (! is_array($entry)) {
                 continue;
             }
 
@@ -607,7 +611,7 @@ class DeployReport
 
     private static function health(array $details): array
     {
-        if (!array_key_exists('health_checked', $details)) {
+        if (! array_key_exists('health_checked', $details)) {
             return [];
         }
 
@@ -625,7 +629,7 @@ class DeployReport
 
         $ports = [];
         foreach (is_array($details['health_ports'] ?? null) ? $details['health_ports'] : [] as $port) {
-            if (!is_array($port) || !is_string($port['status'] ?? null)) {
+            if (! is_array($port) || ! is_string($port['status'] ?? null)) {
                 continue;
             }
             $ports[] = [
@@ -647,7 +651,7 @@ class DeployReport
 
         $failed = [];
         foreach (is_array($details['health_failed_checks'] ?? null) ? $details['health_failed_checks'] : [] as $check) {
-            if (!is_array($check) || !is_string($check['id'] ?? null)) {
+            if (! is_array($check) || ! is_string($check['id'] ?? null)) {
                 continue;
             }
             // The id and its severity only: the message names the customer's own
@@ -665,12 +669,11 @@ class DeployReport
     }
 
     /**
-     * @param mixed $packages
      * @return list<AppPackage>
      */
     private static function packages(mixed $packages): array
     {
-        if (!is_array($packages)) {
+        if (! is_array($packages)) {
             return [];
         }
 
@@ -682,7 +685,7 @@ class DeployReport
 
     private static function truncate(string $text, int $bytes): string
     {
-        return strlen($text) > $bytes ? substr($text, 0, $bytes) . '…' : $text;
+        return strlen($text) > $bytes ? substr($text, 0, $bytes).'…' : $text;
     }
 
     private static function stringOrNull(mixed $value): ?string
