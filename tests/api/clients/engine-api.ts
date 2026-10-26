@@ -10,6 +10,7 @@ import { InspectApi } from './resources/inspect.api';
 import { BackupsApi } from './resources/backups.api';
 import { GitApi } from './resources/git.api';
 import { TunnelsApi } from './resources/tunnels.api';
+import { CdnApi } from './resources/cdn.api';
 import { ProjectSettingsApi } from './resources/project-settings.api';
 import { EnvVarsApi } from './resources/env-vars.api';
 import { TasksApi } from './resources/tasks.api';
@@ -61,6 +62,7 @@ export interface EngineApi
     BackupsApi,
     GitApi,
     TunnelsApi,
+    CdnApi,
     ProjectSettingsApi,
     EnvVarsApi,
     TasksApi,
@@ -102,6 +104,7 @@ export class EngineApi extends EngineApiBase {
     backups: BackupsApi;
     git: GitApi;
     tunnels: TunnelsApi;
+    cdn: CdnApi;
     projectSettings: ProjectSettingsApi;
     envVars: EnvVarsApi;
     tasks: TasksApi;
@@ -138,6 +141,7 @@ export class EngineApi extends EngineApiBase {
       backups: new BackupsApi(transport),
       git: new GitApi(transport),
       tunnels: new TunnelsApi(transport),
+      cdn: new CdnApi(transport),
       projectSettings: new ProjectSettingsApi(transport),
       envVars: new EnvVarsApi(transport),
       tasks: new TasksApi(transport),

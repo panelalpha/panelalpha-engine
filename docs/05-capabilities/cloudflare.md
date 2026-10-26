@@ -16,12 +16,17 @@ Three things must be true:
 - The project was deployed from a repository, so it runs in its own container. A site on another kind of hosting account cannot use a Cloudflare tunnel.
 - The hostname you want is in a zone in your Cloudflare account, and is not already in use on this engine.
 
-You also need a **Cloudflare API token** with exactly two permissions:
+You also need a **Cloudflare API token**. A tunnel needs these two permissions:
 
 - **Account · Cloudflare Tunnel · Edit**
 - **Zone · DNS · Edit**
 
-Create it in your Cloudflare dashboard, with the account and the zone selected under Resources. Both permissions are required. The engine's paste page repeats those steps when you open the link.
+If you also want to purge the cache or change the security level from the engine, add these two to the same token:
+
+- **Zone · Cache Purge**
+- **Zone · Settings · Edit**
+
+Create it in your Cloudflare dashboard, with the account and the zones selected under Resources. The engine's paste page repeats those steps when you open the link. A token with only the first two drives tunnels and DNS; the cache and security endpoints answer that the token is missing a permission until you add the other two.
 
 ## What you do, and what the engine does
 
@@ -52,6 +57,18 @@ From there the engine does the rest for you:
 - creates a tunnel for the project (or reuses the one it already made) and starts the connector inside the project's container,
 - finds the Cloudflare zone for the hostname and creates a DNS record there pointing that name down the tunnel,
 - routes traffic for the hostname to your site.
+
+## Purge the cache and change the security level
+
+Cloudflare caches your site at its edge. After a content change you can ask it to drop what it holds, and you can raise or lower how aggressively it screens visitors.
+
+- **Purge everything.** Clears the whole cache for the zone the domain is in. The next visitor gets a fresh copy from the engine.
+- **Purge single files.** Clears up to 30 URLs, for example the stylesheet and the page that changed.
+- **Security level.** One of `off`, `essentially_off`, `low`, `medium`, `high`, or `under_attack`. `under_attack` is the "I am under attack" mode: every visitor waits a few seconds before the site answers. Set it back to a normal level when the attack is over.
+
+The engine reads the current value first, so a page can show the level before you change it. The same page reports whether the domain's DNS record is proxied through Cloudflare; if it is not, visitors are going straight to the engine and the cache is not in the way.
+
+These actions are pure Cloudflare API calls, so they work on any project that has a token, including traditional PHP hosting. They are refused until the token has **Zone · Cache Purge** and **Zone · Settings · Edit**.
 
 ## Check it worked
 

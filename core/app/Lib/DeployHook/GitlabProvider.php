@@ -2,26 +2,36 @@
 
 namespace App\Lib\DeployHook;
 
+use App\Models\DeployHook;
 use Illuminate\Http\Request;
 
 /**
  * GitLab webhooks, from gitlab.com or a self-managed instance: an
- * `X-Gitlab-Event` header names the event (`Push Hook`, `Tag Push Hook`, ...)
- * and `X-Gitlab-Token` carries the hook's secret token verbatim.
+ * `X-Gitlab-Event` header names the event (`Push Hook`, `Tag Push Hook`, ...).
  *
- * There is no signature to check. GitLab sends the token as plain text, so
- * "verified" here means the sender knew the secret, and nothing about the body
- * is vouched for -- which is why the receiver reads the body only afterwards,
- * as it does for every provider. The comparison is constant-time so a sender
- * cannot learn the secret a character at a time.
+ * A hook with a signing token (GitLab 19.0 and later) sends Standard Webhooks
+ * headers: `webhook-signature` is `v1,<base64 HMAC-SHA256>` of
+ * `{webhook-id}.{webhook-timestamp}.{body}` under the `whsec_` secret, so the
+ * id, the time and the body are vouched for. A delivery that carries one is
+ * checked against it and nothing else, and is refused once its timestamp is
+ * more than {@see SIGNATURE_TOLERANCE_SECONDS} from now.
  *
- * GitLab has a separate signing-token scheme (`webhook-signature`, an HMAC).
- * That is a different secret the operator pastes into GitLab, not one this
- * engine issues, so it is not used: the token field is.
+ * A delivery without one falls back to `X-Gitlab-Token`, compared in constant
+ * time: either the secret itself (a hook registered by hand) or
+ * {@see tokenFor()} of it (a hook the engine registered, which must not send
+ * its signing key as a plain header). That proves only who sent it.
  */
 final class GitlabProvider implements HookProvider
 {
     private const NULL_SHA = '0000000000000000000000000000000000000000';
+
+    private const SIGNATURE_TOLERANCE_SECONDS = 300;
+
+    /** The static token the engine registers beside a signing secret; never the secret itself. */
+    public static function tokenFor(string $secret): string
+    {
+        return hash_hmac('sha256', 'X-Gitlab-Token', $secret);
+    }
 
     public function name(): string
     {
@@ -35,13 +45,63 @@ final class GitlabProvider implements HookProvider
 
     public function verify(Request $request, string $secret): bool
     {
-        $token = $request->headers->get('X-Gitlab-Token');
-
-        if ($secret === '' || !is_string($token) || $token === '') {
+        if ($secret === '') {
             return false;
         }
 
-        return $this->sameSecret($secret, $token);
+        return $this->signsTheBody($request) ? $this->validSignature($request, $secret) : $this->validToken($request, $secret);
+    }
+
+    private function validToken(Request $request, string $secret): bool
+    {
+        $token = $request->headers->get('X-Gitlab-Token');
+        if (! is_string($token) || $token === '') {
+            return false;
+        }
+
+        return $this->sameSecret($secret, $token) || $this->sameSecret(self::tokenFor($secret), $token);
+    }
+
+    private function validSignature(Request $request, string $secret): bool
+    {
+        $key = $this->signingKey($secret);
+        $id = (string) $request->headers->get('webhook-id', '');
+        $timestamp = (string) $request->headers->get('webhook-timestamp', '');
+        if ($key === null || $id === '' || ! $this->isFresh($timestamp)) {
+            return false;
+        }
+
+        $expected = base64_encode(hash_hmac('sha256', $id.'.'.$timestamp.'.'.$request->getContent(), $key, true));
+
+        return $this->anySignatureIs($expected, (string) $request->headers->get('webhook-signature', ''));
+    }
+
+    private function signingKey(string $secret): ?string
+    {
+        if (! str_starts_with($secret, DeployHook::SIGNING_SECRET_PREFIX)) {
+            return null;
+        }
+        $key = base64_decode(substr($secret, strlen(DeployHook::SIGNING_SECRET_PREFIX)), true);
+
+        return $key === false || $key === '' ? null : $key;
+    }
+
+    private function isFresh(string $timestamp): bool
+    {
+        return ctype_digit($timestamp) && abs(time() - (int) $timestamp) <= self::SIGNATURE_TOLERANCE_SECONDS;
+    }
+
+    /** The header is a space-separated list of `v1,<base64>` entries; one matching is enough. */
+    private function anySignatureIs(string $expected, string $header): bool
+    {
+        foreach (preg_split('/\s+/', trim($header)) ?: [] as $entry) {
+            [$version, $signature] = array_pad(explode(',', $entry, 2), 2, '');
+            if ($version === 'v1' && hash_equals($expected, $signature)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -54,24 +114,24 @@ final class GitlabProvider implements HookProvider
     }
 
     /**
-     * Whoever holds the token can send any body, so a body seen before proves
-     * nothing, and a genuine push can repeat one byte for byte (A to B again).
+     * Only a signed delivery: whoever holds the token can send any body, so a
+     * body seen before proves nothing.
      */
-    public function signsTheBody(): bool
+    public function signsTheBody(Request $request): bool
     {
-        return false;
+        return $request->headers->has('webhook-signature');
     }
 
     public function parse(Request $request): HookEvent
     {
         $event = (string) $request->headers->get('X-Gitlab-Event', '');
 
-        if (!in_array($event, ['Push Hook', 'Tag Push Hook'], true)) {
+        if (! in_array($event, ['Push Hook', 'Tag Push Hook'], true)) {
             return new HookEvent($this->name(), HookEvent::OTHER, $event, $this->deliveryId($request, null, null));
         }
 
         $payload = json_decode($request->getContent(), true);
-        if (!is_array($payload)) {
+        if (! is_array($payload)) {
             throw new InvalidPayload('The push body is not JSON.');
         }
 
@@ -79,13 +139,14 @@ final class GitlabProvider implements HookProvider
     }
 
     /**
-     * @param array<mixed> $payload
+     * @param  array<mixed>  $payload
+     *
      * @throws InvalidPayload
      */
     private function pushEvent(Request $request, string $event, array $payload): HookEvent
     {
         $ref = $payload['ref'] ?? null;
-        if (!is_string($ref) || $ref === '') {
+        if (! is_string($ref) || $ref === '') {
             throw new InvalidPayload('A push without a ref.');
         }
 
@@ -112,7 +173,7 @@ final class GitlabProvider implements HookProvider
      *
      * `Idempotency-Key` (also sent as `webhook-id`) is the one GitLab documents
      * as unchanged across retries of the same delivery, so it is used when
-     * present. `X-Gitlab-Event-UUID` is not a substitute on its own: it names
+     * present; `webhook-id` first, since a signature covers it. `X-Gitlab-Event-UUID` is not a substitute on its own: it names
      * the request or chain of webhooks that caused the event, so
      * `git push main feature` gives two push events one UUID, and treating it
      * as a delivery id would drop the second. Older GitLab omits the key; then
@@ -121,16 +182,16 @@ final class GitlabProvider implements HookProvider
      */
     private function deliveryId(Request $request, ?string $ref, ?string $after): ?string
     {
-        $key = $request->headers->get('Idempotency-Key');
+        $key = $request->headers->get('webhook-id') ?: $request->headers->get('Idempotency-Key');
         if (is_string($key) && $key !== '') {
             return substr($key, 0, 128);
         }
 
         $uuid = $request->headers->get('X-Gitlab-Event-UUID');
-        if (!is_string($uuid) || $uuid === '') {
+        if (! is_string($uuid) || $uuid === '') {
             return null;
         }
 
-        return $ref === null ? substr($uuid, 0, 128) : hash('sha256', $uuid . "\n" . $ref . "\n" . (string) $after);
+        return $ref === null ? substr($uuid, 0, 128) : hash('sha256', $uuid."\n".$ref."\n".(string) $after);
     }
 }

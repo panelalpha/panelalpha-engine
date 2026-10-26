@@ -6,12 +6,22 @@ const tlsAdvisorySchema = z.object({
   instructions: z.record(z.string(), z.string()).nullable(),
 });
 
+/** The provider webhook this hook is registered as, or null when it is not registered. */
+const registrationSchema = z
+  .object({
+    provider_hook_id: z.string().min(1),
+    registered_at: z.string().min(1).nullable(),
+  })
+  .nullable();
+
 const deployHookCoreSchema = z.object({
   url: z.string().url(),
   path: z.string().min(1),
   created_at: z.string().min(1),
   updated_at: z.string().min(1),
   warning: z.string().optional(),
+  registration: registrationSchema,
+  registration_warning: z.string().optional(),
 });
 
 /** POST /projects/{username}/git/deploy-hook — secret only when `created` is true. */

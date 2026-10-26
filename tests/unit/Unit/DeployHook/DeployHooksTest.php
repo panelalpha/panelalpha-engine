@@ -38,6 +38,14 @@ class DeployHooksTest extends DeployHookTestCase
         $this->assertGreaterThanOrEqual(32, strlen($creation->secret));
     }
 
+    public function test_a_new_secret_is_a_standard_webhooks_signing_secret(): void
+    {
+        $secret = (string) (new DeployHooks())->create($this->user(), $this->git())->secret;
+
+        $this->assertStringStartsWith(DeployHook::SIGNING_SECRET_PREFIX, $secret);
+        $this->assertSame(32, strlen((string) base64_decode(substr($secret, strlen(DeployHook::SIGNING_SECRET_PREFIX)), true)));
+    }
+
     public function test_the_url_never_says_whose_project_it_is(): void
     {
         $user = $this->user(username: 'alice');

@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Rotate a push-to-deploy hook
 
-    Replace the Deploy Hook's URL and secret with new ones, for when either leaked. The old URL answers 404 from this moment, so the new `url` and `secret` must be registered in the git host again. The secret is shown ONCE, in this response, and can never be read again. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. 404 when the checkout has no hook; rotating never creates one. On the Deploy-managed checkout every push to the tracked branch force-updates it to match the repository (local changes to tracked files and untracked files that are not engine-managed are discarded before the rebuild); a Site Git checkout is only fast-forwarded.
+    Replace the Deploy Hook's URL and secret with new ones, for when either leaked. The old URL answers 404 from this moment, so the new `url` and `secret` must be registered in the git host again. The secret is shown ONCE, in this response, and can never be read again. When the hook is registered at the provider, the provider webhook is updated with the new URL and secret in the same request. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. 404 when the checkout has no hook; rotating never creates one. On the Deploy-managed checkout every push to the tracked branch force-updates it to match the repository (local changes to tracked files and untracked files that are not engine-managed are discarded before the rebuild); a Site Git checkout is only fast-forwarded.
     MARKDOWN)]
 #[IsDestructive]
 class GitDeployHookRotateTool extends ApiTool

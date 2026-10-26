@@ -3,10 +3,12 @@
 namespace Tests\Unit\DeployHook;
 
 use App\Jobs\RunHookDelivery;
+use App\Lib\DeployHook\GitlabProvider;
 use App\Lib\DeployHook\HookReceiver;
 use App\Models\DeployHook;
 use App\Models\HookDelivery;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 
 /**
@@ -18,6 +20,10 @@ use Illuminate\Support\Facades\Queue;
 class HookReceiverTest extends DeployHookTestCase
 {
     private const SECRET = 'a-shared-secret-of-some-length';
+
+    private const SIGNING_KEY = 'a-signing-key-of-thirty-two-byte';
+
+    private const SIGNING_SECRET = 'whsec_YS1zaWduaW5nLWtleS1vZi10aGlydHktdHdvLWJ5dGU=';
 
     private DeployHook $hook;
 
@@ -78,6 +84,28 @@ class HookReceiverTest extends DeployHookTestCase
         }
 
         return $this->request((string) file_get_contents(__DIR__ . '/../../fixtures/gitlab-hooks/' . $fixture), $server);
+    }
+
+    /** A GitLab delivery signed with the hook's signing secret, as GitLab 19.0 and later send one. */
+    private function signedGitlab(string $fixture, string $id): Request
+    {
+        $body = (string) file_get_contents(__DIR__ . '/../../fixtures/gitlab-hooks/' . $fixture);
+        $timestamp = (string) time();
+
+        return $this->request($body, [
+            'CONTENT_TYPE' => 'application/json',
+            'HTTP_X_GITLAB_EVENT' => 'Push Hook',
+            'HTTP_X_GITLAB_TOKEN' => GitlabProvider::tokenFor(self::SIGNING_SECRET),
+            'HTTP_WEBHOOK_ID' => $id,
+            'HTTP_WEBHOOK_TIMESTAMP' => $timestamp,
+            'HTTP_WEBHOOK_SIGNATURE' => 'v1,' . base64_encode(hash_hmac('sha256', "{$id}.{$timestamp}.{$body}", self::SIGNING_KEY, true)),
+        ]);
+    }
+
+    private function useSigningSecret(): void
+    {
+        $this->hook->setSecret(self::SIGNING_SECRET);
+        $this->hook->save();
     }
 
     private function receive(Request $request): \App\Lib\DeployHook\HookResponse
@@ -334,6 +362,42 @@ class HookReceiverTest extends DeployHookTestCase
         Queue::assertPushed(RunHookDelivery::class, 1);
     }
 
+    public function test_an_ignored_signed_push_leaves_no_payload_digest(): void
+    {
+        $this->receive($this->github('push', 'push-other-branch.json'));
+        $replay = $this->receive($this->github('push', 'push-other-branch.json', 'guid-replayed'));
+
+        $this->assertSame(0, DB::table('hook_payload_digests')->count());
+        $this->assertSame(HookDelivery::OUTCOME_IGNORED, $replay->body['outcome']);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_a_payload_digest_past_the_retention_is_forgotten_when_a_push_is_recorded(): void
+    {
+        DB::table('hook_payload_digests')->insert([
+            ['deploy_hook_id' => $this->hook->id, 'digest' => str_repeat('a', 64), 'created_at' => now()->subDays(91)],
+            ['deploy_hook_id' => $this->hook->id, 'digest' => str_repeat('b', 64), 'created_at' => now()->subDays(89)],
+        ]);
+
+        $this->receive($this->github('push', 'push-main.json'));
+
+        $this->assertSame(
+            [str_repeat('b', 64), hash('sha256', $this->fixture('push-main.json'))],
+            DB::table('hook_payload_digests')->orderBy('created_at')->pluck('digest')->all(),
+        );
+    }
+
+    public function test_a_push_replayed_after_its_digest_was_forgotten_is_acted_on_again(): void
+    {
+        $this->receive($this->github('push', 'push-main.json', 'guid-real'));
+        HookDelivery::query()->update(['result' => HookDelivery::RESULT_DEPLOYED]);
+        DB::table('hook_payload_digests')->update(['created_at' => now()->subDays(91)]);
+
+        $this->receive($this->github('push', 'push-main.json', 'guid-replayed'));
+
+        Queue::assertPushed(RunHookDelivery::class, 2);
+    }
+
     public function test_a_gitlab_body_seen_before_is_still_acted_on_under_a_new_key(): void
     {
         // Token-only: a repeated body proves nothing, and a real push can repeat one.
@@ -492,6 +556,61 @@ class HookReceiverTest extends DeployHookTestCase
 
         $this->assertSame(2, HookDelivery::count());
         $this->assertSame(1, HookDelivery::where('outcome', HookDelivery::OUTCOME_QUEUED)->count());
+        Queue::assertPushed(RunHookDelivery::class, 1);
+    }
+
+    public function test_a_signed_gitlab_push_to_the_tracked_branch_is_queued(): void
+    {
+        $this->useSigningSecret();
+
+        $response = $this->receive($this->signedGitlab('push-main.json', 'msg_1'));
+
+        $this->assertSame(202, $response->status);
+        $this->assertSame(HookDelivery::OUTCOME_QUEUED, $this->onlyDelivery()->outcome);
+        $this->assertTrue($this->hook->fresh()?->expectsSignatures());
+    }
+
+    public function test_once_a_hook_received_a_signed_gitlab_delivery_its_token_alone_is_refused(): void
+    {
+        $this->useSigningSecret();
+        $this->receive($this->signedGitlab('push-main.json', 'msg_1'));
+
+        $forged = $this->receive($this->gitlab('push-other-branch.json', key: 'gl-key-2', token: GitlabProvider::tokenFor(self::SIGNING_SECRET)));
+
+        $this->assertSame(401, $forged->status);
+        Queue::assertPushed(RunHookDelivery::class, 1);
+    }
+
+    public function test_a_hook_that_never_received_a_signed_delivery_still_takes_its_token(): void
+    {
+        $this->useSigningSecret();
+
+        $response = $this->receive($this->gitlab('push-main.json', token: GitlabProvider::tokenFor(self::SIGNING_SECRET)));
+
+        $this->assertSame(202, $response->status);
+        Queue::assertPushed(RunHookDelivery::class, 1);
+    }
+
+    public function test_a_new_secret_forgets_that_the_hook_was_signed(): void
+    {
+        $this->useSigningSecret();
+        $this->receive($this->signedGitlab('push-main.json', 'msg_1'));
+
+        $this->hook->refresh()->setSecret(self::SECRET);
+        $this->hook->save();
+
+        $this->assertFalse($this->hook->fresh()?->expectsSignatures());
+        $this->assertSame(202, $this->receive($this->gitlab('push-other-branch.json', key: 'gl-key-2'))->status);
+    }
+
+    public function test_a_signed_gitlab_body_seen_before_deploys_nothing_more(): void
+    {
+        $this->useSigningSecret();
+        $this->receive($this->signedGitlab('push-main.json', 'msg_1'));
+
+        $again = $this->receive($this->signedGitlab('push-main.json', 'msg_2'));
+
+        $this->assertSame(['outcome' => 'duplicate'], $again->body);
         Queue::assertPushed(RunHookDelivery::class, 1);
     }
 

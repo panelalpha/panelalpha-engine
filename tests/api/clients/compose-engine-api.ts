@@ -21,6 +21,7 @@ import { InspectApi } from './resources/inspect.api';
 import { BackupsApi } from './resources/backups.api';
 import { GitApi } from './resources/git.api';
 import { TunnelsApi } from './resources/tunnels.api';
+import { CdnApi } from './resources/cdn.api';
 import { ProjectSettingsApi } from './resources/project-settings.api';
 import { EnvVarsApi } from './resources/env-vars.api';
 import { TasksApi } from './resources/tasks.api';
@@ -57,6 +58,7 @@ export const ENGINE_API_CLIENTS = [
   BackupsApi,
   GitApi,
   TunnelsApi,
+  CdnApi,
   ProjectSettingsApi,
   EnvVarsApi,
   TasksApi,

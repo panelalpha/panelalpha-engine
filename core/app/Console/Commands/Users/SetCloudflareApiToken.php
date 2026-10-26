@@ -15,7 +15,7 @@ class SetCloudflareApiToken extends Command
     protected $aliases = ['projects:set-cloudflare-api-token', 'users:set-cloudflare-api-token'];
 
     protected $signature = 'project:set-cloudflare-api-token
-        {token? : Cloudflare API token (Account: Cloudflare Tunnel Edit + Zone: DNS Edit, with the account and zone selected under Resources)}
+        {token? : Cloudflare API token (Account: Cloudflare Tunnel Edit + Zone: DNS Edit + Zone Cache Purge + Zone Settings Edit, with the account and zones selected under Resources)}
         {--project= : Project username}
         {--username= : Deprecated alias for --project}
         {--token= : Cloudflare API token (alternative to the positional argument)}
@@ -32,6 +32,7 @@ class SetCloudflareApiToken extends Command
         $optionToken = trim((string) ($this->option('token') ?? ''));
         if ($positional !== '' && $optionToken !== '' && $positional !== $optionToken) {
             $this->error('Conflicting tokens: positional argument vs --token.');
+
             return 1;
         }
         $token = $positional !== '' ? $positional : $optionToken;

@@ -526,6 +526,7 @@ class GitCommandsTest extends DeployHookTestCase
             Schema::create('secret_vault_entries', function ($table) {
                 $table->id();
                 $table->char('ref_hash', 64)->unique();
+                $table->string('ref_key', 64)->nullable()->unique();
                 $table->string('type');
                 $table->string('scope', 16)->default(SecretVaultEntry::SCOPE_PROJECT);
                 $table->string('project', 64)->nullable();
@@ -712,6 +713,7 @@ class GitCommandsTest extends DeployHookTestCase
             'warning' => \App\Lib\DeployHook\DeployHooks::FORCE_PULL_WARNING,
             'created' => true,
             'tls' => \App\Lib\DeployHook\EngineTlsAdvisory::forProvider(null),
+            'registration' => null,
             'secret' => $hook->secret(),
         ]]) . "\n", $output);
     }

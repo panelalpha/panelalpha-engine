@@ -22,6 +22,7 @@ export * from './ssh.types';
 export * from './backup.types';
 export * from './git.types';
 export * from './tunnel.types';
+export * from './cdn.types';
 export * from './project-setting.types';
 export * from './env-var.types';
 export * from './task.types';

@@ -15,11 +15,11 @@ Asking again later returns the same URL and does not show the secret again. It d
 You do this in your git host. The assistant cannot open your GitHub, GitLab, or Bitbucket account.
 
 - **GitHub**: repository or organization **Settings > Webhooks > Add webhook**. Payload URL: the hook's URL. Content type: `application/json`. Secret: the hook's secret. Trigger: "Just the push event".
-- **GitLab**: project **Settings > Webhooks**. URL: the hook's URL. Secret token: the hook's secret. Trigger: "Push events".
+- **GitLab**: project **Settings > Webhooks**. URL: the hook's URL. Trigger: "Push events". On GitLab 19.0 or later, put the hook's secret in **Signing token** if GitLab lets you paste one there: every call is then signed, and a recorded call cannot be sent again with another body. Otherwise put it in **Secret token**. Never put it in both: the secret token travels in every call as plain text. A hook the assistant registers for you is set up signed.
 - **Bitbucket Cloud**: repository **Settings > Webhooks > Add webhook**. URL: the hook's URL. Secret: the hook's secret. Triggers: "Repository > Push".
 - **Bitbucket Data Center**: repository **Settings > Webhooks > Create webhook**. URL: the hook's URL. Secret: the hook's secret. Events: "Repository > Push".
 
-Put the secret in on every host. A call that does not send it, or sends one that does not match, is refused.
+Put the secret in on every host. A call that does not send it, or sends one that does not match, is refused. Once a GitLab hook has sent one signed call, a call that is not signed is refused.
 
 Save it, then push a commit to the branch the project follows and check the project updated.
 
@@ -29,7 +29,7 @@ The hook follows the branch that copy is on now. A later change of branch is fol
 
 What the push changes depends on which copy the hook is for:
 
-- **The copy the engine deploys from.** A push makes that copy match the repository, then rebuilds the site. A tracked file you edited on the server is replaced. A file the repository does not know about is removed, except files the engine keeps for itself. Submodules are fetched at the commits the push records, and one that cannot be fetched fails the deploy: [Connecting with Git](connecting-with-git.md#troubleshooting). Once this hook exists, the repository is the only source of truth for that copy.
+- **The copy the engine deploys from.** A push makes that copy match the repository, then rebuilds the site. A tracked file you edited on the server is replaced. A file the repository does not know about is removed, except files the engine keeps for itself. Submodules are fetched at the commits the push records. Once the site has deployed, one that cannot be fetched keeps the copy it had and the deploy log warns; on the first deploy it fails the deploy: [Connecting with Git](connecting-with-git.md#troubleshooting). Once this hook exists, the repository is the only source of truth for that copy.
 - **A folder the site keeps in git**, such as `public_html` on a WordPress project. A push only moves that folder forward. Uploads and a config the site wrote stay. There is no rebuild. If something on the server conflicts with the push (a tracked file edited on the server, a file sitting where the repository now wants to put one, or history that was rewritten), nothing changes. The answer names the paths.
 
 ```text

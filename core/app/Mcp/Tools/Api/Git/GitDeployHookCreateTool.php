@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Create a push-to-deploy hook
 
-    Create the Deploy Hook for a git-connected checkout, so a push to its tracked branch redeploys the project. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed (`project` is the Deploy-managed checkout). Returns the `url` to register in the git host and the `secret` to sign with. The secret is shown ONCE, in this response, and can never be read again: store it now, or rotate later. Asking again returns the same hook (200) without the secret and never rotates it. On the Deploy-managed checkout every push to the tracked branch force-updates it to match the repository (local changes to tracked files and untracked files that are not engine-managed are discarded before the rebuild) and the response carries a `warning` saying so. On a Site Git checkout (e.g. `public_html`) a push only fast-forwards, with no build: untracked files such as uploads are left alone, and when git refuses because of a local change, an untracked file at an incoming path or rewritten history, nothing changes and the delivery's result is `pull_refused`. The response's `tls` block says whether the engine's certificate is one a git host trusts outright (`state: valid`) or self-signed (`state: self_signed`); when self-signed it carries `instructions`, one paragraph per supported provider (github, gitlab, bitbucket-cloud, bitbucket-data-center) on making that provider call the hook anyway. Optional `provider` on the request narrows `instructions` to that one provider. `tls.warning` is set when the engine has no public address, so a git host on the internet could not reach the hook at all. 422 when the checkout is not connected to git.
+    Create the Deploy Hook for a git-connected checkout, so a push to its tracked branch redeploys the project. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed (`project` is the Deploy-managed checkout). Returns the `url` to register in the git host and the `secret` to sign with. The secret is shown ONCE, in this response, and can never be read again: store it now, or rotate later. Asking again returns the same hook (200) without the secret and never rotates it. On the Deploy-managed checkout every push to the tracked branch force-updates it to match the repository (local changes to tracked files and untracked files that are not engine-managed are discarded before the rebuild) and the response carries a `warning` saying so. On a Site Git checkout (e.g. `public_html`) a push only fast-forwards, with no build: untracked files such as uploads are left alone, and when git refuses because of a local change, an untracked file at an incoming path or rewritten history, nothing changes and the delivery's result is `pull_refused`. The response's `tls` block says whether the engine's certificate is one a git host trusts outright (`state: valid`) or self-signed (`state: self_signed`); when self-signed it carries `instructions`, one paragraph per supported provider (github, gitlab, bitbucket-cloud, bitbucket-data-center) on making that provider call the hook anyway. Optional `provider` on the request narrows `instructions` to that one provider. `tls.warning` is set when the engine has no public address, so a git host on the internet could not reach the hook at all. 422 when the checkout is not connected to git. With `register: true` the engine also creates the webhook at the git provider the checkout came from, using the token the checkout itself clones with, and the response carries `registration` (`provider_hook_id` and `registered_at`); the token needs permission to manage repository webhooks (GitHub admin:repo_hook, GitLab maintainer, Bitbucket admin), else 422 `provider_token_missing` or `provider_permission_denied`; a provider that cannot be reached is 502. The Engine hook is created either way, and `registration: null` with `registration_warning` says when the engine has no provider API for that host.
     MARKDOWN)]
 #[IsDestructive]
 class GitDeployHookCreateTool extends ApiTool
@@ -49,6 +49,7 @@ class GitDeployHookCreateTool extends ApiTool
         return [
             'path',
             'provider',
+            'register',
         ];
     }
 
@@ -70,7 +71,8 @@ class GitDeployHookCreateTool extends ApiTool
         return [
             'name' => $schema->string()->required(),
             'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).'),
-            'provider' => $schema->string()->description('Optional. Narrows `tls.instructions` to this git host: github, gitlab, bitbucket-cloud, bitbucket-data-center.'),
+            'provider' => $schema->string()->description('Optional. Narrows `tls.instructions` to this git host, and names the provider to register at when the repository URL does not: github, gitlab, bitbucket-cloud, bitbucket-data-center.'),
+            'register' => $schema->boolean()->description('Optional, default false. Also create the webhook at the git provider with the checkout\'s own token.'),
         ];
     }
 }
