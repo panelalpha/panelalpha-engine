@@ -2,16 +2,17 @@
 
 namespace App\System\Project\Dind\Inner;
 
-use App\System\Project\Dind\InnerDocker;
+use App\Lib\Deploy\CacheManager\BuiltImage;
 use App\Lib\Deploy\CacheManager\ImageTransfer;
-use App\Lib\Deploy\Dind\DindImageStore;
 use App\Lib\Deploy\CacheManager\NodeBuildImage;
 use App\Lib\Deploy\CacheManager\PhpBaseImage;
 use App\Lib\Deploy\CacheManager\PythonBaseImage;
 use App\Lib\Deploy\CacheManager\RubyBaseImage;
 use App\Lib\Deploy\CacheManager\RustBuildToolsImage;
+use App\Lib\Deploy\Dind\DindImageStore;
 use App\Lib\Deploy\Platform\Runtime\RuntimeImageCatalog;
 use App\Lib\Deploy\Telemetry\Telemetry;
+use App\System\Project\Dind\InnerDocker;
 
 /**
  * Base images the host builds once and every account borrows.
@@ -50,13 +51,13 @@ class SharedBaseImages
      * should fall back to the stock php image and compile the extensions in
      * the account — a slow deploy is better than a broken one.
      *
-     * @param list<string> $extras extensions to bake in on top of the standard
-     *                             set, so the account never compiles them
-     * @param list<string> $packages the manifest's `system_packages:`
-     * @param list<string> $required extensions the project's composer files
-     *                               require: a variant carrying one is not deferred
+     * @param  list<string>  $extras  extensions to bake in on top of the standard
+     *                                set, so the account never compiles them
+     * @param  list<string>  $packages  the manifest's `system_packages:`
+     * @param  list<string>  $required  extensions the project's composer files
+     *                                  require: a variant carrying one is not deferred
      * @return array{tag: ?string, baked: list<string>} baked is what $tag has
-     *         beyond the standard set, so the caller knows what not to install
+     *                                                  beyond the standard set, so the caller knows what not to install
      */
     public function ensurePhp(string $phpImage, array $extras = [], array $packages = [], array $required = []): array
     {
@@ -82,9 +83,9 @@ class SharedBaseImages
         if ($tag !== null && RuntimeImageCatalog::runnable('php')) {
             throw new \RuntimeException(
                 "The shared PHP base image {$tag} could not be built or loaded on this server; see the lines above. "
-                . "A PHP app runs on that image (Composer, the Apache configuration and the entrypoint are baked "
-                . "into it), and the stock {$phpImage} has none of them. Deploy again once the cause above is "
-                . 'fixed; `php artisan system:image:prewarm` builds the base ahead of a deploy.'
+                .'A PHP app runs on that image (Composer, the Apache configuration and the entrypoint are baked '
+                ."into it), and the stock {$phpImage} has none of them. Deploy again once the cause above is "
+                .'fixed; `php artisan system:image:prewarm` builds the base ahead of a deploy.'
             );
         }
 
@@ -106,8 +107,8 @@ class SharedBaseImages
      * accepts uploads it can never convert (ClipBucket). The first
      * deploy of a set waits for the build; one that cannot get it fails.
      *
-     * @param list<string> $extras
-     * @param list<string> $packages
+     * @param  list<string>  $extras
+     * @param  list<string>  $packages
      * @return array{tag: string, baked: list<string>}
      */
     private function ensurePhpWithPackages(string $phpImage, array $extras, array $packages): array
@@ -121,10 +122,10 @@ class SharedBaseImages
         throw new \RuntimeException(
             $tag === null
                 ? "This application needs {$wanted} (system_packages), which only the shared PHP base image can carry, "
-                    . "and {$phpImage} is not an image this host builds one from."
+                    ."and {$phpImage} is not an image this host builds one from."
                 : "This application needs {$wanted} (system_packages), and the PHP base image {$tag} "
-                    . 'carrying them could not be built or loaded; see the lines above. '
-                    . 'Deploying on the plain base would serve an application without them.'
+                    .'carrying them could not be built or loaded; see the lines above. '
+                    .'Deploying on the plain base would serve an application without them.'
         );
     }
 
@@ -136,12 +137,12 @@ class SharedBaseImages
      * Returns null when the caller should build FROM the stock ruby image and
      * install the packages itself.
      *
-     * @param list<string> $packages
+     * @param  list<string>  $packages
      */
     public function ensureRuby(string $rubyImage, array $packages): ?string
     {
         $tag = RubyBaseImage::tag($rubyImage, $packages);
-        if ($tag === null || !ImageTransfer::isSafeImageRef($tag)) {
+        if ($tag === null || ! ImageTransfer::isSafeImageRef($tag)) {
             return null;
         }
         if ($this->inner->seeding()->hasImage($tag) || $this->inner->seeding()->provideFromStores($tag)) {
@@ -155,7 +156,7 @@ class SharedBaseImages
             return null;
         }
 
-        if (!$this->hostHasImage($tag)) {
+        if (! $this->hostHasImage($tag)) {
             // Same reasoning as the PHP base: the account waiting on this
             // deploy should not pay for an apt install the host has never
             // done. Queue it and let this build install its own packages.
@@ -167,7 +168,7 @@ class SharedBaseImages
         try {
             $this->buildAndLoad('Ruby', $tag, $dockerfile);
         } catch (\Exception $e) {
-            $this->inner->host()->logInfo("Could not provide {$tag}: " . $e->getMessage());
+            $this->inner->host()->logInfo("Could not provide {$tag}: ".$e->getMessage());
 
             return null;
         }
@@ -184,12 +185,12 @@ class SharedBaseImages
      * chances — a real outcome, not a failure: most projects install entirely
      * from wheels.
      *
-     * @param list<string> $packages
+     * @param  list<string>  $packages
      */
     public function ensurePython(string $pythonImage, array $packages): ?string
     {
         $tag = PythonBaseImage::tag($pythonImage, $packages);
-        if ($tag === null || !ImageTransfer::isSafeImageRef($tag)) {
+        if ($tag === null || ! ImageTransfer::isSafeImageRef($tag)) {
             return null;
         }
         if ($this->inner->seeding()->hasImage($tag) || $this->inner->seeding()->provideFromStores($tag)) {
@@ -203,14 +204,14 @@ class SharedBaseImages
             return null;
         }
 
-        $announced = !$this->hostHasImage($tag);
+        $announced = ! $this->hostHasImage($tag);
         if ($announced) {
             // The catalogue decides whether a deploy waits. Ruby does not: its
             // per-project Dockerfile installs the same packages. Python does,
             // the base being the only place those headers exist — deferring it
             // meant a first deploy that failed on `pg_config executable not
             // found` and a second that worked.
-            if (!RuntimeImageCatalog::runnable('python')) {
+            if (! RuntimeImageCatalog::runnable('python')) {
                 $this->queueBackgroundBuild('Python', $tag, $dockerfile);
 
                 return null;
@@ -218,8 +219,8 @@ class SharedBaseImages
 
             $this->inner->host()->logInfo(
                 "Shared Python base image {$tag} has not been built on this host yet; building it now. "
-                . 'Later deploys on this Python version and dependency set load it in seconds. '
-                . '`pae configure prewarm` can keep it built ahead of time.'
+                .'Later deploys on this Python version and dependency set load it in seconds. '
+                .'`pae configure prewarm` can keep it built ahead of time.'
             );
         }
 
@@ -231,12 +232,36 @@ class SharedBaseImages
             // refused up front.
             $host = $this->inner->host();
             $host->failDeployIfDiskFull($e->getMessage());
-            $host->logInfo('Shared Python base unavailable, using the stock image: ' . $e->getMessage());
+            $host->logInfo('Shared Python base unavailable, using the stock image: '.$e->getMessage());
 
             return null;
         }
 
         return $this->inner->seeding()->hasImage($tag) ? $tag : null;
+    }
+
+    /**
+     * Pull one of ours back from the cache registry, or rebuild it from the
+     * extensions that named it, before a host build asks for it by name.
+     *
+     * @param  list<string>  $extensions  the extras the base image was named with
+     * @param  list<string>  $packages  the system packages it was named with
+     */
+    public function ensureOnHost(string $image, array $extensions, array $packages): void
+    {
+        $argv = $this->inner->imageStore()->hostEnsureImageArgv($image);
+        if ($argv === ['true']) {
+            return;
+        }
+
+        try {
+            $this->inner->dind()->system()->execOnHost($argv, [], 900);
+        } catch (\Throwable $e) {
+            $this->inner->host()->logInfo("Could not pull base image {$image} back onto the host: ".$e->getMessage());
+        }
+        if (! $this->hostHasImage($image)) {
+            $this->rebuildOnHost($image, $extensions, $packages);
+        }
     }
 
     /**
@@ -263,7 +288,7 @@ class SharedBaseImages
 
         // Our own PHP bases exist only on this host: --pull would look for
         // them on Docker Hub and fail.
-        $pull = !$this->hostHasImage($image);
+        $pull = ! $this->hostHasImage($image);
         try {
             $host->cancellable(
                 $this->inner->imageStore()->hostBuildCommand($tag, $dockerfile, false, $pull),
@@ -271,7 +296,7 @@ class SharedBaseImages
             );
         } catch (\Exception $e) {
             $host->failDeployIfDiskFull($e->getMessage());
-            $host->logInfo("Could not build {$tag}, building without Node: " . $e->getMessage());
+            $host->logInfo("Could not build {$tag}, building without Node: ".$e->getMessage());
 
             return null;
         }
@@ -284,7 +309,7 @@ class SharedBaseImages
      * Host only, built now: without them cargo fails every time. Null means
      * compile in $image as before.
      *
-     * @param list<string> $packages
+     * @param  list<string>  $packages
      */
     public function ensureRustBuild(string $image, array $packages): ?string
     {
@@ -294,19 +319,19 @@ class SharedBaseImages
             return null;
         }
         $host = $this->inner->host();
-        $host->logInfo('The Rust build needs ' . implode(', ', $packages) . "; building in {$tag}");
+        $host->logInfo('The Rust build needs '.implode(', ', $packages)."; building in {$tag}");
         if ($this->hostHasImage($tag)) {
             return $tag;
         }
 
         try {
             $host->cancellable(
-                $this->inner->imageStore()->hostBuildCommand($tag, $dockerfile, false, !$this->hostHasImage($image)),
+                $this->inner->imageStore()->hostBuildCommand($tag, $dockerfile, false, ! $this->hostHasImage($image)),
                 self::BUILD_TIMEOUT_SECONDS
             );
         } catch (\Exception $e) {
             $host->failDeployIfDiskFull($e->getMessage());
-            $host->logInfo("Could not build {$tag}, compiling in {$image}: " . $e->getMessage());
+            $host->logInfo("Could not build {$tag}, compiling in {$image}: ".$e->getMessage());
 
             return null;
         }
@@ -318,9 +343,9 @@ class SharedBaseImages
      * Build on the host, then load into the account. Both halves no-op when the
      * image is already where it needs to be, so this is safe to call per deploy.
      *
-     * @param list<string> $extras
-     * @param list<string> $packages
-     * @param list<string> $required the extras composer will refuse to install without
+     * @param  list<string>  $extras
+     * @param  list<string>  $packages
+     * @param  list<string>  $required  the extras composer will refuse to install without
      */
     public function providePhp(
         string $tag,
@@ -329,7 +354,7 @@ class SharedBaseImages
         array $packages = [],
         array $required = []
     ): bool {
-        if (!ImageTransfer::isSafeImageRef($tag)) {
+        if (! ImageTransfer::isSafeImageRef($tag)) {
             return false;
         }
         if ($this->inner->seeding()->hasImage($tag) || $this->inner->seeding()->provideFromStores($tag)) {
@@ -355,19 +380,19 @@ class SharedBaseImages
         // System packages are not deferrable either: the plain base lacks them.
         // Nor is an extension the project requires: composer's platform check
         // aborts on the plain base (Wallabag's ext-tidy).
-        if (!$this->hostHasImage($tag) && $extras !== [] && $packages === [] && $required === []) {
+        if (! $this->hostHasImage($tag) && $extras !== [] && $packages === [] && $required === []) {
             $this->queueBackgroundBuild('PHP', $tag, $dockerfile);
 
             return false;
         }
-        $announced = !$this->hostHasImage($tag);
+        $announced = ! $this->hostHasImage($tag);
         if ($announced) {
             $this->inner->host()->logInfo(
                 "Shared PHP base image {$tag} has not been built on this host yet; building it now"
-                . ($packages === [] ? '' : ' with ' . implode(', ', $packages))
-                . ($required === [] ? '' : ', since this project requires ' . implode(', ', $required)) . '. '
-                . 'Later deploys on this PHP version load it in seconds. '
-                . '`pae configure prewarm` can keep it built ahead of time.'
+                .($packages === [] ? '' : ' with '.implode(', ', $packages))
+                .($required === [] ? '' : ', since this project requires '.implode(', ', $required)).'. '
+                .'Later deploys on this PHP version load it in seconds. '
+                .'`pae configure prewarm` can keep it built ahead of time.'
             );
         }
 
@@ -381,11 +406,11 @@ class SharedBaseImages
             if (str_contains($e->getMessage(), DindImageStore::REGISTRY_DOWN)) {
                 throw new \RuntimeException(
                     'The image cache (panelalpha-cache-registry or its writer) is not running, and a PHP deploy '
-                    . 'cannot get its base image without it. Start it with `docker compose up -d cache-registry cache-registry-writer`.'
+                    .'cannot get its base image without it. Start it with `docker compose up -d cache-registry cache-registry-writer`.'
                 );
             }
             $host->logInfo(
-                'Shared PHP base image unavailable, compiling extensions in the account: ' . $e->getMessage()
+                'Shared PHP base image unavailable, compiling extensions in the account: '.$e->getMessage()
             );
 
             return false;
@@ -431,10 +456,37 @@ class SharedBaseImages
         );
     }
 
+    /**
+     * Rebuild a missing base image from the same Dockerfile prewarm uses and
+     * publish it, so this deploy and the accounts after it find it by name.
+     *
+     * @param  list<string>  $extensions
+     * @param  list<string>  $packages
+     */
+    private function rebuildOnHost(string $image, array $extensions, array $packages): void
+    {
+        $dockerfile = BuiltImage::dockerfile($image, $extensions, $packages);
+        if ($dockerfile === null) {
+            return;
+        }
+
+        $this->inner->host()->logInfo("Base image {$image} was not on this server; building it now");
+        try {
+            $this->inner->host()->cancellable(
+                ['sudo', 'sh', '-c', $this->inner->imageStore()->hostRebuildCommand($image, $dockerfile)],
+                self::BUILD_TIMEOUT_SECONDS
+            );
+        } catch (\Throwable $e) {
+            throw new \RuntimeException(
+                "The base image {$image} is not on this server; rebuilding it failed. ".$e->getMessage()
+            );
+        }
+    }
+
     /** Does the *host* already have this image, i.e. is providing it a push rather than a compile? */
     private function hostHasImage(string $image): bool
     {
-        if (!ImageTransfer::isSafeImageRef($image)) {
+        if (! ImageTransfer::isSafeImageRef($image)) {
             return false;
         }
         try {

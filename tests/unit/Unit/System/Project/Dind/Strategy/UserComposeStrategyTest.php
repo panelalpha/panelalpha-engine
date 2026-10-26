@@ -108,7 +108,7 @@ class UserComposeStrategyTest extends TestCase
         };
     }
 
-    private function stubbedDind(System $system, string $composeSourcePath, string $appDir = ''): Dind
+    private function stubbedDind(System $system, string $composeSourcePath, string $appDir = '', array $envVars = []): Dind
     {
         $model = new \App\Models\User();
         $model->username = 'acme';
@@ -132,17 +132,24 @@ class UserComposeStrategyTest extends TestCase
         // process has bootstrapped. Everything else here (ComposeHarden,
         // RubyStrategy::installHostInitializer against a directory that does
         // not exist) is real.
-        $strategy = new class ($dind) extends DeployStrategy {
+        $strategy = new class ($dind, $envVars) extends DeployStrategy {
+            /** @param array<string, string> $envVars */
+            public function __construct(Dind $dind, private array $envVars)
+            {
+                parent::__construct($dind);
+            }
+
             public function secrets(): AccountSecrets
             {
-                return new class ($this) extends AccountSecrets {
-                    public function __construct(object $unused)
+                return new class ($this->envVars) extends AccountSecrets {
+                    /** @param array<string, string> $envVars */
+                    public function __construct(private array $envVars)
                     {
                     }
 
                     public function userEnvVars(): array
                     {
-                        return [];
+                        return $this->envVars;
                     }
 
                     public function for(string $purpose): string
@@ -629,6 +636,28 @@ class UserComposeStrategyTest extends TestCase
 
         $run = Yaml::parse($this->copiedTo[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_COMPOSE]);
         $this->assertSame(['9494:9494'], $run['services']['web']['ports']);
+    }
+
+    /**
+     * `up` regenerates the run file from the stored env_vars: a value saved
+     * without being applied is written in when the file is rewritten.
+     */
+    public function test_refresh_run_file_writes_the_accounts_stored_env_vars_into_the_run_file(): void
+    {
+        $clientPath = self::PROJECT_DIR . '/docker-compose.yml';
+        $clientYaml = "services:\n  app:\n    image: acme/app:latest\n    ports:\n      - \"8080:80\"\n"
+            . "    environment:\n      APP_SECRET: REPLACE_WITH_LONG_SECRET\n";
+        $dind = $this->stubbedDind(
+            $this->stubbedSystem([$clientPath => $clientYaml]),
+            $clientPath,
+            '',
+            ['APP_SECRET' => 'stored-by-account']
+        );
+
+        (new UserComposeStrategy($dind))->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+
+        $run = Yaml::parse($this->copiedTo[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_COMPOSE]);
+        $this->assertSame('stored-by-account', $run['services']['app']['environment']['APP_SECRET']);
     }
 
     /** The run file inlines env_vars and generated passwords. */

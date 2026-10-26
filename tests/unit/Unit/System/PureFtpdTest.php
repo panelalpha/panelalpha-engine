@@ -4,6 +4,7 @@ namespace Tests\Unit\System;
 
 use App\System;
 use App\System\Services\PureFtpd;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 
@@ -90,6 +91,40 @@ class PureFtpdTest extends TestCase
 
         $cmd = $system->execJournal[0];
         $this->assertStringContainsString('pure-pw usermod ftp@example.com -N', $cmd);
+    }
+
+    #[DataProvider('quotasWithoutACap')]
+    public function test_useradd_omits_the_quota_flag_when_there_is_no_cap(?int $quota): void
+    {
+        $system = $this->recordingSystem();
+        $system->ftp()->useradd(
+            'ftp@example.com',
+            'secret',
+            1001,
+            1001,
+            '/home/ftpuser/alice/public_html',
+            $quota,
+        );
+
+        $this->assertStringContainsString('pure-pw useradd', $system->execJournal[0]);
+        $this->assertStringNotContainsString('-N', $system->execJournal[0]);
+    }
+
+    #[DataProvider('quotasWithoutACap')]
+    public function test_usermod_never_passes_a_numeric_quota_when_there_is_no_cap(?int $quota): void
+    {
+        $system = $this->recordingSystem();
+        $system->ftp()->usermodQuota('ftp@example.com', $quota);
+
+        $cmd = $system->execJournal[0];
+        $this->assertStringContainsString('pure-pw usermod ftp@example.com -N', $cmd);
+        $this->assertDoesNotMatchRegularExpression('/-N\s+-?\d/', $cmd);
+    }
+
+    /** @return list<array{?int}> */
+    public static function quotasWithoutACap(): array
+    {
+        return [[-1], [0], [null]];
     }
 
     public function test_useradd_pipes_password_and_runs_mkdb(): void

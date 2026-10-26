@@ -2,11 +2,10 @@
 
 namespace App\System\Project\Dind\Strategy;
 
-use App\System\Project\Dind as DindProject;
-use App\System\Project\Dind\AppDatabase;
 use App\Lib\Deploy\CacheManager\PhpBaseImage;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Compose\DeployCompose;
+use App\Lib\Deploy\Dind\DindHostBuilder;
 use App\Lib\Deploy\EnvFile;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\PlatformStage;
@@ -22,6 +21,8 @@ use App\Lib\Deploy\Platform\Runtime\Php\PhpExtensions;
 use App\Lib\Deploy\Platform\Runtime\Php\PhpHostBuild;
 use App\Lib\Deploy\Platform\Runtime\PhpRuntime;
 use App\Lib\Deploy\Sidecar\SidecarEngine;
+use App\System\Project\Dind\AppDatabase;
+use App\System\Project\Dind as DindProject;
 use Illuminate\Support\Facades\Cache;
 
 /**
@@ -48,7 +49,7 @@ class PhpStrategy
     }
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     public function apply(
         string $projectDir,
@@ -73,11 +74,11 @@ class PhpStrategy
         // MariaDB and Percona resolve to the same engine, so one check covers
         // every MySQL-compatible sidecar the project might ship.
         $hasMysql = SidecarEngine::servicesProvide($sidecars['services'], 'mysql');
-        $accountDb = !$hasMysql && ($decision['database'] ?? null) === self::DATABASE_MYSQL;
+        $accountDb = ! $hasMysql && ($decision['database'] ?? null) === self::DATABASE_MYSQL;
         $db = $accountDb
             ? AppDatabase::provision($this->dind->userModel())
             : ($artisan ? EnvFile::databaseSettings($projectDir, $this->dind->projectTree()->read(...)) : []);
-        if (!$accountDb && !$hasMysql && MysqlSidecar::isNeeded($db)) {
+        if (! $accountDb && ! $hasMysql && MysqlSidecar::isNeeded($db)) {
             // Before anything reads DB_PASSWORD, so the sidecar and the app
             // get the same one.
             $db = MysqlSidecar::withPassword($db, $strategy->sidecars()->passwords());
@@ -123,7 +124,9 @@ class PhpStrategy
             $this->runtimeImage($build),
             $decision,
             $build->appRoot,
-            $build->composerJson !== null
+            $build->composerJson !== null,
+            $build->baseImageExtras,
+            $build->baseImagePackages
         );
         $frontendBuild = $decision['frontend_build'] ?? null;
         $this->dind->hostCompile()->runForPhp(
@@ -173,11 +176,11 @@ class PhpStrategy
         }
 
         try {
-            $dir = rtrim($projectDir, '/') . '/';
-            $system->filesystem()->filePutContents($dir . EngineArtifacts::RUN_PASSWD, $files['passwd'], $chown, '644');
-            $system->filesystem()->filePutContents($dir . EngineArtifacts::RUN_GROUP, $files['group'], $chown, '644');
+            $dir = rtrim($projectDir, '/').'/';
+            $system->filesystem()->filePutContents($dir.EngineArtifacts::RUN_PASSWD, $files['passwd'], $chown, '644');
+            $system->filesystem()->filePutContents($dir.EngineArtifacts::RUN_GROUP, $files['group'], $chown, '644');
         } catch (\Exception $e) {
-            $this->dind->shell()->logger()?->info('Could not write the account user files: ' . $e->getMessage());
+            $this->dind->shell()->logger()?->info('Could not write the account user files: '.$e->getMessage());
 
             return false;
         }
@@ -216,16 +219,16 @@ class PhpStrategy
     /** The installed tree's package list, written by the host build before the compose file. */
     private function installedPackages(string $projectDir, PhpBuild $build): ?string
     {
-        $prefix = $build->appRoot === '' ? '' : $build->appRoot . '/';
+        $prefix = $build->appRoot === '' ? '' : $build->appRoot.'/';
 
         return $this->dind->projectTree()->readIn(
             $projectDir,
-            $prefix . $build->composer()->vendorDir() . '/composer/installed.json'
+            $prefix.$build->composer()->vendorDir().'/composer/installed.json'
         );
     }
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private function platformId(array $decision, bool $artisan): string
     {
@@ -235,7 +238,7 @@ class PhpStrategy
     }
 
     /**
-     * @param list<string> $systemPackages the manifest's `system_packages:`
+     * @param  list<string>  $systemPackages  the manifest's `system_packages:`
      */
     private function build(
         string $projectDir,
@@ -248,9 +251,9 @@ class PhpStrategy
         // whose manifest declares an app_root these are <root>/composer.json
         // and <root>/composer.lock, and reading the repository root instead
         // resolves no PHP version and no extensions.
-        $prefix = $appRoot === '' ? '' : $appRoot . '/';
-        $composerJson = $this->dind->projectTree()->readIn($projectDir, $prefix . 'composer.json');
-        $composerLock = $this->dind->projectTree()->readIn($projectDir, $prefix . 'composer.lock');
+        $prefix = $appRoot === '' ? '' : $appRoot.'/';
+        $composerJson = $this->dind->projectTree()->readIn($projectDir, $prefix.'composer.json');
+        $composerLock = $this->dind->projectTree()->readIn($projectDir, $prefix.'composer.lock');
         $base = $this->baseImage(
             $composerJson,
             $composerLock,
@@ -264,7 +267,9 @@ class PhpStrategy
             artisan: $artisan,
             waitForMysql: $needsMysql,
             baseImage: $base['tag'],
-            appRoot: $appRoot
+            appRoot: $appRoot,
+            baseImageExtras: $base['baked'],
+            baseImagePackages: $base['packages']
         );
     }
 
@@ -274,9 +279,12 @@ class PhpStrategy
      * a host-built variant instead, so the second account wanting the same
      * set gets them as a ~2s image load.
      *
-     * @param list<string> $extensions
-     * @param list<string> $systemPackages
-     * @return array{tag: ?string, baked: list<string>}
+     * `baked` is what the tag carries, not what was asked for: a variant that is
+     * deferred or fails leaves the plain base, which must be rebuilt without them.
+     *
+     * @param  list<string>  $extensions
+     * @param  list<string>  $systemPackages
+     * @return array{tag: ?string, baked: list<string>, packages: list<string>}
      */
     private function baseImage(
         ?string $composerJson,
@@ -284,12 +292,16 @@ class PhpStrategy
         array $extensions,
         array $systemPackages = []
     ): array {
-        return $this->dind->innerDocker()->ensurePhpBaseImage(
+        $extras = PhpBaseImage::bakeableExtras(PhpBaseImage::missingExtensions($extensions));
+        $packages = PhpBaseImage::normalizeSystemPackages($systemPackages);
+        $base = $this->dind->innerDocker()->ensurePhpBaseImage(
             PhpRuntime::imageFor($composerJson, $composerLock),
-            PhpBaseImage::bakeableExtras(PhpBaseImage::missingExtensions($extensions)),
-            $systemPackages,
+            $extras,
+            $packages,
             PhpExtensions::requiredFor(new ComposerManifest($composerJson, $composerLock))
         );
+
+        return [...$base, 'packages' => $packages];
     }
 
     /**
@@ -314,7 +326,7 @@ class PhpStrategy
      * default for a PHP application and the one every recipe was spelling out
      * by hand.
      *
-     * @param array<string, mixed> $decision the matched manifest's
+     * @param  array<string, mixed>  $decision  the matched manifest's
      * @return array<string, string>
      */
     private function documentRoot(array $decision, PhpBuild $build): array
@@ -322,11 +334,11 @@ class PhpStrategy
         // Undeclared: look where the index files are, not just which directories
         // exist -- the image's `-d /app/public` serves Dotclear's empty public/.
         $root = $this->dind->userAppDirPath()
-            . ($build->appRoot === '' ? '' : '/' . trim($build->appRoot, '/'));
+            .($build->appRoot === '' ? '' : '/'.trim($build->appRoot, '/'));
 
         return PhpDocroot::environment(
             $decision['docroot'] ?? null,
-            fn (string $relative): bool => $this->dind->system()->filesystem()->fileExists($root . '/' . $relative)
+            fn (string $relative): bool => $this->dind->system()->filesystem()->fileExists($root.'/'.$relative)
         );
     }
 
@@ -351,7 +363,7 @@ class PhpStrategy
         $uid = $user->getUid();
         $gid = $user->getGid();
 
-        return $uid === null || $gid === null ? '' : $uid . ':' . $gid;
+        return $uid === null || $gid === null ? '' : $uid.':'.$gid;
     }
 
     /**
@@ -359,7 +371,7 @@ class PhpStrategy
      * to the account before the compose file names it.
      *
      * Creating it here is the load-bearing part, and it is the same lesson as
-     * {@see \App\Lib\Deploy\Dind\DindHostBuilder::prepareCacheArgv()}: a
+     * {@see DindHostBuilder::prepareCacheArgv()}: a
      * bind-mount source that does not exist is created by the daemon as root,
      * and a container running as the account then cannot write it. The daemon
      * in question is the account's nested one, which resolves the path inside
@@ -375,7 +387,7 @@ class PhpStrategy
     {
         $model = $this->dind->userModel();
         $chown = $model->getChownString();
-        if (!is_string($chown) || $chown === '') {
+        if (! is_string($chown) || $chown === '') {
             return null;
         }
 
@@ -388,7 +400,7 @@ class PhpStrategy
             return $dir;
         } catch (\Exception $e) {
             $this->dind->shell()->logger()?->info(
-                'Container Composer cache unavailable, serving without it: ' . $e->getMessage()
+                'Container Composer cache unavailable, serving without it: '.$e->getMessage()
             );
 
             return null;
@@ -400,7 +412,7 @@ class PhpStrategy
      */
     private function mysqlWaitStages(bool $needsMysql): array
     {
-        if (!$needsMysql) {
+        if (! $needsMysql) {
             return [];
         }
         $wait = ['wait-for-mysql' => MysqlWait::command()];
@@ -409,8 +421,8 @@ class PhpStrategy
     }
 
     /**
-     * @param array<string, mixed> $db
-     * @param array{services: array<string, mixed>, ...} $sidecars
+     * @param  array<string, mixed>  $db
+     * @param  array{services: array<string, mixed>, ...}  $sidecars
      */
     private function writeCompose(
         string $projectDir,
@@ -428,7 +440,7 @@ class PhpStrategy
         $publicUrl = $this->dind->publicAppUrl();
         // Read, not run: it decides whether DB_DATABASE for SQLite is a path or a filename.
         $databaseConfig = $artisan
-            ? $this->dind->projectTree()->readIn($projectDir, ($build->appRoot === '' ? '' : $build->appRoot . '/') . 'config/database.php')
+            ? $this->dind->projectTree()->readIn($projectDir, ($build->appRoot === '' ? '' : $build->appRoot.'/').'config/database.php')
             : null;
         $decision = $strategy->sidecars()->mergeRuntimeSidecars(
             $this->decision(
@@ -459,7 +471,7 @@ class PhpStrategy
      * A project that ships its own MySQL service is already pointed at one;
      * only an app with none gets the engine's sidecar.
      *
-     * @param array<string, mixed> $db
+     * @param  array<string, mixed>  $db
      * @return array<string, mixed>
      */
     private function decision(
@@ -514,11 +526,10 @@ class PhpStrategy
 
             return $extraHosts === [] ? $decision : $decision + ['extra_hosts' => $extraHosts];
         }
-        if ($hasMysql || !MysqlSidecar::isNeeded($db)) {
+        if ($hasMysql || ! MysqlSidecar::isNeeded($db)) {
             return $decision;
         }
 
         return MysqlSidecar::withSidecar($decision, $db, $this->dind->strategy()->sidecars()->passwords());
     }
-
 }

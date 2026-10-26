@@ -11,6 +11,24 @@ use App\Models\ProxyRule;
  */
 final class ProxyRuleServerName
 {
+    private const HTTPS_PORT = 443;
+
+    /**
+     * Why clients will warn about a live HTTP rule on 443, or null: only a rule named after a domain
+     * or alias is rendered into that domain's vhost with its certificate; any other gets the host's default.
+     */
+    public static function defaultCertificateWarning(ProxyRule $rule): ?string
+    {
+        if (! $rule->enabled || $rule->transport !== 'http' || (int) $rule->listen_port !== self::HTTPS_PORT
+            || array_key_exists(strtolower((string) $rule->server_name), self::owners())) {
+            return null;
+        }
+        $name = trim((string) $rule->server_name) === '' ? '_' : $rule->server_name;
+
+        return "No domain or alias on this engine is named {$name}, so this rule on port 443 is served with the host's "
+            ."default self-signed certificate and clients will warn. Name one of this engine's domains or aliases to use its certificate.";
+    }
+
     /** Why this owner may not use the server name, or null when it may. */
     public static function refusal(?string $ownerScope, ?string $username, ?string $serverName): ?string
     {
@@ -20,13 +38,13 @@ final class ProxyRuleServerName
         }
 
         return "The server name must be empty or one of the project's own domains or aliases: "
-            . "a project's rule cannot answer for another project's site.";
+            ."a project's rule cannot answer for another project's site.";
     }
 
     /**
      * Whether a stored rule may be served, given every domain's owner from owners().
      *
-     * @param array<string, string> $owners
+     * @param  array<string, string>  $owners
      */
     public static function serves(ProxyRule $rule, array $owners): bool
     {

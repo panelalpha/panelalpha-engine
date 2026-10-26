@@ -50,6 +50,32 @@ test.describe('Proxy rules', () => {
     }
   });
 
+  test('a wildcard rule on 443 says it is served with the default certificate', async ({ api }) => {
+    const created = await api.createProxyRule({
+      owner_scope: 'system',
+      transport: 'http',
+      listen_port: 443,
+      server_name: `*.${rand('pr')}.example.test`,
+      upstream_host: '127.0.0.1',
+      upstream_port: 8080,
+      enabled: false,
+    });
+
+    try {
+      expect(
+        (created as { warnings?: string[] }).warnings,
+        'a disabled rule is not served'
+      ).toBeUndefined();
+
+      const enabled = await api.updateProxyRule(created.data.id, { enabled: true });
+      expect((enabled as { warnings?: string[] }).warnings).toEqual([
+        expect.stringContaining('default self-signed certificate'),
+      ]);
+    } finally {
+      await api.deleteProxyRuleSafe(created.data.id);
+    }
+  });
+
   test('a missing rule returns 404', async ({ api }) => {
     await expectStatus(await api.getProxyRuleRaw(999_999_999), 404);
   });

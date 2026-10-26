@@ -22,11 +22,17 @@ namespace App\System\Firewall;
 final class FirewallRule
 {
     public const ALLOW = 'allow';
+
     public const DENY = 'deny';
+
     public const IN = 'in';
+
     public const OUT = 'out';
+
     public const BOTH = 'both';
+
     public const HOST = 'host';
+
     public const PUBLISHED = 'published';
 
     /** Rules the installer opens carry this comment prefix; the API leaves them alone. */
@@ -42,9 +48,9 @@ final class FirewallRule
     public const COMMENT_REFUSED_CHARACTERS = '/[\'\r\n\x00]/';
 
     /**
-     * @param bool $editable false for a rule written on the host with options this
-     *                       model does not carry (an interface, an application profile,
-     *                       a source port, logging): listed as it is, never rewritten
+     * @param  bool  $editable  false for a rule written on the host with options this
+     *                          model does not carry (an interface, an application profile,
+     *                          a source port, logging): listed as it is, never rewritten
      */
     public function __construct(
         public readonly string $action,
@@ -57,11 +63,10 @@ final class FirewallRule
         public readonly bool $editable = true,
         public readonly ?string $raw = null,
         public readonly string $scope = self::HOST,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array{action: string, direction?: ?string, protocol?: ?string, port?: ?string, source?: ?string, destination?: ?string, comment?: ?string, scope?: ?string} $data
+     * @param  array{action: string, direction?: ?string, protocol?: ?string, port?: ?string, source?: ?string, destination?: ?string, comment?: ?string, scope?: ?string}  $data
      */
     public static function fromArray(array $data): self
     {
@@ -126,7 +131,7 @@ final class FirewallRule
      */
     public static function normalizeAddress(string $address): string
     {
-        if (!self::isAddress($address)) {
+        if (! self::isAddress($address)) {
             return $address;
         }
         [$ip, $prefix] = array_pad(explode('/', $address, 2), 2, null);
@@ -138,10 +143,10 @@ final class FirewallRule
 
         $mask = '';
         for ($i = 0, $left = (int) $prefix; $i < strlen($packed); $i++, $left -= 8) {
-            $mask .= chr($left >= 8 ? 0xff : ($left <= 0 ? 0 : (0xff << (8 - $left)) & 0xff));
+            $mask .= chr($left >= 8 ? 0xFF : ($left <= 0 ? 0 : (0xFF << (8 - $left)) & 0xFF));
         }
 
-        return inet_ntop($packed & $mask) . '/' . (int) $prefix;
+        return inet_ntop($packed & $mask).'/'.(int) $prefix;
     }
 
     /**
@@ -174,13 +179,31 @@ final class FirewallRule
             'comment' => $this->comment,
             'scope' => $this->scope,
         ];
+        if ($this->rederivesScope($changes)) {
+            $current['scope'] = null;
+        }
+
         return self::fromArray(array_merge($current, array_intersect_key($changes, $current)));
+    }
+
+    /**
+     * An edit that changes the action without naming a scope gets the scope a
+     * new rule with that action would get; a published rule stays published.
+     *
+     * @param  array<string, mixed>  $changes
+     */
+    private function rederivesScope(array $changes): bool
+    {
+        return ! array_key_exists('scope', $changes)
+            && isset($changes['action'])
+            && $changes['action'] !== $this->action
+            && $this->scope !== self::PUBLISHED;
     }
 
     /**
      * What makes this rule unsafe or unwritable whatever the provider.
      *
-     * @param self|null $current the rule this one replaces, on an edit
+     * @param  self|null  $current  the rule this one replaces, on an edit
      * @return array<string, string> field => message
      */
     public function problems(?self $current = null): array
@@ -308,15 +331,15 @@ final class FirewallRule
      */
     private function banPrefixProblem(string $comment, ?self $current): ?string
     {
-        if (!str_starts_with($comment, self::BAN_PREFIX)) {
+        if (! str_starts_with($comment, self::BAN_PREFIX)) {
             return null;
         }
         $was = $current?->with([]);
         if ($was === null || $comment !== $was->comment) {
-            return 'The comment prefix "' . self::BAN_PREFIX . '" marks the bans fail2ban makes.';
+            return 'The comment prefix "'.self::BAN_PREFIX.'" marks the bans fail2ban makes.';
         }
-        if ($this->isBan() && !($current->isBan() && $was->source === $this->source)) {
-            return 'A deny from an address with the comment prefix "' . self::BAN_PREFIX . '" is taken for a fail2ban ban; only a ban keeps it, from the address it bans. Change the comment.';
+        if ($this->isBan() && ! ($current->isBan() && $was->source === $this->source)) {
+            return 'A deny from an address with the comment prefix "'.self::BAN_PREFIX.'" is taken for a fail2ban ban; only a ban keeps it, from the address it bans. Change the comment.';
         }
 
         return null;
@@ -344,12 +367,12 @@ final class FirewallRule
     {
         $route = 'On a rule for published ports, which an incoming deny also is, ufw takes ';
         if ($comment === 'delete') {
-            return $route . 'the comment "delete" for part of the rule; reword it.';
+            return $route.'the comment "delete" for part of the rule; reword it.';
         }
-        $words = ' ' . $comment;
+        $words = ' '.$comment;
         if ((str_contains($words, ' in on ') && str_contains($words, ' out on '))
             || (preg_match('/ (in|out) /', $words) === 1 && preg_match('/ (in|out) on | app (in|out) /', $words) !== 1)) {
-            return $route . 'the word in or out followed by more words for part of the rule; reword it.';
+            return $route.'the word in or out followed by more words for part of the rule; reword it.';
         }
 
         return null;
@@ -362,7 +385,7 @@ final class FirewallRule
     public function id(): string
     {
         $key = [$this->action, $this->direction, $this->protocol, $this->port, $this->source, $this->destination];
-        if (!$this->editable) {
+        if (! $this->editable) {
             $key[] = $this->raw;
         }
         if ($this->scope === self::PUBLISHED) {
@@ -433,7 +456,7 @@ final class FirewallRule
         }
         $bits = $prefix === null ? strlen($ip) * 8 : (int) $prefix;
         $whole = intdiv($bits, 8);
-        $mask = (0xff << (8 - $bits % 8)) & 0xff;
+        $mask = (0xFF << (8 - $bits % 8)) & 0xFF;
 
         return substr($net, 0, $whole) === substr($ip, 0, $whole)
             && ($bits % 8 === 0 || ((ord($net[$whole]) ^ ord($ip[$whole])) & $mask) === 0);
@@ -461,7 +484,7 @@ final class FirewallRule
             'destination' => $this->destination,
             'comment' => $this->comment,
             'managed' => $this->managed(),
-            'editable' => $this->editable && !$this->managed(),
+            'editable' => $this->editable && ! $this->managed(),
             'raw' => $this->raw,
         ];
     }

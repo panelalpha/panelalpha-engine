@@ -3,26 +3,28 @@
 namespace App\Http\Controllers\User;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\ProxyRuleCollection;
 use App\Http\Resources\ProxyRuleResource;
-use App\System;
 use App\Models\ProxyRule;
 use App\Rules\ListenIp;
 use App\Rules\ProxyServerName;
 use App\Rules\UpstreamHost;
+use App\System;
 use App\System\Services\Webserver\ProxyListenPort;
+use App\System\Services\Webserver\ProxyRuleDuplicate;
 use App\System\Services\Webserver\ProxyRuleServerName;
 use App\System\Services\Webserver\ProxyRuleUpstream;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
-use App\Http\Resources\ProxyRuleCollection;
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 
 class ProxyRuleController extends Controller
 {
-    private const DUPLICATE_RULE = 'A rule with the same transport, port, and server_name already exists';
+    private const WARNINGS_DESCRIPTION = 'Present when the rule is served with the host\'s default self-signed certificate: '
+        .'an HTTP rule on port 443 whose server_name is no domain or alias on this engine, such as a wildcard.';
 
     #[OA\Get(
         path: '/proxy-rules',
@@ -93,7 +95,12 @@ class ProxyRuleController extends Controller
             ],
         )),
         responses: [
-            new OA\Response(response: 200, description: 'Proxy rule created', content: new OA\JsonContent(ref: '#/components/schemas/ProxyRule')),
+            new OA\Response(response: 200, description: 'Proxy rule created', content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(property: 'data', ref: '#/components/schemas/ProxyRule'),
+                    new OA\Property(property: 'warnings', type: 'array', items: new OA\Items(type: 'string'), description: self::WARNINGS_DESCRIPTION),
+                ],
+            )),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
@@ -149,7 +156,7 @@ class ProxyRuleController extends Controller
 
         $this->rebuildProxyConfig();
 
-        return new ProxyRuleResource($rule);
+        return self::withCertificateWarning($rule);
     }
 
     #[OA\Put(
@@ -168,7 +175,12 @@ class ProxyRuleController extends Controller
             ],
         )),
         responses: [
-            new OA\Response(response: 200, description: 'Proxy rule updated', content: new OA\JsonContent(ref: '#/components/schemas/ProxyRule')),
+            new OA\Response(response: 200, description: 'Proxy rule updated', content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(property: 'data', ref: '#/components/schemas/ProxyRule'),
+                    new OA\Property(property: 'warnings', type: 'array', items: new OA\Items(type: 'string'), description: self::WARNINGS_DESCRIPTION),
+                ],
+            )),
             new OA\Response(response: 404, description: 'Not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
@@ -180,14 +192,14 @@ class ProxyRuleController extends Controller
         $rule = $this->ruleOr404($id);
 
         $validated = $request->validate([
-            'upstream_host' => ['nullable', 'string', new UpstreamHost()],
+            'upstream_host' => ['nullable', 'string', new UpstreamHost],
             'upstream_port' => ['nullable', 'integer', 'min:1', 'max:65535'],
             'upstream_protocol' => ['nullable', Rule::in(['http', 'https'])],
             'enabled' => ['nullable', 'boolean'],
             'metadata' => ['nullable', 'array'],
         ]);
 
-        if (($validated['enabled'] ?? false) && !$rule->enabled) {
+        if (($validated['enabled'] ?? false) && ! $rule->enabled) {
             $this->refuseReenabling($rule);
         }
         if ($validated['enabled'] ?? $rule->enabled) {
@@ -198,7 +210,7 @@ class ProxyRuleController extends Controller
 
         $this->rebuildProxyConfig();
 
-        return new ProxyRuleResource($rule);
+        return self::withCertificateWarning($rule);
     }
 
     #[OA\Delete(
@@ -225,10 +237,18 @@ class ProxyRuleController extends Controller
         return new ProxyRuleResource($rule);
     }
 
+    private static function withCertificateWarning(ProxyRule $rule): ProxyRuleResource
+    {
+        $warning = ProxyRuleServerName::defaultCertificateWarning($rule);
+        $resource = new ProxyRuleResource($rule);
+
+        return $warning === null ? $resource : $resource->additional(['warnings' => [$warning]]);
+    }
+
     private function ruleOr404(int $id): ProxyRule
     {
         $rule = ProxyRule::find($id);
-        if (!$rule) {
+        if (! $rule) {
             abort(new JsonResponse([
                 'message' => 'Rule not found',
             ], 404));
@@ -255,10 +275,10 @@ class ProxyRuleController extends Controller
             'owner_scope' => ['nullable', Rule::in(['system', 'user'])],
             'username' => ['nullable', 'string', 'exists:users,username'],
             'transport' => ['required', Rule::in(['http', 'tcp', 'udp'])],
-            'listen_ip' => ['nullable', 'string', new ListenIp()],
+            'listen_ip' => ['nullable', 'string', new ListenIp],
             'listen_port' => ['required', 'integer', 'min:1', 'max:65535'],
-            'server_name' => ['nullable', 'string', new ProxyServerName()],
-            'upstream_host' => ['required', 'string', new UpstreamHost()],
+            'server_name' => ['nullable', 'string', new ProxyServerName],
+            'upstream_host' => ['required', 'string', new UpstreamHost],
             'upstream_port' => ['required', 'integer', 'min:1', 'max:65535'],
             'upstream_protocol' => ['nullable', Rule::in(['http', 'https'])],
             'enabled' => ['boolean'],
@@ -290,7 +310,8 @@ class ProxyRuleController extends Controller
      * Checks an enabled new rule against the rules already live and the host's ports. A disabled
      * one is stored unchecked and checked when switched on, in update().
      *
-     * @param array<string, mixed> $validated
+     * @param  array<string, mixed>  $validated
+     *
      * @throws ValidationException
      */
     private function refuseClashingRule(array $validated): void
@@ -307,7 +328,7 @@ class ProxyRuleController extends Controller
     /**
      * Keyed on listen_port, or the 422 would name field 0 instead of the port the twin already holds.
      *
-     * @param array<string, mixed> $validated
+     * @param  array<string, mixed>  $validated
      */
     private function refuseDuplicateStreamRule(array $validated): void
     {
@@ -319,16 +340,16 @@ class ProxyRuleController extends Controller
             ->where('server_name', $validated['server_name'] ?? null)
             ->exists()
         ) {
-            throw ValidationException::withMessages(['listen_port' => self::DUPLICATE_RULE]);
+            throw ValidationException::withMessages(['listen_port' => ProxyRuleDuplicate::MESSAGE]);
         }
     }
 
     /** Re-enabling a disabled rule runs the checks a fresh one gets. */
     private function refuseReenabling(ProxyRule $rule): void
     {
-        $this->refuseUnusablePort($rule->transport, $rule->listen_ip ?? '*', $rule->listen_port);
-        if ($rule->transport === 'http') {
-            $this->refuseDuplicateHttpRule($rule->server_name, (int) $rule->listen_port, (int) $rule->id);
+        $refusal = (new ProxyListenPort(app(System::class)))->switchOnRefusal($rule);
+        if ($refusal !== null) {
+            throw ValidationException::withMessages(['listen_port' => $refusal]);
         }
     }
 
@@ -363,8 +384,9 @@ class ProxyRuleController extends Controller
      */
     private function refuseDuplicateHttpRule(?string $serverName, int $listenPort, ?int $ignoreId = null): void
     {
-        if (ProxyRule::conflictingHttpRule($serverName, $listenPort, $ignoreId) !== null) {
-            throw ValidationException::withMessages(['listen_port' => self::DUPLICATE_RULE]);
+        $refusal = ProxyRuleDuplicate::refusal($serverName, $listenPort, $ignoreId);
+        if ($refusal !== null) {
+            throw ValidationException::withMessages(['listen_port' => $refusal]);
         }
     }
 
@@ -376,5 +398,4 @@ class ProxyRuleController extends Controller
             throw ValidationException::withMessages(['server_name' => $refusal]);
         }
     }
-
 }

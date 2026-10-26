@@ -48,6 +48,14 @@ class ProxyRuleCreateCommandTest extends TestCase
         $this->assertWebserverApplied(1);
     }
 
+    public function test_a_wildcard_rule_on_443_says_it_is_served_with_the_default_certificate(): void
+    {
+        $this->create('--scope=system --transport=http --listen-port=443 --server-name=*.shop.test --upstream-host=10.0.0.5 --upstream-port=8080')
+            ->expectsOutputToContain('Rule created successfully')
+            ->expectsOutputToContain("served with the host's default self-signed certificate")
+            ->assertExitCode(0);
+    }
+
     public function test_a_given_listen_ip_is_stored(): void
     {
         $this->create('--scope=user --project=alice --transport=tcp --listen-ip=10.0.0.5 --listen-port=5432 --upstream-host=alice --upstream-port=5432')

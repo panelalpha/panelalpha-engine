@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\CacheManager;
 
+use App\Lib\Deploy\Dind\DindAccountCleanup;
 use App\Lib\Deploy\Dind\DindImageStore;
 
 /**
@@ -13,14 +14,15 @@ use App\Lib\Deploy\Dind\DindImageStore;
  * resolves runtimes from (golang, node, python, dotnet, …), and the Railpack
  * images a Railpack deploy fetches for its accounts. The engine's own
  * images and a repo's compose sidecars are never touched here; the sidecars are
- * account teardown's ({@see \App\Lib\Deploy\Dind\DindAccountCleanup}).
+ * account teardown's ({@see DindAccountCleanup}).
  *
  * Within scope an image is kept when any of these hold:
  * - the prewarm catalogue names it (evicting one sends the next deploy back to
  *   a compile or to Docker Hub, the reason `docker image prune -a` is wrong);
  * - a host container uses it;
  * - it was pulled, built or tagged on this host inside the window
- *   (`LastTagTime`), which also covers a deploy that just fetched it;
+ *   (`LastTagTime`, the time the tag was created here, so a deploy that reuses
+ *   an existing tag does not move it);
  * - an account's latest deploy log, or any deploy log written inside the
  *   window, names it ({@see mentionedIn()}; the caller reads the logs);
  * - its age cannot be read. "Cannot judge" means keep.
@@ -34,7 +36,7 @@ final class HostImageRetention
     /** The name an image goes by, without the loopback registry alias the load path tags. */
     public static function logicalRef(string $tag): string
     {
-        $alias = DindImageStore::HOST_CACHE_REGISTRY . '/';
+        $alias = DindImageStore::HOST_CACHE_REGISTRY.'/';
 
         return str_starts_with($tag, $alias) ? substr($tag, strlen($alias)) : $tag;
     }
@@ -49,7 +51,7 @@ final class HostImageRetention
     }
 
     /**
-     * @param list<string> $catalog every ref images.yaml names ({@see ImageCatalog::all()})
+     * @param  list<string>  $catalog  every ref images.yaml names ({@see ImageCatalog::all()})
      */
     public static function inScope(string $ref, array $catalog): bool
     {
@@ -70,11 +72,11 @@ final class HostImageRetention
      * Images old enough and unprotected enough to remove, before the deploy
      * logs have had their say.
      *
-     * @param list<array{tag: string, bytes: ?int, since: ?int}> $images one row
-     *        per host tag; since = LastTagTime as a unix time, null when unknown
-     * @param list<string> $prewarmed the prewarm catalogue's refs
-     * @param list<string> $catalog every ref images.yaml names
-     * @param list<string> $containerRefs images host containers were started from
+     * @param  list<array{tag: string, bytes: ?int, since: ?int}>  $images  one row
+     *                                                                      per host tag; since = LastTagTime as a unix time, null when unknown
+     * @param  list<string>  $prewarmed  the prewarm catalogue's refs
+     * @param  list<string>  $catalog  every ref images.yaml names
+     * @param  list<string>  $containerRefs  images host containers were started from
      * @return array<string, array{tags: list<string>, bytes: ?int, since: int}> keyed by logical ref
      */
     public static function candidates(
@@ -90,7 +92,7 @@ final class HostImageRetention
         $groups = [];
         foreach ($images as $image) {
             $tag = $image['tag'];
-            if ($tag === '' || str_contains($tag, '<none>') || !ImageTransfer::isSafeImageRef($tag)) {
+            if ($tag === '' || str_contains($tag, '<none>') || ! ImageTransfer::isSafeImageRef($tag)) {
                 continue;
             }
             $ref = self::logicalRef($tag);
@@ -108,10 +110,10 @@ final class HostImageRetention
 
         $candidates = [];
         foreach ($groups as $ref => $group) {
-            if (isset($protected[$ref]) || !self::inScope($ref, $catalog)) {
+            if (isset($protected[$ref]) || ! self::inScope($ref, $catalog)) {
                 continue;
             }
-            if (!$group['known'] || $group['since'] === null || $group['since'] > $now - $maxAge) {
+            if (! $group['known'] || $group['since'] === null || $group['since'] > $now - $maxAge) {
                 continue;
             }
             $candidates[$ref] = ['tags' => $group['tags'], 'bytes' => $group['bytes'], 'since' => $group['since']];
@@ -125,7 +127,7 @@ final class HostImageRetention
      * slashes, so both spellings count, and a ref must end where the name
      * ends: `…-pa20260922` is not named by a line about `…-pa20260922-x1234`.
      *
-     * @param list<string> $refs
+     * @param  list<string>  $refs
      * @return list<string>
      */
     public static function mentionedIn(string $log, array $refs): array
@@ -133,7 +135,7 @@ final class HostImageRetention
         $found = [];
         foreach ($refs as $ref) {
             foreach (array_unique([$ref, str_replace('/', '\\/', $ref)]) as $needle) {
-                $pattern = '/' . preg_quote($needle, '/') . '(?![A-Za-z0-9._-])/';
+                $pattern = '/'.preg_quote($needle, '/').'(?![A-Za-z0-9._-])/';
                 if (preg_match($pattern, $log) === 1) {
                     $found[] = $ref;
                     break;

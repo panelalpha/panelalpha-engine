@@ -171,6 +171,27 @@ test.describe('Firewall rules', () => {
     expect(denyAt, 'a deny rule below an allow rule never matches').toBeLessThan(firstAllowAt);
   });
 
+  test('an allow edited into a deny without a scope covers published ports too', async ({
+    api,
+  }) => {
+    const allow = await createRule(api, created, {
+      action: 'allow',
+      protocol: 'tcp',
+      port: randomTestPort(),
+      source: randomTestNetAddress(),
+      comment: RULE_COMMENT,
+    });
+    expect(allow.scope).toBe('host');
+
+    const deny = (await api.updateFirewallRule(allow.id, { action: 'deny' })).data;
+    created.add(deny.id);
+    expect(deny).toMatchObject({ action: 'deny', scope: 'both' });
+
+    const back = (await api.updateFirewallRule(deny.id, { action: 'allow' })).data;
+    created.add(back.id);
+    expect(back).toMatchObject({ action: 'allow', scope: 'host' });
+  });
+
   test('rules the API cannot write safely are refused', async ({ api }) => {
     const port = randomTestPort();
     const source = randomTestNetAddress();

@@ -3,44 +3,43 @@
 namespace App\System\Project\Dind;
 
 use App\Exceptions\DeployCancelledException;
-use App\System\Project\Dind\Strategy\PythonBase;
+use App\Lib\Deploy\Compose\AppRoot;
+use App\Lib\Deploy\Compose\DeployCompose;
+use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Deploy\DeployLog\FailureOutput;
+use App\Lib\Deploy\DetectProjectStrategy;
 use App\Lib\Deploy\Dind\BuildNetwork;
+use App\Lib\Deploy\Dind\DindEngine;
 use App\Lib\Deploy\Dind\DindHostBuilder;
+use App\Lib\Deploy\Dind\HostBuildSlot;
+use App\Lib\Deploy\Engine\BuildMemory;
+use App\Lib\Deploy\Engine\HostBuilder;
+use App\Lib\Deploy\Platform\DeployPlanContext;
+use App\Lib\Deploy\Platform\PlatformManifest;
 use App\Lib\Deploy\Platform\ProjectContext;
+use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Lib\Deploy\Platform\Runtime\GoEmbeddedFrontends;
+use App\Lib\Deploy\Platform\Runtime\HostNodeBuild;
 use App\Lib\Deploy\Platform\Runtime\HostRunProject;
-use App\Lib\Deploy\Platform\Strategies;
+use App\Lib\Deploy\Platform\Runtime\Images;
+use App\Lib\Deploy\Platform\Runtime\JavaNodeTooling;
+use App\Lib\Deploy\Platform\Runtime\JavaRuntime;
+use App\Lib\Deploy\Platform\Runtime\JsPackageManager;
+use App\Lib\Deploy\Platform\Runtime\NodeRuntime;
+use App\Lib\Deploy\Platform\Runtime\Php\PhpHostBuild;
+use App\Lib\Deploy\Platform\Runtime\PhpRuntime;
+use App\Lib\Deploy\Platform\Runtime\Requirement;
+use App\Lib\Deploy\Platform\Runtime\Ruby\RubyApp;
 use App\Lib\Deploy\Platform\Runtime\Ruby\SystemPackages;
 use App\Lib\Deploy\Platform\Runtime\RubyRuntime;
 use App\Lib\Deploy\Platform\Runtime\RustBuildTools;
 use App\Lib\Deploy\Platform\Runtime\RustRuntime;
 use App\Lib\Deploy\Platform\Runtime\RustRuntimeLibraries;
-use App\Lib\Deploy\Platform\Runtime\Ruby\RubyApp;
-use App\Lib\Deploy\Platform\Runtime\Images;
-use App\Lib\Deploy\Platform\Runtime\JavaNodeTooling;
-use App\Lib\Deploy\Platform\Runtime\JavaRuntime;
-use App\Lib\Deploy\Platform\Runtime\Requirement;
-use App\Lib\Deploy\Platform\Runtime\PhpRuntime;
-use App\Lib\Deploy\Platform\Runtime\NodeRuntime;
-use App\Lib\Deploy\Platform\PlatformManifest;
-use App\System\Project\Dind as DindProject;
-use App\Lib\Deploy\Compose\AppRoot;
-use App\Lib\Deploy\Compose\DeployCompose;
-use App\Lib\Deploy\DetectProjectStrategy;
-use App\Lib\Deploy\DeployLog\FailureOutput;
-use App\Lib\Deploy\Platform\DeployPlanContext;
-use App\Lib\Deploy\Platform\RecipeChoiceContext;
-use App\Lib\Deploy\Engine\HostBuilder;
-use App\Lib\Deploy\Platform\Runtime\HostNodeBuild;
-use App\Lib\Deploy\Platform\Runtime\JsPackageManager;
-use App\Lib\Deploy\Platform\Runtime\Php\PhpHostBuild;
 use App\Lib\Deploy\Platform\Runtime\StandaloneNodeServe;
-use App\Lib\Deploy\DeployLog\DeployLogger;
-use App\Lib\Deploy\Dind\HostBuildSlot;
-use App\Lib\Deploy\Dind\DindEngine;
-use App\Lib\Deploy\Engine\BuildMemory;
+use App\Lib\Deploy\Platform\Strategies;
+use App\System\Project\Dind as DindProject;
+use App\System\Project\Dind\Strategy\PythonBase;
 use Symfony\Component\Process\Process;
-
 
 /**
  * Build a project on the *host* Docker daemon instead of inside the account: a
@@ -95,7 +94,7 @@ class HostCompile
         $isMounted = DeployCompose::isHostRunProject($decision);
         $install = trim((string) ($decision['install_command'] ?? ''));
         $build = trim((string) ($decision['build_command'] ?? ''));
-        if ((!$isNginx && !$isNitro && !$isMounted) || ($install === '' && $build === '')) {
+        if ((! $isNginx && ! $isNitro && ! $isMounted) || ($install === '' && $build === '')) {
             return;
         }
 
@@ -111,7 +110,7 @@ class HostCompile
         $appDir = self::mountedAppDir($projectDir, $appRoot);
         $nodeImage = Images::nodeImage($appDir);
         $image = $this->compileImage($decision, $projectDir, $appDir, $install, $nodeImage, $isNode, $shipsNodeModules);
-        $mayRetryOnNode = $isNode && !$shipsNodeModules && $image !== $nodeImage;
+        $mayRetryOnNode = $isNode && ! $shipsNodeModules && $image !== $nodeImage;
         $this->prepareSources($decision, $projectDir, $appDir, $isNitro, $cached);
         $this->compileWithFallbacks(
             $logger,
@@ -121,7 +120,7 @@ class HostCompile
             $nodeImage,
             $install,
             $build,
-            !$shipsNodeModules && $cached,
+            ! $shipsNodeModules && $cached,
             $isNode,
             $appRoot,
             $mayRetryOnNode
@@ -159,7 +158,7 @@ class HostCompile
      * binary built here works there. Node compiles in its runtime image when
      * node_modules ships with the app, else in the compiler image.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private function compileImage(
         array $decision,
@@ -170,7 +169,7 @@ class HostCompile
         bool $isNode,
         bool $shipsNodeModules
     ): string {
-        if (!$isNode) {
+        if (! $isNode) {
             return $this->commandRuntimeImage($decision, $projectDir) ?: $nodeImage;
         }
         if ($shipsNodeModules) {
@@ -184,7 +183,7 @@ class HostCompile
      * Build the frontends a Go program embeds, and drop a Nitro `.output` the
      * last deploy moved up.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private function prepareSources(array $decision, string $projectDir, string $appDir, bool $isNitro, bool $cached): void
     {
@@ -202,7 +201,7 @@ class HostCompile
      * Never where node_modules ships with the app: a bun install there would
      * leave bun-only packages for the Node runtime.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private function compileWithFallbacks(
         ?DeployLogger $logger,
@@ -225,7 +224,7 @@ class HostCompile
             $jdkImage = $e instanceof DeployCancelledException ? null : self::newerJdkImage($decision, $e->getMessage());
             if ($jdkImage !== null) {
                 $this->compileOnNewerJdk($decision, $projectDir, $jdkImage, $installCmd, $buildCmd, $recipeEnv, $appRoot);
-            } elseif (!$mayRetryOnNode) {
+            } elseif (! $mayRetryOnNode) {
                 throw $e;
             } else {
                 $this->retryOnNode($logger, $e, $projectDir, $nodeImage, $install, $build, $recipeEnv, $isolateNodeModules);
@@ -252,7 +251,7 @@ class HostCompile
      * Retry a failed bun compile in the Node image with the commands' Node
      * forms: a bun project's own `bun install` fails there with `bun: not found`.
      *
-     * @param array<string, mixed> $env
+     * @param  array<string, mixed>  $env
      */
     private function retryOnNode(
         ?DeployLogger $logger,
@@ -265,7 +264,7 @@ class HostCompile
         bool $isolateNodeModules,
         string $appRoot = ''
     ): void {
-        $logger?->info('Bun compile failed, retrying with Node: ' . $failure->getMessage());
+        $logger?->info('Bun compile failed, retrying with Node: '.$failure->getMessage());
         $this->runContainer(
             $projectDir,
             $nodeImage,
@@ -282,7 +281,7 @@ class HostCompile
      * Where the build output must be; the static strategy mounts the checkout
      * itself, so its index is at the root.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private static function outputDir(array $decision, bool $isNitro): string
     {
@@ -295,7 +294,7 @@ class HostCompile
     private function chownCompiled(string $appDir, string $output, bool $isMounted, bool $isNitro, bool $isNode): void
     {
         $chown = $this->project->userModel()->getChownString();
-        if (!is_string($chown) || $chown === '') {
+        if (! is_string($chown) || $chown === '') {
             return;
         }
         $dirs = match (true) {
@@ -305,7 +304,7 @@ class HostCompile
         };
         $system = $this->project->system();
         foreach ($dirs as $dir) {
-            $path = $appDir . '/' . $dir;
+            $path = $appDir.'/'.$dir;
             if ($system->filesystem()->directoryExists($path)) {
                 $system->exec(['sudo', 'chown', '-R', $chown, $path], [], 60);
             }
@@ -323,11 +322,11 @@ class HostCompile
         if ($appRoot === '') {
             return $projectDir;
         }
-        $dir = rtrim($projectDir, '/') . '/' . $appRoot;
+        $dir = rtrim($projectDir, '/').'/'.$appRoot;
         clearstatcache(true);
         $real = realpath($dir);
         $base = realpath($projectDir);
-        if ($real === false || $base === false || !is_dir($real) || !str_starts_with($real, rtrim($base, '/') . '/')) {
+        if ($real === false || $base === false || ! is_dir($real) || ! str_starts_with($real, rtrim($base, '/').'/')) {
             throw new \Exception("app_root '{$appRoot}' is not a directory inside the project");
         }
 
@@ -340,10 +339,10 @@ class HostCompile
      * Node stage. It runs in `$appRoot` when that package.json has a build
      * script, else at the checkout root.
      *
-     * @param array<string, true> $files
-     * @param string|false|null $frontendBuild the manifest's `frontend_build`:
-     *        false skips the pass, a command replaces the `build` script (and
-     *        runs even when package.json has none), null keeps the rule above
+     * @param  array<string, true>  $files
+     * @param  string|false|null  $frontendBuild  the manifest's `frontend_build`:
+     *                                            false skips the pass, a command replaces the `build` script (and
+     *                                            runs even when package.json has none), null keeps the rule above
      */
     public function runForPhp(
         string $projectDir,
@@ -353,7 +352,7 @@ class HostCompile
         ?string $phpImage = null
     ): bool {
         $appRoot = AppRoot::relative(['app_root' => $appRoot]);
-        $appDir = $appRoot === '' ? $projectDir : rtrim($projectDir, '/') . '/' . $appRoot;
+        $appDir = $appRoot === '' ? $projectDir : rtrim($projectDir, '/').'/'.$appRoot;
         $logger = $this->project->shell()->logger();
         if ($frontendBuild === false) {
             $logger?->info('Frontend build turned off by the recipe (frontend_build: false)');
@@ -419,7 +418,7 @@ class HostCompile
         foreach (array_unique([$appRoot, '']) as $candidate) {
             $root = $this->packageJson($projectDir, $candidate);
             $pnpmWorkspace = $this->project->projectTree()
-                ->readIn($projectDir, self::subtreePrefix($candidate) . 'pnpm-workspace.yaml') !== null;
+                ->readIn($projectDir, self::subtreePrefix($candidate).'pnpm-workspace.yaml') !== null;
             if ($root !== null && JsPackageManager::isJsWorkspace($root, $pnpmWorkspace ? ['pnpm-workspace.yaml' => true] : [])) {
                 return ['package' => $root, 'root' => $candidate, 'workspace' => true];
             }
@@ -436,11 +435,11 @@ class HostCompile
      */
     private function composerStillNeeded(string $projectDir, string $appRoot, string $appDir): bool
     {
-        $composerJson = $this->project->projectTree()->readIn($projectDir, self::subtreePrefix($appRoot) . 'composer.json');
+        $composerJson = $this->project->projectTree()->readIn($projectDir, self::subtreePrefix($appRoot).'composer.json');
 
         return $composerJson !== null
-            && !$this->project->system()->filesystem()->fileExists(
-                $appDir . '/' . self::vendorDir($composerJson) . '/autoload.php'
+            && ! $this->project->system()->filesystem()->fileExists(
+                $appDir.'/'.self::vendorDir($composerJson).'/autoload.php'
             );
     }
 
@@ -448,8 +447,8 @@ class HostCompile
      * Install with the engine's command (cache, lockfile, image) and build with
      * the recipe's `frontend_build` or the package's script, on a cache hit too.
      *
-     * @param array<string, true> $files
-     * @param array{package: array<string, mixed>, root: string, workspace: bool} $frontend
+     * @param  array<string, true>  $files
+     * @param  array{package: array<string, mixed>, root: string, workspace: bool}  $frontend
      */
     private function buildFrontend(
         ?DeployLogger $logger,
@@ -486,7 +485,7 @@ class HostCompile
      * The compiler image, or the PHP runtime with Node copied in when a script
      * calls composer or php (selfoss's postinstall), which exits 127 in Node.
      *
-     * @param array<string, mixed> $package
+     * @param  array<string, mixed>  $package
      */
     private function frontendImage(
         string $install,
@@ -543,7 +542,7 @@ class HostCompile
     ): void {
         $system = $this->project->system();
         if ($isMounted) {
-            if ($isNode && !$system->filesystem()->directoryExists($projectDir . '/node_modules')) {
+            if ($isNode && ! $system->filesystem()->directoryExists($projectDir.'/node_modules')) {
                 throw new \Exception('Install finished but node_modules is missing');
             }
 
@@ -555,9 +554,9 @@ class HostCompile
             return;
         }
 
-        $index = $projectDir . '/' . $output . '/index.html';
-        if (!$system->filesystem()->fileExists($index)) {
-            throw new \Exception('Static build finished but ' . $output . '/index.html is missing');
+        $index = $projectDir.'/'.$output.'/index.html';
+        if (! $system->filesystem()->fileExists($index)) {
+            throw new \Exception('Static build finished but '.$output.'/index.html is missing');
         }
     }
 
@@ -584,14 +583,14 @@ class HostCompile
         $logger = $this->project->shell()->logger();
         foreach (GoEmbeddedFrontends::plan($projectDir) as $frontend) {
             $dir = $frontend['dir'];
-            $logger?->info('Building the frontend in ' . ($dir === '' ? 'the project root' : $dir . '/')
-                . " first: {$frontend['embed']} is embedded by the Go build and is not in the checkout");
+            $logger?->info('Building the frontend in '.($dir === '' ? 'the project root' : $dir.'/')
+                ." first: {$frontend['embed']} is embedded by the Go build and is not in the checkout");
             try {
                 $this->runContainer($projectDir, $frontend['image'], $frontend['install'], $frontend['build'], [], $cached, true, $dir);
             } catch (DeployCancelledException $e) {
                 throw $e;
             } catch (\Exception $e) {
-                $logger?->info("The frontend build in {$dir}/ failed; compiling Go without it: " . $e->getMessage());
+                $logger?->info("The frontend build in {$dir}/ failed; compiling Go without it: ".$e->getMessage());
             }
         }
     }
@@ -615,7 +614,7 @@ class HostCompile
         }
         if (count($dirs) > 1) {
             throw new \Exception(StandaloneNodeServe::missingEntryMessage()
-                . '; several workspace apps built one: ' . implode(', ', $dirs));
+                .'; several workspace apps built one: '.implode(', ', $dirs));
         }
         $this->moveNitroOutputUp($root, $dirs[0]);
     }
@@ -623,9 +622,9 @@ class HostCompile
     private function moveNitroOutputUp(string $root, string $dir): void
     {
         $system = $this->project->system();
-        $system->exec(['sudo', 'rm', '-rf', '--', $root . '/.output'], [], 60);
-        $system->exec(['sudo', 'mv', '-T', '--', $root . '/' . $dir, $root . '/.output'], [], 60);
-        $system->exec(['sudo', 'touch', $root . '/.output/' . StandaloneNodeServe::RELOCATED_MARKER], [], 60);
+        $system->exec(['sudo', 'rm', '-rf', '--', $root.'/.output'], [], 60);
+        $system->exec(['sudo', 'mv', '-T', '--', $root.'/'.$dir, $root.'/.output'], [], 60);
+        $system->exec(['sudo', 'touch', $root.'/.output/'.StandaloneNodeServe::RELOCATED_MARKER], [], 60);
         $this->project->shell()->logger()?->info(
             "The build wrote its server to {$dir}; moved it to .output, where it is served from"
         );
@@ -634,8 +633,8 @@ class HostCompile
     /** A `.output` moved up by the last deploy would outlive a build that writes the nested one again. */
     private function clearRelocatedNitroOutput(string $appDir): void
     {
-        $output = rtrim($appDir, '/') . '/.output';
-        if ($this->project->system()->filesystem()->fileExists($output . '/' . StandaloneNodeServe::RELOCATED_MARKER)) {
+        $output = rtrim($appDir, '/').'/.output';
+        if ($this->project->system()->filesystem()->fileExists($output.'/'.StandaloneNodeServe::RELOCATED_MARKER)) {
             $this->project->system()->exec(['sudo', 'rm', '-rf', '--', $output], [], 60);
         }
     }
@@ -646,7 +645,7 @@ class HostCompile
      * same answer FrameworkStrategy writes into the compose file, so a venv
      * built here imports there; non-Python images pass through unchanged.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private function commandRuntimeImage(array $decision, string $projectDir): string
     {
@@ -714,7 +713,7 @@ class HostCompile
      * that is the image it ran on or the recipe names its own. A fetched parent
      * pom (Tigase's) can set a release detection never saw.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     public static function newerJdkImage(array $decision, string $failure): ?string
     {
@@ -725,7 +724,7 @@ class HostCompile
         }
         $declared = trim((string) ($decision['image'] ?? ''));
         foreach (is_array($decision['requirements'] ?? null) ? $decision['requirements'] : [] as $requirement) {
-            if (!$requirement instanceof Requirement || $requirement->id !== 'java'
+            if (! $requirement instanceof Requirement || $requirement->id !== 'java'
                 || preg_match('/^\d+-(maven|gradle)$/', $requirement->version, $tool) !== 1
                 || JavaRuntime::imageTag($requirement->version) !== $declared
             ) {
@@ -743,8 +742,8 @@ class HostCompile
      * Compile again on $jdkImage, then run the app on it: a class file built
      * for a newer release does not load on the older JDK.
      *
-     * @param array<string, mixed> $decision
-     * @param array<string, mixed> $env
+     * @param  array<string, mixed>  $decision
+     * @param  array<string, mixed>  $env
      */
     private function compileOnNewerJdk(
         array $decision,
@@ -779,12 +778,12 @@ class HostCompile
         if ($runtimeImage === '' || $runtimeImage === $compileImage) {
             return;
         }
-        if (!$this->runtimeLacksRustLibraries($projectDir, $runtimeImage)) {
+        if (! $this->runtimeLacksRustLibraries($projectDir, $runtimeImage)) {
             return;
         }
 
         $this->project->shell()->logger()?->info(
-            "Bundling the libraries {$runtimeImage} lacks from {$compileImage} into " . RustRuntimeLibraries::DIR
+            "Bundling the libraries {$runtimeImage} lacks from {$compileImage} into ".RustRuntimeLibraries::DIR
         );
         $this->runContainer($projectDir, $compileImage, '', RustRuntimeLibraries::bundleScript(), [], false, false);
         $this->runContainer($projectDir, $runtimeImage, '', RustRuntimeLibraries::verifyScript(), [], false, false);
@@ -799,13 +798,13 @@ class HostCompile
             throw $e;
         } catch (\Exception $e) {
             $this->project->shell()->logger()?->info(
-                "Could not check the Rust binary against {$runtimeImage}: " . $e->getMessage()
+                "Could not check the Rust binary against {$runtimeImage}: ".$e->getMessage()
             );
 
             return false;
         }
 
-        return $this->project->system()->filesystem()->fileExists($projectDir . '/' . RustRuntimeLibraries::MISSING_FILE);
+        return $this->project->system()->filesystem()->fileExists($projectDir.'/'.RustRuntimeLibraries::MISSING_FILE);
     }
 
     /**
@@ -843,14 +842,14 @@ class HostCompile
     {
         $projectDir = $this->project->engineAccount()->projectDir();
 
-        return $this->project->projectTree()->readIn($projectDir, self::subtreePrefix($appRoot) . $file);
+        return $this->project->projectTree()->readIn($projectDir, self::subtreePrefix($appRoot).$file);
     }
 
     private static function subtreePrefix(string $appRoot): string
     {
         $root = trim($appRoot, '/');
 
-        return $root === '' ? '' : $root . '/';
+        return $root === '' ? '' : $root.'/';
     }
 
     /** {@see PhpHostBuild::mirrorsRuntimeLock()}, for the manifest's subtree. */
@@ -883,7 +882,7 @@ class HostCompile
         if ($package !== null) {
             $this->project->shell()->logger()?->info(
                 "composer.lock holds {$package}, which rejects PHP {$minor} that composer.json allows; "
-                . 'installing the locked set without the php platform check'
+                .'installing the locked set without the php platform check'
             );
         }
 
@@ -896,15 +895,19 @@ class HostCompile
      * the served mount. Throws, so dependencies that do not resolve fail the
      * deploy instead of an app that 500s on its first request.
      *
-     * @param array<string, mixed> $decision the matched manifest's, whose
-     *        `install_command` and `build_command` are its build-stage
-     *        commands split by role
+     * @param  array<string, mixed>  $decision  the matched manifest's, whose
+     *                                          `install_command` and `build_command` are its build-stage
+     *                                          commands split by role
+     * @param  list<string>  $extensions  the extras the base image was named with
+     * @param  list<string>  $packages  the system packages it was named with
      */
     public function runPhpBuild(
         string $image,
         array $decision,
         string $appRoot = '',
-        bool $hasComposer = false
+        bool $hasComposer = false,
+        array $extensions = [],
+        array $packages = []
     ): void {
         $install = is_string($decision['install_command'] ?? null) ? $decision['install_command'] : '';
         $build = is_string($decision['build_command'] ?? null) ? $decision['build_command'] : '';
@@ -920,15 +923,14 @@ class HostCompile
         $withCache = $this->prepareCache();
         $logger?->info('Resolving PHP dependencies on host');
 
-        $this->ensureHostImage($image);
+        $this->project->innerDocker()->bases()->ensureOnHost($image, $extensions, $packages);
 
         $process = $this->runHostBuild(
-            static fn (HostBuilder $builder): array
-                => $builder->phpBuildArgv($account, $image, $script, $appRoot, $withCache, $manifest),
+            static fn (HostBuilder $builder): array => $builder->phpBuildArgv($account, $image, $script, $appRoot, $withCache, $manifest),
             self::PHP_BUILD_TIMEOUT_SECONDS
         );
 
-        if (!$process->isSuccessful()) {
+        if (! $process->isSuccessful()) {
             throw $this->hostBuildFailure($process, 'Host PHP build failed');
         }
 
@@ -998,7 +1000,7 @@ class HostCompile
             $this->buildNetworkUnavailable = true;
             $logger?->warn(
                 "Host build network {$network} could not be created, so this build runs on Docker's "
-                    . 'default bridge and can reach the host and its private network: ' . trim($e->getMessage())
+                    .'default bridge and can reach the host and its private network: '.trim($e->getMessage())
             );
 
             return false;
@@ -1015,7 +1017,7 @@ class HostCompile
         } catch (\Exception $e) {
             $logger?->warn(
                 "Host build network {$network} has no firewall, so this build can reach private addresses: "
-                    . trim($e->getMessage())
+                    .trim($e->getMessage())
             );
         }
     }
@@ -1050,7 +1052,7 @@ class HostCompile
             return true;
         } catch (\Exception $e) {
             $this->project->shell()->logger()?->info(
-                'Host build cache unavailable, compiling without it: ' . $e->getMessage()
+                'Host build cache unavailable, compiling without it: '.$e->getMessage()
             );
 
             return false;
@@ -1082,7 +1084,7 @@ class HostCompile
      */
     private function packageJson(string $projectDir, string $root): ?array
     {
-        $raw = $this->project->projectTree()->readIn($projectDir, self::subtreePrefix($root) . 'package.json');
+        $raw = $this->project->projectTree()->readIn($projectDir, self::subtreePrefix($root).'package.json');
         $package = $raw === null ? null : json_decode($raw, true);
 
         return is_array($package) ? $package : null;
@@ -1106,12 +1108,11 @@ class HostCompile
         $manifest = $this->runtimeComposerManifest($account->projectDir(), $appRoot);
 
         $process = $this->runHostBuild(
-            static fn (HostBuilder $builder): array
-                => $builder->composerInstallArgv($account, $phpMinor, $manifest, $appRoot),
+            static fn (HostBuilder $builder): array => $builder->composerInstallArgv($account, $phpMinor, $manifest, $appRoot),
             self::COMPOSER_INSTALL_TIMEOUT_SECONDS
         );
 
-        if (!$process->isSuccessful()) {
+        if (! $process->isSuccessful()) {
             throw $this->hostBuildFailure($process, 'Host Composer install failed');
         }
     }
@@ -1125,7 +1126,7 @@ class HostCompile
      */
     private function runtimeComposerManifest(string $projectDir, string $appRoot = ''): ?string
     {
-        $appDir = rtrim($projectDir . '/' . trim($appRoot, '/'), '/');
+        $appDir = rtrim($projectDir.'/'.trim($appRoot, '/'), '/');
         $files = $this->project->projectTree();
 
         $composerJson = $files->readIn($appDir, 'composer.json');
@@ -1135,7 +1136,7 @@ class HostCompile
 
         $composerLock = $files->readIn($appDir, 'composer.lock');
         $runtime = PhpHostBuild::runtimeManifest($composerJson, $composerLock);
-        if ($runtime === null || !$this->writeRuntimeManifest($appDir, $runtime, $composerLock)) {
+        if ($runtime === null || ! $this->writeRuntimeManifest($appDir, $runtime, $composerLock)) {
             return null;
         }
 
@@ -1153,14 +1154,14 @@ class HostCompile
         $chown = $this->project->userModel()->getChownString();
         try {
             $filesystem->filePutContents(
-                $appDir . '/' . PhpHostBuild::RUNTIME_MANIFEST_FILE,
+                $appDir.'/'.PhpHostBuild::RUNTIME_MANIFEST_FILE,
                 $runtime,
                 $chown,
                 '644'
             );
             if ($composerLock !== null && trim($composerLock) !== '') {
                 $filesystem->filePutContents(
-                    $appDir . '/' . PhpHostBuild::RUNTIME_LOCK_FILE,
+                    $appDir.'/'.PhpHostBuild::RUNTIME_LOCK_FILE,
                     $composerLock,
                     $chown,
                     '644'
@@ -1169,7 +1170,7 @@ class HostCompile
         } catch (\Exception $e) {
             $this->project->shell()->logger()?->warn(
                 'Could not write a runtime-only Composer manifest, resolving from composer.json: '
-                    . $e->getMessage()
+                    .$e->getMessage()
             );
 
             return false;
@@ -1179,7 +1180,7 @@ class HostCompile
     }
 
     /**
-     * @param array<string, mixed> $env
+     * @param  array<string, mixed>  $env
      */
     private function runContainer(
         string $projectDir,
@@ -1213,7 +1214,7 @@ class HostCompile
             self::NODE_BUILD_TIMEOUT_SECONDS
         );
 
-        if (!$process->isSuccessful()) {
+        if (! $process->isSuccessful()) {
             throw $this->hostBuildFailure($process, 'Host static asset compile failed');
         }
     }
@@ -1223,12 +1224,12 @@ class HostCompile
      * EBUSY on the isolated node_modules bind mount, and a host-run app starts
      * from a node_modules PnP never writes.
      *
-     * @param array<string, mixed> $env
+     * @param  array<string, mixed>  $env
      * @return array<string, mixed>
      */
     private function withNodeModulesLinker(array $env, string $projectDir, string $appRoot): array
     {
-        if (!array_key_exists('YARN_NODE_LINKER', $env) && $this->isYarnPnp($projectDir, $appRoot)) {
+        if (! array_key_exists('YARN_NODE_LINKER', $env) && $this->isYarnPnp($projectDir, $appRoot)) {
             $env['YARN_NODE_LINKER'] = 'node-modules';
         }
 
@@ -1238,7 +1239,7 @@ class HostCompile
     /** Webpack 4 hashes with MD4, which Node 17+ refuses without the legacy OpenSSL provider. */
     private function withLegacyOpenssl(string $build, string $projectDir, string $appRoot): string
     {
-        $buildDir = rtrim($projectDir, '/') . (trim($appRoot, '/') === '' ? '' : '/' . trim($appRoot, '/'));
+        $buildDir = rtrim($projectDir, '/').(trim($appRoot, '/') === '' ? '' : '/'.trim($appRoot, '/'));
         $legacy = NodeRuntime::withLegacyOpenssl($build, $buildDir);
         if ($legacy !== $build) {
             $this->project->shell()->logger()?->info('Webpack 4 build: enabling the OpenSSL legacy provider');
@@ -1251,12 +1252,12 @@ class HostCompile
     {
         $prefix = self::subtreePrefix($appRoot);
         $tree = $this->project->projectTree();
-        $package = json_decode((string) $tree->readIn($projectDir, $prefix . 'package.json'), true);
+        $package = json_decode((string) $tree->readIn($projectDir, $prefix.'package.json'), true);
 
         return JsPackageManager::isYarnPnp(
             is_array($package) ? $package : [],
-            $tree->readIn($projectDir, $prefix . '.yarnrc.yml'),
-            $tree->readIn($projectDir, $prefix . 'yarn.lock')
+            $tree->readIn($projectDir, $prefix.'.yarnrc.yml'),
+            $tree->readIn($projectDir, $prefix.'yarn.lock')
         );
     }
 
@@ -1269,32 +1270,12 @@ class HostCompile
         $message = FailureOutput::fromStreams($process->getErrorOutput(), $process->getOutput());
         if ($process->getExitCode() === 137 || str_contains($process->getErrorOutput(), DindHostBuilder::OOM_REPORT)) {
             $message = 'The host build container ran out of memory at its limit of '
-                . $this->hostBuilder()->memoryLimitMb() . ' MB and the kernel killed the build. That limit is set '
-                . 'for the server (DEPLOY_BUILD_MEMORY), not by the project\'s memory limit.'
-                . ($message === '' ? '' : "\n" . $message);
+                .$this->hostBuilder()->memoryLimitMb().' MB and the kernel killed the build. That limit is set '
+                .'for the server (DEPLOY_BUILD_MEMORY), not by the project\'s memory limit.'
+                .($message === '' ? '' : "\n".$message);
         }
 
         return new \Exception($message !== '' ? $message : $fallback);
-    }
-
-    /**
-     * One of our images the host pruned is pulled back from the cache registry:
-     * `docker run` would look for it on docker.io, which does not publish our
-     * tags. Best-effort: a failed pull leaves the build to report its own error.
-     */
-    private function ensureHostImage(string $image): void
-    {
-        $argv = $this->project->innerDocker()->imageStore()->hostEnsureImageArgv($image);
-        if ($argv === ['true']) {
-            return;
-        }
-        try {
-            $this->project->system()->execOnHost($argv, [], 900);
-        } catch (\Throwable $e) {
-            $this->project->shell()->logger()?->info(
-                "Could not get base image {$image} onto the host; the build will report why: " . $e->getMessage()
-            );
-        }
     }
 
     /**
@@ -1302,7 +1283,7 @@ class HostCompile
      * Each may take up to 8 GB, half the server's RAM, so two at once can
      * exhaust it; {@see HostBuildSlot}.
      *
-     * @param callable(HostBuilder): list<string> $argvFor
+     * @param  callable(HostBuilder): list<string>  $argvFor
      */
     private function runHostBuild(callable $argvFor, int $timeout): Process
     {
@@ -1337,7 +1318,7 @@ class HostCompile
         if ($logger === null) {
             return;
         }
-        $key = $logger->getDeployId() . '|' . $builder->memoryLimitMb();
+        $key = $logger->getDeployId().'|'.$builder->memoryLimitMb();
         if ($key === $this->memoryAnnouncedIn) {
             return;
         }
@@ -1347,21 +1328,21 @@ class HostCompile
 
     public static function buildMemoryLine(int $memoryMb, ?BuildMemory $origin = null): string
     {
-        $line = 'Host build container memory: ' . $memoryMb . ' MB, ';
+        $line = 'Host build container memory: '.$memoryMb.' MB, ';
 
         $host = $origin?->host !== null && $origin->host->totalMb > 0 ? $origin->host : null;
-        $ceiling = $host === null ? '' : 'at most half the server\'s ' . $host->totalMb . ' MB and never more than its RAM less '
-            . $host->engineMb . ' MB for the engine (DEPLOY_ENGINE_MEMORY)';
+        $ceiling = $host === null ? '' : 'at most half the server\'s '.$host->totalMb.' MB and never more than its RAM less '
+            .$host->engineMb.' MB for the engine (DEPLOY_ENGINE_MEMORY)';
         if ($origin?->source === BuildMemory::HOST) {
-            return $line . ($host === null
+            return $line.($host === null
                 ? 'the default, since the server\'s RAM could not be read; DEPLOY_BUILD_MEMORY replaces it'
-                : DindEngine::MAX_BUILD_MEMORY_MB . ' MB by default, ' . $ceiling
-                    . '; DEPLOY_BUILD_MEMORY replaces the default, up to ' . DindEngine::buildCeilingMb($host) . ' MB');
+                : DindEngine::MAX_BUILD_MEMORY_MB.' MB by default, '.$ceiling
+                    .'; DEPLOY_BUILD_MEMORY replaces the default, up to '.DindEngine::buildCeilingMb($host).' MB');
         }
         if ($origin?->source === BuildMemory::SETTING_CAPPED) {
-            return $line . 'DEPLOY_BUILD_MEMORY held to ' . $ceiling;
+            return $line.'DEPLOY_BUILD_MEMORY held to '.$ceiling;
         }
 
-        return $line . 'set for the server by DEPLOY_BUILD_MEMORY; the project\'s memory limit does not apply to it';
+        return $line.'set for the server by DEPLOY_BUILD_MEMORY; the project\'s memory limit does not apply to it';
     }
 }

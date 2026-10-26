@@ -241,8 +241,8 @@ seed_config_dirs() {
     mkdir -p webserver-config/{apache,nginx,nginx-proxy}/vhosts \
         webserver-config/{litespeed,openlitespeed}-admin \
         webserver-logs/{apache,nginx,nginx-proxy,litespeed,openlitespeed} \
-        logs/{litespeed,exim,modsecurity} \
-        config/{pure-ftpd,sftp,logrotate,exim,modsecurity}
+        logs/{litespeed,exim} \
+        config/{pure-ftpd,sftp,logrotate,exim}
     cp -Rn templates/webserver-config/. webserver-config/
     cp -Rn templates/config/pure-ftpd/. config/pure-ftpd/
     chmod +x config/pure-ftpd/entrypoint.sh
@@ -253,7 +253,7 @@ seed_config_dirs() {
     cp -Rn templates/config/logrotate/. config/logrotate/
     cp templates/config/logrotate/{apache,nginx,nginx-proxy,php}.conf config/logrotate/
     cp -Rn templates/config/exim/. config/exim/
-    cp -Rn templates/config/modsecurity/. config/modsecurity/
+    bash scripts/seed-modsecurity.sh "$PWD"
 }
 
 generate_sftp_host_keys() {

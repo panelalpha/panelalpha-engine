@@ -155,8 +155,22 @@ class FirewallRuleTest extends TestCase
         // The same id as the host deny it was before it covered published ports.
         $this->assertSame(substr(sha1((string) json_encode(['deny', 'in', null, null, '203.0.113.7', null])), 0, 12), $deny->id());
         $this->assertSame([], $deny->problems());
-        $this->assertArrayHasKey('scope', $deny->with(['action' => 'allow', 'port' => '22'])->problems());
         $this->assertSame('host', $deny->with(['action' => 'allow', 'port' => '22', 'scope' => 'host'])->scope);
+    }
+
+    public function test_an_edit_that_changes_the_action_without_a_scope_gets_the_scope_a_new_rule_would(): void
+    {
+        $allow = FirewallRule::fromArray(['action' => 'allow', 'source' => '203.0.113.7']);
+        $deny = FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7']);
+        $publishedAllow = FirewallRule::fromArray(['action' => 'allow', 'scope' => 'published', 'protocol' => 'tcp', 'port' => '8080']);
+
+        $this->assertSame('both', $allow->with(['action' => 'deny'])->scope);
+        $this->assertSame('host', $allow->with(['action' => 'deny', 'direction' => 'out'])->scope);
+        $this->assertSame('host', $allow->with(['action' => 'deny', 'scope' => 'host'])->scope);
+        $this->assertSame('host', $deny->with(['action' => 'allow', 'port' => '22'])->scope);
+        $this->assertSame([], $deny->with(['action' => 'allow', 'port' => '22'])->problems());
+        $this->assertSame('published', $publishedAllow->with(['action' => 'deny'])->scope);
+        $this->assertSame('host', FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7', 'scope' => 'host'])->with(['action' => 'deny'])->scope);
     }
 
     /** An edit that does not name the scope keeps the rule's own (engine#766). */

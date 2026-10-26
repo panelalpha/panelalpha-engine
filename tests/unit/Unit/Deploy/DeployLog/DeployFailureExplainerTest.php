@@ -1214,6 +1214,43 @@ OUT;
         );
     }
 
+    /**
+     * A shared base image the engine builds and the host prune removed: the
+     * host build asks for it by its plain name, docker.io does not publish it,
+     * and it could not be rebuilt. "Never published" sends the reader to
+     * rename a tag no project controls.
+     */
+    public function test_a_pruned_engine_base_image_points_at_the_failed_rebuild(): void
+    {
+        $output = "Unable to find image 'panelalpha/php:8.3-apache-bookworm-pa20260924' locally\n"
+            . 'docker: Error response from daemon: manifest for '
+            . 'panelalpha/php:8.3-apache-bookworm-pa20260924 not found: manifest unknown.';
+
+        $message = (string) DeployFailureExplainer::explain($output);
+
+        $this->assertStringContainsString('panelalpha/php:8.3-apache-bookworm-pa20260924', $message);
+        $this->assertStringContainsString('rebuilding it did not work', $message);
+        $this->assertStringNotContainsString('never published', $message);
+    }
+
+    /**
+     * The ad-hoc rebuild the ensure step now runs: when it fails, the reason
+     * the host build gave is what the reader needs, on top of the fact that
+     * this is an image the engine builds rather than a missing upstream tag.
+     */
+    public function test_a_failed_base_image_rebuild_carries_the_build_reason(): void
+    {
+        $output = 'The base image panelalpha/php:8.3-apache-bookworm-pa20260924 is not on this server; '
+            . "rebuilding it failed. E: Unable to locate package imagick";
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertNotNull($match);
+        $this->assertSame('base-image-rebuild-failed', $match['rule']);
+        $this->assertStringContainsString('rebuilding it did not work', $match['message']);
+        $this->assertStringContainsString('Unable to locate package imagick', $match['message']);
+    }
+
     public function test_docker_hubs_ambiguous_denial_says_it_is_ambiguous(): void
     {
         $output = "Error response from daemon: pull access denied for acme/private-base, repository does not exist "

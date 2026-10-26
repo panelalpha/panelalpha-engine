@@ -2,15 +2,14 @@
 
 namespace App\Console\Commands\System;
 
-use App\System;
 use App\Lib\Deploy\CacheManager\BuiltImage;
 use App\Lib\Deploy\CacheManager\CacheRegistry;
-use App\Lib\Deploy\CacheManager\RegistryImageConfig;
-use App\Lib\Deploy\Dind\DindImageStore;
-use App\Lib\Deploy\CacheManager\PhpBaseImage;
 use App\Lib\Deploy\CacheManager\HostPrewarmPlan;
 use App\Lib\Deploy\CacheManager\ImageTransfer;
+use App\Lib\Deploy\CacheManager\RegistryImageConfig;
+use App\Lib\Deploy\Dind\DindImageStore;
 use App\Lib\Deploy\Engine\EngineFactory;
+use App\System;
 use Illuminate\Console\Command;
 
 /**
@@ -47,7 +46,7 @@ class PrewarmImages extends Command
 
     public function handle(): int
     {
-        $system = new System();
+        $system = new System;
 
         try {
             [$budget, $reserve] = $this->diskLimits();
@@ -116,13 +115,13 @@ class PrewarmImages extends Command
             $failed += $refreshFailed;
         }
 
-        if (!$this->option('keep-build-cache')) {
+        if (! $this->option('keep-build-cache')) {
             $this->pruneBuildCache($system);
         }
 
         $this->info($built + $failed === 0
             ? 'Nothing to warm.'
-            : "Warmed {$built} image(s)" . ($failed > 0 ? ", {$failed} failed" : ''));
+            : "Warmed {$built} image(s)".($failed > 0 ? ", {$failed} failed" : ''));
 
         $this->publish($system, $catalog);
         // Trimming to a subset of the catalogue would delete everything else.
@@ -137,7 +136,7 @@ class PrewarmImages extends Command
      * Rebuild or re-pull images the host already has, strictly one at a time,
      * and drop the image each one replaced.
      *
-     * @param list<array<string, mixed>> $items
+     * @param  list<array<string, mixed>>  $items
      * @return array{int, int} refreshed and failed
      */
     private function refreshAll(System $system, array $items): array
@@ -149,9 +148,10 @@ class PrewarmImages extends Command
             $before = $this->imageId($system, $ref);
             $this->line("↻ {$item['kind']} {$ref}");
             $started = microtime(true);
-            if (!$this->warmOne($system, $item, true)) {
+            if (! $this->warmOne($system, $item, true)) {
                 $failed++;
                 $this->warn('  refresh failed, keeping the current image');
+
                 continue;
             }
             $done++;
@@ -189,11 +189,11 @@ class PrewarmImages extends Command
      * Push every catalogue image the host has to the cache registry, where
      * accounts pull it from without asking the host.
      *
-     * @param list<array<string, mixed>> $catalog
+     * @param  list<array<string, mixed>>  $catalog
      */
     private function publish(System $system, array $catalog): void
     {
-        if (!$this->registryRunning($system)) {
+        if (! $this->registryRunning($system)) {
             $this->warn('panelalpha-cache-registry-writer is not running; nothing published.');
 
             return;
@@ -204,14 +204,14 @@ class PrewarmImages extends Command
         $published = 0;
         foreach ($catalog as $item) {
             $ref = (string) $item['ref'];
-            if (!isset($have[$ref])) {
+            if (! isset($have[$ref])) {
                 continue;
             }
             try {
                 $system->exec($store->hostPublishCommand($ref), [], 1800);
                 $published++;
             } catch (\Exception $e) {
-                $this->warn("Could not publish {$ref}: " . trim($e->getMessage()));
+                $this->warn("Could not publish {$ref}: ".trim($e->getMessage()));
             }
         }
 
@@ -225,27 +225,27 @@ class PrewarmImages extends Command
      * Holds the push lock exclusive: an upload's layers belong to no manifest
      * until it finishes, and a GC in between deletes them.
      *
-     * @param list<array<string, mixed>> $catalog
+     * @param  list<array<string, mixed>>  $catalog
      */
     private function trimRegistry(System $system, array $catalog): void
     {
-        if (!$this->registryRunning($system)) {
+        if (! $this->registryRunning($system)) {
             return;
         }
 
         $path = DindImageStore::PUSH_LOCK;
-        if (!file_exists($path)) {
+        if (! file_exists($path)) {
             @touch($path);
         }
         $lock = @fopen($path, 'r');
-        if ($lock === false || !flock($lock, LOCK_EX)) {
+        if ($lock === false || ! flock($lock, LOCK_EX)) {
             $this->warn("Could not lock {$path}; leaving the cache registry as it is.");
 
             return;
         }
 
         try {
-            $registry = new CacheRegistry();
+            $registry = new CacheRegistry;
             $refs = $registry->refs();
             if ($refs === null) {
                 $this->warn('Could not list the cache registry; leaving it as it is.');
@@ -260,7 +260,7 @@ class PrewarmImages extends Command
             $keep = array_map(static fn (array $item): string => (string) $item['ref'], $catalog);
             foreach (CacheRegistry::unwanted($digests, $keep) as $ref) {
                 $deleted = $registry->delete($ref, (string) $digests[$ref]);
-                $this->line(($deleted ? 'removed from the cache registry: ' : 'could not remove: ') . $ref);
+                $this->line(($deleted ? 'removed from the cache registry: ' : 'could not remove: ').$ref);
             }
 
             $before = $this->registryBytes($system);
@@ -272,7 +272,7 @@ class PrewarmImages extends Command
                 HostPrewarmPlan::formatBytes($after)
             ));
         } catch (\Exception $e) {
-            $this->warn('Cache registry garbage-collect failed: ' . trim($e->getMessage()));
+            $this->warn('Cache registry garbage-collect failed: '.trim($e->getMessage()));
         } finally {
             flock($lock, LOCK_UN);
             fclose($lock);
@@ -309,6 +309,7 @@ class PrewarmImages extends Command
 
     /**
      * @return array{?int, int} budget (null = unlimited) and reserve, in bytes
+     *
      * @throws \InvalidArgumentException when either option is unparseable
      */
     private function diskLimits(): array
@@ -345,7 +346,7 @@ class PrewarmImages extends Command
      * that shaped the plan are compressed and understate the cost by roughly
      * three times, so a budget enforced on them would overspend silently.
      *
-     * @param list<array<string, mixed>> $selected
+     * @param  list<array<string, mixed>>  $selected
      * @return array{int, int} images warmed and images that failed
      */
     private function warmAll(System $system, array $selected, int $reserve, ?int $budget): array
@@ -410,15 +411,15 @@ class PrewarmImages extends Command
      * Anything neither measurement reaches is absent from the result, which
      * {@see HostPrewarmPlan::select()} treats as "warm it, uncharged".
      *
-     * @param list<array<string, mixed>> $catalog
-     * @param list<string> $present
+     * @param  list<array<string, mixed>>  $catalog
+     * @param  list<string>  $present
      * @return array<string, int>
      */
     private function plannedSizes(System $system, array $catalog, array $present): array
     {
         $have = array_flip($present);
         $onDisk = $this->presentImageSizes($system, $present);
-        $registries = new RegistryImageConfig();
+        $registries = new RegistryImageConfig;
         $sizes = [];
         foreach ($catalog as $item) {
             $ref = (string) $item['ref'];
@@ -430,6 +431,7 @@ class PrewarmImages extends Command
                 if ($previous !== null) {
                     $sizes[$ref] = $previous;
                 }
+
                 continue;
             }
             $bytes = $registries->downloadBytes($ref) ?? $this->inspectedSize($system, $ref);
@@ -465,7 +467,7 @@ class PrewarmImages extends Command
      * trusting here, and over-stating the cost of a build only makes the plan
      * stop one image earlier than it had to.
      *
-     * @param array<string, int> $onDisk
+     * @param  array<string, int>  $onDisk
      */
     private function sizeOfSiblingImage(string $ref, array $onDisk): ?int
     {
@@ -481,7 +483,7 @@ class PrewarmImages extends Command
     }
 
     /**
-     * @param array<string, mixed> $item
+     * @param  array<string, mixed>  $item
      */
     private function warmOne(System $system, array $item, bool $refresh = false): bool
     {
@@ -489,8 +491,10 @@ class PrewarmImages extends Command
 
         try {
             if ($item['kind'] === HostPrewarmPlan::KIND_BUILD) {
-                $dockerfile = $this->dockerfileFor($ref, is_array($item['extensions'] ?? null)
-                    ? $item['extensions'] : []);
+                $dockerfile = BuiltImage::dockerfile(
+                    $ref,
+                    is_array($item['extensions'] ?? null) ? $item['extensions'] : []
+                );
                 if ($dockerfile === null) {
                     return false;
                 }
@@ -507,47 +511,10 @@ class PrewarmImages extends Command
 
             return true;
         } catch (\Exception $e) {
-            $this->warn('  ' . $e->getMessage());
+            $this->warn('  '.$e->getMessage());
 
             return false;
         }
-    }
-
-    /**
-     * The Dockerfile that produces this tag, or null when nothing here can
-     * produce it.
-     *
-     * Dispatched on the catalogue's repository table rather than assumed to be
-     * PHP, so what the engine warms is what the config says the engine builds.
-     *
-     * A variant tag — the `-x…` suffix — hashes a set of extensions, and a
-     * hash does not go backwards, so the tag alone cannot say what to build.
-     * $extensions is that set, and it comes from the catalogue entry rather
-     * than from the tag: an operator lists the sets their apps ask for, and the
-     * engine warms them. Without it a variant is only ever built by the deploy
-     * that needed it, which is how a required extension failed a first deploy.
-     *
-     * Ruby's and Python's bases fingerprint an apt package set that comes from
-     * the project's own manifest, so there is genuinely nothing to warm.
-     *
-     * @param list<string> $extensions
-     */
-    private function dockerfileFor(string $ref, array $extensions = []): ?string
-    {
-        $source = BuiltImage::sourceImage($ref);
-        if ($source === null) {
-            return null;
-        }
-        // A plain base is rebuildable from its own tag; a variant only when the
-        // catalogue still says which extensions it carries.
-        if (!BuiltImage::isRebuildableFromTag($ref) && $extensions === []) {
-            return null;
-        }
-
-        return match (BuiltImage::runtimeFor($ref)) {
-            'php' => PhpBaseImage::dockerfile($source, $extensions),
-            default => null,
-        };
     }
 
     /**
@@ -569,8 +536,8 @@ class PrewarmImages extends Command
      * the next deploy pull it again from a registry that still has it -- the
      * space is real but the trade is worse.
      *
-     * @param list<string> $present
-     * @param list<string> $runtimes
+     * @param  list<string>  $present
+     * @param  list<string>  $runtimes
      * @return list<string> $present minus what was removed
      */
     private function reclaimUnderPressure(
@@ -618,7 +585,7 @@ class PrewarmImages extends Command
      * will not parse is dropped rather than guessed at: an image of unknown
      * cost must not be chosen for deletion on the strength of a zero.
      *
-     * @param list<string> $present
+     * @param  list<string>  $present
      * @return array<string, int>
      */
     private function presentImageSizes(System $system, array $present): array
@@ -637,7 +604,7 @@ class PrewarmImages extends Command
         $sizes = [];
         foreach (preg_split('/\r?\n/', $out) ?: [] as $line) {
             $parts = explode("\t", trim($line), 2);
-            if (count($parts) !== 2 || !isset($wanted[$parts[0]])) {
+            if (count($parts) !== 2 || ! isset($wanted[$parts[0]])) {
                 continue;
             }
             try {
@@ -654,8 +621,8 @@ class PrewarmImages extends Command
     }
 
     /**
-     * @param list<string> $present
-     * @param list<string> $refs
+     * @param  list<string>  $present
+     * @param  list<string>  $refs
      * @return list<string>
      */
     private function removeImages(System $system, array $present, array $refs, string $verb): array
@@ -675,7 +642,7 @@ class PrewarmImages extends Command
                 $this->line("{$verb} base image {$ref}");
                 $removed[] = $ref;
             } catch (\Exception $e) {
-                $this->warn("Could not remove {$ref}: " . $e->getMessage());
+                $this->warn("Could not remove {$ref}: ".$e->getMessage());
             }
         }
 
@@ -691,7 +658,7 @@ class PrewarmImages extends Command
         try {
             $system->exec(['sudo', 'docker', 'buildx', 'prune', '-af'], [], 300);
         } catch (\Exception $e) {
-            $this->warn('Could not prune the build cache: ' . $e->getMessage());
+            $this->warn('Could not prune the build cache: '.$e->getMessage());
         }
     }
 
@@ -704,7 +671,7 @@ class PrewarmImages extends Command
      * Ruby's bases accumulate one per distinct apt package set and nothing
      * used to remove any of them.
      *
-     * @param list<string> $present
+     * @param  list<string>  $present
      * @return list<string> $present minus what was removed
      */
     private function dropStaleBaseImages(System $system, array $present): array
@@ -727,7 +694,7 @@ class PrewarmImages extends Command
                 $system->exec(['sudo', 'docker', 'rmi', '-f', $ref], [], 120);
                 $this->line("removed superseded base image {$ref}");
             } catch (\Exception $e) {
-                $this->warn("Could not remove {$ref}: " . $e->getMessage());
+                $this->warn("Could not remove {$ref}: ".$e->getMessage());
             }
         }
 
@@ -752,7 +719,7 @@ class PrewarmImages extends Command
         $refs = [];
         foreach (preg_split('/\r?\n/', $out) ?: [] as $line) {
             $line = trim($line);
-            if ($line !== '' && !str_ends_with($line, ':<none>')) {
+            if ($line !== '' && ! str_ends_with($line, ':<none>')) {
                 $refs[] = $line;
             }
         }
@@ -788,7 +755,7 @@ class PrewarmImages extends Command
     }
 
     /**
-     * @param array{selected: list<array<string, mixed>>, skipped: list<array<string, mixed>>} $plan
+     * @param  array{selected: list<array<string, mixed>>, skipped: list<array<string, mixed>>}  $plan
      */
     private function renderPlan(array $plan): void
     {
@@ -804,7 +771,7 @@ class PrewarmImages extends Command
     }
 
     /**
-     * @param array<string, mixed> $item
+     * @param  array<string, mixed>  $item
      * @return list<string>
      */
     private function planRow(string $verdict, array $item): array

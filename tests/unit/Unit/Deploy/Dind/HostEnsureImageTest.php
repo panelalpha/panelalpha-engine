@@ -43,4 +43,18 @@ class HostEnsureImageTest extends TestCase
         $this->assertStringContainsString(DindImageStore::CACHE_REGISTRY_WRITER_CONTAINER, $script);
         $this->assertStringEndsWith('exit 0', $script);
     }
+
+    public function test_our_missing_image_is_rebuilt_and_published_under_the_push_lock(): void
+    {
+        $script = (new DindImageStore())->hostRebuildCommand(self::IMAGE, "FROM php:8.3-apache-bookworm\n");
+
+        // Builds the plain tag the host build runs, then publishes it.
+        $this->assertStringContainsString('docker build', $script);
+        $this->assertStringContainsString('docker push -q '
+            . escapeshellarg(DindImageStore::HOST_CACHE_REGISTRY . '/' . self::IMAGE), $script);
+        // The same lock prewarm's trim and deploy-time pushes take, exclusively,
+        // so two deploys cannot build the same image and a GC cannot run under it.
+        $this->assertStringContainsString(escapeshellarg(DindImageStore::PUSH_LOCK), $script);
+        $this->assertStringContainsString('flock -x', $script);
+    }
 }

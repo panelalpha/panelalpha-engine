@@ -5,6 +5,7 @@ namespace Tests\Unit\System\Services;
 use App\Models\ProxyRule;
 use App\System;
 use App\System\Services\Webserver\ProxyListenPort;
+use App\System\Services\Webserver\ProxyRuleDuplicate;
 use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
 
@@ -120,6 +121,28 @@ SS;
 
         // Whatever binds 8081 now is not nginx serving that rule.
         $this->assertSame('Port 8081 is already in use on this host.', $this->ports()->refusal('http', '*', 8081));
+    }
+
+    public function test_switching_on_an_http_rule_beside_a_live_one_on_its_name_and_port_is_refused(): void
+    {
+        $this->rule('http', 80);
+        $parked = $this->rule('http', 80, enabled: false);
+
+        $this->assertSame(ProxyRuleDuplicate::MESSAGE, $this->ports()->switchOnRefusal($parked));
+    }
+
+    public function test_switching_on_the_only_http_rule_on_its_name_and_port_is_allowed(): void
+    {
+        $parked = $this->rule('http', 80, enabled: false);
+
+        $this->assertNull($this->ports()->switchOnRefusal($parked));
+    }
+
+    public function test_switching_on_a_rule_takes_its_port_again(): void
+    {
+        $parked = $this->rule('tcp', 2011, enabled: false);
+
+        $this->assertSame('Port 2011 is reserved by the engine.', $this->ports()->switchOnRefusal($parked));
     }
 
     public function test_a_listing_that_cannot_be_read_refuses_nothing(): void

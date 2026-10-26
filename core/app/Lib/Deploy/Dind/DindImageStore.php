@@ -2,12 +2,13 @@
 
 namespace App\Lib\Deploy\Dind;
 
-use App\Lib\Deploy\Template\Template;
-
 use App\Lib\Deploy\CacheManager\BuiltImage;
 use App\Lib\Deploy\CacheManager\ImageTransfer;
 use App\Lib\Deploy\Engine\EngineAccount;
 use App\Lib\Deploy\Engine\ImageStore;
+use App\Lib\Deploy\Template\Template;
+use App\System\Project\Dind;
+use App\System\Project\Dind\AccountTemplate;
 
 /**
  * Gets images into an account's nested Docker daemon, through registries only.
@@ -30,7 +31,7 @@ final class DindImageStore implements ImageStore
      * since every account can reach it and pulls from it by tag.
      *
      * Every account's daemon is created with this in `insecure-registries`
-     * ({@see \App\System\Project\Dind}), and the name resolves on
+     * ({@see Dind}), and the name resolves on
      * the engine network, so a pull needs no further setup.
      */
     public const CACHE_REGISTRY = 'panelalpha-cache-registry:5000';
@@ -88,7 +89,7 @@ final class DindImageStore implements ImageStore
     {
         $img = escapeshellarg($tag);
         $doc = escapeshellarg($dockerfile);
-        $build = "printf '%s' {$doc} | sudo docker build" . ($pull ? ' --pull' : '');
+        $build = "printf '%s' {$doc} | sudo docker build".($pull ? ' --pull' : '');
         $always = "{$build} --provenance=false --sbom=false -t {$img} - || {$build} -t {$img} -";
 
         return $rebuild ? $always : "sudo docker image inspect {$img} >/dev/null 2>&1 || { {$always}; }";
@@ -97,10 +98,34 @@ final class DindImageStore implements ImageStore
     /** Push a host image to the cache registry under its own name. */
     public function hostPublishCommand(string $image): string
     {
-        $img = escapeshellarg($image);
-        $pushRef = escapeshellarg(self::HOST_CACHE_REGISTRY . '/' . $image);
+        return self::sharedLock($this->pushCommand($image));
+    }
 
-        return self::sharedLock("sudo docker tag {$img} {$pushRef} && sudo docker push -q {$pushRef} >/dev/null");
+    /** The tag-and-push half, so the ad-hoc rebuild can hold a different lock around it. */
+    private function pushCommand(string $image): string
+    {
+        $img = escapeshellarg($image);
+        $pushRef = escapeshellarg(self::HOST_CACHE_REGISTRY.'/'.$image);
+
+        return "sudo docker tag {$img} {$pushRef} && sudo docker push -q {$pushRef} >/dev/null";
+    }
+
+    /**
+     * Rebuild one of our base images on the host, then publish it, under
+     * {@see PUSH_LOCK} exclusive: two deploys needing the same missing base
+     * cannot both build it (the second waits, then finds the first one's
+     * image) and a garbage-collect cannot run between the build and the push.
+     */
+    public function hostRebuildCommand(string $image, string $dockerfile): string
+    {
+        $img = escapeshellarg($image);
+        $has = "sudo docker image inspect -- {$img} >/dev/null 2>&1";
+
+        return self::exclusiveLock(
+            "if ! {$has}; then { {$this->hostBuildCommand($image, $dockerfile)}; }"
+            ." && { {$this->pushCommand($image)}; }"
+            .' fi'
+        );
     }
 
     /**
@@ -127,19 +152,19 @@ final class DindImageStore implements ImageStore
     {
         $img = escapeshellarg($image);
         $exec = $this->accountExec($account);
-        $pushRef = escapeshellarg(self::HOST_CACHE_REGISTRY . '/' . $image);
-        $pullRef = escapeshellarg(self::CACHE_REGISTRY . '/' . $image);
+        $pushRef = escapeshellarg(self::HOST_CACHE_REGISTRY.'/'.$image);
+        $pullRef = escapeshellarg(self::CACHE_REGISTRY.'/'.$image);
 
         $attempt = "sudo docker tag {$img} {$pushRef}"
-            . " && sudo docker push -q {$pushRef} >/dev/null"
-            . " && {$exec} docker pull -q {$pullRef} >/dev/null"
-            . " && {$exec} docker tag {$pullRef} {$img}"
-            . " && { {$exec} docker image rm {$pullRef} >/dev/null 2>&1 || true; }";
+            ." && sudo docker push -q {$pushRef} >/dev/null"
+            ." && {$exec} docker pull -q {$pullRef} >/dev/null"
+            ." && {$exec} docker tag {$pullRef} {$img}"
+            ." && { {$exec} docker image rm {$pullRef} >/dev/null 2>&1 || true; }";
 
         $running = $this->bothRegistriesRunning();
 
-        return "{ {$running} || { echo '" . self::REGISTRY_DOWN . "' >&2; false; }; }"
-            . ' && ' . self::sharedLock("{ {$attempt}; } || { sleep 2; {$attempt}; }");
+        return "{ {$running} || { echo '".self::REGISTRY_DOWN."' >&2; false; }; }"
+            .' && '.self::sharedLock("{ {$attempt}; } || { sleep 2; {$attempt}; }");
     }
 
     /** What {@see seedCommand()} says when neither the cache registry nor the host has $ours. */
@@ -173,7 +198,7 @@ final class DindImageStore implements ImageStore
         $img = escapeshellarg($image);
         $exec = $this->accountExec($account);
         if ($private) {
-            $config = $dockerConfig === null ? '' : ' --config ' . escapeshellarg($dockerConfig);
+            $config = $dockerConfig === null ? '' : ' --config '.escapeshellarg($dockerConfig);
 
             return self::seedLadder($exec, $img, self::accountPullRung($exec, $img, $config));
         }
@@ -193,8 +218,8 @@ final class DindImageStore implements ImageStore
     private function builtOnHostRungs(EngineAccount $account, string $image, string $img): string
     {
         return " elif ! sudo docker image inspect -- {$img} >/dev/null 2>&1; then"
-            . " printf '%s\\n' '" . self::NOT_BUILT_HERE . "' >&2; false;"
-            . self::throughHostRung("{ {$this->loadFromHostCommand($account, $image)}; }", $img);
+            ." printf '%s\\n' '".self::NOT_BUILT_HERE."' >&2; false;"
+            .self::throughHostRung("{ {$this->loadFromHostCommand($account, $image)}; }", $img);
     }
 
     /**
@@ -212,7 +237,7 @@ final class DindImageStore implements ImageStore
         $img = escapeshellarg($image);
         $exec = $this->accountExec($account);
         $fromCache = $this->fromCacheRegistry($account, $image);
-        $fromHost = self::hostCopyCommand($image, $img) . " && { {$this->loadFromHostCommand($account, $image)}; }";
+        $fromHost = self::hostCopyCommand($image, $img)." && { {$this->loadFromHostCommand($account, $image)}; }";
 
         return self::seedLadder(
             $exec,
@@ -239,8 +264,8 @@ final class DindImageStore implements ImageStore
     private static function seedLadder(string $exec, string $img, string ...$rungs): string
     {
         return "if {$exec} docker image history -q -- {$img} >/dev/null 2>&1; then :;"
-            . implode('', $rungs)
-            . " else printf 'Could not get %s into the account\\n' {$img} >&2; false; fi";
+            .implode('', $rungs)
+            ." else printf 'Could not get %s into the account\\n' {$img} >&2; false; fi";
     }
 
     /** One `elif` of {@see seedLadder()}: when $condition succeeds, print $message for $img. */
@@ -270,12 +295,12 @@ final class DindImageStore implements ImageStore
     {
         $img = escapeshellarg($image);
         $exec = $this->accountExec($account);
-        $cacheRef = escapeshellarg(self::CACHE_REGISTRY . '/' . $image);
+        $cacheRef = escapeshellarg(self::CACHE_REGISTRY.'/'.$image);
 
         return "{$this->registryRunning()}"
-            . " && {$exec} docker pull -q {$cacheRef} >/dev/null 2>&1"
-            . " && {$exec} docker tag {$cacheRef} {$img}"
-            . " && { {$exec} docker image rm {$cacheRef} >/dev/null 2>&1 || true; }";
+            ." && {$exec} docker pull -q {$cacheRef} >/dev/null 2>&1"
+            ." && {$exec} docker tag {$cacheRef} {$img}"
+            ." && { {$exec} docker image rm {$cacheRef} >/dev/null 2>&1 || true; }";
     }
 
     /** No tag or `latest`: what it names moves, unlike a dated tag or a digest. */
@@ -298,7 +323,7 @@ final class DindImageStore implements ImageStore
      * flight. Needs bash for `wait -n`; run it as ['bash', '-c', $script].
      * Best-effort: the caller checks what arrived.
      *
-     * @param list<string> $images
+     * @param  list<string>  $images
      */
     public function parallelImportCommand(EngineAccount $account, array $images, int $concurrency): string
     {
@@ -326,23 +351,31 @@ final class DindImageStore implements ImageStore
         return "( touch {$lock} 2>/dev/null; exec 9<{$lock} && flock -s 9 && { {$command}; } )";
     }
 
+    /** Run $command holding {@see PUSH_LOCK} exclusive, so it never overlaps a push or a garbage-collect. */
+    private static function exclusiveLock(string $command): string
+    {
+        $lock = escapeshellarg(self::PUSH_LOCK);
+
+        return "( touch {$lock} 2>/dev/null; exec 9<{$lock} && flock -x 9 && { {$command}; } )";
+    }
+
     private function bothRegistriesRunning(): string
     {
-        return $this->registryRunning() . ' && ' . $this->registryRunning(self::CACHE_REGISTRY_WRITER_CONTAINER);
+        return $this->registryRunning().' && '.$this->registryRunning(self::CACHE_REGISTRY_WRITER_CONTAINER);
     }
 
     /** Asked of the daemon, which answers the same from core and from the host. */
     private function registryRunning(string $container = self::CACHE_REGISTRY_CONTAINER): string
     {
-        return 'sudo docker inspect -f "{{.State.Running}}" ' . $container
-            . ' 2>/dev/null | grep -qx true';
+        return 'sudo docker inspect -f "{{.State.Running}}" '.$container
+            .' 2>/dev/null | grep -qx true';
     }
 
     private function accountExec(EngineAccount $account): string
     {
         $file = escapeshellarg($account->controlFileOrFail());
 
-        return "sudo docker compose -f {$file} exec -T " . DindEngine::SERVICE;
+        return "sudo docker compose -f {$file} exec -T ".DindEngine::SERVICE;
     }
 
     /**
@@ -367,7 +400,7 @@ final class DindImageStore implements ImageStore
     /**
      * On the host: the account's own container, so a registry refresh can
      * tell a daemon.json that is bind-mounted from one an old init script
-     * still writes by hand. {@see \App\System\Project\Dind\AccountTemplate::daemonJson()}
+     * still writes by hand. {@see AccountTemplate::daemonJson()}
      * is only mounted into accounts created after it shipped.
      *
      * @return list<string>
@@ -440,20 +473,20 @@ final class DindImageStore implements ImageStore
      */
     public function hostEnsureImageArgv(string $image): array
     {
-        if (!ImageTransfer::isSafeImageRef($image) || !BuiltImage::isOurs($image)) {
+        if (! ImageTransfer::isSafeImageRef($image) || ! BuiltImage::isOurs($image)) {
             return ['true'];
         }
 
         $img = escapeshellarg($image);
-        $pullRef = escapeshellarg(self::HOST_CACHE_REGISTRY . '/' . $image);
+        $pullRef = escapeshellarg(self::HOST_CACHE_REGISTRY.'/'.$image);
         $running = $this->bothRegistriesRunning();
 
         return [
             'sh', '-c',
             "docker image inspect -- {$img} >/dev/null 2>&1 && exit 0; "
-            . "if {$running}; then "
-            . "docker pull -q {$pullRef} >/dev/null && docker tag {$pullRef} {$img} && exit 0; "
-            . 'fi; exit 0',
+            ."if {$running}; then "
+            ."docker pull -q {$pullRef} >/dev/null && docker tag {$pullRef} {$img} && exit 0; "
+            .'fi; exit 0',
         ];
     }
 }

@@ -17,16 +17,19 @@ namespace App\Lib\Deploy\Platform\Runtime\Php;
 final class PhpBuild
 {
     /**
-     * @param bool $artisan the app is Laravel, and boots like one
-     * @param bool $waitForMysql the account got a MySQL sidecar
-     * @param ?string $baseImage the shared PHP base the host resolved, or null
-     *        when it could not provide one and the stock php image is all
-     *        there is
-     * @param string $appRoot application root inside the repository, '' when
-     *        they are the same. The compose file mounts this subtree at /app,
-     *        so everything downstream -- composer, the document root, the
-     *        entrypoint -- keeps working on /app and needs to know nothing
-     *        about it.
+     * @param  bool  $artisan  the app is Laravel, and boots like one
+     * @param  bool  $waitForMysql  the account got a MySQL sidecar
+     * @param  ?string  $baseImage  the shared PHP base the host resolved, or null
+     *                              when it could not provide one and the stock php image is all
+     *                              there is
+     * @param  string  $appRoot  application root inside the repository, '' when
+     *                           they are the same. The compose file mounts this subtree at /app,
+     *                           so everything downstream -- composer, the document root, the
+     *                           entrypoint -- keeps working on /app and needs to know nothing
+     *                           about it.
+     * @param  list<string>  $baseImageExtras  the extras beyond the baked set the base
+     *                                         image was named with, so a pruned variant can be rebuilt
+     * @param  list<string>  $baseImagePackages  the `system_packages:` set it was named with
      */
     public function __construct(
         public readonly ?string $composerJson = null,
@@ -34,9 +37,10 @@ final class PhpBuild
         public readonly bool $artisan = true,
         public readonly bool $waitForMysql = false,
         public readonly ?string $baseImage = null,
-        public readonly string $appRoot = ''
-    ) {
-    }
+        public readonly string $appRoot = '',
+        public readonly array $baseImageExtras = [],
+        public readonly array $baseImagePackages = []
+    ) {}
 
     public function composer(): ComposerManifest
     {

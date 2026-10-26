@@ -43,8 +43,7 @@ final class ContainerOperations
     public function __construct(
         private DindProject $project,
         private ShellOperations $shell,
-    ) {
-    }
+    ) {}
 
     /**
      * @return array<array<string, mixed>>
@@ -99,7 +98,7 @@ final class ContainerOperations
                 self::COMPOSE_TIMEOUT,
             );
         } catch (\Throwable $e) {
-            throw new \RuntimeException('compose stop failed: ' . $e->getMessage(), 0, $e);
+            throw new \RuntimeException('compose stop failed: '.$e->getMessage(), 0, $e);
         }
     }
 
@@ -126,7 +125,7 @@ final class ContainerOperations
     public function projectAction(string $action): array
     {
         $allowed = ['up', 'start', 'stop', 'restart', 'down', 'pull'];
-        if (!in_array($action, $allowed, true)) {
+        if (! in_array($action, $allowed, true)) {
             throw new \InvalidArgumentException("Invalid project action: {$action}");
         }
 
@@ -153,7 +152,7 @@ final class ContainerOperations
             600
         );
 
-        return $pullOut . "\n" . $upOut;
+        return $pullOut."\n".$upOut;
     }
 
     private function runProjectAction(string $action): string
@@ -211,7 +210,23 @@ final class ContainerOperations
             return true;
         }
 
-        return $strategy === null && !$hasGitRepo && $hasClientCompose;
+        return $strategy === null && ! $hasGitRepo && $hasClientCompose;
+    }
+
+    /**
+     * Whether `$action` on this project rewrites the run file from the compose
+     * file on disk before running it, so it starts on whatever that now holds.
+     */
+    public static function actionRegeneratesRunFile(DindProject $project, string $action): bool
+    {
+        $user = $project->userModel();
+
+        return self::regeneratesRunFile(
+            $action,
+            $user->getDeployStrategy(),
+            $user->getGitRepo() !== null,
+            $project->userAppExistingComposeFilePath() !== null,
+        );
     }
 
     /**
@@ -219,19 +234,13 @@ final class ContainerOperations
      */
     private function refreshRunFileBefore(string $action): void
     {
-        $user = $this->project->userModel();
-        if (!self::regeneratesRunFile(
-            $action,
-            $user->getDeployStrategy(),
-            $user->getGitRepo() !== null,
-            $this->project->userAppExistingComposeFilePath() !== null,
-        )) {
+        if (! self::actionRegeneratesRunFile($this->project, $action)) {
             return;
         }
 
         $this->project->strategy()->refreshComposeRunFile(
             $this->project->userAppDirPath(),
-            $user->getChownString(),
+            $this->project->userModel()->getChownString(),
         );
     }
 
@@ -241,7 +250,7 @@ final class ContainerOperations
     public function serviceAction(string $service, string $action): array
     {
         $allowed = ['start', 'stop', 'restart'];
-        if (!in_array($action, $allowed, true)) {
+        if (! in_array($action, $allowed, true)) {
             throw new \InvalidArgumentException("Invalid service action: {$action}");
         }
         self::assertServiceName($service);
@@ -271,7 +280,7 @@ final class ContainerOperations
      */
     private function clearStoppedByRequest(string $action): void
     {
-        if (!in_array($action, self::STARTING_ACTIONS, true)) {
+        if (! in_array($action, self::STARTING_ACTIONS, true)) {
             return;
         }
         try {
@@ -319,13 +328,13 @@ final class ContainerOperations
     {
         $name = preg_quote($service, '/');
 
-        return preg_match('/no such service: "?' . $name . '(?![\w.-])(?!"?: disabled)/', $error) === 1;
+        return preg_match('/no such service: "?'.$name.'(?![\w.-])(?!"?: disabled)/', $error) === 1;
     }
 
     /** Throws service_not_found when compose refused the service and does not list it either. */
     private function refuseUnknownService(string $service, string $error): void
     {
-        if (!self::meansNoSuchService($error, $service)) {
+        if (! self::meansNoSuchService($error, $service)) {
             return;
         }
 
@@ -366,7 +375,7 @@ final class ContainerOperations
      * `expected` names every service; the message shows ten (as a missing git branch does)
      * and `examples` five (as the `in` rule does).
      *
-     * @param list<string> $services
+     * @param  list<string>  $services
      */
     private static function serviceNotFound(string $service, array $services): ProblemException
     {
@@ -376,11 +385,11 @@ final class ContainerOperations
         }
 
         $more = count($services) - 10;
-        $message .= ' Its services: ' . implode(', ', array_slice($services, 0, 10))
-            . ($more > 0 ? " and {$more} more" : '') . '.';
+        $message .= ' Its services: '.implode(', ', array_slice($services, 0, 10))
+            .($more > 0 ? " and {$more} more" : '').'.';
 
         return ProblemException::one('service', 'service_not_found', $message, [
-            'expected' => 'one of: ' . implode(', ', $services),
+            'expected' => 'one of: '.implode(', ', $services),
             'examples' => array_slice($services, 0, 5),
         ]);
     }
@@ -389,14 +398,14 @@ final class ContainerOperations
      * Follow a service's log for FOLLOW_SECONDS, handing each line and its timestamp to $onLine;
      * $onIdle runs after every FOLLOW_IDLE_SECONDS without a line.
      *
-     * @param callable(string, ?string): void $onLine
-     * @param ?callable(): void $onIdle
+     * @param  callable(string, ?string): void  $onLine
+     * @param  ?callable(): void  $onIdle
      */
     public function followServiceLogs(string $service, int $lines, ?string $since, callable $onLine, ?callable $onIdle = null): void
     {
         self::assertServiceName($service);
 
-        $tag = 'PANELALPHA_LOG_FOLLOW=' . bin2hex(random_bytes(6));
+        $tag = 'PANELALPHA_LOG_FOLLOW='.bin2hex(random_bytes(6));
         $command = $this->followCommand($tag, $service, $lines, $since);
 
         $buffer = '';
@@ -405,7 +414,7 @@ final class ContainerOperations
                 $command,
                 self::FOLLOW_SECONDS + 10,
                 function (string $type, string $data) use (&$buffer, $onLine): void {
-                    $buffer = self::emitBufferedLines($buffer . $data, $onLine);
+                    $buffer = self::emitBufferedLines($buffer.$data, $onLine);
                 },
                 $onIdle,
                 self::FOLLOW_IDLE_SECONDS,
@@ -436,7 +445,7 @@ final class ContainerOperations
      * Hand every complete line to $onLine, and a partial one once it reaches MAX_LINE_BYTES so output
      * without newlines cannot grow the worker's memory; returns what is left over.
      *
-     * @param callable(string, ?string): void $onLine
+     * @param  callable(string, ?string): void  $onLine
      */
     private static function emitBufferedLines(string $buffer, callable $onLine): string
     {
@@ -474,10 +483,10 @@ final class ContainerOperations
             array_push($args, '--follow', '--timestamps', '--no-log-prefix');
         }
         if ($since !== null && $since !== '') {
-            $args[] = '--since=' . $since;
+            $args[] = '--since='.$since;
         }
         if ($until !== null && $until !== '') {
-            $args[] = '--until=' . $until;
+            $args[] = '--until='.$until;
         }
         array_push($args, '--', $service);
 
@@ -500,7 +509,7 @@ final class ContainerOperations
 
     private static function assertServiceName(string $service): void
     {
-        if (!preg_match(self::SERVICE_NAME, $service)) {
+        if (! preg_match(self::SERVICE_NAME, $service)) {
             throw new \InvalidArgumentException("Invalid service name: {$service}");
         }
     }

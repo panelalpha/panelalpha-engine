@@ -104,6 +104,30 @@ class ProxyRuleUpdateCommandTest extends TestCase
         $this->assertSame([8080, false], [$this->rule->fresh()->upstream_port, $this->rule->fresh()->enabled]);
     }
 
+    /** The vhost keys one entry per name and port, so a second live HTTP rule must not be switched on. */
+    public function test_re_enabling_a_disabled_http_duplicate_is_refused(): void
+    {
+        /** @var ProxyRule $duplicate */
+        $duplicate = ProxyRule::query()->create([
+            'owner_scope' => 'system',
+            'username' => null,
+            'transport' => 'http',
+            'listen_ip' => '10.0.0.5',
+            'listen_port' => 80,
+            'server_name' => 'shop.test',
+            'upstream_host' => '10.0.0.9',
+            'upstream_port' => 8443,
+            'enabled' => false,
+        ]);
+
+        $this->artisan("proxy:rule:update {$duplicate->id} --enabled=1 --no-interaction --force")
+            ->expectsOutput('A rule with the same transport, port, and server_name already exists')
+            ->assertExitCode(1);
+
+        $this->assertFalse($duplicate->fresh()->enabled);
+        $this->assertWebserverApplied(0);
+    }
+
     public function test_disabling_a_rule_is_applied(): void
     {
         $this->update('--enabled=0')

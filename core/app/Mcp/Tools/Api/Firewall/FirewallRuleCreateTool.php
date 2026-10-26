@@ -56,7 +56,7 @@ class FirewallRuleCreateTool extends ApiTool
     {
         return [
             'action' => $schema->string()->description('One of: allow, deny.')->required(),
-            'scope' => $schema->string()->description('Default host: the host\'s own ports. published: ports Docker publishes; port and destination are the container\'s, and direction is in. Neither scope reaches the other. An inbound deny without scope published is both. One of: host, published, both.'),
+            'scope' => $schema->string()->description('Default host: the host\'s own ports. published: ports Docker publishes; port and destination are the container\'s, and direction is in. Neither scope reaches the other. An inbound deny sent without a scope is both; a scope that is sent is kept. One of: host, published, both.'),
             'direction' => $schema->string()->description('Default in. both: traffic from source coming in and to source going out, as one rule; needs source and no destination. One of: in, out, both.'),
             'protocol' => $schema->string()->description('Omit for both. Required with a port range or list. One of: tcp, udp.'),
             'port' => $schema->string()->description('Destination port, range (30000:30009) or comma list. Example: 22.'),

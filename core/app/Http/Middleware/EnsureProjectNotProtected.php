@@ -7,6 +7,9 @@ use App\Auth\ProjectFields;
 use App\Auth\RequestToken;
 use App\Models\Domain;
 use App\Models\User;
+use App\System;
+use App\System\Project\Dind;
+use App\System\Project\Dind\ContainerOperations;
 use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -77,7 +80,7 @@ class EnsureProjectNotProtected
      */
     private function protectedTarget(Request $request, ?string $operation): ?string
     {
-        if ($operation === null || !in_array($operation, self::REFUSED, true)) {
+        if ($operation === null || ! in_array($operation, self::REFUSED, true)) {
             return null;
         }
 
@@ -98,7 +101,7 @@ class EnsureProjectNotProtected
      */
     private function targets(Request $request, string $operation): array
     {
-        if (!$this->actsOnProject($request, $operation)) {
+        if (! $this->actsOnProject($request, $operation)) {
             return [];
         }
 
@@ -118,13 +121,36 @@ class EnsureProjectNotProtected
     private function actsOnProject(Request $request, string $operation): bool
     {
         return match ($operation) {
-            'POST /projects/{username}/containers/action' => in_array($request->input('action'), self::STOPPING_ACTIONS, true),
+            'POST /projects/{username}/containers/action' => $this->refusesProjectAction($request),
             'POST /projects/{username}/containers/{service}/action' => in_array($request->input('action'), self::STOPPING_SERVICE_ACTIONS, true),
             'PUT /projects/{username}/env-vars' => $request->input('apply', 'recreate') !== 'none',
             'PUT /projects/{username}' => $request->filled('domain'),
             'DELETE /projects/{username}/domains/{domain}' => $this->deletesMainDomain($request),
             default => true,
         };
+    }
+
+    /**
+     * A project-level action is refused when it stops the app, or when `up`
+     * rewrites the run file from the compose file on disk first, which starts
+     * the app on whatever that now holds, stored environment included.
+     */
+    private function refusesProjectAction(Request $request): bool
+    {
+        $action = $request->input('action');
+        if (in_array($action, self::STOPPING_ACTIONS, true)) {
+            return true;
+        }
+
+        return $action === 'up' && $this->upRegeneratesRunFile((string) $request->route('username'));
+    }
+
+    private function upRegeneratesRunFile(string $username): bool
+    {
+        $runtime = User::findByUsername($username)?->project(app(System::class))->runtime();
+
+        return $runtime instanceof Dind
+            && ContainerOperations::actionRegeneratesRunFile($runtime, 'up');
     }
 
     /**
@@ -144,8 +170,8 @@ class EnsureProjectNotProtected
     {
         return new JsonResponse([
             'message' => "Project '{$username}' is protected from API and MCP tokens. Deleting, stopping or "
-                . 'redeploying it needs an operator: clear the setting first with '
-                . "`pae project:settings:unset protected --project={$username}`.",
+                .'redeploying it needs an operator: clear the setting first with '
+                ."`pae project:settings:unset protected --project={$username}`.",
             'code' => self::CODE,
         ], 409);
     }
