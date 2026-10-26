@@ -28,6 +28,4 @@ use OpenApi\Attributes as OA;
     ],
     type: 'object',
 )]
-class AssignedIpSchema
-{
-}
+class AssignedIpSchema {}

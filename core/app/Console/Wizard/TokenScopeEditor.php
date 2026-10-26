@@ -36,8 +36,7 @@ class TokenScopeEditor
         private readonly string $title,
         private readonly bool $dryRun,
         private readonly Scope $scope,
-    ) {
-    }
+    ) {}
 
     /** @return array<int, string> */
     public function receipt(): array
@@ -65,7 +64,7 @@ class TokenScopeEditor
                 'items' => sprintf('%-24s %d of %d %s on', ucfirst($many), count(array_intersect($selected, $offered)), count($offered), $many),
                 'save' => match (true) {
                     $this->dryRun => 'Review it — this is a dry run, so nothing will be written',
-                    !$changed => 'Review and save — nothing has changed yet',
+                    ! $changed => 'Review and save — nothing has changed yet',
                     default => 'Review and save',
                 },
                 'back' => $changed ? 'Back, throwing these ticks away' : 'Back',
@@ -102,7 +101,7 @@ class TokenScopeEditor
                     break;
 
                 default:
-                    if (!$changed || confirm(
+                    if (! $changed || confirm(
                         label: 'Leave without saving? The ticks you made will be thrown away.',
                         default: false,
                     )) {
@@ -113,9 +112,9 @@ class TokenScopeEditor
     }
 
     /**
-     * @param array<int, string> $was
-     * @param array<int, string> $selected
-     * @param array<int, string> $offered
+     * @param  array<int, string>  $was
+     * @param  array<int, string>  $selected
+     * @param  array<int, string>  $offered
      * @return bool whether this token is finished with
      */
     private function save(PersonalAccessToken $token, array &$was, array $selected, array $offered): bool
@@ -163,14 +162,14 @@ class TokenScopeEditor
             return true;
         }
 
-        if (!$this->changed($was, $selected, $offered)) {
+        if (! $this->changed($was, $selected, $offered)) {
             note('Nothing to save: that is what this token can already do.', 'warning');
             pause('Press enter to carry on...');
 
             return false;
         }
 
-        if (!confirm(label: sprintf('Save this against token %d?', $token->id), default: true)) {
+        if (! confirm(label: sprintf('Save this against token %d?', $token->id), default: true)) {
             note('Nothing was written. Your ticks are still here.', 'warning');
             pause('Press enter to carry on...');
 
@@ -204,9 +203,9 @@ class TokenScopeEditor
     }
 
     /**
-     * @param array<int, string> $was
-     * @param array<int, string> $selected
-     * @param array<int, string> $offered
+     * @param  array<int, string>  $was
+     * @param  array<int, string>  $selected
+     * @param  array<int, string>  $offered
      */
     private function header(PersonalAccessToken $token, array $was, array $selected, array $offered): void
     {
@@ -241,9 +240,9 @@ class TokenScopeEditor
     }
 
     /**
-     * @param array<int, string> $was
-     * @param array<int, string> $selected
-     * @param array<int, string> $offered
+     * @param  array<int, string>  $was
+     * @param  array<int, string>  $selected
+     * @param  array<int, string>  $offered
      */
     private function changed(array $was, array $selected, array $offered): bool
     {
@@ -256,9 +255,9 @@ class TokenScopeEditor
     }
 
     /**
-     * @param array<int, string> $was
-     * @param array<int, string> $selected
-     * @param array<int, string> $offered
+     * @param  array<int, string>  $was
+     * @param  array<int, string>  $selected
+     * @param  array<int, string>  $offered
      */
     private function picker(PersonalAccessToken $token, array $was, array $selected, array $offered): CommandPicker
     {
@@ -277,7 +276,7 @@ class TokenScopeEditor
     }
 
     /**
-     * @param array<int, string> $selected
+     * @param  array<int, string>  $selected
      * @return array<int, string>
      */
     private function groupsOn(array $selected): array

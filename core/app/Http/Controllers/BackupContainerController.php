@@ -17,7 +17,6 @@ use Throwable;
 
 class BackupContainerController extends Controller
 {
-
     #[OA\Get(
         path: '/backup-containers',
         summary: 'List backup containers',
@@ -54,6 +53,7 @@ class BackupContainerController extends Controller
     {
         /** @var BackupContainer $container */
         $container = BackupContainer::findOrFail($id);
+
         return new BackupContainerResource($container);
     }
 
@@ -148,7 +148,7 @@ class BackupContainerController extends Controller
     /**
      * Sent credentials are normalised for the container's driver; a switch to `local` without any drops the old ones.
      *
-     * @param array{driver?: string, credentials?: ?array} $validated
+     * @param  array{driver?: string, credentials?: ?array}  $validated
      */
     private function applyCredentials(BackupContainer $container, array $validated, BackupContainerUpdateRequest $request): void
     {
@@ -203,12 +203,12 @@ class BackupContainerController extends Controller
             ], 409);
         }
 
-        if (!$container->backups()->exists()) {
+        if (! $container->backups()->exists()) {
             $container->delete();
 
             return new BackupContainerResource($container);
         }
-        if (!$deleteBackups) {
+        if (! $deleteBackups) {
             return new JsonResponse([
                 'message' => 'Cannot delete backup container while backups exist. Pass delete_backups to remove them with the container.',
             ], 409);

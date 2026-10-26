@@ -13,8 +13,8 @@ use Illuminate\Validation\ValidationException;
 final class NewProjectInput
 {
     /**
-     * @param array<string, mixed> $params validated against {@see NewProjectRules}
-     * @param string $nameField what the caller called the project name
+     * @param  array<string, mixed>  $params  validated against {@see NewProjectRules}
+     * @param  string  $nameField  what the caller called the project name
      */
     public function __construct(
         public readonly array $params,
@@ -23,13 +23,13 @@ final class NewProjectInput
         public readonly mixed $envVars = null,
         public readonly mixed $stages = null,
         public readonly mixed $recipe = null,
-    ) {
-    }
+    ) {}
 
     /**
      * Validate a create given as plain fields, the way the API's FormRequest does.
      *
-     * @param array<string, mixed> $input
+     * @param  array<string, mixed>  $input
+     *
      * @throws ValidationException
      */
     public static function fromArray(array $input): self

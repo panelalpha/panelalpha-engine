@@ -10,7 +10,7 @@ namespace App\Exceptions;
 class RollbackIncompleteException extends \RuntimeException
 {
     /**
-     * @param list<string> $failures
+     * @param  list<string>  $failures
      */
     public function __construct(\Throwable $cause, public readonly array $failures)
     {

@@ -22,7 +22,7 @@ final class RedirectUrl implements ValidationRule
             return;
         }
 
-        if (!is_string($value)) {
+        if (! is_string($value)) {
             $fail('The :attribute must be a URL.');
 
             return;

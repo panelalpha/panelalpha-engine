@@ -2,8 +2,8 @@
 
 namespace App\Rules;
 
-use Illuminate\Support\Str;
 use Illuminate\Contracts\Validation\Validator;
+use Illuminate\Support\Str;
 
 /**
  * What a failed Laravel rule wanted, said as `expected` (and `examples` where
@@ -26,8 +26,8 @@ final class RuleExpectation
      * One problem per message of a failed validator, with the field, a
      * `<field>_<rule>` code, the message, and the expectation where known.
      *
-     * @param (callable(string): ?array<string, mixed>)|null $handWritten a request's own expectation for a field; it wins
-     * @param (callable(string): string)|null $reportedField the field as the caller spelled it
+     * @param  (callable(string): ?array<string, mixed>)|null  $handWritten  a request's own expectation for a field; it wins
+     * @param  (callable(string): string)|null  $reportedField  the field as the caller spelled it
      * @return list<array<string, mixed>>
      */
     public static function problems(Validator $validator, ?callable $handWritten = null, ?callable $reportedField = null): array
@@ -51,7 +51,7 @@ final class RuleExpectation
 
                 $problems[] = [
                     'field' => $reported,
-                    'code' => Str::snake($reported) . '_' . Str::snake($rule),
+                    'code' => Str::snake($reported).'_'.Str::snake($rule),
                     'message' => $message,
                 ] + ($expectation ?? []);
             }
@@ -61,8 +61,8 @@ final class RuleExpectation
     }
 
     /**
-     * @param list<mixed> $params the failed rule's parameters
-     * @param list<mixed> $fieldRules every rule on the field, to tell a number from a string or a list
+     * @param  list<mixed>  $params  the failed rule's parameters
+     * @param  list<mixed>  $fieldRules  every rule on the field, to tell a number from a string or a list
      * @return ?array{expected: string, examples?: list<string>}
      */
     public static function describe(string $rule, array $params, array $fieldRules = []): ?array
@@ -73,14 +73,13 @@ final class RuleExpectation
         $date = self::dateExpectation($fieldRules);
 
         return match (Str::snake($rule)) {
-            'in' => ['expected' => 'one of: ' . implode(', ', $params), 'examples' => array_slice($params, 0, 5)],
-            'not_in' => ['expected' => 'anything except: ' . implode(', ', $params)],
+            'in' => ['expected' => 'one of: '.implode(', ', $params), 'examples' => array_slice($params, 0, 5)],
+            'not_in' => ['expected' => 'anything except: '.implode(', ', $params)],
             'required', 'present', 'filled' => $date !== null
-                ? ['expected' => $date['expected'] . '; this field is required'] + $date
+                ? ['expected' => $date['expected'].'; this field is required'] + $date
                 : ['expected' => 'a value; this field is required'],
-            'required_if', 'required_unless', 'required_with', 'required_with_all', 'required_without', 'required_without_all'
-                => $date !== null
-                    ? ['expected' => $date['expected'] . '; this field is required here'] + $date
+            'required_if', 'required_unless', 'required_with', 'required_with_all', 'required_without', 'required_without_all' => $date !== null
+                    ? ['expected' => $date['expected'].'; this field is required here'] + $date
                     : ['expected' => 'a value; this field is required here'],
             'integer' => ['expected' => 'an integer', 'examples' => ['10']],
             'numeric', 'decimal' => ['expected' => 'a number', 'examples' => ['10', '1.5']],
@@ -103,11 +102,11 @@ final class RuleExpectation
             'alpha_dash' => ['expected' => 'letters, digits, dashes and underscores only'],
             'lowercase' => ['expected' => 'lowercase text'],
             'digits' => ['expected' => "exactly {$first} digits"],
-            'digits_between' => ['expected' => 'between ' . $first . ' and ' . ($params[1] ?? '') . ' digits'],
+            'digits_between' => ['expected' => 'between '.$first.' and '.($params[1] ?? '').' digits'],
             'min' => ['expected' => self::bound($kind, 'at least', $first)],
             'max' => ['expected' => self::bound($kind, 'at most', $first)],
             'size' => ['expected' => self::bound($kind, 'exactly', $first)],
-            'between' => ['expected' => self::bound($kind, 'between', $first . ' and ' . ($params[1] ?? ''))],
+            'between' => ['expected' => self::bound($kind, 'between', $first.' and '.($params[1] ?? ''))],
             'gt' => is_numeric($first) ? ['expected' => self::bound($kind, 'more than', $first)] : null,
             'gte' => is_numeric($first) ? ['expected' => self::bound($kind, 'at least', $first)] : null,
             'lt' => is_numeric($first) ? ['expected' => self::bound($kind, 'less than', $first)] : null,
@@ -121,7 +120,7 @@ final class RuleExpectation
      * What a date field takes, from its `date_format` (or `date`) rule, so a
      * `required` failure says the format too rather than only "a value".
      *
-     * @param list<mixed> $fieldRules
+     * @param  list<mixed>  $fieldRules
      * @return ?array{expected: string, examples: list<string>}
      */
     private static function dateExpectation(array $fieldRules): ?array
@@ -129,7 +128,7 @@ final class RuleExpectation
         $formats = [];
         $isDate = false;
         foreach ($fieldRules as $r) {
-            if (!is_string($r)) {
+            if (! is_string($r)) {
                 continue;
             }
             [$name, $args] = array_pad(explode(':', $r, 2), 2, '');
@@ -151,7 +150,7 @@ final class RuleExpectation
      * A letter with no plain spelling (a weekday name, a Unix timestamp)
      * leaves the PHP format as it is; the example still shows the shape.
      *
-     * @param list<string> $formats
+     * @param  list<string>  $formats
      * @return array{expected: string, examples: list<string>}
      */
     private static function formatExpectation(array $formats): array
@@ -164,7 +163,7 @@ final class RuleExpectation
             $examples[] = $example->format($format);
         }
 
-        return ['expected' => 'a date in the format ' . implode(' or ', $spelled), 'examples' => array_values(array_unique($examples))];
+        return ['expected' => 'a date in the format '.implode(' or ', $spelled), 'examples' => array_values(array_unique($examples))];
     }
 
     private static function spellFormat(string $format): ?string

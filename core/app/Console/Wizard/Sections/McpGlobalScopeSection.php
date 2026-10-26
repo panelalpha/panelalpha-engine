@@ -144,7 +144,7 @@ class McpGlobalScopeSection implements Section
 
         warning(sprintf(
             "MCP_DENIED_TOOLS_REGEX=%s is also in force, and this wizard leaves it alone.\n"
-            . 'Commands it matches stay off however they are ticked here.',
+            .'Commands it matches stay off however they are ticked here.',
             $current->get('denied_regex')
         ));
     }
@@ -273,7 +273,7 @@ class McpGlobalScopeSection implements Section
 
         $held = array_filter(
             $names,
-            fn (string $n): bool => isset($selected[$n]) && !isset($exposed[$n])
+            fn (string $n): bool => isset($selected[$n]) && ! isset($exposed[$n])
         );
 
         return $held === [] ? '' : sprintf('(%d above the ceiling)', count($held));
@@ -292,7 +292,7 @@ class McpGlobalScopeSection implements Section
                 continue;
             }
 
-            return $policy->accessOf($class) . ($policy->permits($class) ? '' : '  (above the ceiling)');
+            return $policy->accessOf($class).($policy->permits($class) ? '' : '  (above the ceiling)');
         }
 
         return '';
@@ -331,7 +331,7 @@ class McpGlobalScopeSection implements Section
             return null;
         }
 
-        if (!confirm(label: sprintf('Write this to %s?', $env->path()), default: true)) {
+        if (! confirm(label: sprintf('Write this to %s?', $env->path()), default: true)) {
             note('Nothing was written. Your ticks are still here.', 'warning');
             pause('Press enter to carry on...');
 
@@ -346,7 +346,7 @@ class McpGlobalScopeSection implements Section
         note('Nothing was written: this was a dry run. Drop --dry-run to apply it.', 'warning');
 
         $this->receipt = array_merge(
-            ['A dry run of ' . self::key() . ' would have written:'],
+            ['A dry run of '.self::key().' would have written:'],
             explode("\n", $this->envBlock($next)),
         );
 
@@ -398,7 +398,7 @@ class McpGlobalScopeSection implements Section
     private function adoptInThisProcess(ToolExposure $next): void
     {
         foreach (array_keys(ToolExposure::ENV_KEYS) as $key) {
-            config(['mcp-tools.' . $key => $next->get($key)]);
+            config(['mcp-tools.'.$key => $next->get($key)]);
         }
     }
 
@@ -461,7 +461,7 @@ class McpGlobalScopeSection implements Section
      * value is in full so it can be put back; the new one is shortened. The
      * backup sits inside the core container, not beside .env-core on the host.
      *
-     * @param  array<int, string> $changed
+     * @param  array<int, string>  $changed
      * @return array<int, string>
      */
     private function receiptFor(EnvFile $env, ToolExposure $current, ToolExposure $next, array $changed): array
@@ -488,7 +488,7 @@ class McpGlobalScopeSection implements Section
             $moved,
             [sprintf(
                 'The file as it was is at %s%s.',
-                $env->path() . EnvFile::BACKUP_SUFFIX,
+                $env->path().EnvFile::BACKUP_SUFFIX,
                 $env->isCoreMount() ? ', inside the core container rather than next to .env-core on the host' : '',
             )],
         );
@@ -500,7 +500,7 @@ class McpGlobalScopeSection implements Section
         $lines = [];
 
         foreach ($next->envLines() as $key => $value) {
-            $lines[] = $key . '=' . $value;
+            $lines[] = $key.'='.$value;
         }
 
         return implode("\n", $lines);
@@ -515,8 +515,8 @@ class McpGlobalScopeSection implements Section
 
         note(
             "The engine reads this on its next request, so `pae mcp:tool:list` will show the new set now.\n"
-            . "A connected client will not: it asked for the command list once, when it connected.\n"
-            . 'Reconnect it. If it still sees the old list, restart the engine.',
+            ."A connected client will not: it asked for the command list once, when it connected.\n"
+            .'Reconnect it. If it still sees the old list, restart the engine.',
             'warning'
         );
     }

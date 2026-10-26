@@ -34,11 +34,11 @@ class SourceRefsRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'repository' => ['required', 'string', 'max:' . GitRepoInput::MAX_LENGTH, new GitRepositoryUrl()],
+            'repository' => ['required', 'string', 'max:'.GitRepoInput::MAX_LENGTH, new GitRepositoryUrl],
             'git_token' => [
                 'nullable',
                 'string',
-                'max:' . GitTokenInput::MAX_LENGTH,
+                'max:'.GitTokenInput::MAX_LENGTH,
                 new GitAccessToken('repository'),
             ],
             'limit' => 'nullable|integer|min:1|max:1000',

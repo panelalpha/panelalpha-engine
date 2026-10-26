@@ -42,14 +42,12 @@ final class S6ServiceManager implements ServiceManager
 
         SH;
 
-    public function __construct(private readonly PhpHosting $project)
-    {
-    }
+    public function __construct(private readonly PhpHosting $project) {}
 
     /** Whether the account was rendered from the s6 template. */
     public static function manages(PhpHosting $project): bool
     {
-        return is_dir($project->project()->projectDirPath() . '/' . self::SERVICES_DIR);
+        return is_dir($project->project()->projectDirPath().'/'.self::SERVICES_DIR);
     }
 
     public function bootScripts(array $services): array
@@ -63,7 +61,7 @@ final class S6ServiceManager implements ServiceManager
      */
     public function write(array $services): void
     {
-        $dir = $this->project->project()->projectDirPath() . '/' . self::SERVICES_DIR;
+        $dir = $this->project->project()->projectDirPath().'/'.self::SERVICES_DIR;
 
         $wanted = [];
         foreach ($services as $service) {
@@ -77,22 +75,22 @@ final class S6ServiceManager implements ServiceManager
     private function writeService(string $dir, string $name, string $command): string
     {
         $filesystem = $this->project->system()->filesystem();
-        $filesystem->filePutContents("{$dir}/{$name}/run", self::RUN_PREFIX . "{$command}\n", null, '755');
+        $filesystem->filePutContents("{$dir}/{$name}/run", self::RUN_PREFIX."{$command}\n", null, '755');
         $filesystem->filePutContents("{$dir}/{$name}/finish", self::FINISH, null, '755');
 
         return $name;
     }
 
     /**
-     * @param list<string> $wanted
+     * @param  list<string>  $wanted
      */
     private function removeServicesNotIn(string $dir, array $wanted): void
     {
         $system = $this->project->system();
-        $templateDir = $system->projectFilesTemplateDirPath($this->project->userModel()->getTemplate()) . '/' . self::SERVICES_DIR;
-        foreach (glob($dir . '/*', GLOB_ONLYDIR) ?: [] as $path) {
+        $templateDir = $system->projectFilesTemplateDirPath($this->project->userModel()->getTemplate()).'/'.self::SERVICES_DIR;
+        foreach (glob($dir.'/*', GLOB_ONLYDIR) ?: [] as $path) {
             $name = basename($path);
-            if (!in_array($name, $wanted, true) && !is_dir("{$templateDir}/{$name}")) {
+            if (! in_array($name, $wanted, true) && ! is_dir("{$templateDir}/{$name}")) {
                 $system->exec(['sudo', 'rm', '-rf', $path]);
             }
         }
@@ -105,7 +103,7 @@ final class S6ServiceManager implements ServiceManager
 
     public function reload(string $service): void
     {
-        $this->project->system()->exec($this->project->execArgv(['s6-svc', '-r', self::SCAN_DIR . '/' . self::name($service)]));
+        $this->project->system()->exec($this->project->execArgv(['s6-svc', '-r', self::SCAN_DIR.'/'.self::name($service)]));
     }
 
     public function restartArgv(string $service): array
@@ -214,8 +212,8 @@ final class S6ServiceManager implements ServiceManager
     public static function restartScriptFor(string $service): string
     {
         $name = self::name($service);
-        $src = self::SOURCE_DIR . '/' . $name;
-        $dst = self::SCAN_DIR . '/' . $name;
+        $src = self::SOURCE_DIR.'/'.$name;
+        $dst = self::SCAN_DIR.'/'.$name;
         $scan = self::SCAN_DIR;
         $notManaged = self::EXIT_NOT_MANAGED;
 

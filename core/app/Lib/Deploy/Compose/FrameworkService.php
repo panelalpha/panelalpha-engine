@@ -37,7 +37,7 @@ final class FrameworkService
     private readonly bool $isHostRunProject;
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     public function __construct(
         private readonly array $decision,
@@ -56,7 +56,7 @@ final class FrameworkService
     }
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      * @return array<string, mixed>
      */
     public static function for(array $decision, int $port, ?string $publicUrl = null): array
@@ -118,8 +118,8 @@ final class FrameworkService
             'image' => Images::NGINX_IMAGE,
             'ports' => [self::NGINX_HOST_PORT],
             'volumes' => [
-                './' . $output . ':/usr/share/nginx/html:ro',
-                './' . NginxConfig::FILENAME . ':/etc/nginx/conf.d/default.conf:ro',
+                './'.$output.':/usr/share/nginx/html:ro',
+                './'.NginxConfig::FILENAME.':/etc/nginx/conf.d/default.conf:ro',
             ],
         ];
     }
@@ -145,9 +145,9 @@ final class FrameworkService
      */
     private function standaloneVolumes(): array
     {
-        $volumes = ['./' . StandaloneNodeServe::FILENAME . ':/app/' . StandaloneNodeServe::FILENAME . ':ro'];
+        $volumes = ['./'.StandaloneNodeServe::FILENAME.':/app/'.StandaloneNodeServe::FILENAME.':ro'];
         foreach (StandaloneNodeServe::volumeSources() as $dir) {
-            $volumes[] = './' . $dir . ':/app/' . $dir . ':ro';
+            $volumes[] = './'.$dir.':/app/'.$dir.':ro';
         }
         $volumes[] = './node_modules:/app/node_modules:ro';
 
@@ -182,7 +182,7 @@ final class FrameworkService
         $service = [
             'image' => trim((string) ($this->decision['image'] ?? '')) ?: NodeRuntime::defaultImage(),
             'working_dir' => self::WORKDIR,
-            'volumes' => [$this->appRoot() . ':' . self::WORKDIR],
+            'volumes' => [$this->appRoot().':'.self::WORKDIR],
             'ports' => ["{$this->port}:{$this->port}"],
         ];
 
@@ -194,7 +194,7 @@ final class FrameworkService
         $provision = str_replace('$', '$$', HostRunProject::packageManagerPrefix($this->decision));
         $entrypoint = trim((string) ($this->decision['entrypoint'] ?? ''));
         if ($entrypoint !== '') {
-            $service['command'] = ['sh', '-c', $provision . 'exec ' . self::WORKDIR . '/' . $entrypoint];
+            $service['command'] = ['sh', '-c', $provision.'exec '.self::WORKDIR.'/'.$entrypoint];
 
             return $service + $this->mountedIdentity();
         }
@@ -209,7 +209,7 @@ final class FrameworkService
             $argv = json_decode($command, true);
             $service['command'] = is_array($argv) && array_is_list($argv) && $argv !== []
                 ? array_map('strval', $argv)
-                : ['sh', '-c', $provision . self::shellCommand($command)];
+                : ['sh', '-c', $provision.self::shellCommand($command)];
         }
 
         return $service + $this->mountedIdentity();
@@ -251,7 +251,7 @@ final class FrameworkService
         $compound = preg_match('/(;|&&|\|\||\n)/', $command) === 1
             || str_starts_with(trim($command), 'exec ');
 
-        return str_replace('$', '$$', $compound ? $command : 'exec ' . $command);
+        return str_replace('$', '$$', $compound ? $command : 'exec '.$command);
     }
 
     /**
@@ -273,7 +273,7 @@ final class FrameworkService
         $service = [
             'image' => $this->phpImage(),
             'working_dir' => self::WORKDIR,
-            'volumes' => [$this->appRoot() . ':' . self::WORKDIR],
+            'volumes' => [$this->appRoot().':'.self::WORKDIR],
             'ports' => ["{$this->port}:{$this->port}"],
         ];
         // The whole container is the hosting account, not root.
@@ -290,7 +290,7 @@ final class FrameworkService
         }
         $cache = trim((string) ($this->decision['composer_cache_dir'] ?? ''));
         if ($cache !== '') {
-            $service['volumes'][] = $cache . ':' . PhpBaseImage::COMPOSER_CACHE_DIR;
+            $service['volumes'][] = $cache.':'.PhpBaseImage::COMPOSER_CACHE_DIR;
         }
         // Gives that uid a name: {@see AccountUserFiles}.
         if (($this->decision['account_user_files'] ?? false) === true) {

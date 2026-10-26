@@ -23,7 +23,7 @@ class DomainVisitorsBreakdownCommand extends UsageCommand
             'start' => $this->option('start'),
             'end' => $this->option('end'),
             'dimension' => $this->argument('dimension'),
-        ], (new VisitorsBreakdownRequest())->rules());
+        ], (new VisitorsBreakdownRequest)->rules());
         $domain = $this->domain($usage, $this->project());
 
         return $this->printJson($statistics->domainVisitorBreakdown($domain->domain, $input['dimension'], $input['start'], $input['end']));

@@ -58,7 +58,7 @@ final class BitbucketCloudProvider extends BitbucketProvider
      */
     private function change(mixed $change): ?RefChange
     {
-        if (!is_array($change)) {
+        if (! is_array($change)) {
             return null;
         }
 
@@ -68,7 +68,7 @@ final class BitbucketCloudProvider extends BitbucketProvider
         $described = $new ?? $old ?? [];
         $name = $described['name'] ?? null;
         $type = $described['type'] ?? null;
-        if (!is_string($name) || $name === '' || !is_string($type)) {
+        if (! is_string($name) || $name === '' || ! is_string($type)) {
             return null;
         }
 
@@ -76,22 +76,22 @@ final class BitbucketCloudProvider extends BitbucketProvider
     }
 
     /**
-     * @param ?array<string, mixed> $new the ref after the push; null when the push deleted it
+     * @param  ?array<string, mixed>  $new  the ref after the push; null when the push deleted it
      */
     private function refChange(string $type, string $name, ?array $new): RefChange
     {
         $deleted = $new === null;
         $hash = $new['target']['hash'] ?? null;
-        $commit = !$deleted && is_string($hash) ? $hash : null;
+        $commit = ! $deleted && is_string($hash) ? $hash : null;
 
         if (in_array($type, ['tag', 'annotated_tag'], true)) {
-            return new RefChange(ref: 'refs/tags/' . $name, tag: true, deleted: $deleted, commit: $commit);
+            return new RefChange(ref: 'refs/tags/'.$name, tag: true, deleted: $deleted, commit: $commit);
         }
 
         if ($type !== 'branch') {
             return new RefChange(ref: $name, deleted: $deleted);
         }
 
-        return new RefChange(ref: 'refs/heads/' . $name, branch: $name, deleted: $deleted, commit: $commit);
+        return new RefChange(ref: 'refs/heads/'.$name, branch: $name, deleted: $deleted, commit: $commit);
     }
 }

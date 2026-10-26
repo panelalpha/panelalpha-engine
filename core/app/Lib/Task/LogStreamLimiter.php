@@ -33,7 +33,7 @@ final class LogStreamLimiter
     {
         $dir = self::directory();
 
-        if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
+        if (! is_dir($dir) && ! @mkdir($dir, 0775, true) && ! is_dir($dir)) {
             Log::warning('Could not create the task log stream limiter directory', ['path' => $dir]);
 
             return fopen('php://memory', 'r+') ?: null;
@@ -56,7 +56,7 @@ final class LogStreamLimiter
     }
 
     /**
-     * @param resource|null $handle
+     * @param  resource|null  $handle
      */
     public static function release($handle): void
     {
@@ -70,7 +70,7 @@ final class LogStreamLimiter
     public static function active(int $limit = self::MAX_CONCURRENT): int
     {
         $dir = self::directory();
-        if (!is_dir($dir)) {
+        if (! is_dir($dir)) {
             return 0;
         }
 
@@ -94,7 +94,7 @@ final class LogStreamLimiter
     /** @return resource|null */
     private static function openSlot(string $dir, int $slot)
     {
-        $handle = @fopen($dir . '/slot-' . $slot, 'c');
+        $handle = @fopen($dir.'/slot-'.$slot, 'c');
 
         return $handle === false ? null : $handle;
     }
@@ -102,11 +102,11 @@ final class LogStreamLimiter
     /**
      * Whether another process holds the slot; a free one is locked and released again to tell.
      *
-     * @param resource $handle
+     * @param  resource  $handle
      */
     private static function isHeld($handle): bool
     {
-        if (!@flock($handle, LOCK_EX | LOCK_NB)) {
+        if (! @flock($handle, LOCK_EX | LOCK_NB)) {
             return true;
         }
         @flock($handle, LOCK_UN);

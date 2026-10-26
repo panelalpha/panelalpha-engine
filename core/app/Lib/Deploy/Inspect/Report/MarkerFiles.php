@@ -57,7 +57,7 @@ final class MarkerFiles
 
         return array_values(array_filter(
             self::NAMES,
-            static fn (string $name): bool => is_file($root . '/' . $name)
+            static fn (string $name): bool => is_file($root.'/'.$name)
         ));
     }
 }

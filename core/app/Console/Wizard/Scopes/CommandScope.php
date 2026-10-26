@@ -20,7 +20,7 @@ class CommandScope implements Scope
     public function universe(): array
     {
         $offered = array_flip(ToolExposure::current()->exposedNames());
-        $policy = new ToolPolicy();
+        $policy = new ToolPolicy;
         $groups = [];
 
         foreach (ToolRegistry::byToolset($policy) as $toolset => $classes) {
@@ -54,7 +54,7 @@ class CommandScope implements Scope
 
     public function note(string $key): string
     {
-        $policy = new ToolPolicy();
+        $policy = new ToolPolicy;
 
         foreach (ToolRegistry::all() as $class) {
             if ($policy->nameOf($class) === $key) {

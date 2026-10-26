@@ -1,5 +1,7 @@
 <?php
 
+use App\Support\JobBudget;
+
 return [
 
     /*
@@ -40,7 +42,7 @@ return [
             'queue' => 'default',
             // Above the worker's --timeout (App\Support\JobBudget::WORKER_SECONDS),
             // or a long job is handed to a second worker while the first still runs.
-            'retry_after' => \App\Support\JobBudget::RETRY_AFTER_SECONDS,
+            'retry_after' => JobBudget::RETRY_AFTER_SECONDS,
             'after_commit' => false,
         ],
 
@@ -68,7 +70,7 @@ return [
             'driver' => 'redis',
             'connection' => 'default',
             'queue' => env('REDIS_QUEUE', 'default'),
-            'retry_after' => \App\Support\JobBudget::RETRY_AFTER_SECONDS,
+            'retry_after' => JobBudget::RETRY_AFTER_SECONDS,
             'block_for' => null,
             'after_commit' => false,
         ],

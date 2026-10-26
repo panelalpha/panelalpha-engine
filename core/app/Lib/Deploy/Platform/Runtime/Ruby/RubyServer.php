@@ -14,9 +14,7 @@ final class RubyServer
 
     private const UNICORN_CONFIG = 'config/unicorn.rb';
 
-    public function __construct(private readonly RubyApp $app, private readonly int $port = self::PORT)
-    {
-    }
+    public function __construct(private readonly RubyApp $app, private readonly int $port = self::PORT) {}
 
     public static function command(RubyApp $app, int $port = self::PORT): string
     {
@@ -63,7 +61,7 @@ final class RubyServer
      */
     private function puma(): ?array
     {
-        if (!$this->requires('puma')) {
+        if (! $this->requires('puma')) {
             return null;
         }
 
@@ -122,7 +120,7 @@ final class RubyServer
     }
 
     /**
-     * @param list<string> $argv
+     * @param  list<string>  $argv
      */
     private static function argv(array $argv): string
     {

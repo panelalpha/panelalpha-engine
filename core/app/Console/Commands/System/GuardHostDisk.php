@@ -36,7 +36,7 @@ class GuardHostDisk extends Command
 
         $cap = self::bytes(config('deploy.host_build_cache_max'));
         if ($cap !== null) {
-            $this->pruneBuildCache($system, ['--max-used-space', (string) $cap], 'over the ' . HostPrewarmPlan::formatBytes($cap) . ' cap', $dryRun);
+            $this->pruneBuildCache($system, ['--max-used-space', (string) $cap], 'over the '.HostPrewarmPlan::formatBytes($cap).' cap', $dryRun);
         }
 
         $guard = new HostDiskGuard($system, null);
@@ -48,14 +48,14 @@ class GuardHostDisk extends Command
         }
         $target = self::target(config('deploy.disk_pressure_free'), $lowest['size']);
         if ($target === null || $lowest['free'] >= $target) {
-            $this->line(self::state($lowest) . ', nothing to do.');
+            $this->line(self::state($lowest).', nothing to do.');
 
             return 0;
         }
 
-        $this->report('warning', self::state($lowest) . ', below the ' . HostPrewarmPlan::formatBytes($target) . ' target; freeing disk.');
+        $this->report('warning', self::state($lowest).', below the '.HostPrewarmPlan::formatBytes($target).' target; freeing disk.');
         if ($dryRun) {
-            $this->line('Would prune host build cache down to ' . HostPrewarmPlan::formatBytes($target) . ' free, then images unused for ' . self::PRESSURE_IMAGE_AGE . '.');
+            $this->line('Would prune host build cache down to '.HostPrewarmPlan::formatBytes($target).' free, then images unused for '.self::PRESSURE_IMAGE_AGE.'.');
 
             return 0;
         }
@@ -72,9 +72,9 @@ class GuardHostDisk extends Command
         }
 
         if ($lowest['free'] < $target) {
-            $this->report('error', self::state($lowest) . ' after pruning; what is left is held by images in use, accounts and volumes.');
+            $this->report('error', self::state($lowest).' after pruning; what is left is held by images in use, accounts and volumes.');
         } else {
-            $this->report('info', self::state($lowest) . ' after pruning.');
+            $this->report('info', self::state($lowest).' after pruning.');
         }
 
         return 0;
@@ -124,13 +124,13 @@ class GuardHostDisk extends Command
         try {
             $out = $system->exec(['sudo', 'docker', 'buildx', 'prune', '-af', ...$limit], [], 300);
         } catch (\Exception $e) {
-            $this->report('warning', 'Could not prune the host build cache: ' . trim($e->getMessage()));
+            $this->report('warning', 'Could not prune the host build cache: '.trim($e->getMessage()));
 
             return;
         }
         $freed = self::freed($out);
         if ($freed > 0) {
-            $this->report('info', 'Pruned ' . HostPrewarmPlan::formatBytes($freed) . " of host build cache {$why}.");
+            $this->report('info', 'Pruned '.HostPrewarmPlan::formatBytes($freed)." of host build cache {$why}.");
         }
     }
 
@@ -161,8 +161,8 @@ class GuardHostDisk extends Command
             'warning' => $this->warn($message),
             default => $this->info($message),
         };
-        if (!$this->dryRun) {
-            Log::log($level, 'system:disk:guard: ' . $message);
+        if (! $this->dryRun) {
+            Log::log($level, 'system:disk:guard: '.$message);
         }
     }
 }

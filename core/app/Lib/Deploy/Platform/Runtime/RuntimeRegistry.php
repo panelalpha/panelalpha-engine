@@ -26,15 +26,15 @@ final class RuntimeRegistry
 
         $runtimes = [];
         foreach (scandir(__DIR__) ?: [] as $entry) {
-            if (!str_ends_with($entry, 'Runtime.php') || $entry === 'Runtime.php') {
+            if (! str_ends_with($entry, 'Runtime.php') || $entry === 'Runtime.php') {
                 continue;
             }
-            $class = __NAMESPACE__ . '\\' . basename($entry, '.php');
-            if (!class_exists($class) || !is_subclass_of($class, Runtime::class)) {
+            $class = __NAMESPACE__.'\\'.basename($entry, '.php');
+            if (! class_exists($class) || ! is_subclass_of($class, Runtime::class)) {
                 continue;
             }
             /** @var Runtime $runtime */
-            $runtime = new $class();
+            $runtime = new $class;
             $runtimes[$runtime->id()] = $runtime;
         }
 
@@ -66,9 +66,9 @@ final class RuntimeRegistry
      * (a Laravel app with no package.json needs no Node). A required one that
      * cannot be resolved throws: the manifest claimed the project on it.
      *
-     * @param array<string, array<string, mixed>> $requires
-     * @param bool $lenient substitute a runtime's default instead of throwing
-     *        when the project says nothing
+     * @param  array<string, array<string, mixed>>  $requires
+     * @param  bool  $lenient  substitute a runtime's default instead of throwing
+     *                         when the project says nothing
      * @return list<Requirement>
      */
     public static function resolveAll(
@@ -89,6 +89,7 @@ final class RuntimeRegistry
                     $resolved[] = $runtime->defaultRequirement()->withRole(
                         is_string($spec['role'] ?? null) ? $spec['role'] : Requirement::ROLE_RUNTIME
                     );
+
                     continue;
                 }
                 throw new ManifestException(

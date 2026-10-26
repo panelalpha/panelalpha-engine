@@ -29,7 +29,7 @@ final class DeployLogStream
      * Best-effort: the log files stay the source of truth, so a broken stream
      * must never break a deploy.
      *
-     * @param array<string, mixed> $frame
+     * @param  array<string, mixed>  $frame
      */
     public static function emit(array $frame): void
     {

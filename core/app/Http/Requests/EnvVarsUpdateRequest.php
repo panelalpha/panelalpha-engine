@@ -29,7 +29,7 @@ class EnvVarsUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'env_vars' => ['present', 'array', 'max:200', new EnvVarKeys(), new EnvVarKeysNotReserved()],
+            'env_vars' => ['present', 'array', 'max:200', new EnvVarKeys, new EnvVarKeysNotReserved],
             'env_vars.*' => ['string', 'nullable', 'max:8192'],
             'replace' => ['sometimes', 'boolean'],
             'apply' => ['sometimes', 'in:none,recreate'],

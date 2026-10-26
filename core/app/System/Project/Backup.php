@@ -11,7 +11,6 @@ use App\Models\BackupItem;
 use App\Models\MysqlDatabase;
 use App\Support\JobBudget;
 use App\System\Project as UserProject;
-use App\System\Project\Dind;
 use App\System\Project\Dind\ContainerOperations;
 use App\System\Project\Dind\VolumeArchive;
 use Illuminate\Support\Collection;
@@ -26,14 +25,16 @@ use Throwable;
 class Backup
 {
     private const string PROJECT_INCOMING = 'project.incoming';
+
     private const string PROJECT_PRE_RESTORE = 'project.pre-restore';
+
     private const string STAGING_ROOT = '/var/tmp/panelalpha-backup';
 
     /** Set by a restore rollback step that failed; a stopped stack then stays stopped. */
     private bool $rollbackFailed = false;
 
     public function __construct(
-        private UserProject  $project,
+        private UserProject $project,
         private BackupRecord $record,
     ) {
         if ($this->record->user_id !== $this->project->model()->id) {
@@ -182,7 +183,7 @@ class Backup
         $this->record->loadMissing('container');
         $container = $this->record->container;
         if ($container === null) {
-            throw new \RuntimeException('Backup container not found for record ' . $this->record->id);
+            throw new \RuntimeException('Backup container not found for record '.$this->record->id);
         }
 
         return $container;
@@ -230,7 +231,7 @@ class Backup
             $this->withComposeStopped(
                 $record->id,
                 fn (string $stagingDir) => $this->restoreWhileStopped($selectedItems, $storage, $stagingDir),
-                fn (): bool => !$this->rollbackFailed,
+                fn (): bool => ! $this->rollbackFailed,
             );
 
             $this->saveRestoreStatus('completed');
@@ -274,14 +275,14 @@ class Backup
 
     private function restoreClassicFiles(string $archivePath, bool $deleteExistingFiles): void
     {
-        if (!$deleteExistingFiles) {
+        if (! $deleteExistingFiles) {
             $this->mergeClassicFiles($archivePath);
 
             return;
         }
 
-        $incoming = '.restore-' . $this->record->id;
-        $aside = '.pre-restore-' . $this->record->id;
+        $incoming = '.restore-'.$this->record->id;
+        $aside = '.pre-restore-'.$this->record->id;
         $skip = [$incoming, $aside];
 
         $this->removeHomeEntry($incoming);
@@ -303,7 +304,7 @@ class Backup
     /** The scratch directory goes whether the merge lands or not; the live home is only ever added to. */
     private function mergeClassicFiles(string $archivePath): void
     {
-        $incoming = '.restore-' . $this->record->id;
+        $incoming = '.restore-'.$this->record->id;
 
         $this->removeHomeEntry($incoming);
         try {
@@ -316,8 +317,8 @@ class Backup
     }
 
     /**
-     * @param Collection<int, BackupItem> $selectedItems
-     * @param array<int, string> $stagedPaths
+     * @param  Collection<int, BackupItem>  $selectedItems
+     * @param  array<int, string>  $stagedPaths
      */
     private function restoreClassicDatabases(Collection $selectedItems, array $stagedPaths): void
     {
@@ -345,7 +346,7 @@ class Backup
             'database' => $name,
         ]);
 
-        if (!$this->databaseExists($name)) {
+        if (! $this->databaseExists($name)) {
             $this->createDatabase($name);
         }
         MysqlDatabase::create(['user_id' => $model->id, 'database' => $name]);
@@ -368,7 +369,7 @@ class Backup
     }
 
     /**
-     * @param Collection<int, BackupItem> $selectedItems
+     * @param  Collection<int, BackupItem>  $selectedItems
      */
     private function restoreWhileStopped(Collection $selectedItems, BackupStorage $storage, string $stagingDir): void
     {
@@ -397,15 +398,15 @@ class Backup
         } catch (Throwable $e) {
             $this->rollBackProjectFiles('');
 
-            throw new \RuntimeException('Project swap failed: ' . $e->getMessage());
+            throw new \RuntimeException('Project swap failed: '.$e->getMessage());
         }
     }
 
     /**
      * Restore the selected volumes and databases; on the first failure undo every component restored so far.
      *
-     * @param Collection<int, BackupItem> $selectedItems
-     * @param array<int, string> $stagedPaths
+     * @param  Collection<int, BackupItem>  $selectedItems
+     * @param  array<int, string>  $stagedPaths
      */
     private function restoreComponents(
         Collection $selectedItems,
@@ -437,11 +438,11 @@ class Backup
     {
         if ($this->rollbackFailed) {
             return new \RuntimeException(
-                'Restore failed and rollback was incomplete: ' . $e->getMessage(),
+                'Restore failed and rollback was incomplete: '.$e->getMessage(),
             );
         }
 
-        return new \RuntimeException('Restore failed: ' . $e->getMessage());
+        return new \RuntimeException('Restore failed: '.$e->getMessage());
     }
 
     /** @return string the volume's docker name */
@@ -463,11 +464,11 @@ class Backup
      * Records the pre-restore dump in $databaseBackups for a later rollback; a database restored
      * back from it on its own failure is taken off that list.
      *
-     * @param array<string, string> $databaseBackups
+     * @param  array<string, string>  $databaseBackups
      */
     private function restoreDatabaseItem(string $name, string $sqlGzPath, string $stagingDir, array &$databaseBackups): void
     {
-        $preRestoreDump = $stagingDir . 'pre-restore-' . $name . '.sql.gz';
+        $preRestoreDump = $stagingDir.'pre-restore-'.$name.'.sql.gz';
         $this->dumpDatabase($name, $preRestoreDump);
         $databaseBackups[$name] = $preRestoreDump;
         try {
@@ -480,8 +481,8 @@ class Backup
     }
 
     /**
-     * @param list<string> $restoredVolumes
-     * @param array<string, string> $databaseBackups database name => pre-restore dump
+     * @param  list<string>  $restoredVolumes
+     * @param  array<string, string>  $databaseBackups  database name => pre-restore dump
      */
     private function rollBackComponents(array $restoredVolumes, array $databaseBackups, bool $filesSwapped): void
     {
@@ -516,7 +517,7 @@ class Backup
         } catch (Throwable $rollbackError) {
             $this->rollbackFailed = true;
             throw new \RuntimeException(
-                'Project rollback failed' . $context . '; live content may be in ' . self::PROJECT_PRE_RESTORE . ': ' . $rollbackError->getMessage(),
+                'Project rollback failed'.$context.'; live content may be in '.self::PROJECT_PRE_RESTORE.': '.$rollbackError->getMessage(),
             );
         }
     }
@@ -527,8 +528,8 @@ class Backup
      * Stop compose, create scratch dir, run $work, always clean scratch.
      * On failure: best-effort composeStart when stopped and $shouldRestartOnFailure allows it, then rethrow.
      *
-     * @param callable(string): void $work
-     * @param (callable(): bool)|null $shouldRestartOnFailure null = always restart if stopped
+     * @param  callable(string): void  $work
+     * @param  (callable(): bool)|null  $shouldRestartOnFailure  null = always restart if stopped
      */
     private function withComposeStopped(
         int $backupId,
@@ -577,7 +578,7 @@ class Backup
     private function estimateRequiredBytes(): int
     {
         $estimate = 1024 * 1024 * 1024;
-        if (!$this->record->includeDatabases()) {
+        if (! $this->record->includeDatabases()) {
             return $estimate;
         }
 
@@ -589,12 +590,12 @@ class Backup
     // --- filters ---
 
     /**
-     * @param Collection<int, BackupItem> $items
+     * @param  Collection<int, BackupItem>  $items
      * @return Collection<int, BackupItem>
      */
     private function selectItems(Collection $items, array $only, array $exclude): Collection
     {
-        if (!$this->isFilterNonEmpty($only) && !$this->isFilterNonEmpty($exclude)) {
+        if (! $this->isFilterNonEmpty($only) && ! $this->isFilterNonEmpty($exclude)) {
             return $items;
         }
 
@@ -605,7 +606,7 @@ class Backup
         }
 
         return $items->filter(
-            fn (BackupItem $item): bool => !$this->itemMatchesFilter($item, $exclude),
+            fn (BackupItem $item): bool => ! $this->itemMatchesFilter($item, $exclude),
         )->values();
     }
 
@@ -623,7 +624,7 @@ class Backup
     }
 
     /**
-     * @param Collection<int, BackupItem> $items
+     * @param  Collection<int, BackupItem>  $items
      */
     private function sumSelectedBytes(Collection $items): int
     {
@@ -631,7 +632,7 @@ class Backup
     }
 
     /**
-     * @param Collection<int, BackupItem> $items
+     * @param  Collection<int, BackupItem>  $items
      */
     private function findItemByType(Collection $items, string $type): ?BackupItem
     {
@@ -673,13 +674,13 @@ class Backup
         if ($this->record->includeFiles()) {
             $files[] = $this->project->runsInDind()
                 ? [
-                    'path' => $stagingDir . 'files.tar.gz',
+                    'path' => $stagingDir.'files.tar.gz',
                     'file' => 'files.tar.gz',
                     'type' => 'files',
                     'name' => 'files',
                 ]
                 : [
-                    'path' => $stagingDir . 'home.tar.gz',
+                    'path' => $stagingDir.'home.tar.gz',
                     'file' => 'home.tar.gz',
                     'type' => 'files',
                     'name' => 'home',
@@ -687,15 +688,15 @@ class Backup
                 ];
         }
 
-        if (!$this->record->includeDatabases()) {
+        if (! $this->record->includeDatabases()) {
             return $files;
         }
 
         if ($this->project->runsInDind()) {
             foreach ($this->namedVolumes() as $volume) {
                 $files[] = [
-                    'path' => $stagingDir . 'volume-' . $volume['name'] . '.tar.gz',
-                    'file' => 'volume-' . $volume['name'] . '.tar.gz',
+                    'path' => $stagingDir.'volume-'.$volume['name'].'.tar.gz',
+                    'file' => 'volume-'.$volume['name'].'.tar.gz',
                     'type' => 'volume',
                     'name' => $volume['name'],
                     'docker_name' => $volume['docker_name'],
@@ -705,8 +706,8 @@ class Backup
 
         foreach ($this->databaseNames() as $database) {
             $files[] = [
-                'path' => $stagingDir . 'database-' . $database . '.sql.gz',
-                'file' => 'database-' . $database . '.sql.gz',
+                'path' => $stagingDir.'database-'.$database.'.sql.gz',
+                'file' => 'database-'.$database.'.sql.gz',
                 'type' => 'database',
                 'name' => $database,
             ];
@@ -727,10 +728,10 @@ class Backup
             $sha256 = $this->sha256Of($file['path']);
             $sizeBytes = filesize($file['path']);
             if ($sizeBytes === false) {
-                throw new \RuntimeException('Failed to read staging file size: ' . $file['path']);
+                throw new \RuntimeException('Failed to read staging file size: '.$file['path']);
             }
 
-            $key = $keyPrefix . $file['file'];
+            $key = $keyPrefix.$file['file'];
             $this->putFile($storage, $key, $file['path']);
             $this->saveItem($key, $sizeBytes, $file, $sha256);
         }
@@ -740,7 +741,7 @@ class Backup
     {
         $stream = fopen($path, 'rb');
         if ($stream === false) {
-            throw new \RuntimeException('Failed to open staging file: ' . $path);
+            throw new \RuntimeException('Failed to open staging file: '.$path);
         }
 
         try {
@@ -753,7 +754,7 @@ class Backup
     }
 
     /**
-     * @param array{type: string, name: string, scope?: string, docker_name?: string} $file
+     * @param  array{type: string, name: string, scope?: string, docker_name?: string}  $file
      */
     private function saveItem(string $key, int $sizeBytes, array $file, string $sha256): void
     {
@@ -769,7 +770,7 @@ class Backup
             $details['scope'] = $file['scope'];
         }
 
-        $item = new BackupItem();
+        $item = new BackupItem;
         $item->backup_id = $this->record->id;
         $item->remote_path = $key;
         $item->size_bytes = $sizeBytes;
@@ -778,7 +779,7 @@ class Backup
     }
 
     /**
-     * @param Collection<int, BackupItem> $items
+     * @param  Collection<int, BackupItem>  $items
      * @return array<int, string>
      */
     private function downloadSelectedItems(Collection $items, BackupStorage $storage, string $stagingDir): array
@@ -786,7 +787,7 @@ class Backup
         $stagedPaths = [];
 
         foreach ($items as $item) {
-            $localPath = $stagingDir . basename($item->remote_path);
+            $localPath = $stagingDir.basename($item->remote_path);
             $this->downloadFile($storage, $item->remote_path, $localPath);
             $this->assertChecksum($item, $localPath);
             $stagedPaths[$item->id] = $localPath;
@@ -803,7 +804,7 @@ class Backup
             if (is_resource($stream)) {
                 fclose($stream);
             }
-            throw new \RuntimeException('Failed to open staging file: ' . $localPath);
+            throw new \RuntimeException('Failed to open staging file: '.$localPath);
         }
 
         try {
@@ -821,11 +822,11 @@ class Backup
     private function assertChecksum(BackupItem $item, string $localPath): void
     {
         $expectedSha256 = $item->details['sha256'] ?? null;
-        if (!is_string($expectedSha256) || $expectedSha256 === '') {
+        if (! is_string($expectedSha256) || $expectedSha256 === '') {
             throw new \RuntimeException('Backup item is missing sha256 checksum.');
         }
 
-        if (!hash_equals($expectedSha256, $this->sha256Of($localPath))) {
+        if (! hash_equals($expectedSha256, $this->sha256Of($localPath))) {
             throw new \RuntimeException('Checksum mismatch');
         }
     }
@@ -834,7 +835,7 @@ class Backup
     {
         $sha256 = hash_file('sha256', $path);
         if ($sha256 === false) {
-            throw new \RuntimeException('Failed to hash staging file: ' . $path);
+            throw new \RuntimeException('Failed to hash staging file: '.$path);
         }
 
         return $sha256;
@@ -858,7 +859,7 @@ class Backup
         $record->setBackupStatus('failed');
         $record->error = $cleanupError === null
             ? $e->getMessage()
-            : $e->getMessage() . '; cleanup failed: ' . $cleanupError;
+            : $e->getMessage().'; cleanup failed: '.$cleanupError;
         $record->save();
     }
 
@@ -866,27 +867,27 @@ class Backup
 
     private function stagingDir(string $username, int $backupId): string
     {
-        return self::STAGING_ROOT . '/' . $username . '/' . $backupId . '/';
+        return self::STAGING_ROOT.'/'.$username.'/'.$backupId.'/';
     }
 
     private function storagePrefix(BackupContainer $container, string $username, int $backupId): string
     {
-        return $this->credentialPrefix($container) . $username . '/' . $backupId . '/';
+        return $this->credentialPrefix($container).$username.'/'.$backupId.'/';
     }
 
     private function credentialPrefix(BackupContainer $container): string
     {
         $credentials = $container->credentials;
-        if (!is_array($credentials)) {
+        if (! is_array($credentials)) {
             return '';
         }
 
         $prefix = $credentials['prefix'] ?? '';
-        if (!is_string($prefix) || $prefix === '') {
+        if (! is_string($prefix) || $prefix === '') {
             return '';
         }
 
-        return rtrim($prefix, '/') . '/';
+        return rtrim($prefix, '/').'/';
     }
 
     /**
@@ -907,14 +908,14 @@ class Backup
         $this->project->system()->exec(['sudo', 'mkdir', '-p', $normalized]);
         $this->project->system()->exec(['sudo', 'chown', '-R', 'www-data:www-data', $normalized]);
 
-        if (!is_dir($path) && !is_dir($normalized)) {
-            throw new \RuntimeException('Failed to create staging directory: ' . $path);
+        if (! is_dir($path) && ! is_dir($normalized)) {
+            throw new \RuntimeException('Failed to create staging directory: '.$path);
         }
     }
 
     private function cleanStagingDir(string $path): void
     {
-        if (!is_dir($path)) {
+        if (! is_dir($path)) {
             return;
         }
 
@@ -935,7 +936,7 @@ class Backup
     }
 
     /**
-     * @param list<string> $entries
+     * @param  list<string>  $entries
      */
     private function unlinkFiles(string $dir, array $entries): void
     {
@@ -944,7 +945,7 @@ class Backup
                 continue;
             }
 
-            $fullPath = $dir . $entry;
+            $fullPath = $dir.$entry;
             if (is_file($fullPath)) {
                 @unlink($fullPath);
             }
@@ -964,11 +965,11 @@ class Backup
     {
         $normalized = rtrim(str_replace('\\', '/', $path), '/');
         $root = self::STAGING_ROOT;
-        if ($normalized === $root || !str_starts_with($normalized, $root . '/')) {
-            throw new \RuntimeException('Invalid staging path: ' . $path);
+        if ($normalized === $root || ! str_starts_with($normalized, $root.'/')) {
+            throw new \RuntimeException('Invalid staging path: '.$path);
         }
         if (str_contains($normalized, '..')) {
-            throw new \RuntimeException('Invalid staging path: ' . $path);
+            throw new \RuntimeException('Invalid staging path: '.$path);
         }
 
         return $normalized;
@@ -1121,7 +1122,7 @@ class Backup
     }
 
     /**
-     * @param list<string> $skipEntries
+     * @param  list<string>  $skipEntries
      */
     protected function swapHome(string $incomingDir, string $asideDir, array $skipEntries): void
     {
@@ -1134,7 +1135,7 @@ class Backup
     }
 
     /**
-     * @param list<string> $skipEntries
+     * @param  list<string>  $skipEntries
      */
     protected function rollbackHome(string $incomingDir, string $asideDir, array $skipEntries): void
     {
@@ -1224,13 +1225,13 @@ class Backup
     protected function swapProject(string $incomingDir, string $asideDir): void
     {
         $home = rtrim($this->project->homeDirPath(), '/');
-        $live = $home . '/project';
+        $live = $home.'/project';
         $incoming = $this->userPath($incomingDir);
         $aside = $this->userPath($asideDir);
 
         if ($this->pathExistsOnHost($aside)) {
             throw new \RuntimeException(
-                'Pre-restore aside already exists at ' . $aside . '; refusing to overwrite',
+                'Pre-restore aside already exists at '.$aside.'; refusing to overwrite',
             );
         }
 
@@ -1241,7 +1242,7 @@ class Backup
     protected function rollbackProject(string $asideDir): void
     {
         $home = rtrim($this->project->homeDirPath(), '/');
-        $live = $home . '/project';
+        $live = $home.'/project';
         $aside = $this->userPath($asideDir);
 
         if ($this->pathExistsOnHost($live)) {
@@ -1258,7 +1259,7 @@ class Backup
 
     private function userPath(string $relative): string
     {
-        return rtrim($this->project->homeDirPath(), '/') . '/' . ltrim($relative, '/');
+        return rtrim($this->project->homeDirPath(), '/').'/'.ltrim($relative, '/');
     }
 
     private function pathExistsOnHost(string $path): bool
@@ -1274,7 +1275,7 @@ class Backup
     private function requireDind(): Dind
     {
         $runtime = $this->project->runtime();
-        if (!$runtime instanceof Dind) {
+        if (! $runtime instanceof Dind) {
             throw new \RuntimeException('Backup requires a DinD project');
         }
 

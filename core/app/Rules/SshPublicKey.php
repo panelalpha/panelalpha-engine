@@ -32,7 +32,7 @@ final class SshPublicKey implements ValidationRule
 
     public function validate(string $attribute, mixed $value, Closure $fail): void
     {
-        if (!is_string($value) || !self::isValid($value)) {
+        if (! is_string($value) || ! self::isValid($value)) {
             $fail('The :attribute must be a single-line OpenSSH public key (type, base64 key, optional comment).');
         }
     }
@@ -40,7 +40,7 @@ final class SshPublicKey implements ValidationRule
     public static function isValid(string $key): bool
     {
         $types = implode('|', array_map('preg_quote', self::TYPES));
-        $pattern = '/\A(?:' . $types . ') [A-Za-z0-9+\/]+={0,3}(?: ' . self::COMMENT . ')?\z/';
+        $pattern = '/\A(?:'.$types.') [A-Za-z0-9+\/]+={0,3}(?: '.self::COMMENT.')?\z/';
 
         return preg_match($pattern, $key) === 1;
     }

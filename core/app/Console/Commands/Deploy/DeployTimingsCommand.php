@@ -44,7 +44,7 @@ class DeployTimingsCommand extends Command
         }
 
         $this->line("Deploy timings for <info>{$username}</info>");
-        $this->line('  total: ' . ($summary['total_seconds'] ?? '—') . 's');
+        $this->line('  total: '.($summary['total_seconds'] ?? '—').'s');
 
         $this->newLine();
         // Phases first: they are what an operator acts on. The three recorded
@@ -64,8 +64,8 @@ class DeployTimingsCommand extends Command
             $this->line('Every step, in order:');
             $this->table(['At', 'Took', 'Step'], array_map(
                 static fn (array $t): array => [
-                    $t['at'] . 's',
-                    $t['seconds'] === null ? '—' : $t['seconds'] . 's',
+                    $t['at'].'s',
+                    $t['seconds'] === null ? '—' : $t['seconds'].'s',
                     mb_strimwidth($t['step'], 0, 92, '…'),
                 ],
                 $summary['timeline']

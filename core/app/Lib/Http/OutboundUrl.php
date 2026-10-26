@@ -60,7 +60,7 @@ final class OutboundUrl
     private static ?array $allowHostsForTests = null;
 
     /**
-     * @param (callable(string): list<string>)|null $resolver
+     * @param  (callable(string): list<string>)|null  $resolver
      */
     public static function setResolverForTests(?callable $resolver): void
     {
@@ -68,8 +68,8 @@ final class OutboundUrl
     }
 
     /**
-     * @param ?bool $allowPrivate null restores the configured policy
-     * @param ?list<string> $allowHosts null restores the configured policy
+     * @param  ?bool  $allowPrivate  null restores the configured policy
+     * @param  ?list<string>  $allowHosts  null restores the configured policy
      */
     public static function setPolicyForTests(?bool $allowPrivate, ?array $allowHosts): void
     {
@@ -105,9 +105,10 @@ final class OutboundUrl
     }
 
     /**
-     * @param list<string> $schemes
+     * @param  list<string>  $schemes
+     *
      * @throws EgressRefusedException when the scheme is not one of $schemes, the host is
-     *         missing, or the host resolves to an address the engine must not contact
+     *                                missing, or the host resolves to an address the engine must not contact
      */
     public static function assertAllowed(string $url, array $schemes = self::DEFAULT_SCHEMES): ResolvedTarget
     {
@@ -130,7 +131,8 @@ final class OutboundUrl
      * The checked target of $url: its host, port and every address it resolved
      * to. The address list is empty when the host is a literal.
      *
-     * @param list<string> $schemes
+     * @param  list<string>  $schemes
+     *
      * @throws EgressRefusedException
      */
     public static function target(string $url, array $schemes = self::DEFAULT_SCHEMES): ResolvedTarget
@@ -145,7 +147,8 @@ final class OutboundUrl
      * address checked here, or null for a literal address. Pinning the checked
      * answer keeps a rebinding DNS server from answering differently next time.
      *
-     * @param list<string> $schemes
+     * @param  list<string>  $schemes
+     *
      * @throws EgressRefusedException when the host is refused or does not resolve
      */
     public static function pin(string $url, array $schemes = self::DEFAULT_SCHEMES): ?string
@@ -175,7 +178,7 @@ final class OutboundUrl
     private static function ipv6Addresses(string $host): array
     {
         $records = @dns_get_record($host, DNS_AAAA);
-        if (!is_array($records)) {
+        if (! is_array($records)) {
             return [];
         }
 
@@ -281,17 +284,18 @@ final class OutboundUrl
      * The host and effective port of a URL, or a refusal when it has no host or
      * a scheme the engine does not fetch over.
      *
-     * @param list<string> $schemes
+     * @param  list<string>  $schemes
      * @return array{0: string, 1: int}
+     *
      * @throws EgressRefusedException
      */
     private static function parse(string $url, array $schemes): array
     {
         $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
         $host = (string) parse_url($url, PHP_URL_HOST);
-        if (!in_array($scheme, $schemes, true) || $host === '') {
+        if (! in_array($scheme, $schemes, true) || $host === '') {
             throw new EgressRefusedException(
-                'The URL scheme must be one of ' . implode(', ', $schemes) . ', and it must name a host.'
+                'The URL scheme must be one of '.implode(', ', $schemes).', and it must name a host.'
             );
         }
 
@@ -307,6 +311,7 @@ final class OutboundUrl
      * resolved and checked against the narrower rule.
      *
      * @return list<string>
+     *
      * @throws EgressRefusedException
      */
     private static function checkedAddresses(string $host): array
@@ -324,6 +329,7 @@ final class OutboundUrl
 
     /**
      * @return non-empty-list<string>
+     *
      * @throws EgressRefusedException
      */
     private static function resolvedAndChecked(string $host, bool $allowListed): array
@@ -361,7 +367,7 @@ final class OutboundUrl
             ? ' EGRESS_ALLOW_HOSTS does not allow loopback, link-local, multicast or reserved addresses.'
             : ' Set EGRESS_ALLOW_PRIVATE=true to allow a private address.';
 
-        return new EgressRefusedException($where . $hint);
+        return new EgressRefusedException($where.$hint);
     }
 
     /** A comma list from config, tolerant of a bare PHPUnit run with no booted application. */
@@ -374,12 +380,12 @@ final class OutboundUrl
 
     private static function configured(string $key, mixed $default): mixed
     {
-        if (!function_exists('config')) {
+        if (! function_exists('config')) {
             return $default;
         }
 
         try {
-            return config('egress.' . $key, $default) ?? $default;
+            return config('egress.'.$key, $default) ?? $default;
         } catch (\Throwable) {
             return $default;
         }
@@ -393,18 +399,18 @@ final class OutboundUrl
         }
 
         $parts = parse_url($base);
-        if (!is_array($parts) || !isset($parts['scheme'], $parts['host'])) {
+        if (! is_array($parts) || ! isset($parts['scheme'], $parts['host'])) {
             return $location;
         }
 
-        $origin = $parts['scheme'] . '://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '');
+        $origin = $parts['scheme'].'://'.$parts['host'].(isset($parts['port']) ? ':'.$parts['port'] : '');
         if (str_starts_with($location, '/')) {
-            return $origin . $location;
+            return $origin.$location;
         }
 
         $path = $parts['path'] ?? '/';
         $dir = substr($path, 0, (int) strrpos($path, '/') + 1);
 
-        return $origin . $dir . $location;
+        return $origin.$dir.$location;
     }
 }

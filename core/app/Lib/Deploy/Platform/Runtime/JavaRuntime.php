@@ -11,6 +11,7 @@ use App\Lib\Deploy\Platform\ProjectContext;
 final class JavaRuntime implements Runtime
 {
     public const MAVEN_IMAGE = 'maven:3-eclipse-temurin-21';
+
     public const GRADLE_IMAGE = 'gradle:8-jdk21';
 
     /**
@@ -116,7 +117,7 @@ final class JavaRuntime implements Runtime
         // "java 25-maven (from pom.xml maven.compiler.release 25)" in the log.
         return $said === ''
             ? new Requirement('java', self::toolchain($tool, $release), '', $file)
-            : new Requirement('java', self::toolchain($tool, $release), (string) $release, $file . ' ' . $said);
+            : new Requirement('java', self::toolchain($tool, $release), (string) $release, $file.' '.$said);
     }
 
     /**
@@ -129,7 +130,7 @@ final class JavaRuntime implements Runtime
     {
         $candidates = [];
         foreach (self::toolchains() as $toolchain) {
-            if (preg_match('/^(\d+)-' . preg_quote($tool, '/') . '$/', $toolchain, $m) === 1) {
+            if (preg_match('/^(\d+)-'.preg_quote($tool, '/').'$/', $toolchain, $m) === 1) {
                 $candidates[(int) $m[1]] = $toolchain;
             }
         }
@@ -184,7 +185,7 @@ final class JavaRuntime implements Runtime
             $release = self::release($value);
             if ($release !== null && ($best === null || $release > $best)) {
                 $best = $release;
-                $said = $name . ' ' . $release;
+                $said = $name.' '.$release;
             }
         }
 
@@ -205,8 +206,8 @@ final class JavaRuntime implements Runtime
         $scripts = '';
         if ($projectDir !== '') {
             foreach (self::GRADLE_SCRIPTS as $pattern) {
-                foreach (array_slice(glob($projectDir . $pattern) ?: [], 0, 100) as $file) {
-                    $scripts .= (@file_get_contents($file) ?: '') . "\n";
+                foreach (array_slice(glob($projectDir.$pattern) ?: [], 0, 100) as $file) {
+                    $scripts .= (@file_get_contents($file) ?: '')."\n";
                 }
             }
         }
@@ -221,8 +222,8 @@ final class JavaRuntime implements Runtime
             }
             $declared = array_filter($declared);
             $jdk = $declared === [] ? 0 : max($declared);
-            if (in_array($jdk . '-gradle', self::toolchains(), true)) {
-                return [$jdk, 'toolchain ' . $jdk];
+            if (in_array($jdk.'-gradle', self::toolchains(), true)) {
+                return [$jdk, 'toolchain '.$jdk];
             }
         }
 
@@ -231,7 +232,7 @@ final class JavaRuntime implements Runtime
             if ($releases !== []) {
                 $jdk = max($releases);
                 if ($jdk > self::DEFAULT_JDK) {
-                    return [$jdk, 'sourceCompatibility ' . $jdk];
+                    return [$jdk, 'sourceCompatibility '.$jdk];
                 }
             }
         }
@@ -242,11 +243,11 @@ final class JavaRuntime implements Runtime
                 if ($jdk <= self::DEFAULT_JDK && version_compare($wrapper, $since, '>=')) {
                     return $jdk === self::DEFAULT_JDK
                         ? [self::DEFAULT_JDK, '']
-                        : [$jdk, 'Gradle wrapper ' . $wrapper];
+                        : [$jdk, 'Gradle wrapper '.$wrapper];
                 }
             }
 
-            return [min(array_keys(self::GRADLE_RUNS_ON)), 'Gradle wrapper ' . $wrapper];
+            return [min(array_keys(self::GRADLE_RUNS_ON)), 'Gradle wrapper '.$wrapper];
         }
 
         return [self::DEFAULT_JDK, ''];
@@ -258,7 +259,7 @@ final class JavaRuntime implements Runtime
      */
     public static function gradleWrapperVersion(string $projectDir): ?string
     {
-        if (!self::hasGradleWrapper($projectDir)) {
+        if (! self::hasGradleWrapper($projectDir)) {
             return null;
         }
         $properties = self::read($projectDir, 'gradle/wrapper/gradle-wrapper.properties') ?? '';
@@ -274,9 +275,9 @@ final class JavaRuntime implements Runtime
         $projectDir = rtrim($projectDir, '/');
 
         return $projectDir !== ''
-            && is_file($projectDir . '/gradlew')
-            && is_file($projectDir . '/gradle/wrapper/gradle-wrapper.jar')
-            && is_file($projectDir . '/gradle/wrapper/gradle-wrapper.properties');
+            && is_file($projectDir.'/gradlew')
+            && is_file($projectDir.'/gradle/wrapper/gradle-wrapper.jar')
+            && is_file($projectDir.'/gradle/wrapper/gradle-wrapper.properties');
     }
 
     /**
@@ -288,12 +289,12 @@ final class JavaRuntime implements Runtime
     public static function gradleBuildCommand(string $projectDir): string
     {
         $args = '--no-daemon -x test build';
-        if (!self::hasGradleWrapper($projectDir)) {
-            return 'gradle ' . $args;
+        if (! self::hasGradleWrapper($projectDir)) {
+            return 'gradle '.$args;
         }
 
         // The mode bit does not survive every way a project arrives.
-        return 'chmod +x ./gradlew && ./gradlew ' . $args;
+        return 'chmod +x ./gradlew && ./gradlew '.$args;
     }
 
     /** @return array<string, string> */
@@ -323,10 +324,10 @@ final class JavaRuntime implements Runtime
     private static function read(string $projectDir, string $relative): ?string
     {
         $projectDir = rtrim($projectDir, '/');
-        if ($projectDir === '' || !is_file($projectDir . '/' . $relative)) {
+        if ($projectDir === '' || ! is_file($projectDir.'/'.$relative)) {
             return null;
         }
-        $contents = @file_get_contents($projectDir . '/' . $relative);
+        $contents = @file_get_contents($projectDir.'/'.$relative);
 
         return is_string($contents) ? $contents : null;
     }
@@ -347,34 +348,34 @@ final class JavaRuntime implements Runtime
     public static function startCommand(bool $gradle): string
     {
         $dir = $gradle ? 'build/libs' : 'target';
-        $quarkus = ($gradle ? 'build' : 'target') . '/quarkus-app/quarkus-run.jar';
+        $quarkus = ($gradle ? 'build' : 'target').'/quarkus-app/quarkus-run.jar';
 
         return 'has_main() { if command -v unzip >/dev/null 2>&1; then'
-            . ' unzip -p "$1" META-INF/MANIFEST.MF 2>/dev/null | grep -qi "^Main-Class:";'
-            . ' elif command -v jar >/dev/null 2>&1; then'
-            . ' d="$(mktemp -d)"; (cd "$d" && jar xf "$1" META-INF/MANIFEST.MF) >/dev/null 2>&1;'
-            . ' grep -qi "^Main-Class:" "$d/META-INF/MANIFEST.MF" 2>/dev/null; r=$?; rm -rf "$d"; return $r;'
-            . ' fi; };'
-            . ' runnable() { while IFS= read -r j; do has_main "$PWD/$j" && { printf "%s\n" "$j"; return 0; }; done; return 0; };'
-            . ' jar="$(ls ' . $quarkus . ' */' . $quarkus . ' 2>/dev/null | head -1)";'
-            . ' [ -n "$jar" ] || jar="$(ls -S ' . $dir . '/*.jar 2>/dev/null'
-            . ' | grep -v -- "-plain\.jar$"'
-            . ' | grep -v -- "-sources\.jar$"'
-            . ' | grep -v -- "-javadoc\.jar$"'
-            . ' | runnable)";'
-            . ' [ -n "$jar" ] || jar="$(find . -mindepth 2 -maxdepth 4 -name "*.jar"'
-            . ' -not -path "./.git/*"'
-            . ' -not -path "./gradle/*"'
-            . ' -not -path "./.mvn/*"'
-            . ' -not -path "*/dependency/*"'
-            . ' -not -name "*-wrapper.jar"'
-            . ' -printf "%d %s %p\n" 2>/dev/null'
-            . ' | grep -v -- "-plain\.jar$"'
-            . ' | grep -v -- "-sources\.jar$"'
-            . ' | grep -v -- "-javadoc\.jar$"'
-            . ' | sort -k1,1n -k2,2nr | cut -d" " -f3- | runnable)";'
-            . ' [ -n "$jar" ] || { echo "PANELALPHA: no runnable jar in ' . $dir . '"; exit 1; };'
-            . ' exec java -jar "$jar"';
+            .' unzip -p "$1" META-INF/MANIFEST.MF 2>/dev/null | grep -qi "^Main-Class:";'
+            .' elif command -v jar >/dev/null 2>&1; then'
+            .' d="$(mktemp -d)"; (cd "$d" && jar xf "$1" META-INF/MANIFEST.MF) >/dev/null 2>&1;'
+            .' grep -qi "^Main-Class:" "$d/META-INF/MANIFEST.MF" 2>/dev/null; r=$?; rm -rf "$d"; return $r;'
+            .' fi; };'
+            .' runnable() { while IFS= read -r j; do has_main "$PWD/$j" && { printf "%s\n" "$j"; return 0; }; done; return 0; };'
+            .' jar="$(ls '.$quarkus.' */'.$quarkus.' 2>/dev/null | head -1)";'
+            .' [ -n "$jar" ] || jar="$(ls -S '.$dir.'/*.jar 2>/dev/null'
+            .' | grep -v -- "-plain\.jar$"'
+            .' | grep -v -- "-sources\.jar$"'
+            .' | grep -v -- "-javadoc\.jar$"'
+            .' | runnable)";'
+            .' [ -n "$jar" ] || jar="$(find . -mindepth 2 -maxdepth 4 -name "*.jar"'
+            .' -not -path "./.git/*"'
+            .' -not -path "./gradle/*"'
+            .' -not -path "./.mvn/*"'
+            .' -not -path "*/dependency/*"'
+            .' -not -name "*-wrapper.jar"'
+            .' -printf "%d %s %p\n" 2>/dev/null'
+            .' | grep -v -- "-plain\.jar$"'
+            .' | grep -v -- "-sources\.jar$"'
+            .' | grep -v -- "-javadoc\.jar$"'
+            .' | sort -k1,1n -k2,2nr | cut -d" " -f3- | runnable)";'
+            .' [ -n "$jar" ] || { echo "PANELALPHA: no runnable jar in '.$dir.'"; exit 1; };'
+            .' exec java -jar "$jar"';
     }
 
     /**
@@ -393,8 +394,8 @@ final class JavaRuntime implements Runtime
     public static function toolchainFor(string $projectDir): string
     {
         $projectDir = rtrim($projectDir, '/');
-        if ($projectDir !== '' && !is_file($projectDir . '/pom.xml')
-            && (is_file($projectDir . '/build.gradle') || is_file($projectDir . '/build.gradle.kts'))
+        if ($projectDir !== '' && ! is_file($projectDir.'/pom.xml')
+            && (is_file($projectDir.'/build.gradle') || is_file($projectDir.'/build.gradle.kts'))
         ) {
             return self::toolchain('gradle', self::gradleJdk($projectDir)[0]);
         }

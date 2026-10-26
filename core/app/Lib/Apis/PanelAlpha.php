@@ -25,7 +25,7 @@ class PanelAlpha
     {
         $base = rtrim(trim($base), '/');
 
-        return $base === '' ? '' : $base . '/' . ltrim(trim($path), '/');
+        return $base === '' ? '' : $base.'/'.ltrim(trim($path), '/');
     }
 
     /** Header carrying this install's APP_UID. */

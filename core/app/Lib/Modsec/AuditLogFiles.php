@@ -10,9 +10,7 @@ final class AuditLogFiles
 {
     private const TAIL_BYTES = 1024 * 50;
 
-    public function __construct(private readonly System $system = new System())
-    {
-    }
+    public function __construct(private readonly System $system = new System) {}
 
     /**
      * @return array<array{file: string, path: string, mtime: int, size: int}>
@@ -107,19 +105,19 @@ final class AuditLogFiles
     /** The zlib wrapper cannot seek from the end, so the whole file is streamed. */
     private static function tailCompressed(string $path): ?string
     {
-        $file = @fopen('compress.zlib://' . $path, 'rb');
+        $file = @fopen('compress.zlib://'.$path, 'rb');
         if ($file === false) {
             return null;
         }
 
         $tail = '';
         try {
-            while (!feof($file)) {
+            while (! feof($file)) {
                 $chunk = fread($file, 65536);
                 if ($chunk === false) {
                     return null;
                 }
-                $tail = substr($tail . $chunk, -self::TAIL_BYTES);
+                $tail = substr($tail.$chunk, -self::TAIL_BYTES);
             }
         } finally {
             fclose($file);

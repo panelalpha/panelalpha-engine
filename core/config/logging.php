@@ -1,5 +1,6 @@
 <?php
 
+use App\Logging\CustomDailyLogger;
 use Monolog\Handler\NullHandler;
 use Monolog\Handler\StreamHandler;
 use Monolog\Handler\SyslogUdpHandler;
@@ -72,7 +73,7 @@ return [
 
         'daily' => [
             'driver' => 'custom',
-            'via' => \App\Logging\CustomDailyLogger::class,
+            'via' => CustomDailyLogger::class,
             'path' => storage_path('logs/laravel.log'),
             'level' => env('LOG_LEVEL', 'debug'),
             'days' => 30,
@@ -94,7 +95,7 @@ return [
         */
         'telemetry' => [
             'driver' => 'custom',
-            'via' => \App\Logging\CustomDailyLogger::class,
+            'via' => CustomDailyLogger::class,
             'path' => storage_path('logs/telemetry.log'),
             'level' => 'debug',
             'days' => (int) env('TELEMETRY_LOG_DAYS', 30),
@@ -115,7 +116,7 @@ return [
             'handler_with' => [
                 'host' => env('PAPERTRAIL_URL'),
                 'port' => env('PAPERTRAIL_PORT'),
-                'connectionString' => 'tls://' . (string)env('PAPERTRAIL_URL') . ':' . (string)env('PAPERTRAIL_PORT'),
+                'connectionString' => 'tls://'.(string) env('PAPERTRAIL_URL').':'.(string) env('PAPERTRAIL_PORT'),
             ],
         ],
 

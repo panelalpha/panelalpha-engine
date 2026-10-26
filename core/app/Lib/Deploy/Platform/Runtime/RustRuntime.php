@@ -114,9 +114,9 @@ final class RustRuntime implements Runtime
     public static function systemPackages(): string
     {
         return '{ command -v c++ && command -v make && command -v pkg-config; } >/dev/null 2>&1'
-            . ' || { apt-get update'
-            . ' && apt-get install -y --no-install-recommends build-essential pkg-config libssl-dev ca-certificates'
-            . ' && rm -rf /var/lib/apt/lists/*; } || true';
+            .' || { apt-get update'
+            .' && apt-get install -y --no-install-recommends build-essential pkg-config libssl-dev ca-certificates'
+            .' && rm -rf /var/lib/apt/lists/*; } || true';
     }
 
     /**
@@ -128,7 +128,7 @@ final class RustRuntime implements Runtime
      */
     public static function buildCommand(string $projectDir): string
     {
-        if (!is_file(rtrim($projectDir, '/') . '/Cargo.lock')) {
+        if (! is_file(rtrim($projectDir, '/').'/Cargo.lock')) {
             return 'cargo build --release';
         }
 
@@ -141,22 +141,22 @@ final class RustRuntime implements Runtime
      */
     public static function startCommand(string $projectDir): string
     {
-        $path = './' . self::binaryPath($projectDir);
+        $path = './'.self::binaryPath($projectDir);
 
         // Cargo's name first; failing that, the only executable in
         // target/release runs instead. Libraries the runtime image lacks were
         // bundled by the host compile. {@see RustRuntimeLibraries}
         return RustRuntimeLibraries::startPrefix()
-            . ' b=' . $path . ';'
-            . ' [ -x "$b" ] || { set -- $(find ./target/release -maxdepth 1 -type f -perm -u+x'
-            . ' ! -name \'*.d\' ! -name \'*.so\' -printf \'%f \' 2>/dev/null);'
-            . ' if [ $# -eq 1 ]; then b=./target/release/$1;'
-            . ' else echo "PANELALPHA: no runnable Rust binary at ' . $path . '";'
+            .' b='.$path.';'
+            .' [ -x "$b" ] || { set -- $(find ./target/release -maxdepth 1 -type f -perm -u+x'
+            .' ! -name \'*.d\' ! -name \'*.so\' -printf \'%f \' 2>/dev/null);'
+            .' if [ $# -eq 1 ]; then b=./target/release/$1;'
+            .' else echo "PANELALPHA: no runnable Rust binary at '.$path.'";'
             // Name the built binaries so the user can pick one as the start command.
-            . ' echo "PANELALPHA: built binaries: $*";'
-            . ' echo "PANELALPHA: set a start command naming the one to serve";'
-            . ' exit 1; fi; };'
-            . ' exec "$b"';
+            .' echo "PANELALPHA: built binaries: $*";'
+            .' echo "PANELALPHA: set a start command naming the one to serve";'
+            .' exit 1; fi; };'
+            .' exec "$b"';
     }
 
     /**
@@ -166,7 +166,7 @@ final class RustRuntime implements Runtime
      */
     public static function binaryPath(string $projectDir): string
     {
-        return 'target/release/' . (self::binaryName($projectDir) ?? 'app');
+        return 'target/release/'.(self::binaryName($projectDir) ?? 'app');
     }
 
     public function defaultRequirement(): Requirement
@@ -174,11 +174,10 @@ final class RustRuntime implements Runtime
         return new Requirement('rust', self::VERSION, '', 'engine default');
     }
 
-
     public static function binaryName(string $projectDir): ?string
     {
-        $manifest = @file_get_contents(rtrim($projectDir, '/') . '/Cargo.toml');
-        if (!is_string($manifest) || $manifest === '') {
+        $manifest = @file_get_contents(rtrim($projectDir, '/').'/Cargo.toml');
+        if (! is_string($manifest) || $manifest === '') {
             return null;
         }
 
@@ -193,8 +192,6 @@ final class RustRuntime implements Runtime
 
         return null;
     }
-
-
 
     private static function sanitizeCrateName(string $name): ?string
     {

@@ -28,6 +28,7 @@ trait FpmPoolSettings
                     if (Str::startsWith($line, ["{$name} = ", ";{$name} = "])) {
                         $newLines[] = "{$name} = {$value}";
                         $updatedSettings[] = $name;
+
                         continue 2;
                     }
                 }
@@ -45,7 +46,7 @@ trait FpmPoolSettings
             $process = $system->runProcess(['sudo', 'cp', $tmpFile, $confFile]);
             unlink($tmpFile);
             if ($process->getExitCode() !== 0) {
-                throw new \Exception("Could not update '{$confFile}': " . ($process->getErrorOutput() ?: $process->getOutput()));
+                throw new \Exception("Could not update '{$confFile}': ".($process->getErrorOutput() ?: $process->getOutput()));
             }
         }
     }

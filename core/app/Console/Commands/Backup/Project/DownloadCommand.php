@@ -25,22 +25,26 @@ class DownloadCommand extends Command
         $user = User::query()->where('username', $username)->first();
         if ($user === null) {
             $this->error("Project '{$username}' not found.");
+
             return 1;
         }
 
         $backup = BackupRecord::query()->find($backupId);
         if ($backup === null || $backup->user_id !== $user->id) {
             $this->error("Backup '{$backupId}' not found for project '{$username}'.");
+
             return 1;
         }
         if ($backup->backupStatus() !== 'completed') {
             $this->error('Backup is not complete');
+
             return 1;
         }
 
         $item = $backup->items->firstWhere('id', $itemId);
         if ($item === null) {
             $this->error("Backup item '{$itemId}' not found.");
+
             return 1;
         }
 
@@ -80,7 +84,7 @@ class DownloadCommand extends Command
     private function openDestination()
     {
         $output = $this->option('output');
-        if (!is_string($output) || $output === '') {
+        if (! is_string($output) || $output === '') {
             return STDOUT;
         }
 

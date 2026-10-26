@@ -30,8 +30,7 @@ final class HomeMerge
         private readonly string $uid,
         private readonly string $gid,
         private readonly int $timeout,
-    ) {
-    }
+    ) {}
 
     public function merge(string $archivePath, string $incomingDir): void
     {
@@ -43,8 +42,9 @@ final class HomeMerge
             if ($entry === basename($incomingDir)) {
                 continue;
             }
-            if ($this->bothDirectories($incomingDir . '/' . $entry, $this->home . '/' . $entry)) {
+            if ($this->bothDirectories($incomingDir.'/'.$entry, $this->home.'/'.$entry)) {
                 $merged[] = $entry;
+
                 continue;
             }
             $this->replace($incomingDir, $entry);
@@ -57,10 +57,10 @@ final class HomeMerge
 
     private function createIncoming(string $incomingDir): void
     {
-        $this->run(['sudo', 'mkdir', '--', $incomingDir], 'Failed to create ' . basename($incomingDir) . ' directory');
+        $this->run(['sudo', 'mkdir', '--', $incomingDir], 'Failed to create '.basename($incomingDir).' directory');
         $this->run(
             ['sudo', 'chown', "{$this->uid}:{$this->gid}", '--', $incomingDir],
-            'Failed to hand ' . basename($incomingDir) . ' to the account',
+            'Failed to hand '.basename($incomingDir).' to the account',
         );
     }
 
@@ -79,12 +79,12 @@ final class HomeMerge
      */
     private function replace(string $incomingDir, string $entry): void
     {
-        $target = $this->home . '/' . $entry;
-        if (!$this->isDirectory($target)) {
+        $target = $this->home.'/'.$entry;
+        if (! $this->isDirectory($target)) {
             $this->run(['sudo', 'rm', '-f', '--', $target], "Failed to remove '{$entry}' before restoring it");
         }
         $this->run(
-            ['sudo', 'mv', '-T', '--', $incomingDir . '/' . $entry, $target],
+            ['sudo', 'mv', '-T', '--', $incomingDir.'/'.$entry, $target],
             "Failed to move restored '{$entry}' into the home",
         );
     }
@@ -92,7 +92,7 @@ final class HomeMerge
     /**
      * Existing directories keep their own owner and mode, so one the account does not own is only written into.
      *
-     * @param list<string> $entries
+     * @param  list<string>  $entries
      */
     private function mergeAsAccount(string $incomingDir, array $entries): void
     {
@@ -122,7 +122,7 @@ final class HomeMerge
     }
 
     /**
-     * @param list<string> $argv
+     * @param  list<string>  $argv
      */
     private function run(array $argv, string $context): void
     {
@@ -131,7 +131,7 @@ final class HomeMerge
             return;
         }
 
-        $output = trim($process->getErrorOutput() . ' ' . $process->getOutput());
+        $output = trim($process->getErrorOutput().' '.$process->getOutput());
         throw new RuntimeException($output !== '' ? "{$context}: {$output}" : $context);
     }
 
@@ -141,8 +141,8 @@ final class HomeMerge
     private function list(string $dir): array
     {
         $process = $this->system->runProcess(['sudo', 'ls', '-A', $dir], [], $this->timeout);
-        if (!$process->isSuccessful()) {
-            throw new RuntimeException('Failed to list ' . basename($dir) . ' directory before merge.');
+        if (! $process->isSuccessful()) {
+            throw new RuntimeException('Failed to list '.basename($dir).' directory before merge.');
         }
 
         $entries = [];

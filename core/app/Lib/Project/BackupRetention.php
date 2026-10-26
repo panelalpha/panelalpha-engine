@@ -6,6 +6,7 @@ use App\Jobs\DeleteBackup;
 use App\Models\Backup as BackupRecord;
 use App\Models\BackupSchedule;
 use App\Models\Task;
+use Illuminate\Support\Collection;
 
 /**
  * Keeps a project's automatic backups bounded by its schedule's `keep_last`.
@@ -16,7 +17,7 @@ class BackupRetention
 {
     public function prune(BackupRecord $record): void
     {
-        if (!$record->isScheduled()) {
+        if (! $record->isScheduled()) {
             return;
         }
 
@@ -40,9 +41,9 @@ class BackupRetention
     }
 
     /**
-     * @return \Illuminate\Support\Collection<int, BackupRecord>
+     * @return Collection<int, BackupRecord>
      */
-    private function scheduledWithStatus(int $userId, string $status): \Illuminate\Support\Collection
+    private function scheduledWithStatus(int $userId, string $status): Collection
     {
         return BackupRecord::query()
             ->where('user_id', $userId)

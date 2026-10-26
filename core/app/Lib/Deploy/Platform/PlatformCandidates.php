@@ -2,8 +2,8 @@
 
 namespace App\Lib\Deploy\Platform;
 
-use App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource;
 use App\Lib\Deploy\Platform\AppConfig\AppConfigLocator;
+use App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource;
 use App\Lib\Deploy\Platform\Probes\ProbeRegistry;
 use App\Lib\Deploy\Platform\Runtime\RuntimeRegistry;
 
@@ -19,7 +19,9 @@ final class PlatformCandidates
 {
     /** How a candidate got onto the list: named by the request, detected, or Railpack. */
     public const VIA_RECIPE = 'recipe';
+
     public const VIA_DETECTED = 'detected';
+
     public const VIA_FALLBACK = 'fallback';
 
     /** The last resort, which is code rather than a manifest. */
@@ -27,6 +29,7 @@ final class PlatformCandidates
 
     /**
      * @return list<array{id: string, label: string, priority: int, strategy: string, via: string}>
+     *
      * @throws ManifestException
      */
     public static function forContext(ProjectContext $context, ?string $directory = null): array
@@ -67,7 +70,7 @@ final class PlatformCandidates
     private static function sourceRecipe(ProjectContext $context): ?PlatformManifest
     {
         $hit = AppConfigLocator::findCandidate(
-            new LocalAppConfigSource(),
+            new LocalAppConfigSource,
             $context->projectDir,
             $context->sourceUrl
         );
@@ -84,7 +87,7 @@ final class PlatformCandidates
     }
 
     /**
-     * @param list<array{id: string, label: string, priority: int, strategy: string, via: string}> $candidates
+     * @param  list<array{id: string, label: string, priority: int, strategy: string, via: string}>  $candidates
      */
     private static function add(array &$candidates, PlatformManifest $manifest, string $via): void
     {

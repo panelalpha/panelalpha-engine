@@ -15,8 +15,7 @@ final class WelcomeBootstrap
     public function __construct(
         private DindProject $project,
         private Paths $paths,
-    ) {
-    }
+    ) {}
 
     public function writeIfNeeded(): void
     {
@@ -38,7 +37,7 @@ final class WelcomeBootstrap
             '644'
         );
         $fs->filePutContents(
-            $appDir . '/' . NginxConfig::FILENAME,
+            $appDir.'/'.NginxConfig::FILENAME,
             NginxConfig::site(null),
             null,
             '644'
@@ -54,7 +53,7 @@ final class WelcomeBootstrap
     private function welcomeHtml(): string
     {
         $title = PlaceholderPage::WELCOME_TITLE;
-        $body = <<<HTML
+        $body = <<<'HTML'
             <p>
                 PanelAlpha has set up your container environment. You can now log in and place your
                 application files in the <code>~/project</code> directory.

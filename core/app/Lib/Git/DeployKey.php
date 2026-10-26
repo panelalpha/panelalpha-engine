@@ -5,6 +5,7 @@ namespace App\Lib\Git;
 use App\Exceptions\ProblemException;
 use App\Models\User;
 use App\System;
+use App\System\Project\Git\WorkTree;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -14,7 +15,7 @@ use Illuminate\Support\Facades\DB;
  *
  * The private half is stored encrypted in the project details and only ever
  * leaves them as a 0600 file for the length of one git command
- * ({@see \App\System\Project\Git\WorkTree::execute()}). Host keys are pinned:
+ * ({@see WorkTree::execute()}). Host keys are pinned:
  * github.com, gitlab.com and bitbucket.org from their published keys, any
  * other host from one ssh-keyscan when the caller names it.
  */
@@ -27,9 +28,7 @@ class DeployKey
 
     private const HOST_PATTERN = '/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/';
 
-    public function __construct(private readonly System $system)
-    {
-    }
+    public function __construct(private readonly System $system) {}
 
     /**
      * Create the key unless the project has one, and pin `$host` if it is not
@@ -57,7 +56,7 @@ class DeployKey
     private function prepareBeforeTheLock(User $user, ?string $host): array
     {
         $seen = self::stored($user);
-        $fresh = $seen === null ? $this->generate('panelalpha-' . $user->username) : null;
+        $fresh = $seen === null ? $this->generate('panelalpha-'.$user->username) : null;
         $scanned = self::needsPin($seen, $host) ? $this->scan($host) : null;
 
         return [$fresh, $scanned];
@@ -67,8 +66,8 @@ class DeployKey
      * Re-reads the key under the row lock and saves what changed. The caller's $user is
      * refreshed from the locked row, since the response is built from it.
      *
-     * @param ?array<string, mixed> $fresh
-     * @param ?list<string> $scanned
+     * @param  ?array<string, mixed>  $fresh
+     * @param  ?list<string>  $scanned
      * @return array<string, mixed>
      */
     private function ensureLocked(User $user, ?string $host, ?array $fresh, ?array $scanned): array
@@ -79,7 +78,7 @@ class DeployKey
         $key = self::stored($locked);
         $created = false;
         if ($key === null) {
-            $key = $fresh ?? $this->generate('panelalpha-' . $locked->username);
+            $key = $fresh ?? $this->generate('panelalpha-'.$locked->username);
             $created = true;
         }
 
@@ -98,11 +97,11 @@ class DeployKey
     }
 
     /**
-     * @param ?array<string, mixed> $key
+     * @param  ?array<string, mixed>  $key
      */
     private static function needsPin(?array $key, ?string $host): bool
     {
-        return $host !== null && !self::isShipped($host) && !isset($key['known_hosts'][$host]);
+        return $host !== null && ! self::isShipped($host) && ! isset($key['known_hosts'][$host]);
     }
 
     /** False when the project had no key. */
@@ -123,7 +122,7 @@ class DeployKey
     public static function stored(User $user): ?array
     {
         $key = $user->getDetails()[self::DETAIL] ?? null;
-        if (!is_array($key) || !is_string($key['private_key'] ?? null) || $key['private_key'] === '') {
+        if (! is_array($key) || ! is_string($key['private_key'] ?? null) || $key['private_key'] === '') {
             return null;
         }
         $key['known_hosts'] = is_array($key['known_hosts'] ?? null) ? $key['known_hosts'] : [];
@@ -141,7 +140,7 @@ class DeployKey
             }
         }
 
-        return implode("\n", $lines) . "\n";
+        return implode("\n", $lines)."\n";
     }
 
     /** Whether a clone from `$host` (known_hosts spelling) can verify the server. */
@@ -183,11 +182,11 @@ class DeployKey
             }
         }
 
-        return 'SHA256:' . rtrim(base64_encode(hash('sha256', $blob, true)), '=');
+        return 'SHA256:'.rtrim(base64_encode(hash('sha256', $blob, true)), '=');
     }
 
     /**
-     * @param array{public_key: string, fingerprint: string, known_hosts: array<string, list<string>>} $key
+     * @param  array{public_key: string, fingerprint: string, known_hosts: array<string, list<string>>}  $key
      * @return array<string, mixed>
      */
     private static function view(array $key): array
@@ -213,17 +212,17 @@ class DeployKey
      */
     private function generate(string $comment): array
     {
-        $dir = sys_get_temp_dir() . '/pa-deploy-key-' . bin2hex(random_bytes(8));
-        if (!mkdir($dir, 0700)) {
+        $dir = sys_get_temp_dir().'/pa-deploy-key-'.bin2hex(random_bytes(8));
+        if (! mkdir($dir, 0700)) {
             throw new \RuntimeException('Could not create a directory for the deploy key.');
         }
         try {
-            $this->system->exec(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-C', $comment, '-f', $dir . '/key']);
-            $private = (string) @file_get_contents($dir . '/key');
-            $public = trim((string) @file_get_contents($dir . '/key.pub'));
+            $this->system->exec(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-C', $comment, '-f', $dir.'/key']);
+            $private = (string) @file_get_contents($dir.'/key');
+            $public = trim((string) @file_get_contents($dir.'/key.pub'));
         } finally {
-            @unlink($dir . '/key');
-            @unlink($dir . '/key.pub');
+            @unlink($dir.'/key');
+            @unlink($dir.'/key.pub');
             @rmdir($dir);
         }
         if ($private === '' || $public === '') {
@@ -273,8 +272,8 @@ class DeployKey
         $lines = [];
         foreach (explode("\n", $output) as $line) {
             $parts = preg_split('/\s+/', trim($line)) ?: [];
-            if (count($parts) >= 3 && !str_starts_with($parts[0], '#') && str_starts_with($parts[2], 'AAAA')) {
-                $lines[] = $host . ' ' . $parts[1] . ' ' . $parts[2];
+            if (count($parts) >= 3 && ! str_starts_with($parts[0], '#') && str_starts_with($parts[2], 'AAAA')) {
+                $lines[] = $host.' '.$parts[1].' '.$parts[2];
             }
         }
 
@@ -288,6 +287,6 @@ class DeployKey
 
     private static function shippedFile(): string
     {
-        return dirname(__DIR__, 3) . '/resources/git/known_hosts';
+        return dirname(__DIR__, 3).'/resources/git/known_hosts';
     }
 }

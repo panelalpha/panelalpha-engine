@@ -43,16 +43,22 @@ class ApiAccess
     public const SCOPE_ALL = 'all';
 
     public const ENV_URL = 'PANELALPHA_ENGINE_URL';
+
     public const ENV_TOKEN = 'PANELALPHA_ENGINE_TOKEN';
+
     public const ENV_CA = 'PANELALPHA_ENGINE_CA';
 
     /** @var list<string> */
     public const ENV_KEYS = [self::ENV_URL, self::ENV_TOKEN, self::ENV_CA];
 
     public const SCOPE_INVALID = 'api_access_scope_invalid';
+
     public const PROJECT_UNKNOWN = 'api_access_project_unknown';
+
     public const NOT_ALLOWED = 'api_access_not_allowed';
+
     public const CONTAINER_ONLY = 'api_access_container_only';
+
     public const TASK_ACTION = 'api_access_apply';
 
     /** The one lock every read-modify-write of the setting takes. */
@@ -107,7 +113,7 @@ class ApiAccess
      * which is the only way the new abilities can reach the application, and the
      * old one is revoked once the apply that carries the new one has succeeded.
      *
-     * @param string|list<string> $scope self, all, or the projects to allow
+     * @param  string|list<string>  $scope  self, all, or the projects to allow
      * @return array<string, mixed> the entry, without the token
      */
     public function allow(User $user, string|array $scope, bool $mcp): array
@@ -128,7 +134,7 @@ class ApiAccess
      * and revokes the one it replaces and any older one still tracked once the
      * apply that carries the new one has succeeded.
      *
-     * @param ?int $applyTaskId set to the task the new token travels in
+     * @param  ?int  $applyTaskId  set to the task the new token travels in
      * @return array<string, mixed> the entry, without the token
      */
     public function rotate(User $user, ?int &$applyTaskId = null): array
@@ -167,7 +173,7 @@ class ApiAccess
     public function deny(User|string $project, bool $apply = true): bool
     {
         $username = $project instanceof User ? $project->username : $project;
-        if (!$this->mutate(fn (): bool => $this->forgetAllowance($username))) {
+        if (! $this->mutate(fn (): bool => $this->forgetAllowance($username))) {
             return false;
         }
 
@@ -228,13 +234,13 @@ class ApiAccess
      */
     public static function allows(User $user): bool
     {
-        return (new self())->entryFor($user) !== null;
+        return (new self)->entryFor($user) !== null;
     }
 
     /**
      * A scope as an operator reads it: `self`, `all`, or the projects named.
      *
-     * @param string|list<string> $scope
+     * @param  string|list<string>  $scope
      */
     public static function scopeLabel(string|array $scope): string
     {
@@ -257,7 +263,7 @@ class ApiAccess
      * The account's environment variables without the engine's own names: one
      * stored before they were refused is neither shown nor stored again.
      *
-     * @param array<string, string> $vars
+     * @param  array<string, string>  $vars
      * @return array<string, string>
      */
     public static function withoutReservedKeys(array $vars): array
@@ -314,8 +320,8 @@ class ApiAccess
             'project',
             self::CONTAINER_ONLY,
             "Engine API access is delivered into a container project's application. "
-                . "'{$user->username}' is a PHP hosting project: its token would work, but nothing would "
-                . 'ever be handed the address, the certificate or the token itself.'
+                ."'{$user->username}' is a PHP hosting project: its token would work, but nothing would "
+                .'ever be handed the address, the certificate or the token itself.'
         );
     }
 
@@ -332,7 +338,7 @@ class ApiAccess
     /**
      * Stores the allowance a call asked for, or finds the one already there.
      *
-     * @param string|list<string> $scope
+     * @param  string|list<string>  $scope
      * @return array{entry: array<string, mixed>, apply: bool, revoke: ?int}
      */
     private function recordAllowance(User $user, string|array $scope, bool $mcp): array
@@ -349,8 +355,8 @@ class ApiAccess
      * Mints the token the scope needs, stores it and answers the apply that has to
      * carry it, with the token it replaces.
      *
-     * @param null|array<string, mixed> $previous
-     * @param string|list<string> $scope
+     * @param  null|array<string, mixed>  $previous
+     * @param  string|list<string>  $scope
      * @return array{entry: array<string, mixed>, apply: bool, revoke: ?int}
      */
     private function replaceToken(string $project, ?array $previous, string|array $scope, bool $mcp): array
@@ -365,8 +371,8 @@ class ApiAccess
      * Whether the allowance already in force is the one the caller names, token
      * aside: the same scope spelled the same way and the same MCP flag.
      *
-     * @param array<string, mixed> $entry
-     * @param string|list<string> $scope
+     * @param  array<string, mixed>  $entry
+     * @param  string|list<string>  $scope
      */
     private static function sameAllowance(array $entry, string|array $scope, bool $mcp): bool
     {
@@ -436,12 +442,12 @@ class ApiAccess
     {
         $domain = trim((string) Setting::get('cert_domain'));
         if ($domain !== '') {
-            return 'https://' . $domain . ':2011/api';
+            return 'https://'.$domain.':2011/api';
         }
 
         $base = self::hostOnly(rtrim((string) config('app.url'), '/'));
 
-        return $base === null ? null : $base . ':2011/api';
+        return $base === null ? null : $base.':2011/api';
     }
 
     /**
@@ -459,13 +465,13 @@ class ApiAccess
     }
 
     /**
-     * @param string|list<string> $scope
+     * @param  string|list<string>  $scope
      * @return array<string, mixed>
      */
     private function freshEntry(string $project, ?array $previous, string|array $scope, bool $mcp): array
     {
         $new = Admin::rootAccount()->createToken(
-            self::TOKEN_NAME . $project,
+            self::TOKEN_NAME.$project,
             TokenAbilities::build(api: true, mcp: $mcp, projects: self::projectsFor($project, $scope))
         );
 
@@ -487,7 +493,7 @@ class ApiAccess
      * The entry's own spelling of the scope: self, all, or the named projects, in
      * one order, so the same set of projects reads the same however it was named.
      *
-     * @param string|list<string> $scope
+     * @param  string|list<string>  $scope
      * @return string|list<string>
      */
     private static function scopeOf(string|array $scope): string|array
@@ -503,7 +509,7 @@ class ApiAccess
     }
 
     /**
-     * @param string|list<string> $scope
+     * @param  string|list<string>  $scope
      * @return list<string>|null null for every project on this host
      */
     private static function projectsFor(string $project, string|array $scope): ?array
@@ -514,13 +520,13 @@ class ApiAccess
         if ($scope === self::SCOPE_SELF) {
             return [$project];
         }
-        if (!is_array($scope) || $scope === []) {
+        if (! is_array($scope) || $scope === []) {
             throw self::scopeProblem($scope);
         }
 
         $names = [];
         foreach ($scope as $name) {
-            if (!is_string($name) || !User::existsByUsername($name)) {
+            if (! is_string($name) || ! User::existsByUsername($name)) {
                 throw ProblemException::one(
                     'scope',
                     self::PROJECT_UNKNOWN,
@@ -533,9 +539,6 @@ class ApiAccess
         return array_values(array_unique($names));
     }
 
-    /**
-     * @param mixed $scope
-     */
     private static function scopeProblem(mixed $scope): ProblemException
     {
         return ProblemException::one(
@@ -572,12 +575,12 @@ class ApiAccess
     }
 
     /**
-     * @param array<string, mixed> $entry
+     * @param  array<string, mixed>  $entry
      */
     private static function plainToken(array $entry): ?string
     {
         $token = $entry['token'] ?? null;
-        if (!is_string($token) || $token === '') {
+        if (! is_string($token) || $token === '') {
             return null;
         }
 
@@ -609,7 +612,7 @@ class ApiAccess
         }
 
         $decoded = json_decode((string) $raw, true);
-        if (!is_array($decoded)) {
+        if (! is_array($decoded)) {
             return [];
         }
 
@@ -624,7 +627,7 @@ class ApiAccess
     }
 
     /**
-     * @param list<array<string, mixed>> $entries
+     * @param  list<array<string, mixed>>  $entries
      */
     private function store(array $entries): void
     {
@@ -646,7 +649,7 @@ class ApiAccess
     }
 
     /**
-     * @param array<string, mixed> $entry
+     * @param  array<string, mixed>  $entry
      * @return list<array<string, mixed>>
      */
     private function withEntry(array $entry): array
@@ -672,7 +675,7 @@ class ApiAccess
     }
 
     /**
-     * @param list<array<string, mixed>> $entries
+     * @param  list<array<string, mixed>>  $entries
      * @return list<string>
      */
     private static function allowedProjects(array $entries): array
@@ -684,7 +687,7 @@ class ApiAccess
     }
 
     /**
-     * @param array<string, mixed> $entry
+     * @param  array<string, mixed>  $entry
      * @return array<string, mixed>
      */
     private static function reported(array $entry): array

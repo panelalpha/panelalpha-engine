@@ -25,9 +25,9 @@ final class PlatformCommand
     public const ROLE_NONE = 'none';
 
     /**
-     * @param list<string> $stages one or more of {@see PlatformStage}
-     * @param array<string, mixed>|null $when predicate gating this command,
-     *        evaluated against the project by {@see PlatformMatcher}
+     * @param  list<string>  $stages  one or more of {@see PlatformStage}
+     * @param  array<string, mixed>|null  $when  predicate gating this command,
+     *                                           evaluated against the project by {@see PlatformMatcher}
      */
     private function __construct(
         public readonly string $id,
@@ -41,8 +41,7 @@ final class PlatformCommand
         public readonly ?string $workdir,
         public readonly string $role,
         public readonly bool $before = false
-    ) {
-    }
+    ) {}
 
     /**
      * Commands in the order they run: everything marked `before` first, the
@@ -53,7 +52,7 @@ final class PlatformCommand
      * on the build having happened and wrong for a licence check or a config
      * file the build is about to read.
      *
-     * @param list<self> $commands
+     * @param  list<self>  $commands
      * @return list<self>
      */
     public static function ordered(array $commands): array
@@ -72,7 +71,8 @@ final class PlatformCommand
     }
 
     /**
-     * @param array<string, mixed> $raw one entry of a manifest's `commands`
+     * @param  array<string, mixed>  $raw  one entry of a manifest's `commands`
+     *
      * @throws ManifestException on anything the schema does not allow
      */
     public static function fromArray(array $raw, string $manifestId, int $index): self
@@ -80,14 +80,14 @@ final class PlatformCommand
         $where = "{$manifestId}.commands[{$index}]";
 
         $run = $raw['run'] ?? null;
-        if (!is_string($run) || trim($run) === '') {
+        if (! is_string($run) || trim($run) === '') {
             throw new ManifestException("{$where}: 'run' must be a non-empty string");
         }
 
         $stages = self::readStages($raw, $where);
 
         $id = $raw['id'] ?? null;
-        if ($id !== null && (!is_string($id) || trim($id) === '')) {
+        if ($id !== null && (! is_string($id) || trim($id) === '')) {
             throw new ManifestException("{$where}: 'id' must be a non-empty string when present");
         }
 
@@ -99,22 +99,22 @@ final class PlatformCommand
         }
 
         $when = $raw['when'] ?? null;
-        if ($when !== null && !is_array($when)) {
+        if ($when !== null && ! is_array($when)) {
             throw new ManifestException("{$where}: 'when' must be an object");
         }
 
         $timeout = $raw['timeout'] ?? null;
-        if ($timeout !== null && (!is_int($timeout) || $timeout <= 0)) {
+        if ($timeout !== null && (! is_int($timeout) || $timeout <= 0)) {
             throw new ManifestException("{$where}: 'timeout' must be a positive integer of seconds");
         }
 
         $workdir = $raw['workdir'] ?? null;
-        if ($workdir !== null && (!is_string($workdir) || trim($workdir) === '')) {
+        if ($workdir !== null && (! is_string($workdir) || trim($workdir) === '')) {
             throw new ManifestException("{$where}: 'workdir' must be a non-empty string when present");
         }
 
         $description = $raw['description'] ?? null;
-        if ($description !== null && !is_string($description)) {
+        if ($description !== null && ! is_string($description)) {
             throw new ManifestException("{$where}: 'description' must be a string when present");
         }
 
@@ -144,7 +144,7 @@ final class PlatformCommand
      * because it needs the source. Runtime stages have no layers, so they are
      * always NONE and may not say otherwise.
      *
-     * @param list<string> $stages
+     * @param  list<string>  $stages
      */
     private static function readRole(array $raw, array $stages, string $where): string
     {
@@ -154,11 +154,11 @@ final class PlatformCommand
         if ($declared === null) {
             return $isBuild ? self::ROLE_ASSETS : self::ROLE_NONE;
         }
-        if (!is_string($declared) || !in_array($declared, [self::ROLE_DEPENDENCIES, self::ROLE_ASSETS], true)) {
-            $valid = self::ROLE_DEPENDENCIES . ', ' . self::ROLE_ASSETS;
+        if (! is_string($declared) || ! in_array($declared, [self::ROLE_DEPENDENCIES, self::ROLE_ASSETS], true)) {
+            $valid = self::ROLE_DEPENDENCIES.', '.self::ROLE_ASSETS;
             throw new ManifestException("{$where}: 'role' must be one of {$valid}");
         }
-        if (!$isBuild) {
+        if (! $isBuild) {
             throw new ManifestException("{$where}: 'role' only applies to build-stage commands");
         }
 
@@ -169,7 +169,7 @@ final class PlatformCommand
      * `stage` accepts a single name or a list — `["install", "upgrade"]` is
      * how a migration says "whenever the code changed, never on a restart".
      *
-     * @param array<string, mixed> $raw
+     * @param  array<string, mixed>  $raw
      * @return list<string>
      */
     private static function readStages(array $raw, string $where): array
@@ -178,17 +178,17 @@ final class PlatformCommand
         if (is_string($declared)) {
             $declared = [$declared];
         }
-        if (!is_array($declared) || $declared === []) {
+        if (! is_array($declared) || $declared === []) {
             throw new ManifestException("{$where}: 'stage' must be a stage name or a non-empty list of them");
         }
 
         $stages = [];
         foreach ($declared as $stage) {
-            if (!is_string($stage) || !PlatformStage::isValid($stage)) {
+            if (! is_string($stage) || ! PlatformStage::isValid($stage)) {
                 $valid = implode(', ', PlatformStage::ALL);
-                throw new ManifestException("{$where}: unknown stage '" . (is_string($stage) ? $stage : gettype($stage)) . "'; expected one of {$valid}");
+                throw new ManifestException("{$where}: unknown stage '".(is_string($stage) ? $stage : gettype($stage))."'; expected one of {$valid}");
             }
-            if (!in_array($stage, $stages, true)) {
+            if (! in_array($stage, $stages, true)) {
                 $stages[] = $stage;
             }
         }
@@ -215,7 +215,7 @@ final class PlatformCommand
         }
         $slug = strtolower(trim(implode('-', array_filter($parts)), '-'));
 
-        return $slug !== '' ? $slug : 'step-' . ($index + 1);
+        return $slug !== '' ? $slug : 'step-'.($index + 1);
     }
 
     public function runsIn(string $stage): bool
@@ -226,6 +226,6 @@ final class PlatformCommand
     /** `optional: true` has to survive being joined into one shell line. */
     public function tolerantRun(string $run): string
     {
-        return $this->optional ? '{ ' . $run . '; } || true' : $run;
+        return $this->optional ? '{ '.$run.'; } || true' : $run;
     }
 }

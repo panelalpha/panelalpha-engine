@@ -28,7 +28,7 @@ final class AppRoot
      * The subtree relative to the checkout root: `src`, or '' for the root
      * itself. No leading or trailing slash, so a caller can join it.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     public static function relative(array $decision): string
     {
@@ -42,7 +42,7 @@ final class AppRoot
         }
 
         $root = rtrim($declared, '/');
-        if (!preg_match('#^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$#', $root)) {
+        if (! preg_match('#^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$#', $root)) {
             return '';
         }
         if (in_array('..', explode('/', $root), true)) {
@@ -56,25 +56,25 @@ final class AppRoot
      * The same answer as a bind-mount source, relative to the compose file:
      * `./src`, or `./` for the whole checkout.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     public static function mount(array $decision): string
     {
         $root = self::relative($decision);
 
-        return $root === '' ? './' : './' . $root;
+        return $root === '' ? './' : './'.$root;
     }
 
     /**
      * The absolute directory that becomes /app, for a caller that has to put
      * a file where the container will find it.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     public static function path(string $projectDir, array $decision): string
     {
         $root = self::relative($decision);
 
-        return $root === '' ? $projectDir : rtrim($projectDir, '/') . '/' . $root;
+        return $root === '' ? $projectDir : rtrim($projectDir, '/').'/'.$root;
     }
 }

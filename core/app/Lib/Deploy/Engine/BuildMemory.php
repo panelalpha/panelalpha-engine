@@ -20,12 +20,11 @@ final class BuildMemory
     public const HOST = 'host';
 
     /**
-     * @param string $limit as handed to the builder, which re-spells it
+     * @param  string  $limit  as handed to the builder, which re-spells it
      */
     public function __construct(
         public readonly string $limit,
         public readonly string $source = self::SETTING,
         public readonly ?HostMemory $host = null,
-    ) {
-    }
+    ) {}
 }

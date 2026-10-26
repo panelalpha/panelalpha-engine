@@ -12,18 +12,17 @@ namespace App\Lib\Net;
 final class ResolvedTarget
 {
     /**
-     * @param string $url the URL that was checked
-     * @param string $host the host as written, without brackets
-     * @param int $port the effective port
-     * @param list<string> $addresses the A and AAAA answers that were checked
+     * @param  string  $url  the URL that was checked
+     * @param  string  $host  the host as written, without brackets
+     * @param  int  $port  the effective port
+     * @param  list<string>  $addresses  the A and AAAA answers that were checked
      */
     public function __construct(
         public readonly string $url,
         public readonly string $host,
         public readonly int $port,
         public readonly array $addresses,
-    ) {
-    }
+    ) {}
 
     /** The address the connection should use, or null when there is nothing to pin. */
     public function address(): ?string
@@ -42,11 +41,11 @@ final class ResolvedTarget
             return null;
         }
 
-        return $this->host . ':' . $this->port . ':' . self::bracketed($address);
+        return $this->host.':'.$this->port.':'.self::bracketed($address);
     }
 
     private static function bracketed(string $address): string
     {
-        return str_contains($address, ':') ? '[' . $address . ']' : $address;
+        return str_contains($address, ':') ? '['.$address.']' : $address;
     }
 }

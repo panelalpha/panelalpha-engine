@@ -43,7 +43,7 @@ class ConfigureCommand extends Command
 
     public function handle(): int
     {
-        if (!$this->canAsk()) {
+        if (! $this->canAsk()) {
             $this->error('This is a wizard and needs a terminal to ask on.');
             $this->line('');
             $this->line('  Over SSH:      <fg=yellow>pae configure</>');
@@ -103,7 +103,7 @@ class ConfigureCommand extends Command
                     : 'Leave everything as it is.',
             );
 
-            if (!isset($sections[$key])) {
+            if (! isset($sections[$key])) {
                 return $this->done(self::SUCCESS);
             }
 
@@ -117,12 +117,12 @@ class ConfigureCommand extends Command
     }
 
     /**
-     * @param class-string<Section> $section
+     * @param  class-string<Section>  $section
      */
     private function enter(string $section): int
     {
         try {
-            $run = new $section();
+            $run = new $section;
             $code = $run->run((bool) $this->option('dry-run'));
             $this->receipt = array_merge($this->receipt, $run->receipt());
 
@@ -150,7 +150,6 @@ class ConfigureCommand extends Command
 
         return $code;
     }
-
 
     /**
      * `Laravel\Prompts` does not fail without a terminal — it returns each

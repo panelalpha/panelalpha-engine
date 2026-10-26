@@ -5,8 +5,8 @@ namespace App\Console\Wizard\Sections;
 use App\Auth\TokenAbilities;
 use App\Console\Prompts\Screen;
 use App\Console\Wizard\ConnectAssistant;
-use App\Console\Wizard\Scopes\CommandScope;
 use App\Console\Wizard\KeepsAReceipt;
+use App\Console\Wizard\Scopes\CommandScope;
 use App\Console\Wizard\Section;
 use App\Console\Wizard\TokenManager;
 use App\Mcp\ToolExposure;
@@ -54,7 +54,7 @@ class McpTokensSection implements Section
 
             Screen::draw(self::label(), sprintf(
                 "Global scope:    %d of %d commands, ceiling %s.\n"
-                . 'Tokens:          %s.',
+                .'Tokens:          %s.',
                 count($current->exposed()),
                 count(ToolRegistry::all()),
                 $current->policy()->mode(),
@@ -85,7 +85,7 @@ class McpTokensSection implements Section
             }
 
             if ($choice === 'global') {
-                $section = new McpGlobalScopeSection();
+                $section = new McpGlobalScopeSection;
                 $code = $section->run($dryRun);
                 $this->receipt = array_merge($this->receipt, $section->receipt());
 
@@ -101,7 +101,7 @@ class McpTokensSection implements Section
                     title: self::label(),
                     dryRun: $dryRun,
                     ability: TokenAbilities::MCP,
-                    scope: new CommandScope(),
+                    scope: new CommandScope,
                     noun: 'an assistant',
                     narrow: 'Change which commands it may call…',
                     mintHint: '`pae connect` prints the whole setup command for a given assistant.',

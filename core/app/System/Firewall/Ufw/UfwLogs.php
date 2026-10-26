@@ -20,7 +20,7 @@ final class UfwLogs
     {
         $entries = [];
         foreach (preg_split('/\R/', $lines) ?: [] as $line) {
-            if (!str_contains($line, '[UFW BLOCK]') || preg_match('/^(\S+)/', $line, $t) !== 1) {
+            if (! str_contains($line, '[UFW BLOCK]') || preg_match('/^(\S+)/', $line, $t) !== 1) {
                 continue;
             }
             $time = self::time($t[1]);
@@ -29,7 +29,7 @@ final class UfwLogs
             foreach ($m as [, $key, $value]) {
                 $f[$key] ??= $value;
             }
-            if ($time === null || !isset($f['SRC'], $f['DST'])) {
+            if ($time === null || ! isset($f['SRC'], $f['DST'])) {
                 continue;
             }
             // Leaving the host (OUT set, IN empty) names where it went; anything
@@ -52,7 +52,7 @@ final class UfwLogs
     }
 
     /**
-     * @param string $offset the host's UTC offset (`date +%:z`): fail2ban writes local time
+     * @param  string  $offset  the host's UTC offset (`date +%:z`): fail2ban writes local time
      * @return list<FirewallLogEntry>
      */
     public static function parseFail2ban(string $lines, string $offset = '+00:00'): array

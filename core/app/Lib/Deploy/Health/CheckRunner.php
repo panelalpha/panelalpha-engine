@@ -3,6 +3,7 @@
 namespace App\Lib\Deploy\Health;
 
 use App\Lib\Deploy\Platform\PlatformMatcher;
+use App\Lib\Deploy\Platform\Probes\ProbeRegistry;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
@@ -34,9 +35,9 @@ final class CheckRunner
     private readonly array $skips;
 
     /**
-     * @param list<HealthCheck> $checks
-     * @param list<array{check: string, reason: string, covered_by: ?string}> $skips
-     *        the manifest's `check_skip` entries
+     * @param  list<HealthCheck>  $checks
+     * @param  list<array{check: string, reason: string, covered_by: ?string}>  $skips
+     *                                                                                  the manifest's `check_skip` entries
      */
     public function __construct(private readonly array $checks, array $skips = [])
     {
@@ -51,7 +52,7 @@ final class CheckRunner
      * The checks for an application with this runtime, plus whatever its
      * manifest added.
      *
-     * @param list<string> $references
+     * @param  list<string>  $references
      */
     public static function for(?string $runtime, array $references = []): self
     {
@@ -61,8 +62,8 @@ final class CheckRunner
     /**
      * The same, plus the checks a source recipe directory ships of its own.
      *
-     * @param list<string> $references
-     * @param list<array{check: string, reason: string, covered_by: ?string}> $skips
+     * @param  list<string>  $references
+     * @param  list<array{check: string, reason: string, covered_by: ?string}>  $skips
      */
     public static function forWithDirectory(
         ?string $runtime,
@@ -83,7 +84,7 @@ final class CheckRunner
         $paths = [];
         foreach ($this->checks as $check) {
             $path = $check->path();
-            if ($path !== HealthCheck::DEFAULT_PATH && !in_array($path, $paths, true)) {
+            if ($path !== HealthCheck::DEFAULT_PATH && ! in_array($path, $paths, true)) {
                 $paths[] = $path;
             }
         }
@@ -111,7 +112,7 @@ final class CheckRunner
      * A check whose path is absent from the map was not fetched and is failing
      * rather than skipped: the fetch did not happen or did not survive.
      *
-     * @param array<string, ProbedResponse> $responses by path
+     * @param  array<string, ProbedResponse>  $responses  by path
      * @return array{serving: string, checks: list<array<string, mixed>>}
      */
     public function runByPath(array $responses, ?string $projectDir): array
@@ -140,7 +141,7 @@ final class CheckRunner
     }
 
     /**
-     * @param array<string, ProbedResponse> $responses by path
+     * @param  array<string, ProbedResponse>  $responses  by path
      * @return list<CheckResult>
      */
     public function resultsByPath(array $responses, ?string $projectDir): array
@@ -155,12 +156,12 @@ final class CheckRunner
                 break;
             }
         }
-        if (!$anyAnswer) {
+        if (! $anyAnswer) {
             return [];
         }
 
         $context = $projectDir !== null && is_dir($projectDir) ? ProjectContext::at($projectDir) : null;
-        $matcher = new PlatformMatcher(\App\Lib\Deploy\Platform\Probes\ProbeRegistry::all());
+        $matcher = new PlatformMatcher(ProbeRegistry::all());
 
         $applies = [];
         foreach ($this->checks as $check) {
@@ -173,10 +174,12 @@ final class CheckRunner
             $skip = $this->honouredSkip($check, $applies);
             if ($skip !== null) {
                 $results[] = CheckResult::notApplicable($check, $skip['reason'], $skip['covered_by']);
+
                 continue;
             }
-            if (!$applies[$check->reference()]) {
+            if (! $applies[$check->reference()]) {
                 $results[] = CheckResult::skipped($check);
+
                 continue;
             }
             $results[] = $this->evaluate($check, $responses[$check->path()] ?? null, $context);
@@ -192,7 +195,7 @@ final class CheckRunner
      * asked. The manifest reader refuses the rest; this is the same rule at the
      * point where a missing cover would otherwise hide an outage.
      *
-     * @param array<string, bool> $applies by reference: asked, not guarded out
+     * @param  array<string, bool>  $applies  by reference: asked, not guarded out
      * @return array{check: string, reason: string, covered_by: ?string}|null
      */
     private function honouredSkip(HealthCheck $check, array $applies): ?array
@@ -204,22 +207,22 @@ final class CheckRunner
 
         $cover = $skip['covered_by'];
 
-        return $cover !== null && ($applies[$cover] ?? false) && !isset($this->skips[$cover]) ? $skip : null;
+        return $cover !== null && ($applies[$cover] ?? false) && ! isset($this->skips[$cover]) ? $skip : null;
     }
 
     /**
-     * @param ?ProbedResponse $response null when nothing was fetched for this
-     *        check's path. Not {@see ProbedResponse::none()}, a fetch that
-     *        reached the application and got nothing -- both cannot pass, and
-     *        both are reported as a failure with the reason, because the
-     *        alternative is a check that silently stops checking.
+     * @param  ?ProbedResponse  $response  null when nothing was fetched for this
+     *                                     check's path. Not {@see ProbedResponse::none()}, a fetch that
+     *                                     reached the application and got nothing -- both cannot pass, and
+     *                                     both are reported as a failure with the reason, because the
+     *                                     alternative is a check that silently stops checking.
      */
     private function evaluate(HealthCheck $check, ?ProbedResponse $response, ?ProjectContext $context): CheckResult
     {
         if ($response === null) {
             return CheckResult::fail(
                 $check,
-                'The check asks about ' . $check->path() . ', which was not fetched.',
+                'The check asks about '.$check->path().', which was not fetched.',
                 'The probe returned no response for this path.',
                 $check->fix,
                 ['url' => $check->path(), 'http_code' => null]
@@ -269,20 +272,20 @@ final class CheckRunner
     private static function holds(HealthCheck $check, ProbedResponse $response): bool
     {
         // Not where this check looks: nothing to object to.
-        if ($check->landing !== [] && !$response->landedUnder($check->landing)) {
+        if ($check->landing !== [] && ! $response->landedUnder($check->landing)) {
             return true;
         }
 
         $expect = $check->expect;
 
-        if (isset($expect['status']) && !$response->statusMatches((array) $expect['status'])) {
+        if (isset($expect['status']) && ! $response->statusMatches((array) $expect['status'])) {
             return false;
         }
         if (isset($expect['status_not']) && $response->statusMatches((array) $expect['status_not'])) {
             return false;
         }
         foreach ((array) ($expect['body'] ?? []) as $needle) {
-            if (!$response->bodyContains((string) $needle)) {
+            if (! $response->bodyContains((string) $needle)) {
                 return false;
             }
         }
@@ -292,7 +295,7 @@ final class CheckRunner
             }
         }
 
-        if ($check->json() !== [] && !self::holdsJson($check, $response)) {
+        if ($check->json() !== [] && ! self::holdsJson($check, $response)) {
             return false;
         }
 
@@ -316,10 +319,10 @@ final class CheckRunner
         }
 
         foreach ($wanted as $key => $expected) {
-            if (!array_key_exists($key, $actual)) {
+            if (! array_key_exists($key, $actual)) {
                 return false;
             }
-            if (!self::memberMatches($actual[$key], $expected)) {
+            if (! self::memberMatches($actual[$key], $expected)) {
                 return false;
             }
         }
@@ -366,11 +369,11 @@ final class CheckRunner
      * runtime group. Takes whether anything answered rather than the response:
      * the verdict is about the application that did answer.
      *
-     * @param list<CheckResult> $results
+     * @param  list<CheckResult>  $results
      */
     private static function serving(bool $anyAnswer, array $results): string
     {
-        if (!$anyAnswer) {
+        if (! $anyAnswer) {
             return self::SERVING_UNKNOWN;
         }
 

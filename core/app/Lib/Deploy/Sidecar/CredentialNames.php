@@ -59,7 +59,7 @@ final class CredentialNames
     ];
 
     /**
-     * @param array<string, string> $environment already-resolved env of the service
+     * @param  array<string, string>  $environment  already-resolved env of the service
      * @return array{prefix: ?string, username: ?string, password: ?string, database: ?string}
      */
     public static function extract(array $environment): array
@@ -103,15 +103,15 @@ final class CredentialNames
      * declaring only root credentials -- Mongo's `_INITDB_ROOT_*` -- is
      * unaffected, and so is one declaring only an application account.
      *
-     * @param array{prefix: ?string, username: ?string, password: ?string, database: ?string} $found
-     * @param array{username: array<string, string>, password: array<string, string>} $tiered
+     * @param  array{prefix: ?string, username: ?string, password: ?string, database: ?string}  $found
+     * @param  array{username: array<string, string>, password: array<string, string>}  $tiered
      * @return array{prefix: ?string, username: ?string, password: ?string, database: ?string}
      */
     private static function pairedAccount(array $found, array $tiered): array
     {
         // The password decides, because it is the half that fails loudly.
         $tier = isset($tiered['password']['app']) ? 'app' : 'root';
-        if (!isset($tiered['password'][$tier])) {
+        if (! isset($tiered['password'][$tier])) {
             return $found;
         }
 
@@ -130,7 +130,7 @@ final class CredentialNames
      * Prefixes whose variables name at least two roles: one shared name proves
      * nothing, two is a server declaring how to initialise itself.
      *
-     * @param list<string> $keys uppercased environment keys
+     * @param  list<string>  $keys  uppercased environment keys
      * @return list<string>
      */
     public static function serverPrefixes(array $keys): array
@@ -151,7 +151,7 @@ final class CredentialNames
      * Whether the variables sharing a prefix describe a connection *to* an
      * engine rather than the engine itself.
      *
-     * @param list<string> $keys
+     * @param  list<string>  $keys
      */
     public static function isClientPrefix(string $prefix, array $keys): bool
     {
@@ -161,11 +161,11 @@ final class CredentialNames
             }
         }
         foreach ($keys as $key) {
-            if (!str_starts_with($key, $prefix)) {
+            if (! str_starts_with($key, $prefix)) {
                 continue;
             }
             foreach (self::CLIENT_MARKERS as $marker) {
-                if (str_ends_with($key, $marker) && !in_array($key, SidecarDialects::serverSettingsFor($prefix), true)) {
+                if (str_ends_with($key, $marker) && ! in_array($key, SidecarDialects::serverSettingsFor($prefix), true)) {
                     return true;
                 }
             }
@@ -180,12 +180,12 @@ final class CredentialNames
      * and `MYSQL_PASSWORD` beside `DB_SERVER_HOST: mysql`. A wildcard or a
      * local address (`MYSQL_ROOT_HOST: '%'`) is a server's own setting.
      *
-     * @param array<string, string> $environment uppercased names
+     * @param  array<string, string>  $environment  uppercased names
      */
     public static function namesARemoteHost(array $environment): bool
     {
         foreach ($environment as $key => $value) {
-            if (!str_ends_with($key, '_HOST') && !str_ends_with($key, '_HOSTNAME')) {
+            if (! str_ends_with($key, '_HOST') && ! str_ends_with($key, '_HOSTNAME')) {
                 continue;
             }
             $host = strtolower(trim(EnvVarDefault::resolve($value), " \"'"));

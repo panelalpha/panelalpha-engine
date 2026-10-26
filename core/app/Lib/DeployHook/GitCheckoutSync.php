@@ -30,16 +30,14 @@ use App\System\Project\Git\CheckoutRedeploy;
  */
 class GitCheckoutSync implements CheckoutSync
 {
-    public function __construct(private readonly CheckoutRedeploy $redeploy)
-    {
-    }
+    public function __construct(private readonly CheckoutRedeploy $redeploy) {}
 
     public function pullAndRebuild(User $user, string $pathKey, ?string $pushedCommit, ?callable $onDeployStarted = null): void
     {
         $project = $user->project();
         $git = $this->checkout($project, $pathKey);
 
-        if (!$git->isDeployManaged()) {
+        if (! $git->isDeployManaged()) {
             $git->pull(ProjectGit::STRATEGY_FF);
 
             return;
@@ -84,7 +82,7 @@ class GitCheckoutSync implements CheckoutSync
             $this->forgetWorkerState();
             $this->redeploy->afterMutation($git, $project, 'push', $commit, $deployLogger);
         } catch (\Throwable $e) {
-            $this->finishIfUnfinished($deployLogger, DeployLogger::STATUS_FAILED, 'Could not update the checkout to the pushed branch: ' . $e->getMessage());
+            $this->finishIfUnfinished($deployLogger, DeployLogger::STATUS_FAILED, 'Could not update the checkout to the pushed branch: '.$e->getMessage());
 
             throw $e;
         }
@@ -98,7 +96,7 @@ class GitCheckoutSync implements CheckoutSync
      */
     private function finishIfUnfinished(?DeployLogger $deployLogger, string $status, ?string $error = null): void
     {
-        if ($deployLogger !== null && !$deployLogger->isFinished()) {
+        if ($deployLogger !== null && ! $deployLogger->isFinished()) {
             $deployLogger->finish($status, $error);
         }
     }

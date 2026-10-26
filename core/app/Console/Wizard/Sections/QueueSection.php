@@ -89,10 +89,10 @@ class QueueSection implements Section
 
     private function setCount(int $current, bool $dryRun): void
     {
-        Screen::draw(self::label() . '  ·  Queue workers');
+        Screen::draw(self::label().'  ·  Queue workers');
         note(sprintf(
             'A number from %d to %d. Deploys, backups and staging jobs all wait in this one '
-            . 'queue, so this is how many of them the engine works on at once.',
+            .'queue, so this is how many of them the engine works on at once.',
             QueueWorkers::MIN,
             QueueWorkers::MAX
         ));
@@ -137,7 +137,7 @@ class QueueSection implements Section
     {
         $value = trim($value);
 
-        if (!ctype_digit($value)) {
+        if (! ctype_digit($value)) {
             return 'Enter a whole number.';
         }
 

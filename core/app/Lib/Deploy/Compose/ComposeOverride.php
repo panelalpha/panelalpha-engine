@@ -20,12 +20,12 @@ use Symfony\Component\Yaml\Yaml;
 final class ComposeOverride
 {
     /**
-     * @param (callable(string): ?string)|null $read project-relative path => contents, for
-     *        the files it `include:`s; without one an include is refused
-     * @param array<string, list<?string>|string> $env what compose may interpolate the file with
-     * @param ?string $accountUser whose ~/.panelalpha a service may bind by its absolute path
+     * @param  (callable(string): ?string)|null  $read  project-relative path => contents, for
+     *                                                  the files it `include:`s; without one an include is refused
+     * @param  array<string, list<?string>|string>  $env  what compose may interpolate the file with
+     * @param  ?string  $accountUser  whose ~/.panelalpha a service may bind by its absolute path
      * @return array{yaml: ?string, removed: list<string>} yaml is null when
-     *         the file cannot be read, and so cannot be checked
+     *                                                     the file cannot be read, and so cannot be checked
      */
     public static function harden(string $raw, ?callable $read = null, array $env = [], ?string $accountUser = null, ?string $projectDir = null): array
     {
@@ -47,12 +47,12 @@ final class ComposeOverride
         // A top-level volume redefined here applies to the base file's services too.
         [$parsed, $removed] = ServiceHardener::withoutVolumeDriverOptions($parsed);
         foreach (is_array($parsed['services'] ?? null) ? $parsed['services'] : [] as $name => $service) {
-            if (!is_array($service)) {
+            if (! is_array($service)) {
                 continue;
             }
             [$clean, $dropped] = self::withoutEscapes($service, $env, $accountUser, $projectDir);
             foreach ($dropped as $what) {
-                $removed[] = $name . ': ' . $what;
+                $removed[] = $name.': '.$what;
             }
             $parsed['services'][$name] = $clean;
         }
@@ -73,7 +73,7 @@ final class ComposeOverride
      * has: compose would bring each back as a fragment with no image (Appwrite's
      * `traefik:` with only `command:`). A file naming none is returned as is.
      *
-     * @param list<string> $names
+     * @param  list<string>  $names
      * @return array{yaml: string, dropped: list<string>}
      */
     public static function withoutServices(string $raw, array $names): array
@@ -95,9 +95,9 @@ final class ComposeOverride
      * it gives no image or build: compose refuses the whole project for one.
      * A recipe written for a service the engine no longer keeps is the case.
      *
-     * @param list<string> $defined services the files layered under it define
+     * @param  list<string>  $defined  services the files layered under it define
      * @return array{yaml: ?string, dropped: list<string>} yaml is null when the
-     *         file cannot be read; unchanged, byte for byte, when nothing is dropped
+     *                                                     file cannot be read; unchanged, byte for byte, when nothing is dropped
      */
     public static function withoutUndefinedServices(string $raw, array $defined): array
     {
@@ -108,14 +108,14 @@ final class ComposeOverride
         $block = $parsed['services'] ?? null;
         $tag = $block instanceof TaggedValue ? $block->getTag() : null;
         $services = $block instanceof TaggedValue ? $block->getValue() : $block;
-        if (!is_array($services)) {
+        if (! is_array($services)) {
             return ['yaml' => $raw, 'dropped' => []];
         }
         $dropped = [];
         foreach ($services as $name => $service) {
             $service = $service instanceof TaggedValue ? $service->getValue() : $service;
             $own = is_array($service) && (isset($service['image']) || isset($service['build']) || isset($service['extends']));
-            if (!$own && !in_array((string) $name, $defined, true)) {
+            if (! $own && ! in_array((string) $name, $defined, true)) {
                 unset($services[$name]);
                 $dropped[] = (string) $name;
             }
@@ -147,8 +147,8 @@ final class ComposeOverride
     }
 
     /**
-     * @param array<string, mixed> $service
-     * @param array<string, list<?string>|string> $env
+     * @param  array<string, mixed>  $service
+     * @param  array<string, list<?string>|string>  $env
      * @return array{0: array<string, mixed>, 1: list<string>}
      */
     private static function withoutEscapes(array $service, array $env, ?string $accountUser, ?string $projectDir): array
@@ -167,14 +167,14 @@ final class ComposeOverride
 
         $dropped = [];
         foreach (array_keys($plain) as $key) {
-            if (!array_key_exists($key, $clean)) {
+            if (! array_key_exists($key, $clean)) {
                 $dropped[] = $key === 'volumes' ? 'every volume (host paths)' : (string) $key;
             }
         }
         if (is_array($plain['volumes'] ?? null) && is_array($clean['volumes'] ?? null)) {
             foreach ($plain['volumes'] as $volume) {
-                if (!in_array($volume, $clean['volumes'], true)) {
-                    $dropped[] = 'volume ' . (is_string($volume) ? $volume : json_encode($volume));
+                if (! in_array($volume, $clean['volumes'], true)) {
+                    $dropped[] = 'volume '.(is_string($volume) ? $volume : json_encode($volume));
                 }
             }
         }

@@ -38,7 +38,7 @@ class VisitorsBreakdownRequest extends FormRequest
         return [
             'start' => ['required', 'date_format:Y-m-d', new DateRangeSpan('end')],
             'end' => 'required|date_format:Y-m-d|after_or_equal:start',
-            'dimension' => 'required|in:' . implode(',', self::DIMENSIONS),
+            'dimension' => 'required|in:'.implode(',', self::DIMENSIONS),
         ];
     }
 }

@@ -2,9 +2,9 @@
 
 namespace App\Lib\Deploy\Inspect\Report;
 
-use App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource;
-use App\Lib\Deploy\Platform\AppConfig\AppConfigLocator;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
+use App\Lib\Deploy\Platform\AppConfig\AppConfigLocator;
+use App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource;
 
 /**
  * The app config that applies to a project, and where it came from.
@@ -22,6 +22,6 @@ final class AppConfigOrigin
      */
     public static function find(string $projectDir, ?string $repoUrl): array
     {
-        return AppConfigLocator::find(new LocalAppConfigSource(), $projectDir, $repoUrl);
+        return AppConfigLocator::find(new LocalAppConfigSource, $projectDir, $repoUrl);
     }
 }

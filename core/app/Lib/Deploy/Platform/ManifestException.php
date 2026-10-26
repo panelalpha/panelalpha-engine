@@ -9,6 +9,4 @@ namespace App\Lib\Deploy\Platform;
  * engine, so a broken one is a packaging bug that should surface on the
  * first request rather than on the one deploy that happens to reach it.
  */
-class ManifestException extends \RuntimeException
-{
-}
+class ManifestException extends \RuntimeException {}

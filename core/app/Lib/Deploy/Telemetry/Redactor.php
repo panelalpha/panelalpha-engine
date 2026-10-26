@@ -2,11 +2,13 @@
 
 namespace App\Lib\Deploy\Telemetry;
 
+use App\Lib\Deploy\DeployLog\DeployLogger;
+
 /**
  * Strip anything that identifies a customer, an account, or a secret from
  * text that is about to leave the customer's server.
  *
- * This is a *stricter* pass than {@see \App\Lib\Deploy\DeployLog\DeployLogger::sanitize()},
+ * This is a *stricter* pass than {@see DeployLogger::sanitize()},
  * and the difference is the whole point. That one is written for "the customer
  * may read this in their own panel", where their own repository path and their
  * own home directory are not secrets. This one is written for "this is leaving
@@ -20,6 +22,7 @@ namespace App\Lib\Deploy\Telemetry;
 class Redactor
 {
     public const MASK = '***';
+
     public const ACCOUNT_PLACEHOLDER = '<account>';
 
     /** Longest single line kept, in bytes. */
@@ -119,7 +122,7 @@ class Redactor
         }
 
         if ($maxBytes !== null && strlen($line) > $maxBytes) {
-            $line = mb_strcut($line, 0, $maxBytes) . '…';
+            $line = mb_strcut($line, 0, $maxBytes).'…';
         }
 
         return $line;
@@ -160,13 +163,13 @@ class Redactor
 
         $text = trim(implode("\n", $lines));
 
-        return strlen($text) > $maxBytes ? mb_strcut($text, 0, $maxBytes) . '…' : $text;
+        return strlen($text) > $maxBytes ? mb_strcut($text, 0, $maxBytes).'…' : $text;
     }
 
     /**
      * Redact a block of log lines, keeping the most recent ones.
      *
-     * @param list<string> $lines
+     * @param  list<string>  $lines
      * @return list<string>
      */
     public static function tail(array $lines, ?string $username = null, ?PrivateRepoMask $repo = null): array
@@ -242,7 +245,7 @@ class Redactor
             return self::line($value, $username);
         }
 
-        if (!is_array($value)) {
+        if (! is_array($value)) {
             // int, float, bool, null. Objects do not appear in these reports;
             // anything else is dropped rather than guessed at.
             return is_scalar($value) || $value === null ? $value : null;
@@ -275,7 +278,7 @@ class Redactor
      */
     private static function namesASecret(string $key): bool
     {
-        return preg_match('/(?:' . self::SECRET_KEY_WORDS . ')/i', $key) === 1;
+        return preg_match('/(?:'.self::SECRET_KEY_WORDS.')/i', $key) === 1;
     }
 
     /**
@@ -310,7 +313,7 @@ class Redactor
     {
         return (string) preg_replace(
             '#([a-z][a-z0-9+.-]*://)[^\s/:@]*(:[^\s/@]*)?@#i',
-            '$1' . self::MASK . '@',
+            '$1'.self::MASK.'@',
             $line
         );
     }
@@ -319,7 +322,7 @@ class Redactor
     {
         return (string) preg_replace(
             '/((?:Authorization|Proxy-Authorization)\s*:\s*(?:Bearer|Basic|Token))\s+\S+/i',
-            '$1 ' . self::MASK,
+            '$1 '.self::MASK,
             $line
         );
     }
@@ -335,8 +338,8 @@ class Redactor
         // whose value is the word "Bearer" — masking the scheme and leaving the
         // token in the clear. maskAuthorizationHeaders() owns that shape.
         return (string) preg_replace(
-            '/(?!(?:Proxy-)?Authorization\s*:)([A-Za-z0-9_.\-]*(?:' . $words . ')[A-Za-z0-9_.\-]*)(["\']?\s*[:=]\s*["\']?)([^\s"\',;]+)/i',
-            '$1$2' . self::MASK,
+            '/(?!(?:Proxy-)?Authorization\s*:)([A-Za-z0-9_.\-]*(?:'.$words.')[A-Za-z0-9_.\-]*)(["\']?\s*[:=]\s*["\']?)([^\s"\',;]+)/i',
+            '$1$2'.self::MASK,
             $line
         );
     }
@@ -427,14 +430,14 @@ class Redactor
     {
         if ($username !== null && $username !== '') {
             $quoted = preg_quote($username, '#');
-            $line = (string) preg_replace('#/home/' . $quoted . '\b#', '/home/' . self::ACCOUNT_PLACEHOLDER, $line);
-            $line = (string) preg_replace('/\b' . $quoted . '\b/', self::ACCOUNT_PLACEHOLDER, $line);
+            $line = (string) preg_replace('#/home/'.$quoted.'\b#', '/home/'.self::ACCOUNT_PLACEHOLDER, $line);
+            $line = (string) preg_replace('/\b'.$quoted.'\b/', self::ACCOUNT_PLACEHOLDER, $line);
         }
 
         // Any other account's home directory, in case one leaks into a message.
         return (string) preg_replace(
             '#/home/[A-Za-z0-9_.\-]+#',
-            '/home/' . self::ACCOUNT_PLACEHOLDER,
+            '/home/'.self::ACCOUNT_PLACEHOLDER,
             $line
         );
     }

@@ -44,7 +44,7 @@ final class GenerationState
      * Whether another process still running wrote $entry a moment ago: a
      * checkout moved aside before a pull takes the deploy lock.
      *
-     * @param array<string, mixed> $entry
+     * @param  array<string, mixed>  $entry
      */
     public static function ownedElsewhere(array $entry, ?int $now = null): bool
     {
@@ -61,7 +61,7 @@ final class GenerationState
 
     public static function path(string $username): string
     {
-        return DeployLogPaths::userDir($username) . '/' . self::FILE;
+        return DeployLogPaths::userDir($username).'/'.self::FILE;
     }
 
     /**
@@ -72,7 +72,7 @@ final class GenerationState
     public static function usernames(): array
     {
         $names = [];
-        foreach (glob(DeployLogPaths::base() . '/*/' . self::FILE) ?: [] as $file) {
+        foreach (glob(DeployLogPaths::base().'/*/'.self::FILE) ?: [] as $file) {
             $names[] = basename(dirname($file));
         }
 
@@ -118,13 +118,13 @@ final class GenerationState
      * ({@see CheckoutAside::moveAside()}), and two renames would drop each other's keys.
      * Without a lock file it writes anyway rather than fail a deploy.
      *
-     * @param callable(): void $change
+     * @param  callable(): void  $change
      */
     private function withLock(callable $change): void
     {
         $path = self::path($this->username);
         self::ensureDirectory($path);
-        $lockPath = $path . '.lock';
+        $lockPath = $path.'.lock';
         $handle = @fopen($lockPath, 'c');
         if ($handle === false) {
             $change();
@@ -142,7 +142,8 @@ final class GenerationState
     }
 
     /**
-     * @param array<string, mixed> $state
+     * @param  array<string, mixed>  $state
+     *
      * @throws \RuntimeException so a record written before an irreversible move is known to have landed
      */
     private function write(array $state): void
@@ -154,8 +155,8 @@ final class GenerationState
             return;
         }
         self::ensureDirectory($path);
-        $tmp = $path . '.' . bin2hex(random_bytes(4));
-        if (@file_put_contents($tmp, json_encode($state, JSON_UNESCAPED_SLASHES)) === false || !@rename($tmp, $path)) {
+        $tmp = $path.'.'.bin2hex(random_bytes(4));
+        if (@file_put_contents($tmp, json_encode($state, JSON_UNESCAPED_SLASHES)) === false || ! @rename($tmp, $path)) {
             @unlink($tmp);
 
             throw new \RuntimeException("Could not write the generation state of {$this->username}.");
@@ -164,7 +165,7 @@ final class GenerationState
 
     private static function ensureDirectory(string $path): void
     {
-        if (!is_dir(dirname($path))) {
+        if (! is_dir(dirname($path))) {
             @mkdir(dirname($path), 0755, true);
         }
     }

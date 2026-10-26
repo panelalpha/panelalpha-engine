@@ -12,24 +12,23 @@ use App\System\Project\PhpHosting;
 final class AbstractApplication extends BaseApplication
 {
     /**
-     * @param list<Domain> $domains
+     * @param  list<Domain>  $domains
      */
     public function __construct(
         private PhpHosting $runtime,
         private string $documentRoot,
         private array $domains,
-    ) {
-    }
+    ) {}
 
     public function id(): string
     {
-        return 'php:' . $this->runtime->username() . ':' . $this->documentRoot;
+        return 'php:'.$this->runtime->username().':'.$this->documentRoot;
     }
 
     public function rootPath(): string
     {
         return $this->runtime->system()->projectHomeDirPath($this->runtime->username())
-            . $this->documentRoot;
+            .$this->documentRoot;
     }
 
     public function documentRoot(): string
@@ -51,8 +50,7 @@ final class AbstractApplication extends BaseApplication
     }
 
     /**
-     * @param list<string> $args
-     *
+     * @param  list<string>  $args
      * @return array{stdout: string, stderr: string, exit_code: int}
      */
     public function runWpCli(array $args): array

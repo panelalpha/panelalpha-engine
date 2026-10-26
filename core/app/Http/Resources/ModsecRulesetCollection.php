@@ -11,8 +11,8 @@ class ModsecRulesetCollection extends ResourceCollection
     public function toArray(Request $request): array
     {
         $labels = [
-            'owasp-crs' => "OWASP Core Rule Set",
-            'panelalpha-wordpress' => "PanelAlpha WordPress hardening",
+            'owasp-crs' => 'OWASP Core Rule Set',
+            'panelalpha-wordpress' => 'PanelAlpha WordPress hardening',
         ];
         $config = Setting::getModsecConfig();
 
@@ -27,7 +27,7 @@ class ModsecRulesetCollection extends ResourceCollection
 
             $data[] = [
                 'name' => $set['name'],
-                'label' => !empty($labels[$set['name']]) ? $labels[$set['name']] : $set['name'],
+                'label' => ! empty($labels[$set['name']]) ? $labels[$set['name']] : $set['name'],
                 'enabled' => in_array($set['name'], $config['enabled_rulesets']),
                 'config_files' => $set['config_files'],
             ];

@@ -100,7 +100,7 @@ final class PhpRuntime implements Runtime
         // the constraint path instead: relax what is installed, not what it is
         // installed on.
         if (($locked = self::lockedPlatform($composerLock)) !== null
-            && !self::lockedPhpContradicted($composerLock)
+            && ! self::lockedPhpContradicted($composerLock)
         ) {
             return new Requirement(
                 'php',
@@ -153,7 +153,7 @@ final class PhpRuntime implements Runtime
     }
 
     /**
-     * @param list<string> $constraints
+     * @param  list<string>  $constraints
      */
     private static function allowsMinor(array $constraints, string $minor): bool
     {
@@ -161,7 +161,7 @@ final class PhpRuntime implements Runtime
             // An unrecognised constraint disqualifies the minor. Reading it as
             // compatible would let a garbage `require.php` select the *oldest*
             // PHP the engine ships.
-            if (self::constraintAllowsVersion($constraint, $minor . '.999999') !== true) {
+            if (self::constraintAllowsVersion($constraint, $minor.'.999999') !== true) {
                 return false;
             }
         }
@@ -229,7 +229,7 @@ final class PhpRuntime implements Runtime
             $requires = $package['require']['php'] ?? null;
             if (is_string($requires)
                 && trim($requires) !== ''
-                && self::constraintAllowsVersion(trim($requires), $locked . '.999999') === false
+                && self::constraintAllowsVersion(trim($requires), $locked.'.999999') === false
             ) {
                 return true;
             }
@@ -255,8 +255,8 @@ final class PhpRuntime implements Runtime
             return null;
         }
         $root = self::decodeObject($composerJson)['require']['php'] ?? null;
-        if (!is_string($root) || trim($root) === ''
-            || self::constraintAllowsVersion(trim($root), $minor . '.999999') !== true
+        if (! is_string($root) || trim($root) === ''
+            || self::constraintAllowsVersion(trim($root), $minor.'.999999') !== true
         ) {
             return null;
         }
@@ -264,9 +264,9 @@ final class PhpRuntime implements Runtime
         foreach (self::decodedPackages($composerLock) as $package) {
             $requires = $package['require']['php'] ?? null;
             if (is_string($requires) && trim($requires) !== ''
-                && self::constraintAllowsVersion(trim($requires), $minor . '.999999') === false
+                && self::constraintAllowsVersion(trim($requires), $minor.'.999999') === false
             ) {
-                return trim(($package['name'] ?? '?') . ' ' . ($package['version'] ?? '')) . ' (php ' . trim($requires) . ')';
+                return trim(($package['name'] ?? '?').' '.($package['version'] ?? '')).' (php '.trim($requires).')';
             }
         }
 
@@ -319,7 +319,7 @@ final class PhpRuntime implements Runtime
     {
         $spec = RuntimeImageCatalog::spec('php', $minor);
 
-        return $spec?->from ?? "php:{$minor}-" . self::IMAGE_VARIANT;
+        return $spec?->from ?? "php:{$minor}-".self::IMAGE_VARIANT;
     }
 
     /**
@@ -415,7 +415,7 @@ final class PhpRuntime implements Runtime
                 return null;
             }
             $matched = true;
-            if (!$tokenResult) {
+            if (! $tokenResult) {
                 return false;
             }
         }
@@ -436,7 +436,7 @@ final class PhpRuntime implements Runtime
                 $requiredParts = explode('.', $match[2]);
 
                 return (int) $candidateParts[0] === (int) $requiredParts[0]
-                    && (!isset($requiredParts[1]) || (int) $candidateParts[1] === (int) $requiredParts[1]);
+                    && (! isset($requiredParts[1]) || (int) $candidateParts[1] === (int) $requiredParts[1]);
             }
 
             return version_compare($version, $required, $operator);
@@ -445,11 +445,11 @@ final class PhpRuntime implements Runtime
             $lower = self::normalizePhpVersion($match[1]);
             $parts = array_map('intval', explode('.', $match[1]));
             if ($token[0] === '^') {
-                $upper = ($parts[0] + 1) . '.0.0';
+                $upper = ($parts[0] + 1).'.0.0';
             } elseif (count($parts) >= 3) {
-                $upper = $parts[0] . '.' . ($parts[1] + 1) . '.0';
+                $upper = $parts[0].'.'.($parts[1] + 1).'.0';
             } else {
-                $upper = ($parts[0] + 1) . '.0.0';
+                $upper = ($parts[0] + 1).'.0.0';
             }
 
             return version_compare($version, $lower, '>=') && version_compare($version, $upper, '<');
@@ -469,10 +469,10 @@ final class PhpRuntime implements Runtime
     {
         $parts = array_map('intval', explode('.', $version));
         if (count($parts) === 1) {
-            return ($parts[0] + 1) . '.0.0';
+            return ($parts[0] + 1).'.0.0';
         }
 
-        return $parts[0] . '.' . ($parts[1] + 1) . '.0';
+        return $parts[0].'.'.($parts[1] + 1).'.0';
     }
 
     /**
@@ -488,7 +488,7 @@ final class PhpRuntime implements Runtime
         $lock = self::decodeObject($composerLock);
         if (isset($lock['packages']) && is_array($lock['packages'])) {
             foreach ($lock['packages'] as $package) {
-                if (!is_array($package) || !isset($package['require']) || !is_array($package['require'])) {
+                if (! is_array($package) || ! isset($package['require']) || ! is_array($package['require'])) {
                     continue;
                 }
                 $maps[] = $package['require'];
@@ -511,14 +511,13 @@ final class PhpRuntime implements Runtime
         return is_array($decoded) ? $decoded : [];
     }
 
-
     private static function minimumPhpVersion(?string $composerJson, ?string $composerLock): string
     {
         // The engine's default, so a host configuring a different one gets it here too.
         $minimum = self::normalizePhpVersion(self::defaultMinor());
         $found = false;
         foreach (self::requireMaps($composerJson, $composerLock) as $require) {
-            if (!isset($require['php']) || !is_string($require['php'])) {
+            if (! isset($require['php']) || ! is_string($require['php'])) {
                 continue;
             }
             $constraintMin = self::constraintMinimumPhp($require['php']);
@@ -543,7 +542,7 @@ final class PhpRuntime implements Runtime
 
         $branchMins = [];
         foreach (preg_split('/\s*\|\|\s*/', $constraint) ?: [] as $part) {
-            if (!is_string($part)) {
+            if (! is_string($part)) {
                 continue;
             }
             $partMin = self::singleConstraintMinimumPhp(trim($part));

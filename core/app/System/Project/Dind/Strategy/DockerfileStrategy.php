@@ -2,12 +2,12 @@
 
 namespace App\System\Project\Dind\Strategy;
 
-use App\System\Project\Dind as DindProject;
 use App\Lib\Deploy\Compose\ComposeHarden;
-use App\Lib\Deploy\Detect\DockerfileFinder;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Compose\RepositoryAppTerminal;
+use App\Lib\Deploy\Detect\DockerfileFinder;
 use App\Lib\Deploy\Source\GitUrl;
+use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\Paths;
 
 /**
@@ -39,7 +39,7 @@ class DockerfileStrategy
      * final, since whether it can be left out depends on what it holds.
      * {@see BuildContextIgnoreWriter}.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     public function keepEngineFilesOutOfContext(array $decision, string $projectDir, ?string $chown): void
     {
@@ -63,7 +63,7 @@ class DockerfileStrategy
     }
 
     /**
-     * @param array{dockerfile: ?string, port_hint: ?int, ...} $decision
+     * @param  array{dockerfile: ?string, port_hint: ?int, ...}  $decision
      */
     public function apply(array $decision, string $projectDir, ?string $chown): void
     {
@@ -119,12 +119,12 @@ class DockerfileStrategy
     private function terminal(string $projectDir, string $dockerfile): array
     {
         $dir = dirname($dockerfile);
-        $dirs = array_unique(['', $dir === '.' ? '' : $dir . '/']);
+        $dirs = array_unique(['', $dir === '.' ? '' : $dir.'/']);
         $files = [];
         foreach ($dirs as $dir) {
             foreach (Paths::composeFileCandidates() as $name) {
-                if (!Paths::isEngineComposeFile($projectDir . '/' . $dir . $name)) {
-                    $files[$dir . $name] = $this->dind->projectTree()->readIn($projectDir, $dir . $name);
+                if (! Paths::isEngineComposeFile($projectDir.'/'.$dir.$name)) {
+                    $files[$dir.$name] = $this->dind->projectTree()->readIn($projectDir, $dir.$name);
                 }
             }
         }
@@ -136,8 +136,8 @@ class DockerfileStrategy
         );
         if ($settings !== []) {
             $this->dind->shell()->logger()?->info(
-                'Running the app with ' . implode(' and ', array_map(static fn (string $k): string => "{$k}: true", array_keys($settings)))
-                . ', as the repository\'s compose file does'
+                'Running the app with '.implode(' and ', array_map(static fn (string $k): string => "{$k}: true", array_keys($settings)))
+                .', as the repository\'s compose file does'
             );
         }
 
@@ -164,7 +164,7 @@ class DockerfileStrategy
      * Kimai picks its Apache variant with `ARG BASE`; without it the default
      * FPM variant is built and its port 9000 speaks FastCGI, not HTTP.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      * @return array<string, string>
      */
     private function buildArgs(array $decision): array
@@ -178,7 +178,7 @@ class DockerfileStrategy
         }
         if ($args !== []) {
             $pairs = array_map(static fn (string $n, string $v): string => "{$n}={$v}", array_keys($args), $args);
-            $this->dind->shell()->logger()?->info('Building the repository Dockerfile with ' . implode(', ', $pairs));
+            $this->dind->shell()->logger()?->info('Building the repository Dockerfile with '.implode(', ', $pairs));
         }
 
         return $args;

@@ -18,7 +18,7 @@ use App\System\Project\PhpHosting\PhpErrorLogConfig;
  */
 class PhpConfigRefreshCommand extends ProjectFleetCommand
 {
-    protected $signature = 'projects:php-config:refresh' . ProjectOptions::SIGNATURE;
+    protected $signature = 'projects:php-config:refresh'.ProjectOptions::SIGNATURE;
 
     protected $description = 'Write the PHP error-log directives into existing PHP hosting projects; each takes effect at its handler\'s next restart';
 
@@ -32,13 +32,13 @@ class PhpConfigRefreshCommand extends ProjectFleetCommand
     protected function applyTo(User $user): void
     {
         $runtime = $user->project(app(System::class))->runtime();
-        if (!$runtime instanceof PhpHosting) {
+        if (! $runtime instanceof PhpHosting) {
             $this->outcome = '  Not a PHP hosting project; nothing to refresh.';
 
             return;
         }
 
-        (new PhpErrorLogConfig())->apply($runtime);
+        (new PhpErrorLogConfig)->apply($runtime);
         $this->outcome = '  Error-log directives written.';
     }
 

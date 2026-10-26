@@ -2,8 +2,8 @@
 
 namespace App\Lib;
 
-use App\System;
 use App\Models\Domain;
+use App\System;
 use InvalidArgumentException;
 
 class HttpAcmeChallengeStore
@@ -23,24 +23,24 @@ class HttpAcmeChallengeStore
 
     public function __construct(?System $system = null)
     {
-        $this->system = $system ?? new System();
+        $this->system = $system ?? new System;
     }
 
     public function basePath(): string
     {
-        return $this->system->engineDirPath() . '/data/webserver/acme-challenges';
+        return $this->system->engineDirPath().'/data/webserver/acme-challenges';
     }
 
     public function domainDir(string $primaryDomain): string
     {
-        return $this->basePath() . '/' . $primaryDomain;
+        return $this->basePath().'/'.$primaryDomain;
     }
 
     public function challengePath(string $primaryDomain, string $token): string
     {
         $this->assertValidToken($token);
 
-        return $this->domainDir($primaryDomain) . '/' . $token;
+        return $this->domainDir($primaryDomain).'/'.$token;
     }
 
     /**
@@ -67,7 +67,7 @@ class HttpAcmeChallengeStore
     public function listTokens(string $primaryDomain): array
     {
         $dir = $this->domainDir($primaryDomain);
-        if (!$this->system->directoryExists($dir)) {
+        if (! $this->system->directoryExists($dir)) {
             return [];
         }
 
@@ -116,7 +116,7 @@ class HttpAcmeChallengeStore
         $this->assertValidToken($token);
         $path = $this->challengePath($primaryDomain, $token);
         $fs = $this->system->filesystem();
-        if (!$fs->fileExists($path)) {
+        if (! $fs->fileExists($path)) {
             return null;
         }
 
@@ -148,7 +148,7 @@ class HttpAcmeChallengeStore
         $fs->makeDirWithParents($dir);
         $fs->filePutContents($this->challengePath($primaryDomain, $token), $content, null, '644');
 
-        return ['became_enabled' => !$wasEnabled];
+        return ['became_enabled' => ! $wasEnabled];
     }
 
     /**
@@ -158,7 +158,7 @@ class HttpAcmeChallengeStore
     {
         $this->assertValidToken($token);
         $path = $this->challengePath($primaryDomain, $token);
-        if (!$this->system->filesystem()->fileExists($path)) {
+        if (! $this->system->filesystem()->fileExists($path)) {
             return ['became_disabled' => false, 'deleted' => false];
         }
 
@@ -167,7 +167,7 @@ class HttpAcmeChallengeStore
         $this->removeDomainDirIfEmpty($primaryDomain);
 
         return [
-            'became_disabled' => $wasEnabled && !$this->enabled($primaryDomain),
+            'became_disabled' => $wasEnabled && ! $this->enabled($primaryDomain),
             'deleted' => true,
         ];
     }
@@ -208,7 +208,7 @@ class HttpAcmeChallengeStore
     public function prune(int $ttlHours = self::DEFAULT_TTL_HOURS): array
     {
         $base = $this->basePath();
-        if (!$this->system->directoryExists($base)) {
+        if (! $this->system->directoryExists($base)) {
             return [];
         }
 
@@ -224,7 +224,7 @@ class HttpAcmeChallengeStore
             '-type',
             'f',
             '-mmin',
-            '+' . $mmin,
+            '+'.$mmin,
             '-delete',
         ]);
 
@@ -240,7 +240,7 @@ class HttpAcmeChallengeStore
             }
 
             $dir = $this->domainDir($domainName);
-            if (!$this->system->directoryExists($dir)) {
+            if (! $this->system->directoryExists($dir)) {
                 continue;
             }
 
@@ -257,7 +257,7 @@ class HttpAcmeChallengeStore
 
     public function assertValidToken(string $token): void
     {
-        if ($token === '' || !preg_match(self::TOKEN_PATTERN, $token)) {
+        if ($token === '' || ! preg_match(self::TOKEN_PATTERN, $token)) {
             throw new InvalidArgumentException('Invalid ACME challenge token');
         }
     }

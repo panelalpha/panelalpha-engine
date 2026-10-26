@@ -19,7 +19,7 @@ class DomainPhpVersion
      */
     public function set(Domain $domain, string $version): void
     {
-        $system = new System();
+        $system = new System;
         $this->ensureInstalled($system, $version);
         $this->ensurePhpHosting($system, $domain);
 
@@ -39,7 +39,7 @@ class DomainPhpVersion
     {
         $versions = $system->php()->listAvailablePhpVersions();
 
-        if (!in_array($version, $versions)) {
+        if (! in_array($version, $versions)) {
             throw ValidationException::withMessages([
                 'version' => 'Invalid value',
             ]);
@@ -53,10 +53,10 @@ class DomainPhpVersion
      */
     private function ensurePhpHosting(System $system, Domain $domain): void
     {
-        if (!$domain->getUser()->project($system)->runtime() instanceof PhpHosting) {
+        if (! $domain->getUser()->project($system)->runtime() instanceof PhpHosting) {
             throw ValidationException::withMessages([
                 'version' => 'The PHP version applies only to PHP hosting projects. '
-                    . 'A dind project runs PHP from its own image; set it there.',
+                    .'A dind project runs PHP from its own image; set it there.',
             ]);
         }
     }

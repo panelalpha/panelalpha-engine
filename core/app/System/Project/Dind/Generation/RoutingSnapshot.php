@@ -4,8 +4,8 @@ namespace App\System\Project\Dind\Generation;
 
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Sidecar\SidecarPasswords;
-use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\AppHealth;
+use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\ProjectBindMounts;
 use Illuminate\Support\Facades\Log;
 
@@ -29,9 +29,7 @@ final class RoutingSnapshot
         SidecarPasswords::DETAILS_KEY,
     ];
 
-    public function __construct(private readonly DindProject $project)
-    {
-    }
+    public function __construct(private readonly DindProject $project) {}
 
     /** Before a redeploy prepares anything; nothing when no app is running. */
     public function take(): void
@@ -60,7 +58,7 @@ final class RoutingSnapshot
     }
 
     /**
-     * @param array<string, mixed> $details
+     * @param  array<string, mixed>  $details
      * @return array<string, mixed>
      */
     public static function pick(array $details): array
@@ -138,7 +136,7 @@ final class RoutingSnapshot
         $port = $user->getAppPort();
         // An earlier redeploy's copy holds the site: it leaves the copy only for a version that answers.
         if ($port !== null && ZeroDowntimeRedeploy::copyHeld($this->project->username())
-            && !GenerationSweep::settleNext($this->project, to: $port, wait: self::COPY_HANDOVER_SECONDS)) {
+            && ! GenerationSweep::settleNext($this->project, to: $port, wait: self::COPY_HANDOVER_SECONDS)) {
             return;
         }
         $entry = $state->get(GenerationState::ROUTES);
@@ -160,7 +158,7 @@ final class RoutingSnapshot
      * Nothing running when the redeploy started: remember it, so a cancel can stop what the redeploy
      * started instead of leaving it up. Not recorded when the containers could not be read.
      *
-     * @param ?array{mounts: list<string>, containers: list<string>, running: list<string>} $read
+     * @param  ?array{mounts: list<string>, containers: list<string>, running: list<string>}  $read
      */
     private function noteStoppedWhenNothingRuns(GenerationState $state, ?array $read): void
     {
@@ -207,7 +205,7 @@ final class RoutingSnapshot
                 $outcome = null;
             }
         } catch (\Throwable $e) {
-            Log::warning("Could not settle the routing of {$this->project->username()}: " . $e->getMessage());
+            Log::warning("Could not settle the routing of {$this->project->username()}: ".$e->getMessage());
 
             return null;
         }
@@ -243,7 +241,7 @@ final class RoutingSnapshot
         }
         $served = $entry['details']['app_port'] ?? null;
         // The previous version does not answer and the copy does: the site stays on the copy.
-        if ($served !== null && !ZeroDowntimeRedeploy::copyHeld($this->project->username())) {
+        if ($served !== null && ! ZeroDowntimeRedeploy::copyHeld($this->project->username())) {
             try {
                 // The new version's port, and a second copy's should its routes not have gone back yet.
                 $from = [(int) ($entry['left'] ?? $this->project->userModel()->getAppPort())];
@@ -253,15 +251,15 @@ final class RoutingSnapshot
                 $this->putHandRulesBack($entry, $from);
                 $this->project->networking()->applyRoutes($this->project->userModel(), (int) $served);
             } catch (\Throwable $e) {
-                Log::warning("Could not route {$this->project->username()} back to its previous version: " . $e->getMessage());
+                Log::warning("Could not route {$this->project->username()} back to its previous version: ".$e->getMessage());
             }
         }
         $state->forget(GenerationState::ROUTES);
     }
 
     /**
-     * @param array<string, mixed> $entry
-     * @param list<int> $from
+     * @param  array<string, mixed>  $entry
+     * @param  list<int>  $from
      */
     private function putHandRulesBack(array $entry, array $from): void
     {

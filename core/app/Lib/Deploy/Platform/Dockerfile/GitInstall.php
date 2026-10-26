@@ -13,7 +13,7 @@ final class GitInstall
     private const APK = 'apk add --no-cache git';
 
     private const APT = 'apt-get update && apt-get install -y --no-install-recommends git'
-        . ' && rm -rf /var/lib/apt/lists/*';
+        .' && rm -rf /var/lib/apt/lists/*';
 
     public static function command(string $baseImage): string
     {

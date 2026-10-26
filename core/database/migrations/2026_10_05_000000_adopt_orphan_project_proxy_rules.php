@@ -18,6 +18,7 @@ return new class extends Migration
             $owner = DB::table('users')->where('username', $rule->upstream_host)->value('username');
             if ($owner === $rule->upstream_host) {
                 DB::table('proxy_rules')->where('id', $rule->id)->update(['username' => $owner]);
+
                 continue;
             }
             Log::warning("Proxy rule {$rule->id} has no project, and its upstream {$rule->upstream_host} names none: it is not served.");

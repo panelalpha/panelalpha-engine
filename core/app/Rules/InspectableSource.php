@@ -22,9 +22,7 @@ final class InspectableSource implements DataAwareRule, ProblemRule
     private array $data = [];
 
     /** @param string $typeField the sibling that may name the kind outright */
-    public function __construct(private readonly string $typeField = 'type')
-    {
-    }
+    public function __construct(private readonly string $typeField = 'type') {}
 
     /** @param array<string, mixed> $data */
     public function setData(array $data): static
@@ -36,7 +34,7 @@ final class InspectableSource implements DataAwareRule, ProblemRule
 
     public function validate(string $attribute, mixed $value, Closure $fail): void
     {
-        if (!is_string($value) || trim($value) === '') {
+        if (! is_string($value) || trim($value) === '') {
             return;
         }
 
@@ -46,9 +44,9 @@ final class InspectableSource implements DataAwareRule, ProblemRule
         if ($type === null) {
             $this->reject([
                 'field' => $attribute,
-                'code' => $attribute . '_unrecognised',
-                'message' => 'Could not tell what this source is. Pass `' . $this->typeField
-                    . '` as git or project.',
+                'code' => $attribute.'_unrecognised',
+                'message' => 'Could not tell what this source is. Pass `'.$this->typeField
+                    .'` as git or project.',
                 'expected' => 'a repository URL or a project name',
                 'examples' => ['https://github.com/owner/repo.git', 'myapp'],
             ], $fail);

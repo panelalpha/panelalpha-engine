@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Platform;
 
+use App\Lib\Deploy\Inspect\Report\StageSchedule;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 
 /**
@@ -16,7 +17,7 @@ use App\Lib\Deploy\Platform\AppConfig\AppConfig;
  * This exists as one function because the answer is consumed in three places —
  * the container entrypoint ({@see StageScript}), the account-side scripts
  * ({@see HostScript}) and the inspection report
- * ({@see \App\Lib\Deploy\Inspect\Report\StageSchedule}) — and the third one is
+ * ({@see StageSchedule}) — and the third one is
  * a *prediction of the first two*. Three copies of this logic would eventually
  * disagree, and the shape of that bug is an endpoint confidently reporting a
  * plan the deploy does not follow.
@@ -52,8 +53,8 @@ final class StageResolver
      * a recipe restating `composer-install` means "instead of", and running
      * both paid for the dependency tree twice.
      *
-     * @param list<PlatformCommand> $manifest
-     * @param list<PlatformCommand> $own
+     * @param  list<PlatformCommand>  $manifest
+     * @param  list<PlatformCommand>  $own
      * @return list<PlatformCommand>
      */
     private static function merge(array $manifest, array $own): array
@@ -61,7 +62,7 @@ final class StageResolver
         $replaced = array_map(static fn (PlatformCommand $c): string => $c->id, $own);
         $kept = array_filter(
             $manifest,
-            static fn (PlatformCommand $c): bool => !in_array($c->id, $replaced, true)
+            static fn (PlatformCommand $c): bool => ! in_array($c->id, $replaced, true)
         );
 
         return array_merge(array_values($kept), $own);
@@ -88,7 +89,7 @@ final class StageResolver
      * may legitimately both call a command `migrate` — the question is which
      * object survived the resolution, not which name it carries.
      *
-     * @param list<PlatformCommand> $appConfigCommands
+     * @param  list<PlatformCommand>  $appConfigCommands
      */
     public static function sourceOf(
         PlatformCommand $command,

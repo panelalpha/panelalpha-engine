@@ -16,8 +16,7 @@ final class FpmApacheStack implements PhpStack
     public function __construct(
         private System $system,
         private ModelsUser $model,
-    ) {
-    }
+    ) {}
 
     public function dockerfileTemplateName(): string
     {
@@ -32,7 +31,7 @@ final class FpmApacheStack implements PhpStack
     public function applySettings(PhpHosting $project): void
     {
         $this->applyPhpFpmSettings($project);
-        (new EnvironmentSetup())->applyRedisSettings($project);
+        (new EnvironmentSetup)->applyRedisSettings($project);
     }
 
     public function entrypointInitScripts(PhpHosting $project): array
@@ -46,9 +45,9 @@ final class FpmApacheStack implements PhpStack
         // apache2ctl's own setup, then Apache in the foreground.
         $services[] = new Service(
             'apache2',
-            '. /etc/apache2/envvars' . "\n"
-                . 'mkdir -p "$APACHE_RUN_DIR" "$APACHE_LOCK_DIR" "$APACHE_LOG_DIR"' . "\n"
-                . 'exec apache2 -DFOREGROUND',
+            '. /etc/apache2/envvars'."\n"
+                .'mkdir -p "$APACHE_RUN_DIR" "$APACHE_LOCK_DIR" "$APACHE_LOG_DIR"'."\n"
+                .'exec apache2 -DFOREGROUND',
             ['20-apache.sh' => 'apache2ctl start'],
         );
 
@@ -106,7 +105,7 @@ final class FpmApacheStack implements PhpStack
     public function rebuildDomain(PhpHosting $project, Domain $domain): void
     {
         $projectDomain = $project->project()->domain($domain);
-        if ($domain->sslEnabled() && !$projectDomain->hasSslCertificate()) {
+        if ($domain->sslEnabled() && ! $projectDomain->hasSslCertificate()) {
             $projectDomain->generateCertificate();
         }
         $this->createDomainConfig($project, $domain);
@@ -146,7 +145,7 @@ final class FpmApacheStack implements PhpStack
 
         $templatesDir = $project->system()->templatesDirPath();
         $templateVars['relative_document_root'] = $domain->getDocumentRoot();
-        $domainConfigFile = $project->system()->projectDirPath($project->username()) . "/apache-sites/{$domainName}.conf";
+        $domainConfigFile = $project->system()->projectDirPath($project->username())."/apache-sites/{$domainName}.conf";
         $templateConfigFile = "{$templatesDir}/virtualHost-apache-user.blade.php";
         $project->system()->filesystem()->makeFileFromTemplate($domainConfigFile, $templateConfigFile, $templateVars);
     }
@@ -156,10 +155,10 @@ final class FpmApacheStack implements PhpStack
      */
     public function listDomains(PhpHosting $project): array
     {
-        $dir = $project->system()->projectDirPath($project->username()) . '/apache-sites';
+        $dir = $project->system()->projectDirPath($project->username()).'/apache-sites';
         $domains = [];
         foreach ((new \FilesystemIterator($dir)) as $file) {
-            if (!($file instanceof \SplFileInfo)) {
+            if (! ($file instanceof \SplFileInfo)) {
                 continue;
             }
             if ($file->getExtension() === 'conf') {
@@ -172,12 +171,12 @@ final class FpmApacheStack implements PhpStack
 
     public function deleteAllDomainsConfigs(PhpHosting $project): void
     {
-        $domainConfigsDir = $project->system()->projectDirPath($project->username()) . '/apache-sites';
+        $domainConfigsDir = $project->system()->projectDirPath($project->username()).'/apache-sites';
         $project->system()->runProcess("sudo rm -rf {$domainConfigsDir}/* {$domainConfigsDir}/.*");
     }
 
     /**
-     * @param array<string> $domainNames
+     * @param  array<string>  $domainNames
      */
     public function deleteDomainsConfigs(PhpHosting $project, array $domainNames): void
     {
@@ -188,8 +187,8 @@ final class FpmApacheStack implements PhpStack
 
     public function deleteDomainConfig(PhpHosting $project, string $domainName): void
     {
-        $dir = $project->system()->projectDirPath($project->username()) . '/apache-sites';
-        $configFile = $dir . '/' . $domainName . '.conf';
+        $dir = $project->system()->projectDirPath($project->username()).'/apache-sites';
+        $configFile = $dir.'/'.$domainName.'.conf';
         $project->system()->exec(['sudo', 'rm', '-f', $configFile]);
     }
 

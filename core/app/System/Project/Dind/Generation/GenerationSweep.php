@@ -39,13 +39,14 @@ final class GenerationSweep
         foreach (GenerationState::usernames() as $username) {
             $user = User::query()->where('username', $username)->first();
             $runtime = $user?->project()->runtime();
-            if (!$runtime instanceof DindProject) {
+            if (! $runtime instanceof DindProject) {
                 @unlink(GenerationState::path($username));
+
                 continue;
             }
             $done = self::settleInterrupted($runtime);
             if ($done !== null && $done !== []) {
-                $settled[] = $username . ': ' . implode(', ', $done);
+                $settled[] = $username.': '.implode(', ', $done);
             }
         }
 
@@ -130,7 +131,7 @@ final class GenerationSweep
     /**
      * What was settled and the line the deploy's log gets, if any; null when the account could not be asked.
      *
-     * @param ?array<string, mixed> $entry {@see RoutingSnapshot::entry()}
+     * @param  ?array<string, mixed>  $entry  {@see RoutingSnapshot::entry()}
      * @return ?array{0: list<string>, 1: ?string}
      */
     private static function settleRecorded(DindProject $project, ?array $entry, ?bool $verdict): ?array
@@ -183,12 +184,12 @@ final class GenerationSweep
         }
 
         try {
-            if (!self::moveTrafficOffTheCopy($project, $state, $next, self::backPort($next, $forward, $to), $wait)) {
+            if (! self::moveTrafficOffTheCopy($project, $state, $next, self::backPort($next, $forward, $to), $wait)) {
                 return false;
             }
             self::discardCopy($project, $next);
         } catch (\Throwable $e) {
-            Log::warning("Could not settle the second generation of {$project->username()}: " . $e->getMessage());
+            Log::warning("Could not settle the second generation of {$project->username()}: ".$e->getMessage());
 
             return false;
         }
@@ -201,7 +202,7 @@ final class GenerationSweep
      * The port all of the copy's traffic goes to: $to, else the one noted, else on $forward the
      * routed port. Null to send each of the copy's ports back where it came from.
      *
-     * @param array<string, mixed> $next the NEXT entry
+     * @param  array<string, mixed>  $next  the NEXT entry
      */
     private static function backPort(array $next, bool $forward, ?int $to): ?int
     {
@@ -214,7 +215,7 @@ final class GenerationSweep
      * False when the copy stays, as it serves while the port its traffic would go to does not answer;
      * that port is then noted for the next call.
      *
-     * @param array<string, mixed> $next the NEXT entry
+     * @param  array<string, mixed>  $next  the NEXT entry
      */
     private static function moveTrafficOffTheCopy(DindProject $project, GenerationState $state, array $next, ?int $back, ?int $wait): bool
     {
@@ -238,7 +239,7 @@ final class GenerationSweep
     }
 
     /**
-     * @param array<string, mixed> $next the NEXT entry
+     * @param  array<string, mixed>  $next  the NEXT entry
      * @return array<int, int> the copy's port => where its traffic goes
      */
     private static function trafficMap(array $next, ?int $back): array
@@ -265,7 +266,7 @@ final class GenerationSweep
      * The port traffic would go to, when it does not answer while one of the copy's does; else null and
      * traffic moves. A copy that answers nothing either holds nothing worth keeping.
      *
-     * @param array<int, int> $map the copy's port => where its traffic would go
+     * @param  array<int, int>  $map  the copy's port => where its traffic would go
      */
     private static function silentWhileTheCopyServes(DindProject $project, array $map, int $wait): ?int
     {
@@ -326,7 +327,7 @@ final class GenerationSweep
      * What serves after a redeploy that did not finish as a success, and the
      * line its log gets. Null when the account could not be asked.
      *
-     * @param array<string, mixed> $entry {@see RoutingSnapshot::entry()}
+     * @param  array<string, mixed>  $entry  {@see RoutingSnapshot::entry()}
      * @return ?array{0: list<string>, 1: string}
      */
     private static function recover(DindProject $project, array $entry): ?array
@@ -350,11 +351,11 @@ final class GenerationSweep
         $restorable = $previousVersion->restorable();
         $port = $project->userModel()->getAppPort() ?? $served;
         $silent = null;
-        if ($gated || !$restorable) {
+        if ($gated || ! $restorable) {
             $silent = ZeroDowntimeRedeploy::answersWithin($project, $port, self::$newAnswerSeconds);
         }
 
-        if (self::decide(false, $gated, $restorable, $gated || !$restorable ? $silent === null : null) === self::RESTORE) {
+        if (self::decide(false, $gated, $restorable, $gated || ! $restorable ? $silent === null : null) === self::RESTORE) {
             return self::restartPrevious($project, $previousVersion, $gated, $silent, $previous, $served);
         }
 
@@ -373,10 +374,10 @@ final class GenerationSweep
             ? "the new version passed its health check but no longer answers ({$silent})"
             : 'the new version had not passed its health check';
 
-        return [$done, "The redeploy stopped before it finished, after the new version replaced the running one: "
-            . "the {$previous} was started again on port {$served}, because {$why}"
-            . ($failure === null ? '; it answers' : "; it does not answer: {$failure}")
-            . ($kept ? '. The new version\'s second copy keeps serving the site until it does' : '')];
+        return [$done, 'The redeploy stopped before it finished, after the new version replaced the running one: '
+            ."the {$previous} was started again on port {$served}, because {$why}"
+            .($failure === null ? '; it answers' : "; it does not answer: {$failure}")
+            .($kept ? '. The new version\'s second copy keeps serving the site until it does' : '')];
     }
 
     /**
@@ -394,24 +395,24 @@ final class GenerationSweep
 
         $done = self::settleHeld($project, null, forward: true);
         if (ZeroDowntimeRedeploy::copyHeld($project->username())) {
-            return [$done, "The redeploy stopped before it finished: the {$new} does not answer on port {$port}" . ($silent === null ? '' : " ({$silent})") . ", and the previous one had been replaced "
-                . 'and cannot be started again, so the new version\'s second copy keeps serving the site until the app answers'];
+            return [$done, "The redeploy stopped before it finished: the {$new} does not answer on port {$port}".($silent === null ? '' : " ({$silent})").', and the previous one had been replaced '
+                .'and cannot be started again, so the new version\'s second copy keeps serving the site until the app answers'];
         }
         if ($silent !== null && ZeroDowntimeRedeploy::answersWithin($project, $port, 0) === null) {
             $silent = null;
         }
 
         return [$done, "The redeploy stopped before it finished: the {$new} serves on port {$port}, because {$why}"
-            . ($silent === null ? '; it answers' : "; it does not answer: {$silent}")];
+            .($silent === null ? '; it answers' : "; it does not answer: {$silent}")];
     }
 
     private static function name(string $which, mixed $commit, ?string $image): string
     {
         if (is_string($commit) && $commit !== '') {
-            return "{$which} version (commit " . substr($commit, 0, 7) . ')';
+            return "{$which} version (commit ".substr($commit, 0, 7).')';
         }
 
-        return $image === null ? "{$which} version" : "{$which} version (image " . substr(preg_replace('/^sha256:/', '', $image) ?? '', 0, 12) . ')';
+        return $image === null ? "{$which} version" : "{$which} version (image ".substr(preg_replace('/^sha256:/', '', $image) ?? '', 0, 12).')';
     }
 
     /** The image the app itself ran: one a build named, rather than a sidecar's from a registry. */
@@ -419,7 +420,7 @@ final class GenerationSweep
     {
         $noted = (new ServingImages($project))->noted();
         foreach ($noted as $container) {
-            if (!str_contains($container['ref'], '/') && !str_contains($container['ref'], ':')) {
+            if (! str_contains($container['ref'], '/') && ! str_contains($container['ref'], ':')) {
                 return $container['image'];
             }
         }
@@ -452,7 +453,7 @@ final class GenerationSweep
     private static function logSettled(DindProject $project, array $done): void
     {
         if ($done !== []) {
-            Log::info("Settled what a redeploy of {$project->username()} left: " . implode(', ', $done));
+            Log::info("Settled what a redeploy of {$project->username()} left: ".implode(', ', $done));
         }
     }
 }

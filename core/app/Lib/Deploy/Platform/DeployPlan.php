@@ -27,15 +27,14 @@ final class DeployPlan
     public const MAX_TIMEOUT = JobBudget::COMMAND_SECONDS;
 
     /**
-     * @param array<string, list<PlatformCommand>> $stages stage => commands,
-     *        holding only the stages the request actually named
+     * @param  array<string, list<PlatformCommand>>  $stages  stage => commands,
+     *                                                        holding only the stages the request actually named
      */
-    private function __construct(private readonly array $stages)
-    {
-    }
+    private function __construct(private readonly array $stages) {}
 
     /**
-     * @param mixed $raw the `stages` field as it arrived
+     * @param  mixed  $raw  the `stages` field as it arrived
+     *
      * @throws ManifestException on anything this cannot turn into commands
      */
     public static function fromArray(mixed $raw): ?self
@@ -43,7 +42,7 @@ final class DeployPlan
         if ($raw === null || $raw === []) {
             return null;
         }
-        if (!is_array($raw) || array_is_list($raw)) {
+        if (! is_array($raw) || array_is_list($raw)) {
             throw new ManifestException(
                 "'stages' must be an object keyed by stage name, e.g. {\"upgrade\": [...]}"
             );
@@ -52,10 +51,10 @@ final class DeployPlan
         $stages = [];
         foreach ($raw as $stage => $commands) {
             $stage = is_string($stage) ? strtolower(trim($stage)) : '';
-            if (!PlatformStage::isValid($stage)) {
+            if (! PlatformStage::isValid($stage)) {
                 throw new ManifestException(
                     "stages: '{$stage}' is not a stage; expected one of "
-                    . implode(', ', PlatformStage::ALL)
+                    .implode(', ', PlatformStage::ALL)
                 );
             }
 
@@ -67,6 +66,7 @@ final class DeployPlan
 
     /**
      * @return list<PlatformCommand>
+     *
      * @throws ManifestException
      */
     private static function readStage(string $stage, mixed $commands): array
@@ -92,14 +92,14 @@ final class DeployPlan
     /** @throws ManifestException */
     private static function assertCommandList(string $stage, mixed $commands): void
     {
-        if (!is_array($commands) || !array_is_list($commands)) {
+        if (! is_array($commands) || ! array_is_list($commands)) {
             throw new ManifestException(
                 "stages.{$stage}: must be a list of commands, or [] to run nothing in this stage"
             );
         }
         if (count($commands) > self::MAX_COMMANDS_PER_STAGE) {
             throw new ManifestException(
-                "stages.{$stage}: at most " . self::MAX_COMMANDS_PER_STAGE . ' commands'
+                "stages.{$stage}: at most ".self::MAX_COMMANDS_PER_STAGE.' commands'
             );
         }
     }
@@ -112,7 +112,7 @@ final class DeployPlan
      */
     private static function readCommand(string $stage, int $index, mixed $command, string $where): PlatformCommand
     {
-        if (!is_array($command)) {
+        if (! is_array($command)) {
             throw new ManifestException("{$where}: must be an object with a 'run'");
         }
 
@@ -126,7 +126,8 @@ final class DeployPlan
      * Two serve commands would race for one port. None is allowed: an emptied
      * start stage means the container runs nothing.
      *
-     * @param array<int, PlatformCommand> $commands
+     * @param  array<int, PlatformCommand>  $commands
+     *
      * @throws ManifestException
      */
     private static function assertAtMostOneServe(string $stage, array $commands): void
@@ -141,7 +142,8 @@ final class DeployPlan
      * Bounds the manifest parser does not check, because a manifest is written
      * by us and a plan arrives over HTTP.
      *
-     * @param array<string, mixed> $command
+     * @param  array<string, mixed>  $command
+     *
      * @throws ManifestException
      */
     private static function assertBounds(array $command, string $where): void
@@ -149,14 +151,14 @@ final class DeployPlan
         $run = $command['run'] ?? null;
         if (is_string($run) && strlen($run) > self::MAX_RUN_LENGTH) {
             throw new ManifestException(
-                "{$where}: 'run' is longer than " . self::MAX_RUN_LENGTH . ' characters'
+                "{$where}: 'run' is longer than ".self::MAX_RUN_LENGTH.' characters'
             );
         }
 
         $timeout = $command['timeout'] ?? null;
         if (is_int($timeout) && $timeout > self::MAX_TIMEOUT) {
             throw new ManifestException(
-                "{$where}: 'timeout' may not exceed " . self::MAX_TIMEOUT . ' seconds'
+                "{$where}: 'timeout' may not exceed ".self::MAX_TIMEOUT.' seconds'
             );
         }
 
@@ -206,12 +208,12 @@ final class DeployPlan
      * `role` decides which string a command lands in — `dependencies` above the
      * source copy so BuildKit can cache it, `assets` below.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      * @return array<string, mixed>
      */
     public function applyToDecision(array $decision): array
     {
-        if (!$this->definesStage(PlatformStage::BUILD)) {
+        if (! $this->definesStage(PlatformStage::BUILD)) {
             return $decision;
         }
 

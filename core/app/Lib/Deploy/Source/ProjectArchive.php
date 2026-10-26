@@ -27,7 +27,7 @@ class ProjectArchive
     }
 
     /**
-     * @param string $listing the output of {@see topLevelArgv()} for $dir
+     * @param  string  $listing  the output of {@see topLevelArgv()} for $dir
      */
     public static function findSingleDir(string $dir, string $listing): ?string
     {
@@ -43,7 +43,7 @@ class ProjectArchive
             if ($type !== 'd' || $found !== null) {
                 return null;
             }
-            $found = rtrim($dir, '/') . '/' . $name;
+            $found = rtrim($dir, '/').'/'.$name;
         }
 
         return $found;

@@ -20,7 +20,8 @@ class UserVerifyNewUsernameRequest extends FormRequest
     public function rules()
     {
         /** @var string $rule */
-        $rule = (new UserStoreRequest())->rules()['username'];
+        $rule = (new UserStoreRequest)->rules()['username'];
+
         return [
             'username' => $rule,
         ];

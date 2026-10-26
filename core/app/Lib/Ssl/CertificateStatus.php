@@ -2,6 +2,8 @@
 
 namespace App\Lib\Ssl;
 
+use App\System\Project\Domain;
+
 /**
  * What a certificate actually is, in the words something can act on.
  *
@@ -59,9 +61,9 @@ final class CertificateStatus
      *   not_after?: int|null,
      *   domains?: list<string>,
      *   chain_trusted?: ?bool,
-     * } $cert as {@see \App\System\Project\Domain::getSslCertificateInfo()} returns it
-     * @param string $domain the name actually being served
-     * @param int|null $now unix time, for tests
+     * } $cert as {@see Domain::getSslCertificateInfo()} returns it
+     * @param  string  $domain  the name actually being served
+     * @param  int|null  $now  unix time, for tests
      * @return array{
      *   status: string,
      *   issuer: string,
@@ -119,7 +121,7 @@ final class CertificateStatus
         if ($now < $notBefore) {
             return self::NOT_YET_VALID;
         }
-        if (!$covers) {
+        if (! $covers) {
             return self::DOMAIN_MISMATCH;
         }
 
@@ -138,7 +140,7 @@ final class CertificateStatus
      * of the two distinguished names, which is enough here: an authority's
      * common name is its own ("R11", "E5"), never the subject's.
      *
-     * @param array<string, mixed> $cert
+     * @param  array<string, mixed>  $cert
      */
     private static function isSelfSigned(array $cert): bool
     {
@@ -149,7 +151,7 @@ final class CertificateStatus
     }
 
     /**
-     * @param array<string, mixed> $cert
+     * @param  array<string, mixed>  $cert
      */
     private static function issuer(array $cert): string
     {
@@ -169,29 +171,29 @@ final class CertificateStatus
      * `*.example.com` is `app.example.com` and neither `example.com` nor
      * `a.b.example.com`.
      *
-     * @param mixed $names
+     * @param  mixed  $names
      */
     private static function covers($names, string $domain): bool
     {
         $domain = strtolower(trim($domain));
-        if ($domain === '' || !is_array($names)) {
+        if ($domain === '' || ! is_array($names)) {
             return false;
         }
 
         foreach ($names as $name) {
-            if (!is_string($name)) {
+            if (! is_string($name)) {
                 continue;
             }
             $name = strtolower(trim($name));
             if ($name === $domain) {
                 return true;
             }
-            if (!str_starts_with($name, '*.')) {
+            if (! str_starts_with($name, '*.')) {
                 continue;
             }
             $suffix = substr($name, 1);
             if (str_ends_with($domain, $suffix)
-                && !str_contains(substr($domain, 0, -strlen($suffix)), '.')
+                && ! str_contains(substr($domain, 0, -strlen($suffix)), '.')
                 && strlen($domain) > strlen($suffix)
             ) {
                 return true;
@@ -202,7 +204,7 @@ final class CertificateStatus
     }
 
     /**
-     * @param mixed $value
+     * @param  mixed  $value
      */
     private static function timestamp($value): ?int
     {

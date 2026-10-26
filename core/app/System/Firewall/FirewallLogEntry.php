@@ -6,7 +6,9 @@ namespace App\System\Firewall;
 final class FirewallLogEntry
 {
     public const BLOCKED = 'blocked';
+
     public const BAN = 'ban';
+
     public const UNBAN = 'unban';
 
     public function __construct(
@@ -19,8 +21,7 @@ final class FirewallLogEntry
         public readonly ?string $port = null,
         // The fail2ban jail, for a ban.
         public readonly ?string $jail = null,
-    ) {
-    }
+    ) {}
 
     /**
      * @return array{time: string, type: string, address: string, direction: ?string, protocol: ?string, port: ?string, jail: ?string}

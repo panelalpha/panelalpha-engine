@@ -23,12 +23,14 @@ class DomainsShow extends Command
         $name = strtolower(trim((string) $this->argument('domain')));
         if ($name === '') {
             $this->error('Domain name is required.');
+
             return 1;
         }
 
         $domain = Domain::findByNameOrAlias($name);
-        if (!$domain) {
+        if (! $domain) {
             $this->error("Domain '{$name}' not found.");
+
             return 1;
         }
         $domain->loadMissing('user');
@@ -38,7 +40,7 @@ class DomainsShow extends Command
         $aliases = $domain->getAliases();
         $docRootRel = $domain->getDocumentRoot();
         $docRootAbs = $user
-            ? rtrim($user->project()->homeDirPath(), '/') . $docRootRel
+            ? rtrim($user->project()->homeDirPath(), '/').$docRootRel
             : $docRootRel;
 
         $serverNames = array_values(array_unique(array_filter(array_merge(
@@ -61,9 +63,10 @@ class DomainsShow extends Command
 
         $proxyPorts = $rules->map(static function (ProxyRule $rule): string {
             $line = "{$rule->listen_port} -> {$rule->upstream_host}:{$rule->upstream_port}";
-            if (!$rule->enabled) {
+            if (! $rule->enabled) {
                 $line .= ' (disabled)';
             }
+
             return $line;
         })->all();
 
@@ -93,7 +96,7 @@ class DomainsShow extends Command
         if ($tunnels !== []) {
             $this->comment(
                 'Tunnels expose public hostnames via the provider (Cloudflare bypasses nginx). '
-                . 'ProxyRules remain the source of truth for the upstream port.'
+                .'ProxyRules remain the source of truth for the upstream port.'
             );
         } else {
             $this->comment(

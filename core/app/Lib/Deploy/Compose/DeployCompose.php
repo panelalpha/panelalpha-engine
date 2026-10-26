@@ -6,8 +6,8 @@ use App\Lib\Deploy\CacheManager\ImageTransfer;
 use App\Lib\Deploy\DetectProjectStrategy;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
 use App\Lib\Deploy\Platform\PlatformManifest;
-use App\Lib\Deploy\Platform\Runtime\Images;
 use App\Lib\Deploy\Platform\Runtime\HostRunProject;
+use App\Lib\Deploy\Platform\Runtime\Images;
 use App\Lib\Deploy\Platform\Runtime\StandaloneNodeServe;
 use App\Lib\Deploy\Platform\Strategies;
 use Symfony\Component\Yaml\Yaml;
@@ -77,7 +77,7 @@ class DeployCompose
             'ports' => [self::STATIC_HOST_PORT],
             'volumes' => [
                 './:/usr/share/nginx/html/:ro',
-                './' . NginxConfig::FILENAME . ':/etc/nginx/conf.d/default.conf:ro',
+                './'.NginxConfig::FILENAME.':/etc/nginx/conf.d/default.conf:ro',
             ],
             'labels' => [GeneratedCompose::LABEL => DetectProjectStrategy::COMPOSE_GENERATED_LABEL],
         ]);
@@ -99,7 +99,7 @@ class DeployCompose
     {
         $service = [
             'build' => self::buildContext($dockerfile, ComposeValues::stringMap($decision['build_args'] ?? null)),
-            'ports' => [self::hostPortFor($port) . ':' . $port],
+            'ports' => [self::hostPortFor($port).':'.$port],
             'restart' => 'unless-stopped',
             'labels' => [GeneratedCompose::LABEL => 'dockerfile'],
             'env_file' => ['.env'],
@@ -119,8 +119,8 @@ class DeployCompose
      * Tag the build with the name a sibling service refers to it by (dpaste's
      * `migration: image: app`), or Compose refuses with `pull access denied`.
      *
-     * @param array<string, mixed> $service
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $service
+     * @param  array<string, mixed>  $decision
      * @return array<string, mixed>
      */
     private static function withBuiltImageTag(array $service, array $decision): array
@@ -137,8 +137,8 @@ class DeployCompose
      * The volumes the file's own app service mounted, each declared: the replacement
      * serves the same app, and Compose refuses a mount of an undeclared volume.
      *
-     * @param array<string, mixed> $service
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $service
+     * @param  array<string, mixed>  $decision
      * @return array{0: array<string, mixed>, 1: array<string, mixed>}
      */
     private static function withAppMounts(array $service, array $decision): array
@@ -162,8 +162,8 @@ class DeployCompose
      * `tty` / `stdin_open` as the repository's own service set them: a CMD ending
      * in `exec bash` exits at once without a terminal.
      *
-     * @param array<string, mixed> $service
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $service
+     * @param  array<string, mixed>  $decision
      * @return array<string, mixed>
      */
     private static function withTerminal(array $service, array $decision): array
@@ -180,12 +180,12 @@ class DeployCompose
     /**
      * Compose volume strings, from a decision value that may be anything.
      *
-     * @param mixed $value
+     * @param  mixed  $value
      * @return list<string>
      */
     private static function stringMounts($value): array
     {
-        if (!is_array($value)) {
+        if (! is_array($value)) {
             return [];
         }
         $mounts = [];
@@ -206,7 +206,7 @@ class DeployCompose
      */
     private static function builtImageName(mixed $declared): ?string
     {
-        if (!is_string($declared)) {
+        if (! is_string($declared)) {
             return null;
         }
         $name = trim($declared);
@@ -217,7 +217,7 @@ class DeployCompose
         $colon = strrpos($name, ':');
         $repository = $colon === false ? $name : substr($name, 0, $colon);
         $tag = $colon === false ? null : substr($name, $colon + 1);
-        if (!self::isSafeTag($repository) || ($tag !== null && !self::isSafeTag($tag))) {
+        if (! self::isSafeTag($repository) || ($tag !== null && ! self::isSafeTag($tag))) {
             return null;
         }
 
@@ -246,7 +246,7 @@ class DeployCompose
     private static function appServiceImageName(array $services): ?string
     {
         $app = $services[GeneratedCompose::APP_SERVICE] ?? null;
-        if (!is_array($app) || !isset($app['build'])) {
+        if (! is_array($app) || ! isset($app['build'])) {
             return null;
         }
 
@@ -257,13 +257,13 @@ class DeployCompose
      * The tag of the first build service a sibling's `image:` refers to. Both sides
      * are normalised, so an untagged name and `:latest` compare equal.
      *
-     * @param array<mixed> $services
+     * @param  array<mixed>  $services
      */
     private static function referencedBuildImageName(array $services): ?string
     {
         $referenced = [];
         foreach ($services as $service) {
-            if (!is_array($service) || isset($service['build'])) {
+            if (! is_array($service) || isset($service['build'])) {
                 continue;
             }
             $image = ImageTransfer::normalizeImageRef($service['image'] ?? null);
@@ -272,7 +272,7 @@ class DeployCompose
             }
         }
         foreach ($services as $service) {
-            if (!is_array($service) || !isset($service['build'])) {
+            if (! is_array($service) || ! isset($service['build'])) {
                 continue;
             }
             $declared = self::builtImageName($service['image'] ?? null);
@@ -286,7 +286,7 @@ class DeployCompose
     }
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     public static function framework(array $decision, int $port, ?string $publicUrl = null): string
     {
@@ -309,10 +309,10 @@ class DeployCompose
      * dozen sidecars do not serialise a dozen host pulls. A name the file builds
      * itself is the build's own tag, not something a registry has.
      *
-     * @param list<string>|null $activeProfiles when given, a service behind
-     *        any other `profiles:` is skipped: `compose up` will not start it
-     * @param array<string, list<?string>|string>|null $env when given, `image:`
-     *        is interpolated as Compose would ({@see resolvedImageRef()})
+     * @param  list<string>|null  $activeProfiles  when given, a service behind
+     *                                             any other `profiles:` is skipped: `compose up` will not start it
+     * @param  array<string, list<?string>|string>|null  $env  when given, `image:`
+     *                                                         is interpolated as Compose would ({@see resolvedImageRef()})
      * @return list<string>
      */
     public static function imageRefs(string $composeYaml, int $limit = self::IMAGE_REF_LIMIT, ?array $activeProfiles = null, ?array $env = null): array
@@ -322,7 +322,7 @@ class DeployCompose
 
         $images = [];
         foreach ($services as $service) {
-            if (isset($service['build']) || !self::isActive($service, $activeProfiles)) {
+            if (isset($service['build']) || ! self::isActive($service, $activeProfiles)) {
                 continue;
             }
             $image = self::serviceImageRef($service, $env);
@@ -339,8 +339,8 @@ class DeployCompose
     }
 
     /**
-     * @param array<string, mixed> $service
-     * @param list<string>|null $activeProfiles null: every service counts
+     * @param  array<string, mixed>  $service
+     * @param  list<string>|null  $activeProfiles  null: every service counts
      */
     private static function isActive(array $service, ?array $activeProfiles): bool
     {
@@ -355,15 +355,15 @@ class DeployCompose
     /**
      * Every normalized image name this compose file builds for itself.
      *
-     * @param list<array<string, mixed>> $services
-     * @param array<string, list<?string>|string>|null $env
+     * @param  list<array<string, mixed>>  $services
+     * @param  array<string, list<?string>|string>|null  $env
      * @return list<string> lowercase
      */
     public static function imagesBuiltHere(array $services, ?array $env = null): array
     {
         $names = [];
         foreach ($services as $service) {
-            if (!is_array($service) || !isset($service['build'])) {
+            if (! is_array($service) || ! isset($service['build'])) {
                 continue;
             }
             $image = self::serviceImageRef($service, $env);
@@ -378,8 +378,8 @@ class DeployCompose
     /**
      * A service's `image:`, interpolated when $env is given, else only normalised.
      *
-     * @param array<string, mixed> $service
-     * @param array<string, list<?string>|string>|null $env
+     * @param  array<string, mixed>  $service
+     * @param  array<string, list<?string>|string>|null  $env
      */
     private static function serviceImageRef(array $service, ?array $env): ?string
     {
@@ -394,7 +394,7 @@ class DeployCompose
      * normalised. Null when the value cannot be told for certain or is not a
      * reference docker accepts.
      *
-     * @param array<string, list<?string>|string> $env
+     * @param  array<string, list<?string>|string>  $env
      */
     public static function resolvedImageRef(mixed $image, array $env = []): ?string
     {
@@ -413,7 +413,7 @@ class DeployCompose
      * Does this project run our stock Node image against its own directory, with
      * nothing built?
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     public static function isHostRunProject(array $decision): bool
     {
@@ -427,7 +427,7 @@ class DeployCompose
      * bundled server or as a mounted project directory? No Dockerfile is written
      * and the install and build run on the host.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     public static function isHostCompiled(array $decision): bool
     {
@@ -435,7 +435,7 @@ class DeployCompose
     }
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     public static function isStandaloneNodeOutput(array $decision): bool
     {
@@ -448,7 +448,7 @@ class DeployCompose
      * The `build:` value: a bare context path when neither the file name nor a
      * build arg forces the mapping form. `args` appears only when there are some.
      *
-     * @param array<string, string> $args
+     * @param  array<string, string>  $args
      * @return array<string, mixed>|string `.` when the file is the default one
      */
     private static function buildContext(string $dockerfile, array $args = []): array|string
@@ -478,7 +478,7 @@ class DeployCompose
      * `environment`, `depends_on` and `extra_hosts`, each only when set. Extra hosts
      * pin the account's own MySQL server, whose name resolves only on the host.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      * @return array<string, mixed>
      */
     private static function optional(array $decision): array
@@ -506,8 +506,8 @@ class DeployCompose
      * A path something already mounts is left as it is; two paths folding onto one
      * slug get a volume each.
      *
-     * @param array<string, mixed> $service
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $service
+     * @param  array<string, mixed>  $decision
      * @return array{0: array<string, mixed>, 1: array<string, mixed>}
      */
     private static function withDeclaredVolumes(array $service, array $decision): array
@@ -526,7 +526,7 @@ class DeployCompose
                 continue;
             }
             $name = $names[$path];
-            $mounts[] = $name . ':' . $path;
+            $mounts[] = $name.':'.$path;
             $volumes[$name] ??= null;
         }
 
@@ -539,7 +539,7 @@ class DeployCompose
     }
 
     /**
-     * @param list<string> $mounts
+     * @param  list<string>  $mounts
      * @return array<string, true> container path => true
      */
     private static function mountTargets(array $mounts): array

@@ -54,7 +54,7 @@ class CheckAccountMapping extends Command
      * Recreate the running sysbox accounts whose image is unmapped; a privileged
      * account has no mapping to lose.
      *
-     * @param array<string, string> $running runtime by account name
+     * @param  array<string, string>  $running  runtime by account name
      * @return array{0: int, 1: int, 2: int} checked, unmapped, recreated
      */
     private function checkRunning(System $system, array $running, bool $dryRun): array
@@ -83,7 +83,7 @@ class CheckAccountMapping extends Command
      * Recreate the sysbox accounts stopped by a start that failed on an
      * unmapped image: only a new container starts.
      *
-     * @param array<string, array{runtime: string, error: string}> $failedStarts
+     * @param  array<string, array{runtime: string, error: string}>  $failedStarts
      * @return array{0: int, 1: int} refused, recreated
      */
     private function checkFailedStarts(System $system, array $failedStarts, bool $dryRun): array
@@ -91,7 +91,7 @@ class CheckAccountMapping extends Command
         $refused = 0;
         $recreated = 0;
         foreach ($failedStarts as $name => $start) {
-            if ($start['runtime'] !== AccountRuntime::SYSBOX || !AccountMapping::isStartRefusal($start['error'])) {
+            if ($start['runtime'] !== AccountRuntime::SYSBOX || ! AccountMapping::isStartRefusal($start['error'])) {
                 continue;
             }
             $project = $this->project($system, $name);
@@ -145,8 +145,8 @@ class CheckAccountMapping extends Command
         try {
             $mapping->recreate();
         } catch (\Throwable $e) {
-            $this->error("{$name}: " . $e->getMessage());
-            Log::error("project:mapping:check: {$name}: " . $e->getMessage());
+            $this->error("{$name}: ".$e->getMessage());
+            Log::error("project:mapping:check: {$name}: ".$e->getMessage());
 
             return false;
         }

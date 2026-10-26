@@ -18,8 +18,8 @@ class SshController extends Controller
         path: '/projects/{username}/ssh/command',
         summary: 'Run a shell command inside the project container',
         description: 'Runs one command as the project user inside its container, the way an SSH session would — '
-            . 'the command line reaches bash intact, so pipes, redirection and globs work. '
-            . 'A non-zero exit is reported in the response, not as an HTTP error. Dind projects only.',
+            .'the command line reaches bash intact, so pipes, redirection and globs work. '
+            .'A non-zero exit is reported in the response, not as an HTTP error. Dind projects only.',
         security: [['bearerAuth' => []]],
         tags: ['SSH'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -52,7 +52,7 @@ class SshController extends Controller
             $user,
             $params['command'],
             $params['cwd'] ?? null,
-            (int)($params['timeout'] ?? SshCommandRunRequest::DEFAULT_TIMEOUT)
+            (int) ($params['timeout'] ?? SshCommandRunRequest::DEFAULT_TIMEOUT)
         ));
     }
 }

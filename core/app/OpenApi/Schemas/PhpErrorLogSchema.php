@@ -15,6 +15,4 @@ use OpenApi\Attributes as OA;
     ],
     type: 'object',
 )]
-class PhpErrorLogSchema
-{
-}
+class PhpErrorLogSchema {}

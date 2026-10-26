@@ -18,11 +18,10 @@ final class RouteSwitch
     public function __construct(
         private readonly EngineSystem $system,
         private readonly string $username,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param list<int> $ports
+     * @param  list<int>  $ports
      * @return list<ProxyRule>
      */
     public function httpRulesTo(array $ports): array
@@ -39,7 +38,7 @@ final class RouteSwitch
     /**
      * Enabled rules of every transport; an operator's own rules to these ports included.
      *
-     * @param list<int> $ports
+     * @param  list<int>  $ports
      * @return list<ProxyRule>
      */
     public function rulesTo(array $ports): array
@@ -56,7 +55,7 @@ final class RouteSwitch
      * A domain a Cloudflare tunnel serves: its ingress names the account's
      * port itself. A PanelAlpha Online name only points DNS at this host.
      *
-     * @param list<ProxyRule> $rules
+     * @param  list<ProxyRule>  $rules
      */
     public static function tunnelledDomain(array $rules): ?string
     {
@@ -76,8 +75,8 @@ final class RouteSwitch
     /**
      * The ids of the rules moved from each key of $map to its value.
      *
-     * @param array<int, int> $map
-     * @param ?list<int> $onlyIds
+     * @param  array<int, int>  $map
+     * @param  ?list<int>  $onlyIds
      * @return list<int>
      */
     public function move(array $map, ?array $onlyIds = null): array
@@ -144,8 +143,8 @@ final class RouteSwitch
      * on one of $from: a rule its owner pointed elsewhere, or deleted, stays
      * as they left it. The ids moved.
      *
-     * @param list<array{id: int, port: int}> $recorded
-     * @param list<int> $from the ports a redeploy put them on
+     * @param  list<array{id: int, port: int}>  $recorded
+     * @param  list<int>  $from  the ports a redeploy put them on
      * @return list<int>
      */
     public function putBack(array $recorded, array $from): array
@@ -172,7 +171,7 @@ final class RouteSwitch
      * A vhost-only change cannot move a listener, so it never restarts the webserver;
      * the full rebuild can, so it keeps the reload with its restart fallback.
      *
-     * @param list<ProxyRule> $rules
+     * @param  list<ProxyRule>  $rules
      */
     private function render(array $rules): void
     {
@@ -181,13 +180,14 @@ final class RouteSwitch
             return;
         }
         $inVhost = static fn (ProxyRule $rule): bool => $rule->transport === 'http'
-            && !in_array(trim((string) $rule->server_name), ['', '_'], true);
+            && ! in_array(trim((string) $rule->server_name), ['', '_'], true);
         $webserver = $this->system->webserver();
         if (count(array_filter($live, $inVhost)) === count($live)) {
             foreach (self::domainsOf($live) as $domain) {
                 $webserver->rebuildDomainConfig($domain);
             }
             $webserver->reloadRouting();
+
             return;
         }
         $webserver->rebuildConfig();
@@ -195,7 +195,7 @@ final class RouteSwitch
     }
 
     /**
-     * @param list<ProxyRule> $rules
+     * @param  list<ProxyRule>  $rules
      * @return list<Domain>
      */
     private static function domainsOf(array $rules): array

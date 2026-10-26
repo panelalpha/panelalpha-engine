@@ -11,7 +11,7 @@ class FixFilePermissions extends ProjectFleetCommand
     /** Older spellings still answer, so nothing scripted against them breaks. */
     protected $aliases = ['projects:fix-file-permissions', 'users:fix-file-permissions'];
 
-    protected $signature = 'project:permission:fix' . ProjectOptions::SIGNATURE;
+    protected $signature = 'project:permission:fix'.ProjectOptions::SIGNATURE;
 
     protected $description = 'Fix file permissions under a project\'s home directory';
 

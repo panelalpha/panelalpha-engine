@@ -20,10 +20,10 @@ class SidecarCredentials
      * A database's unresolved `${VAR}` credentials settled once, so the
      * sidecar and the application are configured from the same text.
      *
-     * @param array<string, mixed> $service
-     * @param list<int> $observedPorts ports the image declares, when known
-     * @param ?SidecarPasswords $passwords fills a password nobody set; null
-     *        keeps the legacy `app`
+     * @param  array<string, mixed>  $service
+     * @param  list<int>  $observedPorts  ports the image declares, when known
+     * @param  ?SidecarPasswords  $passwords  fills a password nobody set; null
+     *                                        keeps the legacy `app`
      */
     public static function pinSidecarCredentials(
         string $name,
@@ -47,14 +47,14 @@ class SidecarCredentials
      * The engine's prefixed and init variables resolved as Compose would,
      * with a password nobody set taken from the account, not `app`.
      *
-     * @param array<string, string> $env
+     * @param  array<string, string>  $env
      * @return array<string, string>
      */
     private static function settledEngineEnvironment(array $env, string $engine, SidecarPasswords $passwords): array
     {
         $prefix = strtoupper($engine);
         foreach ($env as $key => $value) {
-            if (str_starts_with(strtoupper((string) $key), $prefix . '_')) {
+            if (str_starts_with(strtoupper((string) $key), $prefix.'_')) {
                 $env[$key] = self::resolvedComposeValue((string) $value, self::fallbackFor((string) $key, $passwords));
             }
         }
@@ -69,8 +69,8 @@ class SidecarCredentials
     }
 
     /**
-     * @param array<string, mixed> $service
-     * @param array<string, string> $env
+     * @param  array<string, mixed>  $service
+     * @param  array<string, string>  $env
      * @return array<string, mixed>
      */
     private static function withServiceOverrides(array $service, string $engine, array $env): array
@@ -94,8 +94,8 @@ class SidecarCredentials
      * engine with no dialect entry still gets its host, port and credentials
      * under its own prefix, plus every variable it declares under that prefix.
      *
-     * @param array<string, mixed> $service
-     * @param list<int> $observedPorts
+     * @param  array<string, mixed>  $service
+     * @param  list<int>  $observedPorts
      * @return array<string, string>
      */
     public static function envForSidecar(string $name, array $service, array $observedPorts = []): array
@@ -120,7 +120,7 @@ class SidecarCredentials
         $env = self::hostAndPort($prefix, $name, $dialect) + self::declaredVariablesUnderPrefix($declared, $prefix);
         $url = self::uninterpolatedUrl($dialect, $name, $username, $password, $database);
         if ($url !== null) {
-            $env[$prefix . '_URL'] = $url;
+            $env[$prefix.'_URL'] = $url;
         }
 
         return $env + self::frameworkEnvironment($dialect, $name, $username, $password, $database, $url);
@@ -130,7 +130,7 @@ class SidecarCredentials
      * Username, password and database as Compose settles them; a blank
      * password falls back to redis's `--requirepass`.
      *
-     * @param array{prefix: ?string, username: ?string, password: ?string, database: ?string} $credentials
+     * @param  array{prefix: ?string, username: ?string, password: ?string, database: ?string}  $credentials
      * @return array{0: string, 1: string, 2: string}
      */
     private static function resolvedCredentials(array $credentials, mixed $command): array
@@ -146,14 +146,14 @@ class SidecarCredentials
     }
 
     /**
-     * @param array{engine: string, port: int, scheme: ?string, driver: ?string} $dialect
+     * @param  array{engine: string, port: int, scheme: ?string, driver: ?string}  $dialect
      * @return array<string, string>
      */
     private static function hostAndPort(string $prefix, string $host, array $dialect): array
     {
-        $env = [$prefix . '_HOST' => $host];
+        $env = [$prefix.'_HOST' => $host];
         if ($dialect['port'] > 0) {
-            $env[$prefix . '_PORT'] = (string) $dialect['port'];
+            $env[$prefix.'_PORT'] = (string) $dialect['port'];
         }
 
         return $env;
@@ -163,7 +163,7 @@ class SidecarCredentials
      * The connection URL, or null while the password still carries a
      * reference: nothing interpolates a *_URL, so the app would get it literally.
      *
-     * @param array{engine: string, port: int, scheme: ?string, driver: ?string} $dialect
+     * @param  array{engine: string, port: int, scheme: ?string, driver: ?string}  $dialect
      */
     private static function uninterpolatedUrl(
         array $dialect,
@@ -185,7 +185,7 @@ class SidecarCredentials
      * App-mode flags the dropped app service declared, which have no sidecar
      * equivalent (Sure's SELF_HOSTED).
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return array<string, string>
      */
     public static function envFromDroppedAppService(array $service): array
@@ -193,7 +193,7 @@ class SidecarCredentials
         $map = self::environmentMap($service['environment'] ?? null);
         $out = [];
         foreach (['SELF_HOSTED', 'SELF_HOSTING_ENABLED'] as $key) {
-            if (!isset($map[$key])) {
+            if (! isset($map[$key])) {
                 continue;
             }
             $value = self::resolvedComposeValue((string) $map[$key], '');
@@ -209,8 +209,8 @@ class SidecarCredentials
      * The workstation app service's whole `environment:`, for the app built in
      * its place. An unresolvable reference is dropped, never injected.
      *
-     * @param array<string, mixed> $service
-     * @param ?string $seed per-account secret for `${VAR:?}` credentials
+     * @param  array<string, mixed>  $service
+     * @param  ?string  $seed  per-account secret for `${VAR:?}` credentials
      * @return array<string, string>
      */
     public static function envFromWorkstationAppService(array $service, ?string $seed = null): array
@@ -235,7 +235,7 @@ class SidecarCredentials
      * verbatim: a literal already sitting in the repository's compose file, the
      * same for every deploy of it, not a per-account `${VAR:?}` reference.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return list<string>
      */
     public static function publishedSecretsIn(array $service): array
@@ -300,8 +300,8 @@ class SidecarCredentials
      * empty string: redis then refuses `--requirepass` with no argument and
      * meilisearch refuses an empty master key in production.
      *
-     * @param array<string, mixed> $service
-     * @param array<string, list<?string>|string> $env what compose may interpolate the file with
+     * @param  array<string, mixed>  $service
+     * @param  array<string, list<?string>|string>  $env  what compose may interpolate the file with
      * @return array{0: array<string, mixed>, 1: array<string, string>} the service, NAME => value generated
      */
     public static function withBareSecretsFilled(array $service, string $seed, array $env): array
@@ -318,8 +318,8 @@ class SidecarCredentials
     }
 
     /**
-     * @param array<string, list<?string>|string> $env
-     * @param array<string, string> $generated NAME => value, extended in place
+     * @param  array<string, list<?string>|string>  $env
+     * @param  array<string, string>  $generated  NAME => value, extended in place
      */
     private static function bareSecretsFilledIn(string $text, ?string $key, string $seed, array $env, array &$generated): string
     {
@@ -327,7 +327,7 @@ class SidecarCredentials
             self::BARE_REFERENCE,
             static function (array $m) use ($key, $seed, $env, &$generated): string {
                 $name = $m[1];
-                if (!self::isUnsetSecret($name, $key, $env)) {
+                if (! self::isUnsetSecret($name, $key, $env)) {
                     return $m[0];
                 }
 
@@ -341,11 +341,11 @@ class SidecarCredentials
      * Whether `${NAME}` is a secret, by its own name or the key it sits under,
      * that compose has no non-blank value for.
      *
-     * @param array<string, list<?string>|string> $env
+     * @param  array<string, list<?string>|string>  $env
      */
     private static function isUnsetSecret(string $name, ?string $key, array $env): bool
     {
-        if (!ComposePlaceholders::isSecretKey($name) && ($key === null || !ComposePlaceholders::isSecretKey($key))) {
+        if (! ComposePlaceholders::isSecretKey($name) && ($key === null || ! ComposePlaceholders::isSecretKey($key))) {
             return false;
         }
         foreach ((array) ($env[$name] ?? []) as $candidate) {
@@ -358,13 +358,13 @@ class SidecarCredentials
     }
 
     /**
-     * @param array<string, mixed> $service
-     * @param \Closure(string, ?string): string $fill
+     * @param  array<string, mixed>  $service
+     * @param  \Closure(string, ?string): string  $fill
      * @return array<string, mixed>
      */
     private static function withEnvironmentFilled(array $service, \Closure $fill): array
     {
-        if (!isset($service['environment']) || !is_array($service['environment'])) {
+        if (! isset($service['environment']) || ! is_array($service['environment'])) {
             return $service;
         }
         $map = self::environmentMap($service['environment']);
@@ -380,8 +380,8 @@ class SidecarCredentials
     }
 
     /**
-     * @param array<string, mixed> $service
-     * @param \Closure(string, ?string): string $fill
+     * @param  array<string, mixed>  $service
+     * @param  \Closure(string, ?string): string  $fill
      * @return array<string, mixed>
      */
     private static function withCommandFilled(array $service, \Closure $fill): array
@@ -411,7 +411,7 @@ class SidecarCredentials
                 return $secret;
             }
         }
-        if (!str_contains($value, '${')) {
+        if (! str_contains($value, '${')) {
             return $value;
         }
         $resolved = self::resolvedComposeValue($value, '');
@@ -420,12 +420,12 @@ class SidecarCredentials
     }
 
     /**
-     * @param mixed $environment
+     * @param  mixed  $environment
      * @return array<string, string>
      */
     public static function environmentMap($environment): array
     {
-        if (!is_array($environment)) {
+        if (! is_array($environment)) {
             return [];
         }
 
@@ -433,14 +433,14 @@ class SidecarCredentials
     }
 
     /**
-     * @param list<mixed> $environment `KEY=value` lines
+     * @param  list<mixed>  $environment  `KEY=value` lines
      * @return array<string, string>
      */
     private static function mapFromEnvList(array $environment): array
     {
         $map = [];
         foreach ($environment as $line) {
-            if (!is_string($line) || !str_contains($line, '=')) {
+            if (! is_string($line) || ! str_contains($line, '=')) {
                 continue;
             }
             [$key, $value] = explode('=', $line, 2);
@@ -451,7 +451,7 @@ class SidecarCredentials
     }
 
     /**
-     * @param array<mixed> $environment
+     * @param  array<mixed>  $environment
      * @return array<string, string> only string keys with scalar, non-bool values
      */
     private static function mapFromEnvMap(array $environment): array
@@ -467,8 +467,8 @@ class SidecarCredentials
     }
 
     /**
-     * @param array<string, mixed> $service
-     * @param list<int> $observedPorts ports the image declares, when known
+     * @param  array<string, mixed>  $service
+     * @param  list<int>  $observedPorts  ports the image declares, when known
      */
     private static function sidecarEngine(string $name, array $service, array $observedPorts = []): ?string
     {
@@ -480,7 +480,7 @@ class SidecarCredentials
      * settings `MEILI_*`. Two variables must agree, so a lone TZ or PUID
      * cannot claim the prefix.
      *
-     * @param array<string, string> $declared
+     * @param  array<string, string>  $declared
      */
     private static function dominantPrefix(array $declared): ?string
     {
@@ -506,7 +506,7 @@ class SidecarCredentials
     /**
      * The service's own variables that belong to its prefix, resolved.
      *
-     * @param array<string, string> $declared
+     * @param  array<string, string>  $declared
      * @return array<string, string>
      */
     private static function declaredVariablesUnderPrefix(array $declared, string $prefix): array
@@ -514,7 +514,7 @@ class SidecarCredentials
         $out = [];
         foreach ($declared as $key => $value) {
             $key = strtoupper(trim((string) $key));
-            if (!str_starts_with($key, $prefix . '_')) {
+            if (! str_starts_with($key, $prefix.'_')) {
                 continue;
             }
             $resolved = self::resolvedComposeValue((string) $value, '');
@@ -543,7 +543,7 @@ class SidecarCredentials
     }
 
     /**
-     * @param array{engine: string, port: int, scheme: ?string, driver: ?string} $dialect
+     * @param  array{engine: string, port: int, scheme: ?string, driver: ?string}  $dialect
      */
     private static function connectionUrl(
         array $dialect,
@@ -558,15 +558,15 @@ class SidecarCredentials
 
         $credentials = '';
         if ($username !== '' || $password !== '') {
-            $credentials = rawurlencode($username) . ':' . rawurlencode($password) . '@';
+            $credentials = rawurlencode($username).':'.rawurlencode($password).'@';
         }
 
         if ($database === '') {
             $database = (string) ($dialect['default_database'] ?? '');
         }
 
-        return $dialect['scheme'] . '://' . $credentials . $host . ':' . $dialect['port']
-            . ($database !== '' ? '/' . $database : '');
+        return $dialect['scheme'].'://'.$credentials.$host.':'.$dialect['port']
+            .($database !== '' ? '/'.$database : '');
     }
 
     /**
@@ -575,7 +575,7 @@ class SidecarCredentials
      * its cache. They can never come out of the compose file, so they come
      * from the engine's entry in resources/sidecars/dialects.php.
      *
-     * @param array{engine: string, port: int, scheme: ?string, driver: ?string, default_database: ?string, env: array<string, string>} $dialect
+     * @param  array{engine: string, port: int, scheme: ?string, driver: ?string, default_database: ?string, env: array<string, string>}  $dialect
      * @return array<string, string>
      */
     private static function frameworkEnvironment(
@@ -605,7 +605,7 @@ class SidecarCredentials
     /**
      * The dialect's own `env` entries with `{host}` and `{port}` filled in.
      *
-     * @param array{port: int, env: array<string, string>} $dialect
+     * @param  array{port: int, env: array<string, string>}  $dialect
      * @return array<string, string>
      */
     private static function dialectEnvironment(array $dialect, string $host): array
@@ -665,7 +665,7 @@ class SidecarCredentials
      * an `=` read as a list, and a list whose first entry has no `=` read as
      * a map. The wrong branch returns nothing for keys it should have found.
      *
-     * @param array<mixed> $environment
+     * @param  array<mixed>  $environment
      */
     private static function isEnvList(array $environment): bool
     {

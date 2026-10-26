@@ -7,6 +7,4 @@ namespace App\Exceptions;
  * lock. Domain-level on purpose: the same code path runs from HTTP, the queue
  * and the CLI, so the transport decides what a conflict looks like.
  */
-class DeployAlreadyRunningException extends \Exception
-{
-}
+class DeployAlreadyRunningException extends \Exception {}

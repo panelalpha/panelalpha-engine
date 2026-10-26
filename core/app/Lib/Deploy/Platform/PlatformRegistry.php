@@ -49,7 +49,7 @@ final class PlatformRegistry
 
     private static function resolve(string $name): string
     {
-        $path = __DIR__ . '/../../../../resources/' . $name;
+        $path = __DIR__.'/../../../../resources/'.$name;
 
         return realpath($path) ?: $path;
     }
@@ -58,6 +58,7 @@ final class PlatformRegistry
      * Every manifest, highest priority first.
      *
      * @return list<PlatformManifest>
+     *
      * @throws ManifestException
      */
     public static function all(?string $directory = null): array
@@ -72,7 +73,7 @@ final class PlatformRegistry
 
         // Only the first (platforms) root must exist: an engine with no apps
         // still deploys, one with no platforms cannot.
-        if (!is_dir($directories[0])) {
+        if (! is_dir($directories[0])) {
             throw new ManifestException("Platform manifest directory not found: {$directories[0]}");
         }
 
@@ -104,7 +105,7 @@ final class PlatformRegistry
     public static function load(string $path): PlatformManifest
     {
         $raw = @file_get_contents($path);
-        if (!is_string($raw) || trim($raw) === '') {
+        if (! is_string($raw) || trim($raw) === '') {
             throw new ManifestException("Unreadable or empty platform manifest: {$path}");
         }
 
@@ -112,13 +113,13 @@ final class PlatformRegistry
             $decoded = Yaml::parse($raw);
         } catch (ParseException $e) {
             throw new ManifestException(
-                "Invalid YAML in platform manifest {$path}: " . $e->getMessage(),
+                "Invalid YAML in platform manifest {$path}: ".$e->getMessage(),
                 0,
                 $e
             );
         }
 
-        if (!is_array($decoded)) {
+        if (! is_array($decoded)) {
             throw new ManifestException("Platform manifest {$path} does not contain a mapping");
         }
 
@@ -189,7 +190,7 @@ final class PlatformRegistry
      * The manifest a persisted detect decision came from, or null — Railpack
      * and the fallback decisions name no manifest.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     public static function forDecision(array $decision, ?string $directory = null): ?PlatformManifest
     {
@@ -204,7 +205,7 @@ final class PlatformRegistry
      * with an `id:` of its own is registered nowhere, so the id alone finds
      * nothing and its install, upgrade and start commands were dropped.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     public static function forDecisionOrAppConfig(array $decision, ?AppConfig $appConfig): ?PlatformManifest
     {
@@ -235,26 +236,27 @@ final class PlatformRegistry
      * `_`- and `.`-prefixed entries are supporting material — the JSON Schema
      * the editor modeline points at, shared fragments — not platforms.
      *
-     * @param list<string> $directories
+     * @param  list<string>  $directories
      * @return list<string>
      */
     private static function manifestFiles(array $directories): array
     {
         $files = [];
         foreach ($directories as $directory) {
-            if (!is_dir($directory)) {
+            if (! is_dir($directory)) {
                 continue;
             }
             foreach (scandir($directory) ?: [] as $entry) {
                 if (str_starts_with($entry, '_') || str_starts_with($entry, '.')) {
                     continue;
                 }
-                $path = $directory . '/' . $entry;
+                $path = $directory.'/'.$entry;
                 if (is_file($path) && self::isManifestName($entry)) {
                     $files[] = $path;
+
                     continue;
                 }
-                $nested = $path . '/' . self::APP_FILENAME;
+                $nested = $path.'/'.self::APP_FILENAME;
                 if (is_dir($path) && is_file($nested)) {
                     $files[] = $nested;
                 }

@@ -13,7 +13,7 @@ namespace App\System\Project\Git;
 class FastForwardRefused extends Exception
 {
     /**
-     * @param list<string> $paths the incoming paths that collide with local ones; empty for diverged history
+     * @param  list<string>  $paths  the incoming paths that collide with local ones; empty for diverged history
      */
     public function __construct(string $message, public readonly array $paths = [])
     {

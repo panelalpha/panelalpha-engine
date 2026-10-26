@@ -16,9 +16,9 @@ use Symfony\Component\Process\Process;
 final class CacheRegistry
 {
     private const ACCEPT = 'application/vnd.oci.image.manifest.v1+json, '
-        . 'application/vnd.docker.distribution.manifest.v2+json, '
-        . 'application/vnd.oci.image.index.v1+json, '
-        . 'application/vnd.docker.distribution.manifest.list.v2+json';
+        .'application/vnd.docker.distribution.manifest.v2+json, '
+        .'application/vnd.oci.image.index.v1+json, '
+        .'application/vnd.docker.distribution.manifest.list.v2+json';
 
     /** @var callable(string, string, array<string, string>): ?array{status: int, headers: array<string, string>, body: string} */
     private $send;
@@ -28,7 +28,7 @@ final class CacheRegistry
     public function __construct(?callable $send = null, ?string $base = null)
     {
         $this->send = $send ?? self::hostSend(...);
-        $this->base = $base ?? 'http://' . DindImageStore::HOST_CACHE_REGISTRY;
+        $this->base = $base ?? 'http://'.DindImageStore::HOST_CACHE_REGISTRY;
     }
 
     /**
@@ -43,9 +43,9 @@ final class CacheRegistry
         $repositories = [];
         $path = '/v2/_catalog?n=1000';
         while ($path !== null) {
-            $response = ($this->send)('GET', $this->base . $path, ['Accept' => 'application/json']);
+            $response = ($this->send)('GET', $this->base.$path, ['Accept' => 'application/json']);
             $page = ($response['status'] ?? 0) === 200 ? json_decode($response['body'] ?? '', true) : null;
-            if (!is_array($page['repositories'] ?? null)) {
+            if (! is_array($page['repositories'] ?? null)) {
                 return null;
             }
             array_push($repositories, ...$page['repositories']);
@@ -86,8 +86,8 @@ final class CacheRegistry
      * except a ref whose digest a kept ref shares, since deleting by digest
      * would take the kept tag with it.
      *
-     * @param array<string, ?string> $digests every registry ref and its digest
-     * @param list<string> $keep
+     * @param  array<string, ?string>  $digests  every registry ref and its digest
+     * @param  list<string>  $keep
      * @return list<string>
      */
     public static function unwanted(array $digests, array $keep): array
@@ -102,7 +102,7 @@ final class CacheRegistry
 
         $unwanted = [];
         foreach ($digests as $ref => $digest) {
-            if (!isset($keep[$ref]) && $digest !== null && !isset($keptDigests[$digest])) {
+            if (! isset($keep[$ref]) && $digest !== null && ! isset($keptDigests[$digest])) {
                 $unwanted[] = (string) $ref;
             }
         }
@@ -129,7 +129,7 @@ final class CacheRegistry
      */
     private function json(string $method, string $path): ?array
     {
-        $response = ($this->send)($method, $this->base . $path, ['Accept' => 'application/json']);
+        $response = ($this->send)($method, $this->base.$path, ['Accept' => 'application/json']);
         if (($response['status'] ?? 0) !== 200) {
             return null;
         }
@@ -141,7 +141,7 @@ final class CacheRegistry
     /**
      * curl run in the host's network namespace; core's own loopback is not the host's.
      *
-     * @param array<string, string> $headers
+     * @param  array<string, string>  $headers
      * @return list<string>
      */
     public static function hostArgv(string $method, string $url, array $headers): array
@@ -185,7 +185,7 @@ final class CacheRegistry
     }
 
     /**
-     * @param array<string, string> $headers
+     * @param  array<string, string>  $headers
      * @return array{status: int, headers: array<string, string>, body: string}|null
      */
     private static function hostSend(string $method, string $url, array $headers): ?array

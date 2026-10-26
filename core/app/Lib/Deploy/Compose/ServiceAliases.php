@@ -14,7 +14,7 @@ final class ServiceAliases
      * unresolvable alias happily, so a bad one turns a loud start-up failure
      * into a silent one at request time.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      * @return list<string>
      */
     public static function fromDecision(array $decision): array
@@ -23,12 +23,12 @@ final class ServiceAliases
     }
 
     /**
-     * @param mixed $value
+     * @param  mixed  $value
      * @return list<string>
      */
     public static function normalised($value): array
     {
-        if (!is_array($value)) {
+        if (! is_array($value)) {
             return [];
         }
 
@@ -54,8 +54,8 @@ final class ServiceAliases
      * Accepts both the list form and the map form. A `default` entry needs no
      * top-level `networks:` declaration, so no extra key is written.
      *
-     * @param mixed $networks the service's existing `networks:` value, or null
-     * @param list<string> $aliases
+     * @param  mixed  $networks  the service's existing `networks:` value, or null
+     * @param  list<string>  $aliases
      * @return array<string, mixed>
      */
     public static function withAliases($networks, array $aliases): array

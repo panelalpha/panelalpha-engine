@@ -29,8 +29,7 @@ final class RegistryLogin
 
     public function __construct(
         private DindProject $project,
-    ) {
-    }
+    ) {}
 
     public function auth(): RegistryAuth
     {
@@ -53,7 +52,8 @@ final class RegistryLogin
      * Run $work with the logins written; nested calls share one directory.
      *
      * @template T
-     * @param callable(): T $work
+     *
+     * @param  callable(): T  $work
      * @return T
      */
     public function during(callable $work): mixed
@@ -83,14 +83,14 @@ final class RegistryLogin
         $this->project->shell()->logger()?->mask($auth->secrets());
         $user = $this->project->userModel();
         $chown = $user->getChownString() ?: $this->project->username();
-        $dir = rtrim($this->project->homeDirPath(), '/') . '/.panelalpha-registry-' . bin2hex(random_bytes(8));
+        $dir = rtrim($this->project->homeDirPath(), '/').'/.panelalpha-registry-'.bin2hex(random_bytes(8));
         try {
             $system = $this->project->system();
             $system->filesystem()->makeDirWithParents($dir, $chown);
             $system->exec(['sudo', 'chmod', '700', $dir]);
-            $system->filesystem()->filePutContents($dir . '/config.json', $auth->dockerConfigJson(), $chown, '600');
+            $system->filesystem()->filePutContents($dir.'/config.json', $auth->dockerConfigJson(), $chown, '600');
         } catch (\Throwable $e) {
-            Log::warning("Could not write registry logins for {$this->project->username()}: " . $e->getMessage());
+            Log::warning("Could not write registry logins for {$this->project->username()}: ".$e->getMessage());
             $this->project->shell()->logger()?->warn('Could not use the registry-auth logins; pulling anonymously');
             $this->remove($dir);
 
@@ -98,7 +98,7 @@ final class RegistryLogin
         }
 
         $this->configDir = $dir;
-        $this->project->shell()->logger()?->info('Using registry logins for: ' . implode(', ', $auth->hosts()));
+        $this->project->shell()->logger()?->info('Using registry logins for: '.implode(', ', $auth->hosts()));
     }
 
     private function close(): void
@@ -114,7 +114,7 @@ final class RegistryLogin
         try {
             $this->project->system()->exec(['sudo', 'rm', '-rf', '--', $dir]);
         } catch (\Throwable $e) {
-            Log::warning("Could not remove registry logins {$dir}: " . $e->getMessage());
+            Log::warning("Could not remove registry logins {$dir}: ".$e->getMessage());
         }
     }
 }

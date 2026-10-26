@@ -35,7 +35,7 @@ class ProjectCertRequest extends Command
         $name = strtolower(trim((string) $this->argument('domain')));
         $model = Domain::where('domain', $name)->first();
 
-        if (!$model) {
+        if (! $model) {
             $this->error("No project domain called {$name} on this engine.");
 
             return self::FAILURE;
@@ -53,9 +53,9 @@ class ProjectCertRequest extends Command
             }
 
             $this->info("Would request a certificate for {$name}");
-            $this->line('  authority: ' . $plan['authority']);
-            $this->line('  account:   ' . ($plan['account_email'] ?? 'registered without an email address'));
-            $this->line('  challenge: ' . $plan['challenge'] . ', served by this host at ' . $plan['challenge_url']);
+            $this->line('  authority: '.$plan['authority']);
+            $this->line('  account:   '.($plan['account_email'] ?? 'registered without an email address'));
+            $this->line('  challenge: '.$plan['challenge'].', served by this host at '.$plan['challenge_url']);
 
             return self::SUCCESS;
         }
@@ -63,7 +63,7 @@ class ProjectCertRequest extends Command
         try {
             $status = ProjectCertificate::request($model, $staging);
         } catch (\Throwable $e) {
-            $this->error("Could not obtain a certificate for {$name}: " . $e->getMessage());
+            $this->error("Could not obtain a certificate for {$name}: ".$e->getMessage());
             $this->line('The site keeps the certificate it already had.');
 
             return self::FAILURE;

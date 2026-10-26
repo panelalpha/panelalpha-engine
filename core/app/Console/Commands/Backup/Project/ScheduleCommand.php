@@ -26,6 +26,7 @@ class ScheduleCommand extends Command
         $user = User::query()->where('username', $username)->first();
         if ($user === null) {
             $this->error("Project '{$username}' not found.");
+
             return 1;
         }
 
@@ -42,6 +43,7 @@ class ScheduleCommand extends Command
     {
         if ($schedule === null) {
             $this->info('No schedule to disable.');
+
             return 0;
         }
 
@@ -57,14 +59,17 @@ class ScheduleCommand extends Command
         $cron = $this->stringOption('cron');
         if ($cron === null) {
             $this->error('The --cron option is required.');
+
             return 1;
         }
-        if (!CronExpression::isValidExpression($cron)) {
+        if (! CronExpression::isValidExpression($cron)) {
             $this->error('Invalid cron expression.');
+
             return 1;
         }
-        if (!BackupSchedule::isAtMostHourly($cron)) {
+        if (! BackupSchedule::isAtMostHourly($cron)) {
             $this->error('Automatic backups may run at most once an hour.');
+
             return 1;
         }
 
@@ -103,6 +108,7 @@ class ScheduleCommand extends Command
         }
         if ($idOrName === null) {
             $this->error('The --container option is required for a new schedule.');
+
             return null;
         }
 
@@ -120,8 +126,9 @@ class ScheduleCommand extends Command
         if ($value === null) {
             return $schedule?->keep_last ?? 7;
         }
-        if (!is_numeric($value) || (int) $value < 1 || (int) $value > 365) {
+        if (! is_numeric($value) || (int) $value < 1 || (int) $value > 365) {
             $this->error('The --keep option must be between 1 and 365.');
+
             return null;
         }
 
@@ -131,7 +138,7 @@ class ScheduleCommand extends Command
     private function stringOption(string $name): ?string
     {
         $value = $this->option($name);
-        if (!is_string($value) || $value === '') {
+        if (! is_string($value) || $value === '') {
             return null;
         }
 

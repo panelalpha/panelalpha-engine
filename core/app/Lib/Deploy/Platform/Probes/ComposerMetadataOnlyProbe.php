@@ -21,11 +21,11 @@ final class ComposerMetadataOnlyProbe implements PlatformProbe
     public function evaluate(ProjectContext $context): bool
     {
         $composer = json_decode($context->contents('composer.json') ?? '', true);
-        if (!is_array($composer) || ($composer['type'] ?? null) !== 'library') {
+        if (! is_array($composer) || ($composer['type'] ?? null) !== 'library') {
             return false;
         }
         $require = $composer['require'] ?? [];
-        if (!is_array($require)) {
+        if (! is_array($require)) {
             return false;
         }
         // php, ext-*, lib-* are platform constraints; a package name has a vendor.
@@ -35,6 +35,6 @@ final class ComposerMetadataOnlyProbe implements PlatformProbe
             }
         }
 
-        return !PhpSources::present($context->projectDir);
+        return ! PhpSources::present($context->projectDir);
     }
 }

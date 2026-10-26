@@ -9,12 +9,12 @@ return new class extends Migration
     {
         try {
             foreach (User::getAll() as $user) {
-                if (($user->getDetails()['home_dir'] ?? null) === "/var/www") {
+                if (($user->getDetails()['home_dir'] ?? null) === '/var/www') {
                     $user->setDetails(['home_dir' => $user->project()->homeDirPath()]);
                     $user->save();
                 }
             }
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
         }
     }
 

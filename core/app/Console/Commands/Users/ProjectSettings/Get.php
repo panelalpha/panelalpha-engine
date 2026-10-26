@@ -29,6 +29,7 @@ class Get extends Command
 
         if ($project === '') {
             $this->error('--project is required.');
+
             return 1;
         }
 
@@ -36,18 +37,21 @@ class Get extends Command
             Settings::assertKnownKey($key);
         } catch (\InvalidArgumentException $e) {
             $this->error($e->getMessage());
+
             return 1;
         }
 
         $user = User::findByUsername($project);
-        if (!$user) {
+        if (! $user) {
             $this->error("Project '{$project}' not found.");
+
             return 1;
         }
 
         $row = $user->project()->settings()->get($key);
-        if (!$row['set']) {
+        if (! $row['set']) {
             $this->warn("Setting '{$key}' is not set.");
+
             return 1;
         }
 

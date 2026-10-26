@@ -34,11 +34,11 @@ class ExpireTunnelsCommand extends Command
                 TunnelManager::removeTunnel($tunnel->user, $tunnel);
             } catch (\Throwable $e) {
                 $failed++;
-                $this->error("Tunnel '{$tunnel->hostname}' could not be expired: " . $e->getMessage());
+                $this->error("Tunnel '{$tunnel->hostname}' could not be expired: ".$e->getMessage());
             }
         }
 
-        $this->info('Expired ' . ($expired->count() - $failed) . ' of ' . $expired->count() . ' tunnel(s).');
+        $this->info('Expired '.($expired->count() - $failed).' of '.$expired->count().' tunnel(s).');
 
         return $failed === 0 ? self::SUCCESS : self::FAILURE;
     }

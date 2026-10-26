@@ -22,8 +22,7 @@ final class GitProbeResult
     private function __construct(
         public readonly string $outcome,
         public readonly ?array $problem = null,
-    ) {
-    }
+    ) {}
 
     public static function verified(): self
     {

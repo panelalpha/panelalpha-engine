@@ -30,10 +30,10 @@ class TunnelController extends Controller
         path: '/projects/{username}/domains/{domain}/tunnels',
         summary: "List a domain's public tunnel hostnames",
         description: 'Every tunnel the domain answers to. A tunnel whose engine lifetime (`valid_until`) '
-            . 'has passed is omitted, whether or not the engine has removed it yet, so a client never serves '
-            . 'an address past its lifetime. `valid_until` is the lifetime this engine was asked to enforce '
-            . 'with `ttl_minutes`; it is null for a tunnel the engine does not expire, even one the proxy '
-            . 'gave its own expiry in `details.valid_until`. `purpose` comes back top-level too.',
+            .'has passed is omitted, whether or not the engine has removed it yet, so a client never serves '
+            .'an address past its lifetime. `valid_until` is the lifetime this engine was asked to enforce '
+            .'with `ttl_minutes`; it is null for a tunnel the engine does not expire, even one the proxy '
+            .'gave its own expiry in `details.valid_until`. `purpose` comes back top-level too.',
         security: [['bearerAuth' => []]],
         tags: ['Tunnels'],
         parameters: [
@@ -60,7 +60,7 @@ class TunnelController extends Controller
             ->where('domain_id', $domainModel->id)
             ->orderBy('hostname')
             ->get()
-            ->filter(static fn (Tunnel $tunnel): bool => !$tunnel->isExpired())
+            ->filter(static fn (Tunnel $tunnel): bool => ! $tunnel->isExpired())
             ->values();
 
         return new TunnelCollection($tunnels);
@@ -70,27 +70,27 @@ class TunnelController extends Controller
         path: '/projects/{username}/domains/{domain}/tunnels',
         summary: 'Attach a public tunnel hostname to a domain',
         description: 'Registers a public hostname that reaches this domain without any DNS record of your own. '
-            . 'The `panelalpha` provider allocates a name under panelalpha.online through the licensing proxy '
-            . '-- the way to give an application a public address with a trusted certificate on an engine with '
-            . 'no DNS of its own. The proxy forwards each name with itself as `Host`, and the domain\'s site '
-            . 'answers to it. Attach the project\'s own name to the project domain of the same name. A project '
-            . 'may also add a few sibling names beside it, such as `api-<name>.panelalpha.online`, for an '
-            . 'application that routes by Host to fixed extra names; the application has to accept those names, '
-            . 'so its prefixes must be configurable. Nested names such as `api.<name>.panelalpha.online` are '
-            . 'not available: an application that needs them needs a domain of the customer\'s own plus addon '
-            . 'domains. Labels are first come, first served across '
-            . 'the fleet, so a name in use is refused; deleting the tunnel releases it again. `cloudflare` '
-            . 'puts a CNAME in a zone the project\'s own '
-            . 'API token controls, so it fits a custom domain; set the token first with PUT '
-            . '/projects/{username}/settings/cloudflare-api-token. Omit `hostname` with the `panelalpha` '
-            . 'provider and the engine allocates a free `preview-<8 random [a-z0-9]>` label under '
-            . 'panelalpha.online; it draws a new label when one is taken, and answers 409 '
-            . '`tunnel_hostname_unavailable` when five labels in a row are. `purpose` separates a '
-            . 'long-lived address (`default`) from one a preview opens (`preview`); `ttl_minutes` gives '
-            . 'either a lifetime the engine enforces -- returned as `valid_until`, and stored under '
-            . '`details.expires_at` -- 24 hours for a `preview` tunnel that does not name one. The proxy\'s '
-            . 'own `details.valid_until` is a separate value the engine does not act on. An expired tunnel '
-            . 'is removed by the engine and never returned by GET.',
+            .'The `panelalpha` provider allocates a name under panelalpha.online through the licensing proxy '
+            .'-- the way to give an application a public address with a trusted certificate on an engine with '
+            .'no DNS of its own. The proxy forwards each name with itself as `Host`, and the domain\'s site '
+            .'answers to it. Attach the project\'s own name to the project domain of the same name. A project '
+            .'may also add a few sibling names beside it, such as `api-<name>.panelalpha.online`, for an '
+            .'application that routes by Host to fixed extra names; the application has to accept those names, '
+            .'so its prefixes must be configurable. Nested names such as `api.<name>.panelalpha.online` are '
+            .'not available: an application that needs them needs a domain of the customer\'s own plus addon '
+            .'domains. Labels are first come, first served across '
+            .'the fleet, so a name in use is refused; deleting the tunnel releases it again. `cloudflare` '
+            .'puts a CNAME in a zone the project\'s own '
+            .'API token controls, so it fits a custom domain; set the token first with PUT '
+            .'/projects/{username}/settings/cloudflare-api-token. Omit `hostname` with the `panelalpha` '
+            .'provider and the engine allocates a free `preview-<8 random [a-z0-9]>` label under '
+            .'panelalpha.online; it draws a new label when one is taken, and answers 409 '
+            .'`tunnel_hostname_unavailable` when five labels in a row are. `purpose` separates a '
+            .'long-lived address (`default`) from one a preview opens (`preview`); `ttl_minutes` gives '
+            .'either a lifetime the engine enforces -- returned as `valid_until`, and stored under '
+            .'`details.expires_at` -- 24 hours for a `preview` tunnel that does not name one. The proxy\'s '
+            .'own `details.valid_until` is a separate value the engine does not act on. An expired tunnel '
+            .'is removed by the engine and never returned by GET.',
         security: [['bearerAuth' => []]],
         tags: ['Tunnels'],
         parameters: [
@@ -103,9 +103,9 @@ class TunnelController extends Controller
                     property: 'hostname',
                     type: 'string',
                     description: 'The public hostname to attach. For the panelalpha provider it must be a '
-                        . 'single label under panelalpha.online: the name of the domain it is attached to, '
-                        . 'or a sibling of it such as `api-<name>.panelalpha.online`. Omit it with '
-                        . 'panelalpha and the engine allocates a `preview-<8>` label. Required for cloudflare.',
+                        .'single label under panelalpha.online: the name of the domain it is attached to, '
+                        .'or a sibling of it such as `api-<name>.panelalpha.online`. Omit it with '
+                        .'panelalpha and the engine allocates a `preview-<8>` label. Required for cloudflare.',
                     example: 'my-shop.panelalpha.online'
                 ),
                 new OA\Property(
@@ -120,15 +120,15 @@ class TunnelController extends Controller
                     type: 'string',
                     enum: ['default', 'preview'],
                     description: 'What the address is for. Defaults to default. A panelalpha preview reaches '
-                        . 'the site as its domain, so WordPress answers instead of redirecting; the proxy swaps '
-                        . 'the preview name back into links, redirects and cookies.',
+                        .'the site as its domain, so WordPress answers instead of redirecting; the proxy swaps '
+                        .'the preview name back into links, redirects and cookies.',
                     example: 'preview'
                 ),
                 new OA\Property(
                     property: 'ttl_minutes',
                     type: 'integer',
                     description: 'Minutes until the engine removes the tunnel. Omit it and a preview '
-                        . 'tunnel lasts 1440 minutes (24 h); a default tunnel then never expires.',
+                        .'tunnel lasts 1440 minutes (24 h); a default tunnel then never expires.',
                     minimum: 5,
                     maximum: 43200,
                     example: 1440
@@ -165,7 +165,7 @@ class TunnelController extends Controller
             $tunnel = $hostname === ''
                 ? TunnelManager::createAllocatedTunnel($user, $domainModel, $purpose, $expiresAt)
                 : TunnelManager::createTunnel($user, $domainModel, $hostname, $provider, $purpose, $expiresAt);
-        } catch (CloudflareException | PanelAlphaException $e) {
+        } catch (CloudflareException|PanelAlphaException $e) {
             // A refused hostname or an unusable provider is the caller's input,
             // not a server fault.
             throw ValidationException::withMessages(['hostname' => $e->getMessage()]);
@@ -191,9 +191,9 @@ class TunnelController extends Controller
         path: '/projects/{username}/domains/{domain}/tunnels/{hostname}',
         summary: 'Remove a public tunnel hostname',
         description: 'Cloudflare tunnels lose their DNS record and ingress rule. A PanelAlpha Online hostname '
-            . 'is released here and at the proxy, so the label can be taken again. A remote delete that fails '
-            . 'is logged rather than raised: the local row goes either way, and the registration then expires '
-            . 'on its own.',
+            .'is released here and at the proxy, so the label can be taken again. A remote delete that fails '
+            .'is logged rather than raised: the local row goes either way, and the registration then expires '
+            .'on its own.',
         security: [['bearerAuth' => []]],
         tags: ['Tunnels'],
         parameters: [
@@ -217,7 +217,7 @@ class TunnelController extends Controller
         [$user, $domainModel] = $this->resolve($username, $domain);
 
         $tunnel = Tunnel::findByHostname(strtolower(trim($hostname)));
-        if (!$tunnel
+        if (! $tunnel
             || (int) $tunnel->user_id !== (int) $user->id
             || (int) $tunnel->domain_id !== (int) $domainModel->id
         ) {
@@ -226,7 +226,7 @@ class TunnelController extends Controller
 
         try {
             TunnelManager::removeTunnel($user, $tunnel);
-        } catch (CloudflareException | PanelAlphaException $e) {
+        } catch (CloudflareException|PanelAlphaException $e) {
             throw ValidationException::withMessages(['hostname' => $e->getMessage()]);
         }
 
@@ -243,7 +243,7 @@ class TunnelController extends Controller
         $user = $this->projectOr404($username);
 
         $domainModel = Domain::findByNameOrAlias(strtolower(trim($domain)));
-        if (!$domainModel || (int) $domainModel->user_id !== (int) $user->id) {
+        if (! $domainModel || (int) $domainModel->user_id !== (int) $user->id) {
             abort(new JsonResponse(['message' => 'Domain not found'], 404));
         }
 

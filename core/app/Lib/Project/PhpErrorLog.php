@@ -29,8 +29,7 @@ final class PhpErrorLog
     private function __construct(
         private readonly User $user,
         private readonly System $system,
-    ) {
-    }
+    ) {}
 
     public static function for(User $user, System $system): self
     {
@@ -105,7 +104,7 @@ final class PhpErrorLog
             $this->assertDomain($domain);
         }
 
-        $path = $this->system->projectDirPath($this->user->username) . '/log/php/' . self::FILE_NAME;
+        $path = $this->system->projectDirPath($this->user->username).'/log/php/'.self::FILE_NAME;
         $stat = AccountFile::ownedRegular($path, $this->user->getUid());
         if ($stat === null) {
             return self::nothing();
@@ -152,7 +151,7 @@ final class PhpErrorLog
     private function assertDomain(string $domain): void
     {
         $exists = $this->user->domains()->getQuery()->where('domain', $domain)->exists();
-        if (!$exists) {
+        if (! $exists) {
             throw new NotFoundException("Domain '{$domain}' not found for project '{$this->user->username}'.", Domain::class);
         }
     }
@@ -161,7 +160,7 @@ final class PhpErrorLog
      * A line PHP wrote has no timestamp of its own when it is a stack frame;
      * it stays, because nothing says when it was written.
      *
-     * @param list<string> $lines
+     * @param  list<string>  $lines
      * @return list<string>
      */
     private function since(array $lines, ?string $since): array

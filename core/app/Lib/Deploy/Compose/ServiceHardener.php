@@ -103,7 +103,7 @@ final class ServiceHardener
 
     /** Names of languages and servers — vocabulary, not a product catalogue. */
     private const NON_NODE_IMAGE_PATTERN = '#\b(nginx|httpd|caddy|traefik|haproxy|varnish|envoy'
-        . '|php|wordpress|ruby|python|golang|openjdk|eclipse-temurin|rust|dotnet|erlang)\b#';
+        .'|php|wordpress|ruby|python|golang|openjdk|eclipse-temurin|rust|dotnet|erlang)\b#';
 
     private const DATABASE_CPUS = '0.50';
 
@@ -142,9 +142,9 @@ final class ServiceHardener
     private const IPV6_WILDCARD = '/^\s*\[\s*::\s*\]:/';
 
     /**
-     * @param array<string, mixed> $service
-     * @param array<string, list<?string>|string> $env what compose may interpolate with ({@see ComposeInterpolation})
-     * @param (callable(string): list<string>)|null $imageEnvironment an image's `Config.Env` ({@see withNodeHeapCap()})
+     * @param  array<string, mixed>  $service
+     * @param  array<string, list<?string>|string>  $env  what compose may interpolate with ({@see ComposeInterpolation})
+     * @param  (callable(string): list<string>)|null  $imageEnvironment  an image's `Config.Env` ({@see withNodeHeapCap()})
      * @return array<string, mixed>
      */
     public static function harden(
@@ -174,20 +174,20 @@ final class ServiceHardener
     }
 
     /**
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return array<string, mixed>
      */
     private static function withThreadPoolsSizedToCpus(array $service): array
     {
         $cpus = EnvVarDefault::resolve(trim((string) ($service['cpus'] ?? $service['cpu_count'] ?? '')));
-        if (!is_numeric($cpus) || (float) $cpus <= 0) {
+        if (! is_numeric($cpus) || (float) $cpus <= 0) {
             return $service;
         }
 
         $threads = (string) max(1, (int) ceil((float) $cpus));
         $defaults = [];
         foreach (self::THREAD_POOL_VARIABLES as $variable) {
-            if (!ServiceEnvironment::hasKey($service['environment'] ?? null, $variable)) {
+            if (! ServiceEnvironment::hasKey($service['environment'] ?? null, $variable)) {
                 $defaults[$variable] = $threads;
             }
         }
@@ -203,19 +203,19 @@ final class ServiceHardener
      * that relied on it publishes nothing, so the port its `PORT` env names is
      * published instead.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return array<string, mixed>
      */
     private static function withHostNetworkPortPublished(array $service): array
     {
-        if (($service['network_mode'] ?? null) !== 'host' || !empty($service['ports']) || !empty($service['expose'])) {
+        if (($service['network_mode'] ?? null) !== 'host' || ! empty($service['ports']) || ! empty($service['expose'])) {
             return $service;
         }
         $port = self::environmentValue($service['environment'] ?? null, 'PORT');
-        if ($port === null || !ctype_digit($port) || (int) $port < 1 || (int) $port > 65535) {
+        if ($port === null || ! ctype_digit($port) || (int) $port < 1 || (int) $port > 65535) {
             return $service;
         }
-        $service['ports'] = [$port . ':' . $port];
+        $service['ports'] = [$port.':'.$port];
 
         return $service;
     }
@@ -225,11 +225,11 @@ final class ServiceHardener
      */
     private static function environmentValue(mixed $environment, string $name): ?string
     {
-        if (!is_array($environment)) {
+        if (! is_array($environment)) {
             return null;
         }
         foreach ($environment as $key => $value) {
-            if (is_int($key) && is_string($value) && str_starts_with($value, $name . '=')) {
+            if (is_int($key) && is_string($value) && str_starts_with($value, $name.'=')) {
                 return trim(substr($value, strlen($name) + 1), " \"'");
             }
             if ($key === $name && is_scalar($value)) {
@@ -248,7 +248,7 @@ final class ServiceHardener
      * the mount as PGDATA skips that check and keeps the data where the volume
      * is; on 17 and earlier it is the image's own default, so nothing changes.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return array<string, mixed>
      */
     private static function withLegacyPostgresDataDir(array $service): array
@@ -286,13 +286,13 @@ final class ServiceHardener
      * With $keepLoopback (another service in the file publishes a web port) a
      * loopback binding is a sidecar kept local on purpose, and stays.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return array<string, mixed>
      */
     private static function withReachablePublishedPorts(array $service, bool $keepLoopback = false): array
     {
         $ports = $service['ports'] ?? null;
-        if (!is_array($ports)) {
+        if (! is_array($ports)) {
             return $service;
         }
 
@@ -308,14 +308,14 @@ final class ServiceHardener
     }
 
     /**
-     * @param array<mixed> $ports
+     * @param  array<mixed>  $ports
      * @return array<int, true>
      */
     private static function hostPortsPublishedOutsideIpv6Wildcard(array $ports): array
     {
         $published = [];
         foreach ($ports as $port) {
-            if (!self::isIpv6Wildcard($port) && ($hostPort = self::anyHostPort($port)) !== null) {
+            if (! self::isIpv6Wildcard($port) && ($hostPort = self::anyHostPort($port)) !== null) {
                 $published[$hostPort] = true;
             }
         }
@@ -328,11 +328,11 @@ final class ServiceHardener
      * reach the account over IPv4, so such a port is published on every
      * address unless another entry already publishes it there.
      *
-     * @param array<int, true> $publishedOutsideIpv6
+     * @param  array<int, true>  $publishedOutsideIpv6
      */
     private static function withIpv6WildcardOnEveryAddress(mixed $port, array $publishedOutsideIpv6): mixed
     {
-        if (!self::isIpv6Wildcard($port) || isset($publishedOutsideIpv6[self::anyHostPort($port) ?? 0])) {
+        if (! self::isIpv6Wildcard($port) || isset($publishedOutsideIpv6[self::anyHostPort($port) ?? 0])) {
             return $port;
         }
         if (is_string($port)) {
@@ -351,7 +351,7 @@ final class ServiceHardener
 
             return $keepLoopback ? $port : self::withoutLoopbackHost($port);
         }
-        if (!$keepLoopback && is_array($port) && isset($port['host_ip']) && self::isLoopbackHost((string) $port['host_ip'])) {
+        if (! $keepLoopback && is_array($port) && isset($port['host_ip']) && self::isLoopbackHost((string) $port['host_ip'])) {
             unset($port['host_ip']);
         }
 
@@ -362,14 +362,14 @@ final class ServiceHardener
      * Whether a service publishes a port the site could be served on, once
      * its host-port variables are defaulted.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     public static function publishesWebPort(array $service): bool
     {
         $ports = self::withHostNetworkPortPublished($service)['ports'] ?? null;
         foreach (is_array($ports) ? $ports : [] as $port) {
             $mapping = PortMapping::parse(is_string($port) ? self::withDefaultedHostPort($port) : $port);
-            if ($mapping !== null && !InternalPorts::coversBinding($mapping, $service)) {
+            if ($mapping !== null && ! InternalPorts::coversBinding($mapping, $service)) {
                 return true;
             }
         }
@@ -391,10 +391,10 @@ final class ServiceHardener
         }
         $host = trim($parts[$count - 2]);
         $container = explode('/', $parts[$count - 1])[0];
-        if (preg_match('/^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$/', $host, $m) !== 1 || !ctype_digit(trim($container))) {
+        if (preg_match('/^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$/', $host, $m) !== 1 || ! ctype_digit(trim($container))) {
             return $port;
         }
-        $parts[$count - 2] = '${' . $m[1] . ':-' . trim($container) . '}';
+        $parts[$count - 2] = '${'.$m[1].':-'.trim($container).'}';
 
         return implode(':', $parts);
     }
@@ -440,11 +440,11 @@ final class ServiceHardener
         }
 
         $parts = self::splitFields($port);
-        if (count($parts) !== 3 || !self::isLoopbackHost(EnvVarDefault::resolve($parts[0]))) {
+        if (count($parts) !== 3 || ! self::isLoopbackHost(EnvVarDefault::resolve($parts[0]))) {
             return $port;
         }
 
-        return $parts[1] . ':' . $parts[2];
+        return $parts[1].':'.$parts[2];
     }
 
     /**
@@ -467,14 +467,14 @@ final class ServiceHardener
     {
         $source = trim($source);
 
-        return $source === '' || preg_match('#^[./~$]#', $source) === 1 ? $source : './' . $source;
+        return $source === '' || preg_match('#^[./~$]#', $source) === 1 ? $source : './'.$source;
     }
 
     /**
      * Top-level volumes mount a path of their own, and a service only names them, so its mount
      * checks never see it: each keeps its name and loses `driver_opts` unless they are a tmpfs.
      *
-     * @param array<string, mixed> $compose
+     * @param  array<string, mixed>  $compose
      * @return array{0: array<string, mixed>, 1: list<string>} the file, and what was removed
      */
     public static function withoutVolumeDriverOptions(array $compose): array
@@ -482,7 +482,7 @@ final class ServiceHardener
         $removed = [];
         foreach ((is_array($compose['volumes'] ?? null) ? $compose['volumes'] : []) as $name => $volume) {
             $options = is_array($volume) ? ($volume['driver_opts'] ?? null) : null;
-            if ($options !== null && !self::isTmpfsDriverOptions($options)) {
+            if ($options !== null && ! self::isTmpfsDriverOptions($options)) {
                 unset($compose['volumes'][$name]['driver_opts']);
                 $removed[] = "volume {$name}: driver_opts";
             }
@@ -502,8 +502,8 @@ final class ServiceHardener
      * Only the isolation part of {@see harden()}: no limits or defaults, so a
      * compose override that sets none does not start overriding its base.
      *
-     * @param array<string, mixed> $service
-     * @param array<string, list<?string>|string> $env
+     * @param  array<string, mixed>  $service
+     * @param  array<string, list<?string>|string>  $env
      * @return array<string, mixed>
      */
     public static function withoutEscapes(array $service, array $env = [], ?string $accountUser = null, ?string $projectDir = null): array
@@ -523,18 +523,18 @@ final class ServiceHardener
     }
 
     /**
-     * @param array<string, mixed> $service
-     * @param array<string, list<?string>|string> $env
+     * @param  array<string, mixed>  $service
+     * @param  array<string, list<?string>|string>  $env
      * @return array<string, mixed>
      */
     private static function withoutForbiddenMounts(array $service, array $env, ?string $accountUser, ?string $projectDir): array
     {
-        if (!is_array($service['volumes'] ?? null)) {
+        if (! is_array($service['volumes'] ?? null)) {
             return $service;
         }
         $kept = array_values(array_filter(
             $service['volumes'],
-            static fn ($volume): bool => !self::isForbiddenMount($volume, $env, $accountUser, $projectDir)
+            static fn ($volume): bool => ! self::isForbiddenMount($volume, $env, $accountUser, $projectDir)
         ));
 
         return self::withListOrWithout($service, 'volumes', $kept);
@@ -544,7 +544,7 @@ final class ServiceHardener
      * $service with $key set to $value, or without $key when $value is empty:
      * an empty PHP array dumps as `{  }`, a map Compose refuses where it wants a list.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return array<string, mixed>
      */
     private static function withListOrWithout(array $service, string $key, mixed $value): array
@@ -561,8 +561,8 @@ final class ServiceHardener
     /**
      * The service's mounts {@see withoutEscapes()} removes, as written.
      *
-     * @param array<string, mixed> $service
-     * @param array<string, list<?string>|string> $env
+     * @param  array<string, mixed>  $service
+     * @param  array<string, list<?string>|string>  $env
      * @return list<string>
      */
     public static function forbiddenMounts(array $service, array $env = [], ?string $accountUser = null, ?string $projectDir = null): array
@@ -583,8 +583,8 @@ final class ServiceHardener
      * service that names the entry. The services' references to a removed
      * entry go too, or Compose refuses the file as "refers to undefined secret".
      *
-     * @param array<string, mixed> $compose
-     * @param array<string, list<?string>|string> $env
+     * @param  array<string, mixed>  $compose
+     * @param  array<string, list<?string>|string>  $env
      * @return array{0: array<string, mixed>, 1: list<string>} the file, and what was removed
      */
     public static function withoutUnsafeFileSources(array $compose, array $env = [], ?string $accountUser = null, ?string $projectDir = null): array
@@ -602,15 +602,15 @@ final class ServiceHardener
      * One top-level `secrets:` or `configs:` block; an override's tag on it
      * (`!override`) is kept and is no way around the check.
      *
-     * @param array<string, mixed> $compose
-     * @param array<string, list<?string>|string> $env
+     * @param  array<string, mixed>  $compose
+     * @param  array<string, list<?string>|string>  $env
      * @return array{0: array<string, mixed>, 1: list<string>}
      */
     private static function withoutUnsafeFileSourcesIn(string $section, array $compose, array $env, ?string $accountUser, ?string $projectDir): array
     {
         $block = $compose[$section] ?? null;
         $entries = self::untagged($block);
-        if (!is_array($entries)) {
+        if (! is_array($entries)) {
             return [$compose, []];
         }
         $names = [];
@@ -620,7 +620,7 @@ final class ServiceHardener
             if ($file !== null && self::isForbiddenSourceIn(self::asPath($file), $env, $accountUser, $projectDir)) {
                 unset($entries[$name]);
                 $names[] = (string) $name;
-                $removed[] = rtrim($section, 's') . " {$name}: file {$file}";
+                $removed[] = rtrim($section, 's')." {$name}: file {$file}";
             }
         }
         if ($names !== []) {
@@ -644,13 +644,13 @@ final class ServiceHardener
      * Each service's `secrets:`/`configs:` without the named entries, in both
      * the short (`- pw`) and the long (`- source: pw`) form.
      *
-     * @param array<string, mixed> $compose
-     * @param list<string> $names
+     * @param  array<string, mixed>  $compose
+     * @param  list<string>  $names
      * @return array<string, mixed>
      */
     private static function withoutReferencesTo(array $compose, string $section, array $names): array
     {
-        if (!is_array($compose['services'] ?? null)) {
+        if (! is_array($compose['services'] ?? null)) {
             return $compose;
         }
         foreach ($compose['services'] as $serviceName => $service) {
@@ -666,19 +666,19 @@ final class ServiceHardener
     /**
      * The service without references to $names, or null when it had none.
      *
-     * @param list<string> $names
+     * @param  list<string>  $names
      */
     private static function serviceWithoutReferencesTo(mixed $taggedService, string $section, array $names): mixed
     {
         $service = self::untagged($taggedService);
         $taggedList = is_array($service) ? ($service[$section] ?? null) : null;
         $list = self::untagged($taggedList);
-        if (!is_array($list)) {
+        if (! is_array($list)) {
             return null;
         }
         $kept = array_values(array_filter(
             $list,
-            static fn (mixed $ref): bool => !in_array(is_array($ref) ? ($ref['source'] ?? null) : $ref, $names, true)
+            static fn (mixed $ref): bool => ! in_array(is_array($ref) ? ($ref['source'] ?? null) : $ref, $names, true)
         ));
         if (count($kept) === count($list)) {
             return null;
@@ -707,7 +707,7 @@ final class ServiceHardener
      * True when the service asks for a locked-memory ulimit, which
      * {@see withoutEscapes()} removes.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     public static function requestsMemlockUlimit(array $service): bool
     {
@@ -720,12 +720,12 @@ final class ServiceHardener
      * Dropping it leaves the account's limit, which is what any lower request
      * would have got anyway.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return array<string, mixed>
      */
     private static function withoutMemlockUlimit(array $service): array
     {
-        if (!self::requestsMemlockUlimit($service)) {
+        if (! self::requestsMemlockUlimit($service)) {
             return $service;
         }
 
@@ -739,7 +739,7 @@ final class ServiceHardener
      * memlock request is dropped: the service gets what it could have anyway
      * instead of a raw OCI error. -1 (unlimited) counts as above.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return array<string, mixed>
      */
     private static function withNofileWithinAccount(array $service): array
@@ -771,12 +771,12 @@ final class ServiceHardener
      * that drops everything and adds back CHOWN/SETUID/SETGID can still drop to
      * its own user. ALL, SYS_ADMIN and the rest are removed.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return array<string, mixed>
      */
     private static function withSafeCapabilities(array $service): array
     {
-        if (!array_key_exists('cap_add', $service)) {
+        if (! array_key_exists('cap_add', $service)) {
             return $service;
         }
 
@@ -786,14 +786,14 @@ final class ServiceHardener
     }
 
     /**
-     * @param array<mixed> $requested
+     * @param  array<mixed>  $requested
      * @return list<string>
      */
     private static function defaultCapabilitiesIn(array $requested): array
     {
         $kept = [];
         foreach ($requested as $capability) {
-            if (!is_string($capability)) {
+            if (! is_string($capability)) {
                 continue;
             }
             $bare = preg_replace('/^CAP_/', '', strtoupper(trim($capability)));
@@ -809,12 +809,12 @@ final class ServiceHardener
      * `sysctls` as a map or as `key=value` entries, keeping only
      * {@see NAMESPACED_SYSCTLS}; dropped entirely when nothing is left.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return array<string, mixed>
      */
     private static function withNamespacedSysctls(array $service): array
     {
-        if (!array_key_exists('sysctls', $service)) {
+        if (! array_key_exists('sysctls', $service)) {
             return $service;
         }
 
@@ -833,7 +833,7 @@ final class ServiceHardener
      * Skipped for a service sharing another's network namespace, which cannot
      * set net.* sysctls, and one that sets the range itself.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return array<string, mixed>
      */
     private static function withPingGroupRange(array $service): array
@@ -843,12 +843,12 @@ final class ServiceHardener
         }
 
         $sysctls = $service['sysctls'] ?? [];
-        if (!is_array($sysctls) || self::setsSysctl($sysctls, 'net.ipv4.ping_group_range')) {
+        if (! is_array($sysctls) || self::setsSysctl($sysctls, 'net.ipv4.ping_group_range')) {
             return $service;
         }
 
         if ($sysctls !== [] && array_is_list($sysctls)) {
-            $sysctls[] = 'net.ipv4.ping_group_range=' . self::PING_GROUP_RANGE;
+            $sysctls[] = 'net.ipv4.ping_group_range='.self::PING_GROUP_RANGE;
         } else {
             $sysctls['net.ipv4.ping_group_range'] = self::PING_GROUP_RANGE;
         }
@@ -888,7 +888,7 @@ final class ServiceHardener
      * service others depend on or reach by name was given the policy before
      * this, by {@see ComposeHarden::applyReporting()}.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return array<string, mixed>
      */
     public static function withRestartPolicy(array $service): array
@@ -911,7 +911,7 @@ final class ServiceHardener
      * account's quota, so a chatty app fills it. A service that names another
      * driver, or sizes its own, is left as it is.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return array<string, mixed>
      */
     public static function withLogRotation(array $service): array
@@ -927,7 +927,7 @@ final class ServiceHardener
             return $service;
         }
         $options = is_array($logging['options'] ?? null) ? $logging['options'] : [];
-        if (!isset($options['max-size'])) {
+        if (! isset($options['max-size'])) {
             $service['logging']['options'] = $options + self::LOG_OPTIONS;
         }
 
@@ -941,13 +941,13 @@ final class ServiceHardener
      * 'deploy.resources.limits.pids'`. The author's numbers move into the keys
      * used above; other `deploy:` keys are Swarm's and inert here.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return array<string, mixed>
      */
     private static function withoutDeployResources(array $service): array
     {
         $deploy = $service['deploy'] ?? null;
-        if (!is_array($deploy) || !is_array($deploy['resources'] ?? null)) {
+        if (! is_array($deploy) || ! is_array($deploy['resources'] ?? null)) {
             return $service;
         }
 
@@ -961,21 +961,21 @@ final class ServiceHardener
      * `deploy.resources` limits and memory reservation as service keys, where
      * the service does not already set them.
      *
-     * @param array<string, mixed> $service
-     * @param array<mixed> $resources
+     * @param  array<string, mixed>  $service
+     * @param  array<mixed>  $resources
      * @return array<string, mixed>
      */
     private static function withResourcesFrom(array $service, array $resources): array
     {
         $limits = is_array($resources['limits'] ?? null) ? $resources['limits'] : [];
         foreach (['memory' => 'mem_limit', 'cpus' => 'cpus', 'pids' => 'pids_limit'] as $from => $to) {
-            if (isset($limits[$from]) && !isset($service[$to])) {
+            if (isset($limits[$from]) && ! isset($service[$to])) {
                 $service[$to] = $limits[$from];
             }
         }
 
         $reservation = $resources['reservations']['memory'] ?? null;
-        if ($reservation !== null && !isset($service['mem_reservation'])) {
+        if ($reservation !== null && ! isset($service['mem_reservation'])) {
             $service['mem_reservation'] = $reservation;
         }
 
@@ -983,12 +983,12 @@ final class ServiceHardener
     }
 
     /**
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return array<string, mixed>
      */
     private static function withMemoryLimit(string $name, array $service, ?int $accountMemoryMb = null): array
     {
-        if (!isset($service['mem_limit']) && !isset($service['mem_reservation'])) {
+        if (! isset($service['mem_limit']) && ! isset($service['mem_reservation'])) {
             $service['mem_limit'] = ServiceLimits::memoryFor($name, $service, $accountMemoryMb);
         }
 
@@ -1002,8 +1002,8 @@ final class ServiceHardener
      * A service's `environment:` replaces the image's own NODE_OPTIONS (which
      * may load the app, e.g. `--require` for Yarn PnP), so the cap is appended to it.
      *
-     * @param array<string, mixed> $service
-     * @param (callable(string): list<string>)|null $imageEnvironment an image's `Config.Env`
+     * @param  array<string, mixed>  $service
+     * @param  (callable(string): list<string>)|null  $imageEnvironment  an image's `Config.Env`
      * @return array<string, mixed>
      */
     private static function withNodeHeapCap(string $name, array $service, ?int $accountMemoryMb = null, ?callable $imageEnvironment = null): array
@@ -1011,7 +1011,7 @@ final class ServiceHardener
         if (ServiceEnvironment::hasKey($service['environment'] ?? null, 'NODE_OPTIONS')) {
             return $service;
         }
-        if (!self::shouldCapNodeHeap($name, $service)) {
+        if (! self::shouldCapNodeHeap($name, $service)) {
             return $service;
         }
 
@@ -1022,7 +1022,7 @@ final class ServiceHardener
 
         $limit = $service['mem_limit'] ?? $service['mem_reservation']
             ?? ServiceLimits::memoryFor($name, $service, $accountMemoryMb);
-        $cap = '--max-old-space-size=' . ServiceLimits::nodeHeapMbFor($limit);
+        $cap = '--max-old-space-size='.ServiceLimits::nodeHeapMbFor($limit);
         $service['environment'] = ServiceEnvironment::withDefaults(
             $service['environment'] ?? [],
             ['NODE_OPTIONS' => self::nodeOptionsWithCap($own, $cap)]
@@ -1034,7 +1034,7 @@ final class ServiceHardener
     /** The image's own options escaped as `$$`, which compose would interpolate otherwise, then the cap. */
     private static function nodeOptionsWithCap(?string $imageOptions, string $cap): string
     {
-        return $imageOptions === null || $imageOptions === '' ? $cap : str_replace('$', '$$', $imageOptions) . ' ' . $cap;
+        return $imageOptions === null || $imageOptions === '' ? $cap : str_replace('$', '$$', $imageOptions).' '.$cap;
     }
 
     /**
@@ -1042,13 +1042,13 @@ final class ServiceHardener
      * the service builds its own, or the image could not be read. A
      * `name:tag@digest` reference is looked up by its digest alone.
      *
-     * @param array<string, mixed> $service
-     * @param callable(string): list<string> $imageEnvironment
+     * @param  array<string, mixed>  $service
+     * @param  callable(string): list<string>  $imageEnvironment
      */
     private static function imageNodeOptions(array $service, callable $imageEnvironment): ?string
     {
         $image = $service['image'] ?? null;
-        if (!is_string($image) || $image === '' || isset($service['build'])) {
+        if (! is_string($image) || $image === '' || isset($service['build'])) {
             return null;
         }
         $image = (string) preg_replace(self::TAG_BEFORE_DIGEST, '', $image);
@@ -1062,12 +1062,12 @@ final class ServiceHardener
     }
 
     /**
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return array<string, mixed>
      */
     private static function withProcessLimits(string $name, array $service): array
     {
-        if (!isset($service['cpus']) && !isset($service['cpu_count'])) {
+        if (! isset($service['cpus']) && ! isset($service['cpu_count'])) {
             if (self::needsStartPeriodUnderCap($service)) {
                 $service['healthcheck']['start_period'] = self::CAPPED_START_PERIOD;
             }
@@ -1083,22 +1083,22 @@ final class ServiceHardener
      * will slow down (`retries: 1` and no start period may never pass under
      * 0.5 CPU). Probes failing in a start period do not count.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     public static function needsStartPeriodUnderCap(array $service): bool
     {
         $check = $service['healthcheck'] ?? null;
-        if (isset($service['cpus']) || isset($service['cpu_count']) || !is_array($check)
-            || !empty($check['disable']) || isset($check['start_period'])) {
+        if (isset($service['cpus']) || isset($service['cpu_count']) || ! is_array($check)
+            || ! empty($check['disable']) || isset($check['start_period'])) {
             return false;
         }
         $test = $check['test'] ?? null;
 
-        return !empty($test) && strtoupper(is_array($test) ? (string) ($test[0] ?? '') : (string) $test) !== 'NONE';
+        return ! empty($test) && strtoupper(is_array($test) ? (string) ($test[0] ?? '') : (string) $test) !== 'NONE';
     }
 
     /**
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     private static function shouldCapNodeHeap(string $name, array $service): bool
     {
@@ -1106,11 +1106,11 @@ final class ServiceHardener
             return false;
         }
 
-        return self::isNodeService($name, $service) || !self::hasKnownNonNodeImage($service);
+        return self::isNodeService($name, $service) || ! self::hasKnownNonNodeImage($service);
     }
 
     /**
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     private static function isNodeService(string $name, array $service): bool
     {
@@ -1129,7 +1129,7 @@ final class ServiceHardener
      * `image:` means the service builds locally and tells us nothing. The
      * sidecar catalogue already knows which images are datastores.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     private static function hasKnownNonNodeImage(array $service): bool
     {
@@ -1143,7 +1143,7 @@ final class ServiceHardener
     }
 
     /**
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     private static function isDatabase(string $name, array $service = []): bool
     {
@@ -1155,11 +1155,11 @@ final class ServiceHardener
      * value it can take is checked, and one that cannot be told is refused.
      * `${DATA_DIR:-./data}` stays allowed; `${X:-/var/run}` does not.
      *
-     * @param array<string, list<?string>|string> $env
+     * @param  array<string, list<?string>|string>  $env
      */
     private static function isForbiddenSourceIn(string $source, array $env, ?string $accountUser = null, ?string $projectDir = null): bool
     {
-        if (!str_contains($source, '$')) {
+        if (! str_contains($source, '$')) {
             return self::isForbiddenSource($source, $accountUser, $projectDir);
         }
         $candidates = ComposeInterpolation::candidates($source, $env);
@@ -1176,7 +1176,7 @@ final class ServiceHardener
     }
 
     /**
-     * @param array<string, list<?string>|string> $env
+     * @param  array<string, list<?string>|string>  $env
      */
     private static function isForbiddenMount(mixed $volume, array $env = [], ?string $accountUser = null, ?string $projectDir = null): bool
     {
@@ -1191,7 +1191,7 @@ final class ServiceHardener
      * Only the source side is a host path; a named volume has no leading
      * slash and is not one of these.
      *
-     * @param array<string, list<?string>|string> $env
+     * @param  array<string, list<?string>|string>  $env
      */
     private static function isForbiddenShortMount(string $volume, array $env, ?string $accountUser, ?string $projectDir): bool
     {
@@ -1207,8 +1207,8 @@ final class ServiceHardener
      * A bind source is a path even without a leading `./`, and the socket's
      * directory counts here too: `source: /var/run` hands over the daemon.
      *
-     * @param array<mixed> $volume
-     * @param array<string, list<?string>|string> $env
+     * @param  array<mixed>  $volume
+     * @param  array<string, list<?string>|string>  $env
      */
     private static function isForbiddenLongMount(array $volume, array $env, ?string $accountUser, ?string $projectDir): bool
     {
@@ -1243,7 +1243,7 @@ final class ServiceHardener
         if (str_starts_with($source, '.')) {
             return self::leavesProject($source);
         }
-        if (!str_starts_with($source, '/')) {
+        if (! str_starts_with($source, '/')) {
             return false;
         }
 
@@ -1259,7 +1259,7 @@ final class ServiceHardener
     private static function escapesThroughSymlink(string $source, ?string $accountUser, ?string $projectDir): bool
     {
         return $projectDir !== null && str_starts_with($projectDir, '/') && preg_match('#^[./]#', $source) === 1
-            && !self::isInOwnPanelalpha($source, $accountUser)
+            && ! self::isInOwnPanelalpha($source, $accountUser)
             && LinkedSource::escapes($source, $projectDir);
     }
 
@@ -1284,12 +1284,12 @@ final class ServiceHardener
         if (self::isOwnPanelalpha($source, $accountUser)) {
             return false;
         }
-        if ($projectDir === null || !str_starts_with($projectDir, '/')) {
+        if ($projectDir === null || ! str_starts_with($projectDir, '/')) {
             return true;
         }
         $checkout = self::checkoutInAccount($projectDir);
 
-        return $source !== $checkout && !str_starts_with($source, $checkout . '/');
+        return $source !== $checkout && ! str_starts_with($source, $checkout.'/');
     }
 
     /** The checkout as the account container sees it, as LinkedSource maps it. */
@@ -1297,7 +1297,7 @@ final class ServiceHardener
     {
         $projectDir = rtrim($projectDir, '/');
 
-        return '/home/' . basename(dirname($projectDir)) . '/' . basename($projectDir);
+        return '/home/'.basename(dirname($projectDir)).'/'.basename($projectDir);
     }
 
     /** Whether normalised absolute $source is the account's ~/.panelalpha or under it. */
@@ -1308,7 +1308,7 @@ final class ServiceHardener
         }
         $keep = "/home/{$accountUser}/.panelalpha";
 
-        return $source === $keep || str_starts_with($source, $keep . '/');
+        return $source === $keep || str_starts_with($source, $keep.'/');
     }
 
     private static function normalisedAbsolute(string $source): string
@@ -1320,12 +1320,13 @@ final class ServiceHardener
             }
             if ($segment === '..') {
                 array_pop($segments);
+
                 continue;
             }
             $segments[] = $segment;
         }
 
-        return '/' . implode('/', $segments);
+        return '/'.implode('/', $segments);
     }
 
     /**
@@ -1358,6 +1359,7 @@ final class ServiceHardener
                     return false;
                 }
                 array_pop($segments);
+
                 continue;
             }
             $segments[] = $segment;

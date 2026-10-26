@@ -21,14 +21,16 @@ class ProjectPushCommand extends Command
         $toUsername = (string) $this->argument('target');
 
         $from = User::findByUsername($fromUsername);
-        if (!$from) {
+        if (! $from) {
             $this->error("No such user: '{$fromUsername}'");
+
             return 1;
         }
 
         $to = User::findByUsername($toUsername);
-        if (!$to) {
+        if (! $to) {
             $this->error("No such user: '{$toUsername}'");
+
             return 1;
         }
 
@@ -36,13 +38,13 @@ class ProjectPushCommand extends Command
             Projects::assertCanPush($from, $to);
 
             $to->mergeAsyncStatus([
-                'push'   => 'running',
+                'push' => 'running',
                 'source' => 'artisan',
             ]);
             $to->setDetails(['error' => null]);
             $to->save();
 
-            (new System())->projects()->pushToApp($fromUsername, $toUsername);
+            (new System)->projects()->pushToApp($fromUsername, $toUsername);
 
             $this->info("Push completed: {$fromUsername} -> {$toUsername}");
 

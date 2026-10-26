@@ -36,7 +36,7 @@ final class PlaceholderPage
     public static function isOneOf(string $path): bool
     {
         $raw = is_file($path) ? @file_get_contents($path) : null;
-        if (!is_string($raw) || $raw === '') {
+        if (! is_string($raw) || $raw === '') {
             return false;
         }
 
@@ -53,9 +53,9 @@ final class PlaceholderPage
     public static function supersededIndex(string $projectDir): ?string
     {
         $projectDir = rtrim($projectDir, '/');
-        $index = $projectDir . '/index.html';
+        $index = $projectDir.'/index.html';
 
-        if (!self::isOneOf($index)) {
+        if (! self::isOneOf($index)) {
             return null;
         }
 
@@ -63,7 +63,7 @@ final class PlaceholderPage
             if (str_starts_with($entry, '.')) {
                 continue;
             }
-            if (!self::isScaffolding($projectDir, $entry)) {
+            if (! self::isScaffolding($projectDir, $entry)) {
                 return $index;
             }
         }
@@ -90,7 +90,7 @@ final class PlaceholderPage
         }
 
         if (in_array($name, ComposeFileInspector::COMPOSE_FILE_CANDIDATES, true)) {
-            return ComposeFileInspector::isGeneratedBootstrapCompose($dir . '/' . $entry);
+            return ComposeFileInspector::isGeneratedBootstrapCompose($dir.'/'.$entry);
         }
 
         return false;

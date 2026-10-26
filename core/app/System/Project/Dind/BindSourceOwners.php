@@ -25,13 +25,11 @@ final class BindSourceOwners
      * is skipped, and nothing below it is followed (-h, -P).
      */
     private const HAND_OVER = 'root=$1; owner=$2; shift 2; for p; do '
-        . '[ -L "$p" ] && continue; r=$(realpath -e -- "$p" 2>/dev/null) || continue; '
-        . 'case "$r" in "$root"/*) ;; *) continue ;; esac; '
-        . 'chown -R -h -P "$owner" -- "$r" && chmod -R g+w -- "$r" && printf "%s\n" "$r"; done';
+        .'[ -L "$p" ] && continue; r=$(realpath -e -- "$p" 2>/dev/null) || continue; '
+        .'case "$r" in "$root"/*) ;; *) continue ;; esac; '
+        .'chown -R -h -P "$owner" -- "$r" && chmod -R g+w -- "$r" && printf "%s\n" "$r"; done';
 
-    public function __construct(private DindProject $project)
-    {
-    }
+    public function __construct(private DindProject $project) {}
 
     public function apply(): void
     {
@@ -50,7 +48,7 @@ final class BindSourceOwners
         } catch (\Throwable) {
             return;
         }
-        if (!is_array($compose)) {
+        if (! is_array($compose)) {
             return;
         }
 
@@ -77,7 +75,7 @@ final class BindSourceOwners
             if ($bind['user'] !== null) {
                 $user = $bind['user'];
                 // `docker create` would ask a registry for a tag not built yet.
-                $passwdImage = $build !== null && ($image === null || !$this->hasLocalImage($image)) ? null : $image;
+                $passwdImage = $build !== null && ($image === null || ! $this->hasLocalImage($image)) ? null : $image;
             } elseif ($build !== null) {
                 [$user, $passwdImage] = $this->builtImageUser($image, $build);
             } else {
@@ -102,7 +100,8 @@ final class BindSourceOwners
                     self::TIMEOUT_SECONDS
                 );
             } catch (\Throwable $e) {
-                $logger?->warn("Could not hand the paths service {$service} writes to uid {$uid}: " . trim($e->getMessage()));
+                $logger?->warn("Could not hand the paths service {$service} writes to uid {$uid}: ".trim($e->getMessage()));
+
                 continue;
             }
             $relative = array_map(
@@ -113,8 +112,8 @@ final class BindSourceOwners
                 continue;
             }
             $logger?->info(
-                "Service {$service} runs as uid {$uid} and writes to " . implode(', ', $relative)
-                . ' through a bind mount; handed them to that uid (the account keeps group write)'
+                "Service {$service} runs as uid {$uid} and writes to ".implode(', ', $relative)
+                .' through a bind mount; handed them to that uid (the account keeps group write)'
             );
         }
     }
@@ -124,9 +123,9 @@ final class BindSourceOwners
      * the service building the tag it runs (kassambara's `image: wpcli`).
      * Null for an image from a registry.
      *
-     * @param array<string, mixed> $services
-     * @param array<string, list<?string>|string> $env
-     * @param list<string> $builtHere
+     * @param  array<string, mixed>  $services
+     * @param  array<string, list<?string>|string>  $env
+     * @param  list<string>  $builtHere
      * @return array<string, mixed>|string|null
      */
     private function buildOf(mixed $service, ?string $image, array $services, array $env, array $builtHere): array|string|null
@@ -137,7 +136,7 @@ final class BindSourceOwners
         if (is_array($service) && (is_array($service['build'] ?? null) || is_string($service['build'] ?? null))) {
             return $service['build'];
         }
-        if (!in_array(strtolower($image), $builtHere, true)) {
+        if (! in_array(strtolower($image), $builtHere, true)) {
             return null;
         }
         foreach ($services as $other) {
@@ -156,15 +155,15 @@ final class BindSourceOwners
      * tag that only exists once the build runs: the Dockerfile's own `USER`,
      * else the image a previous deploy built, else the base it starts from.
      *
-     * @param array<string, mixed>|string $build
+     * @param  array<string, mixed>|string  $build
      * @return array{0: ?string, 1: ?string} the user, and the image to read its passwd from
      */
     private function builtImageUser(?string $image, array|string $build): array
     {
         $projectDir = rtrim($this->project->userAppDirPath(), '/');
         $path = ComposeFileInspector::composeBuildDockerfileAbsolute($projectDir, $build);
-        if ($path !== null && !str_starts_with($path, '/')) {
-            $path = $projectDir . '/' . $path;
+        if ($path !== null && ! str_starts_with($path, '/')) {
+            $path = $projectDir.'/'.$path;
         }
         $fs = $this->project->system()->filesystem();
         $from = ['user' => null, 'base' => null];
@@ -229,11 +228,11 @@ final class BindSourceOwners
     /** The image's /etc/passwd, read from a created (never started) container. */
     private function imagePasswd(string $image): ?string
     {
-        $name = 'pa-passwd-' . bin2hex(random_bytes(4));
+        $name = 'pa-passwd-'.bin2hex(random_bytes(4));
         // Created with a dummy entrypoint: create never checks it, and an image without a CMD is refused otherwise.
         $script = 'docker create --name "$1" --entrypoint /pa-none "$2" >/dev/null 2>&1 || exit 0; '
-            . 'docker cp "$1:/etc/passwd" - 2>/dev/null | tar -xO 2>/dev/null; '
-            . 'docker rm "$1" >/dev/null 2>&1; exit 0';
+            .'docker cp "$1:/etc/passwd" - 2>/dev/null | tar -xO 2>/dev/null; '
+            .'docker rm "$1" >/dev/null 2>&1; exit 0';
         try {
             return $this->project->shell()->execQuiet(['sh', '-c', $script, 'sh', $name, $image], [], self::TIMEOUT_SECONDS);
         } catch (\Throwable) {

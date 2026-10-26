@@ -27,7 +27,7 @@ final class GeneratedCompose
         }
 
         $service = $parsed['services'][self::APP_SERVICE] ?? null;
-        if (!is_array($service) || isset($service['build'])) {
+        if (! is_array($service) || isset($service['build'])) {
             return null;
         }
 
@@ -64,8 +64,8 @@ final class GeneratedCompose
      * The whole file: the app service, the decision's sidecars and its volumes.
      * Empty arrays are dumped as `[]` (`entrypoint: []`), since Compose rejects `{}`.
      *
-     * @param array<string, mixed> $appService
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $appService
+     * @param  array<string, mixed>  $decision
      */
     public static function render(array $appService, array $decision = []): string
     {
@@ -84,9 +84,9 @@ final class GeneratedCompose
      * (Docker's default `no` keeps an app down after a reboot), the aliases of the
      * service it replaced, and long-form `depends_on` on its sidecars.
      *
-     * @param array<string, mixed> $appService
-     * @param array<string, mixed> $decision
-     * @param array<string, array<string, mixed>> $sidecars
+     * @param  array<string, mixed>  $appService
+     * @param  array<string, mixed>  $decision
+     * @param  array<string, array<string, mixed>>  $sidecars
      * @return array<string, mixed>
      */
     private static function appService(array $appService, array $decision, array $sidecars): array
@@ -106,8 +106,8 @@ final class GeneratedCompose
      * network aliases: a proxy naming it in its own nginx config would otherwise
      * fail with `host not found in upstream`. {@see ServiceAliases}
      *
-     * @param array<string, mixed> $appService
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $appService
+     * @param  array<string, mixed>  $decision
      * @return array<string, mixed>
      */
     private static function withReplacedServiceAliases(array $appService, array $decision): array
@@ -124,7 +124,7 @@ final class GeneratedCompose
      * An empty definition (`db_data: {}` parses to `[]`) as null, since Compose
      * rejects `[]` for a volume.
      *
-     * @param array<mixed> $volumes
+     * @param  array<mixed>  $volumes
      * @return array<mixed>
      */
     private static function volumeDefinitions(array $volumes): array
@@ -135,7 +135,7 @@ final class GeneratedCompose
     /**
      * Dump a document we did not write, keeping its own `[]` vs `{}`.
      *
-     * @param array<mixed> $compose
+     * @param  array<mixed>  $compose
      */
     private static function dumpKeeping(string $yaml, array $compose): string
     {
@@ -148,7 +148,7 @@ final class GeneratedCompose
      * checkout a recipe bind-mounts. Mounted over that bind; a path something
      * already mounts is left alone. Unchanged when there is nothing to add.
      *
-     * @param list<string> $paths
+     * @param  list<string>  $paths
      */
     public static function withPersistedPaths(string $yaml, array $paths): string
     {
@@ -157,7 +157,7 @@ final class GeneratedCompose
         }
         $compose = ComposeYaml::parse($yaml);
         $service = $compose['services'][self::APP_SERVICE] ?? null;
-        if (!is_array($service)) {
+        if (! is_array($service)) {
             return $yaml;
         }
 
@@ -177,9 +177,9 @@ final class GeneratedCompose
      * The mounts and volume definitions with a named volume for every path not yet
      * mounted, never reusing a volume name the file already has. Null when none is added.
      *
-     * @param list<string> $paths
-     * @param list<mixed> $mounts
-     * @param array<mixed> $volumes
+     * @param  list<string>  $paths
+     * @param  list<mixed>  $mounts
+     * @param  array<mixed>  $volumes
      * @return array{0: list<mixed>, 1: array<mixed>}|null
      */
     private static function persistedMounts(array $paths, array $mounts, array $volumes): ?array
@@ -192,7 +192,7 @@ final class GeneratedCompose
                 continue;
             }
             $name = $names[$path];
-            $mounts[] = $name . ':' . $path;
+            $mounts[] = $name.':'.$path;
             $volumes[$name] ??= null;
             $taken[$path] = true;
             $added = true;
@@ -204,7 +204,7 @@ final class GeneratedCompose
     /**
      * Container paths the mounts cover, short or long syntax, without a trailing slash.
      *
-     * @param list<mixed> $mounts
+     * @param  list<mixed>  $mounts
      * @return array<string, true>
      */
     private static function mountedTargets(array $mounts): array
@@ -228,7 +228,7 @@ final class GeneratedCompose
      * already uses is skipped, and an app served by stock nginx gets none:
      * there is no runtime in it to run them. Unchanged when there are none.
      *
-     * @param array<string, string> $processes name => command
+     * @param  array<string, string>  $processes  name => command
      */
     public static function withProcesses(string $yaml, array $processes): string
     {
@@ -237,7 +237,7 @@ final class GeneratedCompose
         }
         $compose = ComposeYaml::parse($yaml);
         $app = $compose['services'][self::APP_SERVICE] ?? null;
-        if (!is_array($app) || ($app['image'] ?? null) === Images::NGINX_IMAGE) {
+        if (! is_array($app) || ($app['image'] ?? null) === Images::NGINX_IMAGE) {
             return $yaml;
         }
 
@@ -259,7 +259,7 @@ final class GeneratedCompose
      * loses its `image:` and gets its own cached build, since the app's tag does not
      * exist yet when `run` asks for the release.
      *
-     * @param array<string, mixed> $app
+     * @param  array<string, mixed>  $app
      * @return array<string, mixed>
      */
     private static function processBase(array $app): array
@@ -277,15 +277,15 @@ final class GeneratedCompose
      * One Procfile process, run in a shell of its own as Heroku does: an image
      * entrypoint like Railpack's `bash -c` would otherwise take `sh` for the script.
      *
-     * @param array<string, mixed> $base
+     * @param  array<string, mixed>  $base
      * @return array<string, mixed>
      */
     private static function processService(array $base, string $name, string $command): array
     {
         $service = $base;
-        $service['labels'] = [self::LABEL => self::PROCESS_LABEL_PREFIX . $name];
+        $service['labels'] = [self::LABEL => self::PROCESS_LABEL_PREFIX.$name];
         $service['entrypoint'] = ['sh', '-c'];
-        $service['command'] = ['export PATH=' . self::PROCESS_PATH . ':$$PATH && ' . FrameworkService::shellCommand($command)];
+        $service['command'] = ['export PATH='.self::PROCESS_PATH.':$$PATH && '.FrameworkService::shellCommand($command)];
         if ($name === self::RELEASE_PROCESS) {
             $service['restart'] = 'no';
             $service['profiles'] = [self::RELEASE_PROFILE];
@@ -299,11 +299,11 @@ final class GeneratedCompose
     /**
      * The service a Procfile `release:` line became, if this compose file has one.
      *
-     * @param array<mixed> $compose
+     * @param  array<mixed>  $compose
      */
     public static function releaseService(array $compose): ?string
     {
-        $label = self::PROCESS_LABEL_PREFIX . self::RELEASE_PROCESS;
+        $label = self::PROCESS_LABEL_PREFIX.self::RELEASE_PROCESS;
         foreach (is_array($compose['services'] ?? null) ? $compose['services'] : [] as $name => $service) {
             if (is_array($service) && ($service['labels'][self::LABEL] ?? null) === $label) {
                 return (string) $name;
@@ -318,7 +318,7 @@ final class GeneratedCompose
     {
         $slug = strtolower(trim((string) preg_replace('/[^A-Za-z0-9]+/', '-', $path), '-'));
 
-        return 'data-' . ($slug === '' ? 'root' : $slug);
+        return 'data-'.($slug === '' ? 'root' : $slug);
     }
 
     /**
@@ -326,8 +326,8 @@ final class GeneratedCompose
      * used (`/app/Uploads` after `/app/uploads`) gets a short hash appended, so
      * it does not share that volume; the first keeps the plain name.
      *
-     * @param list<string> $paths
-     * @param list<string> $reserved names another source (a Dockerfile `VOLUME`) already uses
+     * @param  list<string>  $paths
+     * @param  list<string>  $reserved  names another source (a Dockerfile `VOLUME`) already uses
      * @return array<string, string> path => volume name
      */
     public static function volumeNamesFor(array $paths, array $reserved = []): array
@@ -337,7 +337,7 @@ final class GeneratedCompose
         foreach ($paths as $path) {
             $name = self::volumeNameFor($path);
             if (isset($used[$name])) {
-                $name .= '-' . substr(hash('sha256', $path), 0, 8);
+                $name .= '-'.substr(hash('sha256', $path), 0, 8);
             }
             $used[$name] = true;
             $names[$path] = $name;
@@ -351,15 +351,15 @@ final class GeneratedCompose
      * The short form only waits for the container to start, and an app that
      * migrates on boot then races its own database.
      *
-     * @param list<mixed> $names
-     * @param array<string, array<string, mixed>> $sidecars
+     * @param  list<mixed>  $names
+     * @param  array<string, array<string, mixed>>  $sidecars
      * @return array<string, array{condition: string}>
      */
     private static function dependsOn(array $names, array $sidecars): array
     {
         $depends = [];
         foreach ($names as $name) {
-            if (!is_string($name) || $name === '') {
+            if (! is_string($name) || $name === '') {
                 continue;
             }
             $depends[$name] = [
@@ -374,7 +374,7 @@ final class GeneratedCompose
     private static function hasHealthcheck(array $service): bool
     {
         $check = $service['healthcheck'] ?? null;
-        if (!is_array($check) || ($check['disable'] ?? false) === true) {
+        if (! is_array($check) || ($check['disable'] ?? false) === true) {
             return false;
         }
         $test = $check['test'] ?? null;
@@ -386,7 +386,7 @@ final class GeneratedCompose
      * The decision's sidecars, each restarting unless it says otherwise: the app
      * needs them whether or not they publish a port.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      * @return array<string, array<string, mixed>>
      */
     private static function sidecars(array $decision): array

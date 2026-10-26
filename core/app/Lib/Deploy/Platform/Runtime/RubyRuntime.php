@@ -79,11 +79,11 @@ final class RubyRuntime implements Runtime
     {
         $spec = RuntimeImageCatalog::spec('ruby', $version);
 
-        return $spec?->from ?? 'ruby:' . $version . '-' . self::IMAGE_VARIANT;
+        return $spec?->from ?? 'ruby:'.$version.'-'.self::IMAGE_VARIANT;
     }
 
     /** What a project that names no version gets. */
-    public const IMAGE = 'ruby:' . self::DEFAULT_MINOR . '-slim-bookworm';
+    public const IMAGE = 'ruby:'.self::DEFAULT_MINOR.'-slim-bookworm';
 
     public function id(): string
     {
@@ -95,7 +95,7 @@ final class RubyRuntime implements Runtime
         // The Gemfile gate belongs here, not in imageFor(): this method answers
         // "is this project mine", and a .ruby-version with no Gemfile is not a
         // Ruby application the engine can deploy.
-        if (!$context->hasFile('gemfile')) {
+        if (! $context->hasFile('gemfile')) {
             return null;
         }
 
@@ -106,7 +106,7 @@ final class RubyRuntime implements Runtime
         // install under a Ruby the Gemfile rejects (`Your Ruby version is
         // 3.3.0, but your Gemfile specified 3.2.2`), so a violation is a failed
         // deploy — but a range already satisfied must not move to its floor.
-        if ($constraints !== [] && !self::satisfies($version, $constraints)) {
+        if ($constraints !== [] && ! self::satisfies($version, $constraints)) {
             $required = self::lowestAllowed($constraints);
             if ($required !== null) {
                 return new Requirement('ruby', $required, implode(', ', $constraints), 'Gemfile ruby directive');
@@ -149,12 +149,12 @@ final class RubyRuntime implements Runtime
     /**
      * Does this version satisfy every constraint the Gemfile wrote?
      *
-     * @param list<string> $constraints
+     * @param  list<string>  $constraints
      */
     private static function satisfies(string $version, array $constraints): bool
     {
         foreach ($constraints as $constraint) {
-            if (!self::satisfiesOne($version, $constraint)) {
+            if (! self::satisfiesOne($version, $constraint)) {
                 return false;
             }
         }
@@ -174,7 +174,7 @@ final class RubyRuntime implements Runtime
             $prefix = implode('.', $parts);
 
             return version_compare($version, $m[1], '>=')
-                && ($prefix === '' || str_starts_with($version . '.', $prefix . '.'));
+                && ($prefix === '' || str_starts_with($version.'.', $prefix.'.'));
         }
 
         if (preg_match('/^(>=|<=|>|<|!=|=)?\s*(\d+(?:\.\d+){0,2})$/', $constraint, $m) === 1) {
@@ -182,7 +182,7 @@ final class RubyRuntime implements Runtime
             if ($operator === '=') {
                 // An exact pin matches by prefix: `3.2` is satisfied by 3.2.2,
                 // which is what the pin means to bundler.
-                return $version === $m[2] || str_starts_with($version . '.', $m[2] . '.');
+                return $version === $m[2] || str_starts_with($version.'.', $m[2].'.');
             }
 
             return version_compare($version, $m[2], $operator);
@@ -196,7 +196,7 @@ final class RubyRuntime implements Runtime
      * The lowest version the constraints allow, for when the stated one does
      * not satisfy them. Null when nothing here names a floor.
      *
-     * @param list<string> $constraints
+     * @param  list<string>  $constraints
      */
     private static function lowestAllowed(array $constraints): ?string
     {
@@ -243,7 +243,7 @@ final class RubyRuntime implements Runtime
         [$version] = self::statedVersion($context);
         $constraints = Gemfile::of($context)->rubyConstraints();
 
-        if ($constraints !== [] && !self::satisfies($version, $constraints)) {
+        if ($constraints !== [] && ! self::satisfies($version, $constraints)) {
             return self::lowestAllowed($constraints) ?? $version;
         }
 

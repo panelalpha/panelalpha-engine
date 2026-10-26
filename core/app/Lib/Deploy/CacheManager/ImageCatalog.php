@@ -36,7 +36,7 @@ use Symfony\Component\Yaml\Yaml;
  */
 final class ImageCatalog
 {
-    private const CONFIG_PATH = __DIR__ . '/../../../../../config/core/images.yaml';
+    private const CONFIG_PATH = __DIR__.'/../../../../../config/core/images.yaml';
 
     private static ?string $configPath = null;
 
@@ -88,8 +88,7 @@ final class ImageCatalog
             static fn (array $e): bool => $e['prewarm'] !== null
         ));
 
-        usort($items, static fn (array $a, array $b): int
-            => $b['prewarm'] === $a['prewarm']
+        usort($items, static fn (array $a, array $b): int => $b['prewarm'] === $a['prewarm']
                 ? strcmp($a['ref'], $b['ref'])
                 : $b['prewarm'] <=> $a['prewarm']);
 
@@ -125,7 +124,7 @@ final class ImageCatalog
      * this host can resolve — a runtime absent from the image catalogue, a
      * version it does not describe, a ref docker would not accept.
      *
-     * @param array<string, mixed> $entry
+     * @param  array<string, mixed>  $entry
      * @return array{id: string, ref: string, kind: string, runtime: string, prewarm: ?int, why: string}|null
      */
     private static function resolve(array $entry): ?array
@@ -155,14 +154,14 @@ final class ImageCatalog
         }
 
         $version = $entry['version'] ?? null;
-        if (!is_string($version) && !is_int($version) && !is_float($version)) {
+        if (! is_string($version) && ! is_int($version) && ! is_float($version)) {
             return null;
         }
         $version = trim((string) $version);
         // Only a version the runtimes block declares. spec() substitutes
         // {version} into the template whatever it is handed, so without this a
         // typo names `php:9.9-apache-bookworm` -- a tag nobody published.
-        if (!in_array($version, RuntimeImageCatalog::versions($runtime), true)) {
+        if (! in_array($version, RuntimeImageCatalog::versions($runtime), true)) {
             return null;
         }
         $spec = RuntimeImageCatalog::spec($runtime, $version);
@@ -174,7 +173,7 @@ final class ImageCatalog
         // runtime and its entry becomes the stock tag.
         $built = $spec->isBuilt() ? self::builtTag($runtime, $spec->from, $entry) : null;
         $ref = $built ?? $spec->from;
-        if (!ImageTransfer::isSafeImageRef($ref)) {
+        if (! ImageTransfer::isSafeImageRef($ref)) {
             return null;
         }
 
@@ -182,7 +181,7 @@ final class ImageCatalog
         sort($extensions);
 
         return [
-            'id' => $runtime . ':' . $version . ($extensions === [] ? '' : '+' . implode('+', $extensions)),
+            'id' => $runtime.':'.$version.($extensions === [] ? '' : '+'.implode('+', $extensions)),
             'ref' => $ref,
             'kind' => $built === null ? HostPrewarmPlan::KIND_PULL : HostPrewarmPlan::KIND_BUILD,
             // Only a variant needs it -- a plain base's Dockerfile is derivable
@@ -232,13 +231,13 @@ final class ImageCatalog
      * Validated by {@see PhpBaseImage::normalizeExtras()}, so a bad name is
      * dropped rather than reaching a shell.
      *
-     * @param array<string, mixed> $entry
+     * @param  array<string, mixed>  $entry
      * @return list<string>
      */
     private static function entryExtensions(array $entry): array
     {
         $extensions = $entry['extensions'] ?? null;
-        if (!is_array($extensions)) {
+        if (! is_array($extensions)) {
             return [];
         }
 
@@ -270,7 +269,7 @@ final class ImageCatalog
         $entries = [];
         $runtimes = self::config()['runtimes'] ?? null;
         foreach (is_array($runtimes) ? $runtimes : [] as $runtime => $spec) {
-            if (!is_string($runtime) || !is_array($spec)) {
+            if (! is_string($runtime) || ! is_array($spec)) {
                 continue;
             }
             foreach (is_array($spec['versions'] ?? null) ? $spec['versions'] : [] as $version) {
@@ -311,11 +310,11 @@ final class ImageCatalog
         self::$cache = [];
 
         $path = self::$configPath ?? self::CONFIG_PATH;
-        if (!is_file($path)) {
+        if (! is_file($path)) {
             return self::$cache;
         }
         $raw = @file_get_contents($path);
-        if (!is_string($raw) || $raw === '') {
+        if (! is_string($raw) || $raw === '') {
             return self::$cache;
         }
         try {

@@ -27,12 +27,12 @@ final class CoverageRecorder
 
     public static function recordingPath(int $tokenId): string
     {
-        return config('testing.coverage_dir') . "/{$tokenId}/recording";
+        return config('testing.coverage_dir')."/{$tokenId}/recording";
     }
 
     public static function dumpsDir(int $tokenId): string
     {
-        return config('testing.coverage_dir') . "/{$tokenId}/dumps";
+        return config('testing.coverage_dir')."/{$tokenId}/dumps";
     }
 
     public static function isRecording(int $tokenId): bool
@@ -50,12 +50,13 @@ final class CoverageRecorder
 
     /**
      * @template T
-     * @param callable(): T $work
+     *
+     * @param  callable(): T  $work
      * @return T
      */
     public static function around(?int $tokenId, callable $work, string $dumpPrefix = 'cov'): mixed
     {
-        if (!self::canRecord($tokenId) || self::$depth > 0) {
+        if (! self::canRecord($tokenId) || self::$depth > 0) {
             return $work();
         }
 
@@ -79,10 +80,10 @@ final class CoverageRecorder
         /** @psalm-suppress InternalClass, InternalMethod */
         $rawData = RawCodeCoverageData::fromXdebugWithoutPathCoverage($data);
         $dir = self::dumpsDir($tokenId);
-        if (!is_dir($dir)) {
+        if (! is_dir($dir)) {
             mkdir($dir, 0755, true);
         }
-        $file = $dir . '/' . uniqid($dumpPrefix . '-', true) . '.rawcov';
+        $file = $dir.'/'.uniqid($dumpPrefix.'-', true).'.rawcov';
         file_put_contents($file, serialize($rawData));
 
         if ($error !== null) {

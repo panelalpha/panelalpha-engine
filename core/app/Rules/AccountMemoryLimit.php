@@ -13,12 +13,11 @@ final class AccountMemoryLimit implements ProblemRule
 
     public function __construct(
         private readonly ?HostMemory $memory = null,
-    ) {
-    }
+    ) {}
 
     public function validate(string $attribute, mixed $value, Closure $fail): void
     {
-        if (!is_numeric($value)) {
+        if (! is_numeric($value)) {
             return;
         }
 

@@ -42,8 +42,7 @@ class Settings
 
     public function __construct(
         private readonly UserProject $project,
-    ) {
-    }
+    ) {}
 
     public static function normalizeKey(string $key): string
     {
@@ -53,9 +52,9 @@ class Settings
     public static function assertKnownKey(string $key): void
     {
         $key = self::normalizeKey($key);
-        if (!in_array($key, self::KEYS, true)) {
+        if (! in_array($key, self::KEYS, true)) {
             throw new \InvalidArgumentException(
-                "Unknown project setting '{$key}'. Known: " . implode(', ', self::KEYS)
+                "Unknown project setting '{$key}'. Known: ".implode(', ', self::KEYS)
             );
         }
     }
@@ -72,7 +71,7 @@ class Settings
             return str_repeat('*', max(4, $len));
         }
 
-        return substr($value, 0, 4) . str_repeat('*', max(4, $len - 8)) . substr($value, -4);
+        return substr($value, 0, 4).str_repeat('*', max(4, $len - 8)).substr($value, -4);
     }
 
     /**
@@ -127,7 +126,7 @@ class Settings
     }
 
     /**
-     * @param bool $force When unsetting cloudflare-api-token with existing tunnels, tear them down
+     * @param  bool  $force  When unsetting cloudflare-api-token with existing tunnels, tear them down
      */
     public function unset(string $key, bool $force = false): void
     {
@@ -184,7 +183,7 @@ class Settings
         $projectUser->setDetails(['registry_auth' => trim($value)]);
         $projectUser->save();
 
-        return ['message' => 'Registry logins saved for: ' . implode(', ', $auth->hosts()) . '.'];
+        return ['message' => 'Registry logins saved for: '.implode(', ', $auth->hosts()).'.'];
     }
 
     /**
@@ -212,15 +211,15 @@ class Settings
         $projectUser->setDetails(['persist_paths' => $paths]);
         $projectUser->save();
 
-        return ['message' => 'Kept across deploys from the next one: ' . implode(', ', $paths) . '.'];
+        return ['message' => 'Kept across deploys from the next one: '.implode(', ', $paths).'.'];
     }
 
     /**
      * Paths already kept stay first: GeneratedCompose::volumeNamesFor() gives a
      * slug's legacy volume to the first path that claims it.
      *
-     * @param list<string> $stored
-     * @param list<string> $paths
+     * @param  list<string>  $stored
+     * @param  list<string>  $paths
      * @return list<string>
      */
     private static function storedPathsFirst(array $stored, array $paths): array
@@ -230,10 +229,10 @@ class Settings
 
     private function unsetCloudflareApiToken(User $projectUser, bool $force): void
     {
-        if (Tunnel::projectHasCloudflareTunnels($projectUser) && !$force) {
+        if (Tunnel::projectHasCloudflareTunnels($projectUser) && ! $force) {
             throw new CloudflareException(
                 "Project '{$projectUser->username}' still has Cloudflare tunnel hostname(s). "
-                . 'Delete them first, or pass --force to tear down Cloudflare tunnels and clear the token.'
+                .'Delete them first, or pass --force to tear down Cloudflare tunnels and clear the token.'
             );
         }
 
@@ -279,8 +278,8 @@ class Settings
     /** Collapses repeated and trailing slashes; refuses a relative path, `/`, odd characters and `.`/`..` segments. */
     private static function normalizePersistPath(string $path): string
     {
-        $normal = '/' . trim((string) preg_replace('#/+#', '/', $path), '/');
-        if (!str_starts_with($path, '/') || $normal === '/'
+        $normal = '/'.trim((string) preg_replace('#/+#', '/', $path), '/');
+        if (! str_starts_with($path, '/') || $normal === '/'
             || preg_match('#^(/[A-Za-z0-9._@+-]+)+$#', $normal) !== 1
             || preg_match('#/\.\.?(/|$)#', $normal) === 1) {
             throw new \InvalidArgumentException(

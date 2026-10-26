@@ -73,8 +73,8 @@ final class TenantNetwork
     public static function composeOnTenantNetwork(string $yaml): string
     {
         return (string) preg_replace(
-            '/^(\s*name:\s*)' . preg_quote(self::LEGACY_NAME, '/') . '\s*$/m',
-            '${1}' . self::NAME,
+            '/^(\s*name:\s*)'.preg_quote(self::LEGACY_NAME, '/').'\s*$/m',
+            '${1}'.self::NAME,
             $yaml
         );
     }
@@ -83,20 +83,20 @@ final class TenantNetwork
      * sites-db's address as seen from an account, or null when the account is
      * not on this network (not moved yet, or not running).
      *
-     * @param string $networksJson output of {@see accountNetworksArgv()}
+     * @param  string  $networksJson  output of {@see accountNetworksArgv()}
      */
     public static function sitesDbAddressFor(string $networksJson): ?string
     {
         $networks = json_decode(trim($networksJson), true);
         $endpoint = is_array($networks) ? ($networks[self::NAME] ?? null) : null;
-        if (!is_array($endpoint)) {
+        if (! is_array($endpoint)) {
             return null;
         }
 
         $ip = $endpoint['IPAddress'] ?? null;
         $bits = $endpoint['IPPrefixLen'] ?? null;
-        if (!is_string($ip) || filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false
-            || !is_int($bits) || $bits < 1 || $bits > 30) {
+        if (! is_string($ip) || filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false
+            || ! is_int($bits) || $bits < 1 || $bits > 30) {
             return null;
         }
 

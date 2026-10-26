@@ -9,14 +9,14 @@ namespace App\Lib\Deploy\Compose;
 final class ComposeCommand
 {
     /**
-     * @param mixed $command
+     * @param  mixed  $command
      */
     public static function asString($command): string
     {
         if (is_string($command)) {
             return $command;
         }
-        if (!is_array($command)) {
+        if (! is_array($command)) {
             return '';
         }
 

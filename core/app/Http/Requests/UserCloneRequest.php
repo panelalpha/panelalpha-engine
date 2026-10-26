@@ -24,7 +24,7 @@ class UserCloneRequest extends FormRequest
     {
         return [
             'new_username' => 'sometimes|nullable|string|alpha_num:ascii|regex:/^[a-z]{1}/|lowercase|between:3,15',
-            'domain' => 'sometimes|nullable|string|regex:' . DomainName::REGEX,
+            'domain' => 'sometimes|nullable|string|regex:'.DomainName::REGEX,
             'copy_databases' => 'sometimes|boolean',
         ];
     }

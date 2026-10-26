@@ -18,8 +18,7 @@ final class StepDiskLimit
         private readonly ?int $hostMinimumBytes,
         private readonly string $homeDir,
         private readonly ?int $limitMb,
-    ) {
-    }
+    ) {}
 
     /** Null when neither limit applies, so the step is not probed at all. */
     public static function for(DindProject $project): ?self

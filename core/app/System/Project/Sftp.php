@@ -14,8 +14,7 @@ class Sftp
 {
     public function __construct(
         private readonly ProjectAggregate $project,
-    ) {
-    }
+    ) {}
 
     public function loginLines(): string
     {
@@ -42,7 +41,7 @@ class Sftp
                 $project = $this->project->system()->project($user);
                 $config .= $project->sftp()->loginLines();
             } catch (\Exception $e) {
-                Log::warning('Could not rebuild SFTP accounts for user ' . $user->username, [
+                Log::warning('Could not rebuild SFTP accounts for user '.$user->username, [
                     'exception' => $e,
                 ]);
             }

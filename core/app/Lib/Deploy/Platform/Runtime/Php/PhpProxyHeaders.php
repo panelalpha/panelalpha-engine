@@ -24,7 +24,7 @@ final class PhpProxyHeaders
      */
     public const IMAGE_DIR = '/usr/local/lib/panelalpha';
 
-    public const IMAGE_PATH = self::IMAGE_DIR . '/' . self::FILENAME;
+    public const IMAGE_PATH = self::IMAGE_DIR.'/'.self::FILENAME;
 
     public const INI_PATH = '/usr/local/etc/php/conf.d/panelalpha-proxy.ini';
 

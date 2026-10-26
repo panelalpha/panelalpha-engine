@@ -15,12 +15,12 @@ final class BundlerSpaProbe implements PlatformProbe
 {
     // Anchored, so a command that also runs an entry file does not match.
     private const DEV_SERVER = '/^(?:npx\s+|pnpm\s+(?:exec\s+)?|yarn\s+)?'
-        . '(?:webpack(?:-cli)?\s+serve|webpack-dev-server|vue-cli-service\s+serve|ng\s+serve'
-        . '|parcel(?!\s+build\b)|vite(?!\s+build\b))(?:\s[^&|;]*)?$/';
+        .'(?:webpack(?:-cli)?\s+serve|webpack-dev-server|vue-cli-service\s+serve|ng\s+serve'
+        .'|parcel(?!\s+build\b)|vite(?!\s+build\b))(?:\s[^&|;]*)?$/';
 
     // `npm install && webpack serve` is still only the dev server.
     private const INSTALL_PREFIX = '/^(?:(?:npm\s+(?:install|i|ci)|pnpm\s+(?:install|i)|yarn(?:\s+install)?)'
-        . '(?:\s+-[^&|;]*)?\s*&&\s*)+/';
+        .'(?:\s+-[^&|;]*)?\s*&&\s*)+/';
 
     private const ENV_PREFIX = '/^(?:cross-env\s+)?(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*/';
 
@@ -83,8 +83,8 @@ final class BundlerSpaProbe implements PlatformProbe
     public static function outputDir(string $projectDir, string $default = 'dist'): string
     {
         foreach (['webpack.config.js', 'webpack.config.cjs', 'webpack.config.mjs'] as $name) {
-            $path = rtrim($projectDir, '/') . '/' . $name;
-            if (!is_file($path)) {
+            $path = rtrim($projectDir, '/').'/'.$name;
+            if (! is_file($path)) {
                 continue;
             }
             $dir = self::webpackOutputPath((string) @file_get_contents($path));
@@ -105,18 +105,18 @@ final class BundlerSpaProbe implements PlatformProbe
         $block = self::braceBlock($config, $m[0][1] + strlen($m[0][0]) - 1);
         $base = '(?:__dirname|import\.meta\.dirname|process\.cwd\(\))';
 
-        if (preg_match('/\bpath\s*:\s*(?:path\.)?(?:resolve|join)\(\s*' . $base . '\s*,([^()]*)\)/', $block, $m) === 1
+        if (preg_match('/\bpath\s*:\s*(?:path\.)?(?:resolve|join)\(\s*'.$base.'\s*,([^()]*)\)/', $block, $m) === 1
             && preg_match('/^\s*(?:[\'"`][^\'"`$]*[\'"`]\s*,?\s*)+$/', $m[1]) === 1
         ) {
             preg_match_all('/[\'"`]([^\'"`$]*)[\'"`]/', $m[1], $parts);
 
             return self::relative(implode('/', $parts[1]));
         }
-        if (preg_match('/\bpath\s*:\s*' . $base . '\s*\+\s*[\'"`]([^\'"`$]+)[\'"`]/', $block, $m) === 1) {
+        if (preg_match('/\bpath\s*:\s*'.$base.'\s*\+\s*[\'"`]([^\'"`$]+)[\'"`]/', $block, $m) === 1) {
             return self::relative($m[1]);
         }
         if (preg_match('/\bpath\s*:\s*[\'"`]([^\'"`$]+)[\'"`]/', $block, $m) === 1
-            && !str_starts_with($m[1], '/')
+            && ! str_starts_with($m[1], '/')
         ) {
             return self::relative($m[1]);
         }

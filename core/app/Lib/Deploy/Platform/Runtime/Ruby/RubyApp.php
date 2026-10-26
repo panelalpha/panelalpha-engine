@@ -30,7 +30,7 @@ final class RubyApp
     }
 
     /**
-     * @param array<string, true> $files lowercase basename => true
+     * @param  array<string, true>  $files  lowercase basename => true
      */
     public static function at(string $projectDir, array $files = []): self
     {

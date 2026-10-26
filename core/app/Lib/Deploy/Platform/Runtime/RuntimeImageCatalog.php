@@ -19,7 +19,7 @@ use Symfony\Component\Yaml\Yaml;
  */
 final class RuntimeImageCatalog
 {
-    private const CONFIG_PATH = __DIR__ . '/../../../../../../config/core/images.yaml';
+    private const CONFIG_PATH = __DIR__.'/../../../../../../config/core/images.yaml';
 
     /** The only placeholder the format has, substituted into `from`. */
     private const VERSION_PLACEHOLDER = '{version}';
@@ -41,7 +41,7 @@ final class RuntimeImageCatalog
     public static function spec(string $runtime, string $version): ?RuntimeImageSpec
     {
         $image = self::runtimes()[$runtime]['image'] ?? null;
-        if (!is_array($image)) {
+        if (! is_array($image)) {
             return null;
         }
 
@@ -53,7 +53,7 @@ final class RuntimeImageCatalog
             return null;
         }
         $from = str_replace(self::VERSION_PLACEHOLDER, $version, $from);
-        if (!self::isSafeRef($from)) {
+        if (! self::isSafeRef($from)) {
             return null;
         }
 
@@ -67,13 +67,13 @@ final class RuntimeImageCatalog
             ?? self::nonEmptyString($image, 'build_from');
         if ($buildFrom !== null) {
             $buildFrom = str_replace(self::VERSION_PLACEHOLDER, $version, $buildFrom);
-            if (!self::isSafeRef($buildFrom)) {
+            if (! self::isSafeRef($buildFrom)) {
                 $buildFrom = null;
             }
         }
 
         $build = $image['build'] ?? null;
-        if (!is_array($build)) {
+        if (! is_array($build)) {
             return new RuntimeImageSpec($runtime, $version, $from, buildFrom: $buildFrom);
         }
 
@@ -82,7 +82,7 @@ final class RuntimeImageCatalog
         // A repository with no stub names an image nothing knows how to
         // produce, and provisioning would rebuild-loop on it. Pull-only.
         if ($repository === null || $stub === null
-            || !self::isSafeRef($repository) || !self::isSafeStub($stub)
+            || ! self::isSafeRef($repository) || ! self::isSafeStub($stub)
         ) {
             return new RuntimeImageSpec($runtime, $version, $from, buildFrom: $buildFrom);
         }
@@ -122,7 +122,7 @@ final class RuntimeImageCatalog
     public static function versions(string $runtime): array
     {
         $declared = self::runtimes()[$runtime]['versions'] ?? null;
-        if (!is_array($declared)) {
+        if (! is_array($declared)) {
             return [];
         }
 
@@ -135,7 +135,7 @@ final class RuntimeImageCatalog
             // and it is what a config written before the files were merged
             // says.
             $version = is_array($entry) ? ($entry['version'] ?? null) : $entry;
-            if (!is_string($version) && !is_int($version) && !is_float($version)) {
+            if (! is_string($version) && ! is_int($version) && ! is_float($version)) {
                 continue;
             }
             $version = trim((string) $version);
@@ -184,8 +184,7 @@ final class RuntimeImageCatalog
      */
     public static function recipeDate(string $runtime): ?string
     {
-        $declared = self::buildString($runtime, 'recipe', static fn (string $v): bool
-            => preg_match('/^\\d{4}-\\d{2}-\\d{2}$/', $v) === 1 && strtotime($v) !== false);
+        $declared = self::buildString($runtime, 'recipe', static fn (string $v): bool => preg_match('/^\\d{4}-\\d{2}-\\d{2}$/', $v) === 1 && strtotime($v) !== false);
 
         return $declared === null ? null : str_replace('-', '', $declared);
     }
@@ -217,7 +216,7 @@ final class RuntimeImageCatalog
         }
         $repository = explode(':', $from, 2)[0];
 
-        return self::isSafeRef($repository) && !str_contains($repository, self::VERSION_PLACEHOLDER)
+        return self::isSafeRef($repository) && ! str_contains($repository, self::VERSION_PLACEHOLDER)
             ? $repository
             : null;
     }
@@ -251,12 +250,12 @@ final class RuntimeImageCatalog
     }
 
     /**
-     * @param callable(string): bool $isValid
+     * @param  callable(string): bool  $isValid
      */
     private static function buildString(string $runtime, string $key, callable $isValid): ?string
     {
         $build = self::runtimes()[$runtime]['image']['build'] ?? null;
-        if (!is_array($build)) {
+        if (! is_array($build)) {
             return null;
         }
         $value = self::nonEmptyString($build, $key);
@@ -265,7 +264,7 @@ final class RuntimeImageCatalog
     }
 
     /**
-     * @param array<string, mixed> $image the runtime's `image` block
+     * @param  array<string, mixed>  $image  the runtime's `image` block
      */
     private static function overrideString(array $image, string $version, string $key): ?string
     {
@@ -275,12 +274,12 @@ final class RuntimeImageCatalog
     }
 
     /**
-     * @param array<string, mixed> $entry
+     * @param  array<string, mixed>  $entry
      */
     private static function nonEmptyString(array $entry, string $key): ?string
     {
         $value = $entry[$key] ?? null;
-        if (!is_string($value)) {
+        if (! is_string($value)) {
             return null;
         }
         $value = trim($value);
@@ -301,7 +300,7 @@ final class RuntimeImageCatalog
     /** A stub is a path under `resources/deploy/templates/` and may not climb out. */
     private static function isSafeStub(string $stub): bool
     {
-        return !str_contains($stub, '..')
+        return ! str_contains($stub, '..')
             && preg_match('#^[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)*$#i', $stub) === 1;
     }
 
@@ -323,11 +322,11 @@ final class RuntimeImageCatalog
     private static function load(): array
     {
         $path = self::$configPath ?? self::CONFIG_PATH;
-        if (!is_file($path)) {
+        if (! is_file($path)) {
             return [];
         }
         $raw = @file_get_contents($path);
-        if (!is_string($raw) || trim($raw) === '') {
+        if (! is_string($raw) || trim($raw) === '') {
             return [];
         }
         try {
@@ -337,7 +336,7 @@ final class RuntimeImageCatalog
             // fail on.
             return [];
         }
-        if (!is_array($parsed) || !isset($parsed['runtimes']) || !is_array($parsed['runtimes'])) {
+        if (! is_array($parsed) || ! isset($parsed['runtimes']) || ! is_array($parsed['runtimes'])) {
             return [];
         }
 

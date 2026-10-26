@@ -46,8 +46,8 @@ final class BuildRecipe
     private readonly int $portHint;
 
     /**
-     * @param array<string, mixed> $decision
-     * @param array<string, true> $files lowercase basename => true
+     * @param  array<string, mixed>  $decision
+     * @param  array<string, true>  $files  lowercase basename => true
      */
     public function __construct(
         array $decision,
@@ -84,7 +84,7 @@ final class BuildRecipe
     {
         return $this->nodeHeapMb === null
             ? []
-            : ['NODE_OPTIONS' => '--max-old-space-size=' . $this->nodeHeapMb];
+            : ['NODE_OPTIONS' => '--max-old-space-size='.$this->nodeHeapMb];
     }
 
     public function installCommandOr(string $default): string
@@ -120,7 +120,7 @@ final class BuildRecipe
     }
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private static function text(array $decision, string $key): string
     {
@@ -130,13 +130,13 @@ final class BuildRecipe
     }
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      * @return array<string, string>
      */
     private static function environment(array $decision): array
     {
         $declared = $decision['env'] ?? null;
-        if (!is_array($declared)) {
+        if (! is_array($declared)) {
             return [];
         }
 

@@ -21,9 +21,10 @@ class PhpController extends Controller
     )]
     public function listAvailableVersions(): JsonResponse
     {
-        $system = new System();
+        $system = new System;
+
         return new JsonResponse([
-            'data' => $system->php()->listAvailablePhpVersions()
+            'data' => $system->php()->listAvailablePhpVersions(),
         ]);
     }
 }

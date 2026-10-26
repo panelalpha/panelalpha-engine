@@ -21,7 +21,7 @@ class ProjectBandwidthCommand extends UsageCommand
             'start' => $this->option('start'),
             'end' => $this->option('end'),
             'group_by' => $this->option('group-by'),
-        ], (new BandwidthSeriesRequest())->rules());
+        ], (new BandwidthSeriesRequest)->rules());
         $user = $this->project();
 
         return $this->printJson($usage->projectBandwidth($user, $range['start'], $range['end'], $range['group_by']));

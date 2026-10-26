@@ -37,7 +37,7 @@ class PagedToolSearch extends ToolSearch
     /** One line naming the areas, for the server instructions and search_tools. */
     public function areasLine(): string
     {
-        return 'Tool names in the catalogue begin with: ' . implode(', ', $this->areas()) . '.';
+        return 'Tool names in the catalogue begin with: '.implode(', ', $this->areas()).'.';
     }
 
     /** @return array<string, mixed> */

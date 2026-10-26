@@ -2,7 +2,6 @@
 
 namespace App\Lib\Deploy\Telemetry;
 
-use App\System;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Platform\Metadata\AppPackage;
 use App\Lib\Deploy\Platform\Metadata\MetadataRegistry;
@@ -11,6 +10,7 @@ use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Models\Domain;
 use App\Models\User;
+use App\System;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -57,8 +57,9 @@ final class TelemetryFields
      * Evaluate one piece of a report, falling back rather than propagating.
      *
      * @template T
-     * @param callable(): T $value
-     * @param T $default
+     *
+     * @param  callable(): T  $value
+     * @param  T  $default
      * @return T
      */
     public static function safely(callable $value, mixed $default): mixed
@@ -66,7 +67,7 @@ final class TelemetryFields
         try {
             return $value();
         } catch (\Throwable $e) {
-            Log::debug('Telemetry field unavailable: ' . $e->getMessage());
+            Log::debug('Telemetry field unavailable: '.$e->getMessage());
 
             return $default;
         }
@@ -145,7 +146,7 @@ final class TelemetryFields
             return true;
         }
 
-        return !GitUrl::isHttpsWithoutCredentials($url);
+        return ! GitUrl::isHttpsWithoutCredentials($url);
     }
 
     /**
@@ -175,7 +176,7 @@ final class TelemetryFields
     private function readCheckout(): array
     {
         $dir = $this->projectDir();
-        if (!is_dir($dir) || (is_readable($dir) && !file_exists($dir . '/.git'))) {
+        if (! is_dir($dir) || (is_readable($dir) && ! file_exists($dir.'/.git'))) {
             return ['present' => false];
         }
 
@@ -208,7 +209,7 @@ final class TelemetryFields
      */
     private static function gitRunner(): callable
     {
-        $system = new System();
+        $system = new System;
 
         return static function (array $argv) use ($system): ?string {
             try {
@@ -236,7 +237,7 @@ final class TelemetryFields
 
     public function projectDir(): string
     {
-        return (new System())->projectHomeDirPath($this->username) . self::PROJECT_DIR;
+        return (new System)->projectHomeDirPath($this->username).self::PROJECT_DIR;
     }
 
     /**
@@ -286,7 +287,7 @@ final class TelemetryFields
      * project the deploy actually saw. {@see AppFacts} decides which parts of
      * that may be transmitted; this only gathers.
      *
-     * @param ?string $runtime the ecosystem the deploy chose to build, when known
+     * @param  ?string  $runtime  the ecosystem the deploy chose to build, when known
      * @return list<AppPackage>
      */
     public function packages(?string $runtime = null): array
@@ -345,7 +346,7 @@ final class TelemetryFields
             // First writer wins, and the main domain is written first: a name
             // that is both the account's domain and a `domains` row keeps the
             // primary marking rather than being demoted by the second read.
-            if (!isset($found[$name])) {
+            if (! isset($found[$name])) {
                 $found[$name] = ['domain' => $name] + $facts;
             }
         };
@@ -359,7 +360,7 @@ final class TelemetryFields
         ]);
 
         foreach (self::safely(fn (): array => $this->user->domains()->get()->all(), []) as $domain) {
-            if (!$domain instanceof Domain) {
+            if (! $domain instanceof Domain) {
                 continue;
             }
 
@@ -431,7 +432,7 @@ final class TelemetryFields
         $name = explode('/', $name)[0];
         $name = rtrim($name, '.');
 
-        if ($name === '' || str_contains($name, '@') || !str_contains($name, '.') || str_contains($name, ' ')) {
+        if ($name === '' || str_contains($name, '@') || ! str_contains($name, '.') || str_contains($name, ' ')) {
             return '';
         }
 

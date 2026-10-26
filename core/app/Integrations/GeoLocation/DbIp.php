@@ -141,7 +141,8 @@ TEXT;
     }
 
     /**
-     * @param array{accepted_at?: string, year_month?: string} $stamp
+     * @param  array{accepted_at?: string, year_month?: string}  $stamp
+     *
      * @throws JsonException
      */
     private function writeStamp(array $stamp): void

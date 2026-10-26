@@ -2,17 +2,17 @@
 
 namespace App\System\Project\Dind;
 
-use App\System\Project\Dind\AppHealth;
-use App\System\Project\Dind\Generation\RouteSwitch;
-use App\System\Project\Dind\Generation\RoutingSnapshot;
-use App\System\Project\Dind\Generation\ZeroDowntimeRedeploy;
-use App\System\Project\Dind as DindProject;
+use App\Integrations\Tunnels\TunnelManager;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Lib\Deploy\DetectAppPort;
 use App\Lib\Deploy\Platform\Strategies;
 use App\Models\Domain;
 use App\Models\ProxyRule;
 use App\Models\User;
+use App\System\Project\Dind as DindProject;
+use App\System\Project\Dind\Generation\RouteSwitch;
+use App\System\Project\Dind\Generation\RoutingSnapshot;
+use App\System\Project\Dind\Generation\ZeroDowntimeRedeploy;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -45,9 +45,9 @@ class Networking
             return null;
         }
         $details = is_array($domain->details) ? $domain->details : [];
-        $scheme = !empty($details['ssl_disabled']) ? 'http' : 'https';
+        $scheme = ! empty($details['ssl_disabled']) ? 'http' : 'https';
 
-        return $scheme . '://' . $name;
+        return $scheme.'://'.$name;
     }
 
     /**
@@ -62,7 +62,7 @@ class Networking
         $primaryPort = $recipePort ?? $portDetection['primary'] ?? 8080;
 
         $this->project->shell()->logger()?->info(
-            "Detected application port: {$primaryPort}" . ($recipePort !== null ? " (the recipe's port:)" : '')
+            "Detected application port: {$primaryPort}".($recipePort !== null ? " (the recipe's port:)" : '')
         );
 
         $this->routeTo($user, $primaryPort);
@@ -93,7 +93,7 @@ class Networking
     private function staysOnRunningVersion(User $user, int $primaryPort): bool
     {
         $served = RoutingSnapshot::servedPort($user->username);
-        if (!RoutingSnapshot::defers($user->username)) {
+        if (! RoutingSnapshot::defers($user->username)) {
             return false;
         }
         if (ZeroDowntimeRedeploy::copyHeld($user->username)) {
@@ -120,6 +120,7 @@ class Networking
         $fqdn = $domain !== null ? trim((string) $domain->domain) : '';
         if ($fqdn === '') {
             Log::warning("Skipping proxy rule create for {$user->username}: no main domain yet");
+
             return;
         }
 
@@ -139,7 +140,7 @@ class Networking
         try {
             (new RouteSwitch($this->project->system(), $user->username))->follow($fromPort, $primaryPort);
         } catch (\Throwable $e) {
-            Log::warning("Failed to move the proxy rules of {$user->username} to port {$primaryPort}: " . $e->getMessage());
+            Log::warning("Failed to move the proxy rules of {$user->username} to port {$primaryPort}: ".$e->getMessage());
         }
     }
 
@@ -162,13 +163,13 @@ class Networking
     private function syncTunnelIngress(User $user, Domain $domain): void
     {
         try {
-            \App\Integrations\Tunnels\TunnelManager::syncFromProxyRules($user, $domain);
+            TunnelManager::syncFromProxyRules($user, $domain);
         } catch (\Throwable $e) {
             Log::warning("Failed to sync tunnel ingress after port detect for {$user->username}", [
                 'error' => $e->getMessage(),
             ]);
             $this->project->shell()->logger()?->warn('Tunnel ingress was not synced: '
-                . ($e instanceof CloudflareException ? $e->getMessage() : AppHealth::trimReason($e->getMessage())));
+                .($e instanceof CloudflareException ? $e->getMessage() : AppHealth::trimReason($e->getMessage())));
         }
     }
 
@@ -183,7 +184,7 @@ class Networking
                 'error' => $e->getMessage(),
             ]);
             $this->project->shell()->logger()?->warn(
-                'Webserver reload after proxy rules failed: ' . AppHealth::trimReason($e->getMessage())
+                'Webserver reload after proxy rules failed: '.AppHealth::trimReason($e->getMessage())
             );
         }
     }
@@ -197,7 +198,7 @@ class Networking
     {
         $details = $user->getDetails();
         $port = $details['deploy_port'] ?? null;
-        if (($details['deploy_strategy'] ?? null) !== Strategies::COMPOSE || !is_int($port)) {
+        if (($details['deploy_strategy'] ?? null) !== Strategies::COMPOSE || ! is_int($port)) {
             return null;
         }
 

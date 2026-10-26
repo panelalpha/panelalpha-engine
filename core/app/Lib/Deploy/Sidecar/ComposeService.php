@@ -13,14 +13,12 @@ namespace App\Lib\Deploy\Sidecar;
 final class ComposeService
 {
     /**
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
-    private function __construct(private readonly array $service)
-    {
-    }
+    private function __construct(private readonly array $service) {}
 
     /**
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     public static function of(array $service): self
     {
@@ -59,7 +57,7 @@ final class ComposeService
      * container side of `ports:`, merged with whatever the caller observed on
      * the image so both sources feed the same decision.
      *
-     * @param list<int> $observedPorts
+     * @param  list<int>  $observedPorts
      * @return list<int>
      */
     public function ports(array $observedPorts = []): array
@@ -78,7 +76,7 @@ final class ComposeService
     public function environmentKeys(): array
     {
         $environment = $this->service['environment'] ?? null;
-        if (!is_array($environment)) {
+        if (! is_array($environment)) {
             return [];
         }
 
@@ -120,7 +118,7 @@ final class ComposeService
     public function dependencyNames(): array
     {
         $dependsOn = $this->service['depends_on'] ?? [];
-        if (!is_array($dependsOn)) {
+        if (! is_array($dependsOn)) {
             return [];
         }
 
@@ -171,7 +169,7 @@ final class ComposeService
     }
 
     /**
-     * @param array<string, mixed> $mapping
+     * @param  array<string, mixed>  $mapping
      */
     private static function longFormPort(array $mapping): ?int
     {

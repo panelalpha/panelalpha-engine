@@ -33,17 +33,17 @@ final class EngineCertificate
 
     public function __construct(?System $system = null)
     {
-        $this->system = $system ?? new System();
+        $this->system = $system ?? new System;
     }
 
     public function certificatePath(): string
     {
-        return $this->system->engineDirPath() . '/crt/server.cert';
+        return $this->system->engineDirPath().'/crt/server.cert';
     }
 
     public function keyPath(): string
     {
-        return $this->system->engineDirPath() . '/crt/server.key';
+        return $this->system->engineDirPath().'/crt/server.key';
     }
 
     /** The certificate `:2011` presents, read the way covering() reads it; null when there is none. */
@@ -51,7 +51,7 @@ final class EngineCertificate
     {
         $fs = $this->system->filesystem();
         $path = $this->certificatePath();
-        if (!$fs->fileExists($path)) {
+        if (! $fs->fileExists($path)) {
             return null;
         }
 
@@ -74,7 +74,7 @@ final class EngineCertificate
         $keyPath = $this->keyPath();
         $fs = $this->system->filesystem();
 
-        if (!$fs->fileExists($certPath) || !$fs->fileExists($keyPath)) {
+        if (! $fs->fileExists($certPath) || ! $fs->fileExists($keyPath)) {
             return null;
         }
 
@@ -97,13 +97,13 @@ final class EngineCertificate
         // with `SSL alert number 40`. Serving that to a project would hand it
         // a certificate no client can complete a connection with, so the
         // project is better off signing its own.
-        if (!KeyPair::matches($certificate, $key)) {
+        if (! KeyPair::matches($certificate, $key)) {
             return null;
         }
 
         $status = CertificateStatus::of($facts, $domain, $now);
 
-        if (!self::isUsable($status)) {
+        if (! self::isUsable($status)) {
             return null;
         }
 
@@ -116,7 +116,7 @@ final class EngineCertificate
      * self-signed certificate of its own, and one the whole host shares is no
      * worse and one fewer thing to renew.
      *
-     * @param array<string, mixed> $status
+     * @param  array<string, mixed>  $status
      */
     private static function isUsable(array $status): bool
     {
@@ -124,7 +124,7 @@ final class EngineCertificate
             return false;
         }
 
-        return !in_array(
+        return ! in_array(
             $status['status'] ?? null,
             [CertificateStatus::EXPIRED, CertificateStatus::NOT_YET_VALID, CertificateStatus::UNREADABLE],
             true

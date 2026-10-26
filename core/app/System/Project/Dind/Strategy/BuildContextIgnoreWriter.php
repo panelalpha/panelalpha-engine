@@ -15,13 +15,11 @@ use App\System\Project\Dind as DindProject;
  */
 class BuildContextIgnoreWriter
 {
-    public function __construct(private DindProject $dind)
-    {
-    }
+    public function __construct(private DindProject $dind) {}
 
     /**
-     * @param string $dockerfile relative to $projectDir, which is the build context
-     * @param bool   $generated  the engine wrote this Dockerfile
+     * @param  string  $dockerfile  relative to $projectDir, which is the build context
+     * @param  bool  $generated  the engine wrote this Dockerfile
      */
     public function write(string $projectDir, string $dockerfile, bool $generated, ?string $chown): void
     {
@@ -30,7 +28,7 @@ class BuildContextIgnoreWriter
         $target = BuildContextIgnore::pathFor($dockerfile);
 
         $existing = $tree->readIn($projectDir, $target);
-        if ($existing !== null && !BuildContextIgnore::isEngineWritten($existing)) {
+        if ($existing !== null && ! BuildContextIgnore::isEngineWritten($existing)) {
             $logger?->info("Using the project's own {$target} for the build context");
 
             return;
@@ -48,10 +46,10 @@ class BuildContextIgnoreWriter
             fn (string $file): ?string => $tree->readIn($projectDir, $file)
         );
 
-        $excludeEnv = !$generated && $this->emptyEnvIsUnread($projectDir, $dockerfile);
+        $excludeEnv = ! $generated && $this->emptyEnvIsUnread($projectDir, $dockerfile);
 
         $this->dind->system()->filesystem()->filePutContents(
-            rtrim($projectDir, '/') . '/' . $target,
+            rtrim($projectDir, '/').'/'.$target,
             BuildContextIgnore::render($projectIgnore, $dockerfile, $reason === null, $generated, $excludeEnv),
             $chown,
             '644'
@@ -61,7 +59,7 @@ class BuildContextIgnoreWriter
         $logger?->info($reason === null
             ? "Build context: .git and {$engineFiles} left out ({$target})"
             : "Build context: .git kept because {$reason}, so the build cannot reuse its cache "
-                . "past `COPY . .`; {$engineFiles} left out ({$target})");
+                ."past `COPY . .`; {$engineFiles} left out ({$target})");
     }
 
     /**
@@ -72,7 +70,7 @@ class BuildContextIgnoreWriter
     private function emptyEnvIsUnread(string $projectDir, string $dockerfile): bool
     {
         $tree = $this->dind->projectTree();
-        $envPath = rtrim($projectDir, '/') . '/.env';
+        $envPath = rtrim($projectDir, '/').'/.env';
         // readIn() reads an empty file as null, the same as a missing one.
         $env = $this->dind->system()->filesystem()->fileExists($envPath) ? ($tree->read($envPath) ?? '') : null;
 

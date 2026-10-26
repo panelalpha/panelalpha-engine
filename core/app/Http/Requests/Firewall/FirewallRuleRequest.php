@@ -43,20 +43,20 @@ class FirewallRuleRequest extends FormRequest
 
     private function checkAddress(string $attribute, mixed $value, \Closure $fail): void
     {
-        if (is_string($value) && !FirewallRule::isAddress($value)) {
+        if (is_string($value) && ! FirewallRule::isAddress($value)) {
             $fail("The {$attribute} must be an IPv4 or IPv6 address or a CIDR range.");
         }
     }
 
     private function checkComment(string $attribute, mixed $value, \Closure $fail): void
     {
-        if (!is_string($value)) {
+        if (! is_string($value)) {
             return;
         }
         if (preg_match(FirewallRule::COMMENT_REFUSED_CHARACTERS, $value) === 1) {
             $fail('The comment cannot contain \' (an apostrophe), a line break or a NUL character.');
         } elseif (str_starts_with(trim($value), FirewallRule::MANAGED_PREFIX)) {
-            $fail('The comment prefix "' . FirewallRule::MANAGED_PREFIX . '" marks the rules the engine opens.');
+            $fail('The comment prefix "'.FirewallRule::MANAGED_PREFIX.'" marks the rules the engine opens.');
         }
     }
 

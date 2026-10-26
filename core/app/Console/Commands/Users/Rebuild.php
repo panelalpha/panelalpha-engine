@@ -12,7 +12,7 @@ class Rebuild extends ProjectFleetCommand
     /** Older spellings still answer, so nothing scripted against them breaks. */
     protected $aliases = ['projects:rebuild', 'users:rebuild'];
 
-    protected $signature = 'project:rebuild' . ProjectOptions::SIGNATURE . ' {--wipe-vhosts-dir}';
+    protected $signature = 'project:rebuild'.ProjectOptions::SIGNATURE.' {--wipe-vhosts-dir}';
 
     protected $description = 'Rebuild a project\'s docker compose stack and recreate its domain configuration files';
 
@@ -22,7 +22,7 @@ class Rebuild extends ProjectFleetCommand
 
     protected function beforeAll(): void
     {
-        $this->system = new System();
+        $this->system = new System;
         $this->webserver = $this->system->webserver()->getCurrentWebserver();
     }
 
@@ -59,7 +59,7 @@ class Rebuild extends ProjectFleetCommand
     {
         if ($this->option('wipe-vhosts-dir')) {
             try {
-                $dir = $this->system->engineDirPath() . "/webserver-config/{$this->webserver}/vhosts";
+                $dir = $this->system->engineDirPath()."/webserver-config/{$this->webserver}/vhosts";
                 $this->system->exec("rm -rf {$dir}/* {$dir}/.*");
             } catch (\Exception) {
             }

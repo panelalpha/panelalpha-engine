@@ -13,9 +13,9 @@ use GuzzleHttp\Client;
 final class RegistryImageConfig
 {
     private const ACCEPT = 'application/vnd.oci.image.index.v1+json, '
-        . 'application/vnd.docker.distribution.manifest.list.v2+json, '
-        . 'application/vnd.oci.image.manifest.v1+json, '
-        . 'application/vnd.docker.distribution.manifest.v2+json';
+        .'application/vnd.docker.distribution.manifest.list.v2+json, '
+        .'application/vnd.oci.image.manifest.v1+json, '
+        .'application/vnd.docker.distribution.manifest.v2+json';
 
     /** @var callable(string, string): ?string url and Accept header to body, null on any failure */
     private $get;
@@ -78,7 +78,7 @@ final class RegistryImageConfig
     {
         foreach (self::sources($image) as [$base, $repository, $reference]) {
             $layers = $this->manifest($base, $repository, $reference)['layers'] ?? null;
-            if (!is_array($layers)) {
+            if (! is_array($layers)) {
                 continue;
             }
             $total = 0;
@@ -104,15 +104,15 @@ final class RegistryImageConfig
      */
     public static function sources(string $image): array
     {
-        if (!ImageTransfer::isSafeImageRef($image)) {
+        if (! ImageTransfer::isSafeImageRef($image)) {
             return [];
         }
 
         [$name, $reference] = self::split($image);
-        $sources = [['http://' . DindImageStore::CACHE_REGISTRY, $name, $reference]];
+        $sources = [['http://'.DindImageStore::CACHE_REGISTRY, $name, $reference]];
         $hub = self::dockerHubRepository($name);
         if ($hub !== null) {
-            $sources[] = ['http://' . DindImageStore::PROXY_REGISTRY, $hub, $reference];
+            $sources[] = ['http://'.DindImageStore::PROXY_REGISTRY, $hub, $reference];
         }
 
         return $sources;
@@ -147,7 +147,7 @@ final class RegistryImageConfig
         $isHost = count($parts) > 1
             && (str_contains($first, '.') || str_contains($first, ':') || $first === 'localhost');
         if ($isHost) {
-            if (!in_array($first, ['docker.io', 'index.docker.io', 'registry-1.docker.io'], true)) {
+            if (! in_array($first, ['docker.io', 'index.docker.io', 'registry-1.docker.io'], true)) {
                 return null;
             }
             array_shift($parts);
@@ -165,7 +165,7 @@ final class RegistryImageConfig
     private function config(string $base, string $repository, string $reference): ?array
     {
         $configDigest = $this->manifest($base, $repository, $reference)['config']['digest'] ?? null;
-        if (!is_string($configDigest) || $configDigest === '') {
+        if (! is_string($configDigest) || $configDigest === '') {
             return null;
         }
 
@@ -190,7 +190,7 @@ final class RegistryImageConfig
     }
 
     /**
-     * @param array<mixed> $entries
+     * @param  array<mixed>  $entries
      */
     private function platformDigest(array $entries): ?string
     {
@@ -210,7 +210,7 @@ final class RegistryImageConfig
     private function json(string $url, string $accept): ?array
     {
         $body = ($this->get)($url, $accept);
-        if (!is_string($body)) {
+        if (! is_string($body)) {
             return null;
         }
         $decoded = json_decode($body, true);

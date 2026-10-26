@@ -29,12 +29,12 @@ final class ViteNotTheBuildProbe implements PlatformProbe
         if ($context->hasConfigStem('vite.config')) {
             return false;
         }
-        if (!JsPackageManager::isJsWorkspace($context->package() ?? [], $context->files)) {
+        if (! JsPackageManager::isJsWorkspace($context->package() ?? [], $context->files)) {
             return false;
         }
         $build = $context->script('build');
 
-        return $build !== '' && !self::runsVite($context, $build, 0);
+        return $build !== '' && ! self::runsVite($context, $build, 0);
     }
 
     /** Does $command, following root scripts it calls a few levels, mention vite? */

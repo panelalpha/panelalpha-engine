@@ -12,7 +12,7 @@ class RebuildDomains extends ProjectFleetCommand
     /** Older spellings still answer, so nothing scripted against them breaks. */
     protected $aliases = ['projects:rebuild-domains', 'users:rebuild-domains'];
 
-    protected $signature = 'project:domain:rebuild' . ProjectOptions::SIGNATURE;
+    protected $signature = 'project:domain:rebuild'.ProjectOptions::SIGNATURE;
 
     protected $description = 'Recreate the webserver configuration for a project\'s domains';
 
@@ -32,6 +32,6 @@ class RebuildDomains extends ProjectFleetCommand
 
     protected function afterAll(): void
     {
-        (new System())->webserver()->reload();
+        (new System)->webserver()->reload();
     }
 }

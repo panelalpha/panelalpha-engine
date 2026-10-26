@@ -41,7 +41,7 @@ class DeploymentWorkflowTest extends TestCase
         $source = file_get_contents($this->coreAppRoot . '/System/Project/Deployment/DeploymentWorkflow.php');
         $this->assertStringNotContainsString('UserAccountDeletion', $source);
         $this->assertStringNotContainsString('destroy()', $source);
-        $this->assertStringContainsString('new RetainProject()', $source);
+        $this->assertStringContainsString('new RetainProject', $source);
 
         $retain = file_get_contents($this->coreAppRoot . '/System/Project/Deployment/RetainProject.php');
         $this->assertStringContainsString('FailureRetention::', $retain);

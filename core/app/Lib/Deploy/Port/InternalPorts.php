@@ -108,7 +108,7 @@ final class InternalPorts
      */
     public static function isWebCandidate(int $port): bool
     {
-        return $port > 0 && $port <= 65535 && !isset(self::KNOWN[$port]) && !isset(self::NON_WEB[$port]);
+        return $port > 0 && $port <= 65535 && ! isset(self::KNOWN[$port]) && ! isset(self::NON_WEB[$port]);
     }
 
     /**
@@ -116,7 +116,7 @@ final class InternalPorts
      * container port is known, or the image is a datastore whose port was
      * remapped.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     public static function coversBinding(PortMapping $mapping, array $service): bool
     {
@@ -130,11 +130,11 @@ final class InternalPorts
      * knows what a datastore looks like. Only a recognised datastore counts:
      * filtering the application's own port would leave the site unreachable.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     public static function isDatastore(array $service): bool
     {
-        if ($service === [] || !is_string($service['image'] ?? null)) {
+        if ($service === [] || ! is_string($service['image'] ?? null)) {
             return false;
         }
 

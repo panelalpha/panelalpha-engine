@@ -3,10 +3,10 @@
 namespace App\Lib\Deploy\Inspect;
 
 use App\Lib\Deploy\DetectProjectStrategy;
+use App\Lib\Deploy\Inspect\Report\AppConfigOrigin;
 use App\Lib\Deploy\Inspect\Report\ApplicationReport;
 use App\Lib\Deploy\Inspect\Report\EnvironmentReport;
 use App\Lib\Deploy\Inspect\Report\MarkerFiles;
-use App\Lib\Deploy\Inspect\Report\AppConfigOrigin;
 use App\Lib\Deploy\Inspect\Report\PortsReport;
 use App\Lib\Deploy\Inspect\Report\ServicesReport;
 use App\Lib\Deploy\Platform\DeployPlan;
@@ -84,13 +84,13 @@ final class AppInspector
     ): array {
         try {
             return [DetectProjectStrategy::detect($projectDir, $repoUrl, $recipe), null];
-        } catch (InvalidArgumentException | ManifestException $e) {
+        } catch (InvalidArgumentException|ManifestException $e) {
             return [ApplicationReport::undeployable(), $e->getMessage()];
         }
     }
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private static function composePathOf(array $decision): ?string
     {
@@ -100,7 +100,7 @@ final class AppInspector
     }
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private static function runtimeOf(array $decision): ?string
     {

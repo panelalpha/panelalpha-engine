@@ -3,12 +3,12 @@
 namespace App\Mcp\Tools;
 
 use App\Auth\TokenAbilities;
+use App\Mcp\Tools\Concerns\OmitsTitle;
 use App\Models\User;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Attributes\Name;
-use App\Mcp\Tools\Concerns\OmitsTitle;
 use Laravel\Mcp\Server\Tool;
 use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;

@@ -26,7 +26,7 @@ class FtpAccountStoreRequest extends FormRequest
     {
         return [
             'user' => 'string|required|alpha_num:ascii|max:32',
-            'domain' => 'string|required|regex:' . DomainName::REGEX,
+            'domain' => 'string|required|regex:'.DomainName::REGEX,
             'password' => 'required|string|min:8|max:255',
             'directory' => 'string|nullable|max:4096',
             'unlimited_quota' => 'boolean',

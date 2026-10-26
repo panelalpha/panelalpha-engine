@@ -19,15 +19,13 @@ final class RunnerServiceManager implements ServiceManager
     /** The layout, relative to the project dir. */
     private const LAYOUT = ['entrypoint.d', 'entrypoint-runner.sh'];
 
-    public function __construct(private readonly PhpHosting $project)
-    {
-    }
+    public function __construct(private readonly PhpHosting $project) {}
 
     /** Drop the runner's files from a project dir that is on s6 now. */
     public static function removeLayout(PhpHosting $project): void
     {
         foreach (self::LAYOUT as $path) {
-            $project->system()->exec(['sudo', 'rm', '-rf', $project->project()->projectDirPath() . '/' . $path]);
+            $project->system()->exec(['sudo', 'rm', '-rf', $project->project()->projectDirPath().'/'.$path]);
         }
     }
 
@@ -45,7 +43,7 @@ final class RunnerServiceManager implements ServiceManager
     public function write(array $services): void
     {
         $system = $this->project->system();
-        $dir = $system->projectDirPath($this->project->username()) . '/entrypoint.d';
+        $dir = $system->projectDirPath($this->project->username()).'/entrypoint.d';
         $system->runProcess("sudo mkdir -p {$dir} && sudo rm -f {$dir}/*.sh");
         foreach ($services as $service) {
             if ($service->daemonStart !== []) {
@@ -58,7 +56,7 @@ final class RunnerServiceManager implements ServiceManager
     public function sync(): void
     {
         $this->project->system()->runProcess(
-            "sudo docker compose -f {$this->project->composeFilePath()} exec -T php bash " . self::RUNNER . ' sync --all'
+            "sudo docker compose -f {$this->project->composeFilePath()} exec -T php bash ".self::RUNNER.' sync --all'
         );
     }
 

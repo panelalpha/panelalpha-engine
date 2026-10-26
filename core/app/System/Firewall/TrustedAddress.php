@@ -64,7 +64,7 @@ final class TrustedAddress
             return null;
         }
         [$address, $comment] = array_pad(explode('#', $line, 2), 2, null);
-        if (!FirewallRule::isAddress(trim($address))) {
+        if (! FirewallRule::isAddress(trim($address))) {
             return null;
         }
 
@@ -75,7 +75,7 @@ final class TrustedAddress
     public static function formatList(array $list): string
     {
         return implode('', array_map(
-            static fn (self $e): string => $e->address . ($e->comment === null ? '' : ' # ' . $e->comment) . "\n",
+            static fn (self $e): string => $e->address.($e->comment === null ? '' : ' # '.$e->comment)."\n",
             $list
         ));
     }

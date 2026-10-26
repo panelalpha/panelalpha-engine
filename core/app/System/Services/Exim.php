@@ -37,16 +37,15 @@ class Exim
 
     public function __construct(
         private EngineSystem $system,
-    ) {
-    }
+    ) {}
 
     public function rebuildEximConfig(): void
     {
         $config = $this->eximConfig();
 
         // update-exim4.conf.conf
-        $updateConfPath = $this->system->engineDirPath() . '/config/exim/update-exim4.conf.conf';
-        $updateConfTemplatePath = $this->system->engineDirPath() . '/templates/config/exim-update-conf.blade.php';
+        $updateConfPath = $this->system->engineDirPath().'/config/exim/update-exim4.conf.conf';
+        $updateConfTemplatePath = $this->system->engineDirPath().'/templates/config/exim-update-conf.blade.php';
         $updateConfTemplate = $this->system->filesystem()->fileGetContents($updateConfTemplatePath);
 
         $type = 'internet';
@@ -80,8 +79,8 @@ class Exim
         $this->writeConfigFile($updateConfPath, $updateConf);
 
         // passwd.client
-        $passwdPath = $this->system->engineDirPath() . '/config/exim/passwd.client';
-        $passwdTemplatePath = $this->system->engineDirPath() . '/templates/config/exim-passwd.blade.php';
+        $passwdPath = $this->system->engineDirPath().'/config/exim/passwd.client';
+        $passwdTemplatePath = $this->system->engineDirPath().'/templates/config/exim-passwd.blade.php';
         $passwdTemplate = $this->system->filesystem()->fileGetContents($passwdTemplatePath);
 
         $username = '';
@@ -113,8 +112,8 @@ class Exim
         $this->writeConfigFile($passwdPath, $passwd);
 
         // rewrite.conf
-        $rewritePath = $this->system->engineDirPath() . '/config/exim/rewrite.conf';
-        $rewriteTemplatePath = $this->system->engineDirPath() . '/templates/config/exim-rewrite.blade.php';
+        $rewritePath = $this->system->engineDirPath().'/config/exim/rewrite.conf';
+        $rewriteTemplatePath = $this->system->engineDirPath().'/templates/config/exim-rewrite.blade.php';
         $rewriteTemplate = $this->system->filesystem()->fileGetContents($rewriteTemplatePath);
 
         $templateVars = [
@@ -123,12 +122,12 @@ class Exim
         $rewrite = Blade::render($rewriteTemplate, $templateVars);
         $this->writeConfigFile($rewritePath, $rewrite);
 
-        $transportPath = $this->system->engineDirPath() . '/config/exim/transport.conf';
-        $transportTemplatePath = $this->system->engineDirPath() . '/templates/config/exim-transport.blade.php';
+        $transportPath = $this->system->engineDirPath().'/config/exim/transport.conf';
+        $transportTemplatePath = $this->system->engineDirPath().'/templates/config/exim-transport.blade.php';
         $transportTemplate = $this->system->filesystem()->fileGetContents($transportTemplatePath);
 
         $templateVars = [
-            'smtp_implicit_tls' => !empty($config['smtp_implicit_tls']),
+            'smtp_implicit_tls' => ! empty($config['smtp_implicit_tls']),
         ];
         $transport = Blade::render($transportTemplate, $templateVars);
         $this->writeConfigFile($transportPath, $transport);
@@ -144,10 +143,10 @@ class Exim
     public static function smarthost(string $host, string $port): string
     {
         if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false) {
-            $host = '[' . str_replace(':', '::', $host) . ']';
+            $host = '['.str_replace(':', '::', $host).']';
         }
 
-        return $host . '::' . $port;
+        return $host.'::'.$port;
     }
 
     /**
@@ -156,17 +155,17 @@ class Exim
      */
     public function rebuildNetworks(): void
     {
-        $path = $this->system->engineDirPath() . '/config/exim/update-exim4.conf.conf';
+        $path = $this->system->engineDirPath().'/config/exim/update-exim4.conf.conf';
         $current = $this->system->filesystem()->fileGetContents($path);
 
         $lines = array_filter(
             explode("\n", rtrim($current, "\n")),
-            fn (string $line) => !preg_match('/^(dc_local_interfaces|dc_relay_nets)=/', $line)
+            fn (string $line) => ! preg_match('/^(dc_local_interfaces|dc_relay_nets)=/', $line)
         );
         foreach ($this->networkSettings() as $key => $value) {
             $lines[] = "{$key}='{$value}'";
         }
-        $this->writeConfigFile($path, implode("\n", $lines) . "\n");
+        $this->writeConfigFile($path, implode("\n", $lines)."\n");
 
         $this->applyConfig();
     }
@@ -188,7 +187,7 @@ class Exim
         }
 
         return [
-            'dc_local_interfaces' => '127.0.0.1 ; ' . $gateway,
+            'dc_local_interfaces' => '127.0.0.1 ; '.$gateway,
             'dc_relay_nets' => implode(' ; ', $relay),
         ];
     }
@@ -218,12 +217,12 @@ class Exim
     public static function parseNetworkAddresses(string $output): array
     {
         foreach (preg_split('/\R/', trim($output)) ?: [] as $line) {
-            if (!preg_match('#^(\d+\.\d+\.\d+\.\d+)/(\d+)(?:\s+(\S+))?$#', trim($line), $m)
+            if (! preg_match('#^(\d+\.\d+\.\d+\.\d+)/(\d+)(?:\s+(\S+))?$#', trim($line), $m)
                 || filter_var($m[1], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false
                 || (int) $m[2] > 32) {
                 continue;
             }
-            $found = ['subnet' => $m[1] . '/' . $m[2]];
+            $found = ['subnet' => $m[1].'/'.$m[2]];
             if (filter_var($m[3] ?? '', FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false) {
                 $found['gateway'] = $m[3];
             }
@@ -283,11 +282,11 @@ class Exim
         }
 
         // example.invalid is reserved (RFC 2606), so no third party owns it.
-        $message = ""
-            . "From: PanelAlpha Engine <noreply@example.invalid>\n"
-            . "To: {$email}\n"
-            . "Subject: Test email from PanelAlpha Engine\n\n"
-            . "This is a test email sent from PanelAlpha Engine.\n";
+        $message = ''
+            ."From: PanelAlpha Engine <noreply@example.invalid>\n"
+            ."To: {$email}\n"
+            ."Subject: Test email from PanelAlpha Engine\n\n"
+            ."This is a test email sent from PanelAlpha Engine.\n";
 
         $to = escapeshellarg($email);
         $process = $this->system->runProcess([
@@ -302,7 +301,7 @@ class Exim
             '-c',
             // Null envelope sender: a failed test generates no bounce, and exim
             // never rewrites an empty sender into the From: address.
-            "echo " . escapeshellarg($message) . " | exim4 -v -odf -f '<>' $to"
+            'echo '.escapeshellarg($message)." | exim4 -v -odf -f '<>' $to",
         ]);
 
         $stdout = $process->getOutput();
@@ -310,7 +309,7 @@ class Exim
         $exitCode = $process->getExitCode();
 
         return [
-            ...self::deliveryOutcome($stdout . "\n" . $stderr, $exitCode),
+            ...self::deliveryOutcome($stdout."\n".$stderr, $exitCode),
             'stdout' => $stdout,
             'stderr' => $stderr,
             'exit_code' => $exitCode,

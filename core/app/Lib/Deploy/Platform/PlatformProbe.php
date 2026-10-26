@@ -2,7 +2,6 @@
 
 namespace App\Lib\Deploy\Platform;
 
-
 /**
  * Detection logic a `detect` predicate cannot express — walking directories
  * to find a Next.js app inside an unknown workspace layout, for instance.

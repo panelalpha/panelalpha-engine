@@ -89,11 +89,11 @@ final class ComposeYaml
     public static function read(string $path): ?string
     {
         $raw = @file_get_contents($path);
-        if (is_string($raw) || !is_file($path)) {
+        if (is_string($raw) || ! is_file($path)) {
             return is_string($raw) ? $raw : null;
         }
 
-        return (self::$privilegedRead ?? static fn (string $p): ?string => (new System())->filesystem()->cat($p))($path);
+        return (self::$privilegedRead ?? static fn (string $p): ?string => (new System)->filesystem()->cat($p))($path);
     }
 
     /** For tests: what reads a file the core cannot open; null restores sudo. */
@@ -110,8 +110,8 @@ final class ComposeYaml
      * Compose rejects. An empty array is written as a sequence where $source
      * had one, and as a map everywhere else, as before.
      *
-     * @param array<mixed> $compose
-     * @param string ...$included files merged into $source ({@see ComposeInclude})
+     * @param  array<mixed>  $compose
+     * @param  string  ...$included  files merged into $source ({@see ComposeInclude})
      */
     public static function dump(array $compose, string $source, int $inline, int $indent, string ...$included): string
     {
@@ -151,7 +151,7 @@ final class ComposeYaml
     }
 
     /**
-     * @param array<string, true> $found
+     * @param  array<string, true>  $found
      */
     private static function collectEmptySequences(mixed $node, string $path, array &$found): void
     {
@@ -160,11 +160,11 @@ final class ComposeYaml
 
             return;
         }
-        if (!is_array($node) && !$node instanceof \stdClass) {
+        if (! is_array($node) && ! $node instanceof \stdClass) {
             return;
         }
         foreach ((array) $node as $key => $value) {
-            self::collectEmptySequences($value, $path . "\0" . $key, $found);
+            self::collectEmptySequences($value, $path."\0".$key, $found);
         }
     }
 
@@ -173,18 +173,18 @@ final class ComposeYaml
      * `{}`; an empty sequence stays `[]`, which DUMP_EMPTY_ARRAY_AS_SEQUENCE
      * writes as `[]`.
      *
-     * @param array<mixed> $node
-     * @param array<string, true> $sequences
+     * @param  array<mixed>  $node
+     * @param  array<string, true>  $sequences
      * @return array<mixed>|\stdClass
      */
     private static function emptiesMarked(array $node, string $path, array $sequences): array|\stdClass
     {
         if ($node === []) {
-            return isset($sequences[$path]) ? [] : new \stdClass();
+            return isset($sequences[$path]) ? [] : new \stdClass;
         }
         foreach ($node as $key => $value) {
             if (is_array($value)) {
-                $node[$key] = self::emptiesMarked($value, $path . "\0" . $key, $sequences);
+                $node[$key] = self::emptiesMarked($value, $path."\0".$key, $sequences);
             }
         }
 
@@ -220,7 +220,7 @@ final class ComposeYaml
                     continue;
                 }
                 if (str_ends_with($trimmed, ':')) {
-                    $lines[$j] = rtrim($above) . ' ' . trim($line);
+                    $lines[$j] = rtrim($above).' '.trim($line);
                     $lines[$i] = null;
                     $moved = true;
                 }
@@ -228,7 +228,7 @@ final class ComposeYaml
             }
         }
 
-        if (!$moved) {
+        if (! $moved) {
             return $raw;
         }
 

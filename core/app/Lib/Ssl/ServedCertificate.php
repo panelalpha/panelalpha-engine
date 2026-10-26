@@ -16,9 +16,9 @@ final class ServedCertificate
     private const TIMEOUT = 5;
 
     /**
-     * @param string $address host:port, or a URL to take one from
+     * @param  string  $address  host:port, or a URL to take one from
      * @return array{name: string, names: array<int, string>, issuer: string, expires: int, self_signed: bool}|null
-     *         null when nothing answered, which is itself the answer
+     *                                                                                                              null when nothing answered, which is itself the answer
      */
     public static function at(string $address): ?array
     {
@@ -38,7 +38,7 @@ final class ServedCertificate
         ]]);
 
         $stream = @stream_socket_client(
-            'ssl://' . $target,
+            'ssl://'.$target,
             $errno,
             $error,
             self::TIMEOUT,
@@ -96,7 +96,7 @@ final class ServedCertificate
     }
 
     /**
-     * @param array<string, mixed> $parsed
+     * @param  array<string, mixed>  $parsed
      * @return array<int, string>
      */
     private static function alternativeNames(array $parsed): array
@@ -136,10 +136,10 @@ final class ServedCertificate
             $port = parse_url($address, PHP_URL_PORT);
 
             return is_string($host) && $host !== ''
-                ? $host . ':' . ($port ?: 443)
+                ? $host.':'.($port ?: 443)
                 : null;
         }
 
-        return str_contains($address, ':') ? $address : $address . ':443';
+        return str_contains($address, ':') ? $address : $address.':443';
     }
 }

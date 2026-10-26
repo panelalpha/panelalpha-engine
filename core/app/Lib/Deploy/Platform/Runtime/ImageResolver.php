@@ -14,7 +14,7 @@ final class ImageResolver
     /**
      * The base image for the application's runtime stage.
      *
-     * @param list<Requirement> $requirements
+     * @param  list<Requirement>  $requirements
      */
     public static function runtimeImage(array $requirements): ?string
     {
@@ -34,7 +34,7 @@ final class ImageResolver
     /**
      * Build-stage images, keyed by runtime id, in manifest order.
      *
-     * @param list<Requirement> $requirements
+     * @param  list<Requirement>  $requirements
      * @return array<string, string>
      */
     public static function buildImages(array $requirements): array
@@ -56,17 +56,17 @@ final class ImageResolver
      * fingerprint so a changed assembly produces a new tag instead of serving a
      * stale image.
      *
-     * @param list<Requirement> $requirements
+     * @param  list<Requirement>  $requirements
      */
     public static function compositeTag(array $requirements): string
     {
         $token = Requirement::setToken($requirements);
 
-        return self::COMPOSITE_REPOSITORY . ':' . $token . '-pa' . self::fingerprint($token);
+        return self::COMPOSITE_REPOSITORY.':'.$token.'-pa'.self::fingerprint($token);
     }
 
     /**
-     * @param list<Requirement> $requirements
+     * @param  list<Requirement>  $requirements
      * @return list<Requirement>
      */
     public static function runtimeRoleRequirements(array $requirements): array
@@ -80,7 +80,7 @@ final class ImageResolver
     /**
      * Whether this requirement set needs an image nobody publishes.
      *
-     * @param list<Requirement> $requirements
+     * @param  list<Requirement>  $requirements
      */
     public static function needsComposite(array $requirements): bool
     {
@@ -90,6 +90,6 @@ final class ImageResolver
     private static function fingerprint(string $token): string
     {
         // Version the assembly recipe, not just the inputs.
-        return substr(sha1('v1 ' . $token), 0, 8);
+        return substr(sha1('v1 '.$token), 0, 8);
     }
 }

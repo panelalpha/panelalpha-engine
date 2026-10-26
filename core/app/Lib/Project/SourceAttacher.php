@@ -25,9 +25,7 @@ final class SourceAttacher
     /** What the last attach's inspection found, for the response. */
     private ?CreateInspection $inspection = null;
 
-    public function __construct(private readonly ProjectRebuild $rebuild)
-    {
-    }
+    public function __construct(private readonly ProjectRebuild $rebuild) {}
 
     /**
      * @throws ProblemException source_already_attached, project_not_eligible
@@ -59,7 +57,7 @@ final class SourceAttacher
      * Seconds, and never a refusal: what it finds is reported in the response
      * and the attach goes ahead.
      *
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      */
     private function inspect(array $params, ?DeployPlan $plan, ?string $recipe): CreateInspection
     {
@@ -84,7 +82,7 @@ final class SourceAttacher
             throw ProblemException::conflict(
                 'git_repo',
                 'source_already_attached',
-                "Project '{$user->username}' already deploys from " . GitUrl::sanitize($user->getGitRepoOrFail()) . '.',
+                "Project '{$user->username}' already deploys from ".GitUrl::sanitize($user->getGitRepoOrFail()).'.',
             );
         }
 
@@ -93,7 +91,7 @@ final class SourceAttacher
                 'git_repo',
                 'project_not_eligible',
                 "Project '{$user->username}' is classic shared hosting, so a git source cannot be attached to it. "
-                    . 'Create the project with `template: dind` to deploy it from git.',
+                    .'Create the project with `template: dind` to deploy it from git.',
             );
         }
 
@@ -116,7 +114,7 @@ final class SourceAttacher
      * The source the deploy will read: the token encrypted by the model, and
      * the env overrides merged onto the ones the project already carries.
      *
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      */
     private function storeSource(User $user, array $params): void
     {

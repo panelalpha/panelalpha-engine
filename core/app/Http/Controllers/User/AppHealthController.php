@@ -7,13 +7,12 @@ use App\System\Project\Dind;
 use App\System\Project\Dind\AppHealth;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-
 use OpenApi\Attributes as OA;
 
 /**
  * Is the deployed application answering?
  *
- * Thin wrapper over {@see \App\System\Project\Dind\AppHealth} —
+ * Thin wrapper over {@see AppHealth} —
  * the same probe the deploy pipeline runs at the end of every deploy, exposed
  * so the panel can show app status without tailing a deploy log.
  */
@@ -27,7 +26,7 @@ class AppHealthController extends Controller
         }
 
         $runtime = $user->project()->runtime();
-        if (!$runtime instanceof Dind) {
+        if (! $runtime instanceof Dind) {
             $this->refuseNonContainerProject();
         }
 
@@ -43,17 +42,17 @@ class AppHealthController extends Controller
         path: '/projects/{username}/app/health',
         summary: 'Check that the deployed application answers on its published ports',
         description: 'Probes each port the application publishes from inside the account container, over loopback. '
-            . 'Does not go through the domain, DNS, TLS or the reverse proxy, so a failure here means the application '
-            . 'itself is not answering. `healthy` is null when the application publishes no port to probe. '
-            . '`checks` answers a different question from `healthy`: not whether something answered, but whether what '
-            . 'answered is the application - a project the engine could not recognise is served the engine\'s own '
-            . 'placeholder page with a 200, and a static site that has lost its front page answers 404 on `/` while '
-            . 'every other page works. Each check names a stable id, the group it came from, and where it can be said, '
-            . 'what to do about it. `serving` is the one-word summary: `ok`, or what is being served instead. '
-            . 'A `secrets-readable` warning names stored secrets that cannot be decoded.',
+            .'Does not go through the domain, DNS, TLS or the reverse proxy, so a failure here means the application '
+            .'itself is not answering. `healthy` is null when the application publishes no port to probe. '
+            .'`checks` answers a different question from `healthy`: not whether something answered, but whether what '
+            .'answered is the application - a project the engine could not recognise is served the engine\'s own '
+            .'placeholder page with a 200, and a static site that has lost its front page answers 404 on `/` while '
+            .'every other page works. Each check names a stable id, the group it came from, and where it can be said, '
+            .'what to do about it. `serving` is the one-word summary: `ok`, or what is being served instead. '
+            .'A `secrets-readable` warning names stored secrets that cannot be decoded.',
         x: ['mcp-description' => 'Probes the app on its published ports from inside its container, bypassing domain, '
-            . 'DNS, TLS and proxy. `healthy`: something answered (null: no port published). `serving`: whether it '
-            . 'is the app - `ok`, or what answered instead; `checks` say why and what to do.'],
+            .'DNS, TLS and proxy. `healthy`: something answered (null: no port published). `serving`: whether it '
+            .'is the app - `ok`, or what answered instead; `checks` say why and what to do.'],
         security: [['bearerAuth' => []]],
         tags: ['Containers'],
         parameters: [
@@ -70,12 +69,12 @@ class AppHealthController extends Controller
                             property: 'serving',
                             type: 'string',
                             description: '`ok` when the application is serving itself; otherwise what it is serving '
-                                . 'instead - `placeholder`, `missing_entry`, `directory_listing`, `error_page` - or '
-                                . '`unknown` when nothing answered. `restarting` means nothing answered because the '
-                                . 'container keeps exiting, which is a different problem from `unknown`: the process '
-                                . 'is never up rather than up and not publishing. `unclaimed_install` means `/` redirects to the '
-                                . 'application\'s own unfinished installer, which the first visitor can complete; it is a warning '
-                                . 'and does not make the deploy partial.'
+                                .'instead - `placeholder`, `missing_entry`, `directory_listing`, `error_page` - or '
+                                .'`unknown` when nothing answered. `restarting` means nothing answered because the '
+                                .'container keeps exiting, which is a different problem from `unknown`: the process '
+                                .'is never up rather than up and not publishing. `unclaimed_install` means `/` redirects to the '
+                                .'application\'s own unfinished installer, which the first visitor can complete; it is a warning '
+                                .'and does not make the deploy partial.'
                         ),
                         new OA\Property(property: 'ports', type: 'array', items: new OA\Items(properties: [
                             new OA\Property(property: 'port', type: 'integer'),

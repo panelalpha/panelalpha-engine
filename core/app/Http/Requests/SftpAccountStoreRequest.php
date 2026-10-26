@@ -22,7 +22,7 @@ class SftpAccountStoreRequest extends FormRequest
      */
     protected function prepareForValidation(): void
     {
-        if (!$this->has('username') && $this->has('sftp_username')) {
+        if (! $this->has('username') && $this->has('sftp_username')) {
             $this->merge(['username' => $this->input('sftp_username')]);
         }
         $this->resolveVaultFields(['password']);
@@ -34,7 +34,7 @@ class SftpAccountStoreRequest extends FormRequest
             'username' => 'string|required|max:32|regex:/^[a-zA-Z0-9_]+$/D',
             'auth_method' => 'string|required',
             'password' => 'string|nullable|min:8|max:255',
-            'public_key' => ['string', 'nullable', 'max:4096', new SshPublicKey()],
+            'public_key' => ['string', 'nullable', 'max:4096', new SshPublicKey],
         ];
     }
 

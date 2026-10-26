@@ -18,15 +18,15 @@ use App\System\Project\PhpHosting\TenantNetworkMove as PhpHostingTenantNetworkMo
  */
 class MoveToTenantNetwork extends ProjectFleetCommand
 {
-    protected $signature = 'project:network:move' . ProjectOptions::SIGNATURE;
+    protected $signature = 'project:network:move'.ProjectOptions::SIGNATURE;
 
-    protected $description = 'Move DinD and PHP hosting projects onto the isolated tenant network (' . TenantNetwork::NAME . ')';
+    protected $description = 'Move DinD and PHP hosting projects onto the isolated tenant network ('.TenantNetwork::NAME.')';
 
     private string $outcome = '';
 
     protected function progress(User $user): string
     {
-        return "Moving '{$user->username}' to " . TenantNetwork::NAME . '...';
+        return "Moving '{$user->username}' to ".TenantNetwork::NAME.'...';
     }
 
     protected function applyTo(User $user): void
@@ -44,7 +44,7 @@ class MoveToTenantNetwork extends ProjectFleetCommand
 
         $this->outcome = match ($move->run()) {
             TenantNetworkMove::MOVED => '  Moved.',
-            TenantNetworkMove::ALREADY => '  Already on ' . TenantNetwork::NAME . '.',
+            TenantNetworkMove::ALREADY => '  Already on '.TenantNetwork::NAME.'.',
             TenantNetworkMove::NOT_RUNNING => '  Not running, left where it is: start it and run this again.',
         };
     }

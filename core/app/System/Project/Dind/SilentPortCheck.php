@@ -2,10 +2,10 @@
 
 namespace App\System\Project\Dind;
 
-use App\Lib\Deploy\Port\ListeningSockets;
-use App\Lib\Deploy\Port\SilentPort;
 use App\Lib\Deploy\Health\CheckResult;
 use App\Lib\Deploy\Health\HealthCheck;
+use App\Lib\Deploy\Port\ListeningSockets;
+use App\Lib\Deploy\Port\SilentPort;
 use App\System\Project\Dind as DindProject;
 use Illuminate\Support\Facades\Log;
 
@@ -22,11 +22,10 @@ final class SilentPortCheck
 
     public function __construct(
         private DindProject $project,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param list<array<string, mixed>> $results the probe's per-port results
+     * @param  list<array<string, mixed>>  $results  the probe's per-port results
      * @return array<string, mixed>|null
      */
     public function check(array $results): ?array
@@ -68,7 +67,7 @@ final class SilentPortCheck
                 }
             }
         } catch (\Throwable $e) {
-            Log::debug('Silent-port check could not run: ' . AppHealth::trimReason($e->getMessage()));
+            Log::debug('Silent-port check could not run: '.AppHealth::trimReason($e->getMessage()));
 
             return null;
         }
@@ -92,7 +91,7 @@ final class SilentPortCheck
     /**
      * The services a {@see check()} result found running with nothing bound.
      *
-     * @param array<string, mixed>|null $check
+     * @param  array<string, mixed>|null  $check
      * @return list<string>
      */
     public static function starting(?array $check): array
@@ -114,8 +113,8 @@ final class SilentPortCheck
     {
         $name = escapeshellarg($container);
         $script = "pid=\$(docker inspect -f '{{.State.Pid}}' {$name} 2>/dev/null); "
-            . '[ -n "$pid" ] && [ "$pid" != "0" ] || exit 0; '
-            . 'cat /proc/$pid/net/tcp /proc/$pid/net/tcp6 2>/dev/null';
+            .'[ -n "$pid" ] && [ "$pid" != "0" ] || exit 0; '
+            .'cat /proc/$pid/net/tcp /proc/$pid/net/tcp6 2>/dev/null';
 
         return ListeningSockets::fromProcNet(
             $this->project->shell()->execQuiet(['bash', '-c', $script], [], self::TIMEOUT_SECONDS)

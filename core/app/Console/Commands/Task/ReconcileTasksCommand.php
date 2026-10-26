@@ -25,10 +25,10 @@ class ReconcileTasksCommand extends Command
         $retired = TaskReconciler::reconcile($dryRun, $olderThan);
 
         $prefix = $dryRun ? '[dry-run] ' : '';
-        $this->info($prefix . 'Closed ' . count($settled) . ' deploy log(s) left running by a process that is gone.'
-            . ($settled === [] ? '' : ' accounts: ' . implode(', ', $settled)));
-        $this->info($prefix . 'Retired ' . count($retired) . ' orphaned task(s).'
-            . ($retired === [] ? '' : ' ids: ' . implode(', ', $retired)));
+        $this->info($prefix.'Closed '.count($settled).' deploy log(s) left running by a process that is gone.'
+            .($settled === [] ? '' : ' accounts: '.implode(', ', $settled)));
+        $this->info($prefix.'Retired '.count($retired).' orphaned task(s).'
+            .($retired === [] ? '' : ' ids: '.implode(', ', $retired)));
 
         return 0;
     }

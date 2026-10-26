@@ -13,7 +13,7 @@ namespace App\Lib\Deploy\Inspect;
 final class ResolvedSource
 {
     /**
-     * @param array<string, mixed> $meta
+     * @param  array<string, mixed>  $meta
      */
     public function __construct(
         public readonly string $type,
@@ -21,8 +21,7 @@ final class ResolvedSource
         public readonly string $dir,
         public readonly array $meta = [],
         private readonly ?string $removeOnRelease = null
-    ) {
-    }
+    ) {}
 
     /** Is the directory worth inspecting at all? */
     public function isEmpty(): bool
@@ -51,7 +50,7 @@ final class ResolvedSource
      */
     public static function removeTree(string $dir): void
     {
-        if ($dir === '' || !is_dir($dir)) {
+        if ($dir === '' || ! is_dir($dir)) {
             return;
         }
 
@@ -61,8 +60,9 @@ final class ResolvedSource
         );
         foreach ($iterator as $file) {
             /** @var \SplFileInfo $file */
-            if ($file->isDir() && !$file->isLink()) {
+            if ($file->isDir() && ! $file->isLink()) {
                 @rmdir($file->getPathname());
+
                 continue;
             }
             @unlink($file->getPathname());

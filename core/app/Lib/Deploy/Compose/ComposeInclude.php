@@ -19,8 +19,8 @@ final class ComposeInclude
     private const SECTIONS = ['services', 'volumes', 'networks', 'configs', 'secrets'];
 
     /**
-     * @param array<string, mixed> $compose paths already relative to the project root
-     * @param callable(string): ?string $read project-relative path => contents, null when unreadable
+     * @param  array<string, mixed>  $compose  paths already relative to the project root
+     * @param  callable(string): ?string  $read  project-relative path => contents, null when unreadable
      * @return array{compose: array<string, mixed>, sources: list<string>} the merged file, and the raw included files
      */
     public static function flatten(array $compose, callable $read, int $depth = 0): array
@@ -31,7 +31,7 @@ final class ComposeInclude
             return ['compose' => $compose, 'sources' => []];
         }
         if ($depth >= self::MAX_DEPTH) {
-            throw new \InvalidArgumentException('The compose file nests include: deeper than ' . self::MAX_DEPTH . ' levels.');
+            throw new \InvalidArgumentException('The compose file nests include: deeper than '.self::MAX_DEPTH.' levels.');
         }
 
         $merged = [];
@@ -40,13 +40,13 @@ final class ComposeInclude
             $paths = is_array($entry) ? ($entry['path'] ?? null) : $entry;
             $base = is_array($entry) && is_string($entry['project_directory'] ?? null) ? $entry['project_directory'] : null;
             foreach ((array) $paths as $path) {
-                if (!is_string($path) || trim($path) === '') {
+                if (! is_string($path) || trim($path) === '') {
                     continue;
                 }
                 $relative = self::fromRoot($path);
                 $raw = str_starts_with($relative, '/') || str_starts_with($relative, '..') ? null : $read($relative);
                 $parsed = $raw === null ? null : ComposeYaml::parse($raw);
-                if (!is_array($parsed)) {
+                if (! is_array($parsed)) {
                     throw new \InvalidArgumentException("The compose file includes {$path}, which could not be read.");
                 }
                 $dir = dirname($relative) === '.' ? '' : dirname($relative);

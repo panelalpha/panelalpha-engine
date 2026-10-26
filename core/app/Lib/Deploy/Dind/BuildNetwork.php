@@ -56,7 +56,7 @@ final class BuildNetwork
         return [
             'sudo', 'docker', 'network', 'create',
             '--driver', 'bridge',
-            '--opt', 'com.docker.network.bridge.name=' . self::BRIDGE,
+            '--opt', 'com.docker.network.bridge.name='.self::BRIDGE,
             // Not enable_icc=false: Docker would load br_netfilter for it, and
             // that sends every bridge on the host -- tenants' inner networks
             // too -- through iptables. Builds are short-lived and alone.

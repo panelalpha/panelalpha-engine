@@ -2,19 +2,21 @@
 
 namespace App\Http\Resources;
 
-use Illuminate\Http\Resources\Json\JsonResource;
 use App\Models\SftpAccount;
+use Illuminate\Contracts\Support\Arrayable;
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\JsonResource;
 
 class SftpAccountResource extends JsonResource
 {
     /**
-     * @param \Illuminate\Http\Request  $request
-     * @return array|\Illuminate\Contracts\Support\Arrayable|\JsonSerializable
+     * @param  Request  $request
+     * @return array|Arrayable|\JsonSerializable
      */
     public function toArray($request)
     {
         $sftpAccount = $this->resource;
-        assert($sftpAccount instanceOf SftpAccount);
+        assert($sftpAccount instanceof SftpAccount);
 
         return [
             'id' => $sftpAccount->id,

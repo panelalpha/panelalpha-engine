@@ -103,7 +103,7 @@ class ArchiveSafety
      * is matched against the names-only listing, so neither may hold spaces
      * or ` -> ` ambiguously; a link line that cannot be read refuses.
      *
-     * @param list<string> $names {@see names()} of the same archive
+     * @param  list<string>  $names  {@see names()} of the same archive
      * @return array<string, string>
      */
     public static function tarLinks(string $listing, array $names): array
@@ -114,7 +114,7 @@ class ArchiveSafety
             if (preg_match('/^l\S{9}[.+@]?\s+\S+\s+\d+\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?\s(.*)$/', $line, $match) !== 1) {
                 throw new \InvalidArgumentException(self::LINK_MESSAGE);
             }
-            $found = array_values(array_filter($names, static fn (string $name): bool => str_starts_with($match[1], $name . ' -> ')));
+            $found = array_values(array_filter($names, static fn (string $name): bool => str_starts_with($match[1], $name.' -> ')));
             if (count($found) !== 1) {
                 throw new \InvalidArgumentException(self::LINK_MESSAGE);
             }
@@ -128,14 +128,14 @@ class ArchiveSafety
      * The symlink members of an `unzip -Z` listing, by name. Zip keeps the
      * target as the member's contents, so the caller reads it from there.
      *
-     * @param list<string> $names {@see names()} of the same archive
+     * @param  list<string>  $names  {@see names()} of the same archive
      * @return list<string>
      */
     public static function zipLinkNames(string $listing, array $names): array
     {
         $links = [];
         foreach (self::linkLines($listing) as $line) {
-            $found = array_values(array_filter($names, static fn (string $name): bool => str_ends_with($line, ' ' . $name)));
+            $found = array_values(array_filter($names, static fn (string $name): bool => str_ends_with($line, ' '.$name)));
             usort($found, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
             if ($found === []) {
                 throw new \InvalidArgumentException(self::LINK_MESSAGE);
@@ -166,8 +166,8 @@ class ArchiveSafety
      * below a symlink. Walking the target over real directories only, the
      * lexical answer is the one the filesystem gives.
      *
-     * @param array<string, string> $links link member => target
-     * @param list<string> $names every member
+     * @param  array<string, string>  $links  link member => target
+     * @param  list<string>  $names  every member
      */
     public static function assertLinksStayInside(array $links, array $names): void
     {
@@ -204,6 +204,7 @@ class ArchiveSafety
                         throw new \InvalidArgumentException(self::LINK_MESSAGE);
                     }
                     array_pop($at);
+
                     continue;
                 }
                 $at[] = $part;

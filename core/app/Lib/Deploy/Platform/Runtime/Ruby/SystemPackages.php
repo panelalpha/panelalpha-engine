@@ -77,7 +77,7 @@ final class SystemPackages
     {
         $packages = [];
         foreach (self::NATIVE_GEM_PACKAGES as $gem => $package) {
-            if (($gemfile->requires($gem) || $gemfile->locks($gem)) && !in_array($package, $packages, true)) {
+            if (($gemfile->requires($gem) || $gemfile->locks($gem)) && ! in_array($package, $packages, true)) {
                 $packages[] = $package;
             }
         }
@@ -92,7 +92,7 @@ final class SystemPackages
     {
         $packages = [];
         foreach (self::DATABASE_PACKAGES as $gem => $package) {
-            if ($gemfile->requires($gem) && !in_array($package, $packages, true)) {
+            if ($gemfile->requires($gem) && ! in_array($package, $packages, true)) {
                 $packages[] = $package;
             }
         }

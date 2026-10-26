@@ -43,27 +43,27 @@ final class DeployLogPaths
 
     public function directory(): string
     {
-        return self::base() . '/' . $this->username;
+        return self::base().'/'.$this->username;
     }
 
     public function log(string $deployId): string
     {
-        return $this->directory() . '/' . $deployId . self::LOG_EXTENSION;
+        return $this->directory().'/'.$deployId.self::LOG_EXTENSION;
     }
 
     public function latest(): string
     {
-        return $this->directory() . '/' . self::LATEST_FILE;
+        return $this->directory().'/'.self::LATEST_FILE;
     }
 
     public function lock(): string
     {
-        return $this->directory() . '/' . self::LOCK_FILE;
+        return $this->directory().'/'.self::LOCK_FILE;
     }
 
     public function queueLock(): string
     {
-        return $this->directory() . '/' . self::QUEUE_LOCK_FILE;
+        return $this->directory().'/'.self::QUEUE_LOCK_FILE;
     }
 
     /**
@@ -71,6 +71,6 @@ final class DeployLogPaths
      */
     public function logFiles(): array
     {
-        return glob($this->directory() . '/*' . self::LOG_EXTENSION) ?: [];
+        return glob($this->directory().'/*'.self::LOG_EXTENSION) ?: [];
     }
 }

@@ -14,7 +14,7 @@ class CustomRotatingFileHandler extends RotatingFileHandler
             parent::write($record);
         } catch (\Exception $e) {
             if ($logFile = $this->getUrl()) {
-                $system = new System();
+                $system = new System;
                 $system->runProcess([
                     'sudo',
                     'chown',
@@ -23,6 +23,7 @@ class CustomRotatingFileHandler extends RotatingFileHandler
                     dirname($logFile),
                 ]);
                 parent::write($record);
+
                 return;
             }
             throw $e;

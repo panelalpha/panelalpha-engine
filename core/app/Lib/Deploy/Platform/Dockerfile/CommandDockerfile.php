@@ -3,7 +3,6 @@
 namespace App\Lib\Deploy\Platform\Dockerfile;
 
 use App\Lib\Deploy\Platform\Runtime\NodeRuntime;
-use App\Lib\Deploy\Platform\Runtime\Images;
 use App\Lib\Deploy\Template\Template;
 
 /**
@@ -33,7 +32,7 @@ final class CommandDockerfile implements DockerfileWriter
             'entrypoint' => EntrypointInstall::lines(),
         ];
 
-        if (!$this->isMultiStage()) {
+        if (! $this->isMultiStage()) {
             return Template::named('dockerfile/command')->render($values);
         }
 
@@ -69,11 +68,11 @@ final class CommandDockerfile implements DockerfileWriter
     private function installCommand(): string
     {
         $command = $this->recipe->installCommand;
-        if (!str_contains($command, 'pip install') || str_contains($command, '--no-cache-dir')) {
+        if (! str_contains($command, 'pip install') || str_contains($command, '--no-cache-dir')) {
             return $command;
         }
 
-        return PackageManagerCache::mountFor('pip') . $command;
+        return PackageManagerCache::mountFor('pip').$command;
     }
 
     /**

@@ -26,14 +26,17 @@ final class ComposePortScan
 
     /** Why the primary port was chosen ({@see choice()}). */
     public const CHOSEN_PREFERRED = 'preferred';
+
     public const CHOSEN_HEALTHCHECK = 'healthcheck';
+
     public const CHOSEN_LOWEST = 'lowest';
+
     public const CHOSEN_SINGLE = 'single';
 
     /**
-     * @param array<string, string> $env the project's `.env`, which compose
-     *        interpolates host ports with: `${HTTP_WEB_PORT:-80}:80` publishes
-     *        8040 when `.env` says HTTP_WEB_PORT=8040 (Poznote)
+     * @param  array<string, string>  $env  the project's `.env`, which compose
+     *                                      interpolates host ports with: `${HTTP_WEB_PORT:-80}:80` publishes
+     *                                      8040 when `.env` says HTTP_WEB_PORT=8040 (Poznote)
      * @return Scan
      */
     public static function of(string $composePath, array $env = []): array
@@ -44,7 +47,7 @@ final class ComposePortScan
     /**
      * As {@see of()}, from an already-parsed compose array.
      *
-     * @param array<string, mixed> $compose
+     * @param  array<string, mixed>  $compose
      * @return Scan
      */
     public static function ofParsed(array $compose): array
@@ -57,7 +60,7 @@ final class ComposePortScan
     /**
      * Why {@see of()} chose its primary port, null when it offers none.
      *
-     * @param array<string, string> $env
+     * @param  array<string, string>  $env
      * @return Choice|null
      */
     public static function choiceOf(string $composePath, array $env = []): ?array
@@ -66,7 +69,7 @@ final class ComposePortScan
     }
 
     /**
-     * @param array<array-key, array<string, mixed>> $services
+     * @param  array<array-key, array<string, mixed>>  $services
      * @return Scan|array{all: list<int>, primary: int, choice: Choice, refused: list<Refusal>}
      */
     private static function fromServices(array $services, bool $withChoice = false): array
@@ -77,7 +80,7 @@ final class ComposePortScan
         // the datastore next to it declared it.
         $refused = array_values(array_filter(
             $scan['refused'],
-            static fn (array $entry): bool => !in_array($entry['port'], $ports, true)
+            static fn (array $entry): bool => ! in_array($entry['port'], $ports, true)
         ));
 
         // Filtering must never leave the stack with nothing to point at. A
@@ -91,7 +94,7 @@ final class ComposePortScan
             $ports = self::sorted($scan['guessed']);
             $refused = array_values(array_filter(
                 $refused,
-                static fn (array $entry): bool => !in_array($entry['port'], $ports, true)
+                static fn (array $entry): bool => ! in_array($entry['port'], $ports, true)
             ));
         }
 
@@ -110,8 +113,8 @@ final class ComposePortScan
      * publishes on equal terms (Cabernet's 5004 stream over its 6077 web UI).
      * `alternatives` are those equal ports, which only a probe can tell apart.
      *
-     * @param list<int> $ports
-     * @param array{ranks: array<int, int>, demoted: list<int>, checked: list<int>, owners: array<int, list<string>>, published: array<string, list<int>>} $scan
+     * @param  list<int>  $ports
+     * @param  array{ranks: array<int, int>, demoted: list<int>, checked: list<int>, owners: array<int, list<string>>, published: array<string, list<int>>}  $scan
      * @return Choice
      */
     private static function choice(array $ports, array $scan): array
@@ -151,7 +154,7 @@ final class ComposePortScan
      */
     private static function services(string $composePath): array
     {
-        if (!file_exists($composePath)) {
+        if (! file_exists($composePath)) {
             return [];
         }
 
@@ -167,8 +170,8 @@ final class ComposePortScan
      * Port entries with the variables `.env` sets substituted; the rest are
      * left for {@see EnvVarDefault}.
      *
-     * @param array<array-key, array<string, mixed>> $services
-     * @param array<string, string> $env
+     * @param  array<array-key, array<string, mixed>>  $services
+     * @param  array<string, string>  $env
      * @return array<array-key, array<string, mixed>>
      */
     private static function withEnv(array $services, array $env): array
@@ -178,7 +181,7 @@ final class ComposePortScan
         }
         foreach ($services as $name => $service) {
             foreach (['ports', 'expose'] as $key) {
-                if (!is_array($service[$key] ?? null)) {
+                if (! is_array($service[$key] ?? null)) {
                     continue;
                 }
                 foreach ($service[$key] as $index => $entry) {
@@ -195,7 +198,7 @@ final class ComposePortScan
     }
 
     /**
-     * @param array<string, string> $env
+     * @param  array<string, string>  $env
      */
     private static function interpolated(string $value, array $env): string
     {
@@ -203,7 +206,7 @@ final class ComposePortScan
             '/\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:?[-?])([^}]*))?\}|\$([A-Za-z_][A-Za-z0-9_]*)/',
             static function (array $m) use ($env): string {
                 $name = ($m[4] ?? '') !== '' ? $m[4] : $m[1];
-                if (!array_key_exists($name, $env)) {
+                if (! array_key_exists($name, $env)) {
                     return $m[0];
                 }
 
@@ -220,7 +223,7 @@ final class ComposePortScan
      * by a service another publishing service depends_on (9Router publishes
      * 20128 and depends on headroom's 8787).
      *
-     * @param array<array-key, array<string, mixed>> $services
+     * @param  array<array-key, array<string, mixed>>  $services
      * @return array{public: list<int>, refused: list<Refusal>, guessed: list<int>, ranks: array<int, int>, demoted: list<int>, checked: list<int>, owners: array<int, list<string>>, published: array<string, list<int>>}
      */
     private static function scan(array $services): array
@@ -271,14 +274,14 @@ final class ComposePortScan
     /**
      * Services a service that publishes ports `depends_on`, lowercased.
      *
-     * @param array<array-key, array<string, mixed>> $services
+     * @param  array<array-key, array<string, mixed>>  $services
      * @return list<string>
      */
     private static function frontedServices(array $services): array
     {
         $names = [];
         foreach ($services as $service) {
-            if (!empty($service['ports'])) {
+            if (! empty($service['ports'])) {
                 array_push($names, ...ComposeService::of($service)->dependencyNames());
             }
         }
@@ -290,7 +293,7 @@ final class ComposePortScan
      * Behind a `profiles:` gate: `docker compose up` without `--profile` never
      * starts it, so its ports serve nothing (Telegram Files' qBittorrent 8080).
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     private static function isOptIn(array $service): bool
     {
@@ -315,7 +318,7 @@ final class ComposePortScan
      * expose-only ports and, when its own healthcheck names one of its ports,
      * its other ports (Stepifi's Bull Board 3001, which nothing serves).
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return array{public: list<int>, refused: list<Refusal>, guessed: list<int>, ranks: array<int, int>, demoted: list<int>, checked: list<int>}
      */
     private static function serviceScan(array $service): array
@@ -333,8 +336,8 @@ final class ComposePortScan
                 if ($mapping === null) {
                     continue;
                 }
-                if (!InternalPorts::coversBinding($mapping, $service)) {
-                    if ($key === 'expose' && !isset($ports[$mapping->hostPort])) {
+                if (! InternalPorts::coversBinding($mapping, $service)) {
+                    if ($key === 'expose' && ! isset($ports[$mapping->hostPort])) {
                         $exposed[] = $mapping->hostPort;
                     }
                     $ports[$mapping->hostPort] = true;
@@ -346,6 +349,7 @@ final class ComposePortScan
                     if ($checked !== null && ($mapping->containerPort ?? $mapping->hostPort) === $checked) {
                         $healthy[$mapping->hostPort] = true;
                     }
+
                     continue;
                 }
                 $refusal = self::refusal($mapping, $service);
@@ -373,7 +377,7 @@ final class ComposePortScan
      * The container port a service's healthcheck probes over HTTP
      * (`curl -f http://localhost:3000/health`), when it names one.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     private static function healthcheckPort(array $service): ?int
     {
@@ -381,7 +385,7 @@ final class ComposePortScan
         if (is_array($test)) {
             $test = implode(' ', array_filter($test, 'is_scalar'));
         }
-        if (!is_string($test)
+        if (! is_string($test)
             || preg_match('#(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):(\d{1,5})\b#', $test, $m) !== 1) {
             return null;
         }
@@ -395,8 +399,8 @@ final class ComposePortScan
      * on a published binding while neither image nor env names one (OpenCloud
      * serves on 9200, Elasticsearch's port).
      *
-     * @param Refusal $refusal
-     * @param array<string, mixed> $service
+     * @param  Refusal  $refusal
+     * @param  array<string, mixed>  $service
      */
     private static function isGuess(array $refusal, array $service, bool $published): bool
     {
@@ -407,18 +411,18 @@ final class ComposePortScan
             return true;
         }
 
-        return $published && !SidecarEngine::isKnownDatastore('', array_diff_key($service, ['ports' => true, 'expose' => true]));
+        return $published && ! SidecarEngine::isKnownDatastore('', array_diff_key($service, ['ports' => true, 'expose' => true]));
     }
 
     /**
      * Whether the image alone -- no env, no ports -- names a datastore.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     private static function imageIsDatastore(array $service): bool
     {
         $image = $service['image'] ?? null;
-        if (!is_string($image) || $image === '') {
+        if (! is_string($image) || $image === '') {
             return false;
         }
 
@@ -429,7 +433,7 @@ final class ComposePortScan
      * Why {@see InternalPorts::coversBinding()} turned a binding down: the port
      * itself is a datastore's, or the image behind it is.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return Refusal
      */
     private static function refusal(PortMapping $mapping, array $service): array
@@ -447,7 +451,7 @@ final class ComposePortScan
     }
 
     /**
-     * @param mixed $declared
+     * @param  mixed  $declared
      * @return list<mixed>
      */
     private static function entries($declared): array
@@ -464,9 +468,9 @@ final class ComposePortScan
      * after them. $ranks overrides a port's own rank; $demoted ports follow
      * every other web port.
      *
-     * @param list<int> $ports
-     * @param array<int, int> $ranks
-     * @param list<int> $demoted
+     * @param  list<int>  $ports
+     * @param  array<int, int>  $ranks
+     * @param  list<int>  $demoted
      * @return list<int>
      */
     private static function sorted(array $ports, array $ranks = [], array $demoted = []): array

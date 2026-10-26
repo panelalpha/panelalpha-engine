@@ -27,24 +27,28 @@ class ProjectUnsetPassword extends Command
         $username = trim((string) $this->option('username'));
         if ($username === '') {
             $this->error('--project is required.');
+
             return 1;
         }
 
         $user = User::findByUsername($username);
-        if (!$user) {
+        if (! $user) {
             $this->error("Project '{$username}' not found.");
+
             return 1;
         }
 
-        if (!SitePasswordProtection::isEnabled($user)) {
+        if (! SitePasswordProtection::isEnabled($user)) {
             $this->info("Project '{$user->username}' has no site password set.");
+
             return 0;
         }
 
-        if (!$this->option('force')
-            && !$this->confirm("Remove site password for project '{$user->username}'?", true)
+        if (! $this->option('force')
+            && ! $this->confirm("Remove site password for project '{$user->username}'?", true)
         ) {
             $this->info('Aborted.');
+
             return 0;
         }
 

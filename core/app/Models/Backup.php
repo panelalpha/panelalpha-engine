@@ -24,6 +24,7 @@ use Illuminate\Support\Carbon;
  * @property ?User $user
  * @property ?BackupContainer $container
  * @property Collection<int, BackupItem> $items
+ *
  * @method static ?Backup find(int $id)
  */
 class Backup extends Model
@@ -62,7 +63,7 @@ class Backup extends Model
     }
 
     /**
-     * @param array{files?: bool, databases?: bool} $contents
+     * @param  array{files?: bool, databases?: bool}  $contents
      */
     public static function prepare(
         User $user,
@@ -72,7 +73,7 @@ class Backup extends Model
         ?string $note = null,
         string $kind = 'manual',
     ): self {
-        $backup = new self();
+        $backup = new self;
         $backup->user_id = $user->id;
         $backup->username = $user->username;
         $backup->container_id = $container->id;
@@ -105,7 +106,7 @@ class Backup extends Model
     }
 
     /**
-     * @param array{files?: bool, databases?: bool} $contents
+     * @param  array{files?: bool, databases?: bool}  $contents
      * @return array{files: bool, databases: bool}
      */
     private static function normalizeContents(array $contents): array

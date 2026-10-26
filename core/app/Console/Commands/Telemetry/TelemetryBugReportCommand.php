@@ -70,9 +70,9 @@ class TelemetryBugReportCommand extends Command
         // The probe reaches into the account container and can take a few
         // seconds. Say so before it starts, or a person who typed one sentence
         // is left watching a cursor.
-        if (!$this->option('no-health') && !$this->option('json')) {
-            $this->line('<comment>Gathering evidence from ' . $project
-                . ' — inspection and a live port probe…</comment>');
+        if (! $this->option('no-health') && ! $this->option('json')) {
+            $this->line('<comment>Gathering evidence from '.$project
+                .' — inspection and a live port probe…</comment>');
         }
 
         $result = Telemetry::captureBugReport([
@@ -82,8 +82,8 @@ class TelemetryBugReportCommand extends Command
             'severity' => $this->text('severity', ''),
             'area' => $this->text('area', ''),
             'contact' => $this->text('contact', ''),
-            'attach_log' => !$this->option('no-log'),
-            'attach_health' => !$this->option('no-health'),
+            'attach_log' => ! $this->option('no-log'),
+            'attach_health' => ! $this->option('no-health'),
             'dry_run' => (bool) $this->option('dry-run'),
             'via' => 'cli',
         ]);
@@ -98,7 +98,7 @@ class TelemetryBugReportCommand extends Command
     }
 
     /**
-     * @param array{status: string, queued: bool, id: ?string, reason: ?string, endpoint: string, report: ?array<string, mixed>} $result
+     * @param  array{status: string, queued: bool, id: ?string, reason: ?string, endpoint: string, report: ?array<string, mixed>}  $result
      */
     private function report(array $result): int
     {
@@ -106,12 +106,12 @@ class TelemetryBugReportCommand extends Command
             $this->line((string) json_encode($result['report'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
             $this->newLine();
             $this->line('<comment>Nothing was filed. This is what would be sent to '
-                . $result['endpoint'] . ' — run again without --dry-run to file it.</comment>');
+                .$result['endpoint'].' — run again without --dry-run to file it.</comment>');
 
             return self::SUCCESS;
         }
 
-        if (!$result['queued']) {
+        if (! $result['queued']) {
             $this->error((string) $result['reason']);
 
             // Every refusal is a configuration answer, and the one people hit
@@ -120,7 +120,7 @@ class TelemetryBugReportCommand extends Command
             if ($result['status'] === 'disabled') {
                 $this->newLine();
                 $this->line('<comment>Set TELEMETRY_ENABLED=true (and TELEMETRY_BUG_REPORTS=true) in '
-                    . '.env-core, or send storage/logs/telemetry-*.log to support instead.</comment>');
+                    .'.env-core, or send storage/logs/telemetry-*.log to support instead.</comment>');
             }
 
             return self::FAILURE;
@@ -148,7 +148,7 @@ class TelemetryBugReportCommand extends Command
 
         $this->newLine();
         $this->line('<comment>Queued, not sent: telemetry:ship delivers it on the next scheduled run. '
-            . 'Read it back with `telemetry:show ' . $result['id'] . '`.</comment>');
+            .'Read it back with `telemetry:show '.$result['id'].'`.</comment>');
 
         return self::SUCCESS;
     }
@@ -161,12 +161,12 @@ class TelemetryBugReportCommand extends Command
      * engine's own placeholder page, which is exactly the bug most worth
      * filing.
      *
-     * @param array<string, mixed> $report
+     * @param  array<string, mixed>  $report
      */
     private function healthSummary(array $report): string
     {
         $health = $report['app']['health'] ?? null;
-        if (!is_array($health)) {
+        if (! is_array($health)) {
             return $this->option('no-health') ? 'skipped (--no-health)' : 'not available';
         }
 
@@ -179,7 +179,7 @@ class TelemetryBugReportCommand extends Command
 
         return $serving === null || $serving === 'ok'
             ? $healthy
-            : $healthy . ', serving ' . $serving;
+            : $healthy.', serving '.$serving;
     }
 
     /**
@@ -218,7 +218,7 @@ class TelemetryBugReportCommand extends Command
         }
 
         $value = trim($value);
-        if ($value !== '' || !$this->input->isInteractive()) {
+        if ($value !== '' || ! $this->input->isInteractive()) {
             return $value;
         }
 

@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property Carbon $created_at
  * @property Carbon $updated_at
  * @property User $user
+ *
  * @method static IpAssigned FindOrFail(int $id)
  * @method static IpAssigned create(array $params)
  * @method static Collection<IpAssigned> get()

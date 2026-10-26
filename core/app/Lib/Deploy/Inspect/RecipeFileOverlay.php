@@ -49,8 +49,8 @@ final class RecipeFileOverlay
                 continue;
             }
 
-            $target = $root . '/' . $relative;
-            if (!is_dir(dirname($target)) && !mkdir(dirname($target), 0755, true)) {
+            $target = $root.'/'.$relative;
+            if (! is_dir(dirname($target)) && ! mkdir(dirname($target), 0755, true)) {
                 continue;
             }
             if (file_put_contents($target, (string) $snippet['contents']) !== false) {

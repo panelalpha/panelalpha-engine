@@ -19,13 +19,12 @@ final class TenantNetworkMove
 {
     public function __construct(
         private PhpHosting $project,
-    ) {
-    }
+    ) {}
 
     /** @return DindTenantNetworkMove::MOVED|DindTenantNetworkMove::ALREADY|DindTenantNetworkMove::NOT_RUNNING */
     public function run(): string
     {
-        if (!$this->project->isRunning()) {
+        if (! $this->project->isRunning()) {
             return DindTenantNetworkMove::NOT_RUNNING;
         }
 
@@ -34,7 +33,7 @@ final class TenantNetworkMove
         $networks = $this->networks();
 
         $system->exec(TenantNetwork::firewallArgv(), [], 60);
-        if (!array_key_exists(TenantNetwork::NAME, $networks)) {
+        if (! array_key_exists(TenantNetwork::NAME, $networks)) {
             $system->exec(['sudo', 'docker', 'network', 'connect', TenantNetwork::NAME, $account], [], 60);
             // The new port carries nothing until it is bound.
             $system->exec(TenantNetwork::firewallArgv(), [], 60);
@@ -42,7 +41,7 @@ final class TenantNetworkMove
 
         $this->pointComposeAtTenantNetwork();
 
-        if (!array_key_exists(TenantNetwork::LEGACY_NAME, $networks)) {
+        if (! array_key_exists(TenantNetwork::LEGACY_NAME, $networks)) {
             return DindTenantNetworkMove::ALREADY;
         }
         $system->exec(['sudo', 'docker', 'network', 'disconnect', TenantNetwork::LEGACY_NAME, $account], [], 60);
@@ -70,7 +69,7 @@ final class TenantNetworkMove
     {
         $filesystem = $this->project->system()->filesystem();
         $path = $this->project->composeFilePath();
-        if (!$filesystem->fileExists($path)) {
+        if (! $filesystem->fileExists($path)) {
             return;
         }
         $compose = $filesystem->fileGetContents($path);

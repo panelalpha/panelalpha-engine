@@ -15,6 +15,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon $created_at
  * @property Carbon $updated_at
  * @property ?Backup $backup
+ *
  * @method static ?BackupItem find(int $id)
  */
 class BackupItem extends Model

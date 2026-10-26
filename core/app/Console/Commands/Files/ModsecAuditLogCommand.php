@@ -24,16 +24,18 @@ class ModsecAuditLogCommand extends Command
     {
         $filename = $this->argument('filename');
         $out = $this->option('out');
-        $logs = new AuditLogFiles();
+        $logs = new AuditLogFiles;
 
-        if (!is_string($filename) || $filename === '') {
+        if (! is_string($filename) || $filename === '') {
             $this->output->write(json_encode(['data' => $logs->list()], JSON_THROW_ON_ERROR));
+
             return 0;
         }
 
         if ($this->option('tail')) {
             // The tail is JSON, so --out does not apply to it.
             $this->output->write(json_encode(['data' => $logs->tailOrFail($filename)], JSON_THROW_ON_ERROR));
+
             return 0;
         }
 

@@ -6,7 +6,6 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\MysqlPrivilegesUpdateRequest;
 use App\Models\MysqlDatabase;
 use App\Models\MysqlUser;
-use App\Models\User;
 use App\System;
 use Illuminate\Http\JsonResponse;
 use OpenApi\Attributes as OA;
@@ -29,9 +28,9 @@ class PrivilegesController extends Controller
         ],
     )]
     /**
-     * @param string $username
-     * @param string $dbuser
-     * @param string $dbname
+     * @param  string  $username
+     * @param  string  $dbuser
+     * @param  string  $dbname
      * @return JsonResponse
      */
     public function show($username, $dbuser, $dbname)
@@ -40,19 +39,19 @@ class PrivilegesController extends Controller
 
         /** @var ?MysqlUser */
         $dbuser = $user->mysqlUsers()->getQuery()->where('user', $user->qualifyMysqlUser($dbuser))->first();
-        if (!$dbuser) {
+        if (! $dbuser) {
             abort(404, 'Not found');
         }
 
         /** @var ?MysqlDatabase */
         $db = $user->mysqlDatabases()->getQuery()->where('database', $user->qualifyMysqlDatabase($dbname))->first();
-        if (!$db) {
+        if (! $db) {
             abort(404, 'Not found');
         }
 
-        $mysql = (new System())->mysql();
+        $mysql = (new System)->mysql();
         $privs = $mysql->privileges()->showPrivileges($dbuser->user);
-        $data = $privs[$db->database] ?? "";
+        $data = $privs[$db->database] ?? '';
 
         return new JsonResponse(['data' => $data]);
     }
@@ -77,10 +76,9 @@ class PrivilegesController extends Controller
         ],
     )]
     /**
-     * @param string $username
-     * @param string $dbuser
-     * @param string $dbname
-     * @param MysqlPrivilegesUpdateRequest $request
+     * @param  string  $username
+     * @param  string  $dbuser
+     * @param  string  $dbname
      * @return JsonResponse
      */
     public function update($username, $dbuser, $dbname, MysqlPrivilegesUpdateRequest $request)
@@ -89,13 +87,13 @@ class PrivilegesController extends Controller
 
         /** @var ?MysqlUser */
         $dbuser = $user->mysqlUsers()->getQuery()->where('user', $user->qualifyMysqlUser($dbuser))->first();
-        if (!$dbuser) {
+        if (! $dbuser) {
             abort(404, 'Not found');
         }
 
         /** @var ?MysqlDatabase */
         $db = $user->mysqlDatabases()->getQuery()->where('database', $user->qualifyMysqlDatabase($dbname))->first();
-        if (!$db) {
+        if (! $db) {
             abort(404, 'Not found');
         }
 
@@ -106,7 +104,7 @@ class PrivilegesController extends Controller
          */
         $params = $request->validated();
 
-        $mysql = (new System())->mysql();
+        $mysql = (new System)->mysql();
         $mysql->privileges()->updatePrivileges($dbuser->user, $db->database, $params['privileges']);
         $dbuser->touch();
 
@@ -129,9 +127,9 @@ class PrivilegesController extends Controller
         ],
     )]
     /**
-     * @param string $username
-     * @param string $dbuser
-     * @param string $dbname
+     * @param  string  $username
+     * @param  string  $dbuser
+     * @param  string  $dbname
      * @return JsonResponse
      */
     public function destroy($username, $dbuser, $dbname)
@@ -140,17 +138,17 @@ class PrivilegesController extends Controller
 
         /** @var ?MysqlUser */
         $dbuser = $user->mysqlUsers()->getQuery()->where('user', $user->qualifyMysqlUser($dbuser))->first();
-        if (!$dbuser) {
+        if (! $dbuser) {
             abort(404, 'Not found');
         }
 
         /** @var ?MysqlDatabase */
         $db = $user->mysqlDatabases()->getQuery()->where('database', $user->qualifyMysqlDatabase($dbname))->first();
-        if (!$db) {
+        if (! $db) {
             abort(404, 'Not found');
         }
 
-        $mysql = (new System())->mysql();
+        $mysql = (new System)->mysql();
         $mysql->privileges()->revokeIfExists($dbuser->user, $db->database);
         $dbuser->touch();
 

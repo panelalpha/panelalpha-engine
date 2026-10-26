@@ -2,12 +2,14 @@
 
 namespace App\Lib\Deploy\CacheManager;
 
+use App\Lib\Deploy\Engine\ImageStore;
+
 /**
  * What an image transfer is allowed to be, and how many may run at once.
  *
  * Reference validation, the host-capacity readings and the concurrency
  * heuristic are engine-neutral. The commands that actually move an image
- * belong to {@see \App\Lib\Deploy\Engine\ImageStore}.
+ * belong to {@see ImageStore}.
  */
 class ImageTransfer
 {
@@ -94,7 +96,7 @@ class ImageTransfer
     public static function parseExposedPorts(string $json): array
     {
         $decoded = json_decode(trim($json), true);
-        if (!is_array($decoded)) {
+        if (! is_array($decoded)) {
             return [];
         }
 
@@ -120,7 +122,7 @@ class ImageTransfer
     public static function parseManifestSize(string $json): ?int
     {
         $decoded = json_decode(trim($json), true);
-        if (!is_array($decoded)) {
+        if (! is_array($decoded)) {
             return null;
         }
         // A single-platform image inspects to one object, not a list.
@@ -129,14 +131,14 @@ class ImageTransfer
         }
 
         foreach ($decoded as $entry) {
-            if (!is_array($entry) || !self::isLinuxAmd64($entry)) {
+            if (! is_array($entry) || ! self::isLinuxAmd64($entry)) {
                 continue;
             }
             $layers = $entry['OCIManifest']['layers']
                 ?? $entry['SchemaV2Manifest']['layers']
                 ?? $entry['layers']
                 ?? null;
-            if (!is_array($layers)) {
+            if (! is_array($layers)) {
                 continue;
             }
             $total = 0;
@@ -155,14 +157,14 @@ class ImageTransfer
     }
 
     /**
-     * @param array<string, mixed> $entry
+     * @param  array<string, mixed>  $entry
      */
     private static function isLinuxAmd64(array $entry): bool
     {
         $platform = $entry['Descriptor']['platform'] ?? null;
         // An image with no platform block is single-platform: it is whatever
         // the daemon asked for, which is this host.
-        if (!is_array($platform)) {
+        if (! is_array($platform)) {
             return true;
         }
 
@@ -186,7 +188,7 @@ class ImageTransfer
         $digest = '@sha256:[a-f0-9]{64}';
 
         return preg_match(
-            '#^' . $registry . $repository . '(?::[a-z0-9._-]+(?:' . $digest . ')?|' . $digest . ')$#i',
+            '#^'.$registry.$repository.'(?::[a-z0-9._-]+(?:'.$digest.')?|'.$digest.')$#i',
             $image
         ) === 1;
     }
@@ -208,7 +210,7 @@ class ImageTransfer
             $name = substr($name, 0, $colon);
         }
 
-        return $name . substr($image, $at);
+        return $name.substr($image, $at);
     }
 
     /**
@@ -218,7 +220,7 @@ class ImageTransfer
      */
     public static function normalizeImageRef(mixed $image): ?string
     {
-        if (!is_string($image)) {
+        if (! is_string($image)) {
             return null;
         }
         $image = trim($image);
@@ -226,7 +228,7 @@ class ImageTransfer
             return null;
         }
         // A digest is already exact; :latest on top of one resolves to nothing.
-        if (!str_contains($image, '@') && !str_contains(basename($image), ':')) {
+        if (! str_contains($image, '@') && ! str_contains(basename($image), ':')) {
             $image .= ':latest';
         }
 

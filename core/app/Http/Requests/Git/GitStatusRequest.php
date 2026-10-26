@@ -13,12 +13,12 @@ class GitStatusRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        if (!$this->has('fetch')) {
+        if (! $this->has('fetch')) {
             return;
         }
 
         $fetch = $this->input('fetch');
-        if (!is_string($fetch)) {
+        if (! is_string($fetch)) {
             return;
         }
 

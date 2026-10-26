@@ -10,7 +10,7 @@ trait ValidatesMysqlName
 {
     private function mysqlNameRule(int $maxLength): string
     {
-        return 'string|required|regex:/^[A-Za-z_-][A-Za-z0-9_-]*$/D|min:1|max:' . $maxLength;
+        return 'string|required|regex:/^[A-Za-z_-][A-Za-z0-9_-]*$/D|min:1|max:'.$maxLength;
     }
 
     /**

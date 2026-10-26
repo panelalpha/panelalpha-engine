@@ -25,18 +25,17 @@ final class Paths
 
     public function __construct(
         private DindProject $project,
-    ) {
-    }
+    ) {}
 
     public function appDir(): string
     {
-        return $this->project->homeDirPath() . '/project';
+        return $this->project->homeDirPath().'/project';
     }
 
     /** The compose file the engine runs — ADR-0001: never a name the client may own. */
     public function composeFile(): string
     {
-        return $this->appDir() . '/' . EngineArtifacts::RUN_COMPOSE;
+        return $this->appDir().'/'.EngineArtifacts::RUN_COMPOSE;
     }
 
     /**
@@ -48,12 +47,12 @@ final class Paths
     public function existingComposeFile(): ?string
     {
         $fs = $this->project->system()->filesystem();
-        $appConfigCompose = $this->appDir() . '/' . EngineArtifacts::APP_CONFIG_COMPOSE;
+        $appConfigCompose = $this->appDir().'/'.EngineArtifacts::APP_CONFIG_COMPOSE;
         if ($fs->fileExists($appConfigCompose)) {
             return $appConfigCompose;
         }
         foreach (self::COMPOSE_FILE_CANDIDATES as $name) {
-            $path = $this->appDir() . '/' . $name;
+            $path = $this->appDir().'/'.$name;
             if ($fs->fileExists($path)) {
                 return $path;
             }
@@ -76,7 +75,7 @@ final class Paths
     /** The engine's own override layer — an app config's `override`-mode file. */
     public function composeOverrideFile(): string
     {
-        return $this->appDir() . '/' . EngineArtifacts::RUN_COMPOSE_OVERRIDE;
+        return $this->appDir().'/'.EngineArtifacts::RUN_COMPOSE_OVERRIDE;
     }
 
     /**
@@ -144,13 +143,13 @@ final class Paths
 
         if ($this->layersClientOverride()) {
             $clientOverride = $this->clientOverrideIn($this->appDir());
-            if ($clientOverride !== null && !in_array($clientOverride, $files, true)) {
+            if ($clientOverride !== null && ! in_array($clientOverride, $files, true)) {
                 $files[] = $clientOverride;
             }
         }
 
         $engineOverride = $this->composeOverrideFile();
-        if (!in_array($engineOverride, $files, true) && $fs->fileExists($engineOverride)) {
+        if (! in_array($engineOverride, $files, true) && $fs->fileExists($engineOverride)) {
             $files[] = $engineOverride;
         }
 
@@ -167,12 +166,12 @@ final class Paths
         $fs = $this->project->system()->filesystem();
         // Under an app config's replacing compose file only the copy counts:
         // the deploy leaves none when the override is the repository's own.
-        $names = $fs->fileExists($appDir . '/' . EngineArtifacts::APP_CONFIG_COMPOSE)
+        $names = $fs->fileExists($appDir.'/'.EngineArtifacts::APP_CONFIG_COMPOSE)
             ? [EngineArtifacts::RUN_CLIENT_OVERRIDE]
             : [EngineArtifacts::RUN_CLIENT_OVERRIDE, self::CLIENT_OVERRIDE_FILENAME];
         foreach ($names as $name) {
-            if ($fs->fileExists($appDir . '/' . $name)) {
-                return $appDir . '/' . $name;
+            if ($fs->fileExists($appDir.'/'.$name)) {
+                return $appDir.'/'.$name;
             }
         }
 
@@ -191,7 +190,7 @@ final class Paths
     }
 
     /**
-     * @param list<string> $rest
+     * @param  list<string>  $rest
      * @return list<string>
      */
     public function composeCommand(array $rest): array
@@ -213,7 +212,7 @@ final class Paths
      */
     private function composePrefix(string $appDir): array
     {
-        $command = ['env', 'PWD=' . $appDir, 'docker', 'compose', '--project-directory', $appDir];
+        $command = ['env', 'PWD='.$appDir, 'docker', 'compose', '--project-directory', $appDir];
         foreach ($this->envFiles($appDir) as $file) {
             $command[] = '--env-file';
             $command[] = $file;
@@ -234,15 +233,15 @@ final class Paths
     {
         $appDir = rtrim($appDir ?? $this->appDir(), '/');
         $fs = $this->project->system()->filesystem();
-        if (!$fs->fileExists($appDir . '/' . EngineArtifacts::ENV_OVERRIDES)) {
+        if (! $fs->fileExists($appDir.'/'.EngineArtifacts::ENV_OVERRIDES)) {
             return [];
         }
 
         $files = [];
         foreach (['.env', EngineArtifacts::ENV_OVERRIDES] as $name) {
             // Compose refuses a named env file that does not exist.
-            if ($fs->fileExists($appDir . '/' . $name)) {
-                $files[] = $appDir . '/' . $name;
+            if ($fs->fileExists($appDir.'/'.$name)) {
+                $files[] = $appDir.'/'.$name;
             }
         }
 
@@ -292,7 +291,7 @@ final class Paths
     private function composeFilesIn(string $appDir): array
     {
         $fs = $this->project->system()->filesystem();
-        $run = $appDir . '/' . EngineArtifacts::RUN_COMPOSE;
+        $run = $appDir.'/'.EngineArtifacts::RUN_COMPOSE;
         $primary = $fs->fileExists($run) ? $run : ($this->existingComposeFileIn($appDir) ?? $run);
         $files = [$primary];
 
@@ -300,13 +299,13 @@ final class Paths
         // under the compose strategies, then the app config's override.
         if ($this->layersClientOverride()) {
             $clientOverride = $this->clientOverrideIn($appDir);
-            if ($clientOverride !== null && !in_array($clientOverride, $files, true)) {
+            if ($clientOverride !== null && ! in_array($clientOverride, $files, true)) {
                 $files[] = $clientOverride;
             }
         }
 
-        $engineOverride = $appDir . '/' . EngineArtifacts::RUN_COMPOSE_OVERRIDE;
-        if (!in_array($engineOverride, $files, true) && $fs->fileExists($engineOverride)) {
+        $engineOverride = $appDir.'/'.EngineArtifacts::RUN_COMPOSE_OVERRIDE;
+        if (! in_array($engineOverride, $files, true) && $fs->fileExists($engineOverride)) {
             $files[] = $engineOverride;
         }
 
@@ -317,7 +316,7 @@ final class Paths
     {
         $fs = $this->project->system()->filesystem();
         foreach (self::COMPOSE_FILE_CANDIDATES as $candidate) {
-            $path = $appDir . '/' . $candidate;
+            $path = $appDir.'/'.$candidate;
             if ($fs->fileExists($path)) {
                 return $path;
             }

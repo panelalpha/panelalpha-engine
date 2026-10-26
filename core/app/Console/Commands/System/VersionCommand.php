@@ -14,10 +14,11 @@ class VersionCommand extends Command
     public function handle(): int
     {
         $ver = Config::getStringValue('system.version');
-        if (!$ver) {
+        if (! $ver) {
             $ver = 'unknown';
         }
         $this->line($ver);
+
         return 0;
     }
 }

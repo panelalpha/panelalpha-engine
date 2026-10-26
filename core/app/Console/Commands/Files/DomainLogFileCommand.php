@@ -32,8 +32,9 @@ class DomainLogFileCommand extends Command
         $user = User::findByUsernameOrFail((string) $this->argument('project'));
         $logFiles = DomainLogFiles::findOrFail($user, (string) $this->argument('domain'));
 
-        if (!is_string($filename) || $filename === '') {
+        if (! is_string($filename) || $filename === '') {
             $this->output->write(json_encode(['data' => $logFiles->list($all)], JSON_THROW_ON_ERROR));
+
             return 0;
         }
 

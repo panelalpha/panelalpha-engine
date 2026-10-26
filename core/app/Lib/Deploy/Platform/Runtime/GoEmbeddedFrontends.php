@@ -26,15 +26,15 @@ final class GoEmbeddedFrontends
 
     /**
      * @return list<array{dir: string, embed: string}> frontend dir relative to
-     *         the project ('' for the root), and `<file>: <pattern>` that needs it
+     *                                                 the project ('' for the root), and `<file>: <pattern>` that needs it
      */
     public static function missing(string $projectDir): array
     {
         $root = rtrim($projectDir, '/');
         $found = [];
         foreach (self::goFiles($root) as $relative) {
-            $source = @file_get_contents($root . '/' . $relative);
-            if (!is_string($source) || !str_contains($source, '//go:embed')) {
+            $source = @file_get_contents($root.'/'.$relative);
+            if (! is_string($source) || ! str_contains($source, '//go:embed')) {
                 continue;
             }
             $goDir = dirname($relative) === '.' ? '' : dirname($relative);
@@ -43,12 +43,12 @@ final class GoEmbeddedFrontends
                 preg_match_all('/"([^"]+)"|`([^`]+)`|(\S+)/', $line, $tokens, PREG_SET_ORDER);
                 foreach ($tokens as $token) {
                     $pattern = preg_replace('/^all:/', '', $token[1] ?: ($token[2] ?? '') ?: ($token[3] ?? ''));
-                    if (!is_string($pattern) || $pattern === '' || self::exists($root, $goDir, $pattern)) {
+                    if (! is_string($pattern) || $pattern === '' || self::exists($root, $goDir, $pattern)) {
                         continue;
                     }
                     $dir = self::frontendFor($root, $goDir, $pattern);
-                    if ($dir !== null && !isset($found[$dir])) {
-                        $found[$dir] = ['dir' => $dir, 'embed' => $relative . ': ' . $pattern];
+                    if ($dir !== null && ! isset($found[$dir])) {
+                        $found[$dir] = ['dir' => $dir, 'embed' => $relative.': '.$pattern];
                     }
                 }
             }
@@ -67,8 +67,8 @@ final class GoEmbeddedFrontends
     {
         $plan = [];
         foreach (self::missing($projectDir) as $frontend) {
-            $abs = rtrim($projectDir, '/') . ($frontend['dir'] === '' ? '' : '/' . $frontend['dir']);
-            $package = json_decode((string) @file_get_contents($abs . '/package.json'), true);
+            $abs = rtrim($projectDir, '/').($frontend['dir'] === '' ? '' : '/'.$frontend['dir']);
+            $package = json_decode((string) @file_get_contents($abs.'/package.json'), true);
             $package = is_array($package) ? $package : [];
             $files = ProjectContext::listRootFiles($abs);
             $pm = JsPackageManager::detectPackageManager($files, $package);
@@ -85,7 +85,7 @@ final class GoEmbeddedFrontends
 
     private static function exists(string $root, string $goDir, string $pattern): bool
     {
-        $path = $root . '/' . ($goDir === '' ? '' : $goDir . '/') . $pattern;
+        $path = $root.'/'.($goDir === '' ? '' : $goDir.'/').$pattern;
         if (strpbrk($pattern, '*?[') !== false) {
             return (glob($path) ?: []) !== [];
         }
@@ -98,10 +98,10 @@ final class GoEmbeddedFrontends
         if (strpbrk($pattern, '*?[') !== false || str_contains($pattern, '..')) {
             return null;
         }
-        $target = trim(($goDir === '' ? '' : $goDir . '/') . $pattern, '/');
+        $target = trim(($goDir === '' ? '' : $goDir.'/').$pattern, '/');
         $parent = dirname($target) === '.' ? '' : dirname($target);
         foreach (array_unique([$parent, $goDir]) as $dir) {
-            $package = json_decode((string) @file_get_contents($root . '/' . ($dir === '' ? '' : $dir . '/') . 'package.json'), true);
+            $package = json_decode((string) @file_get_contents($root.'/'.($dir === '' ? '' : $dir.'/').'package.json'), true);
             if (is_array($package) && is_string($package['scripts']['build'] ?? null) && trim($package['scripts']['build']) !== '') {
                 return $dir;
             }
@@ -113,7 +113,7 @@ final class GoEmbeddedFrontends
     /** @return list<string> paths relative to $root */
     private static function goFiles(string $root): array
     {
-        if (!is_dir($root)) {
+        if (! is_dir($root)) {
             return [];
         }
         $iterator = new \RecursiveIteratorIterator(
@@ -123,11 +123,11 @@ final class GoEmbeddedFrontends
                     if ($file->isDir()) {
                         $name = $file->getFilename();
 
-                        return !in_array($name, self::SKIP_DIRS, true) && !str_starts_with($name, '.')
-                            && !str_starts_with($name, '_');
+                        return ! in_array($name, self::SKIP_DIRS, true) && ! str_starts_with($name, '.')
+                            && ! str_starts_with($name, '_');
                     }
 
-                    return str_ends_with($file->getFilename(), '.go') && !str_ends_with($file->getFilename(), '_test.go');
+                    return str_ends_with($file->getFilename(), '.go') && ! str_ends_with($file->getFilename(), '_test.go');
                 }
             )
         );

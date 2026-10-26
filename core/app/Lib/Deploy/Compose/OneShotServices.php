@@ -17,7 +17,7 @@ final class OneShotServices
     private const FINITE_COMMANDS = ['chown', 'chmod', 'chgrp', 'mkdir', 'cp', 'touch', 'ln', 'rm', 'install', 'echo', 'true'];
 
     /**
-     * @param array<string, mixed> $compose
+     * @param  array<string, mixed>  $compose
      * @return list<string>
      */
     public static function in(array $compose): array
@@ -50,16 +50,16 @@ final class OneShotServices
      * its siblings run, or is the YAML anchor they inherit from. Neither declares
      * a command, entrypoint or port, so both run the image default and exit.
      *
-     * @param array<string, mixed> $service
-     * @param array<array-key, array<string, mixed>> $services
+     * @param  array<string, mixed>  $service
+     * @param  array<array-key, array<string, mixed>>  $services
      */
     private static function isBaseService(string $name, array $service, array $services): bool
     {
-        if (!is_string($service['image'] ?? null) || trim($service['image']) === '') {
+        if (! is_string($service['image'] ?? null) || trim($service['image']) === '') {
             return false;
         }
         foreach (['ports', 'expose', 'command', 'entrypoint', 'healthcheck'] as $key) {
-            if (!empty($service[$key])) {
+            if (! empty($service[$key])) {
                 return false;
             }
         }
@@ -69,13 +69,13 @@ final class OneShotServices
         $image = self::normalisedImage($service['image']);
         $usedElsewhere = false;
         foreach ($services as $other => $otherService) {
-            if ((string) $other === $name || !is_string($otherService['image'] ?? null)) {
+            if ((string) $other === $name || ! is_string($otherService['image'] ?? null)) {
                 continue;
             }
             if (self::normalisedImage($otherService['image']) !== $image) {
                 continue;
             }
-            if (!empty($otherService['build'])) {
+            if (! empty($otherService['build'])) {
                 return false;
             }
             if (self::runsItself($otherService)) {
@@ -92,7 +92,7 @@ final class OneShotServices
      * dependency rule cannot see it, and the hardener would otherwise restart it
      * forever. Narrow: a known job name, no published port and no healthcheck.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     private static function isJob(string $name, array $service): bool
     {
@@ -103,17 +103,17 @@ final class OneShotServices
      * Baserow's `volume-permissions-fixer` runs `chown 9999:9999 -R /baserow/media`
      * and exits 0. Only a command made of file-setup steps, with no port or healthcheck.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     private static function runsOnlyFileSetup(array $service): bool
     {
         foreach (['ports', 'expose', 'healthcheck'] as $key) {
-            if (!empty($service[$key])) {
+            if (! empty($service[$key])) {
                 return false;
             }
         }
-        $command = trim(ComposeCommand::asString($service['entrypoint'] ?? null) . ' '
-            . ComposeCommand::asString($service['command'] ?? null));
+        $command = trim(ComposeCommand::asString($service['entrypoint'] ?? null).' '
+            .ComposeCommand::asString($service['command'] ?? null));
         $command = (string) preg_replace('#^(/bin/|/usr/bin/)?(ba)?sh\s+-c\s+#', '', $command);
         $command = trim($command, " \t\n\"'");
         if ($command === '') {
@@ -121,7 +121,7 @@ final class OneShotServices
         }
         foreach (preg_split('/&&?|\|\|?|;|\n/', $command) ?: [] as $step) {
             $word = basename(strtok(trim($step), " \t") ?: '');
-            if (trim($step) !== '' && !in_array($word, self::FINITE_COMMANDS, true)) {
+            if (trim($step) !== '' && ! in_array($word, self::FINITE_COMMANDS, true)) {
                 return false;
             }
         }
@@ -132,12 +132,12 @@ final class OneShotServices
     /**
      * Whether a service says how to run itself — a real service, not an anchor.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     private static function runsItself(array $service): bool
     {
         foreach (['ports', 'expose', 'command', 'entrypoint'] as $key) {
-            if (!empty($service[$key])) {
+            if (! empty($service[$key])) {
                 return true;
             }
         }
@@ -150,7 +150,7 @@ final class OneShotServices
      * `depends_on`, `links`, `volumes_from` and `network_mode: service:` all
      * mean the service is expected to be running.
      *
-     * @param array<array-key, array<string, mixed>> $services
+     * @param  array<array-key, array<string, mixed>>  $services
      * @return array<string, list<string>>
      */
     private static function dependencyConditions(array $services): array
@@ -186,8 +186,8 @@ final class OneShotServices
     private static function normalisedImage(string $image): string
     {
         $image = trim($image);
-        $lastSegment = substr((string) strrchr('/' . $image, '/'), 1);
+        $lastSegment = substr((string) strrchr('/'.$image, '/'), 1);
 
-        return str_contains($lastSegment, ':') || str_contains($image, '@') ? $image : $image . ':latest';
+        return str_contains($lastSegment, ':') || str_contains($image, '@') ? $image : $image.':latest';
     }
 }

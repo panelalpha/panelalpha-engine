@@ -19,7 +19,7 @@ class ProjectSetup
     public const MARKER = '.panelalpha-bootstrapped';
 
     /**
-     * @param array<string, true> $files lowercase basename => true
+     * @param  array<string, true>  $files  lowercase basename => true
      */
     public static function command(
         ?string $composerJson = null,
@@ -43,7 +43,7 @@ class ProjectSetup
         if (isset($files['bin/setup']) || isset($files['script/setup'])) {
             $path = isset($files['bin/setup']) ? 'bin/setup' : 'script/setup';
 
-            return 'sh ' . $path;
+            return 'sh '.$path;
         }
 
         return null;
@@ -100,11 +100,11 @@ class ProjectSetup
 
         $marker = self::MARKER;
 
-        return 'if [ ! -f ' . $marker . ' ]; then '
-            . 'APP_ENV=local RAILS_ENV=development NODE_ENV=development '
-            . $command . ' || true; '
-            . 'touch ' . $marker . '; '
-            . 'fi';
+        return 'if [ ! -f '.$marker.' ]; then '
+            .'APP_ENV=local RAILS_ENV=development NODE_ENV=development '
+            .$command.' || true; '
+            .'touch '.$marker.'; '
+            .'fi';
     }
 
     public static function wrapStartCommand(string $start, ?string $setupCommand): string
@@ -114,7 +114,7 @@ class ProjectSetup
             return $start;
         }
 
-        return $boot . ' && ' . $start;
+        return $boot.' && '.$start;
     }
 
     private static function hasComposerSetup(?string $composerJson): bool
@@ -124,7 +124,7 @@ class ProjectSetup
             ? $composer['scripts']
             : [];
 
-        if (!array_key_exists('setup', $scripts)) {
+        if (! array_key_exists('setup', $scripts)) {
             return false;
         }
         $setup = $scripts['setup'];
@@ -139,7 +139,7 @@ class ProjectSetup
     }
 
     /**
-     * @param array<string, mixed> $scripts
+     * @param  array<string, mixed>  $scripts
      */
     private static function hasNamedScript(array $scripts, string $name): bool
     {

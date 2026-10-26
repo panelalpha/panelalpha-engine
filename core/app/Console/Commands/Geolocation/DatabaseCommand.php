@@ -2,13 +2,12 @@
 
 namespace App\Console\Commands\Geolocation;
 
-use Illuminate\Console\Command;
-use RuntimeException;
-
 use App\Integrations\GeoLocation\AcceptsDatabaseTerms;
 use App\Integrations\GeoLocation\DbIp;
 use App\Integrations\GeoLocation\GeoLocation;
 use App\Integrations\GeoLocation\TermsRequiredException;
+use Illuminate\Console\Command;
+use RuntimeException;
 
 class DatabaseCommand extends Command
 {

@@ -21,12 +21,12 @@ final class TemplateLoader
 
     public static function stub(string $name): string
     {
-        return self::contents(ResourceDirectory::templates() . '/' . $name . self::STUB_EXTENSION);
+        return self::contents(ResourceDirectory::templates().'/'.$name.self::STUB_EXTENSION);
     }
 
     public static function asset(string $name): string
     {
-        return self::contents(ResourceDirectory::assets() . '/' . $name);
+        return self::contents(ResourceDirectory::assets().'/'.$name);
     }
 
     public static function flush(): void
@@ -41,12 +41,12 @@ final class TemplateLoader
 
     private static function read(string $path): string
     {
-        if (!is_file($path)) {
+        if (! is_file($path)) {
             throw TemplateException::missingFile($path);
         }
 
         $contents = @file_get_contents($path);
-        if (!is_string($contents)) {
+        if (! is_string($contents)) {
             throw TemplateException::unreadableFile($path);
         }
 

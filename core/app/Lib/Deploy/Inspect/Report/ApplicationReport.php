@@ -3,13 +3,13 @@
 namespace App\Lib\Deploy\Inspect\Report;
 
 use App\Lib\Deploy\Detect\DeployabilityCheck;
-use App\Lib\Deploy\Platform\Runtime\PythonRuntime;
+use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\ManifestException;
 use App\Lib\Deploy\Platform\PlatformCandidates;
-use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Runtime\JsPackageManager;
+use App\Lib\Deploy\Platform\Runtime\PythonRuntime;
 use App\Lib\Deploy\Platform\Runtime\Requirement;
 use App\Lib\Deploy\Platform\Strategies;
 use InvalidArgumentException;
@@ -26,9 +26,9 @@ final class ApplicationReport
     private ?string $issue;
 
     /**
-     * @param array<string, mixed> $decision
-     * @param ?string $issue a reason detection itself already rejected the
-     *        project, which outranks anything found here
+     * @param  array<string, mixed>  $decision
+     * @param  ?string  $issue  a reason detection itself already rejected the
+     *                          project, which outranks anything found here
      */
     public function __construct(
         string $projectDir,
@@ -140,9 +140,9 @@ final class ApplicationReport
         $start = $this->decision['start_command'] ?? null;
         if (is_string($start) && str_contains($start, PythonRuntime::PLACEHOLDER_DIR)) {
             return 'No start command could be worked out. A wsgi.py or asgi.py needs a server '
-                . 'to run it -- declare gunicorn or uvicorn. Otherwise name the entry point in a '
-                . 'panelalpha.yaml, declare one [project.scripts] entry, or add app.py, main.py '
-                . 'or server.py (or a single script with an `if __name__ == "__main__":` guard).';
+                .'to run it -- declare gunicorn or uvicorn. Otherwise name the entry point in a '
+                .'panelalpha.yaml, declare one [project.scripts] entry, or add app.py, main.py '
+                .'or server.py (or a single script with an `if __name__ == "__main__":` guard).';
         }
 
         return null;
@@ -158,7 +158,7 @@ final class ApplicationReport
     private function toolchain(): array
     {
         $requirements = $this->decision['requirements'] ?? null;
-        if (!is_array($requirements)) {
+        if (! is_array($requirements)) {
             return [];
         }
 
@@ -188,7 +188,7 @@ final class ApplicationReport
     private function buildArgs(): array
     {
         $declared = $this->decision['build_args'] ?? null;
-        if (!is_array($declared)) {
+        if (! is_array($declared)) {
             return [];
         }
 
@@ -208,7 +208,7 @@ final class ApplicationReport
         if ($declared !== null && $declared !== '') {
             return $declared;
         }
-        if (!$this->context->hasFile('package.json')) {
+        if (! $this->context->hasFile('package.json')) {
             return null;
         }
 
@@ -223,7 +223,7 @@ final class ApplicationReport
 
     private function relative(string $path): string
     {
-        $prefix = $this->projectDir . '/';
+        $prefix = $this->projectDir.'/';
 
         return str_starts_with($path, $prefix) ? substr($path, strlen($prefix)) : $path;
     }

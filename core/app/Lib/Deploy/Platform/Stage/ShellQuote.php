@@ -11,6 +11,6 @@ final class ShellQuote
 {
     public static function of(string $value): string
     {
-        return "'" . str_replace("'", "'\\''", $value) . "'";
+        return "'".str_replace("'", "'\\''", $value)."'";
     }
 }

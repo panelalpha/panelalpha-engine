@@ -57,6 +57,6 @@ class DomainUpdateRequest extends FormRequest
      */
     private static function redirectUrlRules(): array
     {
-        return ['url', 'nullable', 'max:2048', new RedirectUrl()];
+        return ['url', 'nullable', 'max:2048', new RedirectUrl];
     }
 }

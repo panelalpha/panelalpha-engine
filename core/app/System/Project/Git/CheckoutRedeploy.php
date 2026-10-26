@@ -22,14 +22,14 @@ class CheckoutRedeploy
     protected ?string $branch = null;
 
     /**
-     * @param string  $source what the deploy log says started it (`git` for a manual porcelain call, `push` for a Deploy Hook)
-     * @param ?string $commit the commit the checkout is at, named in the log when known
-     * @param ?DeployLogger $deployLogger a deploy the caller already started -- and holds the lock
-     *                                    of -- before mutating the checkout; null starts one here
+     * @param  string  $source  what the deploy log says started it (`git` for a manual porcelain call, `push` for a Deploy Hook)
+     * @param  ?string  $commit  the commit the checkout is at, named in the log when known
+     * @param  ?DeployLogger  $deployLogger  a deploy the caller already started -- and holds the lock
+     *                                       of -- before mutating the checkout; null starts one here
      */
     public function afterMutation(ProjectGit $git, ProjectAggregate $project, string $source = 'git', ?string $commit = null, ?DeployLogger $deployLogger = null): void
     {
-        if (!$git->isDeployManaged()) {
+        if (! $git->isDeployManaged()) {
             return;
         }
 
@@ -44,7 +44,8 @@ class CheckoutRedeploy
      * and keep them after a failed deploy. Put back or removed afterwards.
      *
      * @template T
-     * @param callable(): T $work
+     *
+     * @param  callable(): T  $work
      * @return T
      */
     public function keepingTheServedTree(ProjectGit $git, ProjectAggregate $project, callable $work): mixed
@@ -63,7 +64,7 @@ class CheckoutRedeploy
     protected function rebuild(ProjectAggregate $project, string $source = 'git', ?string $commit = null, ?DeployLogger $deployLogger = null): void
     {
         $runtime = $project->runtime();
-        if (!$runtime instanceof Dind) {
+        if (! $runtime instanceof Dind) {
             return;
         }
 

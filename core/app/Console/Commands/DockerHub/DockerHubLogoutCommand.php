@@ -15,11 +15,11 @@ class DockerHubLogoutCommand extends Command
 
     public function handle(): int
     {
-        $login = new DockerHubLogin(new System());
+        $login = new DockerHubLogin(new System);
         try {
             $login->clear();
         } catch (\Exception $e) {
-            $this->error('Could not remove it: ' . trim($e->getMessage()));
+            $this->error('Could not remove it: '.trim($e->getMessage()));
 
             return self::FAILURE;
         }

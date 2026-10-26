@@ -15,7 +15,9 @@ class PaemdPage
     public const FILENAME = 'panelalpha.md';
 
     public const PRE_CHECK_SCRIPT = 'panelalpha-before-clone-validation.sh';
+
     public const SETUP_SCRIPT = 'panelalpha-after-clone.sh';
+
     public const APP_SCRIPT = 'panelalpha-app.sh';
 
     /**
@@ -73,7 +75,7 @@ class PaemdPage
     /** The page's embedded app config, if it carries one. */
     public static function config(string $content): ?string
     {
-        $pattern = '/`' . preg_quote(self::CONFIG_BLOCK, '/') . '`\s*```ya?ml\s*(.+?)\s*```/s';
+        $pattern = '/`'.preg_quote(self::CONFIG_BLOCK, '/').'`\s*```ya?ml\s*(.+?)\s*```/s';
 
         return preg_match($pattern, $content, $matches) === 1 ? trim($matches[1]) : null;
     }
@@ -87,7 +89,7 @@ class PaemdPage
     public static function compose(string $content): ?string
     {
         foreach (ComposeFileInspector::COMPOSE_FILE_CANDIDATES as $candidate) {
-            $pattern = '/`' . preg_quote($candidate, '/') . '`\s*```yaml\s*(.+?)\s*```/s';
+            $pattern = '/`'.preg_quote($candidate, '/').'`\s*```yaml\s*(.+?)\s*```/s';
             if (preg_match($pattern, $content, $matches) === 1) {
                 return trim($matches[1]);
             }
@@ -106,7 +108,7 @@ class PaemdPage
     public static function fileSnippets(string $content): array
     {
         $pattern = '/`([^`]+)`\s*```[a-zA-Z]*\s*(.+?)\s*```/s';
-        if (!preg_match_all($pattern, $content, $matches, PREG_SET_ORDER)) {
+        if (! preg_match_all($pattern, $content, $matches, PREG_SET_ORDER)) {
             return [];
         }
 
@@ -147,10 +149,10 @@ class PaemdPage
         }
 
         return self::PAGES_DIR
-            . '/' . strtolower($parsed['host'])
-            . '/' . strtolower($parsed['owner'])
-            . '/' . strtolower($parsed['repo'])
-            . '/' . self::FILENAME;
+            .'/'.strtolower($parsed['host'])
+            .'/'.strtolower($parsed['owner'])
+            .'/'.strtolower($parsed['repo'])
+            .'/'.self::FILENAME;
     }
 
     /**
@@ -167,7 +169,7 @@ class PaemdPage
     /** Body of the ```bash fence introduced by a backticked block name. */
     private static function bashBlock(string $content, string $name): ?string
     {
-        $pattern = '/`' . preg_quote($name, '/') . '`\s*```bash\s*(.+?)\s*```/s';
+        $pattern = '/`'.preg_quote($name, '/').'`\s*```bash\s*(.+?)\s*```/s';
         if (preg_match($pattern, $content, $matches)) {
             return trim($matches[1]);
         }

@@ -13,9 +13,7 @@ use App\System\Project\Domain as ProjectDomain;
 /** A project domain's webserver log files, as the API and the CLI both read them. */
 final class DomainLogFiles
 {
-    private function __construct(private readonly ProjectDomain $domain, private readonly string $name)
-    {
-    }
+    private function __construct(private readonly ProjectDomain $domain, private readonly string $name) {}
 
     /** Null when the project has no such domain. */
     public static function find(User $user, string $domain, ?System $system = null): ?self
@@ -26,7 +24,7 @@ final class DomainLogFiles
             return null;
         }
 
-        return new self($user->project($system ?? new System())->domain($model), $model->domain);
+        return new self($user->project($system ?? new System)->domain($model), $model->domain);
     }
 
     public static function findOrFail(User $user, string $domain): self
@@ -81,7 +79,7 @@ final class DomainLogFiles
         FileStreamWrapper::register();
         FileStreamWrapper::confineTo(dirname($path), $files->asAccount([]));
 
-        return 'sudophp://' . $path;
+        return 'sudophp://'.$path;
     }
 
     public function readablePathOrFail(string $filename, bool $allWebservers): string

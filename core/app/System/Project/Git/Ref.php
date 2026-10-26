@@ -35,7 +35,7 @@ final class Ref
 
     public static function assertName(string $name): void
     {
-        if (!self::isValidName($name)) {
+        if (! self::isValidName($name)) {
             throw new Exception('Invalid git ref name.', 422);
         }
     }

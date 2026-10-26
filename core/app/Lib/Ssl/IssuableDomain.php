@@ -3,11 +3,12 @@
 namespace App\Lib\Ssl;
 
 use App\Models\Domain as ModelsDomain;
+use App\System\Project\Domain;
 
 /**
  * Certificate operations Issuers need from a Project Domain.
  *
- * Implemented by {@see \App\System\Project\Domain} on the production path.
+ * Implemented by {@see Domain} on the production path.
  */
 interface IssuableDomain
 {

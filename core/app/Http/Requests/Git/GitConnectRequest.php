@@ -47,9 +47,9 @@ class GitConnectRequest extends FormRequest
         return [
             'required_unless:repair,true',
             Rule::when(
-                fn (Fluent $input): bool => !GitRepoInput::isSsh((string) $input->get('repo_url', '')),
+                fn (Fluent $input): bool => ! GitRepoInput::isSsh((string) $input->get('repo_url', '')),
                 ['url'],
-                ['string', 'max:' . GitRepoInput::MAX_LENGTH],
+                ['string', 'max:'.GitRepoInput::MAX_LENGTH],
             ),
         ];
     }

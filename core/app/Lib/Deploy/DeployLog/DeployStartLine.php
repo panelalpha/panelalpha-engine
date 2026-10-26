@@ -32,18 +32,18 @@ final class DeployStartLine
     /**
      * The start line a redeploy writes; empty fields are left out.
      *
-     * @param array<string, ?string> $fields
+     * @param  array<string, ?string>  $fields
      */
     public static function text(string $source, array $fields = []): string
     {
-        $parts = ['source: ' . $source];
+        $parts = ['source: '.$source];
         foreach ($fields as $key => $value) {
             if ($value !== null && $value !== '') {
-                $parts[] = $key . ': ' . $value;
+                $parts[] = $key.': '.$value;
             }
         }
 
-        return self::OPENING . implode(', ', $parts) . ')';
+        return self::OPENING.implode(', ', $parts).')';
     }
 
     /**
@@ -52,7 +52,7 @@ final class DeployStartLine
      * source that is not a follow-on wins. The branch is the one a start line
      * names, or the one the create cloned.
      *
-     * @param list<array{msg: string}> $lines
+     * @param  list<array{msg: string}>  $lines
      * @return array{source: ?string, commit: ?string, branch: ?string, kind: ?string}
      */
     public static function read(array $lines): array
@@ -84,7 +84,7 @@ final class DeployStartLine
     }
 
     /**
-     * @param array<string, string> $fields
+     * @param  array<string, string>  $fields
      */
     private static function value(array $fields, string $key): ?string
     {
@@ -97,12 +97,12 @@ final class DeployStartLine
     }
 
     /**
-     * @param list<string> $sources
+     * @param  list<string>  $sources
      */
     private static function origin(array $sources): ?string
     {
         foreach ($sources as $source) {
-            if (!in_array($source, self::FOLLOW_ON, true)) {
+            if (! in_array($source, self::FOLLOW_ON, true)) {
                 return $source;
             }
         }
@@ -115,7 +115,7 @@ final class DeployStartLine
      */
     private static function fields(string $msg): ?array
     {
-        if (!str_starts_with($msg, self::OPENING) || !str_ends_with($msg, ')')) {
+        if (! str_starts_with($msg, self::OPENING) || ! str_ends_with($msg, ')')) {
             return null;
         }
 

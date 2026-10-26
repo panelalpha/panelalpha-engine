@@ -24,7 +24,7 @@ final class LxcfsProc
     /**
      * The files the account template binds over /proc.
      *
-     * @param list<string> $present file names found in {@see PROC_DIR}
+     * @param  list<string>  $present  file names found in {@see PROC_DIR}
      * @return list<string>
      */
     public static function mounts(array $present, bool $sysbox): array
@@ -32,7 +32,7 @@ final class LxcfsProc
         return array_values(array_filter(
             self::FILES,
             static fn (string $file): bool => in_array($file, $present, true)
-                && !($sysbox && in_array($file, self::SYSBOX_VIRTUALISED, true))
+                && ! ($sysbox && in_array($file, self::SYSBOX_VIRTUALISED, true))
         ));
     }
 
@@ -60,7 +60,7 @@ final class LxcfsProc
 
     private static function listScript(): string
     {
-        return 'for f in ' . implode(' ', self::FILES) . '; do [ -f ' . self::PROC_DIR . '/$f ] && echo "$f"; done; true';
+        return 'for f in '.implode(' ', self::FILES).'; do [ -f '.self::PROC_DIR.'/$f ] && echo "$f"; done; true';
     }
 
     /**
@@ -74,15 +74,15 @@ final class LxcfsProc
         try {
             $output = $system->execOnHost(['sh', '-c', self::listScript()]);
         } catch (\Throwable $e) {
-            Log::warning('Could not look for lxcfs on the host; the account sees the host\'s /proc: ' . $e->getMessage());
+            Log::warning('Could not look for lxcfs on the host; the account sees the host\'s /proc: '.$e->getMessage());
 
             return [];
         }
 
         $present = array_values(array_intersect(self::FILES, preg_split('/\s+/', trim($output)) ?: []));
         if ($present === []) {
-            Log::warning('lxcfs is not running on the host (' . self::PROC_DIR . ' is empty); '
-                . 'the account sees the host\'s memory, CPUs and load in /proc.');
+            Log::warning('lxcfs is not running on the host ('.self::PROC_DIR.' is empty); '
+                .'the account sees the host\'s memory, CPUs and load in /proc.');
         }
 
         return $present;

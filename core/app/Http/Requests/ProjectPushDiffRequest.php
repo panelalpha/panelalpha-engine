@@ -31,7 +31,7 @@ class ProjectPushDiffRequest extends FormRequest
 
             $username = $this->route('username');
             $target = $this->input('target');
-            if (!is_string($username) || $username === '' || !is_string($target) || $target === '') {
+            if (! is_string($username) || $username === '' || ! is_string($target) || $target === '') {
                 return;
             }
 

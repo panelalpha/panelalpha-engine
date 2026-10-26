@@ -16,6 +16,4 @@ use OpenApi\Attributes as OA;
     ],
     type: 'object',
 )]
-class ProxyRuleSchema
-{
-}
+class ProxyRuleSchema {}

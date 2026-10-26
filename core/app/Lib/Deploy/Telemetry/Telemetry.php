@@ -2,15 +2,15 @@
 
 namespace App\Lib\Deploy\Telemetry;
 
-use App\System;
-use App\System\Project\Dind;
-use App\System\Project\Dind\AppHealth;
+use App\Integrations\Monitoring\PanelAlphaMonitoring;
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Inspect\AppInspector;
 use App\Lib\Deploy\Inspect\DeploymentSnapshot;
-use App\Integrations\Monitoring\PanelAlphaMonitoring;
 use App\Models\User;
+use App\System;
+use App\System\Project\Dind;
+use App\System\Project\Dind\AppHealth;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -34,9 +34,13 @@ class Telemetry
      * failures an exact one.
      */
     public const EVENT_SUCCESS = 'project.install.success';
+
     public const EVENT_FAIL = 'project.install.fail';
+
     public const EVENT_PARTIAL = 'project.install.partial';
+
     public const EVENT_RECOVERED = 'project.install.recovered';
+
     public const EVENT_CANCELLED = 'project.install.cancelled';
 
     /** An outcome no version of this engine knows how to name. */
@@ -73,6 +77,7 @@ class Telemetry
     private const SIGNAL_SLUG = '/^[a-z0-9-]{1,64}$/';
 
     private static ?string $installId = null;
+
     private static ?Spool $spool = null;
 
     public static function enabled(): bool
@@ -191,9 +196,9 @@ class Telemetry
         }
 
         try {
-            $id = InstallFingerprint::derive(HostFacts::forFingerprint(new System()));
+            $id = InstallFingerprint::derive(HostFacts::forFingerprint(new System));
         } catch (\Throwable $e) {
-            Log::debug('Telemetry could not derive an install id: ' . $e->getMessage());
+            Log::debug('Telemetry could not derive an install id: '.$e->getMessage());
             $id = '';
         }
 
@@ -220,7 +225,7 @@ class Telemetry
      * answers with is returned so the failure can carry it. Anything else, or
      * a send that does not get through, goes to the spool as before.
      *
-     * @param array<string, mixed> $latest the deploy's final status record
+     * @param  array<string, mixed>  $latest  the deploy's final status record
      * @return array<string, ?string>|null the fix, see {@see TelemetryShipper::problem()}
      */
     public static function captureDeploy(
@@ -250,14 +255,14 @@ class Telemetry
 
             self::record($report);
 
-            if (!$sendable) {
+            if (! $sendable) {
                 return null;
             }
 
             // A report carrying source waits for the scheduler: the server may
             // ask for the bundle, and uploading it does not belong on this path.
-            if ($outcome === DeployReport::OUTCOME_FAILED && !isset($input['source_bundle'])) {
-                $sent = (new TelemetryShipper())->sendNow($report);
+            if ($outcome === DeployReport::OUTCOME_FAILED && ! isset($input['source_bundle'])) {
+                $sent = (new TelemetryShipper)->sendNow($report);
                 if ($sent['sent']) {
                     return $sent['problem'];
                 }
@@ -265,14 +270,14 @@ class Telemetry
 
             self::spool()->put($report);
         } catch (\Throwable $e) {
-            Log::debug('Telemetry capture failed: ' . $e->getMessage());
+            Log::debug('Telemetry capture failed: '.$e->getMessage());
         }
 
         return null;
     }
 
     /**
-     * @param array<string, mixed> $latest
+     * @param  array<string, mixed>  $latest
      * @return array<string, mixed>
      */
     private static function deployInput(
@@ -319,11 +324,11 @@ class Telemetry
      * deploy a precheck refused: the host failed the app's requirements
      * before anything was deployed, so it is not a deploy failure.
      *
-     * @param array<string, mixed> $latest
+     * @param  array<string, mixed>  $latest
      */
     private static function isSendable(TelemetryFields $fields, string $outcome, array $latest): bool
     {
-        return !DeployReport::isPreCheckRejection($latest)
+        return ! DeployReport::isPreCheckRejection($latest)
             && self::enabled()
             && DeployReport::isReportable($outcome)
             && self::safely(fn (): string => self::installId(), '') !== ''
@@ -341,7 +346,7 @@ class Telemetry
      * Only errors count, because only errors make a deploy partial. Anything
      * else falls through to {@see DeployFailureExplainer}.
      *
-     * @param array<string, mixed> $details
+     * @param  array<string, mixed>  $details
      */
     private static function healthSignal(string $outcome, array $details): ?string
     {
@@ -355,7 +360,7 @@ class Telemetry
 
         $serving = $details[AppHealth::DETAIL_SERVING] ?? null;
 
-        return is_string($serving) && $serving !== '' ? 'health-' . $serving : null;
+        return is_string($serving) && $serving !== '' ? 'health-'.$serving : null;
     }
 
     /**
@@ -369,7 +374,7 @@ class Telemetry
      * Read at the moment the event is made, off the tree the account has.
      * {@see DeployReport} decides what may be transmitted at which tier.
      *
-     * @param array<string, mixed> $details the account's details
+     * @param  array<string, mixed>  $details  the account's details
      * @return array<string, mixed>
      */
     private static function projectFacts(TelemetryFields $fields, array $details): array
@@ -401,7 +406,7 @@ class Telemetry
      * The ecosystem the deploy chose to build, so metadata reports on that half
      * of a polyglot project, not on whichever reader sorts first.
      *
-     * @param array<string, mixed> $details
+     * @param  array<string, mixed>  $details
      */
     private static function runtimeOf(array $details): ?string
     {
@@ -414,8 +419,9 @@ class Telemetry
      * @see TelemetryFields::safely()
      *
      * @template T
-     * @param callable(): T $value
-     * @param T $default
+     *
+     * @param  callable(): T  $value
+     * @param  T  $default
      * @return T
      */
     private static function safely(callable $value, mixed $default): mixed
@@ -435,7 +441,7 @@ class Telemetry
      * ({@see envelope()}), so the local record and anything sent later say the
      * same thing.
      *
-     * @param array<string, mixed> $report
+     * @param  array<string, mixed>  $report
      */
     private static function record(array $report): void
     {
@@ -449,12 +455,12 @@ class Telemetry
             $event = self::envelope($report);
 
             Log::channel('telemetry')->info(
-                $event['type'] . ' ' . ($report['outcome'] ?? 'unknown'),
+                $event['type'].' '.($report['outcome'] ?? 'unknown'),
                 $event
             );
         } catch (\Throwable $e) {
             // Losing the local line must not cost the caller anything either.
-            Log::debug('Telemetry local record failed: ' . $e->getMessage());
+            Log::debug('Telemetry local record failed: '.$e->getMessage());
         }
     }
 
@@ -468,7 +474,7 @@ class Telemetry
      * `status` still carries the exact outcome and `success` still marks only a
      * failure — both kept because consumers already test them.
      *
-     * @param array<string, mixed> $report
+     * @param  array<string, mixed>  $report
      * @return array<string, mixed>
      */
     public static function envelope(array $report): array
@@ -493,7 +499,7 @@ class Telemetry
      * without one and the receiving end reads a report with no kind as a
      * deploy, so the absence is the answer.
      *
-     * @param array<string, mixed> $report
+     * @param  array<string, mixed>  $report
      */
     private static function kindOf(array $report): string
     {
@@ -509,7 +515,7 @@ class Telemetry
      * `success`, which by the ingest spec marks only a failure; a bug report
      * does not, because a boolean saying one worked would be fabricated.
      *
-     * @param array<string, mixed> $report
+     * @param  array<string, mixed>  $report
      * @return array<string, mixed>
      */
     private static function derived(array $report, string $outcome): array
@@ -550,8 +556,6 @@ class Telemetry
     /**
      * The severity an alert should bind to: the worst any failing check
      * reported, so one error among four warnings does not read as a warning.
-     *
-     * @param mixed $failed
      */
     private static function worstSeverity(mixed $failed): ?string
     {
@@ -608,7 +612,7 @@ class Telemetry
      * cache reclaim, a base image that fell back. None fails a deploy, so none
      * reaches support, and each one is a recipe that could be better.
      *
-     * @param string $signal stable slug, e.g. 'port-realigned'
+     * @param  string  $signal  stable slug, e.g. 'port-realigned'
      */
     public static function signal(string $username, string $signal, string $detail = ''): void
     {
@@ -627,7 +631,7 @@ class Telemetry
                 self::spool()->put($report);
             }
         } catch (\Throwable $e) {
-            Log::debug('Telemetry signal failed: ' . $e->getMessage());
+            Log::debug('Telemetry signal failed: '.$e->getMessage());
         }
     }
 
@@ -643,12 +647,12 @@ class Telemetry
      * Sent only for an application with something wrong: a fleet-wide "still
      * fine" every six hours is the same fact four times a day per account.
      *
-     * @param array<string, mixed> $details the account's details, health verdict included
+     * @param  array<string, mixed>  $details  the account's details, health verdict included
      */
     public static function captureHealth(string $username, array $details): void
     {
         try {
-            if (!self::enabled()) {
+            if (! self::enabled()) {
                 return;
             }
 
@@ -664,12 +668,12 @@ class Telemetry
                 self::spool()->put($report);
             }
         } catch (\Throwable $e) {
-            Log::debug('Telemetry health capture failed: ' . $e->getMessage());
+            Log::debug('Telemetry health capture failed: '.$e->getMessage());
         }
     }
 
     /**
-     * @param array<string, mixed> $details
+     * @param  array<string, mixed>  $details
      * @return array<string, mixed>
      */
     private static function healthInput(TelemetryFields $fields, array $details): array
@@ -692,7 +696,7 @@ class Telemetry
             'error' => '',
             // The check that fires first is the fingerprint: a stable slug, and
             // the same thing the failure `rule` means everywhere else here.
-            'signal' => is_string($serving) && $serving !== '' ? 'health-' . $serving : 'health-degraded',
+            'signal' => is_string($serving) && $serving !== '' ? 'health-'.$serving : 'health-degraded',
             // Read fresh, not repeated out of the deploy report: the point of
             // this event is that time has passed.
         ] + self::projectFacts($fields, $details);
@@ -754,7 +758,6 @@ class Telemetry
      *   attach_health?: bool,
      *   dry_run?: bool
      * } $input
-     *
      * @return array{
      *   status: string, queued: bool, id: ?string, reason: ?string,
      *   endpoint: string, report: ?array<string, mixed>
@@ -762,15 +765,15 @@ class Telemetry
      */
     public static function captureBugReport(array $input): array
     {
-        if (!self::enabled()) {
+        if (! self::enabled()) {
             return self::bugReportError(
                 'disabled',
                 'Telemetry is disabled on this install (TELEMETRY_ENABLED=false), so a bug report '
-                . 'would never be sent. Enable it, or send storage/logs/telemetry-*.log to support instead.'
+                .'would never be sent. Enable it, or send storage/logs/telemetry-*.log to support instead.'
             );
         }
 
-        if (!self::bugReportsEnabled()) {
+        if (! self::bugReportsEnabled()) {
             return self::bugReportError(
                 'disabled',
                 'Bug reports are disabled on this install (TELEMETRY_BUG_REPORTS=false).'
@@ -797,7 +800,7 @@ class Telemetry
             return self::bugReportError(
                 'not-ready',
                 'No monitoring host is configured (PANELALPHA_MONITORING is empty), '
-                . 'so there is nowhere to send a bug report.'
+                .'so there is nowhere to send a bug report.'
             );
         }
 
@@ -821,7 +824,7 @@ class Telemetry
         } catch (\Throwable $e) {
             return self::bugReportError(
                 'failed',
-                'Could not look the project up: ' . $e->getMessage()
+                'Could not look the project up: '.$e->getMessage()
             );
         }
 
@@ -837,9 +840,9 @@ class Telemetry
         try {
             $report = BugReport::build(self::bugReportInput($input, $fields, $installId));
         } catch (\Throwable $e) {
-            Log::debug('Telemetry bug report could not be built: ' . $e->getMessage());
+            Log::debug('Telemetry bug report could not be built: '.$e->getMessage());
 
-            return self::bugReportError('failed', 'The bug report could not be assembled: ' . $e->getMessage());
+            return self::bugReportError('failed', 'The bug report could not be assembled: '.$e->getMessage());
         }
 
         // A preview stops here, having written nothing: it exists so somebody
@@ -867,7 +870,7 @@ class Telemetry
                 'queued' => false,
                 'id' => (string) $report['id'],
                 'reason' => 'The report could not be written to the telemetry spool at '
-                    . self::spool()->dir() . ' — check free disk space and permissions.',
+                    .self::spool()->dir().' — check free disk space and permissions.',
                 'endpoint' => $endpoint,
                 'report' => $report,
             ];
@@ -910,7 +913,7 @@ class Telemetry
      * nothing to inspect and a wedged container cannot be probed, and neither
      * is a reason to lose the report a person just wrote.
      *
-     * @param array<string, mixed> $input
+     * @param  array<string, mixed>  $input
      * @return array<string, mixed>
      */
     private static function bugReportInput(array $input, TelemetryFields $fields, string $installId): array
@@ -997,12 +1000,12 @@ class Telemetry
             $user = $fields->user();
             // The classic template has no container to probe: not an error and
             // not a failure, simply nothing there to ask.
-            if ($user === null || !$fields->isDindAccount()) {
+            if ($user === null || ! $fields->isDindAccount()) {
                 return null;
             }
 
             $runtime = $user->project()->runtime();
-            if (!$runtime instanceof Dind) {
+            if (! $runtime instanceof Dind) {
                 return null;
             }
 
@@ -1035,13 +1038,13 @@ class Telemetry
         ?string $error,
         string $reportId
     ): ?array {
-        if (!self::shouldBundle($outcome, $error)) {
+        if (! self::shouldBundle($outcome, $error)) {
             return null;
         }
 
         $spool = self::spool();
         $zipPath = $spool->bundlePathFor($reportId);
-        if ($zipPath === null || !$spool->ensureDirectory()) {
+        if ($zipPath === null || ! $spool->ensureDirectory()) {
             return null;
         }
 
@@ -1085,9 +1088,9 @@ class Telemetry
     private static function humanBytes(int $bytes): string
     {
         if ($bytes < 1024 * 1024) {
-            return round($bytes / 1024, 1) . ' KiB';
+            return round($bytes / 1024, 1).' KiB';
         }
 
-        return round($bytes / 1024 / 1024, 1) . ' MiB';
+        return round($bytes / 1024 / 1024, 1).' MiB';
     }
 }

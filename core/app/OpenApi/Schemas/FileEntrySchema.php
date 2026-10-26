@@ -21,6 +21,4 @@ use OpenApi\Attributes as OA;
     ],
     type: 'object',
 )]
-class FileEntrySchema
-{
-}
+class FileEntrySchema {}

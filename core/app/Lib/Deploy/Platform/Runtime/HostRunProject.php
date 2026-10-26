@@ -66,7 +66,7 @@ final class HostRunProject
      * and the run image is plain Node, so `pnpm start` exited 127. Empty for
      * npm, Yarn 1 (shipped in the image) and every non-Node strategy.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     public static function packageManagerPrefix(array $decision): string
     {
@@ -74,7 +74,7 @@ final class HostRunProject
         $pm = $decision['package_manager'] ?? '';
         $install = (string) ($decision['install_command'] ?? '');
         $berry = $pm === 'yarn' && str_contains($install, '--immutable');
-        if (!self::isNode($strategy) || ($pm !== 'pnpm' && !$berry)) {
+        if (! self::isNode($strategy) || ($pm !== 'pnpm' && ! $berry)) {
             return '';
         }
         $prepare = HostNodeBuild::provisioning($install);
@@ -83,7 +83,7 @@ final class HostRunProject
         }
 
         return 'export COREPACK_HOME=/tmp/corepack COREPACK_ENABLE_DOWNLOAD_PROMPT=0 npm_config_cache=/tmp/npm-cache'
-            . ' PATH=' . HostNodeBuild::PROVISIONED_PATH . ':$PATH && ' . $prepare . ' && ';
+            .' PATH='.HostNodeBuild::PROVISIONED_PATH.':$PATH && '.$prepare.' && ';
     }
 
     /**
@@ -91,7 +91,7 @@ final class HostRunProject
      * against the project's `package.json` scripts, else the framework's own
      * default.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     public static function startCommand(array $decision): ?string
     {

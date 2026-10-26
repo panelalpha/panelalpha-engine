@@ -59,7 +59,7 @@ class DeleteBackupContainer implements ShouldQueue
     public function failed(?Throwable $e): void
     {
         $task = $this->task();
-        if ($task !== null && !$task->isTerminal()) {
+        if ($task !== null && ! $task->isTerminal()) {
             $this->markFailed($e ?? new RuntimeException('Delete backup container job failed'));
         }
     }

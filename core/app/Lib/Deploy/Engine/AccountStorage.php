@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Engine;
 
+use App\Lib\Deploy\Dind\DindAccountCleanup;
+
 /**
  * An account's own image and layer store: measuring it, reclaiming it, and
  * removing what it leaves behind.
@@ -100,10 +102,10 @@ interface AccountStorage
      * gone — its store, its host-side build cache, and the images it alone
      * caused the host to pull.
      *
-     * @param list<string> $sidecarRefs host images already established as safe
-     *        to remove. Filtering that list is the caller's job
-     *        ({@see \App\Lib\Deploy\Dind\DindAccountCleanup::hostSidecarRefsToRemove()});
-     *        an implementation removes what it is given.
+     * @param  list<string>  $sidecarRefs  host images already established as safe
+     *                                     to remove. Filtering that list is the caller's job
+     *                                     ({@see DindAccountCleanup::hostSidecarRefsToRemove()});
+     *                                     an implementation removes what it is given.
      * @return list<string>
      */
     public function hostCleanupArgv(EngineAccount $account, array $sidecarRefs = []): array;

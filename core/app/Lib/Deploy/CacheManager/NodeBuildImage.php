@@ -27,7 +27,7 @@ final class NodeBuildImage
         }
         $slug = trim((string) preg_replace('/[^a-z0-9._-]+/', '-', strtolower(trim($image))), '-.');
 
-        return self::REPOSITORY . ':' . substr($slug, 0, 80) . '-pa' . substr(sha1($dockerfile), 0, 8);
+        return self::REPOSITORY.':'.substr($slug, 0, 80).'-pa'.substr(sha1($dockerfile), 0, 8);
     }
 
     /**
@@ -41,7 +41,7 @@ final class NodeBuildImage
     {
         $image = trim($image);
         $nodeImage = trim($nodeImage);
-        if (!ImageTransfer::isSafeImageRef($image) || !ImageTransfer::isSafeImageRef($nodeImage)) {
+        if (! ImageTransfer::isSafeImageRef($image) || ! ImageTransfer::isSafeImageRef($nodeImage)) {
             return null;
         }
 

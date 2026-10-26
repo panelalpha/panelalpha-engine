@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\CacheManager;
 
+use App\Lib\Deploy\Engine\ImageStore;
+
 /**
  * A PanelAlpha-owned `ruby:*-slim-bookworm` derivative with the apt packages
  * native gems need already installed.
@@ -11,7 +13,7 @@ namespace App\Lib\Deploy\CacheManager;
  * byte-identical result every time, and cannot be shared through the registry
  * cache because a tenant build must never export layers. Building it once on
  * the host takes that off the deploy path for every account that follows;
- * {@see \App\Lib\Deploy\Engine\ImageStore::hostBuildCommand()} builds it.
+ * {@see ImageStore::hostBuildCommand()} builds it.
  *
  * The package set varies by which database gem the Gemfile asks for, so the
  * tag carries a fingerprint of it — a Postgres app and a MySQL app get

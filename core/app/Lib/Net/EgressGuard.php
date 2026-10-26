@@ -20,7 +20,8 @@ final class EgressGuard
     public const DEFAULT_SCHEMES = OutboundUrl::DEFAULT_SCHEMES;
 
     /**
-     * @param list<string> $schemes
+     * @param  list<string>  $schemes
+     *
      * @throws EgressRefusedException
      */
     public static function assertAllowed(string $url, array $schemes = self::DEFAULT_SCHEMES): ResolvedTarget
@@ -29,7 +30,7 @@ final class EgressGuard
     }
 
     /**
-     * @param list<string> $schemes
+     * @param  list<string>  $schemes
      */
     public static function isAllowed(string $url, array $schemes = self::DEFAULT_SCHEMES): bool
     {
@@ -40,7 +41,8 @@ final class EgressGuard
      * A `host:port:address` value pinning the connection to the checked
      * address, or null for a literal address.
      *
-     * @param list<string> $schemes
+     * @param  list<string>  $schemes
+     *
      * @throws EgressRefusedException
      */
     public static function pin(string $url, array $schemes = self::DEFAULT_SCHEMES): ?string
@@ -58,7 +60,7 @@ final class EgressGuard
      * The problem a refused URL should be reported under, or null when it may
      * be fetched. The code is stable so a client can act on it.
      *
-     * @param list<string> $schemes
+     * @param  list<string>  $schemes
      * @return ?array{field: string, code: string, message: string}
      */
     public static function problem(string $field, string $url, array $schemes = self::DEFAULT_SCHEMES): ?array
@@ -73,8 +75,8 @@ final class EgressGuard
     }
 
     /**
-     * @param ?bool $allowPrivate null restores the configured policy
-     * @param ?list<string> $allowHosts null restores the configured policy
+     * @param  ?bool  $allowPrivate  null restores the configured policy
+     * @param  ?list<string>  $allowHosts  null restores the configured policy
      */
     public static function setPolicyForTests(?bool $allowPrivate, ?array $allowHosts): void
     {

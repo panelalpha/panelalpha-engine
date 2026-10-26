@@ -40,7 +40,7 @@ final class Issuers
         $id = strtolower(trim((string) (Setting::get('ssl_issuer') ?: SelfSignedIssuer::ID)));
 
         if ($id !== AcmeIssuer::ID) {
-            return new SelfSignedIssuer();
+            return new SelfSignedIssuer;
         }
 
         return new AcmeIssuer(
@@ -111,7 +111,7 @@ final class Issuers
 
             return $issuer->id();
         } catch (\Throwable $e) {
-            Log::warning("Could not issue a certificate for {$name}: " . $e->getMessage());
+            Log::warning("Could not issue a certificate for {$name}: ".$e->getMessage());
 
             return self::selfSign($domain);
         }
@@ -147,7 +147,7 @@ final class Issuers
 
     private static function selfSign(IssuableDomain $domain): string
     {
-        $fallback = new SelfSignedIssuer();
+        $fallback = new SelfSignedIssuer;
         $fallback->issue($domain);
 
         return $fallback->id();

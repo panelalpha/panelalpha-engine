@@ -2,21 +2,7 @@
 
 namespace App\System\Project\Dind;
 
-use App\System\Project\Dind as DindProject;
-use App\System\Project\Dind\Strategy\AccountSecrets;
-use App\System\Project\Dind\Strategy\BuildContextIgnoreWriter;
-use App\System\Project\Dind\Strategy\DockerfileStrategy;
-use App\System\Project\Dind\Strategy\EntrypointWriter;
-use App\System\Project\Dind\Strategy\FrameworkStrategy;
-use App\System\Project\Dind\Strategy\ManifestDatabase;
-use App\System\Project\Dind\Strategy\AppConfigBootstrap;
-use App\System\Project\Dind\Strategy\PhpStrategy;
-use App\System\Project\Dind\Strategy\PrepareStage;
-use App\System\Project\Dind\Strategy\RailpackStrategy;
-use App\System\Project\Dind\Strategy\RubyStrategy;
-use App\System\Project\Dind\Strategy\UserComposeStrategy;
 use App\Lib\Deploy\Compose\ComposeEnvironment;
-use App\Lib\Project\ApiAccess;
 use App\Lib\Deploy\Compose\ComposeOverride;
 use App\Lib\Deploy\Compose\ComposeValues;
 use App\Lib\Deploy\Compose\ComposeYaml;
@@ -25,6 +11,20 @@ use App\Lib\Deploy\Compose\FrameworkService;
 use App\Lib\Deploy\Compose\PublicUrlEnvironment;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\Strategies;
+use App\Lib\Project\ApiAccess;
+use App\System\Project\Dind as DindProject;
+use App\System\Project\Dind\Strategy\AccountSecrets;
+use App\System\Project\Dind\Strategy\AppConfigBootstrap;
+use App\System\Project\Dind\Strategy\BuildContextIgnoreWriter;
+use App\System\Project\Dind\Strategy\DockerfileStrategy;
+use App\System\Project\Dind\Strategy\EntrypointWriter;
+use App\System\Project\Dind\Strategy\FrameworkStrategy;
+use App\System\Project\Dind\Strategy\ManifestDatabase;
+use App\System\Project\Dind\Strategy\PhpStrategy;
+use App\System\Project\Dind\Strategy\PrepareStage;
+use App\System\Project\Dind\Strategy\RailpackStrategy;
+use App\System\Project\Dind\Strategy\RubyStrategy;
+use App\System\Project\Dind\Strategy\UserComposeStrategy;
 
 /**
  * Dispatches a detect decision to the {@see Strategy} writer that puts the compose file (and what it
@@ -35,19 +35,32 @@ class DeployStrategy
     private DindProject $dind;
 
     private ?RuntimeSidecars $runtimeSidecars = null;
+
     private ?AppConfigBootstrap $bootstrap = null;
+
     private ?PrepareStage $prepare = null;
+
     private ?EntrypointWriter $entrypoint = null;
+
     private ?AccountSecrets $secrets = null;
+
     private ?ManifestDatabase $database = null;
+
     /** The app config of the deploy in flight, for {@see composeDecision()}. */
     private ?AppConfig $appConfig = null;
+
     private ?UserComposeStrategy $userCompose = null;
+
     private ?DockerfileStrategy $dockerfile = null;
+
     private ?RubyStrategy $ruby = null;
+
     private ?PhpStrategy $php = null;
+
     private ?FrameworkStrategy $framework = null;
+
     private ?RailpackStrategy $railpack = null;
+
     private ?BuildContextIgnoreWriter $contextIgnore = null;
 
     public function __construct(DindProject $dind)
@@ -94,7 +107,7 @@ class DeployStrategy
      * The decision a generated compose file is rendered from. Every generating strategy goes through here,
      * so none can ship a service the account's own `env_vars` do not reach ({@see ComposeEnvironment}).
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      * @return array<string, mixed>
      */
     public function composeDecision(array $decision): array
@@ -116,7 +129,7 @@ class DeployStrategy
      * Pin the engine's database host whenever the app's env names it (a hand-set `DB_HOST`, say):
      * the nested Docker resolves none of the engine's names.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      * @return array<string, mixed>
      */
     private function withDatabaseHostPinned(array $decision): array
@@ -153,7 +166,7 @@ class DeployStrategy
     /**
      * The first entry for each host name wins, so a strategy's own pin listed first is kept.
      *
-     * @param list<string> $entries `name:address` pairs
+     * @param  list<string>  $entries  `name:address` pairs
      * @return list<string>
      */
     private function oneEntryPerHostName(array $entries): array
@@ -185,7 +198,7 @@ class DeployStrategy
      * The decision for a service the engine generates, told which URL keys
      * the project uses as a sub-path ({@see FrameworkService}).
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      * @return array<string, mixed>
      */
     public function withPathPrefixKeys(array $decision, string $projectDir): array
@@ -213,7 +226,7 @@ class DeployStrategy
      * Once `.env` is final: keep the engine's files out of a repository
      * Dockerfile's build context.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     public function keepEngineFilesOutOfBuildContext(array $decision, string $projectDir, ?string $chown): void
     {
@@ -339,7 +352,7 @@ class DeployStrategy
      * A site with no build step: nginx serving the document detection picked to answer `/`,
      * which is not always index.html.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private function writeStaticSite(array $decision, string $projectDir, ?string $chown): void
     {
@@ -363,7 +376,7 @@ class DeployStrategy
     {
         $override = $this->dind->userAppComposeOverridePath();
         $fs = $this->dind->system()->filesystem();
-        if (!$fs->fileExists($override)) {
+        if (! $fs->fileExists($override)) {
             return;
         }
         $defined = $this->servicesDefinedOutside($override);
@@ -389,7 +402,7 @@ class DeployStrategy
         $fs = $this->dind->system()->filesystem();
         $defined = [];
         foreach ($this->dind->userAppComposeFiles() as $file) {
-            if ($file === $override || !$fs->fileExists($file)) {
+            if ($file === $override || ! $fs->fileExists($file)) {
                 continue;
             }
             $services = ComposeYaml::parse($fs->fileGetContents($file))['services'] ?? null;

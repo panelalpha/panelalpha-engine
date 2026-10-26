@@ -46,6 +46,7 @@ class Litespeed extends AbstractWebserver implements WebserverInterface
             if ($domain->domain == $domainName) {
                 return false;
             }
+
             return true;
         });
 
@@ -60,15 +61,15 @@ class Litespeed extends AbstractWebserver implements WebserverInterface
     }
 
     /**
-     * @param ?array<Domain> $domains
+     * @param  ?array<Domain>  $domains
      */
     public function rebuildConfig(?array $domains = null): void
     {
-        $currentConfigPath = $this->system->engineDirPath() . '/webserver-config/litespeed/httpd_config.xml';
+        $currentConfigPath = $this->system->engineDirPath().'/webserver-config/litespeed/httpd_config.xml';
         $currentConfig = $this->system->filesystem()->fileGetContents($currentConfigPath);
-        $listenerTemplate = $this->system->filesystem()->fileGetContents($this->system->templatesDirPath() . '/listener-litespeed.blade.php');
-        $virtualHostTemplate = $this->system->filesystem()->fileGetContents($this->system->templatesDirPath() . '/virtualHost-litespeed.blade.php');
-        $virtualHostConfigTemplate = $this->system->filesystem()->fileGetContents($this->system->templatesDirPath() . '/virtualHostConfig-litespeed.blade.php');
+        $listenerTemplate = $this->system->filesystem()->fileGetContents($this->system->templatesDirPath().'/listener-litespeed.blade.php');
+        $virtualHostTemplate = $this->system->filesystem()->fileGetContents($this->system->templatesDirPath().'/virtualHost-litespeed.blade.php');
+        $virtualHostConfigTemplate = $this->system->filesystem()->fileGetContents($this->system->templatesDirPath().'/virtualHostConfig-litespeed.blade.php');
 
         $users = User::getAll();
         $allDomains = [];
@@ -100,38 +101,38 @@ class Litespeed extends AbstractWebserver implements WebserverInterface
         if (config('env.APP_LITE_PROXY_ENABLED')) {
             /** @var mixed */
             $caDomain = config('env.APP_LITE_CA_DOMAIN');
-            if (empty($caDomain) || !is_string($caDomain)) {
+            if (empty($caDomain) || ! is_string($caDomain)) {
                 $caDomain = '*';
             }
             /** @var mixed */
             $aaDomain = config('env.APP_LITE_AA_DOMAIN');
-            if (empty($aaDomain) || !is_string($aaDomain)) {
+            if (empty($aaDomain) || ! is_string($aaDomain)) {
                 $aaDomain = '*';
             }
 
-            if (!config('env.APP_LITE_CA_PORT')) {
+            if (! config('env.APP_LITE_CA_PORT')) {
                 $otherListenerMaps['app-lite-ca'] = [$caDomain];
             }
-            if (!config('env.APP_LITE_AA_PORT')) {
+            if (! config('env.APP_LITE_AA_PORT')) {
                 $otherListenerMaps['app-lite-aa'] = [$aaDomain];
             }
             /** @var mixed $appLiteCaPortConfig */
             $appLiteCaPortConfig = config('env.APP_LITE_CA_PORT');
             if (
-                !empty($appLiteCaPortConfig)
+                ! empty($appLiteCaPortConfig)
                 && (is_string($appLiteCaPortConfig) || is_int($appLiteCaPortConfig))
-                && !in_array($appLiteCaPortConfig, [80, 443])
+                && ! in_array($appLiteCaPortConfig, [80, 443])
             ) {
-                $otherListeners[] = $this->getListenerString('listener-app-lite-ca', (string)$appLiteCaPortConfig, 'app-lite-ca', [$caDomain]);
+                $otherListeners[] = $this->getListenerString('listener-app-lite-ca', (string) $appLiteCaPortConfig, 'app-lite-ca', [$caDomain]);
             }
             /** @var mixed */
             $appLiteAaPortConfig = config('env.APP_LITE_AA_PORT');
             if (
                 $appLiteAaPortConfig
                 && (is_string($appLiteAaPortConfig) || is_int($appLiteAaPortConfig))
-                && !in_array($appLiteAaPortConfig, [80, 443])
+                && ! in_array($appLiteAaPortConfig, [80, 443])
             ) {
-                $otherListeners[] = $this->getListenerString('listener-app-lite-aa', (string)$appLiteAaPortConfig, 'app-lite-aa', [$aaDomain]);
+                $otherListeners[] = $this->getListenerString('listener-app-lite-aa', (string) $appLiteAaPortConfig, 'app-lite-aa', [$aaDomain]);
             }
             $otherVhosts[] = $this->getVhostString('app-lite-ca');
             $otherVhosts[] = $this->getVhostString('app-lite-aa');
@@ -159,10 +160,10 @@ class Litespeed extends AbstractWebserver implements WebserverInterface
         $virtualHosts = [];
         foreach ($allDomains as $domain) {
             $user = $domain->getUser();
-            $cacheStorePath = $this->system->projectHomeDirPath($user->username) . "/" . $domain->domain . "/.lscache";
+            $cacheStorePath = $this->system->projectHomeDirPath($user->username).'/'.$domain->domain.'/.lscache';
             if ($cacheEnabled) {
-                $this->system->runProcess(["sudo", "mkdir", "-p", $cacheStorePath]);
-                $this->system->runProcess(["sudo", "chown", "-R", "nobody:{$user->username}", $cacheStorePath]);
+                $this->system->runProcess(['sudo', 'mkdir', '-p', $cacheStorePath]);
+                $this->system->runProcess(['sudo', 'chown', '-R', "nobody:{$user->username}", $cacheStorePath]);
             }
             $connection = $this->projectDomain($domain);
             $project = $connection->project();
@@ -175,14 +176,14 @@ class Litespeed extends AbstractWebserver implements WebserverInterface
                 'suspended' => $user->status === 'suspended',
                 'php_port' => $this->phpPortForVersion($domain->getPhpVersion()),
                 'lsphp_max_conns' => $user->getLsPhpMaxConns(),
-                'cache_engine' => $cacheEnabled ? "7" : "0",
+                'cache_engine' => $cacheEnabled ? '7' : '0',
                 'cache_store_path' => $cacheStorePath,
-                'cache_check_public' => $cacheEnabled ? "1" : "0",
-                'cache_check_private' => $cacheEnabled ? "1" : "0",
+                'cache_check_public' => $cacheEnabled ? '1' : '0',
+                'cache_check_private' => $cacheEnabled ? '1' : '0',
             ];
             $templateVars = array_merge($templateVars, $this->httpAcmeChallengeTemplateVars($domain));
             if ($connection->hasServableCertificate()) {
-                $certDir = $project->projectDirPath() . "/ssl-certs";
+                $certDir = $project->projectDirPath().'/ssl-certs';
                 $keyFile = "{$certDir}/{$domain->domain}.key";
                 $pemFile = "{$certDir}/{$domain->domain}.pem";
                 $templateVars['ssl_enabled'] = true;
@@ -190,12 +191,12 @@ class Litespeed extends AbstractWebserver implements WebserverInterface
                 $templateVars['ssl_cert_key_file'] = $keyFile;
             }
             $virtualHostConfig = Blade::render($virtualHostConfigTemplate, $templateVars);
-            $virtualHostConfigPath = $this->system->engineDirPath() . '/webserver-config/litespeed/vhosts/' . $domain->domain . '.xml';
+            $virtualHostConfigPath = $this->system->engineDirPath().'/webserver-config/litespeed/vhosts/'.$domain->domain.'.xml';
             $this->system->filesystem()->filePutContents($virtualHostConfigPath, $virtualHostConfig, '994:994');
 
-            $logsDir = $this->system->engineDirPath() . '/webserver-logs/litespeed/' . $domain->domain;
-            $this->system->runProcess(["sudo", "mkdir", "-p", $logsDir]);
-            $this->system->runProcess(["sudo", "chown", "-R", "nobody:www-data", $logsDir]);
+            $logsDir = $this->system->engineDirPath().'/webserver-logs/litespeed/'.$domain->domain;
+            $this->system->runProcess(['sudo', 'mkdir', '-p', $logsDir]);
+            $this->system->runProcess(['sudo', 'chown', '-R', 'nobody:www-data', $logsDir]);
 
             $virtualHosts[] = Blade::render($virtualHostTemplate, $templateVars);
         }
@@ -216,12 +217,13 @@ class Litespeed extends AbstractWebserver implements WebserverInterface
     }
 
     /**
-     * @param list<string> $domains
+     * @param  list<string>  $domains
      */
     private function getListenerString(string $name, string $port, string $vhost, array $domains): string
     {
         $mapDomains = implode(', ', $domains);
         $cert = $this->getSslCertVars();
+
         return <<<CONFIG
 <listener>
   <name>$name</name>
@@ -243,7 +245,8 @@ CONFIG;
 
     private function getVhostString(string $name): string
     {
-        $docRoot = $this->system->engineDirPath() . '/webserver-config/document-root';
+        $docRoot = $this->system->engineDirPath().'/webserver-config/document-root';
+
         return <<<CONFIG
 <virtualHost>
   <name>$name</name>
@@ -258,7 +261,8 @@ CONFIG;
 
     private function fallbackVirtualHost(): string
     {
-        $vhRoot = $this->system->engineDirPath() . '/webserver-config/document-root';
+        $vhRoot = $this->system->engineDirPath().'/webserver-config/document-root';
+
         return <<<CONFIG
 <virtualHost>
     <name>fallback</name>
@@ -273,8 +277,8 @@ CONFIG;
 
     private function rebuildFallbackVirtualHostConfig(): void
     {
-        $docRoot = $this->system->engineDirPath() . '/webserver-config/document-root';
-        $logDir = $this->system->engineDirPath() . '/webserver-logs/litespeed/fallback';
+        $docRoot = $this->system->engineDirPath().'/webserver-config/document-root';
+        $logDir = $this->system->engineDirPath().'/webserver-logs/litespeed/fallback';
         $virtualHostConfig = <<<CONFIG
 <?xml version="1.0" encoding="UTF-8"?>
 <virtualHostConfig>
@@ -313,7 +317,7 @@ RewriteRule .* /404.html [L]
 </virtualHostConfig>
 CONFIG;
 
-        $virtualHostConfigPath = $this->system->engineDirPath() . '/webserver-config/litespeed/vhosts/fallback.xml';
+        $virtualHostConfigPath = $this->system->engineDirPath().'/webserver-config/litespeed/vhosts/fallback.xml';
         $this->system->filesystem()->filePutContents($virtualHostConfigPath, $virtualHostConfig, '994:994');
         $this->system->exec([
             'sudo',
@@ -325,12 +329,12 @@ CONFIG;
 
     private function rebuildAppProxyVirtualHostConfig(): void
     {
-        $docRoot = $this->system->engineDirPath() . '/webserver-config/document-root';
+        $docRoot = $this->system->engineDirPath().'/webserver-config/document-root';
         $appProxyVars = $this->getAppProxyVars();
 
         // CA
-        $logDir = $this->system->engineDirPath() . '/webserver-logs/litespeed/app-lite-ca';
-        $virtualHostConfigPath = $this->system->engineDirPath() . '/webserver-config/litespeed/vhosts/app-lite-ca.conf';
+        $logDir = $this->system->engineDirPath().'/webserver-logs/litespeed/app-lite-ca';
+        $virtualHostConfigPath = $this->system->engineDirPath().'/webserver-config/litespeed/vhosts/app-lite-ca.conf';
         $virtualHostConfig = $this->getProxyVhostConfigString(
             'proxy-app-lite-ca',
             $docRoot,
@@ -349,8 +353,8 @@ CONFIG;
         ]);
 
         // AA
-        $logDir = $this->system->engineDirPath() . '/webserver-logs/litespeed/app-lite-aa';
-        $virtualHostConfigPath = $this->system->engineDirPath() . '/webserver-config/litespeed/vhosts/app-lite-aa.conf';
+        $logDir = $this->system->engineDirPath().'/webserver-logs/litespeed/app-lite-aa';
+        $virtualHostConfigPath = $this->system->engineDirPath().'/webserver-config/litespeed/vhosts/app-lite-aa.conf';
         $virtualHostConfig = $this->getProxyVhostConfigString(
             'proxy-app-lite-aa',
             $docRoot,
@@ -482,6 +486,7 @@ CONFIG;
             $offset = $from + strlen($replace);
             $from = strpos($xml, "<{$node}>", $offset);
         }
+
         return $xml;
     }
 
@@ -519,11 +524,11 @@ CONFIG;
     {
         $config = Setting::getModsecConfig();
 
-        $currentConfigPath = $this->system->engineDirPath() . '/webserver-config/litespeed/httpd_config.xml';
+        $currentConfigPath = $this->system->engineDirPath().'/webserver-config/litespeed/httpd_config.xml';
         $currentConfig = $this->system->filesystem()->fileGetContents($currentConfigPath);
-        assert(!empty($currentConfig));
+        assert(! empty($currentConfig));
 
-        $dom = new \DOMDocument();
+        $dom = new \DOMDocument;
         $dom->loadXML($currentConfig);
 
         $httpServerConfig = $dom->getElementsByTagName('httpServerConfig')->item(0);
@@ -550,7 +555,7 @@ CONFIG;
         $censorshipControl .= "  <scanPOST>1</scanPOST>\n";
         $censorshipControl .= "</censorshipControl>\n";
 
-        $temp = new \DOMDocument();
+        $temp = new \DOMDocument;
         $temp->loadXml($censorshipControl);
         /** @var \DOMElement $censorshipControlNode */
         $censorshipControlNode = $temp->getElementsByTagName('censorshipControl')->item(0);
@@ -564,7 +569,7 @@ CONFIG;
         $censorshipRuleSet .= "  <ruleSet>include /opt/modsecurity/main.conf</ruleSet>\n";
         $censorshipRuleSet .= "</censorshipRuleSet>\n";
 
-        $temp = new \DOMDocument();
+        $temp = new \DOMDocument;
         $temp->loadXml($censorshipRuleSet);
         /** @var \DOMElement $censorshipRuleSetNode */
         $censorshipRuleSetNode = $temp->getElementsByTagName('censorshipRuleSet')->item(0);
@@ -579,14 +584,14 @@ CONFIG;
 
     public function toggleLscache(): void
     {
-        $disabled = !empty(Setting::get('disable-lscache'));
+        $disabled = ! empty(Setting::get('disable-lscache'));
 
-        $cacheEngine = $disabled ? "0" : "7";
-        $cacheStorePath = $this->system->engineDirPath() . '/data/lscache';
-        $this->system->runProcess(["sudo", "mkdir", "-p", $cacheStorePath]);
-        $this->system->runProcess(["sudo", "chown", "-R", "nobody:www-data", $cacheStorePath]);
+        $cacheEngine = $disabled ? '0' : '7';
+        $cacheStorePath = $this->system->engineDirPath().'/data/lscache';
+        $this->system->runProcess(['sudo', 'mkdir', '-p', $cacheStorePath]);
+        $this->system->runProcess(['sudo', 'chown', '-R', 'nobody:www-data', $cacheStorePath]);
 
-        $defaultCacheConfig = "";
+        $defaultCacheConfig = '';
         $defaultCacheConfig .= "<cache>\n";
         $defaultCacheConfig .= "  <cacheEngine>{$cacheEngine}</cacheEngine>\n";
         $defaultCacheConfig .= "  <storage>\n";
@@ -599,18 +604,18 @@ CONFIG;
         $defaultCacheConfig .= "  </cachePolicy>\n";
         $defaultCacheConfig .= "</cache>\n";
 
-        $currentConfigPath = $this->system->engineDirPath() . '/webserver-config/litespeed/httpd_config.xml';
+        $currentConfigPath = $this->system->engineDirPath().'/webserver-config/litespeed/httpd_config.xml';
         $currentConfig = $this->system->filesystem()->fileGetContents($currentConfigPath);
-        assert(!empty($currentConfig));
+        assert(! empty($currentConfig));
 
-        $dom = new \DOMDocument();
+        $dom = new \DOMDocument;
         $dom->loadXML($currentConfig);
 
         $httpServerConfig = $dom->getElementsByTagName('httpServerConfig')->item(0);
         assert($httpServerConfig instanceof \DOMElement);
         $cacheConfig = $httpServerConfig->getElementsByTagName('cache')->item(0);
         if ($cacheConfig === null) {
-            $temp = new \DOMDocument();
+            $temp = new \DOMDocument;
             $temp->loadXml($defaultCacheConfig);
             $cacheNode = $temp->getElementsByTagName('cache')->item(0);
             assert($cacheNode instanceof \DOMElement);
@@ -620,6 +625,7 @@ CONFIG;
             $this->system->filesystem()->filePutContents($currentConfigPath, $newConfig);
             $this->rebuildConfig();
             $this->reload();
+
             return;
         }
 
@@ -636,9 +642,9 @@ CONFIG;
 
     public function deleteDomainsConfigs(array $domainNames): void
     {
-        $dir = $this->system->engineDirPath() . '/webserver-config/litespeed/vhosts';
+        $dir = $this->system->engineDirPath().'/webserver-config/litespeed/vhosts';
         foreach ($domainNames as $domainName) {
-            $configFile = $dir . '/' . $domainName . '.xml';
+            $configFile = $dir.'/'.$domainName.'.xml';
             // The glob stays a glob; the name is a positional argument, never shell.
             $this->system->exec(['sudo', 'sh', '-c', 'rm -f -- "$1"*', 'sh', $configFile]);
         }

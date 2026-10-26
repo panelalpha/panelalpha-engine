@@ -22,12 +22,10 @@ final class PortMapping
     /** `${VAR:?err}` or `${VAR?err}`: a variable Compose refuses to start without. */
     private const REQUIRED_VARIABLE = '\$\{[A-Za-z_][A-Za-z0-9_]*:?\?[^}]*\}';
 
-    private function __construct(public readonly int $hostPort, public readonly ?int $containerPort)
-    {
-    }
+    private function __construct(public readonly int $hostPort, public readonly ?int $containerPort) {}
 
     /**
-     * @param mixed $mapping one entry as Compose wrote it
+     * @param  mixed  $mapping  one entry as Compose wrote it
      */
     public static function parse($mapping): ?self
     {
@@ -45,7 +43,7 @@ final class PortMapping
      * `{target: 25000, published: "25000", host_ip: 127.0.0.1}`. Without
      * `published` it reads like a bare `25000`.
      *
-     * @param array<array-key, mixed> $mapping
+     * @param  array<array-key, mixed>  $mapping
      */
     private static function fromLongSyntax(array $mapping): ?self
     {
@@ -61,7 +59,7 @@ final class PortMapping
         if ($published === null || $published === '') {
             return new self($target, null);
         }
-        if (is_string($published) && preg_match('/^\s*' . self::REQUIRED_VARIABLE . '\s*$/', $published) === 1) {
+        if (is_string($published) && preg_match('/^\s*'.self::REQUIRED_VARIABLE.'\s*$/', $published) === 1) {
             return new self($target, $target);
         }
         $hostPort = self::scalarPort($published);
@@ -107,7 +105,7 @@ final class PortMapping
     private static function withRequiredHostPortDefaulted(string $mapping): string
     {
         return (string) preg_replace_callback(
-            '#' . self::REQUIRED_VARIABLE . '(?=:(\d+)(?:/[a-z]+)?\s*$)#',
+            '#'.self::REQUIRED_VARIABLE.'(?=:(\d+)(?:/[a-z]+)?\s*$)#',
             static fn (array $m): string => $m[1],
             $mapping
         );
@@ -148,7 +146,7 @@ final class PortMapping
     }
 
     /**
-     * @param list<string> $parts
+     * @param  list<string>  $parts
      */
     private static function isLoopbackBinding(array $parts): bool
     {

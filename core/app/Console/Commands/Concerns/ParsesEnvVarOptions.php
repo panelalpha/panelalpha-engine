@@ -23,6 +23,7 @@ trait ParsesEnvVarOptions
             $parsed = self::envVarPair($pair);
             if ($parsed === null) {
                 $this->error("--env-var expects KEY=VALUE, got: {$pair}");
+
                 return null;
             }
             $vars[$parsed[0]] = $parsed[1];
@@ -34,7 +35,7 @@ trait ParsesEnvVarOptions
     /** @return ?array{0: string, 1: string} */
     private static function envVarPair(string $pair): ?array
     {
-        if (!str_contains($pair, '=')) {
+        if (! str_contains($pair, '=')) {
             return null;
         }
         [$key, $value] = explode('=', $pair, 2);

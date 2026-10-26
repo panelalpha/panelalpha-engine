@@ -28,7 +28,7 @@ return new class extends Migration
             ->chunkById(200, function ($rows) use ($prefix): void {
                 foreach ($rows as $row) {
                     DB::table('deploy_hooks')->where('id', $row->id)->update([
-                        'registered_url' => $prefix . '/hooks/' . $row->public_id,
+                        'registered_url' => $prefix.'/hooks/'.$row->public_id,
                     ]);
                 }
             });

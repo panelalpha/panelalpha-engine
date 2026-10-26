@@ -3,6 +3,7 @@
 namespace App\Lib\Deploy\Port;
 
 use App\Lib\Deploy\Compose\ComposeYaml;
+use App\Lib\Deploy\Compose\PrimaryPortBinding;
 use App\Lib\Deploy\Sidecar\ServiceRole;
 
 /**
@@ -13,7 +14,7 @@ use App\Lib\Deploy\Sidecar\ServiceRole;
  * variable in its environment, the ports its image `EXPOSE`s, and a port the
  * repository's other compose files publish for a service of the same name
  * (reiverr's docker-compose.prod.yml publishes 9494). The port is added as
- * `expose:`, which {@see \App\Lib\Deploy\Compose\PrimaryPortBinding} publishes.
+ * `expose:`, which {@see PrimaryPortBinding} publishes.
  */
 final class UnpublishedAppPort
 {
@@ -24,11 +25,11 @@ final class UnpublishedAppPort
     private const NON_PRODUCTION_WORDS = ['dev', 'development', 'local', 'test', 'tests', 'testing', 'ci', 'e2e', 'debug', 'override'];
 
     /**
-     * @param array<string, mixed> $compose the run file being written
-     * @param callable(string): list<int>|null $imagePorts the ports an image declares
-     * @param array<string, string> $otherFiles the repository's other compose files, filename => YAML
+     * @param  array<string, mixed>  $compose  the run file being written
+     * @param  callable(string): list<int>|null  $imagePorts  the ports an image declares
+     * @param  array<string, string>  $otherFiles  the repository's other compose files, filename => YAML
      * @return array{compose: array<string, mixed>, service: string, port: int, source: string}|null
-     *         null when a port is already published or nothing names one
+     *                                                                                               null when a port is already published or nothing names one
      */
     public static function apply(array $compose, ?callable $imagePorts = null, array $otherFiles = []): ?array
     {
@@ -39,7 +40,7 @@ final class UnpublishedAppPort
 
         $published = self::publishedElsewhere($otherFiles);
         foreach ($services as $name => $service) {
-            if (!is_array($service) || !self::couldBeTheApp((string) $name, $service)) {
+            if (! is_array($service) || ! self::couldBeTheApp((string) $name, $service)) {
                 continue;
             }
             $found = self::fromEnvironment($service['environment'] ?? null)
@@ -61,7 +62,7 @@ final class UnpublishedAppPort
     }
 
     /**
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     private static function couldBeTheApp(string $name, array $service): bool
     {
@@ -73,7 +74,7 @@ final class UnpublishedAppPort
             return false;
         }
 
-        return !ServiceRole::isKnownDatastore($name, $service) && !ServiceRole::isJobService($name, $service);
+        return ! ServiceRole::isKnownDatastore($name, $service) && ! ServiceRole::isJobService($name, $service);
     }
 
     /**
@@ -81,7 +82,7 @@ final class UnpublishedAppPort
      */
     private static function fromEnvironment(mixed $environment): ?array
     {
-        if (!is_array($environment)) {
+        if (! is_array($environment)) {
             return null;
         }
         $values = [];
@@ -106,8 +107,8 @@ final class UnpublishedAppPort
     /**
      * An image built here has no registry entry to ask.
      *
-     * @param array<string, mixed> $service
-     * @param callable(string): list<int>|null $imagePorts
+     * @param  array<string, mixed>  $service
+     * @param  callable(string): list<int>|null  $imagePorts
      * @return array{0: int, 1: string}|null
      */
     private static function fromImage(array $service, ?callable $imagePorts): ?array
@@ -129,7 +130,7 @@ final class UnpublishedAppPort
     /**
      * Container ports other compose files publish, by lowercased service name.
      *
-     * @param array<string, string> $files
+     * @param  array<string, string>  $files
      * @return array<string, array{0: int, 1: string}>
      */
     private static function publishedElsewhere(array $files): array
@@ -145,7 +146,7 @@ final class UnpublishedAppPort
             $services = is_array($parsed) && is_array($parsed['services'] ?? null) ? $parsed['services'] : [];
             foreach ($services as $name => $service) {
                 $key = strtolower((string) $name);
-                if (isset($found[$key]) || !is_array($service) || !is_array($service['ports'] ?? null)) {
+                if (isset($found[$key]) || ! is_array($service) || ! is_array($service['ports'] ?? null)) {
                     continue;
                 }
                 foreach ($service['ports'] as $entry) {
@@ -165,7 +166,7 @@ final class UnpublishedAppPort
     private static function webPort(string $value): ?int
     {
         $value = trim(explode('/', $value)[0]);
-        if (!ctype_digit($value)) {
+        if (! ctype_digit($value)) {
             return null;
         }
 

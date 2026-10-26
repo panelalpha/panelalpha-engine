@@ -56,7 +56,7 @@ final class DomainSslCutoverTest extends TestCase
     {
         $source = file_get_contents(dirname(__DIR__, 4) . '/core/app/Models/Domain.php');
         $this->assertIsString($source);
-        $this->assertStringContainsString('function projectDomain(): \\App\\System\\Project\\Domain', $source);
+        $this->assertStringContainsString('function projectDomain(): System\\Project\\Domain', $source);
         $this->assertStringContainsString('->project()->domain($this)', $source);
         $this->assertStringNotContainsString('function connect()', $source);
     }

@@ -26,6 +26,6 @@ final class SvelteKitStaticAdapterProbe implements PlatformProbe
             return $configured === 'static';
         }
 
-        return $context->hasDep('@sveltejs/adapter-static') && !$context->hasDep('@sveltejs/adapter-node');
+        return $context->hasDep('@sveltejs/adapter-static') && ! $context->hasDep('@sveltejs/adapter-node');
     }
 }

@@ -29,16 +29,16 @@ class McpTokensListCommand extends Command
             ->get(['id', 'name', 'abilities', 'last_used_at', 'expires_at', 'revoked_at', 'created_at'])
             ->filter(fn (PersonalAccessToken $t): bool => TokenAbilities::of($t)->mayUseMcp())
             ->map(fn (PersonalAccessToken $t) => [
-                'id'           => $t->id,
-                'name'         => $t->name,
-                'kind'         => TokenAbilities::of($t)->label(),
+                'id' => $t->id,
+                'name' => $t->name,
+                'kind' => TokenAbilities::of($t)->label(),
                 // What this token may call, which is not the same question as
                 // what the engine offers. `pae configure tokens` sets it.
-                'commands'     => $this->commands($t),
+                'commands' => $this->commands($t),
                 'last_used_at' => $t->last_used_at ?? 'never',
-                'expires_at'   => $t->expires_at ?? 'never',
-                'revoked_at'   => $t->revoked_at ?? '-',
-                'created_at'   => $t->created_at,
+                'expires_at' => $t->expires_at ?? 'never',
+                'revoked_at' => $t->revoked_at ?? '-',
+                'created_at' => $t->created_at,
             ])
             ->values()
             ->toArray();

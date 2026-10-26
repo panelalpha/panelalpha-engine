@@ -15,29 +15,29 @@ namespace App\Lib\Deploy\Telemetry;
 final class PrivateRepoMask
 {
     public const REPO = '<repo>';
+
     public const BRANCH = '<branch>';
 
     /**
-     * @param list<string> $patterns
-     * @param list<string> $branches
+     * @param  list<string>  $patterns
+     * @param  list<string>  $branches
      */
     private function __construct(
         private readonly array $patterns,
         private readonly array $branches,
-    ) {
-    }
+    ) {}
 
     /**
      * Null when there is nothing to hide: a public repository, or none at all.
      * Takes every URL the report knows, since the account record and the
      * checkout's remote can disagree.
      *
-     * @param list<?string> $urls
-     * @param list<?string> $branches
+     * @param  list<?string>  $urls
+     * @param  list<?string>  $branches
      */
     public static function for(bool $private, array $urls, array $branches = []): ?self
     {
-        if (!$private) {
+        if (! $private) {
             return null;
         }
 
@@ -54,9 +54,9 @@ final class PrivateRepoMask
 
             // host/path in any URL or scp form. The bare path only when it has
             // an owner: a lone `app` would mask every word `app` in the log.
-            $patterns[] = '#(?<=' . $host . '[/:])' . $path . $tail . '#i';
+            $patterns[] = '#(?<='.$host.'[/:])'.$path.$tail.'#i';
             if (str_contains($parts['path'], '/')) {
-                $patterns[] = '#(?<![\w.-])' . $path . $tail . '#i';
+                $patterns[] = '#(?<![\w.-])'.$path.$tail.'#i';
             }
         }
 
@@ -83,8 +83,8 @@ final class PrivateRepoMask
         // Only where the text says it is a branch: `main` is also a word.
         foreach ($this->branches as $branch) {
             $line = (string) preg_replace(
-                '#(\bbranch\b[\'"]?\s*[:=]?\s*[\'"]?)' . preg_quote($branch, '#') . '(?![\w./-])#i',
-                '$1' . self::BRANCH,
+                '#(\bbranch\b[\'"]?\s*[:=]?\s*[\'"]?)'.preg_quote($branch, '#').'(?![\w./-])#i',
+                '$1'.self::BRANCH,
                 $line
             );
         }

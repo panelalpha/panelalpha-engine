@@ -26,8 +26,9 @@ class ApiTokensCreateCommand extends Command
     {
         $root = Admin::rootAccount();
         $name = $this->argument('name');
-        if (!is_string($name)) {
+        if (! is_string($name)) {
             $this->error("Invalid 'name' argument");
+
             return 1;
         }
         $expiry = $this->expiry();
@@ -47,6 +48,7 @@ class ApiTokensCreateCommand extends Command
 
         if ($this->option('short')) {
             $this->line($token->plainTextToken);
+
             return 0;
         }
 
@@ -55,6 +57,7 @@ class ApiTokensCreateCommand extends Command
         $this->comment('=============================');
         $this->line($token->plainTextToken);
         $this->comment('=============================');
+
         return 0;
     }
 }

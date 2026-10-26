@@ -42,7 +42,7 @@ final class ComposeUsableNestedProbe implements PlatformProbe
         }
 
         foreach (NestedCompose::DIRECTORIES as $directory) {
-            if (!$context->hasFile($directory) || !is_dir($context->path($directory))) {
+            if (! $context->hasFile($directory) || ! is_dir($context->path($directory))) {
                 continue;
             }
             $found = $this->usableIn($directory, $context);
@@ -67,7 +67,7 @@ final class ComposeUsableNestedProbe implements PlatformProbe
     private function usableIn(string $directory, ProjectContext $context): ?string
     {
         foreach (ComposeFileInspector::COMPOSE_FILE_CANDIDATES as $candidate) {
-            $relative = $directory . '/' . $candidate;
+            $relative = $directory.'/'.$candidate;
             if ($context->isFile($relative) && $this->usable($relative, $context)) {
                 return $relative;
             }
@@ -88,7 +88,7 @@ final class ComposeUsableNestedProbe implements PlatformProbe
         $directories = [];
         foreach (is_array($entries) ? $entries : [] as $entry) {
             if (str_starts_with($entry, '.') || in_array($entry, NestedCompose::DIRECTORIES, true)
-                || !is_dir($context->path($entry))
+                || ! is_dir($context->path($entry))
             ) {
                 continue;
             }
@@ -106,7 +106,7 @@ final class ComposeUsableNestedProbe implements PlatformProbe
         $path = $context->path($relative);
         $raw = $context->contents($relative);
         $parsed = is_string($raw) ? ComposeYaml::parse($raw) : null;
-        if (!is_array($parsed) || !is_array($parsed['services'] ?? null)) {
+        if (! is_array($parsed) || ! is_array($parsed['services'] ?? null)) {
             return false;
         }
         $fromRoot = Yaml::dump(NestedCompose::rebase($parsed, dirname($relative)), 6, 2);

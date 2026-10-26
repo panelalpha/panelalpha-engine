@@ -26,7 +26,7 @@ final class PythonNothingToStartProbe implements PlatformProbe
 
     public function evaluate(ProjectContext $context): bool
     {
-        if (!$this->hasOtherStack($context)) {
+        if (! $this->hasOtherStack($context)) {
             return false;
         }
         $manifests = [];

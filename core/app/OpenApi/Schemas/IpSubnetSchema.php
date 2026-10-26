@@ -22,6 +22,4 @@ use OpenApi\Attributes as OA;
     ],
     type: 'object',
 )]
-class IpSubnetSchema
-{
-}
+class IpSubnetSchema {}

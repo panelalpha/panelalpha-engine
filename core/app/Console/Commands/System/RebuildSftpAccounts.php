@@ -17,11 +17,12 @@ class RebuildSftpAccounts extends Command
     public function handle(): int
     {
         try {
-            $system = new System();
+            $system = new System;
             $system->sftp()->rebuildSftpAccounts();
         } catch (\Exception $e) {
             $this->error($e->getMessage());
         }
+
         return 0;
     }
 }

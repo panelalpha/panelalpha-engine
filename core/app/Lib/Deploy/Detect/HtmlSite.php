@@ -62,9 +62,7 @@ final class HtmlSite
     /** @var list<string> relative paths, shallowest first, then alphabetical */
     private array $documents = [];
 
-    private function __construct(private readonly string $projectDir)
-    {
-    }
+    private function __construct(private readonly string $projectDir) {}
 
     /**
      * The document this site should be served from. Null for a tree holding a
@@ -78,7 +76,7 @@ final class HtmlSite
 
     private function locate(): ?string
     {
-        if (!is_dir($this->projectDir) || !$this->walk()) {
+        if (! is_dir($this->projectDir) || ! $this->walk()) {
             return null;
         }
 
@@ -93,7 +91,7 @@ final class HtmlSite
     {
         foreach (self::ENTRY_NAMES as $name) {
             foreach ($this->documents as $document) {
-                if (!str_contains($document, '/') && self::basenameOf($document) === $name) {
+                if (! str_contains($document, '/') && self::basenameOf($document) === $name) {
                     return $document;
                 }
             }
@@ -124,7 +122,7 @@ final class HtmlSite
                 return false;
             }
 
-            $absolute = $relative === '' ? $this->projectDir : $this->projectDir . '/' . $relative;
+            $absolute = $relative === '' ? $this->projectDir : $this->projectDir.'/'.$relative;
             foreach (ProjectContext::entries($absolute) as $entry) {
                 // Dotfiles are the repository's housekeeping (.gitignore,
                 // .nojekyll, .htaccess), never the reason a tree is a site.
@@ -132,8 +130,8 @@ final class HtmlSite
                     continue;
                 }
 
-                $child = $relative === '' ? $entry : $relative . '/' . $entry;
-                $path = $this->projectDir . '/' . $child;
+                $child = $relative === '' ? $entry : $relative.'/'.$entry;
+                $path = $this->projectDir.'/'.$child;
 
                 if (is_dir($path)) {
                     if (in_array(strtolower($entry), self::SKIPPED_DIRECTORIES, true)) {
@@ -142,15 +140,17 @@ final class HtmlSite
                     if ($depth < self::MAX_DEPTH) {
                         $queue[] = [$child, $depth + 1];
                     }
+
                     continue;
                 }
 
                 // A page of the site, unless the engine wrote it: the welcome
                 // and not-configured placeholders are never the front page.
                 if (self::isDocument($entry)) {
-                    if (!PlaceholderPage::isOneOf($path)) {
+                    if (! PlaceholderPage::isOneOf($path)) {
                         $this->documents[] = $child;
                     }
+
                     continue;
                 }
 
@@ -161,7 +161,7 @@ final class HtmlSite
                     continue;
                 }
 
-                if (!self::isAsset($entry)) {
+                if (! self::isAsset($entry)) {
                     return false;
                 }
             }

@@ -28,7 +28,7 @@ class PushState implements ShouldQueue
     public int $timeout = JobBudget::SECONDS;
 
     /**
-     * @param list<array{database: string, name: string}>|null $tables
+     * @param  list<array{database: string, name: string}>|null  $tables
      */
     public function __construct(
         public string $fromUsername,
@@ -43,7 +43,7 @@ class PushState implements ShouldQueue
     public function handle(): void
     {
         $this->runTask(function (): void {
-            $result = (new System())->projects()->pushToApp(
+            $result = (new System)->projects()->pushToApp(
                 $this->fromUsername,
                 $this->toUsername,
                 $this->files,
@@ -81,13 +81,13 @@ class PushState implements ShouldQueue
     public function failed(\Throwable $e): void
     {
         $task = $this->task();
-        if ($task !== null && !$task->isTerminal()) {
+        if ($task !== null && ! $task->isTerminal()) {
             $this->markFailed($e);
         }
 
         $from = User::findByUsername($this->fromUsername);
         $to = User::findByUsername($this->toUsername);
-        $system = new System();
+        $system = new System;
 
         if ($to !== null) {
             $this->markPushFailed($to, $e->getMessage());
@@ -109,10 +109,10 @@ class PushState implements ShouldQueue
     {
         try {
             $home = rtrim($system->project($to)->homeDirPath(), '/');
-            $system->runProcess(['sudo', 'rm', '-rf', $home . '/.incoming']);
+            $system->runProcess(['sudo', 'rm', '-rf', $home.'/.incoming']);
         } catch (\Throwable $cleanup) {
             Log::warning('PushState failed cleanup could not remove .incoming', [
-                'target'    => $this->toUsername,
+                'target' => $this->toUsername,
                 'exception' => $cleanup->getMessage(),
             ]);
         }

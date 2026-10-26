@@ -2,9 +2,10 @@
 
 namespace App\System\Project\Dind\Strategy;
 
-use App\System\Project\Dind as DindProject;
 use App\Lib\Deploy\CacheManager\PythonBaseImage;
 use App\Lib\Deploy\Platform\Runtime\Python\SystemPackages;
+use App\System\Project\Dind as DindProject;
+use App\System\Project\Dind\HostCompile;
 
 /**
  * Swaps a Python recipe's stock image for the shared base that can build its
@@ -12,7 +13,7 @@ use App\Lib\Deploy\Platform\Runtime\Python\SystemPackages;
  *
  * One class because there are two callers and they must not disagree.
  * {@see FrameworkStrategy} writes the image into the compose file;
- * {@see \App\System\Project\Dind\HostCompile} picks the image the
+ * {@see HostCompile} picks the image the
  * `.venv` is built in, re-running detection to get there, so it sees nothing
  * the strategy decided. Two answers to "which Python" is how a venv gets
  * compiled against headers the runtime does not have.

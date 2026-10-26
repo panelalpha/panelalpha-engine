@@ -60,13 +60,13 @@ class ProjectCertRenew extends Command
             }
 
             $connection = $model->projectDomain();
-            if (!$connection->hasSslCertificate()) {
+            if (! $connection->hasSslCertificate()) {
                 continue;
             }
 
             $status = CertificateStatus::of($connection->getSslCertificateInfo(), $name);
 
-            if (!$this->isDue($status, $threshold)) {
+            if (! $this->isDue($status, $threshold)) {
                 continue;
             }
 
@@ -85,8 +85,8 @@ class ProjectCertRenew extends Command
                 $renewed++;
             } catch (\Throwable $e) {
                 // One domain's authority problem is not the next domain's.
-                $this->error("could not renew {$name}: " . $e->getMessage());
-                Log::warning("Certificate renewal failed for {$name}: " . $e->getMessage());
+                $this->error("could not renew {$name}: ".$e->getMessage());
+                Log::warning("Certificate renewal failed for {$name}: ".$e->getMessage());
                 $failed++;
             }
         }
@@ -101,7 +101,7 @@ class ProjectCertRenew extends Command
      * anyone — never when it is a self-signed certificate this engine put
      * there on purpose.
      *
-     * @param array{status: string, self_signed: bool, days_remaining: ?int} $status
+     * @param  array{status: string, self_signed: bool, days_remaining: ?int}  $status
      */
     private function isDue(array $status, int $threshold): bool
     {

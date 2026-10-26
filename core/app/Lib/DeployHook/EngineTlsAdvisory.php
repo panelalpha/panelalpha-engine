@@ -23,10 +23,11 @@ use App\Lib\Ssl\EngineCertificate;
 final class EngineTlsAdvisory
 {
     public const VALID = 'valid';
+
     public const SELF_SIGNED = 'self_signed';
 
     /**
-     * @param ?string $provider narrow `instructions` to this one provider; null for all of them
+     * @param  ?string  $provider  narrow `instructions` to this one provider; null for all of them
      * @return array{state: string, warning: ?string, instructions: ?array<string, string>}
      */
     public static function forProvider(?string $provider = null): array
@@ -59,10 +60,10 @@ final class EngineTlsAdvisory
 
     private static function state(string $url): string
     {
-        $engine = new EngineCertificate();
+        $engine = new EngineCertificate;
         $path = $engine->certificatePath();
 
-        if (!is_readable($path)) {
+        if (! is_readable($path)) {
             // No certificate to point to is no better than one nobody
             // trusts: either way the safe thing to tell a client is how to
             // get a git host past it.

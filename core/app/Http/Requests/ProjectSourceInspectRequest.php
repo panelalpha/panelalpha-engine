@@ -29,7 +29,7 @@ class ProjectSourceInspectRequest extends FormRequest
         $subdirectory = $this->input('subdirectory');
         $legacy = $this->input('path');
 
-        if (!is_string($subdirectory) && is_string($legacy)) {
+        if (! is_string($subdirectory) && is_string($legacy)) {
             $this->merge(['subdirectory' => $legacy]);
         }
     }

@@ -19,19 +19,22 @@ class ApiTokensDeleteCommand extends Command
     {
         $root = Admin::rootAccount();
         $id = $this->argument('id');
-        if (!is_scalar($id)) {
+        if (! is_scalar($id)) {
             $this->error("Invalid 'id' argument");
+
             return 1;
         }
         /** @var ?PersonalAccessToken */
         $token = $root->tokens()->find($id);
-        if (!$token) {
+        if (! $token) {
             $this->error("Invalid ID: {$id}");
+
             return 1;
         }
 
         $token->delete();
         $this->info("Api token #{$token->id} '{$token->name}' deleted.");
+
         return 0;
     }
 }

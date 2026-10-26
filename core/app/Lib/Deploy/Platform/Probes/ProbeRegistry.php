@@ -25,15 +25,15 @@ final class ProbeRegistry
 
         $probes = [];
         foreach (scandir(__DIR__) ?: [] as $entry) {
-            if (!str_ends_with($entry, 'Probe.php')) {
+            if (! str_ends_with($entry, 'Probe.php')) {
                 continue;
             }
-            $class = __NAMESPACE__ . '\\' . basename($entry, '.php');
-            if (!class_exists($class) || !is_subclass_of($class, PlatformProbe::class)) {
+            $class = __NAMESPACE__.'\\'.basename($entry, '.php');
+            if (! class_exists($class) || ! is_subclass_of($class, PlatformProbe::class)) {
                 continue;
             }
             /** @var PlatformProbe $probe */
-            $probe = new $class();
+            $probe = new $class;
             $probes[$probe->id()] = $probe;
         }
 

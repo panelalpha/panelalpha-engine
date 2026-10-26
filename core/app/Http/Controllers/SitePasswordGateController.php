@@ -20,7 +20,7 @@ class SitePasswordGateController extends Controller
     public function check(Request $request, string $username): Response
     {
         $user = User::findByUsername($username);
-        if (!$user || !SitePasswordProtection::isEnabled($user)) {
+        if (! $user || ! SitePasswordProtection::isEnabled($user)) {
             return new Response('', 200);
         }
 
@@ -42,7 +42,7 @@ class SitePasswordGateController extends Controller
     public function gate(Request $request, string $username): Response
     {
         $user = User::findByUsername($username);
-        if (!$user || !SitePasswordProtection::isEnabled($user)) {
+        if (! $user || ! SitePasswordProtection::isEnabled($user)) {
             return new Response('Not found', 404);
         }
 
@@ -61,17 +61,17 @@ class SitePasswordGateController extends Controller
     public function login(Request $request, string $username): Response|RedirectResponse
     {
         $user = User::findByUsername($username);
-        if (!$user || !SitePasswordProtection::isEnabled($user)) {
+        if (! $user || ! SitePasswordProtection::isEnabled($user)) {
             return new Response('Not found', 404);
         }
 
         $password = (string) $request->input('password', '');
         $redirect = (string) $request->input('redirect', '/');
-        if ($redirect === '' || !str_starts_with($redirect, '/') || str_starts_with($redirect, '//')) {
+        if ($redirect === '' || ! str_starts_with($redirect, '/') || str_starts_with($redirect, '//')) {
             $redirect = '/';
         }
 
-        if (!SitePasswordProtection::verifyPassword($user, $password)) {
+        if (! SitePasswordProtection::verifyPassword($user, $password)) {
             return new Response($this->formHtml(true), 401, [
                 'Content-Type' => 'text/html; charset=UTF-8',
                 'Cache-Control' => 'no-store',

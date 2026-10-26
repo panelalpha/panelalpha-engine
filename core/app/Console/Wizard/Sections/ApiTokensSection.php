@@ -3,8 +3,8 @@
 namespace App\Console\Wizard\Sections;
 
 use App\Auth\TokenAbilities;
-use App\Console\Wizard\Scopes\RouteScope;
 use App\Console\Wizard\KeepsAReceipt;
+use App\Console\Wizard\Scopes\RouteScope;
 use App\Console\Wizard\Section;
 use App\Console\Wizard\TokenManager;
 
@@ -40,7 +40,7 @@ class ApiTokensSection implements Section
             title: self::label(),
             dryRun: $dryRun,
             ability: TokenAbilities::API,
-            scope: new RouteScope(),
+            scope: new RouteScope,
             noun: 'your own software',
             narrow: 'Change which parts of the API it may call…',
             mintHint: 'Send it as `Authorization: Bearer <token>`. The API is documented at /api/documentation.',

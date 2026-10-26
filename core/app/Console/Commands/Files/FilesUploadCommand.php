@@ -30,10 +30,12 @@ class FilesUploadCommand extends Command
 
         if ($path === '') {
             $this->error('--path is required (the destination directory inside the project)');
+
             return 1;
         }
-        if (!is_file($file)) {
+        if (! is_file($file)) {
             $this->error("Local file not found: {$file}");
+
             return 1;
         }
 
@@ -41,7 +43,7 @@ class FilesUploadCommand extends Command
         // for a real POST through PHP-FPM.
         $upload = new UploadedFile($file, basename($file), null, null, true);
 
-        Validator::make(['path' => $path, 'file' => $upload], (new UploadRequest())->rules())->validate();
+        Validator::make(['path' => $path, 'file' => $upload], (new UploadRequest)->rules())->validate();
         $user = User::findByUsernameOrFail($project);
         $dir = $user->project()->resolvePath($path);
 
@@ -52,7 +54,8 @@ class FilesUploadCommand extends Command
             throw ValidationException::withMessages(['file' => $e->getMessage()]);
         }
 
-        $this->info(sprintf('Uploaded %s to %s', basename($file), rtrim($path, '/') . '/' . basename($file)));
+        $this->info(sprintf('Uploaded %s to %s', basename($file), rtrim($path, '/').'/'.basename($file)));
+
         return 0;
     }
 }

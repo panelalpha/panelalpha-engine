@@ -2,10 +2,12 @@
 
 namespace App\Lib\Deploy\Platform\Metadata;
 
+use App\Lib\Deploy\Platform\Runtime\Requirement;
+
 /**
  * A framework the project depends on, at the version it depends on.
  *
- * Separate from {@see \App\Lib\Deploy\Platform\Runtime\Requirement}, which
+ * Separate from {@see Requirement}, which
  * answers "which PHP goes in the image". This answers "which Laravel is this",
  * and the two are unrelated: a project can pin PHP 8.3 and run Laravel 9 or
  * Laravel 12 on it, and only the second decides whether `php artisan optimize`
@@ -26,8 +28,7 @@ final class Framework
         public readonly string $constraint,
         public readonly ?string $version,
         public readonly string $source
-    ) {
-    }
+    ) {}
 
     /**
      * @return array<string, mixed>

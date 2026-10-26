@@ -15,7 +15,7 @@ class DockerHubStatusCommand extends Command
 
     public function handle(): int
     {
-        $login = new DockerHubLogin(new System());
+        $login = new DockerHubLogin(new System);
         $current = $login->current();
 
         if ($current === null) {
@@ -25,13 +25,13 @@ class DockerHubStatusCommand extends Command
             $this->line('  pae docker-hub:login');
         } else {
             $check = $login->check($current['username'], $current['token']);
-            $this->line("registry-proxy pulls as {$current['username']}: " . ($check['ok']
-                ? ($check['remaining'] ?? '?') . ' left of ' . ($check['limit'] ?? '?')
+            $this->line("registry-proxy pulls as {$current['username']}: ".($check['ok']
+                ? ($check['remaining'] ?? '?').' left of '.($check['limit'] ?? '?')
                 : (string) $check['error']));
         }
 
         $mirrors = $login->hostMirrors();
-        $this->line('Host daemon: ' . match ($mirrors) {
+        $this->line('Host daemon: '.match ($mirrors) {
             true => 'mirrors Docker Hub through registry-proxy',
             false => 'pulls Docker Hub directly (bash scripts/install-sysbox.sh sets up the mirror)',
             default => 'could not be asked',

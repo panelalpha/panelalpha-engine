@@ -2,8 +2,8 @@
 
 namespace App\Console\Commands\Ssl;
 
-use App\System;
 use App\Models\Setting;
+use App\System;
 use Illuminate\Console\Command;
 use Symfony\Component\Process\Process;
 
@@ -33,7 +33,7 @@ class EngineCertRequest extends Command
 
     public function handle(System $system): int
     {
-        $script = $system->engineDirPath() . '/scripts/letsencrypt-request-cert.sh';
+        $script = $system->engineDirPath().'/scripts/letsencrypt-request-cert.sh';
         $args = ['sudo', 'nsenter', '--target', '1', '--all', 'bash', $script];
 
         foreach (['domain', 'email', 'ip'] as $name) {
@@ -58,15 +58,17 @@ class EngineCertRequest extends Command
             $type === Process::ERR ? $this->output->write("<comment>{$buffer}</comment>") : $this->output->write($buffer);
         });
 
-        if (!$process->isSuccessful()) {
+        if (! $process->isSuccessful()) {
             $this->error('The certificate was not issued; the served certificate is unchanged');
+
             return 1;
         }
 
         $issued = Setting::get('cert_domain');
-        if ($issued && !$this->option('dry-run')) {
+        if ($issued && ! $this->option('dry-run')) {
             $this->info("Serving https://{$issued}:2011");
         }
+
         return 0;
     }
 }

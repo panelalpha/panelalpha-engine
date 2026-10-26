@@ -18,11 +18,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property Carbon $created_at
  * @property Carbon $updated_at
  * @property User $userModel
+ *
  * @method static SftpAccount create(array $params)
  */
 class SftpAccount extends Model
 {
-    use HasFactory, HasDetails;
+    use HasDetails, HasFactory;
 
     protected $fillable = [
         'user_id',

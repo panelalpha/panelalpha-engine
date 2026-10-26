@@ -2,6 +2,8 @@
 
 namespace App\System\Firewall;
 
+use App\Mcp\ToolPolicy;
+
 /**
  * What the CSF API's tools and routes are called now that the firewall API
  * replaced them, for settings and tokens that still name the old ones.
@@ -44,7 +46,7 @@ final class CsfRenames
             return self::TOOLS[$name];
         }
         if (str_contains($name, '*') && str_starts_with($name, 'csf_')) {
-            return 'firewall_' . substr($name, strlen('csf_'));
+            return 'firewall_'.substr($name, strlen('csf_'));
         }
 
         return $name;
@@ -54,12 +56,12 @@ final class CsfRenames
     public static function ability(string $ability): string
     {
         if (str_starts_with($ability, 'mcp:')) {
-            return 'mcp:' . self::tool(substr($ability, 4));
+            return 'mcp:'.self::tool(substr($ability, 4));
         }
         if (str_starts_with($ability, 'api:')) {
             $route = substr($ability, 4);
 
-            return 'api:' . (self::ROUTES[$route] ?? $route);
+            return 'api:'.(self::ROUTES[$route] ?? $route);
         }
 
         return $ability;
@@ -85,17 +87,17 @@ final class CsfRenames
     public static function regex(string $regex): string
     {
         $renamed = str_replace('csf', 'firewall', str_replace('csf_restart', 'firewall_reload', $regex));
-        if (self::matches('csf_restart', $regex) && !self::matches('firewall_reload', $renamed)) {
+        if (self::matches('csf_restart', $regex) && ! self::matches('firewall_reload', $renamed)) {
             $renamed .= '|^firewall_reload$';
         }
 
         return $renamed;
     }
 
-    /** Whether $pattern matches $subject, as {@see \App\Mcp\ToolPolicy} reads it. */
+    /** Whether $pattern matches $subject, as {@see ToolPolicy} reads it. */
     private static function matches(string $subject, string $pattern): bool
     {
-        $delimited = '/' . str_replace('/', '\\/', $pattern) . '/i';
+        $delimited = '/'.str_replace('/', '\\/', $pattern).'/i';
 
         return @preg_match($delimited, $subject) === 1;
     }
@@ -103,7 +105,7 @@ final class CsfRenames
     /** @param callable(string): string $map */
     private static function mapList(string $csv, callable $map): string
     {
-        if (!str_contains(strtolower($csv), 'csf')) {
+        if (! str_contains(strtolower($csv), 'csf')) {
             return $csv;
         }
 

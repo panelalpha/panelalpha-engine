@@ -21,9 +21,7 @@ use Throwable;
  */
 class DeliveryRunner
 {
-    public function __construct(private readonly CheckoutSync $sync)
-    {
-    }
+    public function __construct(private readonly CheckoutSync $sync) {}
 
     public function run(HookDelivery $delivery): void
     {
@@ -71,7 +69,7 @@ class DeliveryRunner
 
             return;
         } catch (GitException $e) {
-            $this->finish($delivery, HookDelivery::RESULT_DEPLOY_FAILED, 'git pull failed: ' . self::scrub($e->getMessage()), ($delivery->deploy_id ?? self::startedDeployId($before, $user->username)));
+            $this->finish($delivery, HookDelivery::RESULT_DEPLOY_FAILED, 'git pull failed: '.self::scrub($e->getMessage()), ($delivery->deploy_id ?? self::startedDeployId($before, $user->username)));
 
             return;
         } catch (Throwable $e) {

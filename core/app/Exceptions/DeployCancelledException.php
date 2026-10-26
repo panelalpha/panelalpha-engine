@@ -2,6 +2,4 @@
 
 namespace App\Exceptions;
 
-class DeployCancelledException extends \Exception
-{
-}
+class DeployCancelledException extends \Exception {}

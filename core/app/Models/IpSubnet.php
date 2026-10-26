@@ -6,7 +6,7 @@ use Brick\Math\BigInteger;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasManyThrough;
+use Illuminate\Support\Carbon;
 
 /**
  * @property int $id
@@ -14,9 +14,10 @@ use Illuminate\Database\Eloquent\Relations\HasManyThrough;
  * @property int $mask
  * @property int $family
  * @property bool $is_shared
- * @property \Illuminate\Support\Carbon $created_at
- * @property \Illuminate\Support\Carbon $updated_at
+ * @property Carbon $created_at
+ * @property Carbon $updated_at
  * @property Collection<IpAssigned> $ipAssigned
+ *
  * @method static ?IpSubnet find(int $id)
  * @method static IpSubnet findOrFail(int $id)
  * @method static IpSubnet create(array $params)
@@ -47,11 +48,11 @@ class IpSubnet extends Model
 
     public function getCidr(): string
     {
-        return $this->ip . '/' . $this->mask;
+        return $this->ip.'/'.$this->mask;
     }
 
     /**
-     *  @param array<string> $reserved
+     * @param  array<string>  $reserved
      */
     public function findFreeIp(array $reserved = []): ?string
     {
@@ -80,7 +81,7 @@ class IpSubnet extends Model
 
         for ($i = 1; $i < $limit; $i++) {
             $candidate = $base->plus($i);
-            if (!isset($usedBig[(string) $candidate])) {
+            if (! isset($usedBig[(string) $candidate])) {
                 return inet_ntop($candidate->toBytes(false));
             }
         }

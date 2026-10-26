@@ -27,7 +27,7 @@ class SourceInspectRequest extends FormRequest
     protected function prepareForValidation(): void
     {
         $source = $this->input('source');
-        if (!is_string($source)) {
+        if (! is_string($source)) {
             return;
         }
 
@@ -52,7 +52,7 @@ class SourceInspectRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'source' => ['required', 'string', 'max:' . GitRepoInput::MAX_LENGTH, new InspectableSource()],
+            'source' => ['required', 'string', 'max:'.GitRepoInput::MAX_LENGTH, new InspectableSource],
             'type' => ['nullable', 'string', Rule::in(SourceResolver::TYPES)],
             'branch' => 'nullable|string|max:255',
             'subdirectory' => 'nullable|string|max:512',
@@ -63,7 +63,7 @@ class SourceInspectRequest extends FormRequest
             'git_token' => [
                 'nullable',
                 'string',
-                'max:' . GitTokenInput::MAX_LENGTH,
+                'max:'.GitTokenInput::MAX_LENGTH,
                 new GitAccessToken('source'),
             ],
         ];

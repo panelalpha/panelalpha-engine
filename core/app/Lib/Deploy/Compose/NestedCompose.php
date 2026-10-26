@@ -30,9 +30,9 @@ final class NestedCompose
      */
     public static function relativeDir(string $composePath, string $projectDir): ?string
     {
-        $root = rtrim($projectDir, '/') . '/';
+        $root = rtrim($projectDir, '/').'/';
         $dir = dirname($composePath);
-        if (!str_starts_with($dir . '/', $root) || $dir . '/' === $root) {
+        if (! str_starts_with($dir.'/', $root) || $dir.'/' === $root) {
             return null;
         }
 
@@ -40,7 +40,7 @@ final class NestedCompose
     }
 
     /**
-     * @param array<string, mixed> $compose
+     * @param  array<string, mixed>  $compose
      * @return array<string, mixed>
      */
     public static function rebase(array $compose, string $relativeDir): array
@@ -58,7 +58,7 @@ final class NestedCompose
             }
         }
         foreach (['configs', 'secrets'] as $section) {
-            if (!is_array($compose[$section] ?? null)) {
+            if (! is_array($compose[$section] ?? null)) {
                 continue;
             }
             foreach ($compose[$section] as $name => $entry) {
@@ -81,7 +81,7 @@ final class NestedCompose
     }
 
     /**
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return array<string, mixed>
      */
     private static function rebaseService(array $service, string $relativeDir): array
@@ -136,7 +136,7 @@ final class NestedCompose
         if (is_string($volume)) {
             $parts = explode(':', $volume, 2);
             if (count($parts) === 2 && str_starts_with($parts[0], '.')) {
-                return self::path($parts[0], $relativeDir) . ':' . $parts[1];
+                return self::path($parts[0], $relativeDir).':'.$parts[1];
             }
 
             return $volume;
@@ -164,12 +164,13 @@ final class NestedCompose
         }
 
         $segments = [];
-        foreach (explode('/', trim($relativeDir, '/') . '/' . $trimmed) as $segment) {
+        foreach (explode('/', trim($relativeDir, '/').'/'.$trimmed) as $segment) {
             if ($segment === '' || $segment === '.') {
                 continue;
             }
             if ($segment === '..' && $segments !== [] && end($segments) !== '..') {
                 array_pop($segments);
+
                 continue;
             }
             $segments[] = $segment;
@@ -179,6 +180,6 @@ final class NestedCompose
             return '.';
         }
 
-        return ($segments[0] === '..' ? '' : './') . implode('/', $segments);
+        return ($segments[0] === '..' ? '' : './').implode('/', $segments);
     }
 }

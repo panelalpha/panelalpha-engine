@@ -7,6 +7,7 @@ use App\System\ProcessRunner;
 use App\System\Project\PhpHosting;
 use App\System\Project\PhpHosting\Services\Service;
 use App\System\Project\PhpHosting\Services\ServiceManager;
+use Illuminate\Support\Facades\Log;
 
 final class FpmStack implements PhpStack
 {
@@ -18,8 +19,7 @@ final class FpmStack implements PhpStack
     public function __construct(
         private ProcessRunner $system,
         private ModelsUser $model,
-    ) {
-    }
+    ) {}
 
     public function dockerfileTemplateName(): string
     {
@@ -34,7 +34,7 @@ final class FpmStack implements PhpStack
     public function applySettings(PhpHosting $project): void
     {
         $this->applyPhpFpmSettings($project);
-        (new EnvironmentSetup())->applyRedisSettings($project);
+        (new EnvironmentSetup)->applyRedisSettings($project);
     }
 
     public function entrypointInitScripts(PhpHosting $project): array
@@ -47,9 +47,7 @@ final class FpmStack implements PhpStack
         return $this->phpServices();
     }
 
-    public function waitForAllRunning(PhpHosting $project, int $tries = 12, int $intervalSeconds = 5): void
-    {
-    }
+    public function waitForAllRunning(PhpHosting $project, int $tries = 12, int $intervalSeconds = 5): void {}
 
     public function restartPhpHandler(PhpHosting $project, string $phpVersion): void
     {
@@ -69,23 +67,23 @@ final class FpmStack implements PhpStack
         if ($process->getExitCode() === self::EXIT_NOT_MANAGED) {
             throw new PhpHandlerNotRunning("php-fpm{$phpVersion} is not a service of {$project->username()}");
         }
-        if (!$process->isSuccessful()) {
+        if (! $process->isSuccessful()) {
             $message = trim($process->getErrorOutput() ?: $process->getOutput());
             throw new \RuntimeException("Could not restart php-fpm{$phpVersion}: {$message}");
         }
         // A restart prints only the stray master it had to stop.
         $output = $process->isStarted() ? trim($process->getOutput()) : '';
         if ($output !== '') {
-            \Illuminate\Support\Facades\Log::warning("{$project->username()}: {$output}");
+            Log::warning("{$project->username()}: {$output}");
         }
     }
 
     /** Inside the account: restart php-fpm$phpVersion through $services, then wait for its master. */
     public static function restartScript(ServiceManager $services, string $phpVersion): string
     {
-        $name = 'php-fpm' . self::version($phpVersion);
+        $name = 'php-fpm'.self::version($phpVersion);
 
-        return $services->restartScript($name, self::masterPattern($phpVersion)) . "\n" . self::waitForMaster($phpVersion);
+        return $services->restartScript($name, self::masterPattern($phpVersion))."\n".self::waitForMaster($phpVersion);
     }
 
     private static function version(string $phpVersion): string
@@ -100,7 +98,7 @@ final class FpmStack implements PhpStack
     /** Anchored, so it never matches the command line of the script that runs it. */
     private static function masterPattern(string $phpVersion): string
     {
-        return '^php-fpm: master process \\(/etc/php/' . str_replace('.', '\\.', $phpVersion) . '/fpm/';
+        return '^php-fpm: master process \\(/etc/php/'.str_replace('.', '\\.', $phpVersion).'/fpm/';
     }
 
     private static function waitForMaster(string $phpVersion): string
@@ -126,7 +124,7 @@ final class FpmStack implements PhpStack
             if ($ver === null) {
                 continue;
             }
-            if (!in_array($ver, $usedPhpVersions, true)) {
+            if (! in_array($ver, $usedPhpVersions, true)) {
                 $usedPhpVersions[] = $ver;
             }
         }

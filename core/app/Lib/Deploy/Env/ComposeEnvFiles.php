@@ -26,19 +26,19 @@ final class ComposeEnvFiles
     }
 
     /**
-     * @param array<string, mixed> $parsed a decoded compose file
+     * @param  array<string, mixed>  $parsed  a decoded compose file
      * @return list<string>
      */
     public static function pathsIn(array $parsed): array
     {
         $services = $parsed['services'] ?? null;
-        if (!is_array($services)) {
+        if (! is_array($services)) {
             return [];
         }
 
         $paths = [];
         foreach ($services as $service) {
-            if (!is_array($service)) {
+            if (! is_array($service)) {
                 continue;
             }
             foreach (self::entriesOf($service['env_file'] ?? null) as $entry) {
@@ -59,19 +59,19 @@ final class ComposeEnvFiles
      * that never read `.env`. Idempotent: an entry already there is moved to
      * the end rather than added twice.
      *
-     * @param array<string, mixed> $compose a decoded compose file
+     * @param  array<string, mixed>  $compose  a decoded compose file
      * @return array{0: array<string, mixed>, 1: list<string>} the compose file, and the services changed
      */
     public static function attach(array $compose, string $overridesFile): array
     {
-        [$compose, ] = self::detach($compose, $overridesFile);
-        if (!is_array($compose['services'] ?? null)) {
+        [$compose] = self::detach($compose, $overridesFile);
+        if (! is_array($compose['services'] ?? null)) {
             return [$compose, []];
         }
 
         $changed = [];
         foreach ($compose['services'] as $name => &$service) {
-            if (!is_array($service)) {
+            if (! is_array($service)) {
                 continue;
             }
             $loadsEnv = false;
@@ -81,7 +81,7 @@ final class ComposeEnvFiles
                     break;
                 }
             }
-            if (!$loadsEnv) {
+            if (! $loadsEnv) {
                 continue;
             }
             $entries = is_array($service['env_file']) ? array_values($service['env_file']) : [$service['env_file']];
@@ -97,25 +97,25 @@ final class ComposeEnvFiles
     /**
      * Remove every `env_file` entry naming $overridesFile.
      *
-     * @param array<string, mixed> $compose a decoded compose file
+     * @param  array<string, mixed>  $compose  a decoded compose file
      * @return array{0: array<string, mixed>, 1: bool} the compose file, and whether anything was removed
      */
     public static function detach(array $compose, string $overridesFile): array
     {
-        if (!is_array($compose['services'] ?? null)) {
+        if (! is_array($compose['services'] ?? null)) {
             return [$compose, false];
         }
 
         $removed = false;
         foreach ($compose['services'] as &$service) {
-            if (!is_array($service) || !isset($service['env_file'])) {
+            if (! is_array($service) || ! isset($service['env_file'])) {
                 continue;
             }
             $entries = is_array($service['env_file']) ? array_values($service['env_file']) : [$service['env_file']];
             $kept = array_values(array_filter($entries, static function ($entry) use ($overridesFile): bool {
                 $path = is_array($entry) ? ($entry['path'] ?? null) : $entry;
 
-                return !is_string($path) || self::projectRelative($path) !== $overridesFile;
+                return ! is_string($path) || self::projectRelative($path) !== $overridesFile;
             }));
             if (count($kept) === count($entries)) {
                 continue;
@@ -152,7 +152,7 @@ final class ComposeEnvFiles
     /**
      * `env_file` is a string, a list of strings, or a list of `{path: …}`.
      *
-     * @param mixed $envFile
+     * @param  mixed  $envFile
      * @return list<string>
      */
     private static function entriesOf($envFile): array
@@ -160,7 +160,7 @@ final class ComposeEnvFiles
         if (is_string($envFile)) {
             return [$envFile];
         }
-        if (!is_array($envFile)) {
+        if (! is_array($envFile)) {
             return [];
         }
 

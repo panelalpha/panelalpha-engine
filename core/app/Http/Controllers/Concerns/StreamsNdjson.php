@@ -9,7 +9,7 @@ trait StreamsNdjson
     /**
      * A 200 NDJSON response no proxy buffers, whose body runs to the end even after the client leaves.
      *
-     * @param array<string, string> $headers added to the stream's own
+     * @param  array<string, string>  $headers  added to the stream's own
      */
     protected static function ndjsonResponse(callable $body, array $headers = []): StreamedResponse
     {
@@ -30,7 +30,7 @@ trait StreamsNdjson
      */
     protected static function dropOutputBuffers(): void
     {
-        if (!app()->runningUnitTests()) {
+        if (! app()->runningUnitTests()) {
             while (ob_get_level() > 0) {
                 ob_end_clean();
             }

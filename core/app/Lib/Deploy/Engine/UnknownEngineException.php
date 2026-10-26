@@ -10,7 +10,7 @@ namespace App\Lib\Deploy\Engine;
 class UnknownEngineException extends \InvalidArgumentException
 {
     /**
-     * @param list<string> $known
+     * @param  list<string>  $known
      */
     public static function forName(string $name, array $known): self
     {

@@ -70,11 +70,11 @@ class ApiAccessSection implements Section
     }
 
     /**
-     * @param list<array<string, mixed>> $entries
+     * @param  list<array<string, mixed>>  $entries
      */
     private function header(array $entries): void
     {
-        $lines = ['Allowed:     ' . ($entries === [] ? 'none' : count($entries) . ' project(s)')];
+        $lines = ['Allowed:     '.($entries === [] ? 'none' : count($entries).' project(s)')];
         foreach ($entries as $entry) {
             $lines[] = sprintf(
                 '             %-16s scope %-16s %s',
@@ -88,7 +88,7 @@ class ApiAccessSection implements Section
     }
 
     /**
-     * @param list<array<string, mixed>> $entries
+     * @param  list<array<string, mixed>>  $entries
      * @return array<string, string>
      */
     private function actions(array $entries, bool $dryRun): array
@@ -105,9 +105,9 @@ class ApiAccessSection implements Section
 
     private function allow(bool $dryRun): void
     {
-        Screen::draw(self::label() . '  ·  Allow');
+        Screen::draw(self::label().'  ·  Allow');
         note('The project\'s containers may then reach this engine\'s API port, and its environment carries the '
-            . 'API address, a token with the scope you pick, and the certificate it is served.');
+            .'API address, a token with the scope you pick, and the certificate it is served.');
 
         $username = $this->askProject();
         $scope = $username === null ? null : $this->askScope();
@@ -124,7 +124,7 @@ class ApiAccessSection implements Section
             $mcp ? ', including MCP tools' : ''
         );
 
-        if (!$this->confirmWrite($summary, $dryRun)) {
+        if (! $this->confirmWrite($summary, $dryRun)) {
             return;
         }
 
@@ -137,11 +137,11 @@ class ApiAccessSection implements Section
     }
 
     /**
-     * @param list<array<string, mixed>> $entries
+     * @param  list<array<string, mixed>>  $entries
      */
     private function rotate(array $entries, bool $dryRun): void
     {
-        Screen::draw(self::label() . '  ·  Rotate');
+        Screen::draw(self::label().'  ·  Rotate');
         $username = $this->pick($entries);
         $user = $username === null ? null : User::findByUsername($username);
 
@@ -150,7 +150,7 @@ class ApiAccessSection implements Section
         }
 
         $summary = "Mint a new token for {$username}, keeping its scope.";
-        if (!$this->confirmWrite($summary, $dryRun)) {
+        if (! $this->confirmWrite($summary, $dryRun)) {
             return;
         }
 
@@ -158,18 +158,18 @@ class ApiAccessSection implements Section
     }
 
     /**
-     * @param list<array<string, mixed>> $entries
+     * @param  list<array<string, mixed>>  $entries
      */
     private function deny(array $entries, bool $dryRun): void
     {
-        Screen::draw(self::label() . '  ·  Deny');
+        Screen::draw(self::label().'  ·  Deny');
         $username = $this->pick($entries);
         if ($username === null) {
             return;
         }
 
         $summary = "Deny {$username} the Engine API: its token is revoked and the port is closed.";
-        if (!$this->confirmWrite($summary, $dryRun)) {
+        if (! $this->confirmWrite($summary, $dryRun)) {
             return;
         }
 
@@ -232,7 +232,7 @@ class ApiAccessSection implements Section
     }
 
     /**
-     * @param list<array<string, mixed>> $entries
+     * @param  list<array<string, mixed>>  $entries
      */
     private function pick(array $entries): ?string
     {
@@ -258,7 +258,7 @@ class ApiAccessSection implements Section
     private function confirmWrite(string $summary, bool $dryRun): bool
     {
         if ($dryRun) {
-            note($summary . "\n\nNothing was written: this was a dry run.");
+            note($summary."\n\nNothing was written: this was a dry run.");
             $this->receipt[] = $summary;
             pause('Press enter to carry on...');
 
@@ -289,12 +289,12 @@ class ApiAccessSection implements Section
         $this->receipt[] = $summary;
         note($summary, 'info');
         note('Takes effect now for a running project: the environment is rewritten and the stack restarted '
-            . 'without a rebuild. The task list shows the apply.');
+            .'without a rebuild. The task list shows the apply.');
         pause('Press enter to carry on...');
     }
 
     private function access(): ApiAccess
     {
-        return new ApiAccess();
+        return new ApiAccess;
     }
 }

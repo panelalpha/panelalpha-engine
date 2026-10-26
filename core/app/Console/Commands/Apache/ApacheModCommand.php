@@ -27,7 +27,7 @@ abstract class ApacheModCommand extends ProjectFleetCommand
 
     protected function progress(User $user): string
     {
-        return $this->doing() . " mod '{$this->mod()}' for user '{$user->username}'...";
+        return $this->doing()." mod '{$this->mod()}' for user '{$user->username}'...";
     }
 
     protected function applyTo(User $user): void
@@ -38,6 +38,6 @@ abstract class ApacheModCommand extends ProjectFleetCommand
 
     protected function finished(User $user): string
     {
-        return '  Mod ' . $this->done() . '.';
+        return '  Mod '.$this->done().'.';
     }
 }

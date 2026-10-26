@@ -4,6 +4,7 @@ namespace App\Lib\Deploy\Telemetry;
 
 use App\Lib\Apis\PanelAlpha;
 use App\System;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -35,7 +36,7 @@ class TelemetryShipper
 
     public function __construct(?System $system = null)
     {
-        $this->system = $system ?? new System();
+        $this->system = $system ?? new System;
     }
 
     /**
@@ -58,7 +59,7 @@ class TelemetryShipper
             'message' => null,
         ];
 
-        if (!Telemetry::enabled()) {
+        if (! Telemetry::enabled()) {
             return ['status' => 'disabled'] + $result;
         }
 
@@ -134,7 +135,7 @@ class TelemetryShipper
      * `sent` false means the report still has to go through the spool: nothing
      * answered in time, or the server did not take it.
      *
-     * @param array<string, mixed> $report
+     * @param  array<string, mixed>  $report
      * @return array{sent: bool, problem: ?array<string, ?string>}
      */
     public function sendNow(array $report): array
@@ -152,19 +153,19 @@ class TelemetryShipper
         try {
             $response = $this->post($endpoint, ['events' => $events], $timeout);
         } catch (\Throwable $e) {
-            Log::debug('Telemetry could not send a failure straight away: ' . $e->getMessage());
+            Log::debug('Telemetry could not send a failure straight away: '.$e->getMessage());
 
             return $notSent;
         }
 
-        if (!$response->successful()) {
+        if (! $response->successful()) {
             return $notSent;
         }
 
         $body = $response->json();
         $id = (string) ($report['id'] ?? '');
         ['accepted' => $accepted, 'rejected' => $rejected] = self::verdict($body);
-        if (!in_array($id, $rejected, true) && $accepted !== null && !in_array($id, $accepted, true)) {
+        if (! in_array($id, $rejected, true) && $accepted !== null && ! in_array($id, $accepted, true)) {
             return $notSent;
         }
 
@@ -182,9 +183,9 @@ class TelemetryShipper
     {
         foreach (is_array($body) && is_array($body['results'] ?? null) ? $body['results'] : [] as $entry) {
             if (
-                !is_array($entry)
+                ! is_array($entry)
                 || ($entry['index'] ?? null) !== 0
-                || !is_array($entry['problem'] ?? null)
+                || ! is_array($entry['problem'] ?? null)
                 || ($entry['fingerprint'] ?? $fingerprint) !== $fingerprint
             ) {
                 continue;
@@ -208,7 +209,7 @@ class TelemetryShipper
     /**
      * One envelope per queued report, each carrying the same install facts.
      *
-     * @param list<array{report: array<string, mixed>}> $items
+     * @param  list<array{report: array<string, mixed>}>  $items
      * @return list<array<string, mixed>>
      */
     private function events(array $items, string $installId): array
@@ -226,17 +227,17 @@ class TelemetryShipper
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
-    private function post(string $endpoint, array $payload, ?int $timeout = null): \Illuminate\Http\Client\Response
+    private function post(string $endpoint, array $payload, ?int $timeout = null): Response
     {
         $timeout ??= (int) config('telemetry.timeout', 15);
 
         return Http::withHeaders([
-                'Content-Type' => 'application/json',
-                'Accept' => 'application/json',
-                'User-Agent' => $this->userAgent(),
-            ] + $this->authHeader() + PanelAlpha::identityHeaders())
+            'Content-Type' => 'application/json',
+            'Accept' => 'application/json',
+            'User-Agent' => $this->userAgent(),
+        ] + $this->authHeader() + PanelAlpha::identityHeaders())
             ->timeout($timeout)
             // Never longer than the whole budget, and never more than ten
             // seconds waiting on a socket that is not going to open.
@@ -262,12 +263,12 @@ class TelemetryShipper
     {
         return $status >= 400
             && $status < 500
-            && !in_array($status, [404, 405, 408, 429], true);
+            && ! in_array($status, [404, 405, 408, 429], true);
     }
 
     /**
-     * @param list<array{path: string, id: string, attempts: int, report: array<string, mixed>, bundle: ?string}> $items
-     * @param array<string, mixed> $result
+     * @param  list<array{path: string, id: string, attempts: int, report: array<string, mixed>, bundle: ?string}>  $items
+     * @param  array<string, mixed>  $result
      * @return array<string, mixed>
      */
     private function drop(Spool $spool, array $items, array $result, int $status, string $body): array
@@ -278,9 +279,9 @@ class TelemetryShipper
         }
 
         $result['status'] = 'rejected';
-        $result['message'] = "HTTP {$status}: " . mb_substr($body, 0, 300);
+        $result['message'] = "HTTP {$status}: ".mb_substr($body, 0, 300);
         $result['pending'] = $spool->stats()['count'];
-        Log::warning('Telemetry batch permanently rejected: ' . $result['message']);
+        Log::warning('Telemetry batch permanently rejected: '.$result['message']);
 
         return $result;
     }
@@ -292,8 +293,8 @@ class TelemetryShipper
      * no body means it accepted the batch, so the batch is cleared. Holding
      * reports the server has already stored would double-count every failure.
      *
-     * @param list<array{path: string, id: string, attempts: int, report: array<string, mixed>, bundle: ?string}> $items
-     * @param array<string, mixed> $result
+     * @param  list<array{path: string, id: string, attempts: int, report: array<string, mixed>, bundle: ?string}>  $items
+     * @param  array<string, mixed>  $result
      * @return array<string, mixed>
      */
     private function settle(Spool $spool, array $items, mixed $body, array $result): array
@@ -304,17 +305,20 @@ class TelemetryShipper
             if (in_array($item['id'], $rejected, true)) {
                 $spool->forget($item['path']);
                 $result['rejected']++;
+
                 continue;
             }
 
             // A server that names no accepted ids has accepted the batch.
-            if ($accepted !== null && !in_array($item['id'], $accepted, true)) {
+            if ($accepted !== null && ! in_array($item['id'], $accepted, true)) {
                 $this->retryOrDrop($spool, $item['path'], $result);
+
                 continue;
             }
 
-            if (!$this->deliverBundle($item, $wanted, $result)) {
+            if (! $this->deliverBundle($item, $wanted, $result)) {
                 $this->retryOrDrop($spool, $item['path'], $result);
+
                 continue;
             }
 
@@ -341,7 +345,7 @@ class TelemetryShipper
      */
     private static function verdict(mixed $body): array
     {
-        if (!is_array($body)) {
+        if (! is_array($body)) {
             return ['accepted' => null, 'rejected' => [], 'wanted' => []];
         }
 
@@ -361,7 +365,7 @@ class TelemetryShipper
     }
 
     /**
-     * @param array<mixed> $values
+     * @param  array<mixed>  $values
      * @return list<string>
      */
     private static function ids(array $values): array
@@ -377,17 +381,17 @@ class TelemetryShipper
      * report is held so the next run can offer it again: the server asked for
      * the source and has not got it.
      *
-     * @param array{path: string, id: string, attempts: int, report: array<string, mixed>, bundle: ?string} $item
-     * @param list<string> $wanted
-     * @param array<string, mixed> $result
+     * @param  array{path: string, id: string, attempts: int, report: array<string, mixed>, bundle: ?string}  $item
+     * @param  list<string>  $wanted
+     * @param  array<string, mixed>  $result
      */
     private function deliverBundle(array $item, array $wanted, array &$result): bool
     {
-        if ($item['bundle'] === null || !in_array($item['id'], $wanted, true)) {
+        if ($item['bundle'] === null || ! in_array($item['id'], $wanted, true)) {
             return true;
         }
 
-        if (!$this->uploadBundle($item['id'], $item['bundle'])) {
+        if (! $this->uploadBundle($item['id'], $item['bundle'])) {
             $result['bundles_failed']++;
 
             return false;
@@ -404,7 +408,7 @@ class TelemetryShipper
      * The spool decides: it counts attempts and stops at its own limit, so a
      * report that can never be delivered does not sit in the outbox forever.
      *
-     * @param array<string, mixed> $result
+     * @param  array<string, mixed>  $result
      */
     private function retryOrDrop(Spool $spool, string $path, array &$result): void
     {
@@ -426,12 +430,12 @@ class TelemetryShipper
      */
     private function uploadBundle(string $reportId, string $bundlePath): bool
     {
-        if (!is_file($bundlePath)) {
+        if (! is_file($bundlePath)) {
             return true; // nothing to send; do not hold the report for it
         }
 
         $endpoint = rtrim(Telemetry::endpoint(), '/')
-            . '/' . rawurlencode($reportId) . '/source';
+            .'/'.rawurlencode($reportId).'/source';
 
         $handle = @fopen($bundlePath, 'rb');
         if ($handle === false) {
@@ -440,15 +444,15 @@ class TelemetryShipper
 
         try {
             $response = Http::withHeaders([
-                    'Content-Type' => 'application/zip',
-                    'User-Agent' => $this->userAgent(),
-                    'Content-Length' => (string) filesize($bundlePath),
-                ] + PanelAlpha::identityHeaders())
+                'Content-Type' => 'application/zip',
+                'User-Agent' => $this->userAgent(),
+                'Content-Length' => (string) filesize($bundlePath),
+            ] + PanelAlpha::identityHeaders())
                 ->timeout((int) config('telemetry.source_bundle.upload_timeout', 120))
                 ->withBody($handle, 'application/zip')
                 ->post($endpoint);
         } catch (\Throwable $e) {
-            Log::debug("Telemetry source bundle upload failed for {$reportId}: " . $e->getMessage());
+            Log::debug("Telemetry source bundle upload failed for {$reportId}: ".$e->getMessage());
 
             return false;
         } finally {
@@ -474,8 +478,8 @@ class TelemetryShipper
     }
 
     /**
-     * @param list<array{path: string, id: string, attempts: int, report: array<string, mixed>}> $items
-     * @param array<string, mixed> $result
+     * @param  list<array{path: string, id: string, attempts: int, report: array<string, mixed>}>  $items
+     * @param  array<string, mixed>  $result
      */
     private function keep(Spool $spool, array $items, array &$result): void
     {
@@ -493,8 +497,8 @@ class TelemetryShipper
      * would lose every report it has inside a couple of hours, which is
      * exactly when the operator most wants them.
      *
-     * @param list<array{path: string, id: string, attempts: int, report: array<string, mixed>, bundle: ?string}> $items
-     * @param array<string, mixed> $result
+     * @param  list<array{path: string, id: string, attempts: int, report: array<string, mixed>, bundle: ?string}>  $items
+     * @param  array<string, mixed>  $result
      */
     private function defer(Spool $spool, array $items, array &$result): void
     {
@@ -525,6 +529,6 @@ class TelemetryShipper
     {
         $token = trim((string) config('telemetry.token', ''));
 
-        return $token === '' ? [] : ['Authorization' => 'Bearer ' . $token];
+        return $token === '' ? [] : ['Authorization' => 'Bearer '.$token];
     }
 }

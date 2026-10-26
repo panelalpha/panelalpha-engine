@@ -26,14 +26,14 @@ class ApiAccessDenyCommand extends Command
             return 1;
         }
 
-        if (!(new ApiAccess())->deny($username)) {
+        if (! (new ApiAccess)->deny($username)) {
             $this->line("{$username} was not allowed to use the Engine API; nothing changed.");
 
             return 0;
         }
 
         $this->info("Denied {$username} the Engine API: its token is revoked, its firewall rule is gone, and "
-            . 'the URL, token and certificate are taken out of the application now.');
+            .'the URL, token and certificate are taken out of the application now.');
 
         return 0;
     }

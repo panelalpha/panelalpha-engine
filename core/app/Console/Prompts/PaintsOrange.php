@@ -47,6 +47,6 @@ trait PaintsOrange
     /** The method `box()` looks for when asked for an orange frame. */
     public function orange(string $text): string
     {
-        return self::ORANGE . $text . "\e[39m";
+        return self::ORANGE.$text."\e[39m";
     }
 }

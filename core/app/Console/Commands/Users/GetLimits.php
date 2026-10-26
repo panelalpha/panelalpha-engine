@@ -2,10 +2,10 @@
 
 namespace App\Console\Commands\Users;
 
-use App\Lib\Limits\ResourceLimit;
-use App\Models\User;
 use App\Console\Commands\Concerns\ProjectOptions;
 use App\Console\Commands\Concerns\SelectsProjects;
+use App\Lib\Limits\ResourceLimit;
+use App\Models\User;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Collection;
 
@@ -16,7 +16,7 @@ class GetLimits extends Command
     /** Older spellings still answer, so nothing scripted against them breaks. */
     protected $aliases = ['projects:get-limits', 'users:get-limits'];
 
-    protected $signature = 'project:limit:get' . ProjectOptions::SIGNATURE;
+    protected $signature = 'project:limit:get'.ProjectOptions::SIGNATURE;
 
     protected $description = 'Show a project\'s resource limits (disk, memory, CPU, bandwidth, inodes, per-feature counts)';
 
@@ -28,7 +28,7 @@ class GetLimits extends Command
     }
 
     /**
-     * @param array<User>|Collection<int, User> $users
+     * @param  array<User>|Collection<int, User>  $users
      */
     private function getLimits($users): int
     {
@@ -38,9 +38,9 @@ class GetLimits extends Command
                 $value = $user->limit($limit);
                 // A limit that cannot be removed reads back as the default when it is unset.
                 $text = $limit->alwaysApplies && ($value === null || $value <= 0)
-                    ? 'not set, runs with the default (' . $limit->format($user->effectiveLimit($limit)) . ')'
+                    ? 'not set, runs with the default ('.$limit->format($user->effectiveLimit($limit)).')'
                     : $limit->format($value);
-                $this->info('  ' . self::label($limit->key) . $text);
+                $this->info('  '.self::label($limit->key).$text);
             }
         }
 
@@ -56,6 +56,6 @@ class GetLimits extends Command
     {
         $width = $key === 'inodes_limit' ? 17 : 18;
 
-        return str_pad($key . ':', max($width, strlen($key) + 2));
+        return str_pad($key.':', max($width, strlen($key) + 2));
     }
 }

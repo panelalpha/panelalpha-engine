@@ -2,10 +2,10 @@
 
 namespace App\Exceptions;
 
+use App\Jobs\ApplyEnvVars;
 use App\Jobs\CreateBackup;
 use App\Jobs\CreateStaging;
 use App\Jobs\DeleteBackup;
-use App\Jobs\ApplyEnvVars;
 use App\Jobs\DeployProject;
 use App\Jobs\PushState;
 use App\Jobs\RebuildProject;
@@ -34,9 +34,9 @@ class ProjectBusyException extends \RuntimeException
 
     public static function taskRunning(string $project, Task $task): self
     {
-        $state = "Project '{$project}' is busy: " . self::kind($task) . " task {$task->id} is " . self::progress($task) . '.';
+        $state = "Project '{$project}' is busy: ".self::kind($task)." task {$task->id} is ".self::progress($task).'.';
 
-        if (!self::canBeCancelled($task)) {
+        if (! self::canBeCancelled($task)) {
             return new self($state, self::WAIT, self::WAIT);
         }
 
@@ -51,7 +51,7 @@ class ProjectBusyException extends \RuntimeException
     public static function taskStopping(string $project, Task $task): self
     {
         return new self(
-            "Project '{$project}' is busy: " . self::kind($task) . " task {$task->id} was cancelled and is still stopping.",
+            "Project '{$project}' is busy: ".self::kind($task)." task {$task->id} was cancelled and is still stopping.",
             self::WAIT,
             self::WAIT,
         );
@@ -88,7 +88,7 @@ class ProjectBusyException extends \RuntimeException
      */
     private static function canBeCancelled(Task $task): bool
     {
-        return !($task->status === Task::STATUS_RUNNING && !$task->isDeploy() && $task->pid === null);
+        return ! ($task->status === Task::STATUS_RUNNING && ! $task->isDeploy() && $task->pid === null);
     }
 
     private static function progress(Task $task): string

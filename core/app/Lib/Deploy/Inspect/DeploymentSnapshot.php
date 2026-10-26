@@ -21,7 +21,7 @@ final class DeploymentSnapshot
     ];
 
     /**
-     * @param array<string, mixed> $details the account's details
+     * @param  array<string, mixed>  $details  the account's details
      * @return array<string, mixed>
      */
     public static function describe(array $details): array
@@ -50,9 +50,9 @@ final class DeploymentSnapshot
      * Where the deployed snapshot and the current files disagree. Silent when the
      * account has never deployed: everything differs from nothing.
      *
-     * @param array<string, mixed> $details the account's details
-     * @param array<string, mixed> $report what AppInspector just found
-     * @param ?string $commit the commit the project directory is on now
+     * @param  array<string, mixed>  $details  the account's details
+     * @param  array<string, mixed>  $report  what AppInspector just found
+     * @param  ?string  $commit  the commit the project directory is on now
      * @return list<array{field: string, deployed: mixed, detected: mixed}>
      */
     public static function drift(array $details, array $report, ?string $commit = null): array
@@ -82,14 +82,14 @@ final class DeploymentSnapshot
     }
 
     /**
-     * @param array<string, mixed> $report
-     * @param list<string> $path
+     * @param  array<string, mixed>  $report
+     * @param  list<string>  $path
      */
     private static function dig(array $report, array $path): mixed
     {
         $value = $report;
         foreach ($path as $key) {
-            if (!is_array($value) || !array_key_exists($key, $value)) {
+            if (! is_array($value) || ! array_key_exists($key, $value)) {
                 return null;
             }
             $value = $value[$key];
@@ -106,7 +106,7 @@ final class DeploymentSnapshot
 
     private static function stringOrNull(mixed $value): ?string
     {
-        if (!is_string($value)) {
+        if (! is_string($value)) {
             return null;
         }
         $value = trim($value);

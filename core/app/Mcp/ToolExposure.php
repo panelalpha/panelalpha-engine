@@ -100,7 +100,7 @@ class ToolExposure
      * absence, and a partial one whichever is shorter — group plus exceptions,
      * or its tools one by one. Ceiling and regex denylist pass through.
      *
-     * @param array<int, string> $names
+     * @param  array<int, string>  $names
      */
     public function selecting(array $names): self
     {

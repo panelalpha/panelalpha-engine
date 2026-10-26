@@ -21,7 +21,7 @@ final class RuntimeSettings
             'pm.max_spare_servers' => '3',
             'pm.max_requests' => '0',
         ];
-        if (empty($raw) || !is_string($raw)) {
+        if (empty($raw) || ! is_string($raw)) {
             return $default;
         }
 
@@ -51,7 +51,7 @@ final class RuntimeSettings
             'PHP_LSAPI_CHILDREN' => '35',
             'PHP_LSAPI_MAX_REQUESTS' => '5000',
         ];
-        if (empty($raw) || !is_string($raw)) {
+        if (empty($raw) || ! is_string($raw)) {
             return $default;
         }
 
@@ -88,7 +88,7 @@ final class RuntimeSettings
             'lfu-log-factor' => '10',
             'lfu-decay-time' => '1',
         ];
-        if (empty($raw) || !is_string($raw)) {
+        if (empty($raw) || ! is_string($raw)) {
             return $default;
         }
 
@@ -121,7 +121,7 @@ final class RuntimeSettings
 
         $validated = $default;
         foreach ($allowedKeys as $key) {
-            if (!array_key_exists($key, $parsed)) {
+            if (! array_key_exists($key, $parsed)) {
                 continue;
             }
             $value = $parsed[$key];
@@ -129,18 +129,21 @@ final class RuntimeSettings
                 if (in_array($value, $allowedMaxmemoryPolicies)) {
                     $validated[$key] = $value;
                 }
+
                 continue;
             }
             if (in_array($key, ['hz', 'timeout', 'maxmemory-samples', 'lfu-decay-time', 'lfu-log-factor'])) {
                 if (filter_var($value, FILTER_VALIDATE_INT) !== false) {
                     $validated[$key] = $value;
                 }
+
                 continue;
             }
             if (in_array($key, ['lazyfree-lazy-eviction', 'lazyfree-lazy-expire', 'activedefrag'])) {
                 if (in_array($value, ['yes', 'no'])) {
                     $validated[$key] = $value;
                 }
+
                 continue;
             }
             $validated[$key] = $value;

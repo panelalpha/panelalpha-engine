@@ -57,11 +57,11 @@ class SidecarEngine
      * *allowed* to be an engine — an image nobody has heard of resolves to
      * its own name and is configured under it.
      *
-     * @param array<string, mixed> $service the Compose service definition
-     * @param list<int> $observedPorts ports the image declares, from
-     *        `docker image inspect`; empty when the caller could not ask
+     * @param  array<string, mixed>  $service  the Compose service definition
+     * @param  list<int>  $observedPorts  ports the image declares, from
+     *                                    `docker image inspect`; empty when the caller could not ask
      * @return string|null the engine name, or null when the service offers no
-     *         evidence at all of being one
+     *                     evidence at all of being one
      */
     public static function resolve(string $name, array $service, array $observedPorts = []): ?string
     {
@@ -132,7 +132,7 @@ class SidecarEngine
     }
 
     /**
-     * @param array<string, string> $environment already-resolved env of the service
+     * @param  array<string, string>  $environment  already-resolved env of the service
      * @return array{prefix: ?string, username: ?string, password: ?string, database: ?string}
      */
     public static function credentials(array $environment): array
@@ -141,8 +141,8 @@ class SidecarEngine
     }
 
     /**
-     * @param array<string, mixed> $service
-     * @param list<int> $observedPorts
+     * @param  array<string, mixed>  $service
+     * @param  list<int>  $observedPorts
      */
     public static function isKnownDatastore(string $name, array $service, array $observedPorts = []): bool
     {
@@ -150,9 +150,9 @@ class SidecarEngine
     }
 
     /**
-     * @param array<string, mixed> $service
-     * @param list<int> $observedPorts
-     * @param array<string, mixed> $siblings
+     * @param  array<string, mixed>  $service
+     * @param  list<int>  $observedPorts
+     * @param  array<string, mixed>  $siblings
      */
     public static function isBackingService(
         string $name,
@@ -165,8 +165,8 @@ class SidecarEngine
     }
 
     /**
-     * @param array<string, mixed> $service
-     * @param array<string, mixed> $siblings
+     * @param  array<string, mixed>  $service
+     * @param  array<string, mixed>  $siblings
      */
     public static function looksLikeTheApplication(
         string $name,
@@ -183,7 +183,7 @@ class SidecarEngine
     }
 
     /**
-     * @param array<string, mixed> $services
+     * @param  array<string, mixed>  $services
      */
     public static function servicesProvide(array $services, string $engine): bool
     {
@@ -196,8 +196,8 @@ class SidecarEngine
     }
 
     /**
-     * @param array<string, mixed> $service
-     * @param list<int> $observedPorts
+     * @param  array<string, mixed>  $service
+     * @param  list<int>  $observedPorts
      * @return list<int>
      */
     public static function allPorts(array $service, array $observedPorts = []): array
@@ -208,7 +208,7 @@ class SidecarEngine
     /**
      * The engine names the evidence suggests, strongest first.
      *
-     * @param list<int> $observedPorts
+     * @param  list<int>  $observedPorts
      * @return list<string>
      */
     private static function candidates(ComposeService $service, array $observedPorts): array
@@ -225,7 +225,7 @@ class SidecarEngine
     private static function fromImage(ComposeService $service): ?string
     {
         $family = $service->imageFamily();
-        $informative = $family !== '' && !in_array($family, self::UNOPINIONATED_BASE_IMAGES, true);
+        $informative = $family !== '' && ! in_array($family, self::UNOPINIONATED_BASE_IMAGES, true);
 
         return $informative ? SidecarDialects::canonical($family) : null;
     }
@@ -244,7 +244,7 @@ class SidecarEngine
             return null;
         }
         foreach (CredentialNames::serverPrefixes($keys) as $prefix) {
-            if (!CredentialNames::isClientPrefix($prefix, $keys)) {
+            if (! CredentialNames::isClientPrefix($prefix, $keys)) {
                 return SidecarDialects::canonical($prefix);
             }
         }
@@ -258,7 +258,7 @@ class SidecarEngine
      * its image name; matching those ports the other way round would claim
      * every application that happens to serve on 9000.
      *
-     * @param list<int> $ports
+     * @param  list<int>  $ports
      */
     private static function fromPorts(array $ports): ?string
     {

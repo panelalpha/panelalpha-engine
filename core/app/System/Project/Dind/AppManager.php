@@ -19,8 +19,7 @@ class AppManager
 
     public function __construct(
         private DindProject $dind,
-    ) {
-    }
+    ) {}
 
     /**
      * @return array<int, array{id: string, username: string, email: string, role: string}>
@@ -87,7 +86,7 @@ class AppManager
 
     private function scriptPath(): string
     {
-        return $this->dind->userAppDirPath() . '/' . AppConfig::APP_SCRIPT;
+        return $this->dind->userAppDirPath().'/'.AppConfig::APP_SCRIPT;
     }
 
     /**
@@ -100,7 +99,7 @@ class AppManager
     {
         $env = [];
         foreach ($this->dind->userAppComposeEnv() as $name => $value) {
-            $env[] = $name . '=' . $value;
+            $env[] = $name.'='.$value;
         }
 
         return ['env', ...$env, 'bash', $this->scriptPath(), ...$args];
@@ -127,13 +126,13 @@ class AppManager
     /**
      * Runs the script, installing it or the file snippets and running it again when either is missing.
      *
-     * @param list<string> $command
+     * @param  list<string>  $command
      */
     private function runRecovering(string $scriptPath, ShellOperations $shell, array $command): Process
     {
         $process = $shell->runProcessAsUser($command);
 
-        if (self::failedWith($process, $scriptPath . ': no such file')) {
+        if (self::failedWith($process, $scriptPath.': no such file')) {
             $this->installScript($scriptPath);
             $process = $shell->runProcessAsUser($command);
         }
@@ -195,7 +194,7 @@ class AppManager
     /** Refuse a `users:*`, `install` or `roles:list` command the script's `info` does not list. */
     private function refuseUnsupported(string $command): void
     {
-        if (!str_starts_with($command, 'users:') && $command !== 'install' && $command !== 'roles:list') {
+        if (! str_starts_with($command, 'users:') && $command !== 'install' && $command !== 'roles:list') {
             return;
         }
 
@@ -206,7 +205,7 @@ class AppManager
 
         throw new \Exception(
             "The application does not support the '{$command}' command. Its app script lists: "
-            . implode(', ', $advertised) . '.'
+            .implode(', ', $advertised).'.'
         );
     }
 

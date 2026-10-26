@@ -2,9 +2,9 @@
 
 namespace App\Lib\Ssl;
 
-use App\System\Project\Dind;
 use App\Models\Domain;
 use App\Models\User;
+use App\System\Project\Dind;
 use RuntimeException;
 
 /**
@@ -24,12 +24,13 @@ final class ProjectCertificate
      * Request, install and report. The array is the same shape
      * {@see CertificateStatus} returns everywhere else.
      *
-     * @throws RuntimeException when the name is one no authority will issue
-     *         for; the caller turns that into its own kind of refusal
-     * @throws \Throwable when the authority declined — the site keeps the
-     *         certificate it already had
      *
      * @return array<string, mixed>
+     *
+     * @throws RuntimeException when the name is one no authority will issue
+     *                          for; the caller turns that into its own kind of refusal
+     * @throws \Throwable when the authority declined — the site keeps the
+     *                    certificate it already had
      */
     public static function request(Domain $domain, bool $staging = false): array
     {

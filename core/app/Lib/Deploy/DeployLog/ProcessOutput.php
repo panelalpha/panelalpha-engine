@@ -21,7 +21,7 @@ final class ProcessOutput
      */
     public function consume(string $type, string $data): array
     {
-        $lines = explode("\n", ($this->partial[$type] ?? '') . $data);
+        $lines = explode("\n", ($this->partial[$type] ?? '').$data);
         $this->partial[$type] = array_pop($lines);
 
         return $this->keepInteresting($lines);
@@ -39,7 +39,7 @@ final class ProcessOutput
     }
 
     /**
-     * @param list<string> $lines
+     * @param  list<string>  $lines
      * @return list<string>
      */
     private function keepInteresting(array $lines): array
@@ -60,6 +60,6 @@ final class ProcessOutput
     {
         return $line !== ''
             && $line !== $this->lastLine
-            && !DeployLogFilter::shouldSkip($line);
+            && ! DeployLogFilter::shouldSkip($line);
     }
 }

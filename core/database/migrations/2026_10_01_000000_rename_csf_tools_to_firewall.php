@@ -1,7 +1,7 @@
 <?php
 
-use App\System\Firewall\CsfRenames;
 use App\Support\EnvFile;
+use App\System\Firewall\CsfRenames;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
 
@@ -21,7 +21,7 @@ return new class extends Migration
         DB::table('personal_access_tokens')->whereNotNull('abilities')->orderBy('id')
             ->each(function (object $token): void {
                 $abilities = json_decode((string) $token->abilities, true);
-                if (!is_array($abilities)) {
+                if (! is_array($abilities)) {
                     return;
                 }
                 $renamed = array_map(static fn (mixed $a): mixed => is_string($a) ? CsfRenames::ability($a) : $a, $abilities);
@@ -34,7 +34,7 @@ return new class extends Migration
         // Only the file the engine boots from: anywhere else (a test run) it
         // is not the operator's configuration.
         $env = EnvFile::current();
-        if (!$env->isCoreMount() || $env->suspicious() !== null) {
+        if (! $env->isCoreMount() || $env->suspicious() !== null) {
             return;
         }
         $changes = [];

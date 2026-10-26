@@ -28,28 +28,26 @@ final class S6ServiceManager implements ServiceManager
         'ALRM' => '-a', 'USR1' => '-1', 'USR2' => '-2',
     ];
 
-    public function __construct(private readonly Dind $project)
-    {
-    }
+    public function __construct(private readonly Dind $project) {}
 
     /** Whether the account was rendered from the s6 template. */
     public static function manages(Dind $project): bool
     {
         return $project->system()->filesystem()->directoryExists(
-            $project->projectDirPath() . '/' . self::SERVICES_DIR
+            $project->projectDirPath().'/'.self::SERVICES_DIR
         );
     }
 
     public function configure(string $service, bool $enabled, array $env = []): void
     {
         $system = $this->project->system();
-        $dir = $this->project->projectDirPath() . '/' . self::SERVICES_DIR . '/' . self::name($service);
+        $dir = $this->project->projectDirPath().'/'.self::SERVICES_DIR.'/'.self::name($service);
 
-        $this->recreateEmptyEnvDir($dir . '/env');
+        $this->recreateEmptyEnvDir($dir.'/env');
         foreach ($env as $name => $value) {
-            $system->filesystem()->filePutContents($dir . '/env/' . self::name($name), $value . "\n", null, '600');
+            $system->filesystem()->filePutContents($dir.'/env/'.self::name($name), $value."\n", null, '600');
         }
-        $system->exec($enabled ? ['sudo', 'rm', '-f', $dir . '/down'] : ['sudo', 'touch', $dir . '/down']);
+        $system->exec($enabled ? ['sudo', 'rm', '-f', $dir.'/down'] : ['sudo', 'touch', $dir.'/down']);
     }
 
     /** s6-envdir needs the dir even when there are no variables. */
@@ -74,7 +72,7 @@ final class S6ServiceManager implements ServiceManager
     public static function applyArgv(string $service): array
     {
         $name = self::name($service);
-        $src = self::SOURCE_DIR . '/' . $name;
+        $src = self::SOURCE_DIR.'/'.$name;
         $dst = self::scanDirOf($name);
         $scan = self::SCAN_DIR;
 
@@ -118,7 +116,7 @@ final class S6ServiceManager implements ServiceManager
 
     private static function scanDirOf(string $service): string
     {
-        return self::SCAN_DIR . '/' . self::name($service);
+        return self::SCAN_DIR.'/'.self::name($service);
     }
 
     /** Service and variable names go into paths and shell text unquoted. */

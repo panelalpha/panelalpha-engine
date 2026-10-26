@@ -12,8 +12,7 @@ final class LiteSpeedStack implements PhpStack
     public function __construct(
         private ProcessRunner $system,
         private ModelsUser $model,
-    ) {
-    }
+    ) {}
 
     public function dockerfileTemplateName(): string
     {
@@ -27,7 +26,7 @@ final class LiteSpeedStack implements PhpStack
 
     public function applySettings(PhpHosting $project): void
     {
-        (new EnvironmentSetup())->applyRedisSettings($project);
+        (new EnvironmentSetup)->applyRedisSettings($project);
     }
 
     public function entrypointInitScripts(PhpHosting $project): array
@@ -40,9 +39,7 @@ final class LiteSpeedStack implements PhpStack
         return $this->phpServices();
     }
 
-    public function waitForAllRunning(PhpHosting $project, int $tries = 12, int $intervalSeconds = 5): void
-    {
-    }
+    public function waitForAllRunning(PhpHosting $project, int $tries = 12, int $intervalSeconds = 5): void {}
 
     public function restartPhpHandler(PhpHosting $project, string $phpVersion): void
     {
@@ -65,7 +62,7 @@ final class LiteSpeedStack implements PhpStack
             if ($ver === null) {
                 continue;
             }
-            if (!in_array($ver, $usedPhpVersions, true)) {
+            if (! in_array($ver, $usedPhpVersions, true)) {
                 $usedPhpVersions[] = $ver;
             }
         }

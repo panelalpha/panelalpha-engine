@@ -29,16 +29,16 @@ final class NodeStartCommandExplainer implements Explainer
         if ($start === null) {
             return [
                 'fix' => 'Build the project and start it with the production command '
-                    . '(`next start`, `vite preview`, `node dist/server.js`) rather than its dev script.',
+                    .'(`next start`, `vite preview`, `node dist/server.js`) rather than its dev script.',
             ];
         }
 
         $build = is_array($scripts) && is_string($scripts['build'] ?? null) ? trim($scripts['build']) : null;
 
         return [
-            'detail' => 'package.json starts this project with `' . $start . '`.',
+            'detail' => 'package.json starts this project with `'.$start.'`.',
             'fix' => $build !== null
-                ? 'Point the start stage at the production server; this project already builds with `' . $build . '`.'
+                ? 'Point the start stage at the production server; this project already builds with `'.$build.'`.'
                 : 'Point the start stage at a production server rather than the dev one.',
         ];
     }

@@ -2,6 +2,7 @@
 
 namespace App\Lib\Task;
 
+use App\Lib\Deploy\DeployLog\DeployLogArchive;
 use App\Models\Task;
 use App\Models\TaskLog;
 use Illuminate\Database\Eloquent\Builder;
@@ -10,7 +11,7 @@ use InvalidArgumentException;
 /**
  * Retention for Task handles and their poll-buffer lines.
  *
- * The file deploy log is the archive ({@see \App\Lib\Deploy\DeployLog\DeployLogArchive}).
+ * The file deploy log is the archive ({@see DeployLogArchive}).
  * This keeps a bounded set of terminal Tasks so GET /tasks/{id} still answers
  * for recent jobs, and drops `dim` (subprocess spam) once the job is finished.
  */
@@ -39,7 +40,7 @@ final class TaskPruner
         self::assertPositive('max-lines', $maxLines);
 
         $oldIds = self::oldTaskIds($username, $keepDeploy, $keepOther);
-        if (!$dryRun && $oldIds !== []) {
+        if (! $dryRun && $oldIds !== []) {
             foreach (array_chunk($oldIds, 100) as $chunk) {
                 Task::query()->whereIn('id', $chunk)->delete();
             }
@@ -64,7 +65,7 @@ final class TaskPruner
     {
         self::assertPositive('max-lines', $maxLines);
 
-        if (!$task->isTerminal()) {
+        if (! $task->isTerminal()) {
             return 0;
         }
 
@@ -199,13 +200,13 @@ final class TaskPruner
         // A failed deploy's copied tail stays: its deploy log is gone.
         return is_array($decoded)
             && ($decoded['level'] ?? null) === self::DIM_LEVEL
-            && !DeployLogTail::isKept($decoded);
+            && ! DeployLogTail::isKept($decoded);
     }
 
     private static function assertPositive(string $name, int $value): void
     {
         if ($value < 1) {
-            throw new InvalidArgumentException($name . ' must be >= 1');
+            throw new InvalidArgumentException($name.' must be >= 1');
         }
     }
 }

@@ -44,10 +44,10 @@ return new class extends Migration
 
             $hostname = strtolower((string) $domain->domain);
             $tunnelDetails = [];
-            if (!empty($details['cloudflare_zone_id']) && is_string($details['cloudflare_zone_id'])) {
+            if (! empty($details['cloudflare_zone_id']) && is_string($details['cloudflare_zone_id'])) {
                 $tunnelDetails['cloudflare_zone_id'] = $details['cloudflare_zone_id'];
             }
-            if (!empty($details['cloudflare_dns_record_id']) && is_string($details['cloudflare_dns_record_id'])) {
+            if (! empty($details['cloudflare_dns_record_id']) && is_string($details['cloudflare_dns_record_id'])) {
                 $tunnelDetails['cloudflare_dns_record_id'] = $details['cloudflare_dns_record_id'];
             }
 
@@ -100,10 +100,10 @@ return new class extends Migration
                         $tunnelDetails = $decoded;
                     }
                 }
-                if (!empty($tunnelDetails['cloudflare_zone_id'])) {
+                if (! empty($tunnelDetails['cloudflare_zone_id'])) {
                     $details['cloudflare_zone_id'] = $tunnelDetails['cloudflare_zone_id'];
                 }
-                if (!empty($tunnelDetails['cloudflare_dns_record_id'])) {
+                if (! empty($tunnelDetails['cloudflare_dns_record_id'])) {
                     $details['cloudflare_dns_record_id'] = $tunnelDetails['cloudflare_dns_record_id'];
                 }
 

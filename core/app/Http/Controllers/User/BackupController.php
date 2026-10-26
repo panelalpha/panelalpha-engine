@@ -90,7 +90,7 @@ class BackupController extends Controller
         $this->assertIdle($user);
 
         $contents = $request->contents();
-        if (!$contents['files'] && !$contents['databases']) {
+        if (! $contents['files'] && ! $contents['databases']) {
             throw ProblemException::one('files', 'nothing_to_back_up', 'Choose files or databases to back up.');
         }
 
@@ -162,7 +162,7 @@ class BackupController extends Controller
         responses: [
             new OA\Response(response: 202, description: 'Restore accepted', content: new OA\JsonContent(ref: '#/components/schemas/Backup')),
             new OA\Response(response: 404, description: 'Not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: 'Backup is not completed. ' . ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
+            new OA\Response(response: 409, description: 'Backup is not completed. '.ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
@@ -279,7 +279,7 @@ class BackupController extends Controller
 
         $storage = $backup->container->storage();
         $remotePath = (string) $backupItem->remote_path;
-        $filename = $username . '-backup-' . $backup->id . '-' . basename($remotePath);
+        $filename = $username.'-backup-'.$backup->id.'-'.basename($remotePath);
         if ($storage instanceof Local) {
             $response = response()->download($storage->path($remotePath), $filename);
             $response->headers->set('Content-Type', 'application/gzip');

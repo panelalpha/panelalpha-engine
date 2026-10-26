@@ -46,28 +46,33 @@ class DomainsDeleteTunnel extends Command
         $optionHostname = strtolower(trim((string) ($this->option('hostname') ?? '')));
         if ($positional !== '' && $optionHostname !== '' && $positional !== $optionHostname) {
             $this->error("Conflicting hostnames: argument '{$positional}' vs --hostname='{$optionHostname}'.");
+
             return 1;
         }
         $hostname = $positional !== '' ? $positional : $optionHostname;
 
         if ($project === '') {
             $this->error('--project is required.');
+
             return 1;
         }
         if ($hostname === '') {
             $this->error('Tunnel hostname is required (positional argument or --hostname).');
+
             return 1;
         }
 
         $user = User::findByUsername($project);
-        if (!$user) {
+        if (! $user) {
             $this->error("Project '{$project}' not found.");
+
             return 1;
         }
 
         $tunnel = Tunnel::findByHostname($hostname);
-        if (!$tunnel || (int) $tunnel->user_id !== (int) $user->id) {
+        if (! $tunnel || (int) $tunnel->user_id !== (int) $user->id) {
             $this->error("Tunnel '{$hostname}' not found for project '{$project}'.");
+
             return 1;
         }
 
@@ -75,8 +80,9 @@ class DomainsDeleteTunnel extends Command
         $domain = $tunnel->domain;
         if ($domainOpt !== '') {
             $filter = Domain::findByNameOrAlias($domainOpt);
-            if (!$filter || (int) $filter->id !== (int) $tunnel->domain_id) {
+            if (! $filter || (int) $filter->id !== (int) $tunnel->domain_id) {
                 $this->error("Tunnel '{$hostname}' is not attached to domain '{$domainOpt}'.");
+
                 return 1;
             }
         }
@@ -98,18 +104,21 @@ class DomainsDeleteTunnel extends Command
             );
         }
 
-        if (!$this->option('force') && !$this->confirm('Delete this tunnel?')) {
+        if (! $this->option('force') && ! $this->confirm('Delete this tunnel?')) {
             $this->info('Cancelled.');
+
             return 0;
         }
 
         try {
             TunnelManager::removeTunnel($user, $tunnel);
-        } catch (CloudflareException | PanelAlphaException $e) {
+        } catch (CloudflareException|PanelAlphaException $e) {
             $this->error($e->getMessage());
+
             return 1;
         } catch (\Throwable $e) {
-            $this->error('Tunnel delete failed: ' . $e->getMessage());
+            $this->error('Tunnel delete failed: '.$e->getMessage());
+
             return 1;
         }
 

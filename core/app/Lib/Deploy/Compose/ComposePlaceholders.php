@@ -61,6 +61,7 @@ class ComposePlaceholders
      */
     private const PUBLISHED_SECRET_KEY_PATTERN =
         '/SECRET|SALT|PEPPER|SIGNING|ENCRYPTION|^(?=.*(APP_|JWT|SESSION|COOKIE)).*_KEY$/i';
+
     private const THIRD_PARTY_KEY_PATTERN = '/API_?KEY|PUBLIC_KEY|ACCESS_KEY|CLIENT_SECRET/i';
 
     /** Well-known repo placeholders (Planka's notsecretkey, Saleor's changeme). */
@@ -154,20 +155,20 @@ class ComposePlaceholders
     private const BLANK_URL_KEYS = ['URL', 'PUBLIC_URL', 'APP_URL', 'ASSET_URL', 'SITE_URL', 'ORIGIN', 'ROOT_URL'];
 
     /**
-     * @param array<string, mixed> $compose
-     * @param string $seed per-account secret the generated values derive from
+     * @param  array<string, mixed>  $compose
+     * @param  string  $seed  per-account secret the generated values derive from
+     * @param  array<string, string>  $accountEnv  the account's env_vars, which win over a generated value
      * @return array{
      *   compose: array<string, mixed>,
      *   secrets: list<string>,
      *   urls: list<string>,
      *   published: list<string>,
      * } the rewritten compose plus the env names touched, for the deploy log
-     * @param array<string, string> $accountEnv the account's env_vars, which win over a generated value
      */
     public static function fill(array $compose, string $seed, ?string $publicUrl = null, array $accountEnv = []): array
     {
         $services = $compose['services'] ?? null;
-        if (!is_array($services) || $services === []) {
+        if (! is_array($services) || $services === []) {
             return ['compose' => $compose, 'secrets' => [], 'urls' => [], 'published' => []];
         }
 
@@ -192,7 +193,7 @@ class ComposePlaceholders
         $publishedPorts = self::publishedPorts($services);
 
         foreach ($services as $name => $service) {
-            if (!is_array($service) || !isset($service['environment'])) {
+            if (! is_array($service) || ! isset($service['environment'])) {
                 continue;
             }
             $services[$name]['environment'] = self::rewriteEnvironment(
@@ -270,7 +271,7 @@ class ComposePlaceholders
         if (preg_match(self::REQUIRED_VAR_PATTERN, trim($value), $m) !== 1) {
             return null;
         }
-        if (!self::isSecretKey($m[1]) && !self::isSecretKey($key)) {
+        if (! self::isSecretKey($m[1]) && ! self::isSecretKey($key)) {
             return null;
         }
 
@@ -328,7 +329,7 @@ class ComposePlaceholders
     /** A required variable naming the app's own public address. */
     public static function isRequiredOwnUrlKey(string $key): bool
     {
-        return !self::isSecretKey($key) && preg_match(self::REQUIRED_OWN_URL_PATTERN, $key) === 1;
+        return ! self::isSecretKey($key) && preg_match(self::REQUIRED_OWN_URL_PATTERN, $key) === 1;
     }
 
     public static function isSecretKey(string $key): bool
@@ -424,7 +425,7 @@ class ComposePlaceholders
      */
     private const PLACEHOLDER_WORD_PATTERN =
         '/(^|_)(YOUR|YOURS|CHANGE|CHANGEME|REPLACE|TODO|FIXME|PLACEHOLDER|INSERT|ENTER|SOME)(_|$)'
-        . '|PATH_TO|_HERE$|^XXX/';
+        .'|PATH_TO|_HERE$|^XXX/';
 
     /**
      * Seeded by key name, so it survives redeploys; APP_KEY gets Laravel's format.
@@ -435,7 +436,7 @@ class ComposePlaceholders
     public static function publishedSecret(string $key, string $seed, string $placeholder = ''): string
     {
         if (strcasecmp($key, 'APP_KEY') === 0) {
-            return 'base64:' . base64_encode(hash_hmac('sha256', 'compose-placeholder:APP_KEY', $seed, true));
+            return 'base64:'.base64_encode(hash_hmac('sha256', 'compose-placeholder:APP_KEY', $seed, true));
         }
 
         $placeholder = trim(trim($placeholder), '"\'');
@@ -470,15 +471,15 @@ class ComposePlaceholders
      */
     public static function generatedSecret(string $token, string $seed): string
     {
-        return substr(hash_hmac('sha256', 'compose-placeholder:' . $token, $seed), 0, 48);
+        return substr(hash_hmac('sha256', 'compose-placeholder:'.$token, $seed), 0, 48);
     }
 
     /** Hex of exactly $length characters, starting with {@see generatedSecret()}. */
     private static function generatedSecretOfLength(string $token, string $seed, int $length): string
     {
-        $hex = hash_hmac('sha256', 'compose-placeholder:' . $token, $seed);
+        $hex = hash_hmac('sha256', 'compose-placeholder:'.$token, $seed);
         for ($block = 1; strlen($hex) < $length; $block++) {
-            $hex .= hash_hmac('sha256', 'compose-placeholder:' . $token . ':' . $block, $seed);
+            $hex .= hash_hmac('sha256', 'compose-placeholder:'.$token.':'.$block, $seed);
         }
 
         return substr($hex, 0, $length);
@@ -489,7 +490,7 @@ class ComposePlaceholders
     {
         $bytes = '';
         for ($block = 0; strlen($bytes) < $length; $block++) {
-            $bytes .= hash_hmac('sha256', 'compose-placeholder-bytes:' . $token . ':' . $block, $seed, true);
+            $bytes .= hash_hmac('sha256', 'compose-placeholder-bytes:'.$token.':'.$block, $seed, true);
         }
 
         return substr($bytes, 0, $length);
@@ -500,8 +501,8 @@ class ComposePlaceholders
      * value it gets everywhere: the account's own, else one from the seed.
      * A credential key vouches for its variable only as the key's whole value.
      *
-     * @param array<string, mixed> $compose
-     * @param array<string, string> $accountEnv
+     * @param  array<string, mixed>  $compose
+     * @param  array<string, string>  $accountEnv
      * @return array{0: array<string, string>, 1: list<string>, 2: list<string>} name => value, the names generated, the names given the public URL
      */
     private static function requiredVariables(array $compose, string $seed, array $accountEnv, ?string $publicUrl = null): array
@@ -517,6 +518,7 @@ class ComposePlaceholders
                 }
                 if ($publicUrl !== null && self::isRequiredOwnUrlKey($name)) {
                     $urls[$name] = true;
+
                     continue;
                 }
                 if (self::isSecretKey($name) || (self::isSecretKey($key) && trim($value) === $ref[0])) {
@@ -538,6 +540,7 @@ class ComposePlaceholders
             $own = (string) ($accountEnv[$name] ?? '');
             if ($own !== '') {
                 $values[$name] = self::composeLiteral($own);
+
                 continue;
             }
             $values[$name] = self::requiredSecretValue($name, $seed, $length, $base64Bytes);
@@ -560,8 +563,8 @@ class ComposePlaceholders
      * Resolve every reference to the given variables as Compose would with
      * them set: `${VAR:+alt}` answers alt, every other form answers the value.
      *
-     * @param array<string, mixed> $compose
-     * @param array<string, string> $values
+     * @param  array<string, mixed>  $compose
+     * @param  array<string, string>  $values
      * @return array<string, mixed>
      */
     private static function withRequiredVariables(array $compose, array $values): array
@@ -570,7 +573,7 @@ class ComposePlaceholders
             self::REFERENCE_PATTERN,
             static function (array $m) use ($values): string {
                 $name = $m[1] ?? '';
-                if ($name === '' || !isset($values[$name])) {
+                if ($name === '' || ! isset($values[$name])) {
                     return $m[0];
                 }
                 $modifier = $m[2] ?? '';
@@ -587,18 +590,18 @@ class ComposePlaceholders
      * Every string scalar in a compose document, with the key it sits under
      * (a list entry `KEY=value` counts as KEY); map keys are never touched.
      *
-     * @param callable(string, string): string $rewrite
+     * @param  callable(string, string): string  $rewrite
      */
     private static function walkStrings(mixed $node, callable $rewrite, string $key = ''): mixed
     {
         if (is_string($node)) {
             if (preg_match('/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s', $node, $m) === 1) {
-                return $m[1] . '=' . $rewrite($m[1], $m[2]);
+                return $m[1].'='.$rewrite($m[1], $m[2]);
             }
 
             return $rewrite($key, $node);
         }
-        if (!is_array($node)) {
+        if (! is_array($node)) {
             return $node;
         }
         foreach ($node as $k => $child) {
@@ -615,20 +618,20 @@ class ComposePlaceholders
     }
 
     /**
-     * @param array<string, mixed> $services
+     * @param  array<string, mixed>  $services
      * @return array<string, true> placeholder text => seen
      */
     private static function collectPlaceholders(array $services): array
     {
         $tokens = [];
         foreach ($services as $service) {
-            if (!is_array($service) || !isset($service['environment'])) {
+            if (! is_array($service) || ! isset($service['environment'])) {
                 continue;
             }
             self::rewriteEnvironment(
                 $service['environment'],
                 static function (string $key, string $value) use (&$tokens): string {
-                    if (!self::isSecretKey($key)) {
+                    if (! self::isSecretKey($key)) {
                         // A credential hidden in a connection string still
                         // counts: DATABASE_URL is not a "password" key.
                         $embedded = self::embeddedPassword($value);
@@ -656,7 +659,7 @@ class ComposePlaceholders
     {
         return (string) preg_replace_callback(
             '#^(\s*[a-z][a-z0-9+.-]*://[^/@\s:]+:)[^/@\s]+@#i',
-            static fn (array $m): string => $m[1] . $password . '@',
+            static fn (array $m): string => $m[1].$password.'@',
             $value,
             1
         );
@@ -675,7 +678,7 @@ class ComposePlaceholders
     }
 
     /**
-     * @param array<string, string> $replacements
+     * @param  array<string, string>  $replacements
      */
     private static function applyReplacements(string $key, string $value, array $replacements): string
     {
@@ -704,7 +707,7 @@ class ComposePlaceholders
     }
 
     /**
-     * @param array<int, true> $publishedPorts
+     * @param  array<int, true>  $publishedPorts
      */
     private static function isLocalPublicUrl(string $key, string $value, array $publishedPorts = []): bool
     {
@@ -718,7 +721,7 @@ class ComposePlaceholders
         // (Invio's frontend reaching its own backend on :3000), never the
         // address a browser was given.
         $port = (int) ltrim($m[2] ?? '', ':');
-        if ($port > 0 && $publishedPorts !== [] && !isset($publishedPorts[$port])) {
+        if ($port > 0 && $publishedPorts !== [] && ! isset($publishedPorts[$port])) {
             return false;
         }
 
@@ -739,7 +742,7 @@ class ComposePlaceholders
     /**
      * Every port a service publishes, host and container side.
      *
-     * @param array<array-key, mixed> $services
+     * @param  array<array-key, mixed>  $services
      * @return array<int, true>
      */
     private static function publishedPorts(array $services): array
@@ -768,7 +771,7 @@ class ComposePlaceholders
      * `${PA_PUBLIC_URL}` / `${PA_PUBLIC_HOST}` (with or without a default)
      * resolved, and an empty whole-URL key filled.
      *
-     * @param array<string, string> $accountEnv
+     * @param  array<string, string>  $accountEnv
      */
     private static function withPublicUrl(string $key, string $value, string $publicUrl, array $accountEnv = []): string
     {
@@ -798,7 +801,7 @@ class ComposePlaceholders
         $host = (string) parse_url($publicUrl, PHP_URL_HOST);
 
         return (string) preg_replace_callback(
-            '/\$\{(' . self::PUBLIC_URL_VARIABLE . '|' . self::PUBLIC_HOST_VARIABLE . ')(?::?-[^}]*)?\}/',
+            '/\$\{('.self::PUBLIC_URL_VARIABLE.'|'.self::PUBLIC_HOST_VARIABLE.')(?::?-[^}]*)?\}/',
             static fn (array $m): string => $m[1] === self::PUBLIC_URL_VARIABLE ? $publicUrl : $host,
             $value
         );
@@ -808,7 +811,7 @@ class ComposePlaceholders
      * Every service that is not a datastore learns the address under the
      * engine's own names; one that sets them itself keeps its values.
      *
-     * @param array<array-key, mixed> $services
+     * @param  array<array-key, mixed>  $services
      * @return array<array-key, mixed>
      */
     private static function withPublicUrlVariables(array $services, string $publicUrl): array
@@ -818,20 +821,20 @@ class ComposePlaceholders
             self::PUBLIC_HOST_VARIABLE => (string) parse_url($publicUrl, PHP_URL_HOST),
         ];
         foreach ($services as $name => $service) {
-            if (!is_array($service) || ServiceRole::isKnownDatastore((string) $name, $service)) {
+            if (! is_array($service) || ServiceRole::isKnownDatastore((string) $name, $service)) {
                 continue;
             }
             $environment = $service['environment'] ?? [];
-            if (!is_array($environment)) {
+            if (! is_array($environment)) {
                 continue;
             }
             $isList = $environment !== [] && array_is_list($environment);
             foreach ($values as $key => $value) {
                 if ($isList) {
-                    if (preg_grep('/^' . $key . '(=|$)/', array_map('strval', $environment)) === []) {
-                        $environment[] = $key . '=' . $value;
+                    if (preg_grep('/^'.$key.'(=|$)/', array_map('strval', $environment)) === []) {
+                        $environment[] = $key.'='.$value;
                     }
-                } elseif (!array_key_exists($key, $environment)) {
+                } elseif (! array_key_exists($key, $environment)) {
                     $environment[$key] = $value;
                 }
             }
@@ -857,29 +860,32 @@ class ComposePlaceholders
      * form. List entries with no `=` inherit from the host environment; they
      * carry no value to replace and are passed through untouched.
      *
-     * @param mixed $environment
-     * @param callable(string, string): string $rewrite
+     * @param  mixed  $environment
+     * @param  callable(string, string): string  $rewrite
      * @return mixed
      */
     private static function rewriteEnvironment($environment, callable $rewrite)
     {
-        if (!is_array($environment)) {
+        if (! is_array($environment)) {
             return $environment;
         }
 
         $out = [];
         foreach ($environment as $key => $entry) {
             if (is_int($key)) {
-                if (!is_string($entry) || !str_contains($entry, '=')) {
+                if (! is_string($entry) || ! str_contains($entry, '=')) {
                     $out[$key] = $entry;
+
                     continue;
                 }
                 [$name, $value] = explode('=', $entry, 2);
-                $out[$key] = $name . '=' . $rewrite(trim($name), $value);
+                $out[$key] = $name.'='.$rewrite(trim($name), $value);
+
                 continue;
             }
             if ($entry === null || is_bool($entry) || is_array($entry)) {
                 $out[$key] = $entry;
+
                 continue;
             }
             $out[$key] = $rewrite((string) $key, (string) $entry);

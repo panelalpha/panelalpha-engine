@@ -22,7 +22,9 @@ use GuzzleHttp\Client;
 final class DockerHubLogin
 {
     public const ENV_USERNAME = 'REGISTRY_PROXY_USERNAME';
+
     public const ENV_PASSWORD = 'REGISTRY_PROXY_PASSWORD';
+
     public const CONTAINER = 'panelalpha-registry-proxy';
 
     /** @var callable(string, string, array<string, string>, ?string): ?array{status: int, headers: array<string, string>, body: string} */
@@ -61,7 +63,7 @@ final class DockerHubLogin
         $auth = ($this->http)(
             'GET',
             'https://auth.docker.io/token?service=registry.docker.io&scope=repository:ratelimitpreview/test:pull',
-            ['Authorization' => 'Basic ' . base64_encode("{$username}:{$token}")],
+            ['Authorization' => 'Basic '.base64_encode("{$username}:{$token}")],
             null
         );
         if ($auth === null) {
@@ -71,7 +73,7 @@ final class DockerHubLogin
         if ($auth['status'] === 401 || $auth['status'] === 403) {
             return ['ok' => false, 'error' => 'Docker Hub refused this username and token.'] + $none;
         }
-        if ($auth['status'] !== 200 || !is_string($bearer)) {
+        if ($auth['status'] !== 200 || ! is_string($bearer)) {
             return ['ok' => false, 'error' => "Docker Hub answered HTTP {$auth['status']}."] + $none;
         }
 
@@ -107,7 +109,7 @@ final class DockerHubLogin
             (string) json_encode(['username' => $username, 'password' => $token])
         );
         $jwt = json_decode($login['body'] ?? '', true)['token'] ?? null;
-        if (($login['status'] ?? 0) !== 200 || !is_string($jwt)) {
+        if (($login['status'] ?? 0) !== 200 || ! is_string($jwt)) {
             return null;
         }
 
@@ -118,16 +120,16 @@ final class DockerHubLogin
             null
         );
         $results = json_decode($list['body'] ?? '', true)['results'] ?? null;
-        if (($list['status'] ?? 0) !== 200 || !is_array($results)) {
+        if (($list['status'] ?? 0) !== 200 || ! is_array($results)) {
             return null;
         }
 
         $pullable = [];
         foreach ($results as $repository) {
-            if (!is_array($repository) || ($repository['is_private'] ?? false) !== true) {
+            if (! is_array($repository) || ($repository['is_private'] ?? false) !== true) {
                 continue;
             }
-            $name = "{$username}/" . ($repository['name'] ?? '');
+            $name = "{$username}/".($repository['name'] ?? '');
             if ($this->canPull($username, $token, $name)) {
                 $pullable[] = $name;
             }
@@ -220,7 +222,7 @@ final class DockerHubLogin
             $lines[] = "{$key}={$value}";
         }
 
-        return implode("\n", $lines) . "\n";
+        return implode("\n", $lines)."\n";
     }
 
     /** Write the keys, keeping a backup, then recreate registry-proxy alone so it reads them. */
@@ -229,7 +231,7 @@ final class DockerHubLogin
         $dir = $this->system->engineDirPath();
         $path = "{$dir}/.env";
         $current = is_file($path) ? (string) file_get_contents($path) : '';
-        if ($current !== '' && !copy($path, $path . EnvFile::BACKUP_SUFFIX)) {
+        if ($current !== '' && ! copy($path, $path.EnvFile::BACKUP_SUFFIX)) {
             throw new \RuntimeException("Could not back up {$path}");
         }
         if (file_put_contents($path, self::updatedEnv($current, $username, $token)) === false) {
@@ -248,7 +250,7 @@ final class DockerHubLogin
         $auth = ($this->http)(
             'GET',
             "https://auth.docker.io/token?service=registry.docker.io&scope=repository:{$repository}:pull",
-            ['Authorization' => 'Basic ' . base64_encode("{$username}:{$token}")],
+            ['Authorization' => 'Basic '.base64_encode("{$username}:{$token}")],
             null
         );
         $jwt = json_decode($auth['body'] ?? '', true)['token'] ?? '';
@@ -271,7 +273,7 @@ final class DockerHubLogin
         }
         $window = (int) ($m[2] ?? 0);
 
-        return $m[1] . match (true) {
+        return $m[1].match (true) {
             $window === 3600 => ' per hour',
             $window === 21600 => ' per 6 hours',
             $window > 0 => " per {$window}s",
@@ -280,7 +282,7 @@ final class DockerHubLogin
     }
 
     /**
-     * @param array<string, string> $headers
+     * @param  array<string, string>  $headers
      * @return array{status: int, headers: array<string, string>, body: string}|null
      */
     private static function send(string $method, string $url, array $headers, ?string $body): ?array

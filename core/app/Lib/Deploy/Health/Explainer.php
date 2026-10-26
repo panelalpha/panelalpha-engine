@@ -19,7 +19,7 @@ interface Explainer
 
     /**
      * @return array{detail?: ?string, fix?: ?string} what to say instead of
-     *         the check file's own `fix`, as far as this project can be read
+     *                                                the check file's own `fix`, as far as this project can be read
      */
     public function explain(ProjectContext $context, ProbedResponse $response): array;
 }

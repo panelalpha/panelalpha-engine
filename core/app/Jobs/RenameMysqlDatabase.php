@@ -46,7 +46,7 @@ class RenameMysqlDatabase implements ShouldQueue
                 throw new NotFoundException("MySQL database '{$this->from}' not found.", MysqlDatabase::class);
             }
 
-            $mysql = (new System())->mysql();
+            $mysql = (new System)->mysql();
             (new DatabaseRenamer($mysql, new DatabaseCopier($mysql)))->rename($user, $database, $this->to);
         });
     }

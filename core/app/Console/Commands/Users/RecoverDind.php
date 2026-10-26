@@ -2,8 +2,8 @@
 
 namespace App\Console\Commands\Users;
 
-use App\Models\User;
 use App\Console\Commands\Concerns\ResolvesProject;
+use App\Models\User;
 use Illuminate\Console\Command;
 use Symfony\Component\Process\Process;
 
@@ -36,24 +36,27 @@ class RecoverDind extends Command
         $this->foldProjectOption();
 
         $username = $this->option('username');
-        $allStuck = (bool)$this->option('all-stuck');
-        $detect = (bool)$this->option('detect');
-        $wipeInner = (bool)$this->option('wipe-inner');
-        $recreate = (bool)$this->option('recreate');
+        $allStuck = (bool) $this->option('all-stuck');
+        $detect = (bool) $this->option('detect');
+        $wipeInner = (bool) $this->option('wipe-inner');
+        $recreate = (bool) $this->option('recreate');
 
-        if (!$detect && !$username && !$allStuck) {
+        if (! $detect && ! $username && ! $allStuck) {
             $this->error('One of --username=, --all-stuck, or --detect is required.');
+
             return 1;
         }
 
         if ($username) {
             $user = User::findByUsername($username);
-            if (!$user) {
+            if (! $user) {
                 $this->error('Invalid username');
+
                 return 1;
             }
             if ($user->getTemplate() !== 'dind') {
                 $this->error("User `{$username}` is not a DinD (sysbox) project.");
+
                 return 1;
             }
         }
@@ -64,7 +67,7 @@ class RecoverDind extends Command
         } elseif ($allStuck) {
             $args[] = '--all-stuck';
         } else {
-            $args[] = '--username=' . $username;
+            $args[] = '--username='.$username;
         }
         if ($wipeInner) {
             $args[] = '--wipe-inner';
@@ -74,10 +77,10 @@ class RecoverDind extends Command
         }
 
         $quoted = implode(' ', array_map('escapeshellarg', $args));
-        $hostCmd = 'if [ -x ' . escapeshellarg(self::HOST_SCRIPT) . ' ]; then '
-            . escapeshellarg(self::HOST_SCRIPT) . ' ' . $quoted
-            . '; else echo "Missing ' . self::HOST_SCRIPT
-            . ' — run engine scripts/install-sysbox.sh on the host" >&2; exit 127; fi';
+        $hostCmd = 'if [ -x '.escapeshellarg(self::HOST_SCRIPT).' ]; then '
+            .escapeshellarg(self::HOST_SCRIPT).' '.$quoted
+            .'; else echo "Missing '.self::HOST_SCRIPT
+            .' — run engine scripts/install-sysbox.sh on the host" >&2; exit 127; fi';
 
         $this->warn('Running host recovery via nsenter (pid 1)...');
         $process = new Process([
@@ -96,8 +99,9 @@ class RecoverDind extends Command
         });
 
         if ($process->getExitCode() !== 0) {
-            $this->error('Recovery failed with exit code ' . (string)$process->getExitCode());
-            return (int)$process->getExitCode();
+            $this->error('Recovery failed with exit code '.(string) $process->getExitCode());
+
+            return (int) $process->getExitCode();
         }
 
         // Best-effort: refresh compose template so mem_limit / restart policy match DB.
@@ -110,7 +114,7 @@ class RecoverDind extends Command
                     $project->rebuildFromSource();
                 }
             } catch (\Throwable $e) {
-                $this->warn('Container recovered but rebuild failed: ' . $e->getMessage());
+                $this->warn('Container recovered but rebuild failed: '.$e->getMessage());
             }
         }
 

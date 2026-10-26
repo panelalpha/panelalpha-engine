@@ -19,13 +19,13 @@ final class CheckoutExclude
     private const NOTE = '# Engine Artifacts, rewritten by PanelAlpha Engine on every deploy. Edits here are lost.';
 
     /**
-     * @param list<string> $patterns gitignore patterns, one per line
+     * @param  list<string>  $patterns  gitignore patterns, one per line
      */
     public static function render(array $patterns): string
     {
         $lines = [self::BEGIN, self::NOTE, ...array_values(array_unique($patterns)), self::END];
 
-        return implode("\n", $lines) . "\n";
+        return implode("\n", $lines)."\n";
     }
 
     /**
@@ -34,7 +34,7 @@ final class CheckoutExclude
      */
     public static function merge(string $existing, string $block): string
     {
-        $pattern = '/^' . preg_quote(self::BEGIN, '/') . '\n.*?^' . preg_quote(self::END, '/') . '(?:\n|$)/ms';
+        $pattern = '/^'.preg_quote(self::BEGIN, '/').'\n.*?^'.preg_quote(self::END, '/').'(?:\n|$)/ms';
         if (preg_match($pattern, $existing) === 1) {
             return preg_replace_callback($pattern, static fn (): string => $block, $existing, 1);
         }
@@ -43,7 +43,7 @@ final class CheckoutExclude
             return $block;
         }
 
-        return $existing . (str_ends_with($existing, "\n") ? "\n" : "\n\n") . $block;
+        return $existing.(str_ends_with($existing, "\n") ? "\n" : "\n\n").$block;
     }
 
     /**
@@ -55,6 +55,6 @@ final class CheckoutExclude
      */
     public static function anchoredPath(string $relative): string
     {
-        return '/' . preg_replace('/([\\\\*?\[\]])/', '\\\\$1', ltrim($relative, '/'));
+        return '/'.preg_replace('/([\\\\*?\[\]])/', '\\\\$1', ltrim($relative, '/'));
     }
 }

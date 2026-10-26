@@ -23,8 +23,11 @@ class BugReport
     public const OUTCOME = 'reported';
 
     public const SEVERITY_LOW = 'low';
+
     public const SEVERITY_NORMAL = 'normal';
+
     public const SEVERITY_HIGH = 'high';
+
     public const SEVERITY_CRITICAL = 'critical';
 
     /** @var list<string> */
@@ -132,7 +135,6 @@ class BugReport
      *   health?: ?array<string, mixed>,
      *   log_tail?: list<string>
      * } $input
-     *
      * @return array<string, mixed>
      */
     public static function build(array $input): array
@@ -209,7 +211,7 @@ class BugReport
      * a classic-template project has no container to probe, a rolled-back one
      * nothing to inspect — and absent says that.
      *
-     * @param array<string, mixed> $input
+     * @param  array<string, mixed>  $input
      * @return array<string, mixed>
      */
     private static function app(array $input, string $username, int $tier, string $installId): array
@@ -226,7 +228,7 @@ class BugReport
 
         foreach (['inspect', 'health'] as $section) {
             $value = $input[$section] ?? null;
-            if (!is_array($value) || $value === []) {
+            if (! is_array($value) || $value === []) {
                 continue;
             }
             $app[$section] = self::guardPrivateIdentity(
@@ -255,9 +257,7 @@ class BugReport
      * path, a private package name is hashed and its descriptive fields dropped —
      * only where they describe the customer's own package. Salted by install id.
      *
-     * @param mixed $value
-     * @param bool $ownPackage whether this subtree describes the project itself
-     * @return mixed
+     * @param  bool  $ownPackage  whether this subtree describes the project itself
      */
     private static function guardPrivateIdentity(
         mixed $value,
@@ -265,7 +265,7 @@ class BugReport
         string $installId,
         bool $ownPackage = false
     ): mixed {
-        if (!$private || !is_array($value)) {
+        if (! $private || ! is_array($value)) {
             return $value;
         }
 
@@ -275,16 +275,19 @@ class BugReport
 
             if (is_string($item) && in_array($name, self::REPO_URL_KEYS, true)) {
                 $guarded[$key] = self::hashRepo($item, $installId);
+
                 continue;
             }
 
             if ($ownPackage && $name === 'name' && is_string($item)) {
-                $guarded[$key] = substr(hash('sha256', $installId . '|' . $item), 0, 16);
+                $guarded[$key] = substr(hash('sha256', $installId.'|'.$item), 0, 16);
+
                 continue;
             }
 
             if ($ownPackage && in_array($name, self::OWN_PACKAGE_DETAILS, true)) {
                 $guarded[$key] = is_array($item) ? [] : null;
+
                 continue;
             }
 
@@ -303,8 +306,6 @@ class BugReport
      * Does this subtree describe the project itself, not a dependency?
      * `metadata` opens the question and a `frameworks` entry closes it again. A
      * list inside an open subtree stays open, so `metadata.packages[]` inherits it.
-     *
-     * @param mixed $item
      */
     private static function describesOwnPackage(string $key, mixed $item, bool $ownPackage): bool
     {
@@ -326,8 +327,8 @@ class BugReport
             return self::PRIVATE_REPO;
         }
 
-        return $parts['host'] . '/' . substr(
-            hash('sha256', $installId . '|' . $parts['host'] . '/' . $parts['path']),
+        return $parts['host'].'/'.substr(
+            hash('sha256', $installId.'|'.$parts['host'].'/'.$parts['path']),
             0,
             16
         );
@@ -336,7 +337,7 @@ class BugReport
     /**
      * The report itself, as the reporter wrote it.
      *
-     * @param array<string, mixed> $input
+     * @param  array<string, mixed>  $input
      * @return array<string, mixed>
      */
     private static function bug(array $input, string $area, string $title, string $description): array
@@ -364,8 +365,8 @@ class BugReport
      * a deploy report carries. Empty, not a husk of nulls, when the account has
      * never deployed.
      *
-     * @param array<string, mixed> $details
-     * @param array<string, mixed> $latest
+     * @param  array<string, mixed>  $details
+     * @param  array<string, mixed>  $latest
      * @return array<string, mixed>
      */
     private static function deploy(array $details, array $latest): array
@@ -389,7 +390,7 @@ class BugReport
     public static function fingerprint(string $area, string $title): string
     {
         return substr(
-            hash('sha256', self::KIND . '|' . $area . '|' . Fingerprint::normalize($title)),
+            hash('sha256', self::KIND.'|'.$area.'|'.Fingerprint::normalize($title)),
             0,
             Fingerprint::LENGTH
         );
@@ -438,7 +439,7 @@ class BugReport
      */
     private static function contact(mixed $contact): ?string
     {
-        if (!is_string($contact)) {
+        if (! is_string($contact)) {
             return null;
         }
 

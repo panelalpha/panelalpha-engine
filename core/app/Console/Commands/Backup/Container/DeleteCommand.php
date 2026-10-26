@@ -17,20 +17,23 @@ class DeleteCommand extends Command
     public function handle(): int
     {
         $containerArg = $this->argument('container');
-        if (!is_string($containerArg)) {
+        if (! is_string($containerArg)) {
             $this->error('Invalid container identifier.');
+
             return 1;
         }
 
         $container = BackupContainer::findByIdOrName($containerArg);
         if ($container === null) {
             $this->error("Backup container '{$containerArg}' not found.");
+
             return 1;
         }
 
         $hasBackups = $container->backups()->exists();
-        if ($hasBackups && !$this->option('delete-backups')) {
+        if ($hasBackups && ! $this->option('delete-backups')) {
             $this->error('Cannot delete backup container while backups exist.');
+
             return 1;
         }
 
@@ -40,8 +43,9 @@ class DeleteCommand extends Command
         $this->line("  Driver: {$container->driver}");
         $this->line("  Location: {$container->location}");
 
-        if (!$this->option('force') && !$this->confirm('Delete this container?')) {
+        if (! $this->option('force') && ! $this->confirm('Delete this container?')) {
             $this->info('Cancelled.');
+
             return 0;
         }
 
@@ -51,6 +55,7 @@ class DeleteCommand extends Command
                 $user = $backup->user;
                 if ($user === null) {
                     $this->error("Backup {$backup->id} has no owning user.");
+
                     return 1;
                 }
 
@@ -58,12 +63,14 @@ class DeleteCommand extends Command
                     $user->project()->backup($backup)->delete();
                 } catch (\Throwable $e) {
                     $this->error($e->getMessage());
+
                     return 1;
                 }
 
                 if (BackupRecord::query()->find($backup->id) !== null) {
                     $backup->refresh();
                     $this->error($backup->error ?? "Failed to delete backup {$backup->id}.");
+
                     return 1;
                 }
             }

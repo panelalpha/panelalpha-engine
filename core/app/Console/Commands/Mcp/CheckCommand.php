@@ -24,6 +24,7 @@ class CheckCommand extends Command
     protected $description = 'Verify the MCP endpoint: TLS, token, auth enforcement and handshake';
 
     private const LETSENCRYPT_CERT = '/etc/letsencrypt/live/panelalpha-engine-ip-cert/fullchain.pem';
+
     private const SELF_SIGNED_CERT = '/opt/panelalpha/shared-hosting/crt/server.cert';
 
     private bool $ok = true;
@@ -33,13 +34,15 @@ class CheckCommand extends Command
         $token = $this->token();
         if ($token === null) {
             $this->error('No token given. Run `pae mcp:check` and paste it at the prompt, '
-                . 'or pipe it in: `printf %s "$TOKEN" | pae mcp:check --stdin`.');
+                .'or pipe it in: `printf %s "$TOKEN" | pae mcp:check --stdin`.');
+
             return 1;
         }
 
         $base = rtrim((string) config('app.url'), '/');
         if ($base === '') {
             $this->error('APP_URL is not set, so there is no endpoint to check.');
+
             return 1;
         }
 
@@ -48,17 +51,18 @@ class CheckCommand extends Command
         // matches the URL host against the certificate SAN exactly as Node and
         // Go do, so a pass here is a pass for the client.
         $ca = is_file(self::LETSENCRYPT_CERT) ? true : self::SELF_SIGNED_CERT;
-        if ($ca !== true && !is_file($ca)) {
+        if ($ca !== true && ! is_file($ca)) {
             $ca = true;
         }
 
-        $request = fn() => Http::withOptions(['verify' => $ca])->timeout(15)->connectTimeout(10);
+        $request = fn () => Http::withOptions(['verify' => $ca])->timeout(15)->connectTimeout(10);
 
         try {
             $response = $request()->withToken($token)->get("{$base}/mcp/check");
         } catch (ConnectionException $e) {
-            $this->fail_("Could not reach {$base}: " . $this->firstLine($e->getMessage()));
+            $this->fail_("Could not reach {$base}: ".$this->firstLine($e->getMessage()));
             $this->hint($ca);
+
             return 1;
         }
 
@@ -84,7 +88,7 @@ class CheckCommand extends Command
                 $this->fail_("Unauthenticated request returned HTTP {$anonymous}, expected 401");
             }
         } catch (ConnectionException $e) {
-            $this->fail_('Anonymous check failed: ' . $this->firstLine($e->getMessage()));
+            $this->fail_('Anonymous check failed: '.$this->firstLine($e->getMessage()));
         }
 
         // An authenticated endpoint that cannot speak JSON-RPC still leaves the
@@ -115,11 +119,12 @@ class CheckCommand extends Command
                 ));
             }
         } catch (ConnectionException $e) {
-            $this->fail_('MCP handshake failed: ' . $this->firstLine($e->getMessage()));
+            $this->fail_('MCP handshake failed: '.$this->firstLine($e->getMessage()));
         }
 
-        if (!$this->ok) {
+        if (! $this->ok) {
             $this->hint($ca);
+
             return 1;
         }
 
@@ -132,19 +137,22 @@ class CheckCommand extends Command
         if (is_string($argument) && $argument !== '') {
             $this->getOutput()->getErrorStyle()->writeln(
                 '<comment>Passing the token as an argument is deprecated: it shows in ps and in your '
-                . 'shell history. Run `pae mcp:check` without it to be prompted.</comment>'
+                .'shell history. Run `pae mcp:check` without it to be prompted.</comment>'
             );
+
             return $argument;
         }
 
         $stdin = $this->stdin();
-        if ($this->option('stdin') || !stream_isatty($stdin)) {
+        if ($this->option('stdin') || ! stream_isatty($stdin)) {
             $line = fgets($stdin);
             $token = is_string($line) ? trim($line) : '';
+
             return $token === '' ? null : $token;
         }
 
         $token = $this->secret('MCP token');
+
         return is_string($token) && trim($token) !== '' ? trim($token) : null;
     }
 
@@ -164,7 +172,7 @@ class CheckCommand extends Command
         $body = preg_replace('/^data: /m', '', $body) ?? $body;
         /** @var mixed $decoded */
         $decoded = json_decode($body, true);
-        if (!is_array($decoded)) {
+        if (! is_array($decoded)) {
             return null;
         }
         $name = data_get($decoded, 'result.serverInfo.name');

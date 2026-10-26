@@ -3,10 +3,10 @@
 namespace App\Console\Commands\Projects;
 
 use App\Http\Requests\ProjectStagingRequest;
-use App\System;
 use App\Lib\Helper;
 use App\Models\Domain;
 use App\Models\User;
+use App\System;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -24,15 +24,16 @@ class ProjectStagingCommand extends Command
     {
         $username = (string) $this->argument('project');
         $source = User::findByUsername($username);
-        if (!$source) {
+        if (! $source) {
             $this->error("No such user: '{$username}'");
+
             return 1;
         }
 
         $dest = null;
 
         try {
-            $system = new System();
+            $system = new System;
 
             $newUsername = $this->stagingUsername($source, $system);
             if ($newUsername === null) {
@@ -46,14 +47,15 @@ class ProjectStagingCommand extends Command
 
             if ($this->hostingExists($source, $newUsername, $destDomain)) {
                 $this->error('Username not available.');
+
                 return 1;
             }
 
-            ProjectStagingRequest::assertCanCreate($source, $newUsername . '_');
+            ProjectStagingRequest::assertCanCreate($source, $newUsername.'_');
             $dest = $source->makePendingStaging($newUsername, $destDomain, 'artisan');
             $system->projects()->copy($source->username, $dest->username);
 
-            $this->info($dest->username . ' ' . $dest->domain);
+            $this->info($dest->username.' '.$dest->domain);
 
             return 0;
         } catch (\Throwable $e) {
@@ -71,15 +73,18 @@ class ProjectStagingCommand extends Command
             ?? Helper::generateCloneUsername($source->username);
         if ($newUsername === null) {
             $this->error('Could not generate an available username for the staging project.');
+
             return null;
         }
 
         if (User::existsByUsername($newUsername)) {
             $this->error('User already exists.');
+
             return null;
         }
-        if (!$system->isUsernameAvailable($newUsername)) {
+        if (! $system->isUsernameAvailable($newUsername)) {
             $this->error('Username not available.');
+
             return null;
         }
 
@@ -94,6 +99,7 @@ class ProjectStagingCommand extends Command
             $destDomain = Helper::generateCloneDomain($source->domain);
             if ($destDomain === null) {
                 $this->error('Could not generate an available staging domain.');
+
                 return null;
             }
         } elseif (Str::startsWith($destDomain, 'www.')) {
@@ -102,6 +108,7 @@ class ProjectStagingCommand extends Command
 
         if (Domain::domainOrAliasExists($destDomain)) {
             $this->error('Domain already exists.');
+
             return null;
         }
 
@@ -112,8 +119,8 @@ class ProjectStagingCommand extends Command
     {
         $probe = User::make([
             'username' => $newUsername,
-            'domain'   => $destDomain,
-            'email'    => $source->email,
+            'domain' => $destDomain,
+            'email' => $source->email,
         ]);
 
         return $probe->project()->hostingExists();
@@ -149,7 +156,7 @@ class ProjectStagingCommand extends Command
             $existing->project()->destroy();
         } catch (\Throwable $cleanup) {
             Log::error('project:staging cleanup failed', [
-                'dest'      => $dest->username,
+                'dest' => $dest->username,
                 'exception' => $cleanup,
             ]);
         }

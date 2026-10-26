@@ -22,9 +22,7 @@ class EnvFile
     /** The container path `docker-compose.yml` maps the host's `.env-core` onto. */
     public const CORE_MOUNT = '/var/www/html/.env';
 
-    public function __construct(private readonly string $path)
-    {
-    }
+    public function __construct(private readonly string $path) {}
 
     /** The file this installation actually boots from. */
     public static function current(): self
@@ -65,7 +63,7 @@ class EnvFile
      */
     public function suspicious(): ?string
     {
-        if (!$this->exists()) {
+        if (! $this->exists()) {
             return sprintf('There is no %s to write to.', $this->path);
         }
 
@@ -75,8 +73,8 @@ class EnvFile
 
         return sprintf(
             "%s has no APP_KEY, so it is almost certainly not the file this engine boots from.\n"
-            . 'Writing here would change nothing. Restart the engine to reattach it: '
-            . 'docker compose restart core',
+            .'Writing here would change nothing. Restart the engine to reattach it: '
+            .'docker compose restart core',
             $this->path
         );
     }
@@ -100,12 +98,12 @@ class EnvFile
     /**
      * Set keys to values, in place.
      *
-     * @param array<string, string> $values
+     * @param  array<string, string>  $values
      * @return array<int, string> the keys whose value actually changed
      */
     public function set(array $values): array
     {
-        if (!$this->exists()) {
+        if (! $this->exists()) {
             throw new RuntimeException("No .env file at {$this->path}.");
         }
 
@@ -131,7 +129,7 @@ class EnvFile
         // Kept beside the file rather than swapped in, for the inode reason
         // above; one rolling copy, so the state before the last edit is always
         // recoverable and the directory does not fill up with them.
-        $backup = $this->path . self::BACKUP_SUFFIX;
+        $backup = $this->path.self::BACKUP_SUFFIX;
         $this->write($backup, $original);
         $this->keepModeOf($this->path, $backup);
         $this->write($this->path, $updated);
@@ -144,12 +142,12 @@ class EnvFile
      * line if there is one, over the commented placeholder the example file
      * ships if there is one, and at the end of the file otherwise.
      *
-     * @param array<int, string> $lines
+     * @param  array<int, string>  $lines
      * @return array<int, string>
      */
     private function apply(array $lines, string $key, string $value): array
     {
-        $entry = $key . '=' . $this->quote($value);
+        $entry = $key.'='.$this->quote($value);
 
         foreach ($lines as $i => $line) {
             if ($this->keyOf($line) === $key) {
@@ -205,7 +203,7 @@ class EnvFile
             return $value;
         }
 
-        return '"' . str_replace(['\\', '"'], ['\\\\', '\\"'], $value) . '"';
+        return '"'.str_replace(['\\', '"'], ['\\\\', '\\"'], $value).'"';
     }
 
     private function unquote(string $value): string

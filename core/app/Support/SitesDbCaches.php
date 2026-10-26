@@ -28,9 +28,7 @@ final class SitesDbCaches
         ],
     ];
 
-    public function __construct(private readonly System $system)
-    {
-    }
+    public function __construct(private readonly System $system) {}
 
     /** @return array<string, string> key => what `.env` says, or the default */
     public function configured(): array
@@ -51,16 +49,16 @@ final class SitesDbCaches
      */
     public function running(): ?array
     {
-        $select = 'select ' . implode(', ', array_map(fn (array $c) => '@@' . $c['variable'], self::CACHES));
+        $select = 'select '.implode(', ', array_map(fn (array $c) => '@@'.$c['variable'], self::CACHES));
         try {
             $out = $this->system->exec([...$this->compose(), 'exec', '-T', self::SERVICE, 'sh', '-c',
-                'mariadb -uroot -p"$MYSQL_ROOT_PASSWORD" -N -B -e "' . $select . '"'], [], 60);
+                'mariadb -uroot -p"$MYSQL_ROOT_PASSWORD" -N -B -e "'.$select.'"'], [], 60);
         } catch (Throwable) {
             return null;
         }
 
         $bytes = preg_split('/\s+/', trim($out)) ?: [];
-        if (count($bytes) !== count(self::CACHES) || array_filter($bytes, fn ($b) => !ctype_digit($b)) !== []) {
+        if (count($bytes) !== count(self::CACHES) || array_filter($bytes, fn ($b) => ! ctype_digit($b)) !== []) {
             return null;
         }
 
@@ -103,7 +101,7 @@ final class SitesDbCaches
      * Write the sizes, then recreate sites-db when it is running so they take
      * effect. One that is not running reads them at its next start.
      *
-     * @param array<string, string> $values key => size
+     * @param  array<string, string>  $values  key => size
      * @return array{changed: array<int, string>, recreated: bool}
      */
     public function apply(array $values): array
@@ -126,6 +124,6 @@ final class SitesDbCaches
 
     private function env(): EnvFile
     {
-        return new EnvFile($this->system->engineDirPath() . '/.env');
+        return new EnvFile($this->system->engineDirPath().'/.env');
     }
 }

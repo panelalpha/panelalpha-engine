@@ -2,9 +2,9 @@
 
 namespace App\Console\Commands\System;
 
-use App\System;
 use App\Lib\HttpAcmeChallengeStore;
 use App\Models\Domain;
+use App\System;
 use Illuminate\Console\Command;
 
 class PruneHttpAcmeChallenges extends Command
@@ -21,18 +21,19 @@ class PruneHttpAcmeChallenges extends Command
         $ttlHours = (int) ($this->option('ttl-hours') ?: env('HTTP_ACME_CHALLENGE_TTL_HOURS', HttpAcmeChallengeStore::DEFAULT_TTL_HOURS));
         if ($ttlHours < 1) {
             $this->warn('TTL hours must be >= 1, skipping.');
+
             return 0;
         }
 
         $this->info("Pruning HTTP ACME challenges older than {$ttlHours}h...");
 
-        $system = new System();
+        $system = new System;
         $store = new HttpAcmeChallengeStore($system);
         $domainsToRebuild = $store->prune($ttlHours);
 
         foreach ($domainsToRebuild as $domainName) {
             $domain = Domain::findByName($domainName);
-            if (!$domain) {
+            if (! $domain) {
                 continue;
             }
             $this->info("Rebuilding vhost for {$domainName} (ACME alias disabled).");
@@ -43,7 +44,7 @@ class PruneHttpAcmeChallenges extends Command
             $system->webserver()->reload();
         }
 
-        $this->info('Pruned ' . count($domainsToRebuild) . ' domain(s) that no longer have challenges.');
+        $this->info('Pruned '.count($domainsToRebuild).' domain(s) that no longer have challenges.');
 
         return 0;
     }

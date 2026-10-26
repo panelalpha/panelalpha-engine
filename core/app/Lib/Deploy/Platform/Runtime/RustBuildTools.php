@@ -42,7 +42,7 @@ final class RustBuildTools
         $dir = rtrim($projectDir, '/');
         $packages = [];
 
-        $lock = @file_get_contents($dir . '/Cargo.lock');
+        $lock = @file_get_contents($dir.'/Cargo.lock');
         if (is_string($lock) && preg_match_all('/^name\s*=\s*"([A-Za-z0-9_-]+)"/m', $lock, $m) > 0) {
             foreach (array_unique($m[1]) as $crate) {
                 foreach (self::CRATES[$crate] ?? [] as $package) {
@@ -52,8 +52,8 @@ final class RustBuildTools
         }
 
         foreach (['/.cargo/config.toml', '/.cargo/config'] as $file) {
-            $config = @file_get_contents($dir . $file);
-            if (!is_string($config)) {
+            $config = @file_get_contents($dir.$file);
+            if (! is_string($config)) {
                 continue;
             }
             if (preg_match_all('/-fuse-ld=([a-z]+)/', $config, $m) > 0) {

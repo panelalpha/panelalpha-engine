@@ -22,7 +22,7 @@ final class EnvironmentLines
     private const BARE = '/^[A-Za-z0-9_.,:\/@%+=~${}-]*$/';
 
     /**
-     * @param array<string, string> $env
+     * @param  array<string, string>  $env
      * @return list<string>
      */
     public static function of(array $env): array
@@ -32,7 +32,7 @@ final class EnvironmentLines
             if ($key === PlatformStage::PHASE_ENV) {
                 continue;
             }
-            $lines[] = 'ENV ' . self::pair($key, $value);
+            $lines[] = 'ENV '.self::pair($key, $value);
         }
 
         return $lines;
@@ -44,14 +44,14 @@ final class EnvironmentLines
      * engine's build container exceeds the account's cgroup, and V8 reaches
      * for it and is OOM-killed. Reaches every process the build spawns.
      *
-     * @param array<string, string> $env
+     * @param  array<string, string>  $env
      * @return list<string>
      */
     public static function buildArgs(array $env): array
     {
         $lines = [];
         foreach ($env as $key => $value) {
-            $lines[] = 'ARG ' . self::pair($key, $value);
+            $lines[] = 'ARG '.self::pair($key, $value);
         }
 
         return $lines;
@@ -71,9 +71,9 @@ final class EnvironmentLines
             throw new InvalidArgumentException("The value of {$key} spans more than one line, which a Dockerfile cannot hold.");
         }
         if (preg_match(self::BARE, $value) === 1) {
-            return $key . '=' . $value;
+            return $key.'='.$value;
         }
 
-        return $key . '="' . str_replace(['\\', '"'], ['\\\\', '\\"'], $value) . '"';
+        return $key.'="'.str_replace(['\\', '"'], ['\\\\', '\\"'], $value).'"';
     }
 }

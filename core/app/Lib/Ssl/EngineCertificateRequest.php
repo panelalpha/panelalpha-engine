@@ -2,8 +2,8 @@
 
 namespace App\Lib\Ssl;
 
-use App\System;
 use App\Models\Setting;
+use App\System;
 
 /**
  * Running the engine's own certificate request, for the command and the API.
@@ -29,13 +29,13 @@ final class EngineCertificateRequest
     public const TIMEOUT = 900;
 
     /**
-     * @param array{domain?: ?string, email?: ?string, ip?: ?string} $values
-     * @param list<string> $flags any of staging, force-renewal, skip-dns-check, dry-run
+     * @param  array{domain?: ?string, email?: ?string, ip?: ?string}  $values
+     * @param  list<string>  $flags  any of staging, force-renewal, skip-dns-check, dry-run
      * @return array{successful: bool, output: string, cert_domain: ?string}
      */
     public static function run(System $system, array $values = [], array $flags = []): array
     {
-        $script = $system->engineDirPath() . '/scripts/letsencrypt-request-cert.sh';
+        $script = $system->engineDirPath().'/scripts/letsencrypt-request-cert.sh';
         $args = ['sudo', 'nsenter', '--target', '1', '--all', 'bash', $script];
 
         foreach (['domain', 'email', 'ip'] as $name) {
@@ -57,7 +57,7 @@ final class EngineCertificateRequest
             // Both streams: the script reports progress on stdout and
             // certbot's own refusals on stderr, and a caller that only sees
             // one of them is reading half the answer.
-            'output' => self::readable($process->getOutput() . "\n" . $process->getErrorOutput()),
+            'output' => self::readable($process->getOutput()."\n".$process->getErrorOutput()),
             // Written by the script itself after a successful issue, so it is
             // read back rather than assumed.
             'cert_domain' => Setting::get('cert_domain'),

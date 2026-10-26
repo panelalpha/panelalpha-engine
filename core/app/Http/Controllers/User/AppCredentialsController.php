@@ -19,14 +19,14 @@ class AppCredentialsController extends Controller
         path: '/projects/{username}/app-credentials',
         summary: "Get the application's generated login",
         description: 'The login the engine generated for the deployed application when its recipe declares '
-            . '`credentials:` (an admin username and password the app is seeded with), with the URL to use it on. '
-            . 'The same values are delivered to the account on every deploy as ~/.panelalpha/app-credentials.env. '
-            . 'They are what the application was first seeded with: a password changed later inside the application '
-            . 'is not reflected here. `available` is false, with no fields, when the application declares none. '
-            . 'GET /projects/{username} says whether they exist without returning a value.',
+            .'`credentials:` (an admin username and password the app is seeded with), with the URL to use it on. '
+            .'The same values are delivered to the account on every deploy as ~/.panelalpha/app-credentials.env. '
+            .'They are what the application was first seeded with: a password changed later inside the application '
+            .'is not reflected here. `available` is false, with no fields, when the application declares none. '
+            .'GET /projects/{username} says whether they exist without returning a value.',
         x: ['mcp-description' => 'The admin login the engine generated and seeded into the deployed app (from the '
-            . 'recipe\'s `credentials:`), with `login_url`. `available: false` when the app declares none. Values '
-            . 'are what the app was seeded with; a password changed inside the app later is not reflected.'],
+            .'recipe\'s `credentials:`), with `login_url`. `available: false` when the app declares none. Values '
+            .'are what the app was seeded with; a password changed inside the app later is not reflected.'],
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],

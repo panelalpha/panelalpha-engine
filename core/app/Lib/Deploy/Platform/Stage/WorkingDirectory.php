@@ -13,14 +13,14 @@ final class WorkingDirectory
 {
     public static function wrap(string $run, ?string $workdir): string
     {
-        return self::isRoot($workdir) ? $run : '( cd ' . $workdir . ' && ' . $run . ' )';
+        return self::isRoot($workdir) ? $run : '( cd '.$workdir.' && '.$run.' )';
     }
 
     public static function wrapForExec(string $run, ?string $workdir): string
     {
         return self::isRoot($workdir)
             ? $run
-            : 'sh -c ' . ShellQuote::of('cd ' . $workdir . ' && exec ' . $run);
+            : 'sh -c '.ShellQuote::of('cd '.$workdir.' && exec '.$run);
     }
 
     private static function isRoot(?string $workdir): bool

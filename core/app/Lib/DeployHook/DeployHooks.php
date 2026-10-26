@@ -19,8 +19,8 @@ class DeployHooks
      * it was in.
      */
     public const FORCE_PULL_WARNING = 'Every push to the tracked branch force-updates the checkout to match the repository: '
-        . 'local changes to tracked files and untracked files that are not engine-managed are discarded '
-        . 'before the rebuild.';
+        .'local changes to tracked files and untracked files that are not engine-managed are discarded '
+        .'before the rebuild.';
 
     /**
      * The hook for this checkout, made if it does not exist yet.
@@ -35,7 +35,7 @@ class DeployHooks
     {
         // Deploy-managed or Site Git alike: what a push does to each is the
         // delivery's business (see GitCheckoutSync), not a reason to refuse one.
-        if (!$git->isConnected()) {
+        if (! $git->isConnected()) {
             throw new GitException('The checkout is not connected to git, so there is nothing for a push to deploy.', 422);
         }
 
@@ -143,8 +143,9 @@ class DeployHooks
      * URL is one less credential a leak could still act on.
      *
      * @return array<string, mixed> the disconnected status, unchanged
+     *
      * @throws GitException whatever $git->disconnect() throws -- the hook is
-     *         only forgotten once the disconnect itself has succeeded
+     *                      only forgotten once the disconnect itself has succeeded
      */
     public function disconnectAndForget(User $user, ProjectGit $git): array
     {

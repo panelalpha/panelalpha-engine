@@ -5,9 +5,7 @@ namespace App\Http\Controllers\User;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ProjectPasswordSetRequest;
 use App\Http\Resources\UserResource;
-use App\Models\User;
 use App\System\Project\SitePasswordProtection;
-use Illuminate\Http\JsonResponse;
 use OpenApi\Attributes as OA;
 
 class ProjectPasswordController extends Controller

@@ -1,9 +1,9 @@
 <?php
 
 namespace App\Console\Commands\Settings;
-use Illuminate\Console\Command;
-use App\Models\Setting;
 
+use App\Models\Setting;
+use Illuminate\Console\Command;
 
 class Get extends Command
 {
@@ -17,10 +17,11 @@ class Get extends Command
         $name = $this->argument('name');
 
         try {
-            $value = (string)Setting::get($name);
+            $value = (string) Setting::get($name);
             $this->output->writeln($value);
         } catch (\Exception $e) {
-            $this->error("[ERROR] " . $e->getMessage());
+            $this->error('[ERROR] '.$e->getMessage());
+
             return 1;
         }
 

@@ -13,8 +13,7 @@ final class OuterLifecycle
 {
     public function __construct(
         private DindProject $project,
-    ) {
-    }
+    ) {}
 
     /**
      * A container sysbox forgot (it was restarted meanwhile) either cannot start at all or starts
@@ -25,7 +24,7 @@ final class OuterLifecycle
         try {
             $this->composeUp();
         } catch (\Exception $e) {
-            if (!self::isSysboxStartRefusal($e)) {
+            if (! self::isSysboxStartRefusal($e)) {
                 throw $e;
             }
             (new AccountMapping($this->project))->recreate();
@@ -73,7 +72,7 @@ final class OuterLifecycle
             $this->project->system()->exec(TenantNetwork::firewallArgv(), [], 60);
         } catch (\Exception $e) {
             $this->project->shell()->logger()?->warn(
-                'The tenant network firewall could not be applied: ' . trim($e->getMessage())
+                'The tenant network firewall could not be applied: '.trim($e->getMessage())
             );
         }
     }
@@ -85,7 +84,7 @@ final class OuterLifecycle
 
     public function tearDown(): void
     {
-        if (!$this->project->exists()) {
+        if (! $this->project->exists()) {
             throw new \Exception(
                 "Project of the user '{$this->project->username()}' doesn't exist"
             );

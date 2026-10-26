@@ -2,7 +2,6 @@
 
 namespace App\Lib\Deploy\Platform;
 
-use App\Lib\Deploy\Platform\Strategies;
 /**
  * The strategy ids the deploy pipeline knows how to build and run.
  *
@@ -32,34 +31,56 @@ final class Strategies
     // ---- Dispatched: apply() branches on these by name ----------------
     // Repository supplies its own build definition.
     public const PAEMD = 'paemd';
+
     public const COMPOSE = 'compose';
+
     public const DOCKERFILE = 'dockerfile';
 
     // Engine-generated recipes.
     public const LARAVEL = 'laravel';
+
     public const PHP = 'php';
+
     public const RAILS = 'rails';
+
     public const RUBY = 'ruby';
+
     public const DJANGO = 'django';
+
     public const PYTHON = 'python';
+
     public const GO = 'go';
+
     public const RUST = 'rust';
+
     public const JAVA = 'java';
+
     public const DOTNET = 'dotnet';
 
     // ---- Grouped: handled generically; named here for readable tests ---
     // JS frameworks.
     public const NEXTJS = 'nextjs';
+
     public const NUXT = 'nuxt';
+
     public const SVELTEKIT = 'sveltekit';
+
     public const REMIX = 'remix';
+
     public const ASTRO = 'astro';
+
     public const NESTJS = 'nestjs';
+
     public const TANSTACK = 'tanstack-start';
+
     public const ANGULAR = 'angular';
+
     public const CRA = 'cra';
+
     public const VITE = 'vite';
+
     public const EXPRESS = 'express';
+
     public const FASTIFY = 'fastify';
 
     /**
@@ -72,7 +93,9 @@ final class Strategies
 
     // Terminal outcomes; no manifest is required to produce them.
     public const RAILPACK = 'railpack';
+
     public const STATIC = 'static';
+
     public const FALLBACK = 'fallback';
 
     /**

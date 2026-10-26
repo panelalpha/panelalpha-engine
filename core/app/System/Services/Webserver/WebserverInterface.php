@@ -15,7 +15,7 @@ interface WebserverInterface
     public function rebuildDomainConfig(Domain $domain): void;
 
     /**
-     * @param ?array<Domain> $domains
+     * @param  ?array<Domain>  $domains
      */
     public function rebuildConfig(?array $domains = null): void;
 
@@ -40,14 +40,14 @@ interface WebserverInterface
     public function deleteDomainConfig(string $domainName): void;
 
     /**
-     * @param array<string> $domainNames
+     * @param  array<string>  $domainNames
      */
     public function deleteDomainsConfigs(array $domainNames): void;
 
     public function deleteDomainLogsDir(string $domainName): void;
 
     /**
-     * @param array<string> $domainNames
+     * @param  array<string>  $domainNames
      */
     public function deleteDomainsLogsDirs(array $domainNames): void;
 

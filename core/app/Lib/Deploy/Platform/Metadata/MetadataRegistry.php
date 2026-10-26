@@ -25,15 +25,15 @@ final class MetadataRegistry
 
         $readers = [];
         foreach (scandir(__DIR__) ?: [] as $entry) {
-            if (!str_ends_with($entry, 'Metadata.php') || $entry === 'PackageMetadata.php') {
+            if (! str_ends_with($entry, 'Metadata.php') || $entry === 'PackageMetadata.php') {
                 continue;
             }
-            $class = __NAMESPACE__ . '\\' . basename($entry, '.php');
-            if (!class_exists($class) || !is_subclass_of($class, PackageMetadata::class)) {
+            $class = __NAMESPACE__.'\\'.basename($entry, '.php');
+            if (! class_exists($class) || ! is_subclass_of($class, PackageMetadata::class)) {
                 continue;
             }
             /** @var PackageMetadata $reader */
-            $reader = new $class();
+            $reader = new $class;
             $readers[$reader->id()] = $reader;
         }
 
@@ -70,7 +70,7 @@ final class MetadataRegistry
      * that happens to compile assets. With no runtime, or one no reader covers,
      * the first record wins, which is stable because the registry is sorted.
      *
-     * @param list<AppPackage> $packages
+     * @param  list<AppPackage>  $packages
      */
     public static function primary(array $packages, ?string $runtime = null): ?AppPackage
     {

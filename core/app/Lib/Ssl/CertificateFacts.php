@@ -2,11 +2,13 @@
 
 namespace App\Lib\Ssl;
 
+use App\System\Project\Domain;
+
 /**
  * A certificate read out of its PEM, in the shape the rest of this namespace
  * expects.
  *
- * Pulled out of {@see \App\System\Project\Domain::getSslCertificateInfo()}
+ * Pulled out of {@see Domain::getSslCertificateInfo()}
  * because two places now need to know what a certificate says and only one of
  * them belongs to an account: the other is the engine's own certificate, which
  * a project may be entitled to reuse when it covers the project's name.
@@ -21,11 +23,11 @@ namespace App\Lib\Ssl;
 final class CertificateFacts
 {
     /**
-     * @param string $pem the leaf certificate
-     * @param ?string $intermediates the rest of the chain, where it is held
-     *        separately -- an account keeps the leaf in `<domain>.crt` and
-     *        its issuers in `<domain>.ca`, and a leaf alone cannot be checked
-     *        against a root store: openssl has no way to bridge the two.
+     * @param  string  $pem  the leaf certificate
+     * @param  ?string  $intermediates  the rest of the chain, where it is held
+     *                                  separately -- an account keeps the leaf in `<domain>.crt` and
+     *                                  its issuers in `<domain>.ca`, and a leaf alone cannot be checked
+     *                                  against a root store: openssl has no way to bridge the two.
      * @return array{
      *   common_name: string,
      *   issuer_name: string,
@@ -43,7 +45,7 @@ final class CertificateFacts
         }
 
         $parsed = @openssl_x509_parse($pem);
-        if (!is_array($parsed)) {
+        if (! is_array($parsed)) {
             return null;
         }
 
@@ -61,7 +63,7 @@ final class CertificateFacts
             // {@see TrustStore}, and the staging certificate that was
             // reported as trusted before it existed.
             'chain_trusted' => TrustStore::verifies(
-                $pem . ($intermediates === null ? '' : PHP_EOL . $intermediates)
+                $pem.($intermediates === null ? '' : PHP_EOL.$intermediates)
             ),
         ];
     }
@@ -73,14 +75,14 @@ final class CertificateFacts
      * modern certificates, and where it is present it repeats the first
      * subjectAltName entry.
      *
-     * @param array<string, mixed> $parsed
+     * @param  array<string, mixed>  $parsed
      * @return list<string>
      */
     private static function names(array $parsed, string $commonName): array
     {
         $altName = $parsed['extensions']['subjectAltName'] ?? null;
 
-        if (!is_string($altName) || trim($altName) === '') {
+        if (! is_string($altName) || trim($altName) === '') {
             return $commonName === '' ? [] : [$commonName];
         }
 
@@ -101,12 +103,12 @@ final class CertificateFacts
     }
 
     /**
-     * @param array<string, mixed> $parsed
+     * @param  array<string, mixed>  $parsed
      */
     private static function field(array $parsed, string $section, string $key): string
     {
         $values = $parsed[$section] ?? null;
-        if (!is_array($values)) {
+        if (! is_array($values)) {
             return '';
         }
 
@@ -120,7 +122,7 @@ final class CertificateFacts
     }
 
     /**
-     * @param array<string, mixed> $parsed
+     * @param  array<string, mixed>  $parsed
      */
     private static function timestamp(array $parsed, string $key): ?int
     {

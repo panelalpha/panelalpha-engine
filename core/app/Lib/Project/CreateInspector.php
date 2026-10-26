@@ -48,7 +48,7 @@ class CreateInspector
         try {
             $resolved = $this->resolver->fromGitHubTree($repoUrl, $branch);
         } catch (\Throwable $e) {
-            return CreateInspection::skipped('its file list could not be read (' . self::brief($e) . ').');
+            return CreateInspection::skipped('its file list could not be read ('.self::brief($e).').');
         }
 
         try {
@@ -58,7 +58,7 @@ class CreateInspector
 
             return CreateInspection::fromReport(AppInspector::inspect($resolved->dir, $repoUrl, $plan, $recipe));
         } catch (\Throwable $e) {
-            return CreateInspection::skipped('inspecting its file list failed (' . self::brief($e) . ').');
+            return CreateInspection::skipped('inspecting its file list failed ('.self::brief($e).').');
         } finally {
             $resolved->release();
         }

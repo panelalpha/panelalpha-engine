@@ -1,9 +1,10 @@
 <?php
 
 namespace App\Console\Commands\Settings;
-use Illuminate\Console\Command;
+
 use App\Lib\Domains\DomainPlan;
 use App\Models\Setting;
+use Illuminate\Console\Command;
 
 class Set extends Command
 {
@@ -28,7 +29,8 @@ class Set extends Command
             Setting::set($name, $value);
             $this->info("`{$name}` set to `{$value}`");
         } catch (\Exception $e) {
-            $this->error("[ERROR] " . $e->getMessage());
+            $this->error('[ERROR] '.$e->getMessage());
+
             return 1;
         }
 
@@ -43,6 +45,6 @@ class Set extends Command
 
         return in_array($value, DomainPlan::TUNNELS, true)
             ? null
-            : 'default_tunnel must be one of: ' . implode(', ', DomainPlan::TUNNELS) . '.';
+            : 'default_tunnel must be one of: '.implode(', ', DomainPlan::TUNNELS).'.';
     }
 }

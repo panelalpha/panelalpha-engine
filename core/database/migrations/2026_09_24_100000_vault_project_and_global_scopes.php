@@ -34,28 +34,28 @@ return new class extends Migration
             DB::table('settings')->where('name', self::SETTING_PROJECT_SCOPED)->delete();
         }
 
-        if (!Schema::hasTable('secret_vault_entries')) {
+        if (! Schema::hasTable('secret_vault_entries')) {
             return;
         }
 
         // One-hour slots whose secret was copied into the project that used it.
         DB::table('secret_vault_entries')->where('scope', 'request')->delete();
 
-        if (!Schema::hasColumn('secret_vault_entries', 'project')) {
+        if (! Schema::hasColumn('secret_vault_entries', 'project')) {
             Schema::table('secret_vault_entries', function (Blueprint $table) {
                 $table->string('project', 64)->nullable()->after('scope')->index();
                 $table->string('scope', 16)->default(SecretVaultEntry::SCOPE_PROJECT)->change();
             });
         }
 
-        if (!Schema::hasTable('users')) {
+        if (! Schema::hasTable('users')) {
             return;
         }
 
         // The secret each type fell back to before: the newest global, if usable.
         $git = self::usableGlobal(SecretVaultEntry::TYPE_GIT_TOKEN);
         $cloudflare = self::usableGlobal(SecretVaultEntry::TYPE_CLOUDFLARE_API_TOKEN);
-        $sharing = !self::truthy($scoped);
+        $sharing = ! self::truthy($scoped);
 
         User::query()->chunkById(100, function ($users) use ($git, $cloudflare, $sharing): void {
             foreach ($users as $user) {
@@ -87,7 +87,7 @@ return new class extends Migration
     /** The data is not restored: a recorded reference looks like one a caller sent. */
     public function down(): void
     {
-        if (!Schema::hasTable('secret_vault_entries')) {
+        if (! Schema::hasTable('secret_vault_entries')) {
             return;
         }
 

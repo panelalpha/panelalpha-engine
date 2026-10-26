@@ -2,11 +2,10 @@
 
 namespace App\Lib\Deploy\Platform\Runtime;
 
-use App\Lib\Deploy\Platform\PlatformRegistry;
-use App\Lib\Deploy\Platform\PlatformManifest;
 use App\Lib\Deploy\Compose\DeployCompose;
+use App\Lib\Deploy\Platform\PlatformManifest;
+use App\Lib\Deploy\Platform\PlatformRegistry;
 use App\Lib\Deploy\Platform\ProjectContext;
-use App\Lib\Deploy\Platform\Strategies;
 
 /**
  * The catalogue of base images a deploy can resolve to, and which ones a given
@@ -25,7 +24,7 @@ final class Images
 
     public const NGINX_IMAGE = 'nginx:alpine';
 
-    public const PHP_IMAGE = 'php:8.3-' . PhpRuntime::IMAGE_VARIANT;
+    public const PHP_IMAGE = 'php:8.3-'.PhpRuntime::IMAGE_VARIANT;
 
     public const COMPOSER_IMAGE = 'composer:2';
 
@@ -124,7 +123,7 @@ final class Images
     {
         $runtimeImage = trim($runtimeImage);
         // Not an official Node tag (bun, Python, JDK, a pinned image).
-        if (!str_starts_with($runtimeImage, 'node:')) {
+        if (! str_starts_with($runtimeImage, 'node:')) {
             return $runtimeImage;
         }
 
@@ -172,7 +171,6 @@ final class Images
         return NodeRuntime::imageFor($projectDir, $package);
     }
 
-
     /**
      * Every php tag we might need, plus composer. Catalog and last resort: a
      * deploy resolves one tag, see preloadImagesFor().
@@ -186,7 +184,7 @@ final class Images
         foreach (PhpRuntime::minors() as $minor) {
             // Default and newer: older minors are pulled on demand, and warming
             // all five costs disk for versions most hosts never serve.
-            if (version_compare($minor . '.0', $floor, '<')) {
+            if (version_compare($minor.'.0', $floor, '<')) {
                 continue;
             }
             $images[] = PhpRuntime::imageTag($minor);
@@ -195,5 +193,4 @@ final class Images
 
         return $images;
     }
-
 }

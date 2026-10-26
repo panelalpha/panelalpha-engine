@@ -18,14 +18,12 @@ final class DatabaseSettings
     ];
 
     /**
-     * @param array<string, mixed> $db
+     * @param  array<string, mixed>  $db
      */
-    private function __construct(private readonly array $db)
-    {
-    }
+    private function __construct(private readonly array $db) {}
 
     /**
-     * @param array{connection?: string, host?: string, port?: string, database?: string, username?: string, password?: string} $db
+     * @param  array{connection?: string, host?: string, port?: string, database?: string, username?: string, password?: string}  $db
      */
     public static function fromArray(array $db): self
     {

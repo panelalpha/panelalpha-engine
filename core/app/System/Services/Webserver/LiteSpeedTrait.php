@@ -29,9 +29,10 @@ trait LiteSpeedTrait
                 'cat',
                 '/usr/local/lsws/VERSION',
             ]);
+
             return trim($ver);
         } catch (\Exception $e) {
-            return "Unknown";
+            return 'Unknown';
         }
     }
 
@@ -39,7 +40,7 @@ trait LiteSpeedTrait
     {
         $newPassword = Str::random(16);
 
-        $adminDirPath = "/usr/local/lsws/admin";
+        $adminDirPath = '/usr/local/lsws/admin';
         $phpBinPath = "{$adminDirPath}/fcgi-bin/admin_php";
         $phpBinPathAlt = "{$adminDirPath}/fcgi-bin/admin_php5";
         $phpScriptPath = "{$adminDirPath}/misc/htpasswd.php";
@@ -61,7 +62,7 @@ EOS;
             $this->system->composeFilePath(),
             'exec',
             '-e',
-            'ADMIN_PASS=' . $newPassword,
+            'ADMIN_PASS='.$newPassword,
             'sites-http',
             'bash',
             '-c',
@@ -88,29 +89,30 @@ EOS;
 
     private function getSerialNumber(): string
     {
-        $filePath = $this->system->engineDirPath() . '/webserver-config/' . $this->getSlug() . '/serial.no';
-        if (!$this->system->filesystem()->fileExists($filePath)) {
+        $filePath = $this->system->engineDirPath().'/webserver-config/'.$this->getSlug().'/serial.no';
+        if (! $this->system->filesystem()->fileExists($filePath)) {
             return '';
         }
+
         return $this->system->filesystem()->fileGetContents($filePath);
     }
 
     private function validateSerialNumber(string $serialNumber): void
     {
-        $configDir = $this->system->engineDirPath() . '/webserver-config/' . $this->getSlug();
-        $this->system->filesystem()->filePutContents($configDir . '/serial.no.tmp', $serialNumber, '994:994');
+        $configDir = $this->system->engineDirPath().'/webserver-config/'.$this->getSlug();
+        $this->system->filesystem()->filePutContents($configDir.'/serial.no.tmp', $serialNumber, '994:994');
         try {
             $this->system->exec([
-                "sudo",
-                "docker",
-                "run",
-                "--rm",
-                "-v",
+                'sudo',
+                'docker',
+                'run',
+                '--rm',
+                '-v',
                 "{$configDir}/serial.no.tmp:/usr/local/lsws/conf/serial.no",
-                "--entrypoint",
-                "/usr/local/lsws/bin/lshttpd",
-                "litespeedtech/litespeed",
-                "-r",
+                '--entrypoint',
+                '/usr/local/lsws/bin/lshttpd',
+                'litespeedtech/litespeed',
+                '-r',
             ]);
         } catch (DockerErrorException $e) {
             throw $e;
@@ -126,16 +128,17 @@ EOS;
 
     private function updateSerialNumber(string $serialNumber): void
     {
-        $configDir = $this->system->engineDirPath() . '/webserver-config/' . $this->getSlug();
+        $configDir = $this->system->engineDirPath().'/webserver-config/'.$this->getSlug();
         $configFiles = $this->system->filesystem()->ls($configDir);
 
-        if (!in_array('serial.no', $configFiles)) {
-            $this->system->filesystem()->filePutContents($configDir . '/serial.no', $serialNumber, '994:994');
+        if (! in_array('serial.no', $configFiles)) {
+            $this->system->filesystem()->filePutContents($configDir.'/serial.no', $serialNumber, '994:994');
             $this->reload();
+
             return;
         }
 
-        $backupFileSuffix = ".bak" . time();
+        $backupFileSuffix = '.bak'.time();
         $moveFiles = [
             "{$configDir}/serial.no" => "{$configDir}/serial.no{$backupFileSuffix}",
             "{$configDir}/license.key" => "{$configDir}/license.key{$backupFileSuffix}",
@@ -151,7 +154,7 @@ EOS;
             ]);
         }
 
-        $this->system->filesystem()->filePutContents($configDir . '/serial.no', $serialNumber, '994:994');
+        $this->system->filesystem()->filePutContents($configDir.'/serial.no', $serialNumber, '994:994');
         $this->system->exec([
             'sudo',
             'docker',
@@ -161,7 +164,7 @@ EOS;
             'exec',
             'sites-http',
             '/usr/local/lsws/bin/lshttpd',
-            '-r'
+            '-r',
         ]);
         $this->reload();
 
@@ -169,29 +172,30 @@ EOS;
         $removeBackups = [];
         foreach ($configFiles as $filename) {
 
-            if (!Str::startsWith($filename, [
+            if (! Str::startsWith($filename, [
                 'serial.no.bak',
                 'license.key.bak',
-                'trial.key.bak'
+                'trial.key.bak',
             ])) {
                 continue;
             }
             $suffix = Str::afterLast($filename, 'serial.no.bak');
-            if (!$suffix) {
+            if (! $suffix) {
                 continue;
             }
             if (count($keepBackups) < 10) {
-                if (!in_array($suffix, $keepBackups)) {
+                if (! in_array($suffix, $keepBackups)) {
                     $keepBackups[] = $suffix;
                 }
+
                 continue;
             }
             $removeBackups[] = $suffix;
         }
         foreach ($removeBackups as $removeSuffix) {
-            $this->system->runProcess(["sudo", "rm", "{$configDir}/serial.no.bak{$removeSuffix}"]);
-            $this->system->runProcess(["sudo", "rm", "{$configDir}/license.key.bak{$removeSuffix}"]);
-            $this->system->runProcess(["sudo", "rm", "{$configDir}/trial.key.bak{$removeSuffix}"]);
+            $this->system->runProcess(['sudo', 'rm', "{$configDir}/serial.no.bak{$removeSuffix}"]);
+            $this->system->runProcess(['sudo', 'rm', "{$configDir}/license.key.bak{$removeSuffix}"]);
+            $this->system->runProcess(['sudo', 'rm', "{$configDir}/trial.key.bak{$removeSuffix}"]);
         }
     }
 
@@ -199,6 +203,7 @@ EOS;
     {
         if ($this instanceof Openlitespeed) {
             $this->applyOpenlitespeedCloudflareRealIpConfig();
+
             return;
         }
         if ($this instanceof Litespeed) {
@@ -208,27 +213,27 @@ EOS;
 
     private function applyOpenlitespeedCloudflareRealIpConfig(): void
     {
-        $snippetPath = $this->system->engineDirPath() . '/webserver-config/openlitespeed/cloudflare-realip.conf';
-        if (!$this->system->filesystem()->fileExists($snippetPath)) {
+        $snippetPath = $this->system->engineDirPath().'/webserver-config/openlitespeed/cloudflare-realip.conf';
+        if (! $this->system->filesystem()->fileExists($snippetPath)) {
             return;
         }
 
         $snippet = trim($this->system->filesystem()->fileGetContents($snippetPath));
-        $configPath = $this->system->engineDirPath() . '/webserver-config/openlitespeed/httpd_config.conf';
+        $configPath = $this->system->engineDirPath().'/webserver-config/openlitespeed/httpd_config.conf';
         $config = $this->system->filesystem()->fileGetContents($configPath);
         $config = preg_replace(
             '/# panelalpha-cloudflare-realip-begin.*?# panelalpha-cloudflare-realip-end\s*/s',
             '',
             $config
         ) ?? $config;
-        $config = trim($config) . "\n\n" . $snippet . "\n";
+        $config = trim($config)."\n\n".$snippet."\n";
         $this->system->filesystem()->filePutContents($configPath, $config);
     }
 
     private function applyLitespeedCloudflareRealIpConfig(): void
     {
-        $snippetPath = $this->system->engineDirPath() . '/webserver-config/litespeed/cloudflare-realip.xml';
-        if (!$this->system->filesystem()->fileExists($snippetPath)) {
+        $snippetPath = $this->system->engineDirPath().'/webserver-config/litespeed/cloudflare-realip.xml';
+        if (! $this->system->filesystem()->fileExists($snippetPath)) {
             return;
         }
 
@@ -243,7 +248,7 @@ EOS;
         }
         $innerSnippet = trim($innerSnippet);
 
-        $configPath = $this->system->engineDirPath() . '/webserver-config/litespeed/httpd_config.xml';
+        $configPath = $this->system->engineDirPath().'/webserver-config/litespeed/httpd_config.xml';
         $config = $this->system->filesystem()->fileGetContents($configPath);
         $config = preg_replace(
             '/<!-- panelalpha-cloudflare-realip-begin -->.*?<!-- panelalpha-cloudflare-realip-end -->\s*/s',
@@ -254,7 +259,7 @@ EOS;
         $replacement = "<!-- panelalpha-cloudflare-realip-begin -->\n{$innerSnippet}\n<!-- panelalpha-cloudflare-realip-end -->\n";
         $newConfig = preg_replace(
             '/(<httpServerConfig>\s*)/',
-            '$1' . $replacement,
+            '$1'.$replacement,
             $config,
             1
         );

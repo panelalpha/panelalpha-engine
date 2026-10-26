@@ -24,11 +24,10 @@ final class BoundedDownload
 
     public function __construct(
         private readonly int $maxBytes = OutboundUrl::MAX_DOWNLOAD_BYTES,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param ?string $pin a `host:port:address` value from OutboundUrl::pin()
+     * @param  ?string  $pin  a `host:port:address` value from OutboundUrl::pin()
      *
      * @throws InvalidArgumentException when the body is larger than the cap
      */
@@ -70,17 +69,17 @@ final class BoundedDownload
 
     private function refuseWhen(bool $overLimit): void
     {
-        if (!$overLimit) {
+        if (! $overLimit) {
             return;
         }
 
         $this->exceeded = true;
 
-        throw new InvalidArgumentException('The download is larger than the ' . intdiv($this->maxBytes, 1048576) . ' MB limit.');
+        throw new InvalidArgumentException('The download is larger than the '.intdiv($this->maxBytes, 1048576).' MB limit.');
     }
 
     private function tooLarge(string $url): InvalidArgumentException
     {
-        return new InvalidArgumentException("The file at {$url} is larger than the " . intdiv($this->maxBytes, 1048576) . ' MB limit.');
+        return new InvalidArgumentException("The file at {$url} is larger than the ".intdiv($this->maxBytes, 1048576).' MB limit.');
     }
 }

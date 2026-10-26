@@ -42,6 +42,4 @@ use OpenApi\Attributes as OA;
     ],
     type: 'object',
 )]
-class EnvVarsSchema
-{
-}
+class EnvVarsSchema {}

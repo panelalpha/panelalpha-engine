@@ -28,19 +28,29 @@ use Illuminate\Support\Facades\Log;
 class DeployLogger
 {
     public const STAGE_PREPARING = 'preparing';
+
     public const STAGE_CLONING = 'cloning';
+
     public const STAGE_RUNNING = 'running';
 
     public const LEVEL_DIM = 'dim';
+
     public const LEVEL_OK = 'ok';
+
     public const LEVEL_INFO = 'info';
+
     public const LEVEL_WARN = 'warn';
+
     public const LEVEL_ERROR = 'error';
 
     public const STATUS_RUNNING = 'running';
+
     public const STATUS_SUCCESS = 'success';
+
     public const STATUS_PARTIAL = 'partial';
+
     public const STATUS_FAILED = 'failed';
+
     public const STATUS_CANCELLED = 'cancelled';
 
     public const KEEP_LOGS = DeployLogArchive::KEEP_LOGS;
@@ -48,7 +58,7 @@ class DeployLogger
     /** Why a deploy whose process died before finish() is closed as failed. */
     public const INTERRUPTED_MESSAGE =
         'The deploy stopped without finishing — the engine process running it is gone. '
-        . 'This usually means the host restarted or ran out of memory. Deploy again to retry.';
+        .'This usually means the host restarted or ran out of memory. Deploy again to retry.';
 
     /** The line a DinD account without git ends its first deploy on, `running`, until files arrive. */
     public const WAITING_FOR_FILES = 'Environment ready, waiting for project files';
@@ -95,7 +105,7 @@ class DeployLogger
         $this->paths = new DeployLogPaths($username);
         $this->status = new DeployStatus($this->paths);
         $this->lock = new DeployLock($this->paths);
-        $this->output = new ProcessOutput();
+        $this->output = new ProcessOutput;
     }
 
     public static function baseDir(): string
@@ -125,7 +135,7 @@ class DeployLogger
      */
     public static function start(string $username): self
     {
-        $logger = new self($username, date('Ymd-His') . '-' . bin2hex(random_bytes(3)));
+        $logger = new self($username, date('Ymd-His').'-'.bin2hex(random_bytes(3)));
 
         LogStorage::ensureDirectory(DeployLogPaths::base());
         LogStorage::ensureDirectory($logger->paths->directory());
@@ -160,7 +170,7 @@ class DeployLogger
     public static function resumeRunningOrStart(string $username): self
     {
         $current = self::current($username);
-        if ($current === null || !$current->isRunning()) {
+        if ($current === null || ! $current->isRunning()) {
             return self::start($username);
         }
         $current->lock->acquire();
@@ -183,7 +193,8 @@ class DeployLogger
     }
 
     /**
-     * @param callable(): self $open
+     * @param  callable(): self  $open
+     *
      * @throws DeployAlreadyRunningException
      */
     private static function safely(callable $open, string $username, string $action): ?self
@@ -316,7 +327,7 @@ class DeployLogger
     public static function settleOrphaned(string $username, bool $dryRun = false): ?string
     {
         $logger = self::current($username);
-        if ($logger === null || !$logger->isRunning() || $logger->isWaitingForFiles()) {
+        if ($logger === null || ! $logger->isRunning() || $logger->isWaitingForFiles()) {
             return null;
         }
         if ($dryRun) {
@@ -558,7 +569,7 @@ class DeployLogger
      * Mask these values in every line this deploy writes from now on, in its
      * error and in what telemetry is handed.
      *
-     * @param list<string> $values
+     * @param  list<string>  $values
      */
     public function mask(array $values): void
     {
@@ -636,7 +647,7 @@ class DeployLogger
      * Once cancelled, never overwrite the status with a failure caused by the
      * cancellation itself — a killed subprocess, a cleanup error.
      *
-     * @param array<string, mixed> $latest
+     * @param  array<string, mixed>  $latest
      * @return array{0: string, 1: ?string}
      */
     private function settleStatus(array $latest, string $status, ?string $error): array
@@ -657,11 +668,11 @@ class DeployLogger
      * failure, so its "fixed in" and how-to-fix text would be a false claim:
      * only the title and the cause are written then.
      *
-     * @param array<string, ?string> $problem
+     * @param  array<string, ?string>  $problem
      */
     private function writeProblem(array $problem, ?string $stage): void
     {
-        $this->writeLine(self::LEVEL_WARN, 'Known problem: ' . ($problem['title'] ?? 'PanelAlpha has a fix for this failure'), $stage);
+        $this->writeLine(self::LEVEL_WARN, 'Known problem: '.($problem['title'] ?? 'PanelAlpha has a fix for this failure'), $stage);
 
         $fixedIn = $problem['fixed_in_version'] ?? null;
         $alreadyHere = $fixedIn !== null && self::engineHasRelease($fixedIn);
@@ -674,7 +685,7 @@ class DeployLogger
             if ($lines === []) {
                 continue;
             }
-            $this->writeLine(self::LEVEL_INFO, $label . ':', $stage);
+            $this->writeLine(self::LEVEL_INFO, $label.':', $stage);
             foreach (array_slice($lines, 0, self::PROBLEM_MAX_LINES) as $line) {
                 $this->writeLine(self::LEVEL_INFO, $line, $stage);
             }
@@ -687,7 +698,7 @@ class DeployLogger
                 $stage
             );
         } elseif ($fixedIn !== null) {
-            $this->writeLine(self::LEVEL_INFO, 'Fixed in engine version ' . $fixedIn, $stage);
+            $this->writeLine(self::LEVEL_INFO, 'Fixed in engine version '.$fixedIn, $stage);
         }
     }
 
@@ -696,7 +707,7 @@ class DeployLogger
     {
         $running = config('system.version');
         $pattern = '/^\d+(\.\d+)*$/';
-        if (!is_string($running) || preg_match($pattern, $running) !== 1 || preg_match($pattern, trim($version)) !== 1) {
+        if (! is_string($running) || preg_match($pattern, $running) !== 1 || preg_match($pattern, trim($version)) !== 1) {
             return false;
         }
 
@@ -773,7 +784,7 @@ class DeployLogger
             'level' => $level,
             'msg' => LogLine::truncate($message),
         ];
-        LogStorage::write($this->getLogPath(), json_encode($frame) . "\n", FILE_APPEND | LOCK_EX);
+        LogStorage::write($this->getLogPath(), json_encode($frame)."\n", FILE_APPEND | LOCK_EX);
         DeployLogStream::emit(['type' => 'line'] + $frame);
     }
 }

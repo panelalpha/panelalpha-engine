@@ -28,33 +28,38 @@ class ProjectSetPassword extends Command
         $username = trim((string) $this->option('username'));
         if ($username === '') {
             $this->error('--project is required.');
+
             return 1;
         }
 
         $user = User::findByUsername($username);
-        if (!$user) {
+        if (! $user) {
             $this->error("Project '{$username}' not found.");
+
             return 1;
         }
 
         $password = $this->option('password');
-        if (!is_string($password) || $password === '') {
+        if (! is_string($password) || $password === '') {
             $password = $this->secret('Site password');
-            if (!is_string($password) || $password === '') {
+            if (! is_string($password) || $password === '') {
                 $this->error('Password must not be empty.');
+
                 return 1;
             }
             $confirm = $this->secret('Confirm password');
             if ($confirm !== $password) {
                 $this->error('Passwords do not match.');
+
                 return 1;
             }
         }
 
-        if (!$this->option('force')
-            && !$this->confirm("Set site password for project '{$user->username}'?", true)
+        if (! $this->option('force')
+            && ! $this->confirm("Set site password for project '{$user->username}'?", true)
         ) {
             $this->info('Aborted.');
+
             return 0;
         }
 
@@ -62,6 +67,7 @@ class ProjectSetPassword extends Command
             SitePasswordProtection::set($user, $password);
         } catch (\InvalidArgumentException $e) {
             $this->error($e->getMessage());
+
             return 1;
         }
 

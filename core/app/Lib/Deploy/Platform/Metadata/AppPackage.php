@@ -13,14 +13,14 @@ final class AppPackage
     public const NAME_FROM_DIRECTORY = 'directory';
 
     /**
-     * @param list<string> $authors
-     * @param list<string> $keywords
-     * @param list<string> $scripts names only — a script body can hold a token
-     * @param list<string> $entrypoints
-     * @param list<string> $workspaces
-     * @param list<Framework> $frameworks
-     * @param array<string, int> $dependencyCounts
-     * @param array<string, string> $platform requirement id => declared constraint
+     * @param  list<string>  $authors
+     * @param  list<string>  $keywords
+     * @param  list<string>  $scripts  names only — a script body can hold a token
+     * @param  list<string>  $entrypoints
+     * @param  list<string>  $workspaces
+     * @param  list<Framework>  $frameworks
+     * @param  array<string, int>  $dependencyCounts
+     * @param  array<string, string>  $platform  requirement id => declared constraint
      */
     public function __construct(
         public readonly string $ecosystem,
@@ -41,8 +41,7 @@ final class AppPackage
         public readonly array $frameworks = [],
         public readonly array $dependencyCounts = [],
         public readonly array $platform = []
-    ) {
-    }
+    ) {}
 
     /** The framework this project is built on, when it declares one. */
     public function framework(): ?Framework

@@ -24,17 +24,17 @@ final class ExplainerRegistry
         }
 
         $explainers = [];
-        $directory = __DIR__ . '/Explainers';
+        $directory = __DIR__.'/Explainers';
         foreach (scandir($directory) ?: [] as $entry) {
-            if (!str_ends_with($entry, 'Explainer.php')) {
+            if (! str_ends_with($entry, 'Explainer.php')) {
                 continue;
             }
-            $class = __NAMESPACE__ . '\\Explainers\\' . basename($entry, '.php');
-            if (!class_exists($class) || !is_subclass_of($class, Explainer::class)) {
+            $class = __NAMESPACE__.'\\Explainers\\'.basename($entry, '.php');
+            if (! class_exists($class) || ! is_subclass_of($class, Explainer::class)) {
                 continue;
             }
             /** @var Explainer $explainer */
-            $explainer = new $class();
+            $explainer = new $class;
             $explainers[$explainer->id()] = $explainer;
         }
 

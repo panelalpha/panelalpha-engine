@@ -2,8 +2,10 @@
 
 namespace App\Lib\Deploy;
 
+use App\Http\Requests\UserStoreRequest;
+
 /**
- * Hosting-account usernames as {@see \App\Http\Requests\UserStoreRequest}
+ * Hosting-account usernames as {@see UserStoreRequest}
  * accepts them: lowercase ASCII letters and digits, starting with a letter,
  * 3–15 characters. Hyphens and dots from a Git repo name are stripped, not
  * kept — a 16-character `saas-starter-ts` is not a valid account name, and
@@ -42,7 +44,7 @@ class HostingUsername
     {
         $name = strtolower($raw);
         $stripped = preg_replace('/[^a-z0-9]/', '', $name);
-        if (!is_string($stripped) || $stripped === '') {
+        if (! is_string($stripped) || $stripped === '') {
             return null;
         }
         $name = ltrim($stripped, '0123456789');

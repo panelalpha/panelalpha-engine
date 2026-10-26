@@ -13,22 +13,21 @@ class Ftp
 {
     public function __construct(
         private readonly UserProject $project,
-    ) {
-    }
+    ) {}
 
     public function create(string $ftpUser, string $password, string $directory, ?int $quota = null): void
     {
         $directory = trim($directory, '/');
 
         $home = $this->project->homeDirPath();
-        $hostPath = $home . '/' . $directory;
-        if (!File::isDirectory($hostPath) || !self::staysInside($home, $directory, $hostPath)) {
+        $hostPath = $home.'/'.$directory;
+        if (! File::isDirectory($hostPath) || ! self::staysInside($home, $directory, $hostPath)) {
             throw ValidationException::withMessages([
                 'directory' => 'The directory must be an existing directory inside the project home.',
             ]);
         }
 
-        $containerPath = '/home/ftpuser/' . $this->project->username() . '/' . $directory;
+        $containerPath = '/home/ftpuser/'.$this->project->username().'/'.$directory;
         $model = $this->project->model();
         [$uid, $gid] = $model->linuxIds();
 
@@ -59,7 +58,7 @@ class Ftp
             return false;
         }
 
-        return $real === $realHome || str_starts_with($real, rtrim($realHome, '/') . '/');
+        return $real === $realHome || str_starts_with($real, rtrim($realHome, '/').'/');
     }
 
     /**
@@ -69,7 +68,7 @@ class Ftp
     {
         $pureFtpd = $this->project->system()->ftp();
 
-        if (!empty($password)) {
+        if (! empty($password)) {
             $pureFtpd->passwd($ftpUser, $password);
         }
 
@@ -91,7 +90,8 @@ class Ftp
      * The ftp container is an optional profile: a host without it throws
      * on reload, so it is touched only when an account was deleted.
      *
-     * @param string[] $accounts
+     * @param  string[]  $accounts
+     *
      * @throws DockerErrorException
      */
     public function deleteMany(array $accounts): void
@@ -113,7 +113,7 @@ class Ftp
     /** @return bool whether $ftpUser existed and was deleted */
     private function deleteIfExists(PureFtpd $pureFtpd, string $ftpUser): bool
     {
-        if (!$pureFtpd->userExists($ftpUser)) {
+        if (! $pureFtpd->userExists($ftpUser)) {
             return false;
         }
         $pureFtpd->deleteUser($ftpUser);
@@ -126,10 +126,11 @@ class Ftp
      */
     public function diskUsage(string $directory): string
     {
-        $hostPath = $this->project->homeDirPath() . '/' . ltrim($directory, '/');
+        $hostPath = $this->project->homeDirPath().'/'.ltrim($directory, '/');
         $system = $this->project->system();
-        if (!$system->filesystem()->directoryExists($hostPath)) {
+        if (! $system->filesystem()->directoryExists($hostPath)) {
             $system->runProcess(['sudo', 'mkdir', '-p', $hostPath]);
+
             return '0';
         }
         $result = $system->exec(['sudo', 'du', '-shm', $hostPath]);

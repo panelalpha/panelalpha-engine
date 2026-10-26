@@ -58,7 +58,7 @@ final class ProcfileWebProbe implements PlatformProbe
                 continue;
             }
             $name = strtolower($m[1]);
-            if ($name !== 'web' && !isset($processes[$name])) {
+            if ($name !== 'web' && ! isset($processes[$name])) {
                 $processes[$name] = $m[2];
             }
         }
@@ -69,7 +69,7 @@ final class ProcfileWebProbe implements PlatformProbe
     private static function readProjectFile(string $projectDir, string $name): ?string
     {
         $projectDir = rtrim($projectDir, '/');
-        $contents = @file_get_contents($projectDir . '/' . $name);
+        $contents = @file_get_contents($projectDir.'/'.$name);
 
         return is_string($contents) && $contents !== '' ? $contents : null;
     }

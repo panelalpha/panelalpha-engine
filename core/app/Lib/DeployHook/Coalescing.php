@@ -4,6 +4,7 @@ namespace App\Lib\DeployHook;
 
 use App\Jobs\RunHookDelivery;
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Deploy\Telemetry\Telemetry;
 use App\Models\DeployHook;
 use App\Models\HookDelivery;
 use App\Models\User;
@@ -34,7 +35,7 @@ use Illuminate\Support\Facades\Log;
  * pending supersedes the first on the spot, because both would redeploy the
  * same tracked branch and only its current head at follow-up time matters.
  *
- * Static, like {@see \App\Lib\Deploy\Telemetry\Telemetry}: `finish()` calls it
+ * Static, like {@see Telemetry}: `finish()` calls it
  * unconditionally, for every deploy of every project, most of which have no
  * hook at all, so it must never throw and never cost a caller a dependency it
  * has no other reason to take.
@@ -61,7 +62,7 @@ final class Coalescing
     {
         self::markPending($delivery);
 
-        if (!self::isRunning($user) && self::claim($delivery->deploy_hook_id, $delivery->id)) {
+        if (! self::isRunning($user) && self::claim($delivery->deploy_hook_id, $delivery->id)) {
             RunHookDelivery::dispatch($delivery->id);
         }
     }

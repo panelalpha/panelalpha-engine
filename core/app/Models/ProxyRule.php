@@ -31,6 +31,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon $created_at
  * @property Carbon $updated_at
  * @property ?User $user
+ *
  * @method static ?ProxyRule find(int $id)
  */
 class ProxyRule extends Model
@@ -137,8 +138,8 @@ class ProxyRule extends Model
             ->where('server_name', $from)
             ->update(['server_name' => $to]);
 
-        $wwwFrom = 'www.' . $from;
-        $wwwTo = 'www.' . $to;
+        $wwwFrom = 'www.'.$from;
+        $wwwTo = 'www.'.$to;
         $updated += self::forUser($username)
             ->where('server_name', $wwwFrom)
             ->update(['server_name' => $wwwTo]);
@@ -223,7 +224,7 @@ class ProxyRule extends Model
     ): array {
         return [
             'description' => ($isPrimary ? 'Primary' : 'Additional')
-                . " {$listenPort}→{$upstreamPort} for {$username}",
+                ." {$listenPort}→{$upstreamPort} for {$username}",
             'source' => 'auto-detected-from-compose',
             'detected_port' => $upstreamPort,
         ] + ($upstreamProtocol === 'https' ? ['port_scheme' => 'https'] : []);
@@ -268,7 +269,7 @@ class ProxyRule extends Model
     {
         if ($upstreamProtocol === 'https') {
             $rule->upstream_protocol = 'https';
-        } elseif (!$rule->exists || $rule->upstream_protocol === null || $setByRecipe) {
+        } elseif (! $rule->exists || $rule->upstream_protocol === null || $setByRecipe) {
             $rule->upstream_protocol = 'http';
         }
     }

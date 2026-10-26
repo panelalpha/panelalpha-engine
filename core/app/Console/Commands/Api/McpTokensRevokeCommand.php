@@ -18,23 +18,26 @@ class McpTokensRevokeCommand extends Command
     public function handle(): int
     {
         $root = Admin::rootAccount();
-        $id   = $this->argument('id');
+        $id = $this->argument('id');
 
         /** @var ?PersonalAccessToken */
         $token = $root->tokens()->find($id);
 
-        if (!$token) {
+        if (! $token) {
             $this->error("Token #{$id} not found.");
+
             return 1;
         }
 
         if ($token->revoked_at) {
             $this->warn("Token #{$token->id} '{$token->name}' is already revoked.");
+
             return 0;
         }
 
         $token->forceFill(['revoked_at' => now()])->save();
         $this->info("Token #{$token->id} '{$token->name}' revoked.");
+
         return 0;
     }
 }

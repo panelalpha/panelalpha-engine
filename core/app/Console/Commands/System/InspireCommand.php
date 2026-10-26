@@ -14,6 +14,7 @@ class InspireCommand extends Command
     public function handle(): int
     {
         $this->comment(Inspiring::quote());
+
         return 0;
     }
 }

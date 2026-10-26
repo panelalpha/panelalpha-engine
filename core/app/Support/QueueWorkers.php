@@ -74,7 +74,7 @@ class QueueWorkers
     public static function running(?string $scanDir = null): ?int
     {
         $scanDir ??= self::SCAN_DIR;
-        if (!is_dir($scanDir . '/.s6-svscan')) {
+        if (! is_dir($scanDir.'/.s6-svscan')) {
             return null;
         }
 
@@ -135,7 +135,7 @@ class QueueWorkers
     public static function writeServices(int $count, string $scanDir): void
     {
         for ($i = 1; $i <= $count; $i++) {
-            self::writeService($scanDir . '/' . self::PREFIX . $i);
+            self::writeService($scanDir.'/'.self::PREFIX.$i);
         }
 
         foreach (self::serviceDirs($scanDir) as $dir) {
@@ -147,10 +147,10 @@ class QueueWorkers
 
     private static function writeService(string $dir): void
     {
-        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+        if (! is_dir($dir) && ! mkdir($dir, 0755, true) && ! is_dir($dir)) {
             throw new RuntimeException("Could not create {$dir}.");
         }
-        if (file_put_contents($dir . '/run', self::runScript(), LOCK_EX) === false || !chmod($dir . '/run', 0755)) {
+        if (file_put_contents($dir.'/run', self::runScript(), LOCK_EX) === false || ! chmod($dir.'/run', 0755)) {
             throw new RuntimeException("Could not write {$dir}/run.");
         }
     }
@@ -162,8 +162,8 @@ class QueueWorkers
      */
     private static function retire(string $dir, string $scanDir): void
     {
-        $retired = $scanDir . '/.' . basename($dir) . '-' . bin2hex(random_bytes(4));
-        if (!rename($dir, $retired)) {
+        $retired = $scanDir.'/.'.basename($dir).'-'.bin2hex(random_bytes(4));
+        if (! rename($dir, $retired)) {
             throw new RuntimeException("Could not retire {$dir}.");
         }
     }
@@ -171,13 +171,13 @@ class QueueWorkers
     /** Delete retired workers whose supervisor has gone. */
     private static function pruneRetired(string $scanDir): void
     {
-        foreach (glob($scanDir . '/.' . self::PREFIX . '*', GLOB_ONLYDIR) ?: [] as $dir) {
+        foreach (glob($scanDir.'/.'.self::PREFIX.'*', GLOB_ONLYDIR) ?: [] as $dir) {
             try {
                 $supervised = (new Process(['s6-svok', $dir]))->run() === 0;
             } catch (Throwable) {
                 continue;
             }
-            if (!$supervised) {
+            if (! $supervised) {
                 self::removeTree($dir);
             }
         }
@@ -186,7 +186,7 @@ class QueueWorkers
     /** @return list<string> the worker service directories, in number order */
     private static function serviceDirs(string $scanDir): array
     {
-        $dirs = glob($scanDir . '/' . self::PREFIX . '*', GLOB_ONLYDIR) ?: [];
+        $dirs = glob($scanDir.'/'.self::PREFIX.'*', GLOB_ONLYDIR) ?: [];
         usort($dirs, fn (string $a, string $b): int => strnatcmp($a, $b));
 
         return $dirs;
@@ -198,7 +198,7 @@ class QueueWorkers
      */
     private static function rescan(string $scanDir): void
     {
-        if (!is_dir($scanDir . '/.s6-svscan')) {
+        if (! is_dir($scanDir.'/.s6-svscan')) {
             return;
         }
         try {
@@ -209,14 +209,14 @@ class QueueWorkers
 
     private static function removeTree(string $path): void
     {
-        if (is_link($path) || !is_dir($path)) {
+        if (is_link($path) || ! is_dir($path)) {
             @unlink($path);
 
             return;
         }
         foreach (scandir($path) ?: [] as $item) {
             if ($item !== '.' && $item !== '..') {
-                self::removeTree($path . '/' . $item);
+                self::removeTree($path.'/'.$item);
             }
         }
         @rmdir($path);

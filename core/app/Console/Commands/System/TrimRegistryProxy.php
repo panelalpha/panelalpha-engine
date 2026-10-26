@@ -45,23 +45,23 @@ class TrimRegistryProxy extends Command
 
     public function handle(): int
     {
-        $system = new System();
+        $system = new System;
 
-        if (!$this->isRunning($system)) {
+        if (! $this->isRunning($system)) {
             $this->info('registry-proxy is not running, nothing to clear.');
 
             return 0;
         }
 
         if ($this->option('dry-run')) {
-            $this->info('Would wipe ' . self::CONTAINER . "'s store and restart it.");
+            $this->info('Would wipe '.self::CONTAINER."'s store and restart it.");
 
             return 0;
         }
 
         $system->exec(self::wipeArgv(), [], 120);
         $system->exec(self::clearArgv(), [], 120);
-        $this->info('Wiped and restarted ' . self::CONTAINER . '; cache store is empty.');
+        $this->info('Wiped and restarted '.self::CONTAINER.'; cache store is empty.');
 
         return 0;
     }

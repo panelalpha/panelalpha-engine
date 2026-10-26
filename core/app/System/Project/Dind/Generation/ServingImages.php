@@ -22,9 +22,7 @@ final class ServingImages
     /** Ends a retag script: drops each holding tag in `$keep` once, then prints the count `$n`. */
     private const DROP_HOLDING_TAGS = 'for k in $(printf "%s\\n" $keep | sort -u); do docker rmi "$k" >/dev/null 2>&1; done; echo $n';
 
-    public function __construct(private readonly DindProject $project)
-    {
-    }
+    public function __construct(private readonly DindProject $project) {}
 
     /** Holds and notes the image of every running container; only those a tag now holds are noted. */
     public function remember(): void
@@ -44,19 +42,19 @@ final class ServingImages
     private function inspectRunning(): ?string
     {
         $ps = implode(' ', array_map('escapeshellarg', $this->project->userAppComposeCommand(['ps', '--quiet'])));
-        $script = 'ids=$(' . $ps . ') || exit 1; [ -n "$ids" ] || exit 0; docker inspect --format '
-            . escapeshellarg(self::INSPECT_FORMAT) . ' $ids';
+        $script = 'ids=$('.$ps.') || exit 1; [ -n "$ids" ] || exit 0; docker inspect --format '
+            .escapeshellarg(self::INSPECT_FORMAT).' $ids';
         try {
             return $this->project->shell()->execAsUserQuiet(['bash', '-c', $script], [], self::TIMEOUT_SECONDS);
         } catch (\Throwable $e) {
-            $this->couldNotHold('its running containers could not be read: ' . $e->getMessage());
+            $this->couldNotHold('its running containers could not be read: '.$e->getMessage());
 
             return null;
         }
     }
 
     /**
-     * @param list<array{id: string, image: string, ref: string}> $images
+     * @param  list<array{id: string, image: string, ref: string}>  $images
      * @return list<string> the holding tags that were set
      */
     private function hold(array $images): array
@@ -73,7 +71,7 @@ final class ServingImages
                 $held = preg_split('/\R/', trim($out)) ?: [];
             }
         } catch (\Throwable $e) {
-            $this->couldNotHold('their images could not be tagged: ' . $e->getMessage());
+            $this->couldNotHold('their images could not be tagged: '.$e->getMessage());
         }
 
         return $held;
@@ -83,7 +81,7 @@ final class ServingImages
     private function couldNotHold(string $why): void
     {
         $message = "Could not keep the images {$this->project->username()} is serving, so the previous "
-            . 'version will not be startable after a redeploy: ' . $why;
+            .'version will not be startable after a redeploy: '.$why;
         Log::warning($message);
         try {
             $this->project->shell()->logger()?->warn($message);
@@ -94,7 +92,7 @@ final class ServingImages
     /** `panelalpha-serving:<12 hex of the image id>`. */
     public static function keepTag(string $imageId): string
     {
-        return self::KEEP_REPOSITORY . ':' . substr(preg_replace('/^sha256:/', '', $imageId) ?? '', 0, 12);
+        return self::KEEP_REPOSITORY.':'.substr(preg_replace('/^sha256:/', '', $imageId) ?? '', 0, 12);
     }
 
     /**
@@ -114,13 +112,13 @@ final class ServingImages
             array_push($args, $container['id'], $container['image'], $container['ref'], self::keepTag($container['image']));
         }
         $script = 'n=0; keep=; while [ $# -ge 4 ]; do '
-            . '[ "$(docker inspect --format "{{.State.Running}} {{.Image}}" "$1" 2>/dev/null)" = "true $2" ] '
-            . '&& docker tag "$4" "$3" && n=$((n+1)); keep="$keep $4"; shift 4; done; '
-            . self::DROP_HOLDING_TAGS;
+            .'[ "$(docker inspect --format "{{.State.Running}} {{.Image}}" "$1" 2>/dev/null)" = "true $2" ] '
+            .'&& docker tag "$4" "$3" && n=$((n+1)); keep="$keep $4"; shift 4; done; '
+            .self::DROP_HOLDING_TAGS;
         try {
             $out = $args === [] ? '0' : $this->project->shell()->execQuiet(['bash', '-c', $script, 'retag', ...$args], [], self::TIMEOUT_SECONDS);
         } catch (\Throwable $e) {
-            Log::warning("Could not point the image tags of {$this->project->username()} back: " . $e->getMessage());
+            Log::warning("Could not point the image tags of {$this->project->username()} back: ".$e->getMessage());
 
             return null;
         }
@@ -162,11 +160,11 @@ final class ServingImages
             return null;
         }
         $script = 'n=0; keep=; while [ $# -ge 2 ]; do docker tag "$2" "$1" && n=$((n+1)); keep="$keep $2"; shift 2; done; '
-            . self::DROP_HOLDING_TAGS;
+            .self::DROP_HOLDING_TAGS;
         try {
             $out = $this->project->shell()->execQuiet(['bash', '-c', $script, 'restore', ...$args], [], self::TIMEOUT_SECONDS);
         } catch (\Throwable $e) {
-            Log::warning("Could not point the image tags of {$this->project->username()} at the previous version: " . $e->getMessage());
+            Log::warning("Could not point the image tags of {$this->project->username()} at the previous version: ".$e->getMessage());
 
             return null;
         }
@@ -186,7 +184,7 @@ final class ServingImages
     }
 
     /**
-     * @param ?array<string, mixed> $noted the IMAGES entry
+     * @param  ?array<string, mixed>  $noted  the IMAGES entry
      * @return list<array{id: string, image: string, ref: string}>
      */
     private static function containersIn(?array $noted): array
@@ -211,7 +209,7 @@ final class ServingImages
         $images = [];
         foreach (preg_split('/\R/', trim($inspect)) ?: [] as $line) {
             $fields = preg_split('/\s+/', trim($line)) ?: [];
-            if (count($fields) !== 3 || !str_starts_with($fields[1], 'sha256:') || str_contains($fields[2], '@')) {
+            if (count($fields) !== 3 || ! str_starts_with($fields[1], 'sha256:') || str_contains($fields[2], '@')) {
                 continue;
             }
             $images[] = ['id' => $fields[0], 'image' => $fields[1], 'ref' => $fields[2]];

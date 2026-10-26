@@ -47,7 +47,7 @@ class SitePasswordProtection
     {
         $details = $user->getDetails();
 
-        return !empty($details[self::DETAIL_ENABLED])
+        return ! empty($details[self::DETAIL_ENABLED])
             && is_string($details[self::DETAIL_HASH] ?? null)
             && $details[self::DETAIL_HASH] !== '';
     }
@@ -93,7 +93,7 @@ class SitePasswordProtection
 
     public static function unset(User $user): void
     {
-        if (!self::isEnabled($user)) {
+        if (! self::isEnabled($user)) {
             return;
         }
 
@@ -141,7 +141,7 @@ class SitePasswordProtection
         if ($authorization === null || $authorization === '') {
             return null;
         }
-        if (!preg_match('/^\s*Basic\s+(\S+)\s*$/i', $authorization, $m)) {
+        if (! preg_match('/^\s*Basic\s+(\S+)\s*$/i', $authorization, $m)) {
             return null;
         }
         $decoded = base64_decode($m[1], true);
@@ -160,12 +160,12 @@ class SitePasswordProtection
     {
         $version = self::version($user);
 
-        return $version . '.' . self::cookieSignature($user, $version);
+        return $version.'.'.self::cookieSignature($user, $version);
     }
 
     public static function cookieIsValid(User $user, ?string $cookie): bool
     {
-        if ($cookie === null || $cookie === '' || !self::isEnabled($user)) {
+        if ($cookie === null || $cookie === '' || ! self::isEnabled($user)) {
             return false;
         }
         $parts = explode('.', $cookie, 2);
@@ -173,7 +173,7 @@ class SitePasswordProtection
             return false;
         }
         [$versionPart, $sig] = $parts;
-        if (!ctype_digit($versionPart) || (int) $versionPart !== self::version($user)) {
+        if (! ctype_digit($versionPart) || (int) $versionPart !== self::version($user)) {
             return false;
         }
 
@@ -182,7 +182,7 @@ class SitePasswordProtection
 
     private static function cookieSignature(User $user, int $version): string
     {
-        return hash_hmac('sha256', $user->username . '|' . $version, self::cookieSigningKey());
+        return hash_hmac('sha256', $user->username.'|'.$version, self::cookieSigningKey());
     }
 
     /**
@@ -190,7 +190,7 @@ class SitePasswordProtection
      */
     public static function nginxTemplateVars(User $user): array
     {
-        if (!self::isEnabled($user)) {
+        if (! self::isEnabled($user)) {
             return ['site_password_enabled' => false];
         }
 
@@ -200,7 +200,7 @@ class SitePasswordProtection
             'site_password_enabled' => true,
             'site_password_auth_mode' => $mode,
             'site_password_auth_request' => "auth_request /_pa_site_auth;\n"
-                . "            error_page 401 = @pa_site_auth_fail;",
+                .'            error_page 401 = @pa_site_auth_fail;',
             'site_password_locations' => self::gateLocations($mode, $user->username),
         ];
     }
@@ -251,29 +251,29 @@ NGINX;
     {
         if ($mode === self::MODE_BASIC) {
             return "add_header WWW-Authenticate 'Basic realm=\"Protected\"' always;\n"
-                . "        return 401;";
+                .'        return 401;';
         }
 
         return "resolver 127.0.0.54 valid=30s;\n"
-            . "        set \$enginehost core.shared-hosting.palocal;\n"
-            . "        proxy_pass http://\$enginehost/api/internal/site-password/{$username}/gate;\n"
-            . "        proxy_set_header Host \$host;\n"
-            . "        proxy_set_header X-Forwarded-Proto \$scheme;\n"
-            . "        proxy_set_header X-Original-URI \$request_uri;\n"
-            . "        proxy_set_header X-Real-IP \$remote_addr;\n"
-            . "        proxy_method GET;\n"
-            . "        proxy_pass_request_body off;\n"
-            . "        proxy_set_header Content-Length \"\";";
+            ."        set \$enginehost core.shared-hosting.palocal;\n"
+            ."        proxy_pass http://\$enginehost/api/internal/site-password/{$username}/gate;\n"
+            ."        proxy_set_header Host \$host;\n"
+            ."        proxy_set_header X-Forwarded-Proto \$scheme;\n"
+            ."        proxy_set_header X-Original-URI \$request_uri;\n"
+            ."        proxy_set_header X-Real-IP \$remote_addr;\n"
+            ."        proxy_method GET;\n"
+            ."        proxy_pass_request_body off;\n"
+            .'        proxy_set_header Content-Length "";';
     }
 
     private static function applyWebserver(User $user): void
     {
-        $system = new System();
+        $system = new System;
         $webserver = $system->webserver()->getCurrentWebserver();
         if ($webserver !== 'nginx-proxy') {
             Log::warning(
                 "Site password protection is configured for project '{$user->username}', "
-                . "but webserver is '{$webserver}' (only nginx-proxy enforces it)."
+                ."but webserver is '{$webserver}' (only nginx-proxy enforces it)."
             );
         }
 
@@ -293,7 +293,7 @@ NGINX;
         if ($user->getTemplate() !== 'dind') {
             return;
         }
-        if (!Tunnel::projectHasCloudflareTunnels($user)) {
+        if (! Tunnel::projectHasCloudflareTunnels($user)) {
             return;
         }
 
@@ -305,7 +305,7 @@ NGINX;
         } catch (\Throwable $e) {
             Log::warning(
                 "Failed to sync Cloudflare tunnel origins after site password change for {$user->username}: "
-                . $e->getMessage()
+                .$e->getMessage()
             );
         }
     }
@@ -314,8 +314,8 @@ NGINX;
      * Hands the framework cache back to www-data when running as root: the gate's login throttle
      * lives there, and root-owned shards make php-fpm 500 on POST /_pa_site_password.
      *
-     * @param ?int $euid override for tests (null = posix_geteuid / treat as non-root)
-     * @param ?ProcessRunner $runner override for tests
+     * @param  ?int  $euid  override for tests (null = posix_geteuid / treat as non-root)
+     * @param  ?ProcessRunner  $runner  override for tests
      */
     public static function reclaimFrameworkCacheOwnership(?int $euid = null, ?ProcessRunner $runner = null): void
     {
@@ -325,15 +325,15 @@ NGINX;
         }
 
         $path = storage_path('framework/cache');
-        if ($path === '' || $path === '/' || !is_dir($path)) {
+        if ($path === '' || $path === '/' || ! is_dir($path)) {
             return;
         }
 
         try {
-            ($runner ?? new System())->runProcess(['sudo', 'chown', '-R', 'www-data:www-data', $path]);
+            ($runner ?? new System)->runProcess(['sudo', 'chown', '-R', 'www-data:www-data', $path]);
         } catch (\Throwable $e) {
             Log::warning(
-                'Could not reclaim framework cache ownership for site-password gate: ' . $e->getMessage()
+                'Could not reclaim framework cache ownership for site-password gate: '.$e->getMessage()
             );
         }
     }

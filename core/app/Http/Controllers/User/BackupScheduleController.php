@@ -124,10 +124,10 @@ class BackupScheduleController extends Controller
 
     private function acceptableCron(string $cron): string
     {
-        if (!CronExpression::isValidExpression($cron)) {
+        if (! CronExpression::isValidExpression($cron)) {
             throw ProblemException::one('cron', 'invalid_cron', 'The cron expression is not valid.');
         }
-        if (!BackupSchedule::isAtMostHourly($cron)) {
+        if (! BackupSchedule::isAtMostHourly($cron)) {
             throw ProblemException::one('cron', 'cron_too_frequent', 'Automatic backups may run at most once an hour.');
         }
 

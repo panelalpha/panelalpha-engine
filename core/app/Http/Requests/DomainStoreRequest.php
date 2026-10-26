@@ -37,8 +37,8 @@ class DomainStoreRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'domain' => 'string|required|regex:' . DomainName::REGEX,
-            'parent_domain' => 'string|nullable|regex:' . DomainName::REGEX,
+            'domain' => 'string|required|regex:'.DomainName::REGEX,
+            'parent_domain' => 'string|nullable|regex:'.DomainName::REGEX,
             'type' => 'string|required|in:addon,sub',
             'no_ssl' => 'boolean|nullable',
             'aliases' => 'array|nullable',

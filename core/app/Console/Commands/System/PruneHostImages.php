@@ -77,19 +77,19 @@ class PruneHostImages extends Command
         }
         $last = self::lastCompleted();
         if ($due !== null && $last !== null && time() - $last < $due) {
-            $this->line('Image prune not due: last completed ' . self::describe(time() - $last) . ' ago.');
+            $this->line('Image prune not due: last completed '.self::describe(time() - $last).' ago.');
 
             return 0;
         }
 
         $busy = $this->deploysInFlight();
         if ($busy !== []) {
-            $this->report('warning', 'Deferred: deploy in flight for ' . implode(', ', $busy));
+            $this->report('warning', 'Deferred: deploy in flight for '.implode(', ', $busy));
 
             return 0;
         }
 
-        if ($this->pruneImages($system, $imageWindow, $dryRun) && !$dryRun) {
+        if ($this->pruneImages($system, $imageWindow, $dryRun) && ! $dryRun) {
             self::recordCompleted(time());
         }
 
@@ -119,7 +119,7 @@ class PruneHostImages extends Command
     private function report(string $level, string $message): void
     {
         $level === 'warning' ? $this->warn($message) : $this->info($message);
-        Log::log($level, 'system:image:prune: ' . $message);
+        Log::log($level, 'system:image:prune: '.$message);
     }
 
     /**
@@ -154,7 +154,7 @@ class PruneHostImages extends Command
                 60
             ));
         } catch (\Exception $e) {
-            $this->report('warning', 'Could not list host images, keeping them all: ' . $e->getMessage());
+            $this->report('warning', 'Could not list host images, keeping them all: '.$e->getMessage());
 
             return false;
         }
@@ -167,8 +167,7 @@ class PruneHostImages extends Command
 
         $inScope = array_values(array_filter(
             $listed,
-            static fn (array $row): bool
-                => HostImageRetention::inScope(HostImageRetention::logicalRef($row['tag']), $catalog)
+            static fn (array $row): bool => HostImageRetention::inScope(HostImageRetention::logicalRef($row['tag']), $catalog)
         ));
         $since = $this->tagTimes($system, array_column($inScope, 'tag'));
         $rows = array_map(
@@ -181,7 +180,7 @@ class PruneHostImages extends Command
         $named = $this->namedByDeployLogs(array_keys($candidates), $now, $window);
         $remove = array_diff_key($candidates, array_flip($named));
         if ($remove === []) {
-            $this->report('info', 'No host base image is unused for longer than ' . self::describe($window) . '.');
+            $this->report('info', 'No host base image is unused for longer than '.self::describe($window).'.');
 
             return true;
         }
@@ -191,10 +190,10 @@ class PruneHostImages extends Command
         $completed = true;
         foreach ($remove as $ref => $image) {
             $action = $dryRun ? 'would remove' : 'removed';
-            if (!$dryRun) {
+            if (! $dryRun) {
                 $busy = $this->deploysInFlight();
                 if ($busy !== []) {
-                    $this->report('warning', 'Stopped: a deploy started for ' . implode(', ', $busy));
+                    $this->report('warning', 'Stopped: a deploy started for '.implode(', ', $busy));
                     $completed = false;
                     break;
                 }
@@ -203,7 +202,7 @@ class PruneHostImages extends Command
                     $system->exec(['sudo', 'docker', 'rmi', ...$image['tags']], [], 120);
                 } catch (\Exception $e) {
                     $action = 'failed';
-                    $this->warn("Could not remove {$ref}: " . trim($e->getMessage()));
+                    $this->warn("Could not remove {$ref}: ".trim($e->getMessage()));
                 }
             }
             if ($action !== 'failed') {
@@ -211,7 +210,7 @@ class PruneHostImages extends Command
             }
             $table[] = [
                 $ref,
-                self::describe(max(0, $now - $image['since'])) . ' ago',
+                self::describe(max(0, $now - $image['since'])).' ago',
                 HostPrewarmPlan::formatBytes($image['bytes']),
                 $action,
             ];
@@ -227,7 +226,7 @@ class PruneHostImages extends Command
      * LastTagTime per tag, one inspect call per batch. A batch that fails
      * leaves its tags without a time, which keeps them.
      *
-     * @param list<string> $tags
+     * @param  list<string>  $tags
      * @return array<string, ?int>
      */
     private function tagTimes(System $system, array $tags): array
@@ -259,7 +258,7 @@ class PruneHostImages extends Command
      * Candidates a deploy log still names: an account's latest deploy (the
      * build its app runs), or any deploy logged inside the window.
      *
-     * @param list<string> $refs
+     * @param  list<string>  $refs
      * @return list<string>
      */
     private function namedByDeployLogs(array $refs, int $now, int $window): array
@@ -271,11 +270,11 @@ class PruneHostImages extends Command
             }
             $username = (string) $account['username'];
             foreach (DeployLogArchive::deploys($username) as $deploy) {
-                if (!$deploy['is_latest'] && $deploy['mtime'] < $now - $window) {
+                if (! $deploy['is_latest'] && $deploy['mtime'] < $now - $window) {
                     continue;
                 }
                 $log = @file_get_contents((new DeployLogPaths($username))->log($deploy['id']));
-                if (!is_string($log) || $log === '') {
+                if (! is_string($log) || $log === '') {
                     continue;
                 }
                 $found = HostImageRetention::mentionedIn($log, $refs);
@@ -313,7 +312,7 @@ class PruneHostImages extends Command
     private function pruneBuildCache(System $system, int $window, bool $dryRun): void
     {
         if ($dryRun) {
-            $this->line('Would prune host build cache unused for ' . self::describe($window));
+            $this->line('Would prune host build cache unused for '.self::describe($window));
 
             return;
         }
@@ -323,21 +322,21 @@ class PruneHostImages extends Command
                 [],
                 300
             );
-            $this->report('info', 'Pruned host build cache unused for ' . self::describe($window));
+            $this->report('info', 'Pruned host build cache unused for '.self::describe($window));
         } catch (\Exception $e) {
-            $this->report('warning', 'Could not prune the host build cache: ' . trim($e->getMessage()));
+            $this->report('warning', 'Could not prune the host build cache: '.trim($e->getMessage()));
         }
     }
 
     private static function describe(int $seconds): string
     {
         if ($seconds >= 86400) {
-            return round($seconds / 86400, 1) . 'd';
+            return round($seconds / 86400, 1).'d';
         }
         if ($seconds >= 3600) {
-            return round($seconds / 3600, 1) . 'h';
+            return round($seconds / 3600, 1).'h';
         }
 
-        return max(0, (int) round($seconds / 60)) . 'm';
+        return max(0, (int) round($seconds / 60)).'m';
     }
 }

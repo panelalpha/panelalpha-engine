@@ -78,15 +78,15 @@ class PhpController extends Controller
         path: '/projects/{username}/php/error-log',
         summary: 'Get the PHP error log of a project',
         description: 'PHP hosting projects read their own php_error.log, written by the PHP handlers into the project log '
-            . 'directory. A dind project returns its application service container output instead, with file null. '
-            . '"since" drops classic lines whose timestamp is older. On classic hosting the log is project-wide, so '
-            . '"domain" only checks that the domain belongs to the project.',
-        security: [[ 'bearerAuth' => []]],
+            .'directory. A dind project returns its application service container output instead, with file null. '
+            .'"since" drops classic lines whose timestamp is older. On classic hosting the log is project-wide, so '
+            .'"domain" only checks that the domain belongs to the project.',
+        security: [['bearerAuth' => []]],
         tags: ['PHP'],
         parameters: [
             new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'lines', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 200, minimum: 1, maximum: 5000)),
-            new OA\Parameter(name: 'since', description: 'Only lines written after this: ' . LogTime::EXPECTED . '.', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'since', description: 'Only lines written after this: '.LogTime::EXPECTED.'.', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'domain', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
         ],
         responses: [

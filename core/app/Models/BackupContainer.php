@@ -21,6 +21,7 @@ use InvalidArgumentException;
  * @property Carbon $created_at
  * @property Carbon $updated_at
  * @property Collection<int, Backup> $backups
+ *
  * @method static ?BackupContainer find(int $id)
  * @method static BackupContainer findOrFail(int $id)
  */

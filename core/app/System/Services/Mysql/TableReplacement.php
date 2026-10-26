@@ -10,15 +10,14 @@ namespace App\System\Services\Mysql;
 final class TableReplacement
 {
     /**
-     * @param list<array{database: string, table: string, dump: string}> $rollbacks
-     * @param list<string>                                              $createdDatabases
-     * @param list<array{database: string, table: string}>              $createdTables
+     * @param  list<array{database: string, table: string, dump: string}>  $rollbacks
+     * @param  list<string>  $createdDatabases
+     * @param  list<array{database: string, table: string}>  $createdTables
      */
     public function __construct(
         public readonly DatabaseCopyResult $result,
         public readonly array $rollbacks = [],
         public readonly array $createdDatabases = [],
         public readonly array $createdTables = [],
-    ) {
-    }
+    ) {}
 }

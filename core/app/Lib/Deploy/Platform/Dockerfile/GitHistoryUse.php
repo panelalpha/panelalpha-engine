@@ -29,19 +29,19 @@ final class GitHistoryUse
     ];
 
     /** A git history command spelled out, or `"git"` and a history subcommand as Go string arguments. */
-    private const GO_GIT_CALL = '/(?<![\w-])git(\s+-[cC]\s+\S+)*\s+(' . self::HISTORY_SUBCOMMANDS . ')\b'
-        . '|"git"(?=[\s\S]*"(?:' . self::HISTORY_SUBCOMMANDS . ')")'
-        . '|"(?:' . self::HISTORY_SUBCOMMANDS . ')"(?=[\s\S]*"git")/';
+    private const GO_GIT_CALL = '/(?<![\w-])git(\s+-[cC]\s+\S+)*\s+('.self::HISTORY_SUBCOMMANDS.')\b'
+        .'|"git"(?=[\s\S]*"(?:'.self::HISTORY_SUBCOMMANDS.')")'
+        .'|"(?:'.self::HISTORY_SUBCOMMANDS.')"(?=[\s\S]*"git")/';
 
     private const HISTORY_SUBCOMMANDS
         = 'describe|rev-parse|rev-list|log|show|tag|status|diff|symbolic-ref|branch|submodule|lfs|ls-files|name-rev';
 
     /** `git [-C dir | -c k=v]... <subcommand>` for a subcommand that reads the local repository. */
-    private const HISTORY_COMMAND = '/(?<![\w-])git(\s+-[cC]\s+\S+)*\s+(' . self::HISTORY_SUBCOMMANDS . ')\b/';
+    private const HISTORY_COMMAND = '/(?<![\w-])git(\s+-[cC]\s+\S+)*\s+('.self::HISTORY_SUBCOMMANDS.')\b/';
 
     /** The same, or `spawn('git', ['rev-parse', ...])` style arguments in JS. */
-    private const JS_GIT_CALL = '/(?<![\w-])git(\s+-[cC]\s+\S+)*\s+(' . self::HISTORY_SUBCOMMANDS . ')\b'
-        . '|[\'"`]git[\'"`]\s*,\s*\[\s*[\'"`](?:' . self::HISTORY_SUBCOMMANDS . ')[\'"`]/';
+    private const JS_GIT_CALL = '/(?<![\w-])git(\s+-[cC]\s+\S+)*\s+('.self::HISTORY_SUBCOMMANDS.')\b'
+        .'|[\'"`]git[\'"`]\s*,\s*\[\s*[\'"`](?:'.self::HISTORY_SUBCOMMANDS.')[\'"`]/';
 
     /** Bundler configs that often bake the commit in: Stremio Web's runs `git rev-parse HEAD`. */
     private const JS_BUILD_CONFIGS = [
@@ -66,10 +66,10 @@ final class GitHistoryUse
     /**
      * Why this build may read `.git`, or null when nothing suggests it does.
      *
-     * @param string|null               $dockerfile    the project's own Dockerfile; null for one the engine generated
-     * @param string|null               $projectIgnore the project's `.dockerignore`
-     * @param array<string, string|null> $manifests    contents by file name, from {@see manifestFiles()}
-     * @param (callable(string): ?string)|null $read  a file by path relative to the context; enables the JS checks
+     * @param  string|null  $dockerfile  the project's own Dockerfile; null for one the engine generated
+     * @param  string|null  $projectIgnore  the project's `.dockerignore`
+     * @param  array<string, string|null>  $manifests  contents by file name, from {@see manifestFiles()}
+     * @param  (callable(string): ?string)|null  $read  a file by path relative to the context; enables the JS checks
      */
     public static function reason(?string $dockerfile, ?string $projectIgnore, array $manifests, ?callable $read = null): ?string
     {
@@ -82,7 +82,7 @@ final class GitHistoryUse
         foreach (self::MANIFEST_SIGNALS as $file => $pattern) {
             $contents = $manifests[$file] ?? null;
             if ($contents !== null && preg_match($pattern, $contents) === 1) {
-                return $file . ' reads the version from git';
+                return $file.' reads the version from git';
             }
         }
         $package = $manifests['package.json'] ?? null;
@@ -99,14 +99,14 @@ final class GitHistoryUse
      * postinstall runs tools/build_writefile.mts, whose ./lib.mts runs
      * `git rev-parse`.
      *
-     * @param callable(string): ?string $read
+     * @param  callable(string): ?string  $read
      */
     private static function jsBuildReason(string $packageJson, ?string $dockerfile, callable $read): ?string
     {
         foreach (self::JS_BUILD_CONFIGS as $config) {
             $contents = $read($config);
             if ($contents !== null && preg_match(self::JS_GIT_CALL, $contents) === 1) {
-                return $config . ' reads the version from git';
+                return $config.' reads the version from git';
             }
         }
 
@@ -122,7 +122,7 @@ final class GitHistoryUse
         $seen = [];
         foreach ($names as $name) {
             foreach (["pre{$name}", $name, "post{$name}"] as $script) {
-                if (!isset($seen[$script]) && is_string($scripts[$script] ?? null)) {
+                if (! isset($seen[$script]) && is_string($scripts[$script] ?? null)) {
                     $seen[$script] = true;
                     $pending[] = $script;
                 }
@@ -140,14 +140,14 @@ final class GitHistoryUse
             preg_match_all('/(?:^|[\s;&|(])(?:(?:npm|pnpm|bun)\s+run(?:-script)?|yarn(?:\s+run)?|run)\s+([\w:.-]+)/', $body, $m);
             foreach ($m[1] as $next) {
                 foreach (["pre{$next}", $next, "post{$next}"] as $script) {
-                    if (!isset($seen[$script]) && is_string($scripts[$script] ?? null)) {
+                    if (! isset($seen[$script]) && is_string($scripts[$script] ?? null)) {
                         $seen[$script] = true;
                         $pending[] = $script;
                     }
                 }
             }
             preg_match_all('#(?:^|[\s;&|(])(?:node|bash|sh|zsh|dash|bun|deno|ts-node|tsx|zx)(?:\s+-[-\w=:.]+)*\s+'
-                . '(?:\./)?((?:[\w.-]+/)*[\w.-]+\.(?:cjs|mjs|js|cts|mts|ts|sh))\b#', $body, $m);
+                .'(?:\./)?((?:[\w.-]+/)*[\w.-]+\.(?:cjs|mjs|js|cts|mts|ts|sh))\b#', $body, $m);
             foreach ($m[1] as $file) {
                 $files[] = $file;
             }
@@ -165,12 +165,12 @@ final class GitHistoryUse
                 continue;
             }
             if (preg_match(self::JS_GIT_CALL, $contents) === 1) {
-                return $file . ', run by a package.json script, reads the version from git';
+                return $file.', run by a package.json script, reads the version from git';
             }
             preg_match_all('/(?:\bfrom|\bimport|\brequire\s*\()\s*[\'"](\.\.?\/[^\'"]+\.(?:cjs|mjs|js|cts|mts|ts))[\'"]/', $contents, $m);
-            $dir = str_contains($file, '/') ? dirname($file) . '/' : '';
+            $dir = str_contains($file, '/') ? dirname($file).'/' : '';
             foreach ($m[1] as $import) {
-                $files[] = $dir . $import;
+                $files[] = $dir.$import;
             }
         }
 
@@ -190,6 +190,7 @@ final class GitHistoryUse
                     return null;
                 }
                 array_pop($parts);
+
                 continue;
             }
             $parts[] = $part;

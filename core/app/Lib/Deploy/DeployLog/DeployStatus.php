@@ -11,9 +11,7 @@ namespace App\Lib\Deploy\DeployLog;
  */
 final class DeployStatus
 {
-    public function __construct(private readonly DeployLogPaths $paths)
-    {
-    }
+    public function __construct(private readonly DeployLogPaths $paths) {}
 
     /**
      * @return array<string, mixed>|null
@@ -21,7 +19,7 @@ final class DeployStatus
     public function read(): ?array
     {
         $path = $this->paths->latest();
-        if (!is_file($path)) {
+        if (! is_file($path)) {
             return null;
         }
         $decoded = json_decode((string) file_get_contents($path), true);
@@ -30,7 +28,7 @@ final class DeployStatus
     }
 
     /**
-     * @param array<string, mixed> $data
+     * @param  array<string, mixed>  $data
      */
     public function write(array $data): void
     {
@@ -39,7 +37,7 @@ final class DeployStatus
     }
 
     /**
-     * @param array<string, mixed> $changes
+     * @param  array<string, mixed>  $changes
      * @return array<string, mixed> the stored record
      */
     public function update(array $changes): array
@@ -80,7 +78,7 @@ final class DeployStatus
     /**
      * Close the open stage, if any, and name it.
      *
-     * @param list<array{name: string, started_at: ?int, finished_at: ?int}> $stages
+     * @param  list<array{name: string, started_at: ?int, finished_at: ?int}>  $stages
      * @return array{0: list<array<string, mixed>>, 1: ?string} stages, closed stage name
      */
     public static function closeOpenStage(array $stages, int $now): array

@@ -11,7 +11,7 @@ use App\Lib\Deploy\Sidecar\SidecarCredentials;
 final class ServiceEnvironment
 {
     /**
-     * @param mixed $environment
+     * @param  mixed  $environment
      */
     public static function hasKey($environment, string $key): bool
     {
@@ -20,13 +20,13 @@ final class ServiceEnvironment
     }
 
     /**
-     * @param mixed $environment
-     * @param array<string, string> $defaults
+     * @param  mixed  $environment
+     * @param  array<string, string>  $defaults
      * @return array<int|string, mixed>
      */
     public static function withDefaults($environment, array $defaults = []): array
     {
-        if (!is_array($environment) || $environment === []) {
+        if (! is_array($environment) || $environment === []) {
             return $defaults;
         }
 
@@ -40,7 +40,7 @@ final class ServiceEnvironment
      * sniffing a value for an `=` misreads both a map whose value contains one
      * and a list entry like `- POSTGRES_PASSWORD`.
      *
-     * @param array<mixed> $environment
+     * @param  array<mixed>  $environment
      */
     public static function isList(array $environment): bool
     {
@@ -49,8 +49,8 @@ final class ServiceEnvironment
     }
 
     /**
-     * @param list<mixed> $environment
-     * @param array<string, string> $defaults
+     * @param  list<mixed>  $environment
+     * @param  array<string, string>  $defaults
      * @return list<mixed>
      */
     private static function appendMissingLines(array $environment, array $defaults): array
@@ -63,8 +63,8 @@ final class ServiceEnvironment
         }
 
         foreach ($defaults as $key => $value) {
-            if (!isset($declared[$key])) {
-                $environment[] = $key . '=' . $value;
+            if (! isset($declared[$key])) {
+                $environment[] = $key.'='.$value;
             }
         }
 

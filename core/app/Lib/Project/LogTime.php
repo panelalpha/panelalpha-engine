@@ -27,7 +27,7 @@ final class LogTime
     /** The instant a time names, or a duration counts back to from now. */
     public static function instant(string $value): Carbon
     {
-        if (!self::isDuration($value)) {
+        if (! self::isDuration($value)) {
             return Carbon::parse($value);
         }
 

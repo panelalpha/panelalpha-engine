@@ -33,8 +33,8 @@ final class DockerIgnore
      */
     public static function excludes(string $projectDir, string $path): bool
     {
-        $file = rtrim($projectDir, '/') . '/' . self::FILENAME;
-        if ($projectDir === '' || !is_file($file)) {
+        $file = rtrim($projectDir, '/').'/'.self::FILENAME;
+        if ($projectDir === '' || ! is_file($file)) {
             return false;
         }
         $path = trim($path, '/');
@@ -48,7 +48,7 @@ final class DockerIgnore
             $pattern = trim(ltrim($negate ? substr($line, 1) : $line), '/');
             $pattern = (string) preg_replace('#^(\./)+#', '', $pattern);
             if ($pattern !== '' && self::matches($pattern, $path)) {
-                $excluded = !$negate;
+                $excluded = ! $negate;
             }
         }
 
@@ -74,6 +74,6 @@ final class DockerIgnore
             }
         }
 
-        return preg_match('#^' . $regex . '(?:/.*)?$#', $path) === 1;
+        return preg_match('#^'.$regex.'(?:/.*)?$#', $path) === 1;
     }
 }

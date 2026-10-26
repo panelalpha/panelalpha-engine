@@ -3,8 +3,8 @@
 namespace App\Console\Commands\Users;
 
 use App\Console\Commands\Concerns\ProjectOptions;
-use App\Lib\Host\ProjectMemory;
 use App\Console\Commands\Concerns\SelectsProjects;
+use App\Lib\Host\ProjectMemory;
 use App\Lib\Limits\LimitSelection;
 use App\Lib\Limits\ResourceLimit;
 use App\Models\User;
@@ -27,8 +27,8 @@ class SetLimits extends Command
     {
         // Built from the same table the values are parsed against, so an added
         // limit cannot be accepted by one and ignored by the other.
-        $this->signature = 'project:limit:set' . ProjectOptions::SIGNATURE
-            . implode('', array_map(
+        $this->signature = 'project:limit:set'.ProjectOptions::SIGNATURE
+            .implode('', array_map(
                 static fn (ResourceLimit $l): string => " {--{$l->option}=}",
                 ResourceLimit::all()
             ));
@@ -40,14 +40,14 @@ class SetLimits extends Command
     {
         // Options are validated before the project is looked up, so a bad
         // value is reported first whatever the name.
-        if (!$this->namesProjects()) {
+        if (! $this->namesProjects()) {
             return 1;
         }
 
         $selection = LimitSelection::fromOptions($this->options());
 
         if ($selection->isEmpty()) {
-            $this->error('At least one of following options is required: ' . LimitSelection::optionListHint());
+            $this->error('At least one of following options is required: '.LimitSelection::optionListHint());
 
             return 1;
         }
@@ -76,7 +76,7 @@ class SetLimits extends Command
         $one = $this->option('username') ? $projects[0] : null;
         $this->warn($one !== null
             ? "Following limits will be set for user `{$one->username}`:"
-            : 'Following limits will be set for all (' . count($projects) . ') users:');
+            : 'Following limits will be set for all ('.count($projects).') users:');
         // The two headings have always padded their rows differently.
         $this->announce($selection, $one !== null ? 20 : 16);
 
@@ -88,7 +88,7 @@ class SetLimits extends Command
     private function announce(LimitSelection $selection, int $width): void
     {
         foreach ($selection->all() as $key => $value) {
-            $this->info(str_pad('  ' . $key . ': ', $width) . ResourceLimit::byKey($key)->format($value));
+            $this->info(str_pad('  '.$key.': ', $width).ResourceLimit::byKey($key)->format($value));
         }
     }
 

@@ -46,13 +46,13 @@ final class DotnetRuntime implements Runtime
         if (is_array($global)) {
             $sdk = $global['sdk']['version'] ?? null;
             if (is_string($sdk) && preg_match('/^(\d+)\.(\d+)/', $sdk, $m) === 1) {
-                return new Requirement('dotnet', $m[1] . '.0', $sdk, 'global.json sdk.version');
+                return new Requirement('dotnet', $m[1].'.0', $sdk, 'global.json sdk.version');
             }
         }
 
         $target = self::targetFramework($context->projectDir);
         if ($target !== null) {
-            return new Requirement('dotnet', $target, 'net' . $target, 'TargetFramework');
+            return new Requirement('dotnet', $target, 'net'.$target, 'TargetFramework');
         }
 
         return self::hasProject($context->projectDir)
@@ -98,8 +98,8 @@ final class DotnetRuntime implements Runtime
         foreach (['*.sln', '*.slnx', '*.csproj', '*.fsproj', '*.vbproj'] as $pattern) {
             // root, Jellyfin.Server/, src/Foo/
             foreach (['/', '/*/', '/*/*/'] as $depth) {
-                foreach (glob($projectDir . $depth . $pattern) ?: [] as $path) {
-                    if (str_contains($pattern, '.sln') && !self::solutionIsManaged($path)) {
+                foreach (glob($projectDir.$depth.$pattern) ?: [] as $path) {
+                    if (str_contains($pattern, '.sln') && ! self::solutionIsManaged($path)) {
                         continue;
                     }
                     $relative = ltrim(substr($path, strlen($projectDir)), '/');
@@ -121,7 +121,7 @@ final class DotnetRuntime implements Runtime
     private static function solutionIsManaged(string $path): bool
     {
         $contents = @file_get_contents($path);
-        if (!is_string($contents)) {
+        if (! is_string($contents)) {
             return false;
         }
 
@@ -165,11 +165,11 @@ final class DotnetRuntime implements Runtime
         $console = null;
 
         foreach (self::findProjectFiles($projectDir) as $relative) {
-            if (!preg_match('/\.(cs|fs|vb)proj$/', $relative) || self::looksLikeTests($relative)) {
+            if (! preg_match('/\.(cs|fs|vb)proj$/', $relative) || self::looksLikeTests($relative)) {
                 continue;
             }
-            $contents = @file_get_contents(rtrim($projectDir, '/') . '/' . $relative);
-            if (!is_string($contents)) {
+            $contents = @file_get_contents(rtrim($projectDir, '/').'/'.$relative);
+            if (! is_string($contents)) {
                 continue;
             }
             if (preg_match('/<OutputType>\s*Library\s*<\/OutputType>/i', $contents) === 1
@@ -180,6 +180,7 @@ final class DotnetRuntime implements Runtime
             }
             if (stripos($contents, 'Microsoft.NET.Sdk.Web') !== false) {
                 $webSdk ??= $relative;
+
                 continue;
             }
             if (preg_match('/<OutputType>\s*Exe\s*<\/OutputType>/i', $contents) === 1) {
@@ -199,7 +200,7 @@ final class DotnetRuntime implements Runtime
      * SDK, ASP.NET Core (Prowlarr.Console reaches it through Prowlarr.Host),
      * another HTTP server package, or `HttpListener` in its own sources.
      *
-     * @param array<string, true> $seen
+     * @param  array<string, true>  $seen
      */
     private static function servesHttp(string $root, string $relative, array &$seen = []): bool
     {
@@ -207,8 +208,8 @@ final class DotnetRuntime implements Runtime
             return false;
         }
         $seen[$relative] = true;
-        $contents = @file_get_contents($root . '/' . $relative);
-        if (!is_string($contents)) {
+        $contents = @file_get_contents($root.'/'.$relative);
+        if (! is_string($contents)) {
             return false;
         }
         if (stripos($contents, 'Microsoft.NET.Sdk.Web') !== false
@@ -221,17 +222,17 @@ final class DotnetRuntime implements Runtime
         $dir = dirname($relative);
         preg_match_all('/<ProjectReference\s+Include\s*=\s*"([^"]+)"/i', $contents, $refs);
         foreach ($refs[1] as $ref) {
-            $path = self::normalizePath(($dir === '.' ? '' : $dir . '/') . str_replace('\\', '/', $ref));
+            $path = self::normalizePath(($dir === '.' ? '' : $dir.'/').str_replace('\\', '/', $ref));
             if ($path !== null && self::servesHttp($root, $path, $seen)) {
                 return true;
             }
         }
 
-        return self::sourcesUseHttpListener($root . ($dir === '.' ? '' : '/' . $dir));
+        return self::sourcesUseHttpListener($root.($dir === '.' ? '' : '/'.$dir));
     }
 
     private const HTTP_SERVER_PACKAGES = '/<PackageReference\s+Include\s*=\s*"[^"]*'
-        . '(?:AspNetCore|Kestrel|EmbedIO|Nancy|ServiceStack|Suave|Giraffe|Saturn|WatsonWebserver|Owin)[^"]*"/i';
+        .'(?:AspNetCore|Kestrel|EmbedIO|Nancy|ServiceStack|Suave|Giraffe|Saturn|WatsonWebserver|Owin)[^"]*"/i';
 
     /** `a/b/../c/x.csproj` -> `a/c/x.csproj`; null when it climbs out of the project. */
     private static function normalizePath(string $path): ?string
@@ -246,6 +247,7 @@ final class DotnetRuntime implements Runtime
                     return null;
                 }
                 array_pop($parts);
+
                 continue;
             }
             $parts[] = $part;
@@ -257,7 +259,7 @@ final class DotnetRuntime implements Runtime
     /** A bounded look at a console project's own sources for a hand-rolled server. */
     private static function sourcesUseHttpListener(string $dir): bool
     {
-        if (!is_dir($dir)) {
+        if (! is_dir($dir)) {
             return false;
         }
         $checked = 0;
@@ -265,7 +267,7 @@ final class DotnetRuntime implements Runtime
             new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)
         );
         foreach ($files as $file) {
-            if (!$file->isFile() || !preg_match('/\.(cs|fs|vb)$/', $file->getFilename())) {
+            if (! $file->isFile() || ! preg_match('/\.(cs|fs|vb)$/', $file->getFilename())) {
                 continue;
             }
             if (++$checked > 200) {
@@ -315,8 +317,8 @@ final class DotnetRuntime implements Runtime
             if (str_ends_with($relative, '.sln') || str_ends_with($relative, '.slnx')) {
                 continue;
             }
-            $contents = @file_get_contents(rtrim($projectDir, '/') . '/' . $relative);
-            if (!is_string($contents)) {
+            $contents = @file_get_contents(rtrim($projectDir, '/').'/'.$relative);
+            if (! is_string($contents)) {
                 continue;
             }
             foreach (self::declaredFrameworks($contents) as $version) {
@@ -344,15 +346,15 @@ final class DotnetRuntime implements Runtime
 
     private static function legacyFrameworkOf(string $projectDir, string $entry): ?string
     {
-        $contents = @file_get_contents(rtrim($projectDir, '/') . '/' . $entry);
-        if (!is_string($contents)
+        $contents = @file_get_contents(rtrim($projectDir, '/').'/'.$entry);
+        if (! is_string($contents)
             || preg_match('/<TargetFrameworks?>/i', $contents) === 1
             || preg_match('/<TargetFrameworkVersion>\s*([^<]+?)\s*<\/TargetFrameworkVersion>/i', $contents, $m) !== 1
         ) {
             return null;
         }
 
-        return $entry . ' targets .NET Framework ' . $m[1];
+        return $entry.' targets .NET Framework '.$m[1];
     }
 
     /**
@@ -369,7 +371,7 @@ final class DotnetRuntime implements Runtime
         foreach ($elements[1] as $list) {
             foreach (explode(';', $list) as $framework) {
                 if (preg_match('/^net(\d+)\.(\d+)(?:-|$)/i', trim($framework), $m) === 1) {
-                    $versions[] = $m[1] . '.' . $m[2];
+                    $versions[] = $m[1].'.'.$m[2];
                 }
             }
         }
@@ -393,7 +395,7 @@ final class DotnetRuntime implements Runtime
         $files = self::findProjectFiles($root);
         foreach (['/', '/*/', '/*/*/'] as $depth) {
             foreach (['*.props', '*.targets'] as $pattern) {
-                foreach (glob($root . $depth . $pattern) ?: [] as $path) {
+                foreach (glob($root.$depth.$pattern) ?: [] as $path) {
                     $files[] = ltrim(substr($path, strlen($root)), '/');
                 }
             }
@@ -403,13 +405,13 @@ final class DotnetRuntime implements Runtime
             if (str_ends_with($relative, '.sln') || str_ends_with($relative, '.slnx')) {
                 continue;
             }
-            $contents = @file_get_contents($root . '/' . $relative);
-            if (!is_string($contents) || preg_match(self::NODE_EXEC, $contents) !== 1) {
+            $contents = @file_get_contents($root.'/'.$relative);
+            if (! is_string($contents) || preg_match(self::NODE_EXEC, $contents) !== 1) {
                 continue;
             }
-            $dir = dirname($root . '/' . $relative);
+            $dir = dirname($root.'/'.$relative);
 
-            return NodeRuntime::imageFor(is_file($dir . '/package.json') ? $dir : '');
+            return NodeRuntime::imageFor(is_file($dir.'/package.json') ? $dir : '');
         }
 
         return null;
@@ -426,12 +428,12 @@ final class DotnetRuntime implements Runtime
         $framework = $target === null ? null : self::publishFramework($projectDir, $target);
         $solutionDir = $target === null ? null : self::solutionDir($projectDir, $target);
 
-        return 'echo ' . escapeshellarg(self::AUDIT_TARGETS) . ' > ' . self::AUDIT_TARGETS_FILE . ' && '
-            . 'dotnet publish' . ($target === null ? '' : ' ' . escapeshellarg($target))
-            . ($framework === null ? '' : ' -f ' . $framework)
-            . ($solutionDir === null ? '' : ' -p:SolutionDir="$PWD/' . ($solutionDir === '.' ? '' : $solutionDir . '/') . '"')
-            . ' -c Release -o ' . self::PUBLISH_DIR . ' --nologo'
-            . ' -p:CustomAfterMicrosoftCommonTargets=' . self::AUDIT_TARGETS_FILE;
+        return 'echo '.escapeshellarg(self::AUDIT_TARGETS).' > '.self::AUDIT_TARGETS_FILE.' && '
+            .'dotnet publish'.($target === null ? '' : ' '.escapeshellarg($target))
+            .($framework === null ? '' : ' -f '.$framework)
+            .($solutionDir === null ? '' : ' -p:SolutionDir="$PWD/'.($solutionDir === '.' ? '' : $solutionDir.'/').'"')
+            .' -c Release -o '.self::PUBLISH_DIR.' --nologo'
+            .' -p:CustomAfterMicrosoftCommonTargets='.self::AUDIT_TARGETS_FILE;
     }
 
     /**
@@ -442,8 +444,8 @@ final class DotnetRuntime implements Runtime
      * would replace that list and turn its codes back into errors.
      */
     private const AUDIT_TARGETS = '<Project><PropertyGroup><WarningsNotAsErrors>'
-        . '$(WarningsNotAsErrors);NU1900;NU1901;NU1902;NU1903;NU1904'
-        . '</WarningsNotAsErrors></PropertyGroup></Project>';
+        .'$(WarningsNotAsErrors);NU1900;NU1901;NU1902;NU1903;NU1904'
+        .'</WarningsNotAsErrors></PropertyGroup></Project>';
 
     private const AUDIT_TARGETS_FILE = '/tmp/panelalpha-nuget-audit.targets';
 
@@ -460,8 +462,8 @@ final class DotnetRuntime implements Runtime
         $root = rtrim($projectDir, '/');
         $dir = dirname($project);
         while (true) {
-            $path = $root . ($dir === '.' ? '' : '/' . $dir);
-            if ((glob($path . '/*.sln') ?: []) !== [] || (glob($path . '/*.slnx') ?: []) !== []) {
+            $path = $root.($dir === '.' ? '' : '/'.$dir);
+            if ((glob($path.'/*.sln') ?: []) !== [] || (glob($path.'/*.slnx') ?: []) !== []) {
                 return $dir;
             }
             if ($dir === '.' || $dir === '/' || $dir === '') {
@@ -481,8 +483,8 @@ final class DotnetRuntime implements Runtime
     public static function publishFramework(string $projectDir, string $project): ?string
     {
         $root = rtrim($projectDir, '/');
-        $contents = @file_get_contents($root . '/' . $project);
-        if (!is_string($contents)) {
+        $contents = @file_get_contents($root.'/'.$project);
+        if (! is_string($contents)) {
             return null;
         }
 
@@ -498,7 +500,7 @@ final class DotnetRuntime implements Runtime
         foreach (explode(';', $list) as $framework) {
             $framework = strtolower(trim($framework));
             if (preg_match('/^net(\d+)\.(\d+)$/', $framework, $m) === 1
-                && ($best === null || version_compare($m[1] . '.' . $m[2], substr($best, 3), '>'))
+                && ($best === null || version_compare($m[1].'.'.$m[2], substr($best, 3), '>'))
             ) {
                 $best = $framework;
             }
@@ -511,7 +513,7 @@ final class DotnetRuntime implements Runtime
     private static function inheritedFrameworkList(string $root, string $dir): ?string
     {
         while (true) {
-            $props = @file_get_contents($root . ($dir === '.' ? '' : '/' . $dir) . '/Directory.Build.props');
+            $props = @file_get_contents($root.($dir === '.' ? '' : '/'.$dir).'/Directory.Build.props');
             if (is_string($props) && preg_match('/<TargetFrameworks?>/i', $props) === 1) {
                 return self::frameworkList($props);
             }
@@ -555,11 +557,11 @@ final class DotnetRuntime implements Runtime
     {
         $dir = self::PUBLISH_DIR;
 
-        return 'cfg=$(ls ' . $dir . '/*.runtimeconfig.json 2>/dev/null | head -n 1);'
-            . ' [ -n "$cfg" ]'
-            . ' || { echo "PANELALPHA: dotnet publish produced no runnable assembly in ' . $dir . '/";'
-            . ' echo "PANELALPHA: published files: $(ls ' . $dir . ' 2>/dev/null | head -n 20)";'
-            . ' exit 1; };'
-            . ' cd ' . $dir . ' && exec dotnet "$(basename "${cfg%.runtimeconfig.json}").dll"';
+        return 'cfg=$(ls '.$dir.'/*.runtimeconfig.json 2>/dev/null | head -n 1);'
+            .' [ -n "$cfg" ]'
+            .' || { echo "PANELALPHA: dotnet publish produced no runnable assembly in '.$dir.'/";'
+            .' echo "PANELALPHA: published files: $(ls '.$dir.' 2>/dev/null | head -n 20)";'
+            .' exit 1; };'
+            .' cd '.$dir.' && exec dotnet "$(basename "${cfg%.runtimeconfig.json}").dll"';
     }
 }

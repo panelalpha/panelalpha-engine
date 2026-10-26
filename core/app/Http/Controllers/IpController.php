@@ -9,21 +9,21 @@ use App\Http\Resources\IpAssignedCollection;
 use App\Http\Resources\IpAssignedResource;
 use App\Http\Resources\IpSubnetCollection;
 use App\Http\Resources\IpSubnetResource;
-use App\System;
-use App\System\Network;
 use App\Models\IpAssigned;
 use App\Models\IpSubnet;
 use App\Models\Setting;
 use App\Models\User;
+use App\System;
+use App\System\Network;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
+use OpenApi\Attributes as OA;
 use Symfony\Component\HttpFoundation\IpUtils;
 use Symfony\Component\Process\Process;
-use OpenApi\Attributes as OA;
 
 class IpController extends Controller
 {
@@ -46,7 +46,7 @@ class IpController extends Controller
             'meta' => [
                 'default_ipv4' => $this->defaultAddress('default_ipv4', FILTER_FLAG_IPV4, 4),
                 'default_ipv6' => $this->defaultAddress('default_ipv6', FILTER_FLAG_IPV6, 6),
-            ]
+            ],
         ]);
     }
 
@@ -93,36 +93,38 @@ class IpController extends Controller
     {
         $packed = inet_pton($ip);
         $unpacked = unpack('N', $packed);
-        if ($unpacked === false || !array_key_exists(1, $unpacked) || !is_int($unpacked[1])) {
+        if ($unpacked === false || ! array_key_exists(1, $unpacked) || ! is_int($unpacked[1])) {
             return null;
         }
         $long = $unpacked[1];
         $mask = $mask === 0 ? 0 : (0xFFFFFFFF << (32 - $mask)) & 0xFFFFFFFF;
         $networkLong = $long & $mask;
         $networkIp = inet_ntop(pack('N', $networkLong));
+
         return $networkIp;
     }
 
     private function getNetwork6Ip(string $ip, int $mask): ?string
     {
         $packed = inet_pton($ip);
-        $bytes  = unpack('C*', $packed);
+        $bytes = unpack('C*', $packed);
         if ($bytes === false) {
             return null;
         }
         $bits = '';
         foreach ($bytes as $byte) {
-            if (!is_int($byte)) {
+            if (! is_int($byte)) {
                 return null;
             }
             $bits .= str_pad(decbin($byte), 8, '0', STR_PAD_LEFT);
         }
-        $networkBits = substr($bits, 0, $mask) . str_repeat('0', 128 - $mask);
+        $networkBits = substr($bits, 0, $mask).str_repeat('0', 128 - $mask);
         $networkBytes = [];
         for ($i = 0; $i < 16; $i++) {
             $networkBytes[] = bindec(substr($networkBits, $i * 8, 8));
         }
         $networkIp = inet_ntop(pack('C*', ...$networkBytes));
+
         return $networkIp;
     }
 
@@ -150,7 +152,7 @@ class IpController extends Controller
          * @var array{
          *   ip: string,
          *   mask: int,
-         *   is_shared?: ?bool 
+         *   is_shared?: ?bool
          * }
          */
         $params = $request->validated();
@@ -161,7 +163,7 @@ class IpController extends Controller
             'ip' => $params['ip'],
             'mask' => $params['mask'],
             'family' => $family,
-            'is_shared' => $family === 4 && !empty($params['is_shared']),
+            'is_shared' => $family === 4 && ! empty($params['is_shared']),
         ]);
 
         $this->addRouteToHostOrRollBack(app(System::class), $subnet);
@@ -190,7 +192,7 @@ class IpController extends Controller
             ]);
         }
 
-        if (!$routed) {
+        if (! $routed) {
             $this->rollBack($subnet, "IP subnet {$cidr}");
 
             throw ValidationException::withMessages(['ip' => self::routeNotTaken($cidr, $added)]);
@@ -202,7 +204,7 @@ class IpController extends Controller
         $reason = trim($added->getErrorOutput() ?: $added->getOutput());
 
         return "The host does not route {$cidr} after adding it, so the subnet was not added"
-            . ($reason !== '' ? ": {$reason}" : '.');
+            .($reason !== '' ? ": {$reason}" : '.');
     }
 
     /**
@@ -237,7 +239,7 @@ class IpController extends Controller
         $networkIp = $networkOf($ip, $mask);
         if ($ip !== $networkIp) {
             throw ValidationException::withMessages([
-                'ip' => "{$label} must be the network address (e.g. " . ($networkIp === null ? $example : ($networkIp . '/' . $mask)) . ').',
+                'ip' => "{$label} must be the network address (e.g. ".($networkIp === null ? $example : ($networkIp.'/'.$mask)).').',
             ]);
         }
     }
@@ -257,7 +259,7 @@ class IpController extends Controller
     /**
      * Runs a host network command best-effort: a failure is logged and the API change stands.
      *
-     * @param callable(Network): string $command
+     * @param  callable(Network): string  $command
      */
     private function runOnHostOrWarn(System $system, callable $command, string $warning): void
     {
@@ -292,7 +294,7 @@ class IpController extends Controller
         $subnet->delete();
 
         $this->runOnHostOrWarn(
-            new System(),
+            new System,
             fn (Network $network) => $network->generateIpRouteDelCommand($subnet->ip, $subnet->mask, $subnet->family),
             "Could not delete IP route for subnet {$subnet->ip}/{$subnet->mask}",
         );
@@ -314,6 +316,7 @@ class IpController extends Controller
     public function listAssignedIps(): IpAssignedCollection
     {
         $ips = IpAssigned::get();
+
         return new IpAssignedCollection($ips);
     }
 
@@ -361,11 +364,12 @@ class IpController extends Controller
         $this->addAddressToHostOrRollBack($system, $ip, $ipSubnet);
         $reloaded = $system->rebuildDomains();
 
-        return (new IpAssignedResource($ip))->additional(['reload_pending' => !$reloaded]);
+        return (new IpAssignedResource($ip))->additional(['reload_pending' => ! $reloaded]);
     }
 
     /**
-     * @param array{user_id?: int, username?: string} $params
+     * @param  array{user_id?: int, username?: string}  $params
+     *
      * @throws ValidationException
      */
     private function projectFromParams(array $params): User
@@ -376,12 +380,12 @@ class IpController extends Controller
             ]);
         }
 
-        $user = !empty($params['user_id'])
+        $user = ! empty($params['user_id'])
             ? User::find($params['user_id'])
             : User::findByUsername($params['username']);
-        if (!$user) {
+        if (! $user) {
             throw ValidationException::withMessages([
-                (!empty($params['user_id']) ? 'user_id' : 'username') => 'Project not found.',
+                (! empty($params['user_id']) ? 'user_id' : 'username') => 'Project not found.',
             ]);
         }
 
@@ -389,13 +393,14 @@ class IpController extends Controller
     }
 
     /**
-     * @param array{ip_subnet_id: int} $params
+     * @param  array{ip_subnet_id: int}  $params
+     *
      * @throws ValidationException
      */
     private function subnetFromParams(array $params): IpSubnet
     {
         $ipSubnet = IpSubnet::find($params['ip_subnet_id']);
-        if (!$ipSubnet) {
+        if (! $ipSubnet) {
             throw ValidationException::withMessages([
                 'ip_subnet_id' => 'IP subnet not found.',
             ]);
@@ -407,7 +412,7 @@ class IpController extends Controller
     /** @throws ValidationException */
     private function assertAssignable(string $address, IpSubnet $ipSubnet, User $user): void
     {
-        if (!IpUtils::checkIp($address, $ipSubnet->getCidr())) {
+        if (! IpUtils::checkIp($address, $ipSubnet->getCidr())) {
             throw ValidationException::withMessages([
                 'ip_address' => "IP address {$address} is not within the selected subnet {$ipSubnet->getCidr()}.",
             ]);
@@ -425,7 +430,7 @@ class IpController extends Controller
             ]);
         }
 
-        if (!$ipSubnet->is_shared && $alreadyAssigned) {
+        if (! $ipSubnet->is_shared && $alreadyAssigned) {
             throw ValidationException::withMessages([
                 'ip_address' => "IP address {$address} is not shared and it's already assigned.",
             ]);
@@ -458,13 +463,13 @@ class IpController extends Controller
             ]);
         }
 
-        if (!$applied) {
+        if (! $applied) {
             $this->rollBack($ip, "IP assignment {$address}");
             $this->removeUnusedAddress($system, $ip, $ipSubnet);
 
             throw ValidationException::withMessages([
                 'ip_address' => "The host network interface does not carry {$address}/{$ipSubnet->mask} after adding it, "
-                    . 'so the assignment was rolled back.',
+                    .'so the assignment was rolled back.',
             ]);
         }
     }
@@ -541,7 +546,7 @@ class IpController extends Controller
             ->where('ip_subnet_id', $params['ip_subnet_id'])
             ->where('ip_address', self::canonicalAddress($params['ip_address']))
             ->first();
-        if (!$ip) {
+        if (! $ip) {
             throw ValidationException::withMessages([
                 'ip_address' => 'IP address is not assigned to the user.',
             ]);
@@ -549,8 +554,8 @@ class IpController extends Controller
 
         $ip->delete();
 
-        $system = new System();
-        if (!$this->addressStillUsed($ip, $ipSubnet)) {
+        $system = new System;
+        if (! $this->addressStillUsed($ip, $ipSubnet)) {
             $this->runOnHostOrWarn(
                 $system,
                 fn (Network $network) => $network->generateIpAddressDelCommand($ip->ip_address, $ipSubnet->mask, $ipSubnet->family),
@@ -559,7 +564,7 @@ class IpController extends Controller
         }
         $reloaded = $system->rebuildDomains();
 
-        return (new IpAssignedResource($ip))->additional(['reload_pending' => !$reloaded]);
+        return (new IpAssignedResource($ip))->additional(['reload_pending' => ! $reloaded]);
     }
 
     /** A shared address stays on the interface while another project still holds it. */
@@ -567,8 +572,8 @@ class IpController extends Controller
     {
         return $ipSubnet->is_shared
             && IpAssigned::query()
-            ->where('ip_subnet_id', $ipSubnet->id)
-            ->where('ip_address', $ip->ip_address)
-            ->exists();
+                ->where('ip_subnet_id', $ipSubnet->id)
+                ->where('ip_address', $ip->ip_address)
+                ->exists();
     }
 }

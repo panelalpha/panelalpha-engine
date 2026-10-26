@@ -3,8 +3,8 @@
 namespace App\Http\Controllers\User;
 
 use App\Exceptions\ProblemException;
-use App\Http\Controllers\Controller;
 use App\Http\Controllers\Concerns\StreamsNdjson;
+use App\Http\Controllers\Controller;
 use App\Lib\Project\LogTime;
 use App\OpenApi\ApiDefinitions;
 use App\System;
@@ -31,7 +31,7 @@ class ContainerController extends Controller
         }
 
         $runtime = $user->project(app(System::class))->runtime();
-        if (!$runtime instanceof Dind) {
+        if (! $runtime instanceof Dind) {
             $this->refuseNonContainerProject();
         }
 
@@ -56,7 +56,7 @@ class ContainerController extends Controller
     /**
      * A stop asked for is not a fault: the health sweep skips the project until it is started again.
      *
-     * @param array{exit_code: int} $result
+     * @param  array{exit_code: int}  $result
      */
     private function actionResponse(Dind $dind, array $result, bool $stopsApp): JsonResponse
     {
@@ -82,6 +82,7 @@ class ContainerController extends Controller
     public function index(string $username): JsonResponse
     {
         $dind = $this->getDind($username);
+
         return new JsonResponse(['data' => $dind->getContainers()]);
     }
 
@@ -149,7 +150,7 @@ class ContainerController extends Controller
     )]
     public function serviceAction(string $username, string $service, Request $request): JsonResponse
     {
-        if (!$this->isServiceName($service)) {
+        if (! $this->isServiceName($service)) {
             return $this->invalidServiceName();
         }
 
@@ -173,7 +174,7 @@ class ContainerController extends Controller
 
     private const LOG_TIME_EXPECTED = LogTime::EXPECTED;
 
-    private const LOG_LINES_EXPECTED = 'a number of lines, at least 1; at most ' . ContainerOperations::MAX_LOG_LINES . ' are returned';
+    private const LOG_LINES_EXPECTED = 'a number of lines, at least 1; at most '.ContainerOperations::MAX_LOG_LINES.' are returned';
 
     #[OA\Get(
         path: '/projects/{username}/containers/{service}/logs',
@@ -185,8 +186,8 @@ class ContainerController extends Controller
             new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'service', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'lines', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 200, minimum: 1, maximum: 5000)),
-            new OA\Parameter(name: 'since', description: 'Only lines written after this: ' . self::LOG_TIME_EXPECTED . '.', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
-            new OA\Parameter(name: 'until', description: 'Only lines written before this: ' . self::LOG_TIME_EXPECTED . '.', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'since', description: 'Only lines written after this: '.self::LOG_TIME_EXPECTED.'.', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'until', description: 'Only lines written before this: '.self::LOG_TIME_EXPECTED.'.', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Service logs', content: new OA\JsonContent(
@@ -197,7 +198,7 @@ class ContainerController extends Controller
     )]
     public function logs(string $username, string $service, Request $request): JsonResponse
     {
-        if (!$this->isServiceName($service)) {
+        if (! $this->isServiceName($service)) {
             return $this->invalidServiceName();
         }
 
@@ -213,11 +214,11 @@ class ContainerController extends Controller
     #[OA\Get(
         path: '/projects/{username}/containers/{service}/logs/stream',
         description: 'Chunked NDJSON without Content-Length. Starts with the last `lines` lines (at most 5000, '
-            . 'optionally only those after `since`), then follows the log: one `{"line":"...","ts":"..."}` '
-            . 'object per line as the service writes it. While the service is quiet, a `{"type":"heartbeat"}` '
-            . 'frame follows every 2 seconds without a line; skip it. Ends after 10 minutes with a final '
-            . '`{"type":"finish"}` frame, or at once when the client closes the connection. MCP clients read GET '
-            . '/projects/{username}/containers/{service}/logs instead.',
+            .'optionally only those after `since`), then follows the log: one `{"line":"...","ts":"..."}` '
+            .'object per line as the service writes it. While the service is quiet, a `{"type":"heartbeat"}` '
+            .'frame follows every 2 seconds without a line; skip it. Ends after 10 minutes with a final '
+            .'`{"type":"finish"}` frame, or at once when the client closes the connection. MCP clients read GET '
+            .'/projects/{username}/containers/{service}/logs instead.',
         summary: 'Stream a Docker service log as NDJSON',
         // A tool answers once; this never does. container_service_logs is the MCP way.
         x: ['mcp-hide' => true],
@@ -227,7 +228,7 @@ class ContainerController extends Controller
             new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'service', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'lines', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 200, minimum: 1, maximum: 5000)),
-            new OA\Parameter(name: 'since', description: 'Only lines written after this: ' . self::LOG_TIME_EXPECTED . '.', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'since', description: 'Only lines written after this: '.self::LOG_TIME_EXPECTED.'.', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
         ],
         responses: [
             new OA\Response(response: 200, description: 'NDJSON log stream'),
@@ -236,7 +237,7 @@ class ContainerController extends Controller
     )]
     public function streamLogs(string $username, string $service, Request $request): StreamedResponse|JsonResponse
     {
-        if (!$this->isServiceName($service)) {
+        if (! $this->isServiceName($service)) {
             return $this->invalidServiceName();
         }
 
@@ -270,7 +271,7 @@ class ContainerController extends Controller
             if ($this->clientGone) {
                 return;
             }
-            if (!$e instanceof ProcessTimedOutException) {
+            if (! $e instanceof ProcessTimedOutException) {
                 throw $e;
             }
         }
@@ -282,7 +283,7 @@ class ContainerController extends Controller
      * them the follow and this worker would wait for the next line, or the full 10 minutes. A closed
      * client unwinds the follow by throwing, which stops its process.
      *
-     * @param array<string, mixed> $frame
+     * @param  array<string, mixed>  $frame
      */
     private function sendOrHangUp(array $frame): void
     {
@@ -296,8 +297,8 @@ class ContainerController extends Controller
     /** @param array<string, mixed> $frame */
     private static function emitFrame(array $frame): void
     {
-        echo json_encode($frame, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE) . "\n";
-        if (!app()->runningUnitTests()) {
+        echo json_encode($frame, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)."\n";
+        if (! app()->runningUnitTests()) {
             flush();
         }
     }
@@ -317,7 +318,7 @@ class ContainerController extends Controller
     }
 
     /**
-     * @param list<string> $fields
+     * @param  list<string>  $fields
      * @return array<string, ?string>
      */
     private function validateLogTimes(Request $request, array $fields): array
@@ -328,16 +329,18 @@ class ContainerController extends Controller
             $value = $request->query($field);
             if ($value === null || $value === '') {
                 $out[$field] = null;
+
                 continue;
             }
-            if (!is_string($value) || preg_match(self::LOG_TIME, $value) !== 1) {
+            if (! is_string($value) || preg_match(self::LOG_TIME, $value) !== 1) {
                 $problems[] = [
                     'field' => $field,
-                    'code' => $field . '_invalid',
-                    'message' => "The {$field} must be " . self::LOG_TIME_EXPECTED . '.',
+                    'code' => $field.'_invalid',
+                    'message' => "The {$field} must be ".self::LOG_TIME_EXPECTED.'.',
                     'expected' => self::LOG_TIME_EXPECTED,
                     'examples' => ['10m', '2026-10-03T12:00:00Z'],
                 ];
+
                 continue;
             }
             $out[$field] = $value;

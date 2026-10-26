@@ -35,7 +35,7 @@ final class PlatformMatcher
     private array $probeData = [];
 
     /**
-     * @param array<string, PlatformProbe> $probes keyed by probe id
+     * @param  array<string, PlatformProbe>  $probes  keyed by probe id
      */
     public function __construct(array $probes = [])
     {
@@ -55,7 +55,7 @@ final class PlatformMatcher
     /**
      * Commands whose `when` guard holds for this project.
      *
-     * @param list<PlatformCommand> $commands
+     * @param  list<PlatformCommand>  $commands
      * @return list<PlatformCommand>
      */
     public static function applicable(array $commands, ProjectContext $context): array
@@ -69,7 +69,7 @@ final class PlatformMatcher
     }
 
     /**
-     * @param array<string, mixed> $node
+     * @param  array<string, mixed>  $node
      */
     public function matches(array $node, ProjectContext $context): bool
     {
@@ -79,7 +79,7 @@ final class PlatformMatcher
     }
 
     /**
-     * @param array<string, mixed> $node
+     * @param  array<string, mixed>  $node
      */
     private function evaluate(array $node, ProjectContext $context): bool
     {
@@ -90,7 +90,7 @@ final class PlatformMatcher
         }
 
         foreach ($node as $key => $value) {
-            if (!$this->condition((string) $key, $value, $context)) {
+            if (! $this->condition((string) $key, $value, $context)) {
                 return false;
             }
         }
@@ -103,8 +103,8 @@ final class PlatformMatcher
         return match ($key) {
             'all' => $this->everyNode($value, $context, true),
             'any' => $this->anyNode($value, $context),
-            'none' => !$this->anyNode($value, $context),
-            'not' => is_array($value) && !$this->evaluate($value, $context),
+            'none' => ! $this->anyNode($value, $context),
+            'not' => is_array($value) && ! $this->evaluate($value, $context),
             'file' => $this->anyScalar($value, fn (string $n): bool => $context->hasFile(strtolower($n))),
             'path' => $this->anyScalar($value, fn (string $p): bool => $context->isFile($p)),
             'dir' => $this->anyScalar($value, fn (string $p): bool => is_dir($context->path($p))),
@@ -119,19 +119,16 @@ final class PlatformMatcher
         };
     }
 
-    /**
-     * @param mixed $nodes
-     */
     private function everyNode(mixed $nodes, ProjectContext $context, bool $emptyResult): bool
     {
-        if (!is_array($nodes)) {
+        if (! is_array($nodes)) {
             throw new ManifestException("'all' must be a list of conditions");
         }
         if ($nodes === []) {
             return $emptyResult;
         }
         foreach ($nodes as $child) {
-            if (!is_array($child) || !$this->evaluate($child, $context)) {
+            if (! is_array($child) || ! $this->evaluate($child, $context)) {
                 return false;
             }
         }
@@ -141,7 +138,7 @@ final class PlatformMatcher
 
     private function anyNode(mixed $nodes, ProjectContext $context): bool
     {
-        if (!is_array($nodes)) {
+        if (! is_array($nodes)) {
             throw new ManifestException("'any'/'none' must be a list of conditions");
         }
         foreach ($nodes as $child) {
@@ -168,12 +165,12 @@ final class PlatformMatcher
     }
 
     /**
-     * @param array<string, mixed> $spec
+     * @param  array<string, mixed>  $spec
      */
     private function contains(array $spec, ProjectContext $context): bool
     {
         $pattern = $spec['pattern'] ?? null;
-        if (!is_string($pattern) || $pattern === '') {
+        if (! is_string($pattern) || $pattern === '') {
             throw new ManifestException("'contains' needs a non-empty 'pattern'");
         }
 
@@ -186,13 +183,13 @@ final class PlatformMatcher
             throw new ManifestException("'contains' needs a 'path' or a 'glob'");
         }
 
-        if (!is_string($haystack) || $haystack === '') {
+        if (! is_string($haystack) || $haystack === '') {
             return false;
         }
 
         if (($spec['regex'] ?? false) === true) {
             // `@` so a bad pattern reads as a failed match, not a PHP warning.
-            return @preg_match('/' . str_replace('/', '\\/', $pattern) . '/', $haystack) === 1;
+            return @preg_match('/'.str_replace('/', '\\/', $pattern).'/', $haystack) === 1;
         }
 
         return str_contains($haystack, $pattern);

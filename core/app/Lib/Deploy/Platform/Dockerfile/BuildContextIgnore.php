@@ -37,7 +37,7 @@ final class BuildContextIgnore
     /** `Dockerfile` -> `Dockerfile.dockerignore`, `./docker/app.Dockerfile` -> `docker/app.Dockerfile.dockerignore`. */
     public static function pathFor(string $dockerfile): string
     {
-        return (string) preg_replace('#^(\./)+#', '', $dockerfile) . self::SUFFIX;
+        return (string) preg_replace('#^(\./)+#', '', $dockerfile).self::SUFFIX;
     }
 
     /**
@@ -59,12 +59,12 @@ final class BuildContextIgnore
     }
 
     /**
-     * @param string|null $projectIgnore the project's `.dockerignore`, or null when it has none
-     * @param string      $dockerfile    the Dockerfile path relative to the context
-     * @param bool        $excludeGit    false when the build reads git history ({@see GitHistoryUse})
-     * @param bool        $generated     the engine wrote the Dockerfile, so its base rules apply
-     *                                   when the project has no `.dockerignore`
-     * @param bool        $excludeEnv    leave `.env` out too ({@see excludesEnv()})
+     * @param  string|null  $projectIgnore  the project's `.dockerignore`, or null when it has none
+     * @param  string  $dockerfile  the Dockerfile path relative to the context
+     * @param  bool  $excludeGit  false when the build reads git history ({@see GitHistoryUse})
+     * @param  bool  $generated  the engine wrote the Dockerfile, so its base rules apply
+     *                           when the project has no `.dockerignore`
+     * @param  bool  $excludeEnv  leave `.env` out too ({@see excludesEnv()})
      */
     public static function render(
         ?string $projectIgnore,
@@ -101,7 +101,7 @@ final class BuildContextIgnore
             $lines[] = '.git';
         }
 
-        return implode("\n", $lines) . "\n";
+        return implode("\n", $lines)."\n";
     }
 
     /**

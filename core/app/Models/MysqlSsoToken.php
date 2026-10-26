@@ -17,11 +17,12 @@ use Illuminate\Support\Str;
  * @property string $token
  * @property Carbon $expires_at
  * @property User $user
+ *
  * @method static MysqlSsoToken create(array $params)
  */
 class MysqlSsoToken extends Model
 {
-    use HasFactory, HasDetails, Prunable;
+    use HasDetails, HasFactory, Prunable;
 
     protected $fillable = [
         'user_id',
@@ -69,18 +70,18 @@ class MysqlSsoToken extends Model
 
     public function getCredentials(): array
     {
-        $username = 'sso_' . $this->user->username;
+        $username = 'sso_'.$this->user->username;
         $password = Str::random(27);
 
-        $mysql = (new System())->mysql();
-        
+        $mysql = (new System)->mysql();
+
         /** @var MysqlSsoUser */
         $ssoUser = MysqlSsoUser::firstOrNew([
             'user_id' => $this->user_id,
             'username' => $username,
         ]);
 
-        if (!$mysql->users()->userExists($username)) {
+        if (! $mysql->users()->userExists($username)) {
             $mysql->users()->createUser($username, $password);
         } else {
             $mysql->users()->changeUserPassword($username, $password);
@@ -88,7 +89,7 @@ class MysqlSsoToken extends Model
 
         $mysql->privileges()->revokeAll($username);
 
-        foreach($this->user->mysqlDatabases as $db) {
+        foreach ($this->user->mysqlDatabases as $db) {
             $mysql->privileges()->updatePrivileges($username, $db->database, 'ALL PRIVILEGES');
         }
 

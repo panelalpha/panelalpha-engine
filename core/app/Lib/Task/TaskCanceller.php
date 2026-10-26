@@ -2,6 +2,7 @@
 
 namespace App\Lib\Task;
 
+use App\Jobs\Concerns\AttachTask;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\ProcessIdentity;
 use App\Models\Task;
@@ -17,8 +18,8 @@ class TaskCanceller
     private $cancelDeploy;
 
     /**
-     * @param null|callable(mixed, mixed): bool $isStillRunning
-     * @param null|callable(Task): void $cancelDeploy
+     * @param  null|callable(mixed, mixed): bool  $isStillRunning
+     * @param  null|callable(Task): void  $cancelDeploy
      */
     public function __construct(private ProcessTreeKiller $killer, mixed $isStillRunning = null, mixed $cancelDeploy = null)
     {
@@ -44,7 +45,7 @@ class TaskCanceller
             return self::refused('This task is already running and cannot be stopped; wait for it to finish.');
         }
 
-        if (!$task->markCancelled()) {
+        if (! $task->markCancelled()) {
             return self::refused('Task cannot be cancelled');
         }
 
@@ -91,7 +92,7 @@ class TaskCanceller
      */
     private static function cannotBeStopped(Task $task): bool
     {
-        return !$task->isDeploy() && $task->pid === null;
+        return ! $task->isDeploy() && $task->pid === null;
     }
 
     /**
@@ -121,7 +122,7 @@ class TaskCanceller
 
     /**
      * Cancel a task only while it is still queued. Its job then exits before
-     * doing anything ({@see \App\Jobs\Concerns\AttachTask::runTask()}), so
+     * doing anything ({@see AttachTask::runTask()}), so
      * there is no process to stop. False when a worker took it first.
      */
     public function cancelQueued(Task $task): bool

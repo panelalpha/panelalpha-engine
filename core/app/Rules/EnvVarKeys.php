@@ -21,20 +21,20 @@ final class EnvVarKeys implements ProblemRule
 
     public function validate(string $attribute, mixed $value, Closure $fail): void
     {
-        if (!is_array($value)) {
+        if (! is_array($value)) {
             return;
         }
 
         foreach (array_keys($value) as $key) {
-            if (is_string($key) && preg_match('/\A' . self::PATTERN . '\z/', $key) === 1) {
+            if (is_string($key) && preg_match('/\A'.self::PATTERN.'\z/', $key) === 1) {
                 continue;
             }
             $shown = is_scalar($key) ? (string) $key : gettype($key);
 
             $this->reject([
                 'field' => $attribute,
-                'code' => $attribute . '_invalid_key',
-                'message' => "'{$shown}' is not a valid environment variable name. A name is " . self::EXPECTED . '.',
+                'code' => $attribute.'_invalid_key',
+                'message' => "'{$shown}' is not a valid environment variable name. A name is ".self::EXPECTED.'.',
                 'expected' => self::EXPECTED,
                 'pattern' => self::PATTERN,
                 'examples' => self::EXAMPLES,

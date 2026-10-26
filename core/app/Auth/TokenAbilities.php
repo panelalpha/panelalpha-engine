@@ -19,6 +19,7 @@ use Laravel\Mcp\Server\Tool;
 class TokenAbilities
 {
     public const API = 'api';
+
     public const MCP = 'mcp';
 
     /** Sanctum's own "everything": both surfaces, no limit. */
@@ -77,9 +78,7 @@ class TokenAbilities
     private const PROJECT_SCOPE_TOOLS = ['project_list_summary'];
 
     /** @param array<int, string> $abilities */
-    private function __construct(private readonly array $abilities)
-    {
-    }
+    private function __construct(private readonly array $abilities) {}
 
     /** @param array<int, string> $abilities */
     public static function fromList(array $abilities): self
@@ -106,11 +105,11 @@ class TokenAbilities
     }
 
     /**
-     * @param array<int, string>|null $commands MCP commands to allow, or null for all
-     * @param array<int, string>|null $routes   REST operations to allow, or null for all
-     * @param array<int, string>|null $projects project usernames to allow, or null for all
-     * @param array<int, string>      $existing the token's current abilities, so
-     *                                          anything outside this vocabulary survives
+     * @param  array<int, string>|null  $commands  MCP commands to allow, or null for all
+     * @param  array<int, string>|null  $routes  REST operations to allow, or null for all
+     * @param  array<int, string>|null  $projects  project usernames to allow, or null for all
+     * @param  array<int, string>  $existing  the token's current abilities, so
+     *                                        anything outside this vocabulary survives
      * @return array<int, string>
      */
     public static function build(
@@ -127,10 +126,10 @@ class TokenAbilities
         $kept = array_values(array_filter(
             $existing,
             fn (mixed $a): bool => is_string($a)
-                && !in_array($a, $ours, true)
-                && !str_starts_with($a, self::COMMAND_PREFIX)
-                && !str_starts_with($a, self::ROUTE_PREFIX)
-                && !str_starts_with($a, self::PROJECT_PREFIX)
+                && ! in_array($a, $ours, true)
+                && ! str_starts_with($a, self::COMMAND_PREFIX)
+                && ! str_starts_with($a, self::ROUTE_PREFIX)
+                && ! str_starts_with($a, self::PROJECT_PREFIX)
         ));
 
         $built = [];
@@ -162,7 +161,7 @@ class TokenAbilities
     }
 
     /**
-     * @param array<int, string> $values
+     * @param  array<int, string>  $values
      * @return array<int, string>
      */
     private static function prefixed(string $prefix, array $values): array
@@ -170,7 +169,7 @@ class TokenAbilities
         $values = array_values(array_unique(array_filter($values)));
         sort($values);
 
-        return array_map(fn (string $v): string => $prefix . $v, $values);
+        return array_map(fn (string $v): string => $prefix.$v, $values);
     }
 
     /** A token from before any of this: `*`, or nothing at all. */
@@ -226,7 +225,7 @@ class TokenAbilities
      */
     public function mayReachRoute(?string $operation): bool
     {
-        if (!$this->isProjectScoped()) {
+        if (! $this->isProjectScoped()) {
             return true;
         }
 
@@ -240,19 +239,19 @@ class TokenAbilities
     /** Whether this token may call an operation the operator owns. Only an unscoped one may. */
     public function mayCallOperatorRoute(?string $operation): bool
     {
-        return !$this->isProjectScoped() || !in_array($operation, self::OPERATOR_ROUTES, true);
+        return ! $this->isProjectScoped() || ! in_array($operation, self::OPERATOR_ROUTES, true);
     }
 
     /**
      * The fields among those a request sends that are the operator's and this
      * token may not set. None for an unscoped token.
      *
-     * @param array<int, int|string> $sent
+     * @param  array<int, int|string>  $sent
      * @return list<string>
      */
     public function operatorFields(?string $operation, array $sent): array
     {
-        if (!$this->isProjectScoped() || $operation !== self::PROJECT_UPDATE) {
+        if (! $this->isProjectScoped() || $operation !== self::PROJECT_UPDATE) {
             return [];
         }
 
@@ -329,7 +328,7 @@ class TokenAbilities
     /**
      * This token's abilities with its MCP command limit replaced.
      *
-     * @param array<int, string>|null $commands
+     * @param  array<int, string>|null  $commands
      * @return array<int, string>
      */
     public function withCommands(?array $commands): array
@@ -347,7 +346,7 @@ class TokenAbilities
     /**
      * This token's abilities with its REST operation limit replaced.
      *
-     * @param array<int, string>|null $routes
+     * @param  array<int, string>|null  $routes
      * @return array<int, string>
      */
     public function withRoutes(?array $routes): array
@@ -366,7 +365,7 @@ class TokenAbilities
      * This token's abilities with its project scope replaced. Null removes the
      * scope; an empty list limits the token to no project at all.
      *
-     * @param array<int, string>|null $projects
+     * @param  array<int, string>|null  $projects
      * @return array<int, string>
      */
     public function withProjects(?array $projects): array
@@ -394,19 +393,19 @@ class TokenAbilities
     }
 
     /**
-     * @param array<int, class-string<Tool>> $tools
+     * @param  array<int, class-string<Tool>>  $tools
      * @return array<int, class-string<Tool>>
      */
     public function filterTools(array $tools): array
     {
         $commands = $this->commands();
 
-        if ($commands === null && !$this->isProjectScoped()) {
+        if ($commands === null && ! $this->isProjectScoped()) {
             return $tools;
         }
 
         $allowed = $commands === null ? null : array_flip($commands);
-        $policy = new ToolPolicy();
+        $policy = new ToolPolicy;
 
         return array_values(array_filter(
             $tools,
@@ -415,26 +414,25 @@ class TokenAbilities
     }
 
     /**
-     * @param array<string, int>|null $allowed
-     * @param class-string<Tool>      $class
+     * @param  array<string, int>|null  $allowed
+     * @param  class-string<Tool>  $class
      */
     private function permitsTool(ToolPolicy $policy, string $class, ?array $allowed): bool
     {
         $name = $policy->nameOf($class);
 
-        if ($allowed !== null && !isset($allowed[$name])) {
+        if ($allowed !== null && ! isset($allowed[$name])) {
             return false;
         }
 
-        if (!$this->isProjectScoped()) {
+        if (! $this->isProjectScoped()) {
             return true;
         }
 
-        $tool = new $class();
+        $tool = new $class;
 
         return $tool instanceof ApiTool
             ? $this->mayReachRoute($tool->operationKey())
             : in_array($name, self::PROJECT_SCOPE_TOOLS, true);
     }
-
 }

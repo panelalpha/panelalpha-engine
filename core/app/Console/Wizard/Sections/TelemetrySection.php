@@ -122,7 +122,7 @@ class TelemetrySection implements Section
     /** Whether reports are being sent, or null when the setting is unreadable. */
     private function sending(): ?bool
     {
-        if (!$this->database) {
+        if (! $this->database) {
             return null;
         }
 
@@ -190,18 +190,18 @@ class TelemetrySection implements Section
             return;
         }
 
-        Screen::draw(self::label() . '  ·  Sending');
+        Screen::draw(self::label().'  ·  Sending');
         note(
             $on
                 ? "Reports are being sent.\n\nTurning this off keeps every deploy in the local log, where it can still be\n"
-                    . 'shared with support by hand. Nothing is deleted and nothing stops working.'
+                    .'shared with support by hand. Nothing is deleted and nothing stops working.'
                 : "Reports are not being sent.\n\nTurning it on sends anonymous reports about failed and degraded deploys. No\n"
-                    . 'username, no repository token, no host address.'
+                    .'username, no repository token, no host address.'
         );
 
         // No by default: Enter leaves a toggle as it is. unchanged()
         // says so, so a No does not read as the wizard ignoring the key.
-        if (!confirm(label: $on ? 'Stop sending reports?' : 'Start sending reports?', default: false)) {
+        if (! confirm(label: $on ? 'Stop sending reports?' : 'Start sending reports?', default: false)) {
             $this->unchanged();
 
             return;
@@ -222,7 +222,7 @@ class TelemetrySection implements Section
             // matter — the local switch, and telling monitoring to stop
             // probing this install.
             Setting::set(NotificationPreferences::SETTING_TELEMETRY_ENABLED, $on ? '0' : '1');
-            $sync = NotificationPreferences::sync(!$on);
+            $sync = NotificationPreferences::sync(! $on);
         } catch (Throwable $e) {
             error($e->getMessage());
             pause('Press enter to carry on...');
@@ -249,7 +249,7 @@ class TelemetrySection implements Section
         // half can fail on a box with no way out. Say which happened.
         note($sync['ok']
             ? $sync['message']
-            : $sync['message'] . ' — the local setting still stands.');
+            : $sync['message'].' — the local setting still stands.');
 
         note(sprintf(
             'Stored as the `%s` setting, which overrides TELEMETRY_ENABLED in .env-core.',
@@ -260,7 +260,7 @@ class TelemetrySection implements Section
 
     private function setTier(bool $dryRun): void
     {
-        Screen::draw(self::label() . '  ·  What reports carry');
+        Screen::draw(self::label().'  ·  What reports carry');
 
         // Named keys, not the tier numbers. `0, 1, 2` is a PHP list, and the
         // package reads a list's *values* as the options — so the default
@@ -296,10 +296,10 @@ class TelemetrySection implements Section
 
     private function setBundles(bool $dryRun): void
     {
-        Screen::draw(self::label() . '  ·  Source code');
+        Screen::draw(self::label().'  ·  Source code');
         warning(
             'A source bundle is a zip of the deployed application\'s own code, uploaded with '
-            . 'the report. Dependencies, build output and every .env but the examples are left out.'
+            .'the report. Dependencies, build output and every .env but the examples are left out.'
         );
         note('It is the difference between someone being able to explain a failed deploy and not. It is also your customer\'s code.');
 
@@ -316,7 +316,7 @@ class TelemetrySection implements Section
 
         // This one keeps its No: it is the only answer here that starts
         // sending somebody else's code.
-        if ($mode !== SourceBundlePolicy::MODE_OFF && !confirm(
+        if ($mode !== SourceBundlePolicy::MODE_OFF && ! confirm(
             label: 'Turn on uploading application source?',
             default: false,
         )) {
@@ -336,14 +336,14 @@ class TelemetrySection implements Section
     {
         $on = $this->bugReports();
 
-        Screen::draw(self::label() . '  ·  Bug reports');
+        Screen::draw(self::label().'  ·  Bug reports');
         note(
             "`pae telemetry:bug-report <project>` lets somebody here file a report about one\n"
-            . "deployed app, with free text they type. This decides whether that is allowed.\n\n"
-            . 'Filing is refused outright when sending is off, whatever this says.'
+            ."deployed app, with free text they type. This decides whether that is allowed.\n\n"
+            .'Filing is refused outright when sending is off, whatever this says.'
         );
 
-        if (!confirm(label: $on ? 'Stop allowing bug reports?' : 'Allow bug reports?', default: false)) {
+        if (! confirm(label: $on ? 'Stop allowing bug reports?' : 'Allow bug reports?', default: false)) {
             $this->unchanged();
 
             return;
@@ -365,7 +365,7 @@ class TelemetrySection implements Section
 
     private function show(): void
     {
-        Screen::draw(self::label() . '  ·  What is sent');
+        Screen::draw(self::label().'  ·  What is sent');
 
         try {
             Artisan::call('telemetry:status');
@@ -383,12 +383,12 @@ class TelemetrySection implements Section
     }
 
     /**
-     * @param array<string, string> $values
+     * @param  array<string, string>  $values
      */
     private function writeEnv(array $values, string $said, bool $dryRun): void
     {
         if ($dryRun) {
-            note('Dry run: ' . $said, 'warning');
+            note('Dry run: '.$said, 'warning');
             pause('Press enter to carry on...');
 
             return;

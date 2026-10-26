@@ -25,8 +25,10 @@ final class DindEngine implements ContainerEngine
     public const SERVICE = 'dind';
 
     private ?DindImageStore $images = null;
+
     /** @var array<string, DindHostBuilder> keyed by memory limit */
     private array $hostBuilders = [];
+
     private ?DindAccountStorage $storage = null;
 
     public function name(): string
@@ -36,7 +38,7 @@ final class DindEngine implements ContainerEngine
 
     public function images(): ImageStore
     {
-        return $this->images ??= new DindImageStore();
+        return $this->images ??= new DindImageStore;
     }
 
     public function hostBuilder(): HostBuilder
@@ -72,13 +74,13 @@ final class DindEngine implements ContainerEngine
         $configuredMb = ServiceLimits::toMegabytes(trim($configured)) ?? 0;
         if ($configuredMb > 0) {
             return $maxMb > 0 && $configuredMb > $maxMb
-                ? new BuildMemory($maxMb . 'm', BuildMemory::SETTING_CAPPED, $host)
+                ? new BuildMemory($maxMb.'m', BuildMemory::SETTING_CAPPED, $host)
                 : new BuildMemory(trim($configured), BuildMemory::SETTING, $host);
         }
 
         // An unreadable host leaves the builder's default.
         return new BuildMemory(
-            $maxMb > 0 ? min(self::MAX_BUILD_MEMORY_MB, $maxMb) . 'm' : '',
+            $maxMb > 0 ? min(self::MAX_BUILD_MEMORY_MB, $maxMb).'m' : '',
             BuildMemory::HOST,
             $host
         );
@@ -92,6 +94,6 @@ final class DindEngine implements ContainerEngine
 
     public function storage(): AccountStorage
     {
-        return $this->storage ??= new DindAccountStorage();
+        return $this->storage ??= new DindAccountStorage;
     }
 }

@@ -11,6 +11,7 @@ final class ProjectShell
 {
     /**
      * @return array{stdout: string, stderr: string, exit_code: int}
+     *
      * @throws ValidationException when the project is not a dind project
      */
     public static function run(User $user, string $command, ?string $cwd, int $timeout): array
@@ -20,7 +21,7 @@ final class ProjectShell
         }
 
         $runtime = $user->project()->runtime();
-        if (!$runtime instanceof Dind) {
+        if (! $runtime instanceof Dind) {
             self::refuse();
         }
 

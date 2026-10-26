@@ -23,7 +23,7 @@ final class PhpSources
     public static function present(string $projectDir): bool
     {
         $projectDir = rtrim($projectDir, '/');
-        if (!is_dir($projectDir)) {
+        if (! is_dir($projectDir)) {
             return false;
         }
 
@@ -42,18 +42,19 @@ final class PhpSources
                     continue;
                 }
 
-                $path = $dir . '/' . $entry;
+                $path = $dir.'/'.$entry;
 
                 if (is_file($path)) {
                     if (str_ends_with(strtolower($entry), '.php')) {
                         return true;
                     }
+
                     continue;
                 }
 
                 if ($depth < self::MAX_DEPTH
                     && is_dir($path)
-                    && !in_array(strtolower($entry), self::SKIPPED, true)
+                    && ! in_array(strtolower($entry), self::SKIPPED, true)
                 ) {
                     $queue[] = [$path, $depth + 1];
                 }

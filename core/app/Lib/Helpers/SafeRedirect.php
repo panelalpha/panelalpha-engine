@@ -35,16 +35,16 @@ final class SafeRedirect
         }
 
         $path = $parts['path'] ?? '/';
-        if ($path === '' || !str_starts_with($path, '/')) {
-            $path = '/' . ltrim($path, '/');
+        if ($path === '' || ! str_starts_with($path, '/')) {
+            $path = '/'.ltrim($path, '/');
         }
 
         $safe = $path;
         if (isset($parts['query']) && $parts['query'] !== '') {
-            $safe .= '?' . $parts['query'];
+            $safe .= '?'.$parts['query'];
         }
         if (isset($parts['fragment']) && $parts['fragment'] !== '') {
-            $safe .= '#' . $parts['fragment'];
+            $safe .= '#'.$parts['fragment'];
         }
 
         // `//host/path` is a URL to another origin, not a path -- and browsers

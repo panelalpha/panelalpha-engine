@@ -25,7 +25,7 @@ class GitCommitsRequest extends FormRequest
         return [
             'path' => 'nullable|string',
             'branch' => 'nullable|string',
-            'limit' => 'nullable|integer|min:1|max:' . GitActions::MAX_COMMITS,
+            'limit' => 'nullable|integer|min:1|max:'.GitActions::MAX_COMMITS,
         ];
     }
 

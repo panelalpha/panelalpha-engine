@@ -2,22 +2,23 @@
 
 namespace App\System\Project\Dind\Strategy;
 
-use App\System\Project\Dind as DindProject;
 use App\Lib\Deploy\Compose\AppRoot;
-use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
+use App\Lib\Deploy\Platform\DeployPlan;
+use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\PlatformManifest;
 use App\Lib\Deploy\Platform\PlatformRegistry;
 use App\Lib\Deploy\Platform\PlatformStage;
 use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\StageScript;
 use App\Lib\Deploy\ProjectSetup;
+use App\System\Project\Dind as DindProject;
 
 /**
  * The staged entrypoint, written next to the Dockerfile that installs it.
  *
  * The manifest supplies the stages; the deploy request may replace any of them
- * outright (see {@see \App\Lib\Deploy\Platform\DeployPlan}); the decision
+ * outright (see {@see DeployPlan}); the decision
  * supplies the commands as they were resolved for *this* project — the package manager the lockfile
  * chose, the binary name out of Cargo.toml. A project-level `setup` script
  * joins the install stage rather than keeping its own marker file: a marker
@@ -58,17 +59,17 @@ class EntrypointWriter
      * worker's stale recipe list). No entrypoint follows, so every stage
      * command is dropped; this is the line that says so.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     public static function unresolvedPlatformWarning(array $decision, ?PlatformManifest $manifest): ?string
     {
         $platform = $decision['platform'] ?? null;
-        if ($manifest !== null || !is_string($platform) || $platform === '') {
+        if ($manifest !== null || ! is_string($platform) || $platform === '') {
             return null;
         }
 
         return "Platform '{$platform}' was detected but could not be resolved;"
-            . ' no entrypoint was written, so its install, upgrade and start commands will not run.';
+            .' no entrypoint was written, so its install, upgrade and start commands will not run.';
     }
 
     /**
@@ -83,7 +84,7 @@ class EntrypointWriter
      * deploy log matters, because a project whose migrations stopped running
      * needs to know its own file is why.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private function writeProjectOverride(string $projectDir, ?string $chown, array $decision): bool
     {
@@ -91,26 +92,26 @@ class EntrypointWriter
         // Read from the checkout root: `.panelalpha/entrypoint.sh` is a
         // repository-level convention and stays where the project put it.
         // Only the destination follows the mount.
-        $source = $projectDir . '/' . self::PROJECT_OVERRIDE;
-        if (!$system->filesystem()->fileExists($source)) {
+        $source = $projectDir.'/'.self::PROJECT_OVERRIDE;
+        if (! $system->filesystem()->fileExists($source)) {
             return false;
         }
 
         $contents = $system->filesystem()->fileGetContents($source);
-        if (!is_string($contents) || trim($contents) === '') {
+        if (! is_string($contents) || trim($contents) === '') {
             $this->dind->shell()->logger()?->info(
-                self::PROJECT_OVERRIDE . ' is empty; using the generated entrypoint instead'
+                self::PROJECT_OVERRIDE.' is empty; using the generated entrypoint instead'
             );
 
             return false;
         }
 
         $this->dind->shell()->logger()?->info(
-            'Using this project\'s own ' . self::PROJECT_OVERRIDE
-            . ' — the platform\'s install, upgrade and start commands are not applied'
+            'Using this project\'s own '.self::PROJECT_OVERRIDE
+            .' — the platform\'s install, upgrade and start commands are not applied'
         );
         $system->filesystem()->filePutContents(
-            AppRoot::path($projectDir, $decision) . '/' . StageScript::FILENAME,
+            AppRoot::path($projectDir, $decision).'/'.StageScript::FILENAME,
             $contents,
             $chown,
             '755'
@@ -120,8 +121,8 @@ class EntrypointWriter
     }
 
     /**
-     * @param array<string, mixed> $decision
-     * @param array<string, array<string, string>> $prepend
+     * @param  array<string, mixed>  $decision
+     * @param  array<string, array<string, string>>  $prepend
      */
     /**
      * A project's own entrypoint, replacing the generated one outright.
@@ -143,10 +144,10 @@ class EntrypointWriter
 
     /**
      * @return bool whether a script now exists at
-     *         {@see StageScript::FILENAME}. False for a project that runs
-     *         from its own compose file or Dockerfile, which has no generated
-     *         entrypoint to write — a caller that has to *invoke* the script
-     *         rather than bake it into an image needs to know which it got.
+     *              {@see StageScript::FILENAME}. False for a project that runs
+     *              from its own compose file or Dockerfile, which has no generated
+     *              entrypoint to write — a caller that has to *invoke* the script
+     *              rather than bake it into an image needs to know which it got.
      */
     public function write(
         array $decision,
@@ -173,9 +174,9 @@ class EntrypointWriter
             $runtimeStages = array_intersect($plan?->stages() ?? [], PlatformStage::RUNTIME_ORDER);
             if ($runtimeStages !== []) {
                 $this->dind->shell()->logger()?->info(
-                    'The deploy request set ' . implode(', ', $runtimeStages)
-                    . ' commands, but this project runs from its own compose file or Dockerfile'
-                    . ' — there is no generated entrypoint to put them in, so they were not applied.'
+                    'The deploy request set '.implode(', ', $runtimeStages)
+                    .' commands, but this project runs from its own compose file or Dockerfile'
+                    .' — there is no generated entrypoint to put them in, so they were not applied.'
                 );
             }
 
@@ -212,12 +213,12 @@ class EntrypointWriter
                 // `setup` script seeds demo data has to be able to find out
                 // why it stopped running.
                 $this->dind->shell()->logger()?->info(
-                    'Skipping this project\'s own setup script: ' . $manifest->label
-                    . ' resolves its dependencies during the build, on the host'
+                    'Skipping this project\'s own setup script: '.$manifest->label
+                    .' resolves its dependencies during the build, on the host'
                 );
             } else {
                 $extraInstall['project-setup'] =
-                    'APP_ENV=local RAILS_ENV=development NODE_ENV=development ' . $setup;
+                    'APP_ENV=local RAILS_ENV=development NODE_ENV=development '.$setup;
             }
         }
 
@@ -227,7 +228,7 @@ class EntrypointWriter
         // root it is invisible to the container, the shim falls through to
         // "serving directly", and every stage command is dropped in silence.
         $this->dind->system()->filesystem()->filePutContents(
-            AppRoot::path($projectDir, $decision) . '/' . StageScript::FILENAME,
+            AppRoot::path($projectDir, $decision).'/'.StageScript::FILENAME,
             StageScript::render(
                 $manifest,
                 $context,

@@ -31,7 +31,7 @@ class VaultPurgeCommand extends Command
                 ->orWhere(fn ($q) => $q->whereNull('filled_at')->where('link_expires_at', '<=', $cutoff)))
             ->delete();
 
-        $this->info("Deleted {$deleted} expired or abandoned vault entr" . ($deleted === 1 ? 'y' : 'ies') . ($grace > 0 ? " (grace {$grace}s)" : '') . '.');
+        $this->info("Deleted {$deleted} expired or abandoned vault entr".($deleted === 1 ? 'y' : 'ies').($grace > 0 ? " (grace {$grace}s)" : '').'.');
 
         return self::SUCCESS;
     }

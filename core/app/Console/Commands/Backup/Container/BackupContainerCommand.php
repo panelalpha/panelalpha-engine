@@ -48,7 +48,7 @@ abstract class BackupContainerCommand extends Command
             return null;
         }
 
-        $mustHave = $requireIdentity && !$this->input->isInteractive();
+        $mustHave = $requireIdentity && ! $this->input->isInteractive();
 
         if ($driver === 's3') {
             $accessKeyId = $this->stringOption('s3-access-key-id');
@@ -127,6 +127,7 @@ abstract class BackupContainerCommand extends Command
         if ($driver === 's3') {
             $this->requireCredentialValue($credentials, 'access_key_id');
             $this->requireCredentialValue($credentials, 'secret_access_key');
+
             return;
         }
 
@@ -140,7 +141,7 @@ abstract class BackupContainerCommand extends Command
     private function requireCredentialValue(?array $credentials, string $key): void
     {
         $value = $credentials[$key] ?? null;
-        if (!is_string($value) || $value === '') {
+        if (! is_string($value) || $value === '') {
             throw new \InvalidArgumentException("Credential {$key} is required for this driver.");
         }
     }
@@ -148,7 +149,7 @@ abstract class BackupContainerCommand extends Command
     protected function stringOption(string $name): ?string
     {
         $value = $this->option($name);
-        if (!is_string($value) || $value === '') {
+        if (! is_string($value) || $value === '') {
             return null;
         }
 
@@ -158,7 +159,7 @@ abstract class BackupContainerCommand extends Command
     protected function numericOption(string $name): ?int
     {
         $value = $this->option($name);
-        if (!is_string($value) || $value === '' || !is_numeric($value)) {
+        if (! is_string($value) || $value === '' || ! is_numeric($value)) {
             return null;
         }
 

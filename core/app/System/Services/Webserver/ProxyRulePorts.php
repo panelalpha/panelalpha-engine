@@ -22,11 +22,9 @@ use Illuminate\Support\Facades\Log;
  */
 class ProxyRulePorts
 {
-    public const COMMENT = FirewallRule::MANAGED_PREFIX . ' proxy rule ';
+    public const COMMENT = FirewallRule::MANAGED_PREFIX.' proxy rule ';
 
-    public function __construct(private ?Firewall $firewall = null)
-    {
-    }
+    public function __construct(private ?Firewall $firewall = null) {}
 
     /**
      * Allow every custom rule's port, and drop the allows of rules that are
@@ -47,7 +45,7 @@ class ProxyRulePorts
             $present = [];
             foreach ($firewall->rules() as $rule) {
                 $present[$rule->id()] = true;
-                if (str_starts_with((string) $rule->comment, self::COMMENT) && !isset($wanted[$rule->id()])) {
+                if (str_starts_with((string) $rule->comment, self::COMMENT) && ! isset($wanted[$rule->id()])) {
                     $firewall->deleteRule($rule->id());
                 }
             }
@@ -59,11 +57,12 @@ class ProxyRulePorts
                     $firewall->addRule($rule);
                 } catch (FirewallClash $e) {
                     // Still synced: the caller's marker has to hold the ports opened beside it, so they close later.
-                    Log::warning('Could not update the firewall for the proxy rules: ' . $e->getMessage());
+                    Log::warning('Could not update the firewall for the proxy rules: '.$e->getMessage());
                 }
             }
         } catch (\Throwable $e) {
-            Log::warning('Could not update the firewall for the proxy rules: ' . $e->getMessage());
+            Log::warning('Could not update the firewall for the proxy rules: '.$e->getMessage());
+
             return false;
         }
 
@@ -72,6 +71,7 @@ class ProxyRulePorts
 
     /**
      * @psalm-param list<PortRule> $rules
+     *
      * @return array<string, FirewallRule> by rule id
      */
     public static function allows(array $rules): array
@@ -91,7 +91,7 @@ class ProxyRulePorts
                 protocol: $rule['transport'] === 'udp' ? 'udp' : 'tcp',
                 port: (string) $rule['listen_port'],
                 destination: $rule['listen_ip'] === '*' ? null : FirewallRule::normalizeAddress($rule['listen_ip']),
-                comment: self::COMMENT . $rule['id'],
+                comment: self::COMMENT.$rule['id'],
             );
             $allows[$allow->id()] ??= $allow;
         }

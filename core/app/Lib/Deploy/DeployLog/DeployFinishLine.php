@@ -22,19 +22,19 @@ final class DeployFinishLine
     {
         $message = self::MESSAGES[$status] ?? self::MESSAGES[DeployLogger::STATUS_FAILED];
 
-        return $error === null || $error === '' ? $message : $message . ': ' . $error;
+        return $error === null || $error === '' ? $message : $message.': '.$error;
     }
 
     /**
      * The last finish line among these lines, oldest first.
      *
-     * @param list<array{ts: int, level: string, msg: string}> $lines
+     * @param  list<array{ts: int, level: string, msg: string}>  $lines
      * @return array{status: string, error: ?string, ts: int}|null
      */
     public static function find(array $lines): ?array
     {
         foreach (array_reverse($lines) as $line) {
-            if (!in_array($line['level'], [DeployLogger::LEVEL_OK, DeployLogger::LEVEL_ERROR], true)) {
+            if (! in_array($line['level'], [DeployLogger::LEVEL_OK, DeployLogger::LEVEL_ERROR], true)) {
                 continue;
             }
             $verdict = self::verdict($line['msg']);
@@ -55,7 +55,7 @@ final class DeployFinishLine
             if ($msg === $message) {
                 return ['status' => $status, 'error' => null];
             }
-            if (str_starts_with($msg, $message . ': ')) {
+            if (str_starts_with($msg, $message.': ')) {
                 return ['status' => $status, 'error' => substr($msg, strlen($message) + 2)];
             }
         }

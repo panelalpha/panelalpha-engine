@@ -22,8 +22,7 @@ final class PublishedPort
         public readonly int $published,
         /** The container-side port the recipe guessed. */
         public readonly int $container
-    ) {
-    }
+    ) {}
 
     /**
      * Null when the entry is not a pair of usable ports — a range, an

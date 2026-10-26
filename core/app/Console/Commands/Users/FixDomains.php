@@ -12,7 +12,7 @@ class FixDomains extends ProjectFleetCommand
     /** Older spellings still answer, so nothing scripted against them breaks. */
     protected $aliases = ['projects:fix-domains', 'users:fix-domains'];
 
-    protected $signature = 'project:domain:fix' . ProjectOptions::SIGNATURE;
+    protected $signature = 'project:domain:fix'.ProjectOptions::SIGNATURE;
 
     protected $description = 'Create missing document-root directories for a project\'s domains';
 
@@ -35,6 +35,6 @@ class FixDomains extends ProjectFleetCommand
 
     protected function afterAll(): void
     {
-        (new System())->webserver()->reload();
+        (new System)->webserver()->reload();
     }
 }

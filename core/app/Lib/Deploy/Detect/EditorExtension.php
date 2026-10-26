@@ -12,7 +12,7 @@ final class EditorExtension
     private const ENTRYPOINT_PATTERN = '#(?:^|/)extension\.js$#i';
 
     /**
-     * @param array<string, mixed> $package parsed package.json
+     * @param  array<string, mixed>  $package  parsed package.json
      */
     public static function describes(array $package): bool
     {
@@ -21,7 +21,7 @@ final class EditorExtension
     }
 
     /**
-     * @param array<string, mixed> $package
+     * @param  array<string, mixed>  $package
      */
     private static function declaresEditorEngine(array $package): bool
     {
@@ -31,7 +31,7 @@ final class EditorExtension
     }
 
     /**
-     * @param array<string, mixed> $package
+     * @param  array<string, mixed>  $package
      */
     private static function hasExtensionEntrypoint(array $package): bool
     {

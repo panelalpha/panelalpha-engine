@@ -28,8 +28,7 @@ class Domain implements IssuableDomain
     public function __construct(
         private readonly UserProject $project,
         private readonly DomainModel $model,
-    ) {
-    }
+    ) {}
 
     public function model(): DomainModel
     {
@@ -69,14 +68,14 @@ class Domain implements IssuableDomain
             $this->delete();
         } catch (\Throwable $cleanup) {
             Log::warning(
-                "Cleanup after failed domain create failed for {$this->model->domain}: " . $cleanup->getMessage()
+                "Cleanup after failed domain create failed for {$this->model->domain}: ".$cleanup->getMessage()
             );
         }
     }
 
     public function rebuild(): void
     {
-        if ($this->model->sslEnabled() && !$this->hasSslCertificate()) {
+        if ($this->model->sslEnabled() && ! $this->hasSslCertificate()) {
             $this->generateCertificate();
         }
         $this->project->rebuildDomain($this->model);
@@ -102,7 +101,7 @@ class Domain implements IssuableDomain
             TunnelManager::teardownDomain($this->userModel(), $this->model);
         } catch (\Throwable $e) {
             Log::warning(
-                "Cloudflare teardown during domain delete failed for {$this->model->domain}: " . $e->getMessage()
+                "Cloudflare teardown during domain delete failed for {$this->model->domain}: ".$e->getMessage()
             );
         }
     }
@@ -116,7 +115,7 @@ class Domain implements IssuableDomain
                 ->delete();
         } catch (\Throwable $e) {
             Log::warning(
-                "ProxyRule cleanup during domain delete failed for {$this->model->domain}: " . $e->getMessage()
+                "ProxyRule cleanup during domain delete failed for {$this->model->domain}: ".$e->getMessage()
             );
         }
     }
@@ -124,7 +123,7 @@ class Domain implements IssuableDomain
     private function deleteFromHostWebserver(): void
     {
         $this->hostWebserver()->deleteDomainConfig($this->model->domain);
-        if (!config('env.KEEP_WEBSERVER_LOGS_FOR_DELETED_DOMAINS')) {
+        if (! config('env.KEEP_WEBSERVER_LOGS_FOR_DELETED_DOMAINS')) {
             $this->hostWebserver()->deleteDomainLogsDir($this->model->domain);
         }
         $this->hostWebserver()->reload();
@@ -137,12 +136,12 @@ class Domain implements IssuableDomain
 
         $system = $this->system();
         $home = $system->projectHomeDirPath($this->project->username());
-        $domainDir = $home . '/' . $this->model->domain;
-        $domainRootDir = $home . $this->model->getDocumentRoot();
+        $domainDir = $home.'/'.$this->model->domain;
+        $domainRootDir = $home.$this->model->getDocumentRoot();
 
         $this->makeOwnedDir($domainDir, $owner);
 
-        $documentRootMissing = !$system->filesystem()->isDir($domainRootDir);
+        $documentRootMissing = ! $system->filesystem()->isDir($domainRootDir);
         $this->makeOwnedDir($domainRootDir, $owner);
 
         if ($documentRootMissing) {
@@ -176,9 +175,9 @@ class Domain implements IssuableDomain
     {
         $system = $this->system();
         $template = $this->userModel()->getTemplate() ?? 'default';
-        $templateDir = $system->projectDomainTemplateDirPath($template) . '/public_html';
-        if (!$system->filesystem()->isDir($templateDir)) {
-            $templateDir = $system->templatesDirPath() . '/user-home/default-site';
+        $templateDir = $system->projectDomainTemplateDirPath($template).'/public_html';
+        if (! $system->filesystem()->isDir($templateDir)) {
+            $templateDir = $system->templatesDirPath().'/user-home/default-site';
         }
 
         return $templateDir;
@@ -192,7 +191,7 @@ class Domain implements IssuableDomain
             return;
         }
 
-        $covering = (new EngineCertificate())->covering($this->model->domain);
+        $covering = (new EngineCertificate)->covering($this->model->domain);
         if ($covering !== null) {
             $this->putCertificate($covering['certificate'], $covering['key']);
 
@@ -207,8 +206,8 @@ class Domain implements IssuableDomain
     {
         $system = $this->system();
         $engineDir = $system->engineDirPath();
-        $serverCertFile = $engineDir . '/crt/server.cert';
-        $serverKeyFile = $engineDir . '/crt/server.key';
+        $serverCertFile = $engineDir.'/crt/server.cert';
+        $serverKeyFile = $engineDir.'/crt/server.key';
 
         $certDir = $this->certDir();
         $certFile = $this->certFile('crt');
@@ -247,7 +246,7 @@ class Domain implements IssuableDomain
      */
     private function selfSignCommand(string $keyFile, string $certFile): array
     {
-        $subject = '/C=US/ST=California/O=PanelAlpha/OU=Org/CN=' . $this->model->domain;
+        $subject = '/C=US/ST=California/O=PanelAlpha/OU=Org/CN='.$this->model->domain;
 
         return [
             'sudo', 'openssl', 'req', '-x509',
@@ -279,7 +278,7 @@ class Domain implements IssuableDomain
     public function hasServableCertificate(): bool
     {
         foreach (['pem', 'key'] as $ext) {
-            if (!$this->fileExists($this->certFile($ext))) {
+            if (! $this->fileExists($this->certFile($ext))) {
                 return false;
             }
         }
@@ -296,7 +295,7 @@ class Domain implements IssuableDomain
         if ($this->hasServableCertificate()) {
             return true;
         }
-        if (!is_dir($this->projectDirPath())) {
+        if (! is_dir($this->projectDirPath())) {
             return false;
         }
 
@@ -304,7 +303,7 @@ class Domain implements IssuableDomain
             $this->generateSelfSignedCertificate();
         } catch (\Throwable $e) {
             Log::warning(
-                "Could not self-sign a certificate for {$this->model->domain}: " . $e->getMessage()
+                "Could not self-sign a certificate for {$this->model->domain}: ".$e->getMessage()
             );
         }
 
@@ -348,10 +347,10 @@ class Domain implements IssuableDomain
         $system = $this->system();
         $system->exec(['sudo', 'mkdir', '-p', $this->certDir()]);
 
-        $this->installCertFile(trim($cert) . PHP_EOL, $certFile);
-        $this->installCertFile(trim($key) . PHP_EOL, $keyFile);
-        $this->installCertFile(trim($ca) . PHP_EOL, $caFile);
-        $this->installCertFile(trim($cert) . PHP_EOL . trim($ca) . PHP_EOL, $pemFile);
+        $this->installCertFile(trim($cert).PHP_EOL, $certFile);
+        $this->installCertFile(trim($key).PHP_EOL, $keyFile);
+        $this->installCertFile(trim($ca).PHP_EOL, $caFile);
+        $this->installCertFile(trim($cert).PHP_EOL.trim($ca).PHP_EOL, $pemFile);
         $system->exec(['sudo', 'chmod', 'a+r', $certFile, $caFile, $pemFile]);
         $system->exec(['sudo', 'chmod', '600', $keyFile]);
     }
@@ -391,7 +390,7 @@ class Domain implements IssuableDomain
         $files = array_merge($this->hostWebserverLogFiles(), $this->apacheLogFiles(), $this->phpErrorLogFiles());
 
         usort($files, function (array $a, array $b): int {
-            return (int)$b['mtime'] - (int)$a['mtime'];
+            return (int) $b['mtime'] - (int) $a['mtime'];
         });
 
         return $files;
@@ -405,7 +404,7 @@ class Domain implements IssuableDomain
      */
     private function phpErrorLogFiles(): array
     {
-        $path = $this->projectDirPath() . '/log/php/' . PhpErrorLog::FILE_NAME;
+        $path = $this->projectDirPath().'/log/php/'.PhpErrorLog::FILE_NAME;
         $stat = AccountFile::ownedRegular($path, $this->userModel()->getUid());
         if ($stat === null) {
             return [];
@@ -431,7 +430,7 @@ class Domain implements IssuableDomain
         foreach (self::logFileNames($logsDir) as $fileName) {
             $files[] = self::logFileEntry($fileName, "{$logsDir}/{$fileName}");
             if ($webserver == 'nginx-proxy') {
-                $files[] = self::logFileEntry('nginx_' . $fileName, "{$logsDir}/{$fileName}");
+                $files[] = self::logFileEntry('nginx_'.$fileName, "{$logsDir}/{$fileName}");
             }
         }
 
@@ -443,11 +442,11 @@ class Domain implements IssuableDomain
      */
     private function apacheLogFiles(): array
     {
-        $apacheLogsDir = $this->projectDirPath() . "/log/apache2";
+        $apacheLogsDir = $this->projectDirPath().'/log/apache2';
 
         $files = [];
         foreach (self::logFileNames($apacheLogsDir) as $fileName) {
-            $files[] = self::logFileEntry('apache_' . $fileName, "{$apacheLogsDir}/{$fileName}");
+            $files[] = self::logFileEntry('apache_'.$fileName, "{$apacheLogsDir}/{$fileName}");
         }
 
         return $files;
@@ -458,7 +457,7 @@ class Domain implements IssuableDomain
      */
     private static function logFileNames(string $dir): array
     {
-        if (!is_dir($dir)) {
+        if (! is_dir($dir)) {
             return [];
         }
 
@@ -536,7 +535,7 @@ class Domain implements IssuableDomain
      */
     private static function apacheSslTemplateVars(string $domainName): array
     {
-        $certDir = "/etc/apache2/ssl-certs";
+        $certDir = '/etc/apache2/ssl-certs';
 
         return [
             'ssl_enabled' => true,
@@ -570,7 +569,7 @@ class Domain implements IssuableDomain
     private function normalizeCertFileNames(string $certDir): void
     {
         foreach (['.crt', '.key', '.ca', '.pem'] as $ext) {
-            $this->normalizeCertFileName($certDir, $this->model->domain . $ext);
+            $this->normalizeCertFileName($certDir, $this->model->domain.$ext);
         }
     }
 
@@ -608,7 +607,7 @@ class Domain implements IssuableDomain
             );
         } catch (\Throwable $e) {
             Log::warning(
-                "Statistics configure failed for {$this->model->domain}: " . $e->getMessage()
+                "Statistics configure failed for {$this->model->domain}: ".$e->getMessage()
             );
         }
     }
@@ -619,7 +618,7 @@ class Domain implements IssuableDomain
             $this->statistics()->forgetDomain($this->model->domain);
         } catch (\Throwable $e) {
             Log::warning(
-                "Statistics cleanup during domain delete failed for {$this->model->domain}: " . $e->getMessage()
+                "Statistics cleanup during domain delete failed for {$this->model->domain}: ".$e->getMessage()
             );
         }
     }
@@ -636,7 +635,7 @@ class Domain implements IssuableDomain
 
     private function hostLogsDir(string $webserver): string
     {
-        return $this->system()->engineDirPath() . "/webserver-logs/{$webserver}/{$this->model->domain}";
+        return $this->system()->engineDirPath()."/webserver-logs/{$webserver}/{$this->model->domain}";
     }
 
     private function hostWebserver(): WebserverInterface

@@ -14,12 +14,12 @@ use App\System\Project\Dind\Source\GitRepository;
 final class SourceAccess
 {
     private ?GitRepository $git = null;
+
     private ?Files $files = null;
 
     public function __construct(
         private DindProject $project,
-    ) {
-    }
+    ) {}
 
     public function git(): GitRepository
     {
@@ -36,6 +36,6 @@ final class SourceAccess
      */
     public function afterGitMutation(GitRepository $git): void
     {
-        (new CheckoutRedeploy())->afterMutation($git, $this->project);
+        (new CheckoutRedeploy)->afterMutation($git, $this->project);
     }
 }

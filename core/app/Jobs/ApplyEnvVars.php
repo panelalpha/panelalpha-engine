@@ -42,10 +42,10 @@ class ApplyEnvVars implements ShouldQueue
     public ?int $userId = null;
 
     /**
-     * @param list<string> $replaced the keys the run file was generated with, so the ones
-     *        the account no longer sets are taken back out of its `environment:`
-     * @param ?int $revokeTokenId the token this apply replaces, revoked once the
-     *        application is up on the new one
+     * @param  list<string>  $replaced  the keys the run file was generated with, so the ones
+     *                                  the account no longer sets are taken back out of its `environment:`
+     * @param  ?int  $revokeTokenId  the token this apply replaces, revoked once the
+     *                               application is up on the new one
      */
     public function __construct(
         public string $username,
@@ -62,7 +62,7 @@ class ApplyEnvVars implements ShouldQueue
         $this->runTask(function (): void {
             $user = $this->project();
             if ($user === null) {
-                throw new TaskCancelledException();
+                throw new TaskCancelledException;
             }
             $this->throwIfCancelled();
 
@@ -73,7 +73,7 @@ class ApplyEnvVars implements ShouldQueue
     public function failed(?Throwable $e): void
     {
         $task = $this->task();
-        if ($task !== null && !$task->isTerminal()) {
+        if ($task !== null && ! $task->isTerminal()) {
             $this->markFailed($e ?? new RuntimeException('Apply env vars job failed'));
         }
 
@@ -94,7 +94,7 @@ class ApplyEnvVars implements ShouldQueue
     private function apply(User $user): void
     {
         $runtime = $user->project(app(System::class))->runtime();
-        if (!$runtime instanceof Dind) {
+        if (! $runtime instanceof Dind) {
             throw new RuntimeException("Project '{$this->username}' is not a container project.");
         }
 
@@ -150,7 +150,7 @@ class ApplyEnvVars implements ShouldQueue
     }
 
     /**
-     * @param array{stdout?: string, stderr?: string, exit_code?: int} $result
+     * @param  array{stdout?: string, stderr?: string, exit_code?: int}  $result
      */
     private static function composeError(array $result): string
     {

@@ -2,9 +2,9 @@
 
 namespace App\Console\Commands\Api;
 
-use App\Mcp\ClientRegistration;
 use App\Auth\TokenAbilities;
 use App\Console\Prompts\PanelAlphaTheme;
+use App\Mcp\ClientRegistration;
 use App\Models\Admin;
 use Illuminate\Console\Command;
 
@@ -30,7 +30,7 @@ class McpConnectCommand extends Command
     public function handle(): int
     {
         $client = $this->argument('client');
-        if (!is_string($client) || $client === '') {
+        if (! is_string($client) || $client === '') {
             // With a terminal to answer on, the list becomes a choice: the
             // agent is picked with the arrow keys and the command printed, so
             // the operator never retypes a `pae mcp:connect:<agent>` by hand.
@@ -43,23 +43,24 @@ class McpConnectCommand extends Command
         $client = strtolower(trim($client));
 
         // Checked before a token exists, so a typo does not leave one behind.
-        if (!in_array($client, ClientRegistration::clients(), true)) {
+        if (! in_array($client, ClientRegistration::clients(), true)) {
             $this->error(sprintf(
                 'Unknown client "%s". Known clients: %s.',
                 $client,
                 implode(', ', ClientRegistration::clients())
             ));
+
             return 1;
         }
 
-        if (!$this->option('bare')) {
+        if (! $this->option('bare')) {
             return $this->call('mcp:token:create', ['name' => $client, '--client' => $client]);
         }
 
         $token = Admin::rootAccount()
             ->createToken($client, TokenAbilities::build(api: false, mcp: true))
             ->plainTextToken;
-        $url   = rtrim((string) config('app.url'), '/') . '/mcp';
+        $url = rtrim((string) config('app.url'), '/').'/mcp';
         foreach (ClientRegistration::for($client, $url, $token)['lines'] as $line) {
             $this->line($line);
         }
@@ -73,7 +74,7 @@ class McpConnectCommand extends Command
      */
     private function chooseClient(): ?string
     {
-        if (!$this->canAsk()) {
+        if (! $this->canAsk()) {
             return null;
         }
 
@@ -105,7 +106,7 @@ class McpConnectCommand extends Command
      */
     public function canAsk(): bool
     {
-        return !$this->option('bare')
+        return ! $this->option('bare')
             && $this->input->isInteractive()
             && self::hasTerminal();
     }

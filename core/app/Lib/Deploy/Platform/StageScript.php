@@ -33,26 +33,26 @@ final class StageScript
     private const PHASE_STAGES = [PlatformStage::INSTALL, PlatformStage::UPGRADE];
 
     /**
-     * @param ?ProjectContext $context project to evaluate `when` guards
-     *        against; null keeps every command
-     * @param array<string, string> $overrides command id => the command as
-     *        resolved for this project, replacing the manifest's default
-     *        (a `{{js.start:…}}` placeholder is the manifest speaking in
-     *        generalities; by render time the project has answered)
-     * @param array<string, string> $extraInstall install-stage commands the
-     *        caller discovered rather than the manifest — a `setup` script in
-     *        package.json or composer.json, `bin/setup`
-     * @param array<string, array<string, string>> $prepend stage => commands
-     *        to run before the manifest's own
-     * @param ?AppConfig $appConfig the project's own app config, whose staged
-     *        commands run alongside the platform's — ahead of them where it
-     *        said `before`, and whose `serve` command replaces the platform's
-     *        entrypoint outright
-     * @param ?DeployPlan $plan what this deploy was told to run. A stage it
-     *        names replaces that stage entirely — manifest, app config and the
-     *        `extra` commands discovered from the project alike. What the
-     *        engine prepends survives it: only the engine knows whether this
-     *        account's migration has a MySQL sidecar to wait for
+     * @param  ?ProjectContext  $context  project to evaluate `when` guards
+     *                                    against; null keeps every command
+     * @param  array<string, string>  $overrides  command id => the command as
+     *                                            resolved for this project, replacing the manifest's default
+     *                                            (a `{{js.start:…}}` placeholder is the manifest speaking in
+     *                                            generalities; by render time the project has answered)
+     * @param  array<string, string>  $extraInstall  install-stage commands the
+     *                                               caller discovered rather than the manifest — a `setup` script in
+     *                                               package.json or composer.json, `bin/setup`
+     * @param  array<string, array<string, string>>  $prepend  stage => commands
+     *                                                         to run before the manifest's own
+     * @param  ?AppConfig  $appConfig  the project's own app config, whose staged
+     *                                 commands run alongside the platform's — ahead of them where it
+     *                                 said `before`, and whose `serve` command replaces the platform's
+     *                                 entrypoint outright
+     * @param  ?DeployPlan  $plan  what this deploy was told to run. A stage it
+     *                             names replaces that stage entirely — manifest, app config and the
+     *                             `extra` commands discovered from the project alike. What the
+     *                             engine prepends survives it: only the engine knows whether this
+     *                             account's migration has a MySQL sidecar to wait for
      */
     public static function render(
         PlatformManifest $manifest,
@@ -65,7 +65,7 @@ final class StageScript
     ): string {
         return Template::named('script/entrypoint')->render([
             'source' => $manifest->source,
-            'platform' => $manifest->id . ' (' . $manifest->label . ')',
+            'platform' => $manifest->id.' ('.$manifest->label.')',
             'phase_env' => PlatformStage::PHASE_ENV,
             'default_phase' => PlatformStage::UPGRADE,
             'stage_blocks' => self::stageBlocks($manifest, $context, $overrides, $extraInstall, $prepend, $appConfig, $plan),
@@ -89,7 +89,7 @@ final class StageScript
 
         foreach (self::commandsFor($manifest, PlatformStage::BUILD, $context, null, $plan) as $command) {
             $run = WorkingDirectory::wrap($command->run, $command->workdir);
-            $layers[self::layerOf($command)][] = $command->optional ? $run . ' || true' : $run;
+            $layers[self::layerOf($command)][] = $command->optional ? $run.' || true' : $run;
         }
 
         return $layers;
@@ -101,9 +101,9 @@ final class StageScript
     }
 
     /**
-     * @param array<string, string> $overrides
-     * @param array<string, string> $extraInstall
-     * @param array<string, array<string, string>> $prepend
+     * @param  array<string, string>  $overrides
+     * @param  array<string, string>  $extraInstall
+     * @param  array<string, array<string, string>>  $prepend
      * @return list<string>
      */
     private static function stageBlocks(
@@ -127,10 +127,10 @@ final class StageScript
                 // so a request that spoke for the install stage replaces it
                 // too. Leaving it in would make "install runs exactly this"
                 // false for the one command nobody listed.
-                $stage === PlatformStage::INSTALL && !$overridden ? $extraInstall : [],
+                $stage === PlatformStage::INSTALL && ! $overridden ? $extraInstall : [],
                 $overridden
             );
-            if (!$block->isEmpty()) {
+            if (! $block->isEmpty()) {
                 $blocks[] = $block->render();
                 $blocks[] = '';
             }
@@ -140,7 +140,7 @@ final class StageScript
     }
 
     /**
-     * @param array<string, string> $overrides
+     * @param  array<string, string>  $overrides
      * @return list<string>
      */
     private static function startCommands(
@@ -155,7 +155,7 @@ final class StageScript
             $lines[] = "pa_step start 'replaced by the deploy request'";
         }
         foreach (self::commandsFor($manifest, PlatformStage::START, $context, $appConfig, $plan) as $command) {
-            if (!$command->serve) {
+            if (! $command->serve) {
                 $lines = array_merge(
                     $lines,
                     (new CommandScript($command, PlatformStage::START, $overrides))->lines()
@@ -171,7 +171,7 @@ final class StageScript
      * platform and then correcting how it starts is a smaller statement than
      * taking the whole deployment over, and used to be impossible.
      *
-     * @param array<string, string> $overrides
+     * @param  array<string, string>  $overrides
      * @return list<string>
      */
     private static function serve(
@@ -193,7 +193,7 @@ final class StageScript
                 ? [
                     "pa_step start 'no serve command'",
                     "printf '[panelalpha] the deploy request replaced the start stage without a serve"
-                    . " command; there is nothing to run\\n' >&2",
+                    ." command; there is nothing to run\\n' >&2",
                     'exit 1',
                 ]
                 : (new ServeCommand($serve, []))->lines();
@@ -214,7 +214,7 @@ final class StageScript
     }
 
     /**
-     * @param list<PlatformCommand> $commands
+     * @param  list<PlatformCommand>  $commands
      */
     private static function serveIn(array $commands): ?PlatformCommand
     {

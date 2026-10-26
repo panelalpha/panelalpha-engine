@@ -93,7 +93,7 @@ final class ComposerManifest
     {
         $config = $this->json['config'] ?? null;
         $dir = is_array($config) ? ($config['vendor-dir'] ?? null) : null;
-        if (!is_string($dir) || str_starts_with($dir, '/')) {
+        if (! is_string($dir) || str_starts_with($dir, '/')) {
             return 'vendor';
         }
         $dir = rtrim($dir, '/');

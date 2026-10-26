@@ -19,9 +19,7 @@ use RuntimeException;
  */
 final class TemplateDeployMechanics implements DeployMechanics
 {
-    public function __construct(private ProjectAggregate $project)
-    {
-    }
+    public function __construct(private ProjectAggregate $project) {}
 
     public function user(): ModelsUser
     {
@@ -45,7 +43,7 @@ final class TemplateDeployMechanics implements DeployMechanics
 
     public function isDindWithoutGit(): bool
     {
-        return $this->user()->getTemplate() === 'dind' && !$this->user()->hasGitProject();
+        return $this->user()->getTemplate() === 'dind' && ! $this->user()->hasGitProject();
     }
 
     public function prepareHostingEnvironment(): void
@@ -82,9 +80,7 @@ final class TemplateDeployMechanics implements DeployMechanics
     }
 
     /** The template path has no generations to note. */
-    public function recordRunningVersion(): void
-    {
-    }
+    public function recordRunningVersion(): void {}
 
     public function syncHostingForCheckoutRebuild(bool $reuseRunning): void
     {
@@ -126,9 +122,7 @@ final class TemplateDeployMechanics implements DeployMechanics
         $this->project->abortRunningDeploy(removeVolumes: $removeVolumes);
     }
 
-    public function settleRedeploy(bool $succeeded): void
-    {
-    }
+    public function settleRedeploy(bool $succeeded): void {}
 
     public function servingWarnings(): array
     {
@@ -143,7 +137,7 @@ final class TemplateDeployMechanics implements DeployMechanics
 
     public function customEnvFailureHint(): ?string
     {
-        if (!$this->user()->usedCustomEnvVars()) {
+        if (! $this->user()->usedCustomEnvVars()) {
             return null;
         }
 

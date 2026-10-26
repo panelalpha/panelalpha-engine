@@ -14,7 +14,7 @@ interface ServiceManager
      * account's project dir. Takes effect when the account next starts, or
      * now through {@see apply()}.
      *
-     * @param array<string, string> $env
+     * @param  array<string, string>  $env
      */
     public function configure(string $service, bool $enabled, array $env = []): void;
 

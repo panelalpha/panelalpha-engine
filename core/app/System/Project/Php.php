@@ -2,9 +2,9 @@
 
 namespace App\System\Project;
 
+use App\Lib\Project\CustomIniSettings;
 use App\Models\Domain;
 use App\System\Project as UserProject;
-use App\System\Project\PhpHosting;
 use App\System\Project\PhpHosting\PhpErrorLogConfig;
 use App\System\Project\PhpHosting\PhpHandlerNotRunning;
 use Illuminate\Support\Facades\Log;
@@ -14,12 +14,11 @@ class Php
 {
     public function __construct(
         private readonly UserProject $project,
-    ) {
-    }
+    ) {}
 
     public function customIniFilePath(string $phpVersion): string
     {
-        return $this->project->projectDirPath() . "/php/{$phpVersion}/custom.ini";
+        return $this->project->projectDirPath()."/php/{$phpVersion}/custom.ini";
     }
 
     /**
@@ -30,7 +29,7 @@ class Php
     public function getCustomIniSettings(string $phpVersion): array
     {
         $iniFile = $this->customIniFilePath($phpVersion);
-        if (!is_file($iniFile)) {
+        if (! is_file($iniFile)) {
             return [];
         }
 
@@ -45,7 +44,7 @@ class Php
     }
 
     /**
-     * @param array<string, string> $settings
+     * @param  array<string, string>  $settings
      *
      * @throws \InvalidArgumentException
      */
@@ -67,7 +66,7 @@ class Php
         $this->requirePhpHosting();
         $path = $this->domainDirectivesPath($domain);
         $system = $this->project->system();
-        if (!$system->fileExists($path)) {
+        if (! $system->fileExists($path)) {
             return [];
         }
 
@@ -81,14 +80,14 @@ class Php
     /**
      * An empty map removes the file.
      *
-     * @param array<string, string> $settings
+     * @param  array<string, string>  $settings
      */
     public function replaceDomainDirectives(Domain $domain, array $settings): void
     {
         $this->requirePhpHosting();
         $path = $this->domainDirectivesPath($domain);
         $system = $this->project->system();
-        if (!$system->directoryExists(dirname($path))) {
+        if (! $system->directoryExists(dirname($path))) {
             throw ValidationException::withMessages([
                 'document_root' => 'Document root does not exist.',
             ]);
@@ -140,22 +139,22 @@ class Php
 
     private function domainDirectivesPath(Domain $domain): string
     {
-        $relative = rtrim($domain->getDocumentRoot(), '/') . '/.user.ini';
+        $relative = rtrim($domain->getDocumentRoot(), '/').'/.user.ini';
 
         return $this->project->fileManager()->resolvePath($relative);
     }
 
     /**
-     * @param array<string, string> $settings
+     * @param  array<string, string>  $settings
      */
     private function encodeIniMap(array $settings): string
     {
         $lines = '';
         foreach ($settings as $key => $value) {
-            if (!is_string($key) || $key === '' || strpbrk($key, "\r\n=") !== false || !is_string($value)) {
+            if (! is_string($key) || $key === '' || strpbrk($key, "\r\n=") !== false || ! is_string($value)) {
                 throw new \InvalidArgumentException('Invalid directive name.');
             }
-            $lines .= $key . '=' . $value . "\n";
+            $lines .= $key.'='.$value."\n";
         }
 
         if ($this->parseIniMap($lines) !== $settings) {
@@ -183,7 +182,7 @@ class Php
             restore_error_handler();
         }
 
-        if (!is_array($parsed)) {
+        if (! is_array($parsed)) {
             throw new \InvalidArgumentException('Directive file is not valid INI.');
         }
 
@@ -200,14 +199,14 @@ class Php
 
     /**
      * A dind app runs PHP from its own image and reads none of these files, so
-     * a write would succeed and change nothing ({@see \App\Lib\Project\CustomIniSettings}).
+     * a write would succeed and change nothing ({@see CustomIniSettings}).
      */
     private function requirePhpHosting(): void
     {
-        if (!$this->project->runtime() instanceof PhpHosting) {
+        if (! $this->project->runtime() instanceof PhpHosting) {
             throw ValidationException::withMessages([
                 'project' => 'Custom PHP INI settings apply only to PHP hosting projects. '
-                    . 'A dind project runs PHP from its own image; set php.ini there.',
+                    .'A dind project runs PHP from its own image; set php.ini there.',
             ]);
         }
     }
@@ -220,7 +219,7 @@ class Php
     {
         $runtime = $this->project->runtime();
         if ($runtime instanceof PhpHosting) {
-            (new PhpErrorLogConfig())->apply($runtime);
+            (new PhpErrorLogConfig)->apply($runtime);
         }
     }
 
@@ -231,7 +230,7 @@ class Php
     private function restartPhpHandler(string $phpVersion): void
     {
         $runtime = $this->project->runtime();
-        if (!$runtime instanceof PhpHosting) {
+        if (! $runtime instanceof PhpHosting) {
             return;
         }
         try {

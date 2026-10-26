@@ -28,7 +28,7 @@ class DockerHubLoginCommand extends Command
 
     public function handle(): int
     {
-        $interactive = $this->input->isInteractive() && stream_isatty(STDIN) && !$this->option('token-stdin');
+        $interactive = $this->input->isInteractive() && stream_isatty(STDIN) && ! $this->option('token-stdin');
         $username = trim((string) ($this->option('username') ?? ''));
         if ($username === '' && $interactive) {
             $username = trim(text('Docker Hub username', validate: fn (string $v) => DockerHubLogin::badUsername(trim($v))));
@@ -49,19 +49,19 @@ class DockerHubLoginCommand extends Command
             return self::FAILURE;
         }
 
-        $login = new DockerHubLogin(new System());
+        $login = new DockerHubLogin(new System);
         $check = $login->check($username, $token);
-        if (!$check['ok']) {
+        if (! $check['ok']) {
             $this->error((string) $check['error']);
 
             return self::FAILURE;
         }
-        $this->info("Docker Hub accepts it: {$username}" . ($check['limit'] !== null ? ", {$check['limit']}" : ''));
+        $this->info("Docker Hub accepts it: {$username}".($check['limit'] !== null ? ", {$check['limit']}" : ''));
 
         $private = $login->pullablePrivateRepositories($username, $token);
         if ($private === null) {
             $this->warn('Could not check whether this token reaches private repositories. '
-                . 'Every account on this engine can pull whatever it can read; use a Public Repo Read-only token.');
+                .'Every account on this engine can pull whatever it can read; use a Public Repo Read-only token.');
         } elseif ($private !== []) {
             $this->warn('This token can pull private repositories, and registry-proxy would serve them to every account:');
             foreach ($private as $repository) {
@@ -69,7 +69,7 @@ class DockerHubLoginCommand extends Command
             }
             $allowed = $this->option('allow-private')
                 || ($interactive && confirm('Save it anyway?', default: false));
-            if (!$allowed) {
+            if (! $allowed) {
                 $this->line('Not saved. Create a token with the Public Repo Read-only scope, or pass --allow-private.');
 
                 return self::FAILURE;
@@ -79,7 +79,7 @@ class DockerHubLoginCommand extends Command
         try {
             $login->save($username, $token);
         } catch (\Exception $e) {
-            $this->error('Could not save it: ' . trim($e->getMessage()));
+            $this->error('Could not save it: '.trim($e->getMessage()));
 
             return self::FAILURE;
         }

@@ -17,7 +17,7 @@ final class LocalAppConfigSource implements AppConfigSource
 
     public function read(string $path): ?string
     {
-        if (!is_file($path)) {
+        if (! is_file($path)) {
             return null;
         }
         $contents = @file_get_contents($path);
@@ -33,7 +33,7 @@ final class LocalAppConfigSource implements AppConfigSource
     /** @return list<string> */
     public function listFiles(string $dir): array
     {
-        if (!is_dir($dir)) {
+        if (! is_dir($dir)) {
             return [];
         }
 
@@ -42,11 +42,12 @@ final class LocalAppConfigSource implements AppConfigSource
             if ($entry === '.' || $entry === '..') {
                 continue;
             }
-            $path = $dir . '/' . $entry;
+            $path = $dir.'/'.$entry;
             if (is_dir($path)) {
                 foreach ($this->listFiles($path) as $nested) {
-                    $found[] = $entry . '/' . $nested;
+                    $found[] = $entry.'/'.$nested;
                 }
+
                 continue;
             }
             if (is_file($path)) {

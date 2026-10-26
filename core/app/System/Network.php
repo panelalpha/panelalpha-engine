@@ -17,16 +17,17 @@ class Network
 
     /** @var array{gateway: string, interface: string}|null */
     private static ?array $defaultIpv4Route = null;
+
     /** @var array{gateway: string, interface: string}|null */
     private static ?array $defaultIpv6Route = null;
 
     public function __construct(
         private ProcessRunner $system,
-    ) {
-    }
+    ) {}
 
     /**
      * @return array{gateway: string, interface: string}
+     *
      * @throws Exception
      */
     public function getDefaultIpv4Route(): array
@@ -34,11 +35,13 @@ class Network
         if (self::$defaultIpv4Route === null) {
             self::$defaultIpv4Route = $this->getDefaultGatewayAndInterface(4);
         }
+
         return self::$defaultIpv4Route;
     }
 
     /**
      * @return array{gateway: string, interface: string}
+     *
      * @throws Exception
      */
     public function getDefaultIpv6Route(): array
@@ -46,11 +49,13 @@ class Network
         if (self::$defaultIpv6Route === null) {
             self::$defaultIpv6Route = $this->getDefaultGatewayAndInterface(6);
         }
+
         return self::$defaultIpv6Route;
     }
 
     /**
      * @return array{gateway: string, interface: string}
+     *
      * @throws Exception
      */
     private function getDefaultGatewayAndInterface(int $family = 4): array
@@ -64,7 +69,7 @@ class Network
 
         if (preg_match('/default via ([^ ]+) dev ([^ ]+)/', $output, $m)) {
             return [
-                'gateway'   => $m[1],
+                'gateway' => $m[1],
                 'interface' => $m[2],
             ];
         }
@@ -74,6 +79,7 @@ class Network
 
     /**
      * @return array{gateway: string, interface: string}
+     *
      * @throws Exception
      */
     private function defaultRoute(int $family): array
@@ -83,6 +89,7 @@ class Network
 
     /**
      * @return list<string>
+     *
      * @throws Exception
      */
     public function generateIpRouteAddCommand(string $ip, int $mask, int $family, ?string $gateway = null, ?string $interface = null): array
@@ -92,6 +99,7 @@ class Network
 
     /**
      * @return list<string>
+     *
      * @throws Exception
      */
     public function generateIpRouteDelCommand(string $ip, int $mask, int $family, ?string $gateway = null, ?string $interface = null): array
@@ -103,6 +111,7 @@ class Network
      * `ip route <verb>` via the given gateway and interface, each defaulting to the default route's.
      *
      * @return list<string>
+     *
      * @throws Exception
      */
     private function ipRouteCommand(string $verb, string $ip, int $mask, int $family, ?string $gateway, ?string $interface): array
@@ -113,25 +122,27 @@ class Network
             $interface ??= $route['interface'];
         }
 
-        return ['ip', 'route', $verb, $ip . '/' . $mask, 'via', $gateway, 'dev', $interface];
+        return ['ip', 'route', $verb, $ip.'/'.$mask, 'via', $gateway, 'dev', $interface];
     }
 
     /**
      * @return list<string>
+     *
      * @throws Exception
      */
     public function generateIpAddressAddCommand(string $ip, int $mask, int $family, ?string $interface = null): array
     {
-        return ['ip', 'addr', 'add', $ip . '/' . $mask, 'dev', $interface ?? $this->defaultRoute($family)['interface']];
+        return ['ip', 'addr', 'add', $ip.'/'.$mask, 'dev', $interface ?? $this->defaultRoute($family)['interface']];
     }
 
     /**
      * @return list<string>
+     *
      * @throws Exception
      */
     public function generateIpAddressDelCommand(string $ip, int $mask, int $family, ?string $interface = null): array
     {
-        return ['ip', 'addr', 'del', $ip . '/' . $mask, 'dev', $interface ?? $this->defaultRoute($family)['interface']];
+        return ['ip', 'addr', 'del', $ip.'/'.$mask, 'dev', $interface ?? $this->defaultRoute($family)['interface']];
     }
 
     /**
@@ -151,7 +162,7 @@ class Network
         $maps = $this->upsertDiscoveredMaps($localIps, $lookupUrl);
 
         $defaultIpv4Previous = Setting::get('default_ipv4');
-        $replacement = $replaceDefaultIpv4 && !empty($defaultIpv4Previous)
+        $replacement = $replaceDefaultIpv4 && ! empty($defaultIpv4Previous)
             ? $this->replaceDefaultIpv4($defaultIpv4Previous, $localIps, $previousPublicToLocal)
             : null;
         $defaultIpv4Current = $replacement ?? $defaultIpv4Previous;
@@ -166,7 +177,7 @@ class Network
     }
 
     /**
-     * @param list<string> $localIps
+     * @param  list<string>  $localIps
      * @return array<Ipv4NatMap>
      */
     private function upsertDiscoveredMaps(array $localIps, string $lookupUrl): array
@@ -187,8 +198,8 @@ class Network
      * address to, when it names a local address or one the map gave out before
      * this rebuild; null when nothing was replaced.
      *
-     * @param list<string> $localIps
-     * @param array<string, string> $previousPublicToLocal
+     * @param  list<string>  $localIps
+     * @param  array<string, string>  $previousPublicToLocal
      */
     private function replaceDefaultIpv4(string $previous, array $localIps, array $previousPublicToLocal): ?string
     {
@@ -217,7 +228,7 @@ class Network
         $ips = [];
         $lines = explode("\n", $output);
         foreach ($lines as $line) {
-            if (!preg_match('/\binet\s+([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)\//', $line, $matches)) {
+            if (! preg_match('/\binet\s+([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)\//', $line, $matches)) {
                 continue;
             }
 
@@ -241,15 +252,15 @@ class Network
         $interface ??= $this->defaultRoute($family)['interface'];
 
         $process = $this->system->runProcessOnHost(['ip', 'addr', 'show', 'dev', $interface]);
-        if (!$process->isSuccessful()) {
+        if (! $process->isSuccessful()) {
             throw new Exception(
                 "Could not read addresses of interface {$interface}: "
-                . ($process->getErrorOutput() ?: $process->getOutput())
+                .($process->getErrorOutput() ?: $process->getOutput())
             );
         }
 
         foreach (explode("\n", $process->getOutput()) as $line) {
-            if (!preg_match('/\binet6?\s+([0-9a-fA-F:.]+)\/(\d+)/', $line, $matches)) {
+            if (! preg_match('/\binet6?\s+([0-9a-fA-F:.]+)\/(\d+)/', $line, $matches)) {
                 continue;
             }
 
@@ -280,8 +291,8 @@ class Network
     {
         $cmd = $family === 6 ? ['ip', '-6', 'route', 'show', "{$ip}/{$mask}"] : ['ip', 'route', 'show', "{$ip}/{$mask}"];
         $process = $this->system->runProcessOnHost($cmd);
-        if (!$process->isSuccessful()) {
-            throw new Exception("Could not read the host's routes: " . ($process->getErrorOutput() ?: $process->getOutput()));
+        if (! $process->isSuccessful()) {
+            throw new Exception("Could not read the host's routes: ".($process->getErrorOutput() ?: $process->getOutput()));
         }
 
         return trim($process->getOutput()) !== '';
@@ -292,26 +303,27 @@ class Network
         try {
             $url = $lookupUrl;
             if (strpos($url, '?') === false) {
-                $url .= '?local_ip=' . urlencode($localIp);
+                $url .= '?local_ip='.urlencode($localIp);
             }
 
             $response = Http::timeout(10)->get($url);
-            if (!$response->ok()) {
+            if (! $response->ok()) {
                 return null;
             }
 
             $body = trim($response->body());
-            if (!filter_var($body, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            if (! filter_var($body, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
                 return null;
             }
 
             return $body;
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             Log::warning('Could not lookup public IP for local IP', [
                 'local_ip' => $localIp,
                 'lookup_url' => $lookupUrl,
                 'exception_message' => $e->getMessage(),
             ]);
+
             return null;
         }
     }
@@ -320,7 +332,7 @@ class Network
     private function isUsableHostIpv4(string $ip): bool
     {
         return filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)
-            && !str_starts_with($ip, '127.')
-            && !str_starts_with($ip, '0.');
+            && ! str_starts_with($ip, '127.')
+            && ! str_starts_with($ip, '0.');
     }
 }

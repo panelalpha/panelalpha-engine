@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Telemetry;
 
+use App\Lib\Deploy\DeployLog\LogStorage;
 use App\System;
 use App\System\ProcessRunner;
 
@@ -13,7 +14,7 @@ use App\System\ProcessRunner;
  *
  * Every method swallows its own errors and reports failure by return value: a
  * full disk is exactly when deploys fail. Cron ships as www-data, so every mkdir
- * and write chowns to www-data, as {@see \App\Lib\Deploy\DeployLog\LogStorage} does.
+ * and write chowns to www-data, as {@see LogStorage} does.
  */
 class Spool
 {
@@ -34,7 +35,7 @@ class Spool
     private ?ProcessRunner $processes;
 
     /**
-     * @param ?ProcessRunner $processes for chown only; built on demand when null
+     * @param  ?ProcessRunner  $processes  for chown only; built on demand when null
      */
     public function __construct(string $dir, ?ProcessRunner $processes = null)
     {
@@ -53,11 +54,11 @@ class Spool
      */
     public function bundlePathFor(string $id): ?string
     {
-        if (!preg_match(self::VALID_ID, $id)) {
+        if (! preg_match(self::VALID_ID, $id)) {
             return null;
         }
 
-        return $this->dir . '/' . $id . '.zip';
+        return $this->dir.'/'.$id.'.zip';
     }
 
     /**
@@ -79,16 +80,16 @@ class Spool
      * Queue a report. Returns the file path, or null when it could not be
      * written.
      *
-     * @param array<string, mixed> $report
+     * @param  array<string, mixed>  $report
      */
     public function put(array $report): ?string
     {
         $id = $report['id'] ?? null;
-        if (!is_string($id) || !preg_match(self::VALID_ID, $id)) {
+        if (! is_string($id) || ! preg_match(self::VALID_ID, $id)) {
             return null;
         }
 
-        if (!$this->ensureDir()) {
+        if (! $this->ensureDir()) {
             return null;
         }
 
@@ -97,8 +98,8 @@ class Spool
             return null;
         }
 
-        $path = $this->dir . '/' . $id . '.json';
-        if (!$this->writeAtomic($path, $encoded)) {
+        $path = $this->dir.'/'.$id.'.json';
+        if (! $this->writeAtomic($path, $encoded)) {
             return null;
         }
 
@@ -111,7 +112,7 @@ class Spool
      * A new report's envelope as JSON. Raw stderr or a branch name need not be
      * UTF-8, so invalid bytes are substituted rather than failing the encode.
      *
-     * @param array<string, mixed> $report
+     * @param  array<string, mixed>  $report
      */
     private static function encodedEnvelope(array $report): ?string
     {
@@ -159,8 +160,9 @@ class Spool
                 break;
             }
             $envelope = $this->read($path);
-            if ($envelope === null || !self::isSendable($envelope)) {
+            if ($envelope === null || ! self::isSendable($envelope)) {
                 $this->forget($path);
+
                 continue;
             }
             if (self::isBackingOff($envelope, $now)) {
@@ -183,7 +185,7 @@ class Spool
     }
 
     /**
-     * @param array<string, mixed> $envelope
+     * @param  array<string, mixed>  $envelope
      * @return array{path: string, id: string, attempts: int, report: array<string, mixed>, bundle: ?string}
      */
     private function pendingItem(string $path, array $envelope): array
@@ -204,7 +206,7 @@ class Spool
      * Whether the envelope holds a report the ingest can interpret: `id` (the
      * idempotency key) and `outcome` (the event) are both non-empty strings.
      *
-     * @param array<string, mixed> $envelope
+     * @param  array<string, mixed>  $envelope
      */
     private static function isSendable(array $envelope): bool
     {
@@ -298,7 +300,7 @@ class Spool
     }
 
     /**
-     * @param list<string> $files
+     * @param  list<string>  $files
      * @return array{0: int, 1: ?int} total bytes, oldest mtime
      */
     private static function sizeAndOldest(array $files): array
@@ -324,7 +326,7 @@ class Spool
      */
     private function bundleUsage(): array
     {
-        $bundles = @glob($this->dir . '/*.zip') ?: [];
+        $bundles = @glob($this->dir.'/*.zip') ?: [];
         $bundleBytes = 0;
         foreach ($bundles as $bundle) {
             $bundleBytes += (int) @filesize($bundle);
@@ -338,11 +340,11 @@ class Spool
      */
     public function read(string $path): ?array
     {
-        if (!is_file($path)) {
+        if (! is_file($path)) {
             return null;
         }
         $raw = @file_get_contents($path);
-        if (!is_string($raw) || $raw === '') {
+        if (! is_string($raw) || $raw === '') {
             return null;
         }
         $decoded = json_decode($raw, true);
@@ -357,7 +359,7 @@ class Spool
      */
     private function files(): array
     {
-        $found = @glob($this->dir . '/*.json');
+        $found = @glob($this->dir.'/*.json');
         if ($found === false) {
             return [];
         }
@@ -380,8 +382,8 @@ class Spool
             }
         }
 
-        foreach (@glob($this->dir . '/*.zip') ?: [] as $bundle) {
-            if (!is_file($this->dir . '/' . basename($bundle, '.zip') . '.json')) {
+        foreach (@glob($this->dir.'/*.zip') ?: [] as $bundle) {
+            if (! is_file($this->dir.'/'.basename($bundle, '.zip').'.json')) {
                 @unlink($bundle);
             }
         }
@@ -389,13 +391,13 @@ class Spool
 
     private function ensureDir(): bool
     {
-        if (!is_dir($this->dir)) {
-            if (!@mkdir($this->dir, self::DIRECTORY_MODE, true) && !is_dir($this->dir)) {
+        if (! is_dir($this->dir)) {
+            if (! @mkdir($this->dir, self::DIRECTORY_MODE, true) && ! is_dir($this->dir)) {
                 return false;
             }
         }
 
-        if (!is_dir($this->dir)) {
+        if (! is_dir($this->dir)) {
             return false;
         }
 
@@ -424,12 +426,12 @@ class Spool
 
     private function writeAtomic(string $path, string $contents): bool
     {
-        $tmp = $path . '.tmp.' . getmypid();
+        $tmp = $path.'.tmp.'.getmypid();
         if (@file_put_contents($tmp, $contents, LOCK_EX) === false) {
             return false;
         }
         @chmod($tmp, 0600);
-        if (!@rename($tmp, $path)) {
+        if (! @rename($tmp, $path)) {
             @unlink($tmp);
 
             return false;
@@ -442,7 +444,7 @@ class Spool
 
     private function processes(): ProcessRunner
     {
-        return $this->processes ??= new System();
+        return $this->processes ??= new System;
     }
 
     /**

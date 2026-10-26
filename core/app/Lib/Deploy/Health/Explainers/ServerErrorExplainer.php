@@ -41,28 +41,28 @@ final class ServerErrorExplainer implements Explainer
 
             return [
                 'detail' => "The {$response->status} came back in about {$ms}ms -- too fast for the application "
-                    . 'to have answered. A proxy returned it -- the engine\'s, or one the image runs in front of '
-                    . 'the app -- because nothing answered behind it: the container never started or is crash-looping.',
+                    .'to have answered. A proxy returned it -- the engine\'s, or one the image runs in front of '
+                    .'the app -- because nothing answered behind it: the container never started or is crash-looping.',
                 'fix' => 'Read the container\'s STARTUP output with `docker logs` -- not the application log -- '
-                    . 'to see why the entrypoint died; the app-restart-looping check names the service when it '
-                    . 'is still looping.',
+                    .'to see why the entrypoint died; the app-restart-looping check names the service when it '
+                    .'is still looping.',
             ];
         }
 
-        if ($response->time > 0.0 || !$gateway) {
+        if ($response->time > 0.0 || ! $gateway) {
             return [
-                'detail' => 'The application accepted the request and its own code answered ' . $response->status
-                    . ', so this is a fault inside the running container.',
+                'detail' => 'The application accepted the request and its own code answered '.$response->status
+                    .', so this is a fault inside the running container.',
                 'fix' => 'Read the application log.',
             ];
         }
 
         // No timing was measured, so either case is possible.
         return [
-            'detail' => 'A ' . $response->status . ' here is either the application failing after it accepted the '
-                . 'request, or the engine\'s proxy answering for an app port nothing is bound to.',
+            'detail' => 'A '.$response->status.' here is either the application failing after it accepted the '
+                .'request, or the engine\'s proxy answering for an app port nothing is bound to.',
             'fix' => 'If it returned in a few milliseconds it is the proxy with no upstream -- check `docker logs` '
-                . 'for a container that did not start; otherwise read the application log.',
+                .'for a container that did not start; otherwise read the application log.',
         ];
     }
 }

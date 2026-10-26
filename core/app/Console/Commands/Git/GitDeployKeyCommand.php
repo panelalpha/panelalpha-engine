@@ -24,7 +24,7 @@ class GitDeployKeyCommand extends Command
     {
         if ($this->option('delete')) {
             $user = User::findByUsernameOrFail((string) $this->argument('username'));
-            if (!DeployKey::delete($user)) {
+            if (! DeployKey::delete($user)) {
                 throw new NotFoundException("Project '{$user->username}' has no deploy key.");
             }
             $this->line((string) json_encode(['data' => ['deleted' => true]], JSON_THROW_ON_ERROR));

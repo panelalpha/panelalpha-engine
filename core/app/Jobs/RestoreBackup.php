@@ -28,8 +28,8 @@ class RestoreBackup implements ShouldQueue
     public int $timeout = JobBudget::SECONDS;
 
     /**
-     * @param array<string, mixed> $only
-     * @param array<string, mixed> $exclude
+     * @param  array<string, mixed>  $only
+     * @param  array<string, mixed>  $exclude
      */
     public function __construct(
         public int $backupId,
@@ -63,12 +63,12 @@ class RestoreBackup implements ShouldQueue
     public function failed(?Throwable $e): void
     {
         $record = BackupRecord::query()->find($this->backupId);
-        if ($record !== null && !in_array($record->restoreStatus(), ['completed', 'failed'], true)) {
+        if ($record !== null && ! in_array($record->restoreStatus(), ['completed', 'failed'], true)) {
             $this->recordFailure($record, $e?->getMessage() ?? 'Restore job failed');
         }
 
         $task = $this->task();
-        if ($task !== null && !$task->isTerminal()) {
+        if ($task !== null && ! $task->isTerminal()) {
             $this->markFailed($e ?? new RuntimeException('Restore job failed'));
         }
     }

@@ -12,12 +12,11 @@ class Cron
 {
     public function __construct(
         private readonly UserProject $project,
-    ) {
-    }
+    ) {}
 
     public function crontabPath(): string
     {
-        return $this->project->projectDirPath() . '/crontabs/www-data';
+        return $this->project->projectDirPath().'/crontabs/www-data';
     }
 
     /**
@@ -27,7 +26,7 @@ class Cron
     {
         $file = $this->crontabPath();
         $system = $this->project->system();
-        if (!is_file($file)) {
+        if (! is_file($file)) {
             $system->exec(['sudo', 'touch', $file]);
         }
         $chown = $chown ?? '33:33';
@@ -78,7 +77,6 @@ class Cron
      *   month: string,
      *   day_of_week: string
      * } $params
-     *
      * @return array{
      *   hash: string,
      *   command: string,
@@ -93,7 +91,7 @@ class Cron
     {
         $crontab = $this->loadCrontab();
 
-        $job = new Job();
+        $job = new Job;
         $job->setCommand($params['command']);
         $job->setMinute($params['minute']);
         $job->setHour($params['hour']);
@@ -119,6 +117,7 @@ class Cron
      *   month: string,
      *   day_of_week: string
      * }
+     *
      * @throws Exception
      */
     public function delete(string $hash): array
@@ -143,7 +142,6 @@ class Cron
      *   month: string,
      *   day_of_week: string
      * } $params
-     *
      * @return array{
      *   hash: string,
      *   command: string,
@@ -153,6 +151,7 @@ class Cron
      *   month: string,
      *   day_of_week: string
      * }
+     *
      * @throws Exception
      */
     public function update(string $hash, array $params): array
@@ -177,7 +176,7 @@ class Cron
 
     private function loadCrontab(): Crontab
     {
-        $crontab = new Crontab();
+        $crontab = new Crontab;
         $contents = $this->project->system()->filesystem()->fileGetContents($this->crontabPath());
         foreach (explode("\n", $contents) as $line) {
             $line = trim($line);
@@ -204,7 +203,7 @@ class Cron
             return Job::parse($line);
         }
 
-        $job = new Job();
+        $job = new Job;
         $job->setMinute($parts[0]);
         $job->setHour($parts[1]);
         $job->setDayOfMonth($parts[2]);
@@ -220,7 +219,7 @@ class Cron
     {
         $this->project->system()->filesystem()->filePutContents(
             $this->crontabPath(),
-            $crontab->render() . PHP_EOL,
+            $crontab->render().PHP_EOL,
         );
     }
 

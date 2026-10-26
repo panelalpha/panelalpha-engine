@@ -15,7 +15,7 @@ use RuntimeException;
  */
 final class SidecarDialects
 {
-    private const SHIPPED_FILE = __DIR__ . '/../../../../resources/sidecars/dialects.php';
+    private const SHIPPED_FILE = __DIR__.'/../../../../resources/sidecars/dialects.php';
 
     private const OVERRIDE_PATH = '/etc/panelalpha/sidecar-dialects.json';
 
@@ -34,6 +34,7 @@ final class SidecarDialects
      * it, so the path is checked loudly instead.
      *
      * @return array<string, array<string, mixed>>
+     *
      * @throws RuntimeException when the shipped catalogue cannot be read
      */
     public static function all(): array
@@ -110,7 +111,7 @@ final class SidecarDialects
     public static function passwordVariablesFor(string $engine): ?array
     {
         $entry = self::entry($engine)['init_password'] ?? null;
-        if (!is_array($entry)) {
+        if (! is_array($entry)) {
             return null;
         }
         $list = static fn ($v): array => is_array($v) ? array_values(array_map('strval', $v)) : [];
@@ -181,9 +182,9 @@ final class SidecarDialects
      */
     private static function load(): array
     {
-        if (!is_readable(self::SHIPPED_FILE)) {
+        if (! is_readable(self::SHIPPED_FILE)) {
             throw new RuntimeException(
-                'Sidecar dialect catalogue is missing or unreadable: ' . self::SHIPPED_FILE
+                'Sidecar dialect catalogue is missing or unreadable: '.self::SHIPPED_FILE
             );
         }
 
@@ -204,7 +205,7 @@ final class SidecarDialects
      */
     private static function operatorAdditions(): array
     {
-        if (!is_readable(self::OVERRIDE_PATH)) {
+        if (! is_readable(self::OVERRIDE_PATH)) {
             return [];
         }
         $decoded = json_decode((string) @file_get_contents(self::OVERRIDE_PATH), true);

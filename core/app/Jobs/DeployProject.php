@@ -41,9 +41,9 @@ class DeployProject implements ShouldQueue
     public ?int $userId = null;
 
     /**
-     * @param array<string, list<array<string, mixed>>>|null $stages
-     * @param ?array<string, mixed> $inspection what the create's inspection
-     *        found, written under the log's first line
+     * @param  array<string, list<array<string, mixed>>>|null  $stages
+     * @param  ?array<string, mixed>  $inspection  what the create's inspection
+     *                                             found, written under the log's first line
      */
     public function __construct(
         public string $username,
@@ -109,7 +109,7 @@ class DeployProject implements ShouldQueue
 
     private function startDeployLog(User $user): ?DeployLogger
     {
-        if (!$user->hasGitProject() && $user->getTemplate() !== 'dind') {
+        if (! $user->hasGitProject() && $user->getTemplate() !== 'dind') {
             return null;
         }
 
@@ -120,7 +120,7 @@ class DeployProject implements ShouldQueue
 
         $gitRepo = $user->getGitRepo();
         $logger->info($gitRepo
-            ? 'Deploy started (source: git, repo: ' . GitUrl::sanitize($gitRepo) . ')'
+            ? 'Deploy started (source: git, repo: '.GitUrl::sanitize($gitRepo).')'
             : 'Deploy started (source: dind template)');
         CreateInspection::fromArray($this->inspection)?->writeTo($logger);
 
@@ -157,7 +157,7 @@ class DeployProject implements ShouldQueue
             $this->runDeployment($user, $logger, $keepTail);
         } catch (ValidationException $e) {
             if ($this->isCancellation($e)) {
-                throw new TaskCancelledException();
+                throw new TaskCancelledException;
             }
 
             $summary = $this->validationSummary($e);
@@ -176,7 +176,7 @@ class DeployProject implements ShouldQueue
     public function failed(?Throwable $e): void
     {
         $task = $this->task();
-        if ($task !== null && !$task->isTerminal()) {
+        if ($task !== null && ! $task->isTerminal()) {
             $this->markFailed($e ?? new RuntimeException('Deploy job failed'));
         }
     }
@@ -212,7 +212,7 @@ class DeployProject implements ShouldQueue
      */
     private function stoppedBeforeFilesArrived(User $user, string $status): bool
     {
-        return $user->getTemplate() === 'dind' && !$user->hasGitProject() && $status === 'unknown';
+        return $user->getTemplate() === 'dind' && ! $user->hasGitProject() && $status === 'unknown';
     }
 
     private function validationSummary(ValidationException $e): string

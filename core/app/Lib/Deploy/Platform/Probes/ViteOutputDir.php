@@ -37,8 +37,8 @@ final class ViteOutputDir
 
         $config = null;
         foreach (self::CONFIGS as $name) {
-            if (is_file($projectDir . '/' . $name)) {
-                $config = (string) @file_get_contents($projectDir . '/' . $name);
+            if (is_file($projectDir.'/'.$name)) {
+                $config = (string) @file_get_contents($projectDir.'/'.$name);
                 break;
             }
         }
@@ -59,7 +59,7 @@ final class ViteOutputDir
         if (preg_match('/\bbuild\s*:\s*\{/', $config, $m, PREG_OFFSET_CAPTURE) === 1) {
             $block = self::braceBlock($config, $m[0][1] + strlen($m[0][0]) - 1);
             $rest = str_replace($block, '', $config);
-            if (preg_match('/\boutDir\s*:\s*' . self::EXPR . '/', $block, $o) === 1) {
+            if (preg_match('/\boutDir\s*:\s*'.self::EXPR.'/', $block, $o) === 1) {
                 $outDir = self::evaluate(trim($o[1]), $config);
                 if ($outDir === null) {
                     return null;
@@ -74,12 +74,12 @@ final class ViteOutputDir
         }
 
         [$path, $anchored] = $outDir;
-        if (!$anchored && preg_match('/\broot\s*:\s*' . self::EXPR . '/', $rest, $r) === 1) {
+        if (! $anchored && preg_match('/\broot\s*:\s*'.self::EXPR.'/', $rest, $r) === 1) {
             $root = self::evaluate(trim($r[1]), $config);
             if ($root === null) {
                 return null;
             }
-            $path = $root[0] . '/' . $path;
+            $path = $root[0].'/'.$path;
         }
 
         return self::normalize($path);
@@ -126,8 +126,9 @@ final class ViteOutputDir
         $anchored = $m[1] === 'resolve';
         $parts = [];
         foreach ($args as $i => $arg) {
-            if ($i === 0 && preg_match('/^' . self::BASE . '$/', $arg) === 1) {
+            if ($i === 0 && preg_match('/^'.self::BASE.'$/', $arg) === 1) {
                 $anchored = true;
+
                 continue;
             }
             $value = self::literal($arg, $config);
@@ -147,7 +148,7 @@ final class ViteOutputDir
             return $m[2];
         }
         if (preg_match('/^[A-Za-z_$][\w$]*$/', $expr) === 1
-            && preg_match('/\b(?:const|let|var)\s+' . preg_quote($expr, '/') . '\s*=\s*([\'"`])([^\'"`$]*)\1/', $config, $m) === 1
+            && preg_match('/\b(?:const|let|var)\s+'.preg_quote($expr, '/').'\s*=\s*([\'"`])([^\'"`$]*)\1/', $config, $m) === 1
         ) {
             return $m[2];
         }
@@ -171,6 +172,7 @@ final class ViteOutputDir
                     return null;
                 }
                 array_pop($out);
+
                 continue;
             }
             $out[] = $segment;

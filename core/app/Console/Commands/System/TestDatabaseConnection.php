@@ -18,7 +18,7 @@ class TestDatabaseConnection extends Command
     {
         $retries = $this->option('retries');
         assert(is_string($retries));
-        $retries = (int)$retries;
+        $retries = (int) $retries;
         if ($retries < 0) {
             $retries = 0;
         }
@@ -27,13 +27,15 @@ class TestDatabaseConnection extends Command
                 // information_schema is MySQL-only; a plain SELECT proves the
                 // connection is up on any driver, sqlite included.
                 DB::select('SELECT 1');
-                $this->line("Test successful");
+                $this->line('Test successful');
+
                 return 0;
             } catch (\Exception $e) {
                 $this->error($e->getMessage());
             }
             $retries && sleep(5);
         } while ($retries--);
+
         return 1;
     }
 }

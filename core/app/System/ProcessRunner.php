@@ -17,7 +17,7 @@ use Symfony\Component\Process\Process;
 interface ProcessRunner
 {
     /**
-     * @param string|list<string> $cmd
+     * @param  string|list<string>  $cmd
      *
      * @throws DockerErrorException
      * @throws \Exception
@@ -25,24 +25,24 @@ interface ProcessRunner
     public function exec(string|array $cmd, array $env = [], int $timeout = 600): string;
 
     /**
-     * @param string|list<string> $cmd
+     * @param  string|list<string>  $cmd
      *
      * @throws DockerErrorException
      */
     public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string;
 
     /**
-     * @param string|list<string> $cmd
+     * @param  string|list<string>  $cmd
      */
     public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process;
 
     /**
-     * @param string|list<string> $cmd
+     * @param  string|list<string>  $cmd
      */
     public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process;
 
     /**
-     * @param string|list<string> $cmd
+     * @param  string|list<string>  $cmd
      */
     public function runProcessWithCallbacks(
         string|array $cmd,

@@ -83,7 +83,7 @@ class BackupRestoreRequest extends FormRequest
     }
 
     /**
-     * @param array<string, mixed> $filter
+     * @param  array<string, mixed>  $filter
      * @return array<string, mixed>
      */
     private function normalizeRestoreFilter(array $filter): array
@@ -102,7 +102,7 @@ class BackupRestoreRequest extends FormRequest
     }
 
     /**
-     * @param array<string, mixed> $filter
+     * @param  array<string, mixed>  $filter
      */
     private function restoreFilterNonEmpty(array $filter): bool
     {

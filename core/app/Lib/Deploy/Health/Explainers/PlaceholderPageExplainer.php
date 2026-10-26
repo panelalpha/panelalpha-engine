@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Health\Explainers;
 
+use App\Lib\Deploy\Detect\PlaceholderPage;
 use App\Lib\Deploy\Health\Explainer;
 use App\Lib\Deploy\Health\ProbedResponse;
 use App\Lib\Deploy\Platform\ProjectContext;
@@ -18,7 +19,7 @@ use App\Lib\Deploy\Platform\ProjectContext;
  *
  * The two are told apart by whether the directory holds anything but the
  * engine's own handwriting, which is the question
- * {@see \App\Lib\Deploy\Detect\PlaceholderPage::supersededIndex()} already
+ * {@see PlaceholderPage::supersededIndex()} already
  * answers for the deploy pipeline.
  */
 final class PlaceholderPageExplainer implements Explainer
@@ -40,10 +41,10 @@ final class PlaceholderPageExplainer implements Explainer
         }
 
         return [
-            'detail' => '~/project holds ' . $files . ' file' . ($files === 1 ? '' : 's')
-                . ', so an application was uploaded and no recipe recognised it.',
+            'detail' => '~/project holds '.$files.' file'.($files === 1 ? '' : 's')
+                .', so an application was uploaded and no recipe recognised it.',
             'fix' => 'Check the deploy log for the detected project type. A type of "Unknown" '
-                . 'means nothing matched and the engine served its own page instead.',
+                .'means nothing matched and the engine served its own page instead.',
         ];
     }
 
@@ -55,7 +56,7 @@ final class PlaceholderPageExplainer implements Explainer
             if ($entry === '.' || $entry === '..' || str_starts_with($entry, '.')) {
                 continue;
             }
-            if (!\App\Lib\Deploy\Detect\PlaceholderPage::isScaffolding($projectDir, $entry)) {
+            if (! PlaceholderPage::isScaffolding($projectDir, $entry)) {
                 $count++;
             }
         }

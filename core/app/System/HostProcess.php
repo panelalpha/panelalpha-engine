@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\App;
 use Illuminate\Support\Str;
 use Laravel\Prompts\Output\ConsoleOutput;
 use Symfony\Component\Process\Process;
+use Tests\Unit\System\HostProcessTest;
 
 /**
  * Running commands: on this container, or in the host's namespaces.
@@ -29,16 +30,14 @@ use Symfony\Component\Process\Process;
  * so this class calls back through the System instance rather than into itself.
  * Short-circuiting any of those hops would make overrides stop taking effect --
  * and a test that meant to fake `sudo rm -rf` would run it.
- * {@see \Tests\Unit\System\HostProcessTest}
+ * {@see HostProcessTest}
  */
 final class HostProcess
 {
     /** Entering the host's namespaces from inside the engine container. */
     private const NSENTER = ['sudo', 'nsenter', '--target', '1', '--all'];
 
-    public function __construct(private readonly EngineSystem $system)
-    {
-    }
+    public function __construct(private readonly EngineSystem $system) {}
 
     /**
      * The same command, run on the host instead.
@@ -46,14 +45,13 @@ final class HostProcess
      * A list stays a list and a string stays a shell line: the caller chose
      * which, and turning one into the other would change how it is quoted.
      *
-     * @param string|list<string> $cmd
-     *
+     * @param  string|list<string>  $cmd
      * @return string|list<string>
      */
     public static function onHost(string|array $cmd): string|array
     {
         return is_string($cmd)
-            ? implode(' ', self::NSENTER) . ' ' . $cmd
+            ? implode(' ', self::NSENTER).' '.$cmd
             : [...self::NSENTER, ...$cmd];
     }
 
@@ -63,7 +61,7 @@ final class HostProcess
      * A docker daemon error is its own exception because the HTTP boundary
      * reads it as 422 or 503 rather than 500. {@see DockerErrorException}
      *
-     * @param string|list<string> $cmd
+     * @param  string|list<string>  $cmd
      *
      * @throws DockerErrorException
      * @throws Exception
@@ -90,25 +88,25 @@ final class HostProcess
     }
 
     /**
-     * @param string|list<string> $cmd
+     * @param  string|list<string>  $cmd
      */
     public function run(string|array $cmd, array $env = [], int $timeout = 600): Process
     {
         $process = self::make($cmd);
         $process->setTimeout($timeout);
 
-        if (!self::isDebugging()) {
+        if (! self::isDebugging()) {
             $process->run(null, $env);
 
             return $process;
         }
 
-        $output = new ConsoleOutput();
-        $output->writeln('<comment>Running process: ' . (is_array($cmd) ? implode(' ', $cmd) : $cmd) . '</comment>');
+        $output = new ConsoleOutput;
+        $output->writeln('<comment>Running process: '.(is_array($cmd) ? implode(' ', $cmd) : $cmd).'</comment>');
         $process->run(function (string $type, string $data) use ($output): void {
             $output->writeln($type === Process::OUT ? "<info>{$data}</info>" : "<comment>{$data}</comment>");
         }, $env);
-        $output->writeln('<comment>Process exited with code: ' . (string) $process->getExitCode() . '</comment>');
+        $output->writeln('<comment>Process exited with code: '.(string) $process->getExitCode().'</comment>');
 
         return $process;
     }
@@ -117,7 +115,7 @@ final class HostProcess
      * Start and wait, with the caller watching the output as it arrives. The
      * watchdog, when there is one, is what kills a step that has gone quiet.
      *
-     * @param string|list<string> $cmd
+     * @param  string|list<string>  $cmd
      */
     public function runWithCallbacks(
         string|array $cmd,
@@ -144,7 +142,7 @@ final class HostProcess
     /**
      * A list is an argv and is not touched by a shell; a string is a shell line.
      *
-     * @param string|list<string> $cmd
+     * @param  string|list<string>  $cmd
      */
     private static function make(string|array $cmd): Process
     {
@@ -156,7 +154,7 @@ final class HostProcess
     /** `artisan ... -v` echoes every command and its output. */
     private static function isDebugging(): bool
     {
-        if (!App::runningInConsole() || empty($_SERVER['argv'])) {
+        if (! App::runningInConsole() || empty($_SERVER['argv'])) {
             return false;
         }
 

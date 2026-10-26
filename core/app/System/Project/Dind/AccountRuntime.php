@@ -15,7 +15,7 @@ final class AccountRuntime
 
     public static function configured(): string
     {
-        if (!function_exists('config')) {
+        if (! function_exists('config')) {
             return self::SYSBOX;
         }
         try {
@@ -37,7 +37,7 @@ final class AccountRuntime
     public static function composeIsolation(): string
     {
         return self::isSysbox()
-            ? 'runtime: ' . self::SYSBOX
+            ? 'runtime: '.self::SYSBOX
             : 'privileged: true';
     }
 

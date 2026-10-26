@@ -1,5 +1,6 @@
 #!/usr/bin/env php
 <?php
+
 /**
  * file-stream.php
  *
@@ -11,7 +12,7 @@
  * privileged open. The opened handle is then compared against the resolved
  * file, so a symlink swapped in between the check and the open is refused
  * too.
- * 
+ *
  * The script reads commands from STDIN and writes results to STDOUT.
  * Each command is a line terminated by "\n".
  *
@@ -28,7 +29,7 @@
  *   OK <optional‑payload>
  *   ERR <message>
  */
-if (!isset($argc)) {
+if (! isset($argc)) {
     return;
 }
 
@@ -48,7 +49,7 @@ if ($root !== null) {
     if (
         $realRoot === false
         || $resolved === false
-        || !str_starts_with($resolved, rtrim($realRoot, '/') . '/')
+        || ! str_starts_with($resolved, rtrim($realRoot, '/').'/')
     ) {
         fwrite(STDERR, "Refusing $path: it does not resolve to a file under $root\n");
         exit(1);
@@ -79,28 +80,30 @@ if ($resolved !== null) {
 /* Helper to send a line */
 function reply(string $line): void
 {
-    fwrite(STDOUT, $line . "\n");
+    fwrite(STDOUT, $line."\n");
     fflush(STDOUT);
 }
 
 /* Main command loop */
 while (($line = fgets(STDIN)) !== false) {
     $line = rtrim($line, "\r\n");
-    if ($line === '') continue;
+    if ($line === '') {
+        continue;
+    }
 
     $parts = explode(' ', $line, 2);
     $cmd = strtoupper($parts[0]);
 
     switch ($cmd) {
         case 'READ':
-            $bytes = (int)($parts[1] ?? 0);
-            $data  = fread($fh, $bytes);
+            $bytes = (int) ($parts[1] ?? 0);
+            $data = fread($fh, $bytes);
             if ($data === false) {
                 reply('ERR read_failed');
             } else {
                 // send length in hex then raw data (binary‑safe)
                 $hex = dechex(strlen($data));
-                reply('OK ' . $hex);
+                reply('OK '.$hex);
                 fwrite(STDOUT, $data);
                 fflush(STDOUT);
             }
@@ -109,8 +112,8 @@ while (($line = fgets(STDIN)) !== false) {
         case 'WRITE':
             // format: WRITE <hexlen>
             $hexLen = $parts[1] ?? '0';
-            $len    = hexdec($hexLen);
-            $data   = '';
+            $len = hexdec($hexLen);
+            $data = '';
             $remaining = $len;
             while ($remaining > 0 && ($chunk = fread(STDIN, $remaining)) !== false) {
                 $data .= $chunk;
@@ -133,13 +136,13 @@ while (($line = fgets(STDIN)) !== false) {
 
         case 'TELL':
             $pos = ftell($fh);
-            reply($pos !== false ? 'OK ' . $pos : 'ERR tell_failed');
+            reply($pos !== false ? 'OK '.$pos : 'ERR tell_failed');
             break;
 
         case 'STAT':
             $info = fstat($fh);
             $json = json_encode($info);
-            reply('OK ' . $json);
+            reply('OK '.$json);
             break;
 
         case 'EOF':

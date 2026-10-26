@@ -2,10 +2,10 @@
 
 namespace App\Lib\Deploy\Platform;
 
-use App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource;
+use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\AppConfig\AppConfigDirectory;
 use App\Lib\Deploy\Platform\AppConfig\AppConfigSource;
-use App\Lib\Deploy\Platform\AppConfig\AppConfig;
+use App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource;
 use App\Lib\Deploy\Source\RepoUrl;
 use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Yaml;
@@ -44,7 +44,7 @@ final class SourceRecipes
     /** Where the shipped directories live: `core/resources/sources/`. */
     public static function defaultDirectory(): string
     {
-        $path = __DIR__ . '/../../../../resources/sources';
+        $path = __DIR__.'/../../../../resources/sources';
 
         return realpath($path) ?: $path;
     }
@@ -64,12 +64,12 @@ final class SourceRecipes
         }
 
         $root = self::root($directory);
-        $key = $root . ':' . $slug . ':' . self::stamp($root . '/' . $slug);
+        $key = $root.':'.$slug.':'.self::stamp($root.'/'.$slug);
         if (array_key_exists($key, self::$cache)) {
             return self::$cache[$key];
         }
 
-        return self::$cache[$key] = self::at($root . '/' . $slug, $slug);
+        return self::$cache[$key] = self::at($root.'/'.$slug, $slug);
     }
 
     /**
@@ -83,7 +83,7 @@ final class SourceRecipes
             return null;
         }
 
-        $path = self::root($directory) . '/' . $slug;
+        $path = self::root($directory).'/'.$slug;
 
         return is_dir($path) ? $path : null;
     }
@@ -113,14 +113,14 @@ final class SourceRecipes
      */
     public static function at(string $dir, ?string $name = null, ?AppConfigSource $source = null): ?PlatformManifest
     {
-        $source ??= new LocalAppConfigSource();
-        if (!$source->isDirectory(rtrim($dir, '/'))) {
+        $source ??= new LocalAppConfigSource;
+        if (! $source->isDirectory(rtrim($dir, '/'))) {
             return null;
         }
         $config = AppConfigDirectory::config($source, $dir);
         if ($config === null) {
             throw new ManifestException(
-                ($name ?? $dir) . ': ' . AppConfigDirectory::CONFIG . ' is required'
+                ($name ?? $dir).': '.AppConfigDirectory::CONFIG.' is required'
             );
         }
 
@@ -139,7 +139,7 @@ final class SourceRecipes
      */
     public static function checksDirectory(string $dir): ?string
     {
-        $path = rtrim($dir, '/') . '/checks';
+        $path = rtrim($dir, '/').'/checks';
 
         return is_dir($path) ? $path : null;
     }
@@ -184,15 +184,16 @@ final class SourceRecipes
      * The declared keys over the recipe they extend. A key with no value does not
      * unset an inherited one, and `extends` itself is not a manifest key.
      *
-     * @param array<string, mixed> $declared
+     * @param  array<string, mixed>  $declared
      * @return array<string, mixed>
+     *
      * @throws ManifestException
      */
     private static function mergedOntoBase(array $declared, string $name): array
     {
         $baseId = self::baseIdOf($declared);
         $base = self::base($baseId);
-        if ($base === [] && !isset($declared['label'])) {
+        if ($base === [] && ! isset($declared['label'])) {
             throw new ManifestException("{$name}: nothing extends '{$baseId}' and the file describes no manifest of its own");
         }
 
@@ -209,7 +210,7 @@ final class SourceRecipes
      * The recipe to inherit from: `extends` when it is set, else the recipe's own id,
      * so a recipe sharing a shipped manifest's id extends it.
      *
-     * @param array<string, mixed> $declared
+     * @param  array<string, mixed>  $declared
      */
     private static function baseIdOf(array $declared): string
     {
@@ -222,12 +223,12 @@ final class SourceRecipes
      * A base that spells no `strategy` means its id is its strategy (`compose.yaml`
      * produces `compose`); stated, so a recipe with its own id does not default to that.
      *
-     * @param array<string, mixed> $base
+     * @param  array<string, mixed>  $base
      * @return array<string, mixed>
      */
     private static function withImplicitStrategy(array $base, string $baseId): array
     {
-        if (!isset($base['strategy']) && ($base['id'] ?? null) === $baseId) {
+        if (! isset($base['strategy']) && ($base['id'] ?? null) === $baseId) {
             $base['strategy'] = $baseId;
         }
 
@@ -238,15 +239,16 @@ final class SourceRecipes
      * The pipeline falls back on a strategy it does not know, so a typo would deploy
      * green and serve the placeholder page. An unset key keeps the default, the id.
      *
-     * @param array<string, mixed> $raw
+     * @param  array<string, mixed>  $raw
+     *
      * @throws ManifestException
      */
     private static function assertKnownStrategy(array $raw, string $name): void
     {
-        if (isset($raw['strategy']) && is_string($raw['strategy']) && !Strategies::isKnown($raw['strategy'])) {
+        if (isset($raw['strategy']) && is_string($raw['strategy']) && ! Strategies::isKnown($raw['strategy'])) {
             throw new ManifestException(
                 "{$name}: strategy '{$raw['strategy']}' is not one this engine deploys; "
-                . 'expected one of: ' . implode(', ', Strategies::ALL)
+                .'expected one of: '.implode(', ', Strategies::ALL)
             );
         }
     }
@@ -310,7 +312,7 @@ final class SourceRecipes
      * The recipe in one directory of the walk, or null; a malformed one is logged
      * and recorded in $skipped rather than thrown.
      *
-     * @param array<string, string> $skipped slug => reason, filled in place
+     * @param  array<string, string>  $skipped  slug => reason, filled in place
      */
     private static function readOrSkip(string $dir, string $slug, array &$skipped): ?PlatformManifest
     {
@@ -318,7 +320,7 @@ final class SourceRecipes
             return self::at($dir, $slug);
         } catch (ManifestException $e) {
             $skipped[$slug] = $e->getMessage();
-            error_log('panelalpha: skipping recipe directory ' . $dir . ': ' . $e->getMessage());
+            error_log('panelalpha: skipping recipe directory '.$dir.': '.$e->getMessage());
 
             return null;
         }
@@ -328,13 +330,13 @@ final class SourceRecipes
      * Which recipe files exist and when each last changed: cheap to take (one
      * stat per recipe) and different whenever a parse would be.
      *
-     * @param array<string, string> $directories slug => directory
+     * @param  array<string, string>  $directories  slug => directory
      */
     private static function signature(array $directories): string
     {
         $parts = [];
         foreach ($directories as $slug => $dir) {
-            $parts[] = $slug . '=' . self::stamp($dir);
+            $parts[] = $slug.'='.self::stamp($dir);
         }
 
         return md5(implode("\n", $parts));
@@ -343,11 +345,11 @@ final class SourceRecipes
     /** The recipe file's mtime and size, or 'none' when it is not there. */
     private static function stamp(string $dir): string
     {
-        $file = $dir . '/' . AppConfigDirectory::CONFIG;
+        $file = $dir.'/'.AppConfigDirectory::CONFIG;
         clearstatcache(true, $file);
         $stat = @stat($file);
 
-        return $stat === false ? 'none' : $stat['mtime'] . '.' . $stat['size'];
+        return $stat === false ? 'none' : $stat['mtime'].'.'.$stat['size'];
     }
 
     /**
@@ -359,7 +361,7 @@ final class SourceRecipes
     public static function skipped(?string $directory = null): array
     {
         $root = self::root($directory);
-        if (!isset(self::$skipped[$root])) {
+        if (! isset(self::$skipped[$root])) {
             self::all($root);
         }
 
@@ -385,7 +387,7 @@ final class SourceRecipes
     public static function directories(?string $directory = null): array
     {
         $root = self::root($directory);
-        if (!is_dir($root)) {
+        if (! is_dir($root)) {
             return [];
         }
 
@@ -401,12 +403,12 @@ final class SourceRecipes
     /**
      * Record every recipe directory in one namespace subtree.
      *
-     * @param array<string, string> $found slug => directory, filled in place
+     * @param  array<string, string>  $found  slug => directory, filled in place
      */
     private static function collect(string $dir, string $slug, int $depth, array &$found): void
     {
         $children = self::entries($dir);
-        if ($depth >= 3 && (is_file($dir . '/' . AppConfigDirectory::CONFIG) || $children === [])) {
+        if ($depth >= 3 && (is_file($dir.'/'.AppConfigDirectory::CONFIG) || $children === [])) {
             $found[$slug] = $dir;
 
             return;
@@ -432,7 +434,7 @@ final class SourceRecipes
             if (str_starts_with($entry, '.') || str_starts_with($entry, '_')) {
                 continue;
             }
-            if (is_dir($directory . '/' . $entry)) {
+            if (is_dir($directory.'/'.$entry)) {
                 $names[] = $entry;
             }
         }
@@ -447,18 +449,19 @@ final class SourceRecipes
      * would load every manifest and would recurse back into this class.
      *
      * @return array<string, mixed>
+     *
      * @throws ManifestException
      */
     private static function base(string $id): array
     {
-        if (!preg_match('/^[a-z0-9][a-z0-9-]*$/', $id)) {
+        if (! preg_match('/^[a-z0-9][a-z0-9-]*$/', $id)) {
             return [];
         }
 
         $paths = [
-            PlatformRegistry::defaultAppDirectory() . '/' . $id . '/' . PlatformRegistry::APP_FILENAME,
-            PlatformRegistry::defaultDirectory() . '/' . $id . '.yaml',
-            PlatformRegistry::defaultDirectory() . '/' . $id . '.yml',
+            PlatformRegistry::defaultAppDirectory().'/'.$id.'/'.PlatformRegistry::APP_FILENAME,
+            PlatformRegistry::defaultDirectory().'/'.$id.'.yaml',
+            PlatformRegistry::defaultDirectory().'/'.$id.'.yml',
         ];
         foreach ($paths as $path) {
             if (is_file($path)) {
@@ -471,19 +474,20 @@ final class SourceRecipes
 
     /**
      * @return array<string, mixed>
+     *
      * @throws ManifestException
      */
     private static function decode(string $path): array
     {
         $raw = @file_get_contents($path);
-        if (!is_string($raw) || trim($raw) === '') {
+        if (! is_string($raw) || trim($raw) === '') {
             throw new ManifestException("Unreadable or empty manifest: {$path}");
         }
 
         try {
             $decoded = Yaml::parse($raw);
         } catch (ParseException $e) {
-            throw new ManifestException("Invalid YAML in {$path}: " . $e->getMessage(), 0, $e);
+            throw new ManifestException("Invalid YAML in {$path}: ".$e->getMessage(), 0, $e);
         }
 
         return is_array($decoded) ? $decoded : [];

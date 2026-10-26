@@ -23,23 +23,22 @@ class ProjectContext
     private array $json = [];
 
     /**
-     * @param array<string, true> $files lowercase basename => true
-     * @param ?string $sourceUrl the repository this checkout came from, when
-     *        it came from one. Not a fact about the files, which is why
-     *        nothing on this class reads it — but it is a fact about the
-     *        project, and {@see SourceRecipes} answers "what is this?" from
-     *        the URL alone, faster and more exactly than any file rule can.
-     *        Null for an uploaded archive.
+     * @param  array<string, true>  $files  lowercase basename => true
+     * @param  ?string  $sourceUrl  the repository this checkout came from, when
+     *                              it came from one. Not a fact about the files, which is why
+     *                              nothing on this class reads it — but it is a fact about the
+     *                              project, and {@see SourceRecipes} answers "what is this?" from
+     *                              the URL alone, faster and more exactly than any file rule can.
+     *                              Null for an uploaded archive.
      */
     public function __construct(
         public readonly string $projectDir,
         public readonly array $files,
         public readonly ?string $sourceUrl = null
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, true> $files lowercase basename => true
+     * @param  array<string, true>  $files  lowercase basename => true
      */
     public static function make(string $projectDir, array $files, ?string $sourceUrl = null): self
     {
@@ -63,13 +62,13 @@ class ProjectContext
     public static function listRootFiles(string $projectDir): array
     {
         $projectDir = rtrim($projectDir, '/');
-        if (!is_dir($projectDir)) {
+        if (! is_dir($projectDir)) {
             return [];
         }
 
         $files = [];
         foreach (self::entries($projectDir) as $entry) {
-            if ($entry !== '.' && $entry !== '..' && file_exists($projectDir . '/' . $entry)) {
+            if ($entry !== '.' && $entry !== '..' && file_exists($projectDir.'/'.$entry)) {
                 $files[strtolower($entry)] = true;
             }
         }
@@ -102,14 +101,14 @@ class ProjectContext
 
     public function path(string $relative): string
     {
-        return $this->projectDir . '/' . ltrim($relative, '/');
+        return $this->projectDir.'/'.ltrim($relative, '/');
     }
 
     /** Contents of $relative, or null when it is missing or unreadable. */
     public function contents(string $relative): ?string
     {
         $path = $this->path($relative);
-        if (!is_file($path)) {
+        if (! is_file($path)) {
             return null;
         }
         $raw = @file_get_contents($path);
@@ -124,7 +123,7 @@ class ProjectContext
      */
     public function package(): ?array
     {
-        if (!$this->packageLoaded) {
+        if (! $this->packageLoaded) {
             $this->package = self::readPackageJson($this->projectDir);
             $this->packageLoaded = true;
         }
@@ -213,7 +212,7 @@ class ProjectContext
      */
     public function hasConfigStem(string $stem): bool
     {
-        $prefix = strtolower($stem) . '.';
+        $prefix = strtolower($stem).'.';
         foreach (array_keys($this->files) as $name) {
             if (str_starts_with((string) $name, $prefix)) {
                 return true;
@@ -237,12 +236,12 @@ class ProjectContext
      */
     public static function readPackageJson(string $projectDir): ?array
     {
-        $path = rtrim($projectDir, '/') . '/package.json';
-        if (!is_file($path)) {
+        $path = rtrim($projectDir, '/').'/package.json';
+        if (! is_file($path)) {
             return null;
         }
         $raw = @file_get_contents($path);
-        if (!is_string($raw) || $raw === '') {
+        if (! is_string($raw) || $raw === '') {
             return null;
         }
         $json = json_decode($raw, true);
@@ -251,7 +250,7 @@ class ProjectContext
     }
 
     /**
-     * @param array<string, mixed> $package
+     * @param  array<string, mixed>  $package
      */
     public static function packageHasDep(array $package, string $name): bool
     {
@@ -267,16 +266,16 @@ class ProjectContext
     public static function firstConfigContents(string $projectDir, string $stem): ?string
     {
         $root = rtrim($projectDir, '/');
-        $prefix = strtolower($stem) . '.';
+        $prefix = strtolower($stem).'.';
         foreach (self::entries($root) as $entry) {
             if ($entry === '.' || $entry === '..') {
                 continue;
             }
-            if (!str_starts_with(strtolower($entry), $prefix)) {
+            if (! str_starts_with(strtolower($entry), $prefix)) {
                 continue;
             }
-            $path = $root . '/' . $entry;
-            if (!is_file($path)) {
+            $path = $root.'/'.$entry;
+            if (! is_file($path)) {
                 continue;
             }
             $contents = @file_get_contents($path);

@@ -2,9 +2,10 @@
 
 namespace App\Console\Commands\System;
 
-use App\System;
 use App\Models\Domain;
+use App\System;
 use Illuminate\Console\Command;
+use Illuminate\Database\Eloquent\Collection;
 
 class CleanupDisconnectedDomains extends Command
 {
@@ -26,34 +27,36 @@ class CleanupDisconnectedDomains extends Command
             //     'openlitespeed',
             // ];
 
-            $system = new System();
+            $system = new System;
             $webserver = $system->webserver();
             $webDomains = $webserver->listDomains();
-            /** @var \Illuminate\Database\Eloquent\Collection<int, Domain> */
+            /** @var Collection<int, Domain> */
             $dbDomains = Domain::get();
             $dbDomainsList = $dbDomains->pluck('domain');
             $unusedDomains = [];
             foreach ($webDomains as $webDomain) {
-                if (!($dbDomainsList->contains($webDomain))) {
+                if (! ($dbDomainsList->contains($webDomain))) {
                     $unusedDomains[] = $webDomain;
                 }
             }
 
             if (empty($unusedDomains)) {
                 $this->info('Did not found any disconnected domains. Nothing to cleanup.');
+
                 return 0;
             }
 
-            $this->info('Found ' . count($unusedDomains) . ' disconnected domains: ');
+            $this->info('Found '.count($unusedDomains).' disconnected domains: ');
             foreach ($unusedDomains as $unusedDomain) {
-                $this->info('  ' . $unusedDomain);
+                $this->info('  '.$unusedDomain);
             }
-            if (!$this->confirm('Continue with cleanup of these domains?')) {
+            if (! $this->confirm('Continue with cleanup of these domains?')) {
                 $this->info('Exiting.');
+
                 return 0;
             }
             $webserver->deleteDomainsConfigs($unusedDomains);
-            if (!config('env.KEEP_WEBSERVER_LOGS_FOR_DELETED_DOMAINS')) {
+            if (! config('env.KEEP_WEBSERVER_LOGS_FOR_DELETED_DOMAINS')) {
                 $system->webserver()->deleteDomainsLogsDirs($unusedDomains);
             }
             $webserver->reload();
@@ -62,6 +65,7 @@ class CleanupDisconnectedDomains extends Command
         } catch (\Exception $e) {
             $this->error($e->getMessage());
         }
+
         return 0;
     }
 }

@@ -29,7 +29,7 @@ class GitConnectCommand extends Command
         $repoUrl = (string) ($this->option('repo-url') ?? '');
         $branch = (string) ($this->option('branch') ?? '');
 
-        if (!$repair) {
+        if (! $repair) {
             if ($repoUrl === '') {
                 $this->error('--repo-url is required');
 

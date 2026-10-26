@@ -57,7 +57,7 @@ final class NpmMetadata implements PackageMetadata
 
     public function read(ProjectContext $context): ?AppPackage
     {
-        if (!$context->isFile(self::FILE)) {
+        if (! $context->isFile(self::FILE)) {
             return null;
         }
         $package = self::map($context->package());
@@ -71,7 +71,7 @@ final class NpmMetadata implements PackageMetadata
             ecosystem: $this->id(),
             file: self::FILE,
             name: $name ?? self::directoryName($context),
-            nameSource: $name !== null ? self::FILE . ' name' : AppPackage::NAME_FROM_DIRECTORY,
+            nameSource: $name !== null ? self::FILE.' name' : AppPackage::NAME_FROM_DIRECTORY,
             description: self::text($package['description'] ?? null),
             version: self::text($package['version'] ?? null),
             license: implode(', ', self::stringList($package['license'] ?? null)) ?: null,
@@ -103,7 +103,7 @@ final class NpmMetadata implements PackageMetadata
      * not just `node`: a project that pins `pnpm` fails for a reason its `node`
      * constraint cannot explain.
      *
-     * @param array<string, mixed> $package
+     * @param  array<string, mixed>  $package
      * @return array<string, string>
      */
     private static function engines(array $package): array
@@ -111,7 +111,7 @@ final class NpmMetadata implements PackageMetadata
         $engines = [];
         foreach (self::map($package['engines'] ?? null) as $name => $constraint) {
             $range = self::text($constraint);
-            if (!is_string($name) || $range === null) {
+            if (! is_string($name) || $range === null) {
                 continue;
             }
             $engines[strtolower($name)] = $range;
@@ -139,7 +139,7 @@ final class NpmMetadata implements PackageMetadata
             $version = is_array($entry) ? self::text($entry['version'] ?? null) : null;
             // The root project is keyed by the empty string, and its version
             // is the application's own — not a dependency's.
-            if ($path === null || $version === null || !str_starts_with($path, 'node_modules/')) {
+            if ($path === null || $version === null || ! str_starts_with($path, 'node_modules/')) {
                 continue;
             }
             $name = substr($path, strlen('node_modules/'));
@@ -155,7 +155,7 @@ final class NpmMetadata implements PackageMetadata
         foreach (self::map($lock['dependencies'] ?? null) as $name => $entry) {
             $name = self::text($name);
             $version = is_array($entry) ? self::text($entry['version'] ?? null) : null;
-            if ($name !== null && $version !== null && !isset($versions[$name])) {
+            if ($name !== null && $version !== null && ! isset($versions[$name])) {
                 $versions[$name] = $version;
             }
         }
@@ -166,14 +166,14 @@ final class NpmMetadata implements PackageMetadata
     /**
      * `author` is a string or an object; `contributors` is a list of either.
      *
-     * @param array<string, mixed> $package
+     * @param  array<string, mixed>  $package
      * @return list<string>
      */
     private static function authors(array $package): array
     {
         $authors = self::stringList($package['author'] ?? null);
         foreach (self::stringList($package['contributors'] ?? null) as $contributor) {
-            if (!in_array($contributor, $authors, true)) {
+            if (! in_array($contributor, $authors, true)) {
                 $authors[] = $contributor;
             }
         }
@@ -192,7 +192,7 @@ final class NpmMetadata implements PackageMetadata
     }
 
     /**
-     * @param array<string, mixed> $package
+     * @param  array<string, mixed>  $package
      * @return list<string>
      */
     private static function entrypoints(array $package): array

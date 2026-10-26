@@ -3,6 +3,7 @@
 namespace App\Lib\Deploy\Platform\Runtime\Php;
 
 use App\Lib\Deploy\CacheManager\PhpBaseImage;
+use App\Lib\Deploy\Dind\DindHostBuilder;
 use App\Lib\Deploy\ProjectCache;
 
 /**
@@ -20,8 +21,6 @@ use App\Lib\Deploy\ProjectCache;
  */
 final class PhpHostBuild
 {
-
-
     /**
      * `--no-scripts` always. `--no-plugins` is the fail-safe default, dropped
      * only once the build resolves from the engine's runtime manifest, whose
@@ -98,7 +97,7 @@ final class PhpHostBuild
      */
     public static function installCommand(string $install, bool $pluginsRestricted): string
     {
-        if ($install === '' || !$pluginsRestricted) {
+        if ($install === '' || ! $pluginsRestricted) {
             return $install;
         }
 
@@ -118,7 +117,7 @@ final class PhpHostBuild
      * `--optimize-autoloader` because nothing dumps the autoloader afterwards
      * unless the manifest declares a step.
      */
-    public const DEFAULT_INSTALL = 'composer install ' . self::SAFE_INSTALL_FLAGS . ' --optimize-autoloader';
+    public const DEFAULT_INSTALL = 'composer install '.self::SAFE_INSTALL_FLAGS.' --optimize-autoloader';
 
     /**
      * The copy of the manifest Composer resolves from: the engine's
@@ -147,7 +146,7 @@ final class PhpHostBuild
      * worth pinning.
      *
      * The one spelling, shared with the Composer-image pass
-     * ({@see \App\Lib\Deploy\Dind\DindHostBuilder::composerInstallArgv()}) so
+     * ({@see DindHostBuilder::composerInstallArgv()}) so
      * the two cannot drift. They had: only that pass pinned, so a project's own
      * `config.platform` won against the image the engine built — YOURLS
      * declares `"platform": {"php": "8.1.0"}` beside `require.php ^8.4`, and
@@ -168,7 +167,7 @@ final class PhpHostBuild
             return '';
         }
 
-        return 'composer config --no-plugins platform.php ' . $phpVersion . '.99';
+        return 'composer config --no-plugins platform.php '.$phpVersion.'.99';
     }
 
     /**
@@ -181,8 +180,8 @@ final class PhpHostBuild
     public static function lockContradictionNote(): string
     {
         return 'echo "[panelalpha] this project\'s composer.lock pins a PHP its own '
-            . 'packages reject, so the locked set is installed as-is; php is the one '
-            . 'requirement not enforced for it" >&2';
+            .'packages reject, so the locked set is installed as-is; php is the one '
+            .'requirement not enforced for it" >&2';
     }
 
     /**
@@ -223,19 +222,19 @@ final class PhpHostBuild
         // Objects round-trip `{}` as `{}` and leave real lists (`classmap`,
         // `authors`) as lists, which JSON_FORCE_OBJECT would not.
         $decoded = json_decode($composerJson);
-        if (!is_object($decoded)) {
+        if (! is_object($decoded)) {
             return null;
         }
 
         $locked = $composerLock !== null && trim($composerLock) !== '';
         // A root with no `require` object keeps its require-dev: dropping it
         // would leave an empty graph.
-        if (!$locked && isset($decoded->{'require-dev'}) && isset($decoded->require) && is_object($decoded->require)) {
+        if (! $locked && isset($decoded->{'require-dev'}) && isset($decoded->require) && is_object($decoded->require)) {
             unset($decoded->{'require-dev'});
         }
 
-        if (!isset($decoded->config) || !is_object($decoded->config)) {
-            $decoded->config = new \stdClass();
+        if (! isset($decoded->config) || ! is_object($decoded->config)) {
+            $decoded->config = new \stdClass;
         }
         $decoded->config->{'allow-plugins'} = (object) self::allowPlugins();
 
@@ -266,7 +265,7 @@ final class PhpHostBuild
         $decoded = json_decode($composerJson);
 
         return is_object($decoded)
-            && !(isset($decoded->{'require-dev'}) && isset($decoded->require) && is_object($decoded->require));
+            && ! (isset($decoded->{'require-dev'}) && isset($decoded->require) && is_object($decoded->require));
     }
 
     /**
@@ -302,7 +301,7 @@ final class PhpHostBuild
             throw new \InvalidArgumentException('Invalid account home directory for composer cache');
         }
 
-        return $home . '/.cache/composer';
+        return $home.'/.cache/composer';
     }
 
     /**
@@ -319,7 +318,7 @@ final class PhpHostBuild
     {
         $decoded = json_decode((string) $composerJson, true);
         $classmap = is_array($decoded) ? ($decoded['autoload']['classmap'] ?? null) : null;
-        if (!is_array($classmap)) {
+        if (! is_array($classmap)) {
             return '';
         }
         $vendor = $decoded['config']['vendor-dir'] ?? 'vendor';
@@ -327,7 +326,7 @@ final class PhpHostBuild
 
         $dirs = [];
         foreach ($classmap as $path) {
-            if (!is_string($path)) {
+            if (! is_string($path)) {
                 continue;
             }
             $path = trim((string) preg_replace('#^(\./)+#', '', trim($path)), '/');
@@ -336,7 +335,7 @@ final class PhpHostBuild
                 || preg_match('#(^|/)\.\.?(/|$)#', $path) === 1
                 || str_contains(basename($path), '.')
                 || $path === $vendor
-                || str_starts_with($path, $vendor . '/')
+                || str_starts_with($path, $vendor.'/')
             ) {
                 continue;
             }
@@ -346,9 +345,9 @@ final class PhpHostBuild
             return '';
         }
 
-        return 'for d in ' . implode(' ', array_unique($dirs)) . '; do [ -e "$d" ] || { '
-            . 'echo "[panelalpha] creating autoload classmap directory missing from the checkout: $d" >&2; '
-            . 'mkdir -p "$d"; }; done';
+        return 'for d in '.implode(' ', array_unique($dirs)).'; do [ -e "$d" ] || { '
+            .'echo "[panelalpha] creating autoload classmap directory missing from the checkout: $d" >&2; '
+            .'mkdir -p "$d"; }; done';
     }
 
     /**
@@ -361,24 +360,24 @@ final class PhpHostBuild
      * command is load-bearing unless it arrived marked `optional: true` and
      * carrying its own `|| true`.
      *
-     * @param bool $hasComposer the application ships a composer.json. osTicket
-     *        vendors its dependencies and ships none, and `composer install`
-     *        against a directory with no composer.json fails the deploy for an
-     *        application that never needed Composer at all.
-     * @param ?string $phpVersion the minor the app will run on, so the resolve
-     *        is pinned to it and the project's own `config.platform` cannot
-     *        override the image the engine chose. Null leaves the install
-     *        exactly as the manifest declared it.
-     * @param bool $lockPhpContradicted the lock pins a PHP its own packages
-     *        cannot run on, so the deploy must not fail on that requirement.
-     *        Reported then ignored; see {@see self::lockContradictionNote()}.
-     * @param bool $pluginsRestricted Composer reads the runtime manifest, so
-     *        its allow-plugins holds and `--no-plugins` may go; see
-     *        {@see runtimeManifest()}. False keeps the flag.
-     * @param bool $mirrorLock copy the lock the install wrote to composer.lock
-     *        when there is none; see {@see mirrorsRuntimeLock()}.
-     * @param ?string $composerJson the project's manifest, read only for the
-     *        classmap directories to create; see {@see classmapDirsStep()}.
+     * @param  bool  $hasComposer  the application ships a composer.json. osTicket
+     *                             vendors its dependencies and ships none, and `composer install`
+     *                             against a directory with no composer.json fails the deploy for an
+     *                             application that never needed Composer at all.
+     * @param  ?string  $phpVersion  the minor the app will run on, so the resolve
+     *                               is pinned to it and the project's own `config.platform` cannot
+     *                               override the image the engine chose. Null leaves the install
+     *                               exactly as the manifest declared it.
+     * @param  bool  $lockPhpContradicted  the lock pins a PHP its own packages
+     *                                     cannot run on, so the deploy must not fail on that requirement.
+     *                                     Reported then ignored; see {@see self::lockContradictionNote()}.
+     * @param  bool  $pluginsRestricted  Composer reads the runtime manifest, so
+     *                                   its allow-plugins holds and `--no-plugins` may go; see
+     *                                   {@see runtimeManifest()}. False keeps the flag.
+     * @param  bool  $mirrorLock  copy the lock the install wrote to composer.lock
+     *                            when there is none; see {@see mirrorsRuntimeLock()}.
+     * @param  ?string  $composerJson  the project's manifest, read only for the
+     *                                 classmap directories to create; see {@see classmapDirsStep()}.
      */
     public static function script(
         string $install,
@@ -404,7 +403,7 @@ final class PhpHostBuild
             if ($pluginsRestricted) {
                 // So a project missing a plugin's output can see why.
                 $steps[] = 'echo "[panelalpha] composer plugins allowed: '
-                    . implode(', ', self::INSTALLER_PLUGINS) . '; any other plugin is installed but not run" >&2';
+                    .implode(', ', self::INSTALLER_PLUGINS).'; any other plugin is installed but not run" >&2';
             }
             // Ahead of the install: the pin is a `composer config` write that
             // must happen before Composer reads the platform. {@see platformPin()}
@@ -416,11 +415,11 @@ final class PhpHostBuild
             }
             if ($lockPhpContradicted) {
                 $steps[] = self::lockContradictionNote();
-                $install .= " --ignore-platform-req=php";
+                $install .= ' --ignore-platform-req=php';
             }
             $steps[] = $install;
             if ($mirrorLock) {
-                $steps[] = '[ -e composer.lock ] || cp ' . self::RUNTIME_LOCK_FILE . ' composer.lock';
+                $steps[] = '[ -e composer.lock ] || cp '.self::RUNTIME_LOCK_FILE.' composer.lock';
             }
         }
         if (trim($build) !== '') {
@@ -448,17 +447,17 @@ final class PhpHostBuild
      */
     public static function restoreProjectAllowPlugins(): string
     {
-        $code = '$m = getenv("' . self::MANIFEST_ENV . '");'
-            . ' $p = json_decode((string) file_get_contents("composer.json"));'
-            . ' $r = json_decode((string) file_get_contents($m));'
-            . ' if (!is_object($r)) { exit(0); }'
-            . ' if (!isset($r->config) || !is_object($r->config)) { $r->config = new stdClass(); }'
-            . ' if (is_object($p) && isset($p->config) && is_object($p->config) && property_exists($p->config, "allow-plugins")) {'
-            . ' $r->config->{"allow-plugins"} = $p->config->{"allow-plugins"}; }'
-            . ' else { unset($r->config->{"allow-plugins"}); }'
-            . ' file_put_contents($m, json_encode($r, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION));';
+        $code = '$m = getenv("'.self::MANIFEST_ENV.'");'
+            .' $p = json_decode((string) file_get_contents("composer.json"));'
+            .' $r = json_decode((string) file_get_contents($m));'
+            .' if (!is_object($r)) { exit(0); }'
+            .' if (!isset($r->config) || !is_object($r->config)) { $r->config = new stdClass(); }'
+            .' if (is_object($p) && isset($p->config) && is_object($p->config) && property_exists($p->config, "allow-plugins")) {'
+            .' $r->config->{"allow-plugins"} = $p->config->{"allow-plugins"}; }'
+            .' else { unset($r->config->{"allow-plugins"}); }'
+            .' file_put_contents($m, json_encode($r, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION));';
 
-        return 'php -r ' . escapeshellarg($code);
+        return 'php -r '.escapeshellarg($code);
     }
 
     /**
@@ -500,6 +499,6 @@ final class PhpHostBuild
     {
         $appRoot = trim($appRoot, '/');
 
-        return $appRoot === '' ? '/app' : '/app/' . $appRoot;
+        return $appRoot === '' ? '/app' : '/app/'.$appRoot;
     }
 }

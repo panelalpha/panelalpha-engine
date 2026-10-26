@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy;
 
+use App\Lib\Deploy\Compose\ComposeEnvironment;
+
 /**
  * The environment overrides an account carries from one deploy to the next.
  *
@@ -16,7 +18,7 @@ namespace App\Lib\Deploy;
  * already has that meaning everywhere these values are read — an empty
  * override is no override, in `.env` ({@see \App\\System\\Project\Dind\ProjectEnvironment})
  * and in the generated compose environment
- * ({@see \App\Lib\Deploy\Compose\ComposeEnvironment}) alike. So an empty value
+ * ({@see ComposeEnvironment}) alike. So an empty value
  * drops the key rather than being stored as a variable that does nothing.
  *
  * Clearing every override at once is `env_vars: null`, which the controllers
@@ -27,8 +29,8 @@ namespace App\Lib\Deploy;
 final class EnvVarOverrides
 {
     /**
-     * @param array<string, string> $stored what the project already carries
-     * @param array<string, string> $incoming what this deploy declared
+     * @param  array<string, string>  $stored  what the project already carries
+     * @param  array<string, string>  $incoming  what this deploy declared
      * @return array<string, string>
      */
     public static function merge(array $stored, array $incoming): array
@@ -50,7 +52,7 @@ final class EnvVarOverrides
      * The overrides to store for a deploy that sent `env_vars`, merged onto
      * what the project already carries. An explicit null clears them all.
      *
-     * @param array<string, string> $stored
+     * @param  array<string, string>  $stored
      * @return array<string, string>
      */
     public static function applyIncoming(mixed $incoming, array $stored): array
@@ -65,12 +67,12 @@ final class EnvVarOverrides
     /** @return array<string, string> */
     private static function normalize(mixed $envVars): array
     {
-        if (!is_array($envVars)) {
+        if (! is_array($envVars)) {
             return [];
         }
         $result = [];
         foreach ($envVars as $key => $value) {
-            if (!is_string($key) || !preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $key)) {
+            if (! is_string($key) || ! preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $key)) {
                 continue;
             }
             // ConvertEmptyStringsToNull turns the documented `""` (remove this key) into null.
@@ -79,7 +81,7 @@ final class EnvVarOverrides
 
                 continue;
             }
-            if (!is_string($value) && !is_numeric($value)) {
+            if (! is_string($value) && ! is_numeric($value)) {
                 continue;
             }
             $result[$key] = (string) $value;

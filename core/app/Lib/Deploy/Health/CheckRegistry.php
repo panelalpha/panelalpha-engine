@@ -40,7 +40,7 @@ final class CheckRegistry
     /** Where the shipped checks live: `core/resources/checks/`. */
     public static function directory(): string
     {
-        $path = __DIR__ . '/../../../../resources/checks';
+        $path = __DIR__.'/../../../../resources/checks';
 
         return realpath($path) ?: $path;
     }
@@ -49,6 +49,7 @@ final class CheckRegistry
      * Every shipped check, by group.
      *
      * @return array<string, list<HealthCheck>>
+     *
      * @throws CheckException
      */
     public static function all(): array
@@ -58,14 +59,14 @@ final class CheckRegistry
         }
 
         $root = self::directory();
-        if (!is_dir($root)) {
+        if (! is_dir($root)) {
             throw new CheckException("Health check directory not found: {$root}");
         }
 
         $groups = [];
         foreach (self::sorted($root) as $group) {
-            $path = $root . '/' . $group;
-            if (!is_dir($path) || str_starts_with($group, '.')) {
+            $path = $root.'/'.$group;
+            if (! is_dir($path) || str_starts_with($group, '.')) {
                 continue;
             }
             $groups[$group] = self::load($path, $group);
@@ -83,8 +84,9 @@ final class CheckRegistry
      * typo is a failed contract test rather than a check that silently never
      * runs.
      *
-     * @param list<string> $references
+     * @param  list<string>  $references
      * @return list<HealthCheck>
+     *
      * @throws CheckException
      */
     public static function for(?string $runtime, array $references = [], ?string $recipeDirectory = null): array
@@ -118,15 +120,16 @@ final class CheckRegistry
     }
 
     /**
-     * @param array<string, list<HealthCheck>> $groups
+     * @param  array<string, list<HealthCheck>>  $groups
      * @return list<HealthCheck>
+     *
      * @throws CheckException
      */
     private static function resolve(string $reference, array $groups): array
     {
         $reference = trim($reference);
-        if (!str_contains($reference, '/')) {
-            if (!isset($groups[$reference])) {
+        if (! str_contains($reference, '/')) {
+            if (! isset($groups[$reference])) {
                 throw new CheckException("Unknown check group '{$reference}'");
             }
 
@@ -158,12 +161,13 @@ final class CheckRegistry
      * would report the same id twice, and the report is what telemetry counts.
      *
      * @return array<string, list<HealthCheck>>
+     *
      * @throws CheckException
      */
     public static function allWithDirectory(?string $checksDirectory): array
     {
         $groups = self::all();
-        if ($checksDirectory === null || !is_dir($checksDirectory)) {
+        if ($checksDirectory === null || ! is_dir($checksDirectory)) {
             return $groups;
         }
 
@@ -199,17 +203,17 @@ final class CheckRegistry
      * would otherwise be refused as unknown. Answering only "is it here" keeps
      * the reader from having to reproduce the resolution rules.
      *
-     * @param list<string> $references
+     * @param  list<string>  $references
      * @return list<string>
      */
     public static function recipeReferences(?string $checksDirectory, array $references): array
     {
-        if ($checksDirectory === null || !is_dir($checksDirectory) || $references === []) {
+        if ($checksDirectory === null || ! is_dir($checksDirectory) || $references === []) {
             return [];
         }
 
         $key = realpath($checksDirectory) ?: $checksDirectory;
-        if (!isset(self::$recipeCache[$key])) {
+        if (! isset(self::$recipeCache[$key])) {
             self::$recipeCache[$key] = self::directoryGroups($checksDirectory, 'recipe');
         }
         $groups = self::$recipeCache[$key];
@@ -219,11 +223,12 @@ final class CheckRegistry
             [$group, $id] = str_contains($reference, '/')
                 ? explode('/', $reference, 2)
                 : [$reference, null];
-            if (!isset($groups[$group])) {
+            if (! isset($groups[$group])) {
                 continue;
             }
             if ($id === null) {
                 $found[] = $reference;
+
                 continue;
             }
             foreach ($groups[$group] as $check) {
@@ -239,14 +244,15 @@ final class CheckRegistry
 
     /**
      * @return array<string, list<HealthCheck>>
+     *
      * @throws CheckException
      */
     private static function directoryGroups(string $directory, string $source): array
     {
         $groups = [];
         foreach (self::sorted($directory) as $group) {
-            $path = $directory . '/' . $group;
-            if (!is_dir($path) || str_starts_with($group, '.')) {
+            $path = $directory.'/'.$group;
+            if (! is_dir($path) || str_starts_with($group, '.')) {
                 continue;
             }
             $groups[$group] = self::load($path, $group, $source);
@@ -267,33 +273,34 @@ final class CheckRegistry
 
     /**
      * @return list<HealthCheck>
+     *
      * @throws CheckException
      */
     private static function load(string $path, string $group, string $origin = 'shipped'): array
     {
         $checks = [];
         foreach (self::sorted($path) as $entry) {
-            if (!str_ends_with($entry, '.yaml')) {
+            if (! str_ends_with($entry, '.yaml')) {
                 continue;
             }
-            $file = $path . '/' . $entry;
+            $file = $path.'/'.$entry;
             // A recipe's own check is named as such, so "check file is
             // malformed" says whether to look in resources/checks/.
-            $source = ($origin === 'shipped' ? '' : "{$origin} ") . $group . '/' . $entry;
+            $source = ($origin === 'shipped' ? '' : "{$origin} ").$group.'/'.$entry;
 
             try {
                 $raw = Yaml::parseFile($file);
             } catch (ParseException $e) {
-                throw new CheckException("{$source}: " . $e->getMessage());
+                throw new CheckException("{$source}: ".$e->getMessage());
             }
-            if (!is_array($raw)) {
+            if (! is_array($raw)) {
                 throw new CheckException("{$source}: expected a mapping");
             }
 
             $check = HealthCheck::fromArray($raw, $group, $source);
             // The filename is the id: a check whose file and id disagree cannot
             // be found from a report that names it.
-            if ($check->id . '.yaml' !== $entry) {
+            if ($check->id.'.yaml' !== $entry) {
                 throw new CheckException("{$source}: file should be named {$check->id}.yaml");
             }
             $checks[] = $check;

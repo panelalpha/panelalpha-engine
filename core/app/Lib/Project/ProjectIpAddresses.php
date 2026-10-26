@@ -8,26 +8,27 @@ use App\Models\Ipv4NatMap;
 use App\Models\Setting;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Collection;
+use Symfony\Component\HttpFoundation\IpUtils;
+use Tests\Unit\UserIpAddressesTest;
 
 /**
  * The addresses a project answers on: its own dedicated IPs if it has any,
  * else the engine's defaults, translated through the NAT map when NAT mode
  * is on. Moved out of User as it was, dead branches included -- see
- * {@see \Tests\Unit\UserIpAddressesTest} for why they stay.
+ * {@see UserIpAddressesTest} for why they stay.
  */
 final class ProjectIpAddresses
 {
-    public function __construct(private readonly User $user)
-    {
-    }
+    public function __construct(private readonly User $user) {}
 
     public function dedicatedIpv4Enabled(): bool
     {
         $default = false;
         $details = $this->user->getDetails();
-        if (empty($details['dedicated_ipv4']) || !is_bool($details['dedicated_ipv4'])) {
+        if (empty($details['dedicated_ipv4']) || ! is_bool($details['dedicated_ipv4'])) {
             return $default;
         }
+
         return $details['dedicated_ipv4'];
     }
 
@@ -35,9 +36,10 @@ final class ProjectIpAddresses
     {
         $default = false;
         $details = $this->user->getDetails();
-        if (empty($details['dedicated_ipv6']) || !is_bool($details['dedicated_ipv6'])) {
+        if (empty($details['dedicated_ipv6']) || ! is_bool($details['dedicated_ipv6'])) {
             return $default;
         }
+
         return $details['dedicated_ipv6'];
     }
 
@@ -97,15 +99,16 @@ final class ProjectIpAddresses
             'ipv6' => [],
         ];
 
-        if (!empty(Setting::get('disable-user-ip-assign'))) {
+        if (! empty(Setting::get('disable-user-ip-assign'))) {
             return $ips;
         }
 
         $assigned = $this->user->getAssignedIpAddresses();
-        if (!empty($assigned)) {
+        if (! empty($assigned)) {
             foreach ($assigned as $ip) {
                 if (filter_var($ip->ip_address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
                     $ips['ipv6'][] = $ip->ip_address;
+
                     continue;
                 }
                 $ips['ipv4'][] = $ip->ip_address;
@@ -144,17 +147,17 @@ final class ProjectIpAddresses
             'ipv6' => [],
         ];
 
-        if (!empty(Setting::get('disable-user-ip-assign'))) {
+        if (! empty(Setting::get('disable-user-ip-assign'))) {
             return $ips;
         }
 
         $defaultIpv4 = Setting::get('default_ipv4');
-        if (!empty($defaultIpv4)) {
+        if (! empty($defaultIpv4)) {
             $ips['ipv4'][] = $defaultIpv4;
         }
 
         $defaultIpv6 = Setting::get('default_ipv6');
-        if (!empty($defaultIpv6)) {
+        if (! empty($defaultIpv6)) {
             $ips['ipv6'][] = $defaultIpv6;
         }
 
@@ -182,8 +185,8 @@ final class ProjectIpAddresses
     }
 
     /**
-     * @param array<string> $ips
-     * @param array<string, string> $map
+     * @param  array<string>  $ips
+     * @param  array<string, string>  $map
      * @return array<string>
      */
     private static function mapIps(array $ips, array $map): array
@@ -192,12 +195,13 @@ final class ProjectIpAddresses
         foreach ($ips as $ip) {
             $mapped[] = $map[$ip] ?? $ip;
         }
+
         return array_values(array_unique($mapped));
     }
 
     private function isBindableIpv4(string $ip): bool
     {
-        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+        if (! filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
             return false;
         }
 
@@ -230,7 +234,7 @@ final class ProjectIpAddresses
         ];
 
         foreach ($privateRanges as $range) {
-            if (\Symfony\Component\HttpFoundation\IpUtils::checkIp($ip, $range)) {
+            if (IpUtils::checkIp($ip, $range)) {
                 return true;
             }
         }
@@ -258,6 +262,7 @@ final class ProjectIpAddresses
                     'ip_subnet_id' => $subnet->id,
                     'ip_address' => $freeIp,
                 ]);
+
                 return true;
             }
         }
@@ -285,6 +290,7 @@ final class ProjectIpAddresses
                     'ip_subnet_id' => $subnet->id,
                     'ip_address' => $freeIp,
                 ]);
+
                 return true;
             }
         }

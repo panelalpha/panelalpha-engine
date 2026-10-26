@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Deployment;
 
+use App\Lib\Deploy\Platform\PlatformStage;
 use App\Models\User as ModelsUser;
 use Illuminate\Support\Facades\Log;
 
@@ -24,7 +25,7 @@ final class FailureRetention
 
     /**
      * A failed redeploy does not undo the install: the flag keeps the next
-     * deploy in the upgrade phase ({@see \App\Lib\Deploy\Platform\PlatformStage::phaseFor()}).
+     * deploy in the upgrade phase ({@see PlatformStage::phaseFor()}).
      *
      * @return array<string, mixed>
      */

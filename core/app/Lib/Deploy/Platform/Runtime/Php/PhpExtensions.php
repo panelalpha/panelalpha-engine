@@ -49,8 +49,7 @@ final class PhpExtensions
         private readonly ComposerManifest $composer,
         private readonly bool $artisan = true,
         private readonly bool $needsMysql = false
-    ) {
-    }
+    ) {}
 
     /**
      * @return list<string>
@@ -112,18 +111,18 @@ final class PhpExtensions
      * it. An `extensions:` list in the image catalogue has to drop these too,
      * or it describes a variant no deploy can ask for.
      *
-     * @param list<string> $names
+     * @param  list<string>  $names
      * @return list<string>
      */
     public static function installable(array $names): array
     {
         $out = [];
         foreach ($names as $name) {
-            if (!is_string($name)) {
+            if (! is_string($name)) {
                 continue;
             }
             $name = strtolower($name);
-            if (preg_match(self::NAME_PATTERN, $name) === 1 && !in_array($name, self::BUNDLED, true)) {
+            if (preg_match(self::NAME_PATTERN, $name) === 1 && ! in_array($name, self::BUNDLED, true)) {
                 $out[] = $name;
             }
         }
@@ -148,7 +147,7 @@ final class PhpExtensions
     }
 
     /**
-     * @param list<array<string, mixed>> $maps
+     * @param  list<array<string, mixed>>  $maps
      * @return list<string>
      */
     private function fromMaps(array $maps): array
@@ -168,11 +167,11 @@ final class PhpExtensions
 
     private static function extensionName(string $package): ?string
     {
-        if (!str_starts_with($package, self::PREFIX)) {
+        if (! str_starts_with($package, self::PREFIX)) {
             return null;
         }
         $name = strtolower(substr($package, strlen(self::PREFIX)));
-        $known = preg_match(self::NAME_PATTERN, $name) === 1 && !in_array($name, self::BUNDLED, true);
+        $known = preg_match(self::NAME_PATTERN, $name) === 1 && ! in_array($name, self::BUNDLED, true);
 
         return $known ? $name : null;
     }

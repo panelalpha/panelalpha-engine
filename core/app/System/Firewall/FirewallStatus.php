@@ -5,8 +5,8 @@ namespace App\System\Firewall;
 final class FirewallStatus
 {
     /**
-     * @param list<array{id: ?string, rule: string, error: string}> $refusedRules stored rules the
-     *        firewall would not load: `id` is the listed rule to delete, null when none is
+     * @param  list<array{id: ?string, rule: string, error: string}>  $refusedRules  stored rules the
+     *                                                                               firewall would not load: `id` is the listed rule to delete, null when none is
      */
     public function __construct(
         public readonly string $provider,
@@ -16,8 +16,7 @@ final class FirewallStatus
         public readonly ?string $defaultOutgoing = null,
         public readonly ?string $error = null,
         public readonly array $refusedRules = [],
-    ) {
-    }
+    ) {}
 
     /**
      * @return array{provider: string, enabled: ?bool, version: ?string, default_incoming: ?string, default_outgoing: ?string, error: ?string, refused_rules: list<array{id: ?string, rule: string, error: string}>}

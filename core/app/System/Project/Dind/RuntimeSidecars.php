@@ -2,15 +2,15 @@
 
 namespace App\System\Project\Dind;
 
-use App\System\Project\Dind as DindProject;
-use App\Lib\Deploy\Compose\ComposeHarden;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
-use App\Lib\Deploy\Compose\RuntimeSidecars as ComposeSidecars;
+use App\Lib\Deploy\Compose\ComposeHarden;
 use App\Lib\Deploy\Compose\GeneratedCompose;
+use App\Lib\Deploy\Compose\RuntimeSidecars as ComposeSidecars;
 use App\Lib\Deploy\Compose\ServiceDependencies;
 use App\Lib\Deploy\Sidecar\EnvSidecars;
 use App\Lib\Deploy\Sidecar\SidecarPasswords;
 use App\Lib\Deploy\Source\GitUrl;
+use App\System\Project\Dind as DindProject;
 
 /**
  * Backing services (databases, caches) a repo implies but does not run itself
@@ -43,9 +43,9 @@ class RuntimeSidecars
     public function runtimeSidecarsFromProject(string $projectDir): array
     {
         foreach (Paths::composeFileCandidates() as $candidate) {
-            $path = $projectDir . '/' . $candidate;
+            $path = $projectDir.'/'.$candidate;
             $raw = $this->dind->projectTree()->read($path);
-            if ($raw === null || !ComposeFileInspector::isLocalDevComposeYaml($raw)) {
+            if ($raw === null || ! ComposeFileInspector::isLocalDevComposeYaml($raw)) {
                 continue;
             }
             // The repo says what production runs beside the app: that beats
@@ -121,14 +121,14 @@ class RuntimeSidecars
      * The first template of $candidates that yields a backing service, read
      * for its datastores only.
      *
-     * @param list<string> $candidates
+     * @param  list<string>  $candidates
      * @return array{services: array<string, array<string, mixed>>, volumes: array<string, mixed>, env: array<string, string>}|null
      */
     private function fromTemplates(string $projectDir, array $candidates, string $note = ''): ?array
     {
         $rootBuildNames = $this->rootBuildNames($projectDir);
         foreach ($candidates as $candidate) {
-            $raw = $this->dind->projectTree()->read($projectDir . '/' . $candidate);
+            $raw = $this->dind->projectTree()->read($projectDir.'/'.$candidate);
             if ($raw === null) {
                 continue;
             }
@@ -167,7 +167,7 @@ class RuntimeSidecars
      * every deploy of this repository the same thing an attacker can already
      * read from it.
      *
-     * @param array<string, list<string>> $byService
+     * @param  array<string, list<string>>  $byService
      */
     private function warnOfPublishedSecrets(array $byService): void
     {
@@ -180,7 +180,7 @@ class RuntimeSidecars
     }
 
     /**
-     * @param array{dropped_proxies?: list<string>} $extracted
+     * @param  array{dropped_proxies?: list<string>}  $extracted
      */
     private function logDroppedProxies(array $extracted): void
     {
@@ -190,7 +190,7 @@ class RuntimeSidecars
     }
 
     /**
-     * @param array{dropped_test_services?: list<string>, dropped_test_matrix?: array{engines: int, databases?: list<string>, services: list<string>}|null} $extracted
+     * @param  array{dropped_test_services?: list<string>, dropped_test_matrix?: array{engines: int, databases?: list<string>, services: list<string>}|null}  $extracted
      */
     private static function droppedATestSuite(array $extracted): bool
     {
@@ -198,13 +198,13 @@ class RuntimeSidecars
     }
 
     /**
-     * @param array{dropped_test_services?: list<string>, dropped_test_matrix?: array{engines: int, databases?: list<string>, services: list<string>}|null} $extracted
+     * @param  array{dropped_test_services?: list<string>, dropped_test_matrix?: array{engines: int, databases?: list<string>, services: list<string>}|null}  $extracted
      */
     private function logDroppedTestServices(array $extracted, string $file): void
     {
         $names = $extracted['dropped_test_services'] ?? [];
         if ($names !== []) {
-            $this->dind->shell()->logger()?->info('Dropped test-suite services: ' . implode(', ', $names));
+            $this->dind->shell()->logger()?->info('Dropped test-suite services: '.implode(', ', $names));
         }
         $matrix = $extracted['dropped_test_matrix'] ?? null;
         if ($matrix !== null) {
@@ -215,24 +215,24 @@ class RuntimeSidecars
     /**
      * The count is of the databases listed; what went with them is listed apart.
      *
-     * @param array{engines: int, databases?: list<string>, services: list<string>} $matrix
+     * @param  array{engines: int, databases?: list<string>, services: list<string>}  $matrix
      */
     public static function droppedTestMatrixLine(array $matrix, string $file): string
     {
         $databases = $matrix['databases'] ?? $matrix['services'];
         $others = array_values(array_diff($matrix['services'], $databases));
-        $line = "Dropped a test matrix from {$file} (" . count($databases) . ' SQL engines, none configured): ' . implode(', ', $databases);
+        $line = "Dropped a test matrix from {$file} (".count($databases).' SQL engines, none configured): '.implode(', ', $databases);
 
-        return $others === [] ? $line : $line . '; with them: ' . implode(', ', $others);
+        return $others === [] ? $line : $line.'; with them: '.implode(', ', $others);
     }
 
     /**
-     * @param array{hardening_removed?: list<string>} $extracted
+     * @param  array{hardening_removed?: list<string>}  $extracted
      */
     private function logHardeningRemovals(array $extracted): void
     {
         foreach ($extracted['hardening_removed'] ?? [] as $what) {
-            $this->dind->shell()->logger()?->warn(ComposeHarden::REMOVED_SOURCE . ": {$what}");
+            $this->dind->shell()->logger()?->warn(ComposeHarden::REMOVED_SOURCE.": {$what}");
         }
     }
 
@@ -254,7 +254,7 @@ class RuntimeSidecars
      * The words between `compose` and the extension that are in $words:
      * `docker-compose.local-dev.yml` gives `local`, `dev`.
      *
-     * @param list<string> $words
+     * @param  list<string>  $words
      * @return list<string>
      */
     private static function suffixWords(string $filename, array $words): array
@@ -277,7 +277,7 @@ class RuntimeSidecars
      */
     private static function exampleComposeFilenames(string $projectDir = ''): array
     {
-        if (defined(ComposeFileInspector::class . '::COMPOSE_EXAMPLE_CANDIDATES')) {
+        if (defined(ComposeFileInspector::class.'::COMPOSE_EXAMPLE_CANDIDATES')) {
             /** @var list<string> $names */
             $names = ComposeFileInspector::COMPOSE_EXAMPLE_CANDIDATES;
         } else {
@@ -302,7 +302,7 @@ class RuntimeSidecars
         if ($projectDir !== '' && is_dir($projectDir)) {
             $found = [];
             foreach (['docker-compose.*.yml', 'docker-compose.*.yaml', 'compose.*.yml', 'compose.*.yaml'] as $pattern) {
-                foreach (glob($projectDir . '/' . $pattern) ?: [] as $path) {
+                foreach (glob($projectDir.'/'.$pattern) ?: [] as $path) {
                     $base = basename($path);
                     if (in_array($base, Paths::composeFileCandidates(), true)) {
                         continue;
@@ -333,7 +333,7 @@ class RuntimeSidecars
     }
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      * @param array{
      *   services: array<string, array<string, mixed>>,
      *   volumes: array<string, mixed>,
@@ -372,7 +372,7 @@ class RuntimeSidecars
         // sidecar with the credentials it runs with: it carries the driver the
         // app ships (CTFd's mysql+pymysql://), which the generic one drops.
         foreach (self::urlsToKeptSidecars($sidecars['app_env'] ?? [], array_keys($sidecars['services'])) as $key => $url) {
-            if (isset($sidecars['env'][$key]) && !isset($generated[$key])
+            if (isset($sidecars['env'][$key]) && ! isset($generated[$key])
                 && self::sameCredentials($url, $sidecars['env'][$key])
             ) {
                 $decision['env'][$key] = $url;
@@ -395,8 +395,8 @@ class RuntimeSidecars
     }
 
     /**
-     * @param array<string, string> $env
-     * @param list<int|string> $services
+     * @param  array<string, string>  $env
+     * @param  list<int|string>  $services
      * @return array<string, string>
      */
     private static function urlsToKeptSidecars(array $env, array $services): array
@@ -417,7 +417,7 @@ class RuntimeSidecars
      * A sidecar under the generated app's own name makes `app -> app`. The
      * extractor renames genuine ones, so one still here is the app itself.
      *
-     * @param array{services: array<string, array<string, mixed>>, volumes: array<string, mixed>, env: array<string, string>} $sidecars
+     * @param  array{services: array<string, array<string, mixed>>, volumes: array<string, mixed>, env: array<string, string>}  $sidecars
      * @return array{services: array<string, array<string, mixed>>, volumes: array<string, mixed>, env: array<string, string>}
      */
     private function withoutAppService(array $sidecars): array
@@ -486,7 +486,6 @@ class RuntimeSidecars
         return $this->dind->strategy()->secrets()->for('compose-placeholders');
     }
 
-
     /**
      * The account's own memory ceiling, so a project the operator has raised
      * gets services sized to match. Null when none is set.
@@ -519,7 +518,7 @@ class RuntimeSidecars
     {
         $names = [];
         foreach (array_unique([...Paths::composeFileCandidates(), ...self::exampleComposeFilenames($projectDir)]) as $candidate) {
-            $raw = $this->dind->projectTree()->read($projectDir . '/' . $candidate);
+            $raw = $this->dind->projectTree()->read($projectDir.'/'.$candidate);
             if ($raw !== null) {
                 $names = [...$names, ...ComposeSidecars::rootBuildServiceNames($raw)];
             }
@@ -543,7 +542,7 @@ class RuntimeSidecars
             if ($image === '') {
                 return [];
             }
-            if (!array_key_exists($image, $seen)) {
+            if (! array_key_exists($image, $seen)) {
                 $seen[$image] = $inner->declaredImagePorts($image);
             }
 

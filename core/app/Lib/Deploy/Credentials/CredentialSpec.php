@@ -13,7 +13,9 @@ use App\Lib\Deploy\Platform\ManifestException;
 final class CredentialSpec
 {
     public const KIND_USERNAME = 'username';
+
     public const KIND_EMAIL = 'email';
+
     public const KIND_PASSWORD = 'password';
 
     public const KINDS = [self::KIND_USERNAME, self::KIND_EMAIL, self::KIND_PASSWORD];
@@ -40,17 +42,17 @@ final class CredentialSpec
     public const PLACEHOLDERS = ['{random}', '{host}', '{email}'];
 
     /**
-     * @param array<string, array{kind: string, value: ?string, symbol: bool}> $fields
+     * @param  array<string, array{kind: string, value: ?string, symbol: bool}>  $fields
      */
     private function __construct(
         public readonly array $fields,
         public readonly ?string $loginPath,
         public readonly ?string $adoptFrom,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param \Closure(string): ManifestException $fail builds the error, naming the manifest
+     * @param  \Closure(string): ManifestException  $fail  builds the error, naming the manifest
+     *
      * @throws ManifestException
      */
     public static function parse(mixed $raw, \Closure $fail): ?self
@@ -58,16 +60,16 @@ final class CredentialSpec
         if ($raw === null) {
             return null;
         }
-        if (!is_array($raw) || array_is_list($raw)) {
+        if (! is_array($raw) || array_is_list($raw)) {
             throw $fail('credentials must be a mapping with `fields`');
         }
         $unknown = array_diff(array_keys($raw), self::KEYS);
         if ($unknown !== []) {
-            throw $fail('credentials: unknown key(s) ' . implode(', ', $unknown) . '; expected ' . implode(', ', self::KEYS));
+            throw $fail('credentials: unknown key(s) '.implode(', ', $unknown).'; expected '.implode(', ', self::KEYS));
         }
 
         $declared = $raw['fields'] ?? null;
-        if (!is_array($declared) || $declared === [] || array_is_list($declared)) {
+        if (! is_array($declared) || $declared === [] || array_is_list($declared)) {
             throw $fail('credentials.fields must be a non-empty mapping of env name => field');
         }
         $fields = [];
@@ -81,11 +83,11 @@ final class CredentialSpec
     /**
      * Back from the decision array a manifest describes itself as.
      *
-     * @param array<string, mixed>|null $array
+     * @param  array<string, mixed>|null  $array
      */
     public static function fromArray(?array $array): ?self
     {
-        if ($array === null || !is_array($array['fields'] ?? null) || $array['fields'] === []) {
+        if ($array === null || ! is_array($array['fields'] ?? null) || $array['fields'] === []) {
             return null;
         }
 
@@ -107,7 +109,7 @@ final class CredentialSpec
     }
 
     /**
-     * @param \Closure(string): ManifestException $fail
+     * @param  \Closure(string): ManifestException  $fail
      * @return array{kind: string, value: ?string, symbol: bool}
      */
     private static function parseField(string $name, mixed $field, \Closure $fail): array
@@ -115,32 +117,32 @@ final class CredentialSpec
         if (preg_match(self::ENV_NAME, $name) !== 1) {
             throw $fail("credentials.fields: '{$name}' is not a valid environment variable name");
         }
-        if (!is_array($field) || array_is_list($field)) {
+        if (! is_array($field) || array_is_list($field)) {
             throw $fail("credentials.fields.{$name} must be a mapping with a `kind`");
         }
         $unknown = array_diff(array_keys($field), self::FIELD_KEYS);
         if ($unknown !== []) {
-            throw $fail("credentials.fields.{$name}: unknown key(s) " . implode(', ', $unknown));
+            throw $fail("credentials.fields.{$name}: unknown key(s) ".implode(', ', $unknown));
         }
         $kind = $field['kind'] ?? null;
-        if (!is_string($kind) || !in_array($kind, self::KINDS, true)) {
-            throw $fail("credentials.fields.{$name}.kind must be one of " . implode(', ', self::KINDS));
+        if (! is_string($kind) || ! in_array($kind, self::KINDS, true)) {
+            throw $fail("credentials.fields.{$name}.kind must be one of ".implode(', ', self::KINDS));
         }
 
         $value = $field['value'] ?? null;
         if ($value !== null && $kind === self::KIND_PASSWORD) {
             throw $fail("credentials.fields.{$name}: a password is generated, it cannot declare a value");
         }
-        if ($value !== null && (!is_string($value)
+        if ($value !== null && (! is_string($value)
             || preg_match(self::LITERAL, str_replace(self::PLACEHOLDERS, 'x', $value)) !== 1)) {
             throw $fail(
                 "credentials.fields.{$name}.value must be a non-empty string of letters, digits and @._+-"
-                . ', optionally with ' . implode(' / ', self::PLACEHOLDERS)
+                .', optionally with '.implode(' / ', self::PLACEHOLDERS)
             );
         }
 
         $symbol = $field['symbol'] ?? false;
-        if (!is_bool($symbol)) {
+        if (! is_bool($symbol)) {
             throw $fail("credentials.fields.{$name}.symbol must be true or false");
         }
         if ($symbol && $kind !== self::KIND_PASSWORD) {
@@ -156,7 +158,7 @@ final class CredentialSpec
         if ($raw === null) {
             return null;
         }
-        if (!is_string($raw) || !str_starts_with($raw, '/') || preg_match('/\s/', $raw) === 1) {
+        if (! is_string($raw) || ! str_starts_with($raw, '/') || preg_match('/\s/', $raw) === 1) {
             throw $fail('credentials.login_path must be a path starting with /');
         }
 
@@ -166,7 +168,7 @@ final class CredentialSpec
     /**
      * Relative to the account home, and never out of it: the file is read as root.
      *
-     * @param \Closure(string): ManifestException $fail
+     * @param  \Closure(string): ManifestException  $fail
      */
     private static function adoptFrom(mixed $raw, \Closure $fail): ?string
     {
@@ -174,9 +176,9 @@ final class CredentialSpec
             return null;
         }
         $segments = is_string($raw) ? explode('/', trim($raw)) : [];
-        $valid = is_string($raw) && !str_starts_with(trim($raw), '/') && $segments !== []
+        $valid = is_string($raw) && ! str_starts_with(trim($raw), '/') && $segments !== []
             && array_filter($segments, static fn (string $s): bool => $s === '' || $s === '.' || $s === '..') === [];
-        if (!$valid) {
+        if (! $valid) {
             throw $fail('credentials.adopt_from must be a relative path inside the account home');
         }
 

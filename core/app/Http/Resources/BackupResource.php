@@ -39,7 +39,7 @@ class BackupResource extends JsonResource
 
     private function sizeBytes(BackupRecord $backup): int
     {
-        if (!$backup->relationLoaded('items')) {
+        if (! $backup->relationLoaded('items')) {
             return 0;
         }
 

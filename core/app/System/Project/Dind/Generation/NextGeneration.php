@@ -24,20 +24,19 @@ final class NextGeneration
     private const GENERATED_LABEL = 'panelalpha.generated';
 
     /**
-     * @param array<string, mixed> $config
-     * @param array<int, int> $ports published port => container port
+     * @param  array<string, mixed>  $config
+     * @param  array<int, int>  $ports  published port => container port
      */
     private function __construct(
         public readonly string $project,
         public readonly string $service,
         public readonly array $ports,
         private readonly array $config,
-    ) {
-    }
+    ) {}
 
     public static function projectNameFor(string $project): string
     {
-        return $project . self::PROJECT_SUFFIX;
+        return $project.self::PROJECT_SUFFIX;
     }
 
     public function projectName(): string
@@ -48,7 +47,7 @@ final class NextGeneration
     /**
      * Or why two copies of the service publishing $routedPort cannot run side by side.
      *
-     * @param array<string, mixed> $config `docker compose config --format json`
+     * @param  array<string, mixed>  $config  `docker compose config --format json`
      */
     public static function plan(array $config, int $routedPort, bool $repositoryCompose): self|string
     {
@@ -70,10 +69,10 @@ final class NextGeneration
         }
 
         $service = $services[$name];
-        if (!empty($service['network_mode'])) {
+        if (! empty($service['network_mode'])) {
             return "{$name} shares another network namespace (network_mode: {$service['network_mode']})";
         }
-        if (!empty($service['container_name'])) {
+        if (! empty($service['container_name'])) {
             return "{$name} names its container ({$service['container_name']}), and a name exists only once";
         }
         foreach (is_array($service['ports'] ?? null) ? $service['ports'] : [] as $port) {
@@ -82,8 +81,8 @@ final class NextGeneration
             }
         }
         if ($repositoryCompose && count($services) > 1) {
-            return 'the repository\'s compose file runs ' . count($services)
-                . ' services, and only a single-service stack is started twice';
+            return 'the repository\'s compose file runs '.count($services)
+                .' services, and only a single-service stack is started twice';
         }
 
         return new self($project, $name, self::published($service), $config);
@@ -99,7 +98,7 @@ final class NextGeneration
         $root = rtrim($projectDir, '/');
         $names = [];
         foreach (is_array($this->config['services'] ?? null) ? $this->config['services'] : [] as $name => $service) {
-            if (!is_array($service)) {
+            if (! is_array($service)) {
                 continue;
             }
             $label = (string) ($service['labels'][self::GENERATED_LABEL] ?? '');
@@ -127,7 +126,7 @@ final class NextGeneration
             $override['build'] = new TaggedValue('reset', null);
             $override['image'] = is_string($service['image'] ?? null) && $service['image'] !== ''
                 ? $service['image']
-                : $this->project . '-' . $this->service;
+                : $this->project.'-'.$this->service;
         }
 
         $compose = ['services' => [$this->service => $override]];
@@ -158,11 +157,11 @@ final class NextGeneration
     {
         $name = $this->config[$kind][$key]['name'] ?? null;
 
-        return is_string($name) && $name !== '' ? $name : $this->project . '_' . $key;
+        return is_string($name) && $name !== '' ? $name : $this->project.'_'.$key;
     }
 
     /**
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return array<int, int>
      */
     private static function published(array $service): array
@@ -179,14 +178,14 @@ final class NextGeneration
     }
 
     /**
-     * @param array<string, mixed> $port one long-syntax entry from `compose config`
+     * @param  array<string, mixed>  $port  one long-syntax entry from `compose config`
      * @return ?array{0: int, 1: int}
      */
     private static function singleTcp(array $port): ?array
     {
         $published = (string) ($port['published'] ?? '');
         $target = $port['target'] ?? null;
-        if (strtolower((string) ($port['protocol'] ?? 'tcp')) !== 'tcp' || !ctype_digit($published) || !is_int($target)) {
+        if (strtolower((string) ($port['protocol'] ?? 'tcp')) !== 'tcp' || ! ctype_digit($published) || ! is_int($target)) {
             return null;
         }
 
@@ -194,13 +193,13 @@ final class NextGeneration
     }
 
     /**
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     private static function bindsUnder(array $service, string $root): bool
     {
         foreach (is_array($service['volumes'] ?? null) ? $service['volumes'] : [] as $volume) {
             $source = is_array($volume) && ($volume['type'] ?? null) === 'bind' ? rtrim((string) ($volume['source'] ?? ''), '/') : '';
-            if ($source !== '' && ($source === $root || str_starts_with($source, $root . '/'))) {
+            if ($source !== '' && ($source === $root || str_starts_with($source, $root.'/'))) {
                 return true;
             }
         }

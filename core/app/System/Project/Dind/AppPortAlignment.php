@@ -25,17 +25,16 @@ final class AppPortAlignment
     private const MAX_PROBED = 3;
 
     /**
-     * @param (\Closure(int): void)|null $sleep
+     * @param  (\Closure(int): void)|null  $sleep
      */
     public function __construct(
         private DindProject $project,
         private ?\Closure $sleep = null,
-    ) {
-    }
+    ) {}
 
     public function alignIfNeeded(): void
     {
-        if (!$this->realign(null)) {
+        if (! $this->realign(null)) {
             return;
         }
         try {
@@ -45,7 +44,7 @@ final class AppPortAlignment
                 300
             );
         } catch (\Exception $e) {
-            Log::warning('Could not align the published app port: ' . $e->getMessage());
+            Log::warning('Could not align the published app port: '.$e->getMessage());
         }
     }
 
@@ -54,7 +53,7 @@ final class AppPortAlignment
      * app; the caller starts the copy again. True when the run file changed.
      * The wait ends early once $stopped() says the copy no longer runs.
      *
-     * @param (\Closure(): bool)|null $stopped
+     * @param  (\Closure(): bool)|null  $stopped
      */
     public function alignTo(string $container, ?\Closure $stopped = null): bool
     {
@@ -78,11 +77,11 @@ final class AppPortAlignment
                 return false;
             }
             $parsed = Yaml::parse($raw);
-            if (!is_array($parsed) || !isset($parsed['services']['app']['ports'])) {
+            if (! is_array($parsed) || ! isset($parsed['services']['app']['ports'])) {
                 return false;
             }
             $ports = $parsed['services']['app']['ports'];
-            if (!is_array($ports) || !isset($ports[0]) || !is_string($ports[0])) {
+            if (! is_array($ports) || ! isset($ports[0]) || ! is_string($ports[0])) {
                 return false;
             }
             $mapping = PublishedPort::parse($ports[0]);
@@ -109,9 +108,9 @@ final class AppPortAlignment
                 $probed = array_slice($candidates, 0, self::MAX_PROBED);
                 $listed = implode(', ', $probed);
                 $logger?->warn(
-                    'Application is listening on port' . (count($probed) > 1 ? 's' : '') . " {$listed}, not {$mapping->container}, but "
-                        . (count($probed) > 1 ? 'none of them answers' : "{$listed} does not answer")
-                        . " HTTP; still forwarding to {$mapping->container}"
+                    'Application is listening on port'.(count($probed) > 1 ? 's' : '')." {$listed}, not {$mapping->container}, but "
+                        .(count($probed) > 1 ? 'none of them answers' : "{$listed} does not answer")
+                        ." HTTP; still forwarding to {$mapping->container}"
                 );
 
                 return false;
@@ -135,14 +134,14 @@ final class AppPortAlignment
 
             return true;
         } catch (\Exception $e) {
-            Log::warning('Could not align the published app port: ' . $e->getMessage());
+            Log::warning('Could not align the published app port: '.$e->getMessage());
 
             return false;
         }
     }
 
     /**
-     * @param list<int> $declared
+     * @param  list<int>  $declared
      * @return list<int>
      */
     private function settledCandidates(int $expected, array $declared, ?string $container, ?\Closure $stopped): array
@@ -154,8 +153,8 @@ final class AppPortAlignment
      * The first candidate whose probe did not rule HTTP out, trying at most
      * {@see MAX_PROBED}; null when every one tried answered nothing.
      *
-     * @param list<int> $candidates best first
-     * @param callable(int): ?bool $answersHttp null when the probe could not run
+     * @param  list<int>  $candidates  best first
+     * @param  callable(int): ?bool  $answersHttp  null when the probe could not run
      */
     public static function firstAnsweringHttp(array $candidates, callable $answersHttp): ?int
     {
@@ -186,12 +185,12 @@ final class AppPortAlignment
     private function containerIdLine(?string $container): string
     {
         if ($container !== null) {
-            return 'cid=' . escapeshellarg($container);
+            return 'cid='.escapeshellarg($container);
         }
         $composeFile = escapeshellarg($this->project->userAppComposeFileToRun());
         $projectDir = escapeshellarg($this->project->userAppDirPath());
 
-        return 'cid=$(' . $this->envFilesAssignment() . "docker compose --project-directory {$projectDir} -f {$composeFile} ps -q app 2>/dev/null | head -1)";
+        return 'cid=$('.$this->envFilesAssignment()."docker compose --project-directory {$projectDir} -f {$composeFile} ps -q app 2>/dev/null | head -1)";
     }
 
     /** `COMPOSE_ENV_FILES=… ` for a script's bare compose call, or '' when compose's default `.env` is all there is. */
@@ -199,7 +198,7 @@ final class AppPortAlignment
     {
         $files = $this->project->userAppComposeEnv()['COMPOSE_ENV_FILES'] ?? null;
 
-        return $files === null ? '' : 'COMPOSE_ENV_FILES=' . escapeshellarg($files) . ' ';
+        return $files === null ? '' : 'COMPOSE_ENV_FILES='.escapeshellarg($files).' ';
     }
 
     /** The status the app container answers on $port, over http then https; '' when it cannot be asked. */
@@ -228,7 +227,7 @@ SH;
     /**
      * The TCP ports the built Dockerfile EXPOSEs.
      *
-     * @param mixed $build the app service's `build:` value
+     * @param  mixed  $build  the app service's `build:` value
      * @return list<int>
      */
     private function declaredPorts(string $composeDir, $build): array
@@ -236,13 +235,13 @@ SH;
         if (is_string($build)) {
             $build = ['context' => $build];
         }
-        if (!is_array($build)) {
+        if (! is_array($build)) {
             return [];
         }
         $context = is_string($build['context'] ?? null) ? $build['context'] : '.';
         $dockerfile = is_string($build['dockerfile'] ?? null) ? $build['dockerfile'] : 'Dockerfile';
         $contents = $this->project->projectTree()->read(
-            $composeDir . '/' . trim($context, '/') . '/' . ltrim($dockerfile, '/')
+            $composeDir.'/'.trim($context, '/').'/'.ltrim($dockerfile, '/')
         );
 
         return $contents === null ? [] : DockerfileFinder::exposedPortsIn($contents);
@@ -253,9 +252,9 @@ SH;
      * is the last candidate seen the answer. MeTube binds a helper on 4416
      * before its server on 8081, so the first unexpected port is not it.
      *
-     * @param callable(): list<array{addr: string, port: int}> $sockets
-     * @param (callable(int): void)|null $sleep
-     * @param list<int> $declared ports the Dockerfile EXPOSEs
+     * @param  callable(): list<array{addr: string, port: int}>  $sockets
+     * @param  (callable(int): void)|null  $sleep
+     * @param  list<int>  $declared  ports the Dockerfile EXPOSEs
      */
     public static function awaitPort(int $expected, callable $sockets, ?callable $sleep = null, array $declared = []): ?int
     {
@@ -266,10 +265,10 @@ SH;
      * {@see awaitPort()}, with every candidate of the last poll that saw one,
      * best first; none once $stopped() says the container stopped running.
      *
-     * @param callable(): list<array{addr: string, port: int}> $sockets
-     * @param (callable(int): void)|null $sleep
-     * @param list<int> $declared
-     * @param (callable(): bool)|null $stopped
+     * @param  callable(): list<array{addr: string, port: int}>  $sockets
+     * @param  (callable(int): void)|null  $sleep
+     * @param  list<int>  $declared
+     * @param  (callable(): bool)|null  $stopped
      * @return list<int>
      */
     public static function awaitCandidates(int $expected, callable $sockets, ?callable $sleep = null, array $declared = [], ?callable $stopped = null): array

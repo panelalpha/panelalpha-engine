@@ -28,7 +28,9 @@ use Illuminate\Support\Collection;
  * @property int $user_id
  * @property string $provider
  * @property string $hostname
+ *
  * @psalm-property ?TunnelDetails $details
+ *
  * @property Carbon $created_at
  * @property Carbon $updated_at
  * @property ?Domain $domain
@@ -137,7 +139,7 @@ class Tunnel extends Model
     public function expiresAt(): ?Carbon
     {
         $raw = $this->getDetails()['expires_at'] ?? null;
-        if (!is_string($raw) || trim($raw) === '') {
+        if (! is_string($raw) || trim($raw) === '') {
             return null;
         }
 
@@ -152,7 +154,7 @@ class Tunnel extends Model
     {
         $expiresAt = $this->expiresAt();
 
-        return $expiresAt !== null && !$expiresAt->isAfter($now ?? Carbon::now());
+        return $expiresAt !== null && ! $expiresAt->isAfter($now ?? Carbon::now());
     }
 
     /**

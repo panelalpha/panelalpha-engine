@@ -3,6 +3,7 @@
 namespace App\Lib\Deploy\Engine;
 
 use App\Lib\Deploy\Platform\Runtime\Php\PhpHostBuild;
+use App\System;
 
 /**
  * Throwaway build containers on the **host**, working on an account's
@@ -17,22 +18,22 @@ use App\Lib\Deploy\Platform\Runtime\Php\PhpHostBuild;
  * new privileges with all capabilities dropped, bounded memory and pids, and a
  * project directory that is exactly the account's own ~/project.
  *
- * Every method returns argv for {@see \App\System} to run on the host.
+ * Every method returns argv for {@see System} to run on the host.
  */
 interface HostBuilder
 {
     /**
      * Run $install then $build for the account's JS project in $image.
      *
-     * @param string $image compiler image the recipe picked (Node or bun)
-     * @param array<string, string|int> $env extra environment the recipe asked
-     *        for (NITRO_PRESET, NODE_ENV, …); keys that are not plain
-     *        SHOUTING_CASE are dropped
-     * @param bool $isolateNodeModules keep node_modules in the host cache
-     *        instead of leaving it in the account's ~/project. False only for
-     *        a standalone Node runtime, which has to serve the tree it built.
-     * @param string $appRoot application subtree the build runs in, '' for
-     *        the checkout root
+     * @param  string  $image  compiler image the recipe picked (Node or bun)
+     * @param  array<string, string|int>  $env  extra environment the recipe asked
+     *                                          for (NITRO_PRESET, NODE_ENV, …); keys that are not plain
+     *                                          SHOUTING_CASE are dropped
+     * @param  bool  $isolateNodeModules  keep node_modules in the host cache
+     *                                    instead of leaving it in the account's ~/project. False only for
+     *                                    a standalone Node runtime, which has to serve the tree it built.
+     * @param  string  $appRoot  application subtree the build runs in, '' for
+     *                           the checkout root
      * @return list<string>
      */
     public function nodeBuildArgv(
@@ -54,13 +55,13 @@ interface HostBuilder
      * here and writes `vendor/` into ~/project, which *is* the document root:
      * the running container picks it up without a restart.
      *
-     * @param string $image the shared PHP base assigned to this account
-     * @param string $script build steps, already ordered
-     * @param string $appRoot application subtree inside the repository, '' when
-     *        they are the same
-     * @param ?string $manifest a manifest for Composer to resolve from
-     *        instead of composer.json, exported as COMPOSER; see
-     *        {@see PhpHostBuild::runtimeManifest()}
+     * @param  string  $image  the shared PHP base assigned to this account
+     * @param  string  $script  build steps, already ordered
+     * @param  string  $appRoot  application subtree inside the repository, '' when
+     *                           they are the same
+     * @param  ?string  $manifest  a manifest for Composer to resolve from
+     *                             instead of composer.json, exported as COMPOSER; see
+     *                             {@see PhpHostBuild::runtimeManifest()}
      * @return list<string>
      */
     public function phpBuildArgv(

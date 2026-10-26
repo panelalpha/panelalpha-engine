@@ -27,7 +27,7 @@ class ListRequest extends FormRequest
         return [
             'path' => 'string|required',
             'show_hidden' => 'sometimes|boolean',
-            'limit' => 'sometimes|integer|min:1|max:' . FileManager::LIST_MAX_LIMIT,
+            'limit' => 'sometimes|integer|min:1|max:'.FileManager::LIST_MAX_LIMIT,
         ];
     }
 }

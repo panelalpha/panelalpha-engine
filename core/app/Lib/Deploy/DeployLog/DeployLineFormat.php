@@ -33,12 +33,12 @@ final class DeployLineFormat
     /**
      * Null when the line is not to be shown at this verbosity.
      *
-     * @param array{ts?: int, level?: string, msg?: string} $line
+     * @param  array{ts?: int, level?: string, msg?: string}  $line
      */
     public static function line(array $line, int $startedAt, bool $verbose = false): ?string
     {
         $level = (string) ($line['level'] ?? DeployLogger::LEVEL_DIM);
-        if ($level === DeployLogger::LEVEL_DIM && !$verbose) {
+        if ($level === DeployLogger::LEVEL_DIM && ! $verbose) {
             return null;
         }
 

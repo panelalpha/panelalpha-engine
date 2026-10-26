@@ -24,15 +24,13 @@ final class CheckoutAside
 
     /** Asks dockerd first, so a daemon not up yet is not read as every container stopped. */
     private const RUNNING_SCRIPT = 'docker version >/dev/null 2>&1 || { echo "docker is not answering" >&2; exit 1; }; '
-        . 'for id in "$@"; do docker inspect --format "{{.State.Running}}" "$id" 2>/dev/null || echo gone; done';
+        .'for id in "$@"; do docker inspect --format "{{.State.Running}}" "$id" 2>/dev/null || echo gone; done';
 
-    public function __construct(private readonly DindProject $project)
-    {
-    }
+    public function __construct(private readonly DindProject $project) {}
 
     public function asidePath(): string
     {
-        return rtrim($this->project->homeDirPath(), '/') . '/' . self::DIR;
+        return rtrim($this->project->homeDirPath(), '/').'/'.self::DIR;
     }
 
     /**
@@ -40,7 +38,7 @@ final class CheckoutAside
      * a container reads the checkout through a bind mount. False when it
      * could not, and the caller goes on as before.
      *
-     * @param list<string> $containers the project's running containers
+     * @param  list<string>  $containers  the project's running containers
      */
     public function moveAside(array $containers, bool $copyBack, bool $binds = true): bool
     {
@@ -52,11 +50,11 @@ final class CheckoutAside
 
         $aside = $this->asidePath();
         $records = $this->branchRecords();
-        if (!$this->recordBeforeMove($state, $aside, $containers, $binds, $copyBack, $records) || !$this->moveTree($state, $aside)) {
+        if (! $this->recordBeforeMove($state, $aside, $containers, $binds, $copyBack, $records) || ! $this->moveTree($state, $aside)) {
             return false;
         }
 
-        return !$copyBack || $this->copyBack($state, $aside);
+        return ! $copyBack || $this->copyBack($state, $aside);
     }
 
     /**
@@ -65,11 +63,11 @@ final class CheckoutAside
      */
     private function strandedCheckoutInTheWay(): bool
     {
-        if (!$this->asideExists() || $this->reconcileStranded() === 'restored') {
+        if (! $this->asideExists() || $this->reconcileStranded() === 'restored') {
             return false;
         }
-        Log::warning("Leaving a checkout of {$this->project->username()} aside: ~/" . self::DIR
-            . ' exists with no record naming it, and ~/project already does');
+        Log::warning("Leaving a checkout of {$this->project->username()} aside: ~/".self::DIR
+            .' exists with no record naming it, and ~/project already does');
 
         return true;
     }
@@ -77,8 +75,8 @@ final class CheckoutAside
     /**
      * Recorded before the move: a process killed between the two must not leave a tree aside that nothing names.
      *
-     * @param list<string> $containers
-     * @param array{git_branch: mixed, branch: mixed} $records
+     * @param  list<string>  $containers
+     * @param  array{git_branch: mixed, branch: mixed}  $records
      */
     private function recordBeforeMove(GenerationState $state, string $aside, array $containers, bool $binds, bool $copyBack, array $records): bool
     {
@@ -92,7 +90,7 @@ final class CheckoutAside
                 'owner' => GenerationState::owner(),
             ]);
         } catch (\Throwable $e) {
-            Log::warning("Could not record the checkout of {$this->project->username()} before moving it aside: " . $e->getMessage());
+            Log::warning("Could not record the checkout of {$this->project->username()} before moving it aside: ".$e->getMessage());
 
             return false;
         }
@@ -108,7 +106,7 @@ final class CheckoutAside
             $system->exec(['sudo', 'rm', '-rf', $aside], [], 300);
             $system->exec(['sudo', 'mv', '-T', $this->project->userAppDirPath(), $aside], [], 120);
         } catch (\Throwable $e) {
-            Log::warning("Could not move the checkout of {$this->project->username()} aside: " . $e->getMessage());
+            Log::warning("Could not move the checkout of {$this->project->username()} aside: ".$e->getMessage());
             try {
                 $state->forget(GenerationState::CHECKOUT);
             } catch (\Throwable) {
@@ -125,7 +123,7 @@ final class CheckoutAside
         try {
             $this->project->system()->exec(['sudo', 'cp', '-a', '-T', $aside, $this->project->userAppDirPath()], [], self::COPY_TIMEOUT_SECONDS);
         } catch (\Throwable $e) {
-            Log::warning("Could not copy the checkout of {$this->project->username()} back: " . $e->getMessage());
+            Log::warning("Could not copy the checkout of {$this->project->username()} back: ".$e->getMessage());
             $this->putBack();
             $state->forget(GenerationState::CHECKOUT);
 
@@ -144,7 +142,7 @@ final class CheckoutAside
             $entry = $state->get(GenerationState::CHECKOUT) ?? [];
             $state->put(GenerationState::CHECKOUT, ['copy_back_pending' => false] + $entry);
         } catch (\Throwable $e) {
-            Log::warning("Could not record the copy back of {$this->project->username()}: " . $e->getMessage());
+            Log::warning("Could not record the copy back of {$this->project->username()}: ".$e->getMessage());
         }
     }
 
@@ -204,7 +202,7 @@ final class CheckoutAside
         if ($aside === null) {
             return null;
         }
-        if (!$this->asideExists()) {
+        if (! $this->asideExists()) {
             $state->forget(GenerationState::CHECKOUT);
 
             return null;
@@ -215,7 +213,7 @@ final class CheckoutAside
             return null;
         }
         $outcome = $this->outcomeKeepingOneCopy($succeeded, $running, $aside);
-        if (!$this->apply($outcome)) {
+        if (! $this->apply($outcome)) {
             return null;
         }
         $state->forget(GenerationState::CHECKOUT);
@@ -227,7 +225,7 @@ final class CheckoutAside
     }
 
     /**
-     * @param array<string, mixed> $aside the CHECKOUT entry
+     * @param  array<string, mixed>  $aside  the CHECKOUT entry
      * @return list<string>
      */
     private static function recordedContainers(array $aside): array
@@ -239,7 +237,7 @@ final class CheckoutAside
      * {@see outcome()}, but never 'removed' while the tree aside is the only
      * whole copy: ~/project is gone, or a copy back into it never finished.
      *
-     * @param array<string, mixed> $aside the CHECKOUT entry
+     * @param  array<string, mixed>  $aside  the CHECKOUT entry
      */
     private function outcomeKeepingOneCopy(?bool $succeeded, bool $running, array $aside): string
     {
@@ -249,7 +247,7 @@ final class CheckoutAside
         }
 
         $partialCopy = ($aside['copy_back_pending'] ?? false) === true;
-        if ($partialCopy || !$this->project->system()->filesystem()->directoryExists($this->project->userAppDirPath())) {
+        if ($partialCopy || ! $this->project->system()->filesystem()->directoryExists($this->project->userAppDirPath())) {
             return 'restored';
         }
 
@@ -265,7 +263,7 @@ final class CheckoutAside
                 $this->project->system()->exec(['sudo', 'rm', '-rf', $this->asidePath()], [], 600);
             }
         } catch (\Throwable $e) {
-            Log::warning("Could not settle the checkout of {$this->project->username()}: " . $e->getMessage());
+            Log::warning("Could not settle the checkout of {$this->project->username()}: ".$e->getMessage());
 
             return false;
         }
@@ -290,7 +288,7 @@ final class CheckoutAside
     public function reconcileStranded(): ?string
     {
         $state = new GenerationState($this->project->username());
-        if ($state->get(GenerationState::CHECKOUT) !== null || !$this->asideExists()) {
+        if ($state->get(GenerationState::CHECKOUT) !== null || ! $this->asideExists()) {
             return null;
         }
         if ($this->project->system()->filesystem()->directoryExists($this->project->userAppDirPath())) {
@@ -304,7 +302,7 @@ final class CheckoutAside
                 120
             );
         } catch (\Throwable $e) {
-            Log::warning("Could not put a stranded checkout of {$this->project->username()} back: " . $e->getMessage());
+            Log::warning("Could not put a stranded checkout of {$this->project->username()} back: ".$e->getMessage());
 
             return null;
         }
@@ -325,7 +323,7 @@ final class CheckoutAside
         try {
             $this->putBack();
         } catch (\Throwable $e) {
-            Log::warning("Could not put the previous checkout of {$this->project->username()} back: " . $e->getMessage());
+            Log::warning("Could not put the previous checkout of {$this->project->username()} back: ".$e->getMessage());
 
             return false;
         }
@@ -356,18 +354,18 @@ final class CheckoutAside
      * The tree aside is back: so is the branch the records named for it, or
      * the next pull would fetch the other branch into it.
      *
-     * @param array<string, mixed> $aside the CHECKOUT entry
+     * @param  array<string, mixed>  $aside  the CHECKOUT entry
      */
     private function recordsBack(array $aside): void
     {
         $records = $aside['records'] ?? null;
         try {
-            if (!is_array($records) || $records === $this->branchRecords()) {
+            if (! is_array($records) || $records === $this->branchRecords()) {
                 return;
             }
             $this->writeBranchRecords($records);
         } catch (\Throwable $e) {
-            Log::warning("Could not put the branch records of {$this->project->username()} back: " . $e->getMessage());
+            Log::warning("Could not put the branch records of {$this->project->username()} back: ".$e->getMessage());
         }
     }
 
@@ -399,8 +397,8 @@ final class CheckoutAside
     {
         $system = $this->project->system();
         $projectDir = $this->project->userAppDirPath();
-        $failed = rtrim($this->project->homeDirPath(), '/') . '/' . self::FAILED_DIR;
-        if (!$this->asideExists()) {
+        $failed = rtrim($this->project->homeDirPath(), '/').'/'.self::FAILED_DIR;
+        if (! $this->asideExists()) {
             throw new \RuntimeException('nothing is aside to put back');
         }
         $system->exec(['sudo', 'rm', '-rf', $failed], [], 600);
@@ -412,7 +410,7 @@ final class CheckoutAside
     }
 
     /**
-     * @param list<string> $ids
+     * @param  list<string>  $ids
      */
     public static function allRunning(DindProject $project, array $ids): ?bool
     {

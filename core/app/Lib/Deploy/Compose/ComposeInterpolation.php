@@ -32,10 +32,10 @@ final class ComposeInterpolation
     private const MAX_RESULTS = 64;
 
     /**
-     * @param array<string, list<?string>|string> $env the values each variable may
-     *        have, null for unset; a variable not listed is unset
+     * @param  array<string, list<?string>|string>  $env  the values each variable may
+     *                                                    have, null for unset; a variable not listed is unset
      * @return list<string>|null every result, or null when it cannot be told:
-     *         bad syntax, a process variable, or a value that itself interpolates
+     *                           bad syntax, a process variable, or a value that itself interpolates
      */
     public static function candidates(string $value, array $env): ?array
     {
@@ -51,7 +51,7 @@ final class ComposeInterpolation
      * env_vars, which the deploy merges in. Only a key already in `.env`
      * cannot end up unset: the deploy and the prepare hooks only add to it.
      *
-     * @param array<string, string> $accountVars
+     * @param  array<string, string>  $accountVars
      * @return array<string, list<?string>>
      */
     public static function environment(?string $dotEnv, ?string $example, array $accountVars): array
@@ -66,7 +66,7 @@ final class ComposeInterpolation
         }
         foreach ($accountVars as $key => $value) {
             $states = $env[$key] ?? [null];
-            if (is_string($key) && (string) $value !== '' && !in_array((string) $value, $states, true)) {
+            if (is_string($key) && (string) $value !== '' && ! in_array((string) $value, $states, true)) {
                 $env[$key] = [...$states, (string) $value];
             }
         }
@@ -75,7 +75,7 @@ final class ComposeInterpolation
     }
 
     /**
-     * @param array<string, list<?string>|string> $env
+     * @param  array<string, list<?string>|string>  $env
      * @return list<string>|null
      */
     private static function parse(string $value, array $env): ?array
@@ -87,25 +87,27 @@ final class ComposeInterpolation
             $char = $value[$i];
             if ($char !== '$') {
                 $literal .= $char;
+
                 continue;
             }
             $next = $value[$i + 1] ?? '';
             if ($next === '$') {
                 $literal .= '$';
                 $i++;
+
                 continue;
             }
 
             if ($next === '{') {
                 $end = self::closingBrace($value, $i + 1);
                 if ($end === null
-                    || preg_match('/^(' . self::NAME . ')(?:(:?[-+?])(.*))?$/s', substr($value, $i + 2, $end - $i - 2), $m) !== 1
+                    || preg_match('/^('.self::NAME.')(?:(:?[-+?])(.*))?$/s', substr($value, $i + 2, $end - $i - 2), $m) !== 1
                 ) {
                     return null;
                 }
                 $alternatives = self::variable($m[1], $m[2] ?? '', $m[3] ?? '', $env);
                 $i = $end;
-            } elseif (preg_match('/^' . self::NAME . '/', substr($value, $i + 1), $m) === 1) {
+            } elseif (preg_match('/^'.self::NAME.'/', substr($value, $i + 1), $m) === 1) {
                 $alternatives = self::variable($m[0], '', '', $env);
                 $i += strlen($m[0]);
             } else {
@@ -119,7 +121,7 @@ final class ComposeInterpolation
             $combined = [];
             foreach ($results as $prefix) {
                 foreach ($alternatives as $alternative) {
-                    $combined[] = $prefix . $literal . $alternative;
+                    $combined[] = $prefix.$literal.$alternative;
                 }
             }
             $results = array_values(array_unique($combined));
@@ -129,14 +131,14 @@ final class ComposeInterpolation
             }
         }
 
-        return array_map(static fn (string $prefix): string => $prefix . $literal, $results);
+        return array_map(static fn (string $prefix): string => $prefix.$literal, $results);
     }
 
     /**
      * The values `${name<operator>word}` can take, once per state the variable
      * may be in. An `:?` error has none — Compose stops there.
      *
-     * @param array<string, list<?string>|string> $env
+     * @param  array<string, list<?string>|string>  $env
      * @return list<string>|null
      */
     private static function variable(string $name, string $operator, string $word, array $env): ?array

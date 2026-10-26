@@ -86,7 +86,7 @@ class DeployArchiveCommand extends Command
 
             return null;
         }
-        if (!is_file($file) || !is_readable($file)) {
+        if (! is_file($file) || ! is_readable($file)) {
             $this->error("Archive not found or not readable: {$file}");
 
             return null;

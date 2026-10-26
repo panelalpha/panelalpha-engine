@@ -31,7 +31,7 @@ class Git extends WorkTree
             } else {
                 // What the site serves, the same rule WP-CLI uses.
                 $main = $project->model()->getMainDomain();
-                $this->absolutePath = $home . ($main?->getDocumentRoot() ?? '/public_html');
+                $this->absolutePath = $home.($main?->getDocumentRoot() ?? '/public_html');
             }
         } else {
             $this->absolutePath = $project->resolvePath($trimmed);

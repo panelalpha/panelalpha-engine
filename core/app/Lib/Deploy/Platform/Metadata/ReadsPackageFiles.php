@@ -17,7 +17,7 @@ trait ReadsPackageFiles
         if (is_int($value) || is_float($value)) {
             $value = (string) $value;
         }
-        if (!is_string($value)) {
+        if (! is_string($value)) {
             return null;
         }
         $value = trim($value);
@@ -37,7 +37,7 @@ trait ReadsPackageFiles
         if ($single !== null) {
             return [$single];
         }
-        if (!is_array($value)) {
+        if (! is_array($value)) {
             return [];
         }
 
@@ -62,7 +62,7 @@ trait ReadsPackageFiles
      */
     protected static function keys(mixed $value): array
     {
-        if (!is_array($value)) {
+        if (! is_array($value)) {
             return [];
         }
 
@@ -89,9 +89,9 @@ trait ReadsPackageFiles
      * Order is precedence: every Next.js project also depends on React, and
      * reporting React first would describe the wrong thing.
      *
-     * @param array<string, string> $table package id => display name, most specific first
-     * @param array<string, string> $constraints package id => declared range
-     * @param array<string, string> $versions package id => resolved version, where one is known
+     * @param  array<string, string>  $table  package id => display name, most specific first
+     * @param  array<string, string>  $constraints  package id => declared range
+     * @param  array<string, string>  $versions  package id => resolved version, where one is known
      * @return list<Framework>
      */
     protected static function matchFrameworks(
@@ -103,7 +103,7 @@ trait ReadsPackageFiles
     ): array {
         $found = [];
         foreach ($table as $id => $name) {
-            if (!isset($constraints[$id])) {
+            if (! isset($constraints[$id])) {
                 continue;
             }
             $version = self::text($versions[$id] ?? null);
@@ -128,7 +128,7 @@ trait ReadsPackageFiles
      */
     protected static function tomlSection(string $toml, string $name): ?string
     {
-        $pattern = '/^[ \t]*\[' . preg_quote($name, '/') . '\][ \t]*\r?$(.*?)(?=^[ \t]*\[|\z)/ms';
+        $pattern = '/^[ \t]*\['.preg_quote($name, '/').'\][ \t]*\r?$(.*?)(?=^[ \t]*\[|\z)/ms';
 
         return preg_match($pattern, $toml, $matches) === 1 ? $matches[1] : null;
     }
@@ -136,7 +136,7 @@ trait ReadsPackageFiles
     /** A `key = "value"` out of a TOML table body. */
     protected static function tomlString(string $section, string $key): ?string
     {
-        $pattern = '/^[ \t]*' . preg_quote($key, '/') . '[ \t]*=[ \t]*(["\'])(.*?)\1/m';
+        $pattern = '/^[ \t]*'.preg_quote($key, '/').'[ \t]*=[ \t]*(["\'])(.*?)\1/m';
 
         return preg_match($pattern, $section, $matches) === 1 ? self::text($matches[2]) : null;
     }
@@ -148,7 +148,7 @@ trait ReadsPackageFiles
      */
     protected static function tomlList(string $section, string $key): array
     {
-        $pattern = '/^[ \t]*' . preg_quote($key, '/') . '[ \t]*=[ \t]*\[(.*?)\]/ms';
+        $pattern = '/^[ \t]*'.preg_quote($key, '/').'[ \t]*=[ \t]*\[(.*?)\]/ms';
         if (preg_match($pattern, $section, $matches) !== 1) {
             return [];
         }
@@ -163,7 +163,7 @@ trait ReadsPackageFiles
     }
 
     /**
-     * @param array<string, mixed>|null $json
+     * @param  array<string, mixed>|null  $json
      * @return array<string, mixed>
      */
     protected static function map(mixed $json): array
@@ -175,7 +175,7 @@ trait ReadsPackageFiles
      * Declared dependency ranges as `name => constraint`, from any number of
      * `name: constraint` maps. The first section to name a dependency wins.
      *
-     * @param array<string, mixed> ...$sections
+     * @param  array<string, mixed>  ...$sections
      * @return array<string, string>
      */
     protected static function constraints(array ...$sections): array

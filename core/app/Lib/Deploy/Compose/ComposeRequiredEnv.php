@@ -27,11 +27,11 @@ final class ComposeRequiredEnv
     private const MAX_INCLUDE_DEPTH = 3;
 
     /**
-     * @param list<array{dir: string, yaml: string}> $files the compose file and
-     *        everything it includes, each with its directory relative to the project
-     * @param array<string, string> $env what `.env` (and the account) already set
-     * @param string|(\Closure(): ?string)|null $publicUrl the account's address, for a
-     *        required variable naming the app's own URL; a closure is asked only when one does
+     * @param  list<array{dir: string, yaml: string}>  $files  the compose file and
+     *                                                         everything it includes, each with its directory relative to the project
+     * @param  array<string, string>  $env  what `.env` (and the account) already set
+     * @param  string|(\Closure(): ?string)|null  $publicUrl  the account's address, for a
+     *                                                        required variable naming the app's own URL; a closure is asked only when one does
      * @return array<string, string> NAME => value, for the keys `.env` must gain
      */
     public static function missing(array $files, array $env, string $seed, string|\Closure|null $publicUrl = null): array
@@ -88,7 +88,7 @@ final class ComposeRequiredEnv
     {
         $parsed = ComposeYaml::parse($yaml);
         $include = is_array($parsed) ? ($parsed['include'] ?? null) : null;
-        if (!is_array($include)) {
+        if (! is_array($include)) {
             return [];
         }
 
@@ -112,7 +112,7 @@ final class ComposeRequiredEnv
      * Reads a compose file and whatever it includes, through a reader that
      * answers null for anything missing or unreadable.
      *
-     * @param callable(string): ?string $read relative path => contents
+     * @param  callable(string): ?string  $read  relative path => contents
      * @return list<array{dir: string, yaml: string}>
      */
     public static function collect(string $relativePath, callable $read): array
@@ -127,7 +127,7 @@ final class ComposeRequiredEnv
             }
             $seen[$path] = true;
             $yaml = $read($path);
-            if (!is_string($yaml) || $yaml === '') {
+            if (! is_string($yaml) || $yaml === '') {
                 continue;
             }
             $dir = dirname($path);
@@ -190,20 +190,20 @@ final class ComposeRequiredEnv
      * `.env` through `env_file:`; whichever of the two is empty is the name
      * to generate.
      *
-     * @param array<string, string> $env
+     * @param  array<string, string>  $env
      * @return list<string>
      */
     private static function datastorePasswordNames(string $yaml, string $dir, array $env): array
     {
         $parsed = ComposeYaml::parse($yaml);
         $services = is_array($parsed) ? ($parsed['services'] ?? null) : null;
-        if (!is_array($services)) {
+        if (! is_array($services)) {
             return [];
         }
 
         $names = [];
         foreach ($services as $service) {
-            if (!is_array($service)) {
+            if (! is_array($service)) {
                 continue;
             }
             $engine = SidecarDialects::canonical(ComposeService::familyOf((string) ($service['image'] ?? '')));
@@ -233,13 +233,13 @@ final class ComposeRequiredEnv
     {
         $parsed = ComposeYaml::parse($yaml);
         $services = is_array($parsed) ? ($parsed['services'] ?? null) : null;
-        if (!is_array($services)) {
+        if (! is_array($services)) {
             return [];
         }
 
         $names = [];
         foreach ($services as $service) {
-            if (!is_array($service)) {
+            if (! is_array($service)) {
                 continue;
             }
             $engine = SidecarDialects::canonical(ComposeService::familyOf((string) ($service['image'] ?? '')));
@@ -262,9 +262,9 @@ final class ComposeRequiredEnv
     }
 
     /**
-     * @param array<string, mixed> $service
-     * @param array{passwords: list<string>, waivers: list<string>} $vocabulary
-     * @param array<string, string> $env
+     * @param  array<string, mixed>  $service
+     * @param  array{passwords: list<string>, waivers: list<string>}  $vocabulary
+     * @param  array<string, string>  $env
      */
     private static function passwordSource(array $service, array $vocabulary, string $dir, array $env): ?string
     {
@@ -281,10 +281,11 @@ final class ComposeRequiredEnv
         }
 
         foreach ($vocabulary['passwords'] as $key) {
-            if (!array_key_exists($key, $declared)) {
+            if (! array_key_exists($key, $declared)) {
                 if ($setInEnvFile($key)) {
                     return null;
                 }
+
                 continue;
             }
             // A literal, or a value too involved to second-guess, is left as written.
@@ -309,7 +310,7 @@ final class ComposeRequiredEnv
      */
     private static function environmentOf(mixed $environment): array
     {
-        if (!is_array($environment)) {
+        if (! is_array($environment)) {
             return [];
         }
         $map = [];
@@ -319,6 +320,7 @@ final class ComposeRequiredEnv
                     [$k, $v] = explode('=', $value, 2);
                     $map[trim($k)] = $v;
                 }
+
                 continue;
             }
             if (is_scalar($value) || $value === null) {
@@ -350,7 +352,7 @@ final class ComposeRequiredEnv
             return null;
         }
         $parts = [];
-        foreach (explode('/', ($dir === '' ? '' : $dir . '/') . $path) as $segment) {
+        foreach (explode('/', ($dir === '' ? '' : $dir.'/').$path) as $segment) {
             if ($segment === '' || $segment === '.') {
                 continue;
             }
@@ -359,6 +361,7 @@ final class ComposeRequiredEnv
                     return null;
                 }
                 array_pop($parts);
+
                 continue;
             }
             $parts[] = $segment;

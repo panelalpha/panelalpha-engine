@@ -25,9 +25,13 @@ use Illuminate\Support\Facades\Log;
 class SourceBundle
 {
     public const SKIP_TOO_LARGE = 'too-large';
+
     public const SKIP_TOO_MANY_FILES = 'too-many-files';
+
     public const SKIP_EMPTY = 'empty';
+
     public const SKIP_UNAVAILABLE = 'zip-unavailable';
+
     public const SKIP_ERROR = 'error';
 
     /**
@@ -79,7 +83,7 @@ class SourceBundle
      */
     private static function unavailableReason(string $projectDir): ?string
     {
-        if (!is_dir($projectDir)) {
+        if (! is_dir($projectDir)) {
             return self::SKIP_EMPTY;
         }
 
@@ -103,7 +107,7 @@ class SourceBundle
         try {
             $selection = self::plan($projectDir, $maxBytes, $maxFiles, $maxFileBytes);
         } catch (\Throwable $e) {
-            Log::debug('Telemetry source bundle walk failed: ' . $e->getMessage());
+            Log::debug('Telemetry source bundle walk failed: '.$e->getMessage());
 
             return ['skipped' => self::SKIP_ERROR];
         }
@@ -121,11 +125,11 @@ class SourceBundle
      * A half-written zip is removed rather than left for the shipper to find:
      * it would be uploaded as though it were the source.
      *
-     * @param array<string, string> $files relative path => absolute path
+     * @param  array<string, string>  $files  relative path => absolute path
      */
     private static function writeZip(array $files, string $zipPath): ?string
     {
-        $zip = new \ZipArchive();
+        $zip = new \ZipArchive;
         if ($zip->open($zipPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== true) {
             return self::SKIP_ERROR;
         }
@@ -138,7 +142,7 @@ class SourceBundle
         } catch (\Throwable $e) {
             @$zip->close();
             @unlink($zipPath);
-            Log::debug('Telemetry source bundle write failed: ' . $e->getMessage());
+            Log::debug('Telemetry source bundle write failed: '.$e->getMessage());
 
             return self::SKIP_ERROR;
         }
@@ -237,7 +241,7 @@ class SourceBundle
                     return false;
                 }
 
-                return !($file->isDir() && SourceBundlePolicy::isExcludedDirectory($file->getFilename()));
+                return ! ($file->isDir() && SourceBundlePolicy::isExcludedDirectory($file->getFilename()));
             }
         ), \RecursiveIteratorIterator::LEAVES_ONLY, \RecursiveIteratorIterator::CATCH_GET_CHILD);
     }
@@ -251,7 +255,7 @@ class SourceBundle
      */
     private static function includedPath(\SplFileInfo $file, int $rootLength, int $maxFileBytes): ?string
     {
-        if (!$file->isFile() || $file->isLink()) {
+        if (! $file->isFile() || $file->isLink()) {
             return null;
         }
 
@@ -259,7 +263,7 @@ class SourceBundle
         if ($relative === false || $relative === '') {
             return null;
         }
-        if (!SourceBundlePolicy::shouldInclude($relative, (int) $file->getSize(), $maxFileBytes)) {
+        if (! SourceBundlePolicy::shouldInclude($relative, (int) $file->getSize(), $maxFileBytes)) {
             return null;
         }
 
