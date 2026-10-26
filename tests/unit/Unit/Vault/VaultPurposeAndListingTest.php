@@ -63,7 +63,7 @@ class VaultPurposeAndListingTest extends VaultTestCase
         foreach ($rows as $row) {
             $this->assertIsInt($row['id']);
             $this->assertSame('git_token', $row['type']);
-            $this->assertSame('vault:' . $row['id'], $row['ref']);
+            $this->assertMatchesRegularExpression('/^vault:[A-Za-z0-9]{24}$/', $row['ref']);
             $this->assertArrayHasKey('created_at', $row);
             $this->assertArrayHasKey('project', $row);
             // The whole point: an inventory, never the values.
@@ -86,7 +86,7 @@ class VaultPurposeAndListingTest extends VaultTestCase
         $this->assertStringContainsString('Shop repo', (string) $encoded);
     }
 
-    public function test_an_entry_can_be_addressed_by_the_id_the_listing_gives(): void
+    public function test_an_entry_can_be_addressed_by_the_reference_the_listing_gives(): void
     {
         [$entry] = $this->entry(['secret' => 'ghp_pasted', 'purpose' => 'Shop repo']);
 
@@ -98,7 +98,7 @@ class VaultPurposeAndListingTest extends VaultTestCase
         $this->assertSame('Shop repo', $data['purpose']);
     }
 
-    public function test_an_entry_can_be_deleted_by_that_id(): void
+    public function test_an_entry_can_be_deleted_by_that_reference(): void
     {
         // Deleting is the only way to replace a secret.
         [$entry] = $this->entry(['secret' => 'ghp_pasted']);
@@ -108,13 +108,11 @@ class VaultPurposeAndListingTest extends VaultTestCase
         $this->assertNull(SecretVaultEntry::query()->find($entry->id));
     }
 
-    public function test_a_junk_id_is_a_404_not_a_crash(): void
+    public function test_an_unknown_reference_is_a_404(): void
     {
-        // A non-numeric id resolves to no entry: a 404, not a database error
-        // from casting "notanumber" to an integer key.
         try {
             (new SecretVaultController())->show('vault:notanumber');
-            $this->fail('An unresolvable id must not be reported as a found entry.');
+            $this->fail('An unknown reference must not be reported as a found entry.');
         } catch (HttpResponseException $e) {
             $this->assertSame(404, $e->getResponse()->getStatusCode());
         }

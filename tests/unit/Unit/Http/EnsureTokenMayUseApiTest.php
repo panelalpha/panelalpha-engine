@@ -319,6 +319,109 @@ class EnsureTokenMayUseApiTest extends TestCase
         $this->assertSame(403, $this->through($abilities, route: $route, params: ['username' => 'alice'], body: ['target' => 'bob']));
     }
 
+    /** A clone or a staging copy creates a project, so its name is a project the scope must cover. */
+    public function test_a_scoped_token_may_only_create_a_project_it_lists(): void
+    {
+        $abilities = TokenAbilities::build(api: true, mcp: false, projects: ['alice', 'alice2']);
+
+        foreach (['clone', 'staging'] as $action) {
+            $route = ['POST', 'api/projects/{username}/' . $action];
+
+            $this->assertSame(200, $this->through(
+                $abilities,
+                route: $route,
+                params: ['username' => 'alice'],
+                body: ['new_username' => 'alice2'],
+            ));
+
+            $response = $this->dispatched(
+                $abilities,
+                route: $route,
+                params: ['username' => 'alice'],
+                body: ['new_username' => 'bob'],
+            );
+
+            $this->assertSame(403, $response->getStatusCode(), $action);
+            $this->assertSame(
+                'This token is limited to projects alice, alice2; POST /projects/{username}/' . $action . ' is outside it.',
+                $response->getData(true)['error'],
+            );
+        }
+    }
+
+    /** The engine picks the name, and a scope lists names rather than a rule for choosing them. */
+    public function test_a_scoped_token_may_not_create_a_project_the_engine_names(): void
+    {
+        $abilities = TokenAbilities::build(api: true, mcp: false, projects: ['alice']);
+
+        foreach (['clone', 'staging'] as $action) {
+            foreach ([[], ['new_username' => null], ['new_username' => '']] as $body) {
+                $response = $this->dispatched(
+                    $abilities,
+                    route: ['POST', 'api/projects/{username}/' . $action],
+                    params: ['username' => 'alice'],
+                    body: $body,
+                );
+
+                $this->assertSame(403, $response->getStatusCode(), $action);
+                $this->assertSame(
+                    'This token is limited to projects alice; POST /projects/{username}/' . $action
+                        . ' must name the project it creates in new_username.',
+                    $response->getData(true)['error'],
+                );
+            }
+        }
+    }
+
+    public function test_the_created_project_is_held_to_the_scope_on_a_tool_call(): void
+    {
+        $abilities = TokenAbilities::build(api: false, mcp: true, projects: ['alice']);
+        $route = ['POST', 'api/projects/{username}/clone'];
+
+        $this->assertSame(200, $this->through(
+            $abilities,
+            internal: true,
+            route: $route,
+            params: ['username' => 'alice'],
+            body: ['new_username' => 'alice'],
+        ));
+
+        $this->assertSame(403, $this->through(
+            $abilities,
+            internal: true,
+            route: $route,
+            params: ['username' => 'alice'],
+            body: ['new_username' => 'bob'],
+        ));
+
+        $this->assertSame(403, $this->through(
+            $abilities,
+            internal: true,
+            route: $route,
+            params: ['username' => 'alice'],
+        ));
+    }
+
+    public function test_an_unscoped_token_may_create_a_project_the_engine_names(): void
+    {
+        foreach ([TokenAbilities::build(api: true, mcp: false), ['*']] as $abilities) {
+            foreach (['clone', 'staging'] as $action) {
+                $this->assertSame(200, $this->through(
+                    $abilities,
+                    route: ['POST', 'api/projects/{username}/' . $action],
+                    params: ['username' => 'bob'],
+                ));
+
+                $this->assertSame(200, $this->through(
+                    $abilities,
+                    route: ['POST', 'api/projects/{username}/' . $action],
+                    params: ['username' => 'bob'],
+                    body: ['new_username' => 'bob2'],
+                ));
+            }
+        }
+    }
+
     public function test_an_unscoped_token_may_inspect_any_project(): void
     {
         $abilities = TokenAbilities::build(api: true, mcp: false);

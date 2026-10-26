@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Vault;
 
+use App\Http\Requests\DomainInstallSslCertRequest;
 use App\Http\Requests\FtpAccountStoreRequest;
 use App\Http\Requests\Git\GitUpdateCredentialsRequest;
 use App\Http\Requests\MysqlUserStoreRequest;
@@ -17,8 +18,8 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use ReflectionMethod;
 
 /**
- * A `vault:<id>` is resolved for every secret field, not only git_token and
- * env_vars. It used to be stored as the literal string `vault:<id>` -- long
+ * A `vault:<key>` is resolved for every secret field, not only git_token and
+ * env_vars. It used to be stored as the literal string `vault:<key>` -- long
  * enough to pass a min:8 rule -- so the credential silently became that text.
  */
 class VaultSecretFieldTest extends VaultTestCase
@@ -75,6 +76,7 @@ class VaultSecretFieldTest extends VaultTestCase
             'sftp account update' => [SftpAccountUpdateRequest::class, 'password'],
             'site password set' => [ProjectPasswordSetRequest::class, 'password'],
             'git token' => [GitUpdateCredentialsRequest::class, 'token'],
+            'certificate key' => [DomainInstallSslCertRequest::class, 'key'],
         ];
     }
 

@@ -122,7 +122,7 @@ class ProjectRebuildHttpTest extends TestCase
     }
 
     /**
-     * The archive deploy resolves a `vault:<id>` env value the way a rebuild
+     * The archive deploy resolves a `vault:<key>` env value the way a rebuild
      * does, storing the secret rather than the reference.
      */
     public function test_an_archive_deploy_resolves_a_vault_env_var(): void
@@ -140,7 +140,7 @@ class ProjectRebuildHttpTest extends TestCase
 
         $response = $this->postJson("/api/projects/{$user->username}/deploy-archive", [
             'zip_path' => '/project/app.zip',
-            'env_vars' => ['TOKEN' => SecretVaultEntry::PREFIX . $entry->id],
+            'env_vars' => ['TOKEN' => $entry->reference()],
         ]);
 
         $this->assertSame(202, $response->getStatusCode(), (string) $response->getContent());

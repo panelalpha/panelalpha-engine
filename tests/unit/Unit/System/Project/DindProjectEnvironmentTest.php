@@ -663,6 +663,23 @@ class DindProjectEnvironmentTest extends TestCase
         $this->assertSame('0600', $this->mode('.env'));
     }
 
+    public function test_an_empty_root_env_a_compose_file_needs_is_owner_only_and_a_nested_one_is_not(): void
+    {
+        file_put_contents(
+            $this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE,
+            "services:\n  app:\n    image: php:8-cli\n    env_file:\n      - .env\n      - worker/.env\n"
+        );
+        mkdir($this->projectDir . '/worker');
+
+        $this->dind($this->dindModel())->applyProjectEnvVars();
+        $this->assertSame('0600', $this->mode('.env'));
+        $this->assertSame('0644', $this->mode('worker/.env'));
+
+        $this->dind($this->dindModel(['env_vars' => ['API_SECRET' => 's3cret']]))->applyProjectEnvVars();
+        $this->assertSame('s3cret', $this->vars((string) file_get_contents($this->projectDir . '/.env'))['API_SECRET']);
+        $this->assertSame('0600', $this->mode('.env'));
+    }
+
     public function test_a_tracked_env_is_not_given_generated_values(): void
     {
         file_put_contents($this->projectDir . '/docker-compose.yml', "services:\n  db:\n    image: postgres:16\n    env_file: .env\n");

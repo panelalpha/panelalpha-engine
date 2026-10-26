@@ -238,10 +238,10 @@ class SourceResolverTest extends TestCase
         mkdir($fresh, 0700, true);
 
         // Any clone attempt sweeps first; this one fails immediately (the host
-        // is unresolvable, and a private address would be refused before the
-        // workspace is even made).
+        // is unresolvable, which the address check and the pin both refuse).
         try {
-            (new SourceResolver($workspace, 15))->fromGit('https://nonexistent.invalid/nope.git');
+            (new \ReflectionMethod(SourceResolver::class, 'cloneRepository'))
+                ->invoke(new SourceResolver($workspace, 15), 'https://nonexistent.invalid/nope.git', null, null);
         } catch (InspectException $e) {
             // expected
         }
@@ -251,9 +251,9 @@ class SourceResolverTest extends TestCase
     }
 
     /**
-     * A clone that cannot start must not leave its workspace behind. The
-     * address is a closed port on this host, so this needs no network and
-     * fails immediately rather than on the timeout.
+     * A clone that cannot start must not leave its workspace behind. The host
+     * does not resolve, so this needs no network and fails immediately rather
+     * than on the timeout.
      */
     public function test_a_failed_clone_cleans_up_after_itself(): void
     {
@@ -261,7 +261,8 @@ class SourceResolverTest extends TestCase
         $resolver = new SourceResolver($workspace, 15);
 
         try {
-            $resolver->fromGit('https://nonexistent.invalid/nope.git');
+            (new \ReflectionMethod(SourceResolver::class, 'cloneRepository'))
+                ->invoke($resolver, 'https://nonexistent.invalid/nope.git', null, null);
             $this->fail('Cloning from an unresolvable host should fail');
         } catch (InspectException $e) {
             $this->assertStringContainsString('Could not clone the repository', $e->getMessage());

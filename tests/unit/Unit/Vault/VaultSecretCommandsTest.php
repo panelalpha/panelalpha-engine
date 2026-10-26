@@ -121,24 +121,25 @@ class VaultSecretCommandsTest extends VaultTestCase
         $this->assertStringNotContainsString('Repo one', $output);
     }
 
-    public function test_delete_removes_an_entry_by_the_id_the_listing_shows(): void
+    public function test_delete_removes_an_entry_by_the_reference_the_listing_shows(): void
     {
         [$entry] = $this->entry(['secret' => 'ghp_pasted']);
 
-        $this->runCommand('vault:secret:delete', ['ref' => (string) $entry->id, '--force' => true]);
+        $this->assertStringContainsString($entry->reference(), $this->runCommand('vault:secret:list'));
+        $this->runCommand('vault:secret:delete', ['ref' => $entry->reference(), '--force' => true]);
 
         $this->assertNull(SecretVaultEntry::query()->find($entry->id));
     }
 
-    public function test_delete_takes_a_reference_or_a_bare_id(): void
+    public function test_delete_refuses_an_id(): void
     {
         [$global] = $this->globalEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_shared');
-        [$owned] = $this->projectEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_mine', 'shop');
 
-        $this->runCommand('vault:secret:delete', ['ref' => $global->reference(), '--force' => true]);
-        $this->runCommand('vault:secret:delete', ['ref' => (string) $owned->id, '--force' => true]);
+        foreach ([(string) $global->id, 'vault:' . $global->id] as $ref) {
+            $this->assertStringContainsString('No vault entry', $this->runCommand('vault:secret:delete', ['ref' => $ref, '--force' => true]));
+        }
 
-        $this->assertSame(0, SecretVaultEntry::query()->count());
+        $this->assertNotNull($global->fresh());
     }
 
     public function test_delete_of_an_unknown_ref_says_how_to_address_one(): void

@@ -15,6 +15,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('file_unzip')]
 #[Description(<<<'MARKDOWN'
     Extract a ZIP archive
+
+    Extracts a .zip, .tar.gz or .gz into path, which is created when missing. Nothing already in path is replaced or merged into: when path holds any entry the archive unpacks to at its top level (for a .gz, the unpacked file), the request is refused with 409 and nothing is extracted.
     MARKDOWN)]
 #[IsDestructive]
 class FileUnzipTool extends ApiTool

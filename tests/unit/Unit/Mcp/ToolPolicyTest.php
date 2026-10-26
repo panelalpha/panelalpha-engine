@@ -314,7 +314,6 @@ class ToolPolicyTest extends TestCase
     }
 
     private const CREDENTIAL_READS = [
-        SystemEximConfigGetTool::class,
         // A GET that returns any file in the home, including the generated
         // docker-compose.panelalpha.yml with the app's DB password.
         FileDownloadTool::class,
@@ -344,11 +343,19 @@ class ToolPolicyTest extends TestCase
     {
         $policy = new ToolPolicy([
             'toolsets' => 'engine',
-            'tools' => 'system_exim_config_get,app_sso_login',
+            'tools' => 'file_download,app_sso_login',
             'permission_mode' => 'readonly',
         ]);
 
         $this->assertSame([], $policy->filter(self::CREDENTIAL_READS));
+    }
+
+    /** The mail settings read answers no stored password, so readonly may look at it. */
+    public function test_readonly_offers_the_mail_settings_read(): void
+    {
+        $policy = new ToolPolicy(['toolsets' => 'all', 'permission_mode' => 'readonly']);
+
+        $this->assertSame([SystemEximConfigGetTool::class], $policy->filter([SystemEximConfigGetTool::class]));
     }
 
     public function test_modify_and_full_keep_the_credential_reads(): void

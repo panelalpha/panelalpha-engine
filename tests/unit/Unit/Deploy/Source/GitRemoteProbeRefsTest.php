@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\Source;
 
 use App\Lib\Deploy\Source\GitRefsUnavailableException;
 use App\Lib\Deploy\Source\GitRemoteProbe;
+use App\Lib\Http\OutboundUrl;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -24,12 +25,14 @@ class GitRemoteProbeRefsTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        OutboundUrl::setResolverForTests(static fn (string $host): array => ['140.82.121.4']);
         $this->dir = sys_get_temp_dir() . '/probe-refs-' . bin2hex(random_bytes(6));
         mkdir($this->dir);
     }
 
     protected function tearDown(): void
     {
+        OutboundUrl::setResolverForTests(null);
         foreach (glob($this->dir . '/git*') ?: [] as $file) {
             unlink($file);
         }

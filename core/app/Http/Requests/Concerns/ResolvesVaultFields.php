@@ -6,7 +6,7 @@ use App\Lib\Vault\RequestVault;
 use App\Models\User;
 
 /**
- * Read a `vault:<id>` in place of a secret field, typed by the field's own name
+ * Read a `vault:<key>` in place of a secret field, typed by the field's own name
  * as `git_token` and `env_vars` are. An unusable reference is a 422 naming the field.
  */
 trait ResolvesVaultFields
@@ -15,7 +15,7 @@ trait ResolvesVaultFields
      * Call from prepareForValidation(), so the rules (a min:8, say) see the
      * secret rather than the reference.
      *
-     * @param list<string> $fields
+     * @param  list<string>  $fields
      */
     protected function resolveVaultFields(array $fields): void
     {
@@ -30,7 +30,7 @@ trait ResolvesVaultFields
         }
     }
 
-    /** Whether a field's value, or any item of an array field, is a `vault:<id>`. */
+    /** Whether a field's value, or any item of an array field, is a `vault:<key>`. */
     private static function holdsReference(mixed $value): bool
     {
         $values = is_array($value) ? $value : [$value];
@@ -45,7 +45,7 @@ trait ResolvesVaultFields
     private function existingProject(): ?string
     {
         $project = $this->route('username');
-        if (!is_string($project) || $project === '') {
+        if (! is_string($project) || $project === '') {
             return null;
         }
 

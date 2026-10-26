@@ -27,13 +27,13 @@ class SourceRefsController extends Controller
         path: '/source/refs',
         summary: 'List the branches and tags of a remote Git repository',
         description: 'Reads a remote with `git ls-remote --symref`, without cloning it or '
-            . 'touching any account, so a branch picker can be shown before a project exists. '
-            . 'Runs globally, not for one project. `branches` is the default branch first, then '
-            . 'by name; `tags` is by name. `default_branch` is the branch HEAD pointed at, or null '
-            . 'when the remote named none. A public repository needs no token; a private one takes a '
-            . '`git_token` (a `vault:<id>` is accepted in its place). A repository URL whose host '
-            . 'resolves to an internal address is refused 422 with `problems[{field: repository, '
-            . 'code: host_refused}]`.',
+            .'touching any account, so a branch picker can be shown before a project exists. '
+            .'Runs globally, not for one project. `branches` is the default branch first, then '
+            .'by name; `tags` is by name. `default_branch` is the branch HEAD pointed at, or null '
+            .'when the remote named none. A public repository needs no token; a private one takes a '
+            .'`git_token` (a `vault:<key>` is accepted in its place). A repository URL whose host '
+            .'resolves to an internal address, or does not resolve at all, is refused 422 with '
+            .'`problems[{field: repository, code: host_refused}]`.',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             required: ['repository'],
@@ -42,16 +42,16 @@ class SourceRefsController extends Controller
                     property: 'repository',
                     type: 'string',
                     description: 'Repository URL. The scheme may be left out; the host is not guessed '
-                        . 'for owner/repo shorthand.',
+                        .'for owner/repo shorthand.',
                     example: 'https://github.com/owner/repo.git'
                 ),
                 new OA\Property(
                     property: 'git_token',
                     type: 'string',
-                    description: 'Access token for a private HTTPS repository. A `vault:<id>` of a '
-                        . 'global vault entry is accepted in place of the literal token; a project entry '
-                        . 'is accepted while no project owns it, and listing does not assign it. Omitted, '
-                        . 'the remote is read anonymously.'
+                    description: 'Access token for a private HTTPS repository. A `vault:<key>` of a '
+                        .'global vault entry is accepted in place of the literal token; a project entry '
+                        .'is accepted while no project owns it, and listing does not assign it. Omitted, '
+                        .'the remote is read anonymously.'
                 ),
                 new OA\Property(
                     property: 'limit',
@@ -119,7 +119,7 @@ class SourceRefsController extends Controller
     }
 
     /**
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      */
     private function limit(array $params): int
     {

@@ -59,7 +59,7 @@ class SourceResolverTreeTest extends TestCase
     {
         $tree = new GitHubTree(static fn (string $url, ?string $branch): array => [self::SHA, 'main']);
 
-        return new SourceResolver($this->tmp . '/work', 60, $tree);
+        return new SourceResolver($this->tmp . '/work', 60, $tree, ['https', 'http', 'file']);
     }
 
     private static function fakeTree(int $status = 200): void
@@ -137,7 +137,7 @@ class SourceResolverTreeTest extends TestCase
     {
         Http::fake();
 
-        $resolved = (new SourceResolver($this->tmp . '/work', 60))->fromGit(self::URL);
+        $resolved = (new SourceResolver($this->tmp . '/work', 60, null, ['https', 'http', 'file']))->fromGit(self::URL);
         try {
             $this->assertSame(SourceResolver::METHOD_CLONE, $resolved->meta['method']);
         } finally {

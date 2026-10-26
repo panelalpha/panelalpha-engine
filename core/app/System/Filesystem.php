@@ -22,12 +22,12 @@ class Filesystem
 {
     /** @psalm-var ?FilesystemInfo */
     private static ?array $homeFilesystemInfo = null;
+
     private static ?string $homeFilesystemParentBlockDevice = null;
 
     public function __construct(
         private ProcessRunner $system,
-    ) {
-    }
+    ) {}
 
     /** Copies with argv, not a shell string, since $target is often a path a caller chose. */
     public function copyFile(string $source, string $target, ?string $chown = null, ?string $chmod = null): void
@@ -46,7 +46,7 @@ class Filesystem
     {
         $dir = dirname($path);
         $this->makeDirWithParents($dir, $chown);
-        $tmp = $path . '.tmp-' . bin2hex(random_bytes(8));
+        $tmp = $path.'.tmp-'.bin2hex(random_bytes(8));
         $this->copyContents($contents, $tmp);
         $this->setOwnerAndMode($tmp, $chown, $chmod);
         $this->system->exec(['sudo', 'mv', '-T', $tmp, $path]);
@@ -61,12 +61,19 @@ class Filesystem
      */
     public function overwriteFileUnlessSymlink(string $path, string $contents): bool
     {
-        if ($this->system->runProcess(['sudo', 'test', '-L', $path])->getExitCode() === 0) {
+        if ($this->isSymlink($path)) {
             return false;
         }
         $this->copyContents($contents, $path);
 
         return true;
+    }
+
+    public function assertNotSymlink(string $path): void
+    {
+        if ($this->isSymlink($path)) {
+            throw new \RuntimeException("Refusing to rewrite '{$path}': it is a symlink.");
+        }
     }
 
     /** Stage $contents in a local temp file and `sudo cp` it to $target; the temp file is removed either way. */
@@ -93,16 +100,17 @@ class Filesystem
 
     public function isDir(string $target): bool
     {
-        $process = $this->system->runProcess(["sudo", "test", "-d", $target]);
+        $process = $this->system->runProcess(['sudo', 'test', '-d', $target]);
+
         return $process->getExitCode() === 0;
     }
 
     public function makeDirWithParents(string $target, ?string $chown = null): void
     {
         foreach (array_reverse($this->missingDirs($target)) as $d) {
-            $this->system->exec(["sudo", "mkdir", $d]);
+            $this->system->exec(['sudo', 'mkdir', $d]);
             if ($chown) {
-                $this->system->exec(["sudo", "chown", $chown, $d]);
+                $this->system->exec(['sudo', 'chown', $chown, $d]);
             }
         }
     }
@@ -117,7 +125,7 @@ class Filesystem
     {
         $missing = [];
         $dir = $target;
-        while (!$this->isDir($dir)) {
+        while (! $this->isDir($dir)) {
             if (dirname($dir) === $dir) {
                 throw new \RuntimeException("Cannot create {$target}: '{$dir}' does not read as a directory (is sudo working?)");
             }
@@ -139,7 +147,7 @@ class Filesystem
     }
 
     /**
-     * @param array<string> $exclude
+     * @param  array<string>  $exclude
      */
     public function makeDirFromTemplate(string $dir, string $templateDir, array $templateVars, ?string $chown = null, ?string $chmod = null, array $exclude = []): void
     {
@@ -164,7 +172,7 @@ class Filesystem
      * Where each template file lands under $dir: plain files are copied, and
      * `.blade.php` files rendered to the name without that suffix.
      *
-     * @param array<string> $exclude paths relative to $dir
+     * @param  array<string>  $exclude  paths relative to $dir
      * @return array{0: array<string, string>, 1: array<string, string>} copy and render, source => target
      */
     private function templateTargets(string $dir, string $templateDir, array $exclude): array
@@ -180,13 +188,14 @@ class Filesystem
             $filename = $file->getFilename();
             $relPath = $file->getRelativePath();
             $source = "{$file->getPath()}/{$filename}";
-            $target = $dir . ($relPath ? "/{$relPath}" : '') . "/{$filename}";
+            $target = $dir.($relPath ? "/{$relPath}" : '')."/{$filename}";
 
             if (in_array($target, $excludeFullPaths)) {
                 continue;
             }
             if (Str::endsWith($filename, '.blade.php')) {
                 $render[$source] = Str::beforeLast($target, '.blade.php');
+
                 continue;
             }
             $copy[$source] = $target;
@@ -233,6 +242,11 @@ class Filesystem
         return $response->getExitCode() === 0;
     }
 
+    public function isSymlink(string $path): bool
+    {
+        return $this->system->runProcess(['sudo', 'test', '-L', $path])->getExitCode() === 0;
+    }
+
     public function directoryExists(string $path): bool
     {
         $response = $this->system->runProcess([
@@ -257,6 +271,7 @@ class Filesystem
             $path,
         ]);
         $files = explode("\n", trim($response));
+
         return $files;
     }
 
@@ -269,7 +284,8 @@ class Filesystem
             '%Y',
             $path,
         ]);
-        return is_numeric($process->getOutput()) ? (int)$process->getOutput() : null;
+
+        return is_numeric($process->getOutput()) ? (int) $process->getOutput() : null;
     }
 
     /** Permission bits of $path, or null when there is no such file. */
@@ -294,7 +310,7 @@ class Filesystem
 
     public function tail(string $path, int $lines): ?string
     {
-        return $this->outputOrNull(['sudo', 'tail', '-n', (string)$lines, $path]);
+        return $this->outputOrNull(['sudo', 'tail', '-n', (string) $lines, $path]);
     }
 
     /** @param list<string> $argv */
@@ -311,18 +327,19 @@ class Filesystem
     public function getHomeFilesystemInfo(): array
     {
         if (self::$homeFilesystemInfo === null) {
-            $output = $this->system->execOnHost("df -P /home | tail -1");
+            $output = $this->system->execOnHost('df -P /home | tail -1');
             $info = preg_split('/\s+/', trim($output));
 
             self::$homeFilesystemInfo = [
                 'filesystem' => $info[0],
-                '1024-blocks' => (int)$info[1],
-                'used' => (int)$info[2],
-                'available' => (int)$info[3],
-                'capacity' => (int)$info[4],
+                '1024-blocks' => (int) $info[1],
+                'used' => (int) $info[2],
+                'available' => (int) $info[3],
+                'capacity' => (int) $info[4],
                 'mount_point' => $info[5],
             ];
         }
+
         return self::$homeFilesystemInfo;
     }
 
@@ -343,11 +360,12 @@ class Filesystem
             if ($device === null) {
                 throw new \RuntimeException(
                     "The /home filesystem's block device could not be found (df reports '{$fs}'), "
-                    . 'so an I/O limit cannot be set. Remove device_read_bps/device_write_bps for it.'
+                    .'so an I/O limit cannot be set. Remove device_read_bps/device_write_bps for it.'
                 );
             }
             self::$homeFilesystemParentBlockDevice = $device;
         }
+
         return self::$homeFilesystemParentBlockDevice;
     }
 
@@ -357,16 +375,16 @@ class Filesystem
      */
     private function resolveBlockDevice(string $filesystem): ?string
     {
-        if (!str_starts_with($filesystem, '/dev/')) {
+        if (! str_starts_with($filesystem, '/dev/')) {
             return null;
         }
         $parent = trim($this->system->execOnHost(['lsblk', '-no', 'PKNAME', $filesystem]));
         if ($parent !== '') {
-            return '/dev/' . $parent;
+            return '/dev/'.$parent;
         }
         $type = trim($this->system->execOnHost(['lsblk', '-no', 'TYPE', $filesystem]));
 
-        return $type !== '' ? '/dev/' . basename($filesystem) : null;
+        return $type !== '' ? '/dev/'.basename($filesystem) : null;
     }
 
     /**
@@ -409,7 +427,7 @@ class Filesystem
         }
 
         $fields = preg_split('/\s+/', trim($lines[1]));
-        if ($fields === false || !isset($fields[3]) || !ctype_digit($fields[3])) {
+        if ($fields === false || ! isset($fields[3]) || ! ctype_digit($fields[3])) {
             return null;
         }
 

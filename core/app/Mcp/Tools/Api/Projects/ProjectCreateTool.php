@@ -86,7 +86,7 @@ class ProjectCreateTool extends ApiTool
             'tunnel' => $schema->string()->description('Omitted, the Engine setting `default_tunnel` decides: none uses `<name>.<cert_domain>` and registers nothing; panelalpha and an unset setting both use the default ladder (a configured base domain first, a free panelalpha.online name otherwise). An explicit value here wins. One of: panelalpha, none.'),
             'git_repo' => $schema->string()->description('HTTPS clone URL; github.com/owner/repo also works. For an SSH remote, create the project without it, then git_deploy_key_create and git_connect. Example: https://github.com/owner/repo.git.'),
             'git_branch' => $schema->string(),
-            'git_token' => $schema->string()->description('Token for a private repository. Prefer a `vault:<id>` from vault_secret_create over the token itself.'),
+            'git_token' => $schema->string()->description('Token for a private repository. Prefer a `vault:<key>` from vault_secret_create over the token itself.'),
             'env_vars' => $schema->object()->description('KEY=value applied to the app\'s .env and container on every deploy.'),
             'recipe' => $schema->string()->description('Recipe id to use instead of the detected one, from source_inspect\'s application.candidates. This deploy only. Example: php.'),
             'stages' => $schema->object()->description('Replace a stage\'s commands for this deploy only: {stage: [{id, run, ...}]} for precheck, prepare, build, install, upgrade, start; [] skips a stage.'),

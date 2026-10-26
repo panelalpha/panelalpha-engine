@@ -76,7 +76,7 @@ class ProjectCreator
     /** The deploy log for a project that has something to deploy, or null. */
     public function startDeployLog(User $user): ?DeployLogger
     {
-        if (!self::writesDeployLog($user)) {
+        if (! self::writesDeployLog($user)) {
             return null;
         }
 
@@ -84,7 +84,7 @@ class ProjectCreator
         if ($deployLogger !== null) {
             $gitRepo = $user->getGitRepo();
             $deployLogger->info($gitRepo
-                ? "Deploy started (source: git, repo: " . GitUrl::sanitize($gitRepo) . ")"
+                ? 'Deploy started (source: git, repo: '.GitUrl::sanitize($gitRepo).')'
                 : 'Deploy started (source: dind template)');
             $this->inspection?->writeTo($deployLogger);
         }
@@ -165,7 +165,7 @@ class ProjectCreator
         self::assertRequestChecksPass($params, $input->nameField);
         $params = self::resolvedSource($params, $input);
 
-        if (!empty($params['git_repo'])) {
+        if (! empty($params['git_repo'])) {
             $this->inspection = self::inspectRepository($params, $input);
         }
 
@@ -173,7 +173,7 @@ class ProjectCreator
         $params['domain'] = $allocated->domain;
         self::assertAllocatedDomainFree($params['domain']);
 
-        if (!empty($params['git_repo']) && empty($params['template'])) {
+        if (! empty($params['git_repo']) && empty($params['template'])) {
             $params['template'] = 'dind';
         }
 
@@ -222,6 +222,7 @@ class ProjectCreator
      *   git_token?: string,
      *   env_vars?: array<string, string>,
      * }
+     *
      * @throws ProblemException username_required
      */
     private static function namedParams(NewProjectInput $input): array
@@ -229,7 +230,7 @@ class ProjectCreator
         $params = $input->params;
 
         if (
-            !empty($params['domain'])
+            ! empty($params['domain'])
             && Str::startsWith($params['domain'], 'www.')
         ) {
             $params['domain'] = Str::after($params['domain'], 'www.');
@@ -243,7 +244,8 @@ class ProjectCreator
     }
 
     /**
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
+     *
      * @throws ProblemException username_required
      */
     private static function generatedName(array $params, string $nameField): string
@@ -258,7 +260,7 @@ class ProjectCreator
                 $nameField,
                 'username_required',
                 'No project name was given and none could be generated; pass `name` ('
-                    . ProjectNameRule::EXPECTED . ').'
+                    .ProjectNameRule::EXPECTED.').'
             );
         }
 
@@ -268,12 +270,13 @@ class ProjectCreator
     /**
      * Everything knowable from the request alone, asked at once and answered at once.
      *
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
+     *
      * @throws ProblemException
      */
     private static function assertRequestChecksPass(array $params, string $nameField): void
     {
-        $problems = (new ProvisionChecks(new SystemProvisionEnvironment()))->problems($params, $nameField);
+        $problems = (new ProvisionChecks(new SystemProvisionEnvironment))->problems($params, $nameField);
 
         if ($problems !== []) {
             throw ProblemException::of($problems);
@@ -284,14 +287,15 @@ class ProjectCreator
      * The source a deploy will clone: its `vault:` references read for this
      * project, and the remote checked before anything is created or changed.
      *
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      * @return array<string, mixed>
+     *
      * @throws ProblemException
      */
     public static function resolvedSource(array $params, NewProjectInput $input): array
     {
         $params = self::withVaultResolved($params, $input);
-        if (!empty($params['git_repo'])) {
+        if (! empty($params['git_repo'])) {
             self::assertRepositoryReachable($params);
         }
 
@@ -303,7 +307,7 @@ class ProjectCreator
      * this project, and before the allocator spends a label on a create that would fail here.
      * The project stores the secrets themselves; nothing reads the vault on its behalf later.
      *
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      * @return array<string, mixed>
      */
     private static function withVaultResolved(array $params, NewProjectInput $input): array
@@ -322,7 +326,8 @@ class ProjectCreator
      * core, which reaches addresses the project's own network refuses, so those are refused
      * first. It uses the token the clone will (none: anonymous) and asks for the branch too.
      *
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
+     *
      * @throws ProblemException
      */
     private static function assertRepositoryReachable(array $params): void
@@ -347,7 +352,7 @@ class ProjectCreator
      * Seconds, and never a refusal: what it finds is reported in the response and the
      * deploy log, and the create goes ahead.
      *
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      */
     private static function inspectRepository(array $params, NewProjectInput $input): CreateInspection
     {
@@ -364,13 +369,14 @@ class ProjectCreator
      * Chosen before anything is created: a panelalpha.online label is bought from the
      * licensing proxy, and a taken one must be found while another can still be picked.
      *
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
+     *
      * @throws ProblemException
      */
     private static function allocateDomain(array $params): AllocatedDomain
     {
         try {
-            return (new DomainAllocator())->allocate(
+            return (new DomainAllocator)->allocate(
                 $params['username'],
                 $params['domain'] ?? null,
                 $params['tunnel'] ?? null,
@@ -398,7 +404,7 @@ class ProjectCreator
     }
 
     /**
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      */
     private static function newUser(array $params, AllocatedDomain $allocated): User
     {
@@ -414,7 +420,7 @@ class ProjectCreator
             ),
         ]);
 
-        if (!empty($params['password']) && is_string($params['password'])) {
+        if (! empty($params['password']) && is_string($params['password'])) {
             self::enableSitePassword($user, $params['password']);
         }
 
@@ -455,20 +461,20 @@ class ProjectCreator
      * the exact label registered gets no `www.`: it would reach something that has never heard
      * of it and fail TLS on the way.
      *
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      * @return \Closure(User): Domain
      */
     private static function mainDomainFor(array $params): \Closure
     {
         $redirectEnabled = false;
         $redirectUrl = null;
-        if (!empty($params['domain_redirect_url'])) {
+        if (! empty($params['domain_redirect_url'])) {
             $redirectEnabled = true;
             $redirectUrl = $params['domain_redirect_url'];
         }
 
         $aliasAvailable = DomainPlan::wwwAliasWouldAnswer($params['domain'])
-            && !Domain::domainOrAliasExists('www.' . $params['domain']);
+            && ! Domain::domainOrAliasExists('www.'.$params['domain']);
 
         return fn (User $user): Domain => Domain::make([
             'user_id' => $user->id,
@@ -478,21 +484,21 @@ class ProjectCreator
                 'document_root' => "/{$params['domain']}/public_html",
                 'redirect_enabled' => $redirectEnabled,
                 'redirect_url' => $redirectUrl,
-                'aliases' => $aliasAvailable ? ['www.' . $params['domain']] : [],
+                'aliases' => $aliasAvailable ? ['www.'.$params['domain']] : [],
             ],
         ]);
     }
 
     /**
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      */
     private static function assignDedicatedIps(User $user, array $params): void
     {
-        if (!empty($params['dedicated_ipv4']) && !$user->assignFreeDedicatedIpv4()) {
+        if (! empty($params['dedicated_ipv4']) && ! $user->assignFreeDedicatedIpv4()) {
             self::dropUnassignedDedicatedIp($user, 'dedicated_ipv4');
         }
 
-        if (!empty($params['dedicated_ipv6']) && !$user->assignFreeDedicatedIpv6()) {
+        if (! empty($params['dedicated_ipv6']) && ! $user->assignFreeDedicatedIpv6()) {
             self::dropUnassignedDedicatedIp($user, 'dedicated_ipv6');
         }
     }
@@ -515,8 +521,8 @@ class ProjectCreator
      * duplicate gets instead of a 500. One transaction, so the
      * loser leaves no user row without its main domain.
      *
-     * @param \Closure(User): Domain $mainDomain
-     * @param string $nameField the field the caller sent the name as
+     * @param  \Closure(User): Domain  $mainDomain
+     * @param  string  $nameField  the field the caller sent the name as
      */
     private static function saveNewProject(User $user, \Closure $mainDomain, string $nameField = 'username'): Domain
     {
@@ -544,9 +550,8 @@ class ProjectCreator
     }
 
     /**
-     * Why core must not contact the repository's host, when an address it has
-     * is one the tenant network refuses; null otherwise, or when it does not
-     * resolve (the probe says that).
+     * Why core must not contact the repository's host, when it is one the tenant
+     * network refuses or one PHP cannot resolve to check; null otherwise.
      */
     private static function refusedRepositoryAddress(string $repoUrl): ?string
     {

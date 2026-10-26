@@ -12,6 +12,14 @@ use Illuminate\Support\Facades\Route;
 class RouteServiceProvider extends ServiceProvider
 {
     /**
+     * Request attribute the `api` rate limiter skips on. An in-process dispatch
+     * from the CLI runs as root, and a throttle hit would write root-owned files
+     * into storage/framework/cache that the www-data web and queue processes
+     * cannot open (HTTP 500, Permission denied).
+     */
+    public const INTERNAL_DISPATCH_ATTRIBUTE = 'internal_dispatch';
+
+    /**
      * The path to the "home" route for your application.
      *
      * Typically, users are redirected here after authentication.
@@ -19,6 +27,17 @@ class RouteServiceProvider extends ServiceProvider
      * @var string
      */
     public const HOME = '/home';
+
+    private const VAULT_FORM_ATTEMPTS = 20;
+
+    private const VAULT_PASTE_ATTEMPTS = 10;
+
+    private const VAULT_DECAY_MINUTES = 10;
+
+    /** Unauthenticated routes whose link or token is the capability, each on its own budget. */
+    public const CAPABILITY_LINK_LIMITERS = ['plugin-package-download', 'app-sso-token', 'phpmyadmin-sso-token'];
+
+    private const CAPABILITY_LINK_ATTEMPTS_PER_MINUTE = 60;
 
     /**
      * Define your route model bindings, pattern filters, and other route configuration.
@@ -49,6 +68,9 @@ class RouteServiceProvider extends ServiceProvider
     /**
      * Configure the rate limiters for the application.
      *
+     * Every route with its own budget gets a named limiter: an unnamed throttle keys
+     * a guest on the domain and address alone, so all of them would share one counter.
+     *
      * @return void
      */
     protected function configureRateLimiting()
@@ -56,12 +78,16 @@ class RouteServiceProvider extends ServiceProvider
         // A floor against a runaway or leaked token, not a quota; the numbers
         // and why they are that high are in config/auth.php.
         RateLimiter::for('api', function (Request $request) {
+            if ($request->attributes->get(self::INTERNAL_DISPATCH_ATTRIBUTE) === true) {
+                return Limit::none();
+            }
+
             $token = $request->user()?->currentAccessToken();
             $tokenId = is_object($token) ? ($token->id ?? null) : null;
 
             [$limit, $key] = $tokenId !== null
-                ? [(int) config('auth.api_rate_limit.per_token'), 'token:' . $tokenId]
-                : [(int) config('auth.api_rate_limit.per_ip'), 'ip:' . $request->ip()];
+                ? [(int) config('auth.api_rate_limit.per_token'), 'token:'.$tokenId]
+                : [(int) config('auth.api_rate_limit.per_ip'), 'ip:'.$request->ip()];
 
             return $limit > 0 ? Limit::perMinute($limit)->by($key) : Limit::none();
         });
@@ -71,5 +97,35 @@ class RouteServiceProvider extends ServiceProvider
                 optional($request->user()?->currentAccessToken())->id ?: $request->ip()
             );
         });
+
+        $this->configureVaultLimiters();
+        $this->configureCapabilityLinkLimiters();
+    }
+
+    private function configureVaultLimiters(): void
+    {
+        RateLimiter::for('vault-form', function (Request $request) {
+            return Limit::perMinutes(self::VAULT_DECAY_MINUTES, self::VAULT_FORM_ATTEMPTS)
+                ->by($request->ip());
+        });
+
+        RateLimiter::for('vault-paste', function (Request $request) {
+            return Limit::perMinutes(self::VAULT_DECAY_MINUTES, self::VAULT_PASTE_ATTEMPTS)
+                ->by($request->ip());
+        });
+    }
+
+    /** Keyed like an unnamed throttle: the signed-in user when there is one, else the address. */
+    private function configureCapabilityLinkLimiters(): void
+    {
+        foreach (self::CAPABILITY_LINK_LIMITERS as $name) {
+            RateLimiter::for($name, function (Request $request) {
+                $user = $request->user();
+
+                return Limit::perMinute(self::CAPABILITY_LINK_ATTEMPTS_PER_MINUTE)->by(
+                    $user !== null ? 'user:'.$user->getAuthIdentifier() : 'ip:'.$request->ip()
+                );
+            });
+        }
     }
 }

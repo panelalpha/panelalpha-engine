@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Schema;
 
 /**
  * The vault only proxies what a caller passes. A request that names
- * `vault:<id>` gets the secret, stored on the project as any value would be;
+ * `vault:<key>` gets the secret, stored on the project as any value would be;
  * nothing else -- the User getters, settings, telemetry -- reads the vault,
  * so `use_count` stays 0 on every path that was not given a reference.
  */

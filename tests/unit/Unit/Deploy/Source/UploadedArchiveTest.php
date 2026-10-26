@@ -153,7 +153,7 @@ class UploadedArchiveTest extends TestCase
         $this->assertSame(
             [
                 'sudo', 'setpriv', '--reuid', '1001', '--regid', '1001', '--clear-groups',
-                'unzip', '-UU', '-o', '/staged', '-d', '/tmp/x',
+                'unzip', '-o', '/staged', '-d', '/tmp/x',
             ],
             $archive->extractArgv(1001, 1001, '/staged', '/tmp/x')
         );
@@ -237,6 +237,28 @@ class UploadedArchiveTest extends TestCase
         );
     }
 
+    /**
+     * A zip member's Unicode Path extra field names it again, and may name it differently:
+     * the listing the checks read shows that name, so extraction has to write it.
+     */
+    public function test_a_zip_member_is_written_under_the_name_its_listing_shows(): void
+    {
+        $this->zipWithUnicodePath($this->home . '/named.zip', 'evil/x', 'safe/x');
+        $archive = UploadedArchive::inHome('named.zip', $this->home);
+        $into = sys_get_temp_dir() . '/pa-unpack-' . bin2hex(random_bytes(8));
+        mkdir($into);
+        try {
+            $listed = $this->runOk(array_slice($archive->listNamesArgv($archive->path), 1));
+            $this->runOk(array_slice($archive->extractArgv(1, 1, $archive->path, $into), 7));
+
+            $this->assertSame("safe/x\n", $listed);
+            $this->assertFileExists($into . '/safe/x');
+            $this->assertDirectoryDoesNotExist($into . '/evil');
+        } finally {
+            $this->runOk(['rm', '-rf', $into, $this->home . '/named.zip']);
+        }
+    }
+
     public function test_modes_are_normalised_as_the_account(): void
     {
         $this->touchInHome('site.zip');
@@ -273,11 +295,27 @@ class UploadedArchiveTest extends TestCase
         }
     }
 
+    /** One stored member whose header names it $headerName and whose Unicode Path field names it $unicodeName. */
+    private function zipWithUnicodePath(string $path, string $headerName, string $unicodeName): void
+    {
+        $extra = pack('vvCV', 0x7075, 5 + strlen($unicodeName), 1, crc32($headerName)) . $unicodeName;
+        $sizes = [crc32('x'), 1, 1, strlen($headerName), strlen($extra)];
+        $local = pack('VvvvvvVVVvv', 0x04034b50, 10, 0, 0, 0, 0x21, ...$sizes) . $headerName . $extra . 'x';
+        $central = pack(
+            'VvvvvvvVVVvvvvvVV',
+            0x02014b50, 0x031e, 10, 0, 0, 0, 0x21, ...$sizes, ...[0, 0, 0, 0100644 << 16, 0]
+        ) . $headerName . $extra;
+        $end = pack('VvvvvVVv', 0x06054b50, 0, 0, 1, 1, strlen($central), strlen($local), 0);
+        file_put_contents($path, $local . $central . $end);
+    }
+
     /** @param list<string> $argv */
-    private function runOk(array $argv): void
+    private function runOk(array $argv): string
     {
         $process = new \Symfony\Component\Process\Process($argv);
         $process->run();
         $this->assertSame(0, $process->getExitCode(), implode(' ', $argv) . "\n" . $process->getErrorOutput());
+
+        return $process->getOutput();
     }
 }

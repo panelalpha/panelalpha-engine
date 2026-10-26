@@ -168,7 +168,7 @@ class EximConfigInputTest extends TestCase
     }
 
     /**
-     * A credential sent as `vault:<id>` is saved resolved, but answered as the
+     * A credential sent as `vault:<key>` is saved resolved, but answered as the
      * reference: the secret must not land in the caller's transcript.
      */
     public function test_a_save_answers_a_vault_credential_as_the_reference_sent(): void

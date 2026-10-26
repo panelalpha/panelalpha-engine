@@ -5,16 +5,17 @@ namespace App\Http\Controllers\User;
 use App\Http\Controllers\Controller;
 use App\Lib\Helpers\SafeRedirect;
 use App\Lib\Vault\RequestVault;
-use App\System\Project\Dind;
-use App\System\Project\Dind\AppManager;
 use App\Models\AppSsoToken;
 use App\Models\User;
+use App\System\Project\Dind;
+use App\System\Project\Dind\AppManager;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
+use Symfony\Component\HttpFoundation\Response;
 
 class AppUserController extends Controller
 {
@@ -31,7 +32,7 @@ class AppUserController extends Controller
         }
 
         $runtime = $user->project()->runtime();
-        if (!$runtime instanceof Dind) {
+        if (! $runtime instanceof Dind) {
             $this->refuseNonContainerProject($operation);
         }
 
@@ -46,7 +47,7 @@ class AppUserController extends Controller
     /**
      * Runs an app call, turning a genuine app-layer failure into a 422 on `app`.
      *
-     * @param callable(): JsonResponse $call
+     * @param  callable(): JsonResponse  $call
      */
     private function callApp(callable $call): JsonResponse
     {
@@ -137,10 +138,10 @@ class AppUserController extends Controller
     private static function newUserRules(): array
     {
         return [
-            'login'    => ['required', 'string'],
-            'email'    => ['required', 'email'],
+            'login' => ['required', 'string'],
+            'email' => ['required', 'email'],
             'password' => ['required', 'string', 'min:8'],
-            'role'     => ['required', 'string'],
+            'role' => ['required', 'string'],
         ];
     }
 
@@ -226,16 +227,16 @@ class AppUserController extends Controller
      * SSO itself, e.g. WordPress's mu-plugin), a path on the project's primary domain, or cookie
      * credentials the engine sets through /panelalpha-sso before redirecting into the app.
      *
-     * @param array<string, mixed> $result
+     * @param  array<string, mixed>  $result
      */
     private function ssoResponse(string $username, array $result): JsonResponse
     {
-        if (!empty($result['url'])) {
+        if (! empty($result['url'])) {
             return new JsonResponse(['url' => $result['url']]);
         }
 
-        if (!empty($result['path'])) {
-            return new JsonResponse(['url' => $this->primaryDomainOrigin($username) . $result['path']]);
+        if (! empty($result['path'])) {
+            return new JsonResponse(['url' => $this->primaryDomainOrigin($username).$result['path']]);
         }
 
         if (empty($result['cookie']) || empty($result['value'])) {
@@ -251,12 +252,12 @@ class AppUserController extends Controller
         $origin = $this->primaryDomainOrigin($username);
 
         $token = AppSsoToken::create([
-            'token'        => Str::random(48),
-            'username'     => $username,
-            'cookie_name'  => $result['cookie'],
+            'token' => Str::random(48),
+            'username' => $username,
+            'cookie_name' => $result['cookie'],
             'cookie_value' => $result['value'],
-            'redirect'     => $result['redirect'] ?? '/',
-            'expires_at'   => now()->addSeconds(60),
+            'redirect' => $result['redirect'] ?? '/',
+            'expires_at' => now()->addSeconds(60),
         ]);
 
         return "{$origin}/panelalpha-sso?token={$token->token}";
@@ -266,7 +267,7 @@ class AppUserController extends Controller
     private function primaryDomainOrigin(string $username): string
     {
         $domain = User::findByUsername($username)?->getMainDomain();
-        if (!$domain) {
+        if (! $domain) {
             throw new \Exception('No primary domain configured for this user');
         }
         $scheme = $domain->sslEnabled() ? 'https' : 'http';
@@ -290,13 +291,13 @@ class AppUserController extends Controller
             new OA\Response(response: 404, description: 'Token not found or expired', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
-    public function useAppSsoToken(string $username): \Symfony\Component\HttpFoundation\Response
+    public function useAppSsoToken(string $username): Response
     {
         $tokenStr = (string) request()->query('token', '');
 
         $record = AppSsoToken::redeem($tokenStr, $username);
 
-        if (!$record) {
+        if (! $record) {
             abort(new JsonResponse(['message' => 'Not found'], 404));
         }
 
@@ -375,10 +376,10 @@ class AppUserController extends Controller
         self::resolveVaultField($request, 'admin_password', $username);
         /** @var array{url: string, title: string, admin_user: string, admin_email: string, admin_password: string} $validated */
         $validated = $request->validate([
-            'url'            => ['required', 'url'],
-            'title'          => ['required', 'string'],
-            'admin_user'     => ['required', 'string'],
-            'admin_email'    => ['required', 'email'],
+            'url' => ['required', 'url'],
+            'title' => ['required', 'string'],
+            'admin_user' => ['required', 'string'],
+            'admin_email' => ['required', 'email'],
             'admin_password' => ['required', 'string', 'min:8'],
         ]);
 
@@ -395,7 +396,7 @@ class AppUserController extends Controller
         });
     }
 
-    /** A `vault:<id>` read before validation, so the rules (min:8) see the secret. */
+    /** A `vault:<key>` read before validation, so the rules (min:8) see the secret. */
     private static function resolveVaultField(Request $request, string $field, string $username): void
     {
         if ($request->has($field)) {

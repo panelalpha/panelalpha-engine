@@ -40,4 +40,21 @@ test.describe('main domain changes', () => {
       expect(moverDomains, 'the occupied domain was not added').not.toContain(occupant.domain);
     });
   });
+
+  test('a name under panelalpha.online is refused and the old one kept', async ({
+    api,
+    userFactory,
+  }) => {
+    const user = await userFactory.createSimpleUser();
+
+    const result = await api.updateUserRaw(user.username, {
+      domain: `${randomUsername()}.panelalpha.online`,
+    });
+
+    await expectStatus(result, 422, JSON.stringify(result.body));
+    expect((result.body as { problems?: unknown[] }).problems).toContainEqual(
+      expect.objectContaining({ field: 'domain', code: 'domain_proxy_zone' })
+    );
+    expect((await api.getUser(user.username)).data.domain).toBe(user.domain);
+  });
 });

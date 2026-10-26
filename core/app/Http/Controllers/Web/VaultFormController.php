@@ -2,10 +2,10 @@
 
 namespace App\Http\Controllers\Web;
 
+use App\Http\Requests\VaultSecretRequest;
 use App\Lib\Vault\PasteCheck;
 use App\Models\SecretVaultEntry;
 use Illuminate\Contracts\View\View;
-use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 
 /**
@@ -39,11 +39,9 @@ class VaultFormController
         return $this->refusal($entry) ?? $this->screen($token, $entry);
     }
 
-    public function store(Request $request, string $token): Response|View
+    public function store(VaultSecretRequest $request, string $token): Response|View
     {
-        $validated = $request->validate([
-            'secret' => ['required', 'string', 'max:8192', 'not_in:'],
-        ]);
+        $secret = (string) $request->validated('secret');
 
         $entry = $this->find($token);
 
@@ -52,12 +50,12 @@ class VaultFormController
             return $refusal;
         }
 
-        $check = $this->checkBeforeSaving($entry, $validated['secret']);
+        $check = $this->checkBeforeSaving($entry, $secret);
         if ($check['rejected'] !== null) {
             return response($this->screen($token, $entry, $check['rejected']), 422);
         }
 
-        if (!$entry->seal($validated['secret'], $check['verification'])) {
+        if (! $entry->seal($secret, $check['verification'])) {
             return $this->sealed();
         }
 
@@ -126,7 +124,7 @@ class VaultFormController
         return $this->unavailable(
             'This secret is already set',
             'It cannot be changed from this page. To replace it, ask for the old one to be deleted '
-            . 'and a new link created.'
+            .'and a new link created.'
         );
     }
 
@@ -145,7 +143,7 @@ class VaultFormController
 
         return $this->unavailable(
             'This link expired',
-            'It expired at ' . ($at?->format('Y-m-d H:i T') ?? 'an earlier time') . '. Ask the assistant that gave it to you for a new one.'
+            'It expired at '.($at?->format('Y-m-d H:i T') ?? 'an earlier time').'. Ask the assistant that gave it to you for a new one.'
         );
     }
 
@@ -156,12 +154,12 @@ class VaultFormController
     private function note(SecretVaultEntry $entry): string
     {
         $stored = 'Saved once and for all: stored encrypted on your server, never shown to anyone again '
-            . '(including your AI agent), and it cannot be changed from this page afterwards.';
+            .'(including your AI agent), and it cannot be changed from this page afterwards.';
 
         if ($entry->isGlobal()) {
-            $stored = 'Saved for this whole server: any project may use it, but only where it is told to. ' . $stored;
+            $stored = 'Saved for this whole server: any project may use it, but only where it is told to. '.$stored;
         } elseif ($entry->project !== null) {
-            $stored = "Saved for project {$entry->project} only. " . $stored;
+            $stored = "Saved for project {$entry->project} only. ".$stored;
         }
 
         return $stored;

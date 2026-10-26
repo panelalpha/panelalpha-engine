@@ -25,7 +25,7 @@ class GitTokenInputTest extends TestCase
             'unprefixed' => ['abc123def456'],
             'gitea 40 hex' => [str_repeat('0123456789abcdef', 2) . str_repeat('a', 8)],
             'surrounding whitespace is trimmed, not rejected' => ["  ghp_" . str_repeat('a', 36) . "\n"],
-            'vault reference' => ['vault:12'],
+            'vault reference' => ['vault:Kq3xT9bLmW2vR8nYp4sZ6cHd'],
             // Longer than the known length is a newer format, not a mistake.
             'a longer future github token' => ['ghp_' . str_repeat('a', 60)],
         ];
@@ -55,7 +55,7 @@ class GitTokenInputTest extends TestCase
             'truncated github' => ['ghp_aaaaaaaa', 'git_token_truncated'],
             'truncated gitlab' => ['glpat-aaaa', 'git_token_truncated'],
             'bare vault prefix' => ['vault:', 'git_token_malformed_vault_reference'],
-            'vault ref that is not an id' => ['vault:9f2c1d7b', 'git_token_malformed_vault_reference'],
+            'vault ref that is not a key' => ['vault:7.Kq3x', 'git_token_malformed_vault_reference'],
             'too long' => [str_repeat('a', GitTokenInput::MAX_LENGTH + 1), 'git_token_too_long'],
         ];
     }

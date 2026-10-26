@@ -33,7 +33,7 @@ class EnsureTokenMayUseApi
     {
         $token = RequestToken::of($request);
 
-        if (!$token instanceof PersonalAccessToken) {
+        if (! $token instanceof PersonalAccessToken) {
             return $next($request);
         }
 
@@ -58,11 +58,11 @@ class EnsureTokenMayUseApi
             return null;
         }
 
-        if (!$abilities->mayUseApi()) {
+        if (! $abilities->mayUseApi()) {
             return 'This token was not issued for the API. Mint one with `pae api:token:create`.';
         }
 
-        if (!$abilities->mayCallRoute($operation)) {
+        if (! $abilities->mayCallRoute($operation)) {
             return sprintf(
                 'This token is limited to part of the API, and %s is not in it.',
                 $operation ?? 'this route'
@@ -85,6 +85,7 @@ class EnsureTokenMayUseApi
         }
 
         return $this->routeProjectRefusal($request, $scope, $operation)
+            ?? $this->createdProjectRefusal($request, $scope, $operation)
             ?? $this->namedProjectRefusal($request, $scope, $operation)
             ?? $this->operatorRefusal($request, $abilities, $scope, $operation)
             ?? $this->globalProjectRefusal($abilities, $scope, $operation);
@@ -94,11 +95,11 @@ class EnsureTokenMayUseApi
      * What the operator owns on a project in scope: an operation a scoped
      * token may not call, or the fields of one it may not set.
      *
-     * @param array<int, string> $scope
+     * @param  array<int, string>  $scope
      */
     private function operatorRefusal(Request $request, TokenAbilities $abilities, array $scope, ?string $operation): ?string
     {
-        if (!$abilities->mayCallOperatorRoute($operation)) {
+        if (! $abilities->mayCallOperatorRoute($operation)) {
             return sprintf(
                 'This token is limited to projects %s; only an unscoped token may call %s.',
                 implode(', ', $scope),
@@ -120,7 +121,7 @@ class EnsureTokenMayUseApi
      * The project the route itself names, if any: the path parameter, the
      * project owning a domain, or the task owner.
      *
-     * @param array<int, string> $scope
+     * @param  array<int, string>  $scope
      */
     private function routeProjectRefusal(Request $request, array $scope, ?string $operation): ?string
     {
@@ -146,15 +147,33 @@ class EnsureTokenMayUseApi
     }
 
     /**
+     * A project the request creates under a name the caller left out: the
+     * engine picks that name, and a scope lists names, not a rule for picking.
+     *
+     * @param  array<int, string>  $scope
+     */
+    private function createdProjectRefusal(Request $request, array $scope, ?string $operation): ?string
+    {
+        $field = ProjectFields::missingCreationName($request, $operation);
+
+        return $field === null ? null : sprintf(
+            'This token is limited to projects %s; %s must name the project it creates in %s.',
+            implode(', ', $scope),
+            $operation,
+            $field
+        );
+    }
+
+    /**
      * Every project named in a body or query field this operation is known to
      * carry, refused as a whole when one is outside the scope.
      *
-     * @param array<int, string> $scope
+     * @param  array<int, string>  $scope
      */
     private function namedProjectRefusal(Request $request, array $scope, ?string $operation): ?string
     {
         foreach (ProjectFields::namedIn($request, $operation) as $username) {
-            if (!in_array($username, $scope, true)) {
+            if (! in_array($username, $scope, true)) {
                 return $this->outsideScope($scope, $operation);
             }
         }
@@ -163,7 +182,7 @@ class EnsureTokenMayUseApi
     }
 
     /**
-     * @param array<int, string> $scope
+     * @param  array<int, string>  $scope
      */
     private function globalProjectRefusal(TokenAbilities $abilities, array $scope, ?string $operation): ?string
     {
@@ -174,7 +193,7 @@ class EnsureTokenMayUseApi
      * A domain that belongs to a project in scope. A domain outside every
      * scoped project, or one that does not exist, is outside the token.
      *
-     * @param array<int, string> $scope
+     * @param  array<int, string>  $scope
      */
     private function domainRefusal(array $scope, string $domain, ?string $operation): ?string
     {
@@ -184,7 +203,7 @@ class EnsureTokenMayUseApi
     }
 
     /**
-     * @param array<int, string> $scope
+     * @param  array<int, string>  $scope
      */
     private function taskRefusal(array $scope, int $id, ?string $operation): ?string
     {
@@ -194,7 +213,7 @@ class EnsureTokenMayUseApi
     }
 
     /**
-     * @param array<int, string> $scope
+     * @param  array<int, string>  $scope
      */
     private function outsideUnless(array $scope, string $username, ?string $operation): ?string
     {
@@ -202,7 +221,7 @@ class EnsureTokenMayUseApi
     }
 
     /**
-     * @param array<int, string> $scope
+     * @param  array<int, string>  $scope
      */
     private function outsideScope(array $scope, ?string $operation): string
     {

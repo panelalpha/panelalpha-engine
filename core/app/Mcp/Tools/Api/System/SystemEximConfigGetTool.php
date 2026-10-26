@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('system_exim_config_get')]
 #[Description(<<<'MARKDOWN'
     Get Exim mail server configuration
+
+    A stored password or API token (sendgrid_api_token, mailchannels_password, amazon_ses_smtp_password, smtp_password) is never returned: it is null, and `<field>_set` says whether one is stored. Sending this answer back to PUT keeps them; PUT `clear_secrets` clears one.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

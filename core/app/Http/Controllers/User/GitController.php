@@ -25,39 +25,39 @@ use OpenApi\Attributes as OA;
 class GitController extends Controller
 {
     private const QUEUED_ON_DEPLOY = 'On a Deploy-managed checkout (`managed_by` is `deploy`) the request is checked at once '
-        . '(the remote is read, 400 with git\'s error when it cannot be; the branch or ref must exist, 422 otherwise), then the change and the rebuild after it '
-        . 'run in a queue job: the answer is 202 with a task. Poll GET /tasks/{id} until it is completed, failed or '
-        . 'cancelled: a failure is on the task as `details.error` and `details.problems`, and `details.commit` is the '
-        . 'commit a completed one deployed. A new version that fails while the previous one still runs leaves it '
-        . 'serving, with its checkout put back';
+        .'(the remote is read, 400 with git\'s error when it cannot be; the branch or ref must exist, 422 otherwise), then the change and the rebuild after it '
+        .'run in a queue job: the answer is 202 with a task. Poll GET /tasks/{id} until it is completed, failed or '
+        .'cancelled: a failure is on the task as `details.error` and `details.problems`, and `details.commit` is the '
+        .'commit a completed one deployed. A new version that fails while the previous one still runs leaves it '
+        .'serving, with its checkout put back';
 
     private const BUSY = 'While a deploy of a Deploy-managed checkout\'s project is queued or running the answer is 409 with '
-        . 'that deploy\'s `task_id`: follow it rather than calling again, or cancel it with POST /tasks/{id}/cancel if '
-        . 'it is stuck; `task_id` is null when the running deploy was not started as a task (the CLI, a push), and '
-        . 'GET /projects/{username}/deploy-log follows it then.';
+        .'that deploy\'s `task_id`: follow it rather than calling again, or cancel it with POST /tasks/{id}/cancel if '
+        .'it is stuck; `task_id` is null when the running deploy was not started as a task (the CLI, a push), and '
+        .'GET /projects/{username}/deploy-log follows it then.';
 
     private const QUEUED_RESPONSE = 'Deploy-managed checkout: the change and the rebuild are queued; `data` is the task to follow';
 
-    private const BUSY_RESPONSE = 'A deploy of this project is already queued or running. ' . ApiDefinitions::PROTECTED_RESPONSE;
+    private const BUSY_RESPONSE = 'A deploy of this project is already queued or running. '.ApiDefinitions::PROTECTED_RESPONSE;
 
     private const GIT_ERROR_RESPONSE = 'Git failed, e.g. the remote could not be read';
 
     private const LOCK_RESPONSE = 'Deploy-managed checkout: the project could not be locked to queue the change; try again';
 
     private const MCP_QUEUED = 'On a managed_by deploy checkout the change and the rebuild after it run in the background: '
-        . 'the answer is a task `id` at once; follow it with task_get until completed, failed or cancelled (a failure '
-        . 'is in details.error and details.problems, the deployed commit in details.commit). A 409 means a deploy is '
-        . 'already running: follow the task_id it names with task_get (task_cancel if it is stuck), or deploy_log_get '
-        . 'when task_id is null, instead of calling again.';
+        .'the answer is a task `id` at once; follow it with task_get until completed, failed or cancelled (a failure '
+        .'is in details.error and details.problems, the deployed commit in details.commit). A 409 means a deploy is '
+        .'already running: follow the task_id it names with task_get (task_cancel if it is stuck), or deploy_log_get '
+        .'when task_id is null, instead of calling again.';
 
     #[OA\Get(
         path: '/projects/{username}/git/status',
         description: 'Call this first. Optional `path` defaults to `project` on DinD and the document root '
-            . 'of the main domain on FPM/LiteSpeed. Query `fetch` updates remote-tracking refs before reporting. The '
-            . 'payload includes `managed_by`: `deploy` (account provisioned with git_repo; a pull, branch change '
-            . 'or revert rebuilds the app after it, as a task, and `project_rebuild` redeploys it unchanged) or '
-            . '`site_git` (the Git tools change the checkout and nothing is rebuilt). `connecting: true` '
-            . 'means a connect is still fetching the repository: wait and poll; do not call connect again.',
+            .'of the main domain on FPM/LiteSpeed. Query `fetch` updates remote-tracking refs before reporting. The '
+            .'payload includes `managed_by`: `deploy` (account provisioned with git_repo; a pull, branch change '
+            .'or revert rebuilds the app after it, as a task, and `project_rebuild` redeploys it unchanged) or '
+            .'`site_git` (the Git tools change the checkout and nothing is rebuilt). `connecting: true` '
+            .'means a connect is still fetching the repository: wait and poll; do not call connect again.',
         summary: 'Git repository status',
         security: [['bearerAuth' => []]],
         tags: ['Git'],
@@ -95,7 +95,7 @@ class GitController extends Controller
     #[OA\Get(
         path: '/projects/{username}/git/branches',
         description: 'List git branches. Optional `path` defaults to `project` on DinD and the document root '
-            . 'of the main domain on FPM/LiteSpeed.',
+            .'of the main domain on FPM/LiteSpeed.',
         summary: 'List git branches',
         security: [['bearerAuth' => []]],
         tags: ['Git'],
@@ -121,7 +121,7 @@ class GitController extends Controller
     #[OA\Get(
         path: '/projects/{username}/git/commits',
         description: 'List git commits. Optional `path` defaults to `project` on DinD and the document root '
-            . 'of the main domain on FPM/LiteSpeed. Query `branch` filters the log; `limit` caps how many commits are returned.',
+            .'of the main domain on FPM/LiteSpeed. Query `branch` filters the log; `limit` caps how many commits are returned.',
         summary: 'List git commits',
         security: [['bearerAuth' => []]],
         tags: ['Git'],
@@ -149,13 +149,13 @@ class GitController extends Controller
     #[OA\Post(
         path: '/projects/{username}/git/connect',
         description: 'Connect a directory to a git remote. Optional `path` defaults to `project` on DinD '
-            . 'and the document root of the main domain on FPM/LiteSpeed. Body `repo_url` and `branch` are required. Optional '
-            . '`token` is a PAT (never logged). Set `repair` to re-adopt a missing .git. On a `deploy` '
-            . 'account without repair this only keeps origin in sync and persists metadata — it does '
-            . 'not clone from scratch. An SSH `repo_url` (`git@host:owner/repo.git`) needs the project\'s '
-            . 'deploy key (POST /projects/{username}/git/deploy-key) added to the repository first. A `repo_url` '
-            . 'whose host resolves to an internal address is refused 422 with `problems[{field: repo_url, '
-            . 'code: host_refused}]`; anything that is not a URL (`file://`, `ext::`) fails validation first.',
+            .'and the document root of the main domain on FPM/LiteSpeed. Body `repo_url` and `branch` are required. Optional '
+            .'`token` is a PAT (never logged). Set `repair` to re-adopt a missing .git. On a `deploy` '
+            .'account without repair this only keeps origin in sync and persists metadata — it does '
+            .'not clone from scratch. An SSH `repo_url` (`git@host:owner/repo.git`) needs the project\'s '
+            .'deploy key (POST /projects/{username}/git/deploy-key) added to the repository first. A `repo_url` '
+            .'whose host resolves to an internal address, or does not resolve at all, is refused 422 with '
+            .'`problems[{field: repo_url, code: host_refused}]`; anything that is not a URL (`file://`, `ext::`) fails validation first.',
         summary: 'Connect a directory to a git remote',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
@@ -189,9 +189,9 @@ class GitController extends Controller
     #[OA\Post(
         path: '/projects/{username}/git/disconnect',
         description: 'Disconnect git from a directory. Optional `path` defaults to `project` on DinD and '
-            . 'the document root of the main domain on FPM/LiteSpeed. Removes `origin` and site-git metadata; does not delete '
-            . 'working-tree files. Also removes the checkout\'s Deploy Hook, if it has one -- a '
-            . 'disconnected checkout has nothing for a push to deploy. Returns 422 when managed_by is `deploy`.',
+            .'the document root of the main domain on FPM/LiteSpeed. Removes `origin` and site-git metadata; does not delete '
+            .'working-tree files. Also removes the checkout\'s Deploy Hook, if it has one -- a '
+            .'disconnected checkout has nothing for a push to deploy. Returns 422 when managed_by is `deploy`.',
         summary: 'Disconnect git from a directory',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
@@ -217,10 +217,10 @@ class GitController extends Controller
     #[OA\Put(
         path: '/projects/{username}/git/change-branch',
         description: 'Change the tracked git branch. Optional `path` defaults to `project` on DinD and '
-            . 'the document root of the main domain on FPM/LiteSpeed. Body `branch` is required. Returns 422 if the working '
-            . 'tree is dirty or the remote branch does not exist. On a `site_git` checkout the change runs in the request '
-            . 'and the answer is 200 with the checkout. ' . self::QUEUED_ON_DEPLOY . ' (`details.action: change_branch`). '
-            . self::BUSY,
+            .'the document root of the main domain on FPM/LiteSpeed. Body `branch` is required. Returns 422 if the working '
+            .'tree is dirty or the remote branch does not exist. On a `site_git` checkout the change runs in the request '
+            .'and the answer is 200 with the checkout. '.self::QUEUED_ON_DEPLOY.' (`details.action: change_branch`). '
+            .self::BUSY,
         summary: 'Change the tracked git branch',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
@@ -246,8 +246,8 @@ class GitController extends Controller
             new OA\Response(response: 503, description: self::LOCK_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
         x: ['mcp-description' => 'Switches the checkout to another branch. Optional `path` defaults to `project` on DinD and '
-            . 'the document root of the main domain on FPM/LiteSpeed. Refused (422) when the working tree is dirty or the '
-            . 'remote has no such branch. ' . self::MCP_QUEUED . ' Use project_rebuild to redeploy without changing the branch.'],
+            .'the document root of the main domain on FPM/LiteSpeed. Refused (422) when the working tree is dirty or the '
+            .'remote has no such branch. '.self::MCP_QUEUED.' Use project_rebuild to redeploy without changing the branch.'],
     )]
     public function changeBranch(string $username, GitChangeBranchRequest $request, GitActions $git): JsonResponse
     {
@@ -260,8 +260,8 @@ class GitController extends Controller
     #[OA\Put(
         path: '/projects/{username}/git/update-credentials',
         description: 'Update git credentials for a directory. Optional `path` defaults to `project` on '
-            . 'DinD and the document root of the main domain on FPM/LiteSpeed. Sending `token` (including empty) updates stored '
-            . 'credentials. Omitting `token` is a no-op that returns status.',
+            .'DinD and the document root of the main domain on FPM/LiteSpeed. Sending `token` (including empty) updates stored '
+            .'credentials. Omitting `token` is a no-op that returns status.',
         summary: 'Update git credentials for a directory',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
@@ -290,15 +290,15 @@ class GitController extends Controller
     #[OA\Post(
         path: '/projects/{username}/git/pull',
         description: 'Pull from the git remote. Optional `path` defaults to `project` on DinD and '
-            . 'the document root of the main domain on FPM/LiteSpeed. Body `strategy` is `ff` (default), `force` '
-            . '(`reset --hard` origin/<branch> plus clean -fd), or `push_first`. `ff` fetches and fast-forwards, '
-            . 'and git alone decides whether the checkout allows it: untracked files (uploads, caches) and edits to '
-            . 'files the incoming commits leave alone do not block it. It is refused, naming the paths, when a local '
-            . 'edit or untracked file sits where an incoming commit writes, or when history has diverged '
-            . '(for example after a force-push); the checkout is left as it was. On a `site_git` checkout the pull '
-            . 'runs in the request: 200 with the checkout, or 422 for those refusals. ' . self::QUEUED_ON_DEPLOY
-            . ' (`details.action: git_pull`); a refused pull fails the task the same way. ' . self::BUSY
-            . ' Confirm with the operator before `force`.',
+            .'the document root of the main domain on FPM/LiteSpeed. Body `strategy` is `ff` (default), `force` '
+            .'(`reset --hard` origin/<branch> plus clean -fd), or `push_first`. `ff` fetches and fast-forwards, '
+            .'and git alone decides whether the checkout allows it: untracked files (uploads, caches) and edits to '
+            .'files the incoming commits leave alone do not block it. It is refused, naming the paths, when a local '
+            .'edit or untracked file sits where an incoming commit writes, or when history has diverged '
+            .'(for example after a force-push); the checkout is left as it was. On a `site_git` checkout the pull '
+            .'runs in the request: 200 with the checkout, or 422 for those refusals. '.self::QUEUED_ON_DEPLOY
+            .' (`details.action: git_pull`); a refused pull fails the task the same way. '.self::BUSY
+            .' Confirm with the operator before `force`.',
         summary: 'Pull from the git remote',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
@@ -323,10 +323,10 @@ class GitController extends Controller
             new OA\Response(response: 503, description: self::LOCK_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
         x: ['mcp-description' => 'Pulls the connected branch. Optional `path` defaults to `project` on DinD and the document '
-            . 'root of the main domain on FPM/LiteSpeed. `strategy`: `ff` (default) fast-forwards and is refused when history '
-            . 'has diverged or a local edit or untracked file sits where an incoming commit writes; `force` is `reset --hard` '
-            . 'to origin plus clean -fd; `push_first` pushes local commits first. Confirm with the operator before `force`. '
-            . self::MCP_QUEUED],
+            .'root of the main domain on FPM/LiteSpeed. `strategy`: `ff` (default) fast-forwards and is refused when history '
+            .'has diverged or a local edit or untracked file sits where an incoming commit writes; `force` is `reset --hard` '
+            .'to origin plus clean -fd; `push_first` pushes local commits first. Confirm with the operator before `force`. '
+            .self::MCP_QUEUED],
     )]
     public function pull(string $username, GitPullRequest $request, GitActions $git): JsonResponse
     {
@@ -339,9 +339,9 @@ class GitController extends Controller
     #[OA\Post(
         path: '/projects/{username}/git/push',
         description: 'Push local git changes. Optional `path` defaults to `project` on DinD and '
-            . 'the document root of the main domain on FPM/LiteSpeed. If the working tree is dirty this tool will commit all '
-            . 'changes itself, then push. Returns 422 `Pull first.` when behind the remote, or when '
-            . 'managed_by is `deploy`.',
+            .'the document root of the main domain on FPM/LiteSpeed. If the working tree is dirty this tool will commit all '
+            .'changes itself, then push. Returns 422 `Pull first.` when behind the remote, or when '
+            .'managed_by is `deploy`.',
         summary: 'Push local git changes',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
@@ -367,10 +367,10 @@ class GitController extends Controller
     #[OA\Post(
         path: '/projects/{username}/git/revert',
         description: 'Revert local git changes. Optional `path` defaults to `project` on DinD and '
-            . 'the document root of the main domain on FPM/LiteSpeed. Runs `reset --hard` and `clean -fd` to `ref` (default '
-            . 'HEAD). Discards local changes. Confirm with the operator. 422 when `ref` names no commit in the checkout. '
-            . 'On a `site_git` checkout it runs in the request and the answer is 200 with the checkout. '
-            . self::QUEUED_ON_DEPLOY . ' (`details.action: revert`). ' . self::BUSY,
+            .'the document root of the main domain on FPM/LiteSpeed. Runs `reset --hard` and `clean -fd` to `ref` (default '
+            .'HEAD). Discards local changes. Confirm with the operator. 422 when `ref` names no commit in the checkout. '
+            .'On a `site_git` checkout it runs in the request and the answer is 200 with the checkout. '
+            .self::QUEUED_ON_DEPLOY.' (`details.action: revert`). '.self::BUSY,
         summary: 'Revert local git changes',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
@@ -395,8 +395,8 @@ class GitController extends Controller
             new OA\Response(response: 503, description: self::LOCK_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
         x: ['mcp-description' => 'Discards local changes: `reset --hard` and `clean -fd` to `ref` (default HEAD). Optional '
-            . '`path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. Confirm with '
-            . 'the operator. ' . self::MCP_QUEUED],
+            .'`path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. Confirm with '
+            .'the operator. '.self::MCP_QUEUED],
     )]
     public function revert(string $username, GitRevertRequest $request, GitActions $git): JsonResponse
     {
@@ -409,12 +409,12 @@ class GitController extends Controller
     #[OA\Post(
         path: '/projects/{username}/git/deploy-key',
         description: 'Create the project\'s SSH deploy key, or return the one it has: `public_key` is the line '
-            . 'to add to the repository as a read-only deploy key, then connect an SSH remote with git_connect. '
-            . 'The private key is stored encrypted and never returned. Host keys are pinned: github.com, '
-            . 'gitlab.com and bitbucket.org from their published keys; for another host pass `host` '
-            . '(`git.example.com` or `git.example.com:2222`) and its keys are read once and pinned, with their '
-            . '`fingerprints` returned to check. 201 when the key was created, 200 when it existed; never '
-            . 'rotates (delete and create again for a new key).',
+            .'to add to the repository as a read-only deploy key, then connect an SSH remote with git_connect. '
+            .'The private key is stored encrypted and never returned. Host keys are pinned: github.com, '
+            .'gitlab.com and bitbucket.org from their published keys; for another host pass `host` '
+            .'(`git.example.com` or `git.example.com:2222`) and its keys are read once and pinned, with their '
+            .'`fingerprints` returned to check. 201 when the key was created, 200 when it existed; never '
+            .'rotates (delete and create again for a new key).',
         summary: 'Create a git deploy key',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
@@ -453,7 +453,7 @@ class GitController extends Controller
     #[OA\Delete(
         path: '/projects/{username}/git/deploy-key',
         description: 'Delete the project\'s SSH deploy key and the host keys pinned with it. SSH remotes stop '
-            . 'authenticating; remove the key from the repository too. 404 when the project has no deploy key.',
+            .'authenticating; remove the key from the repository too. 404 when the project has no deploy key.',
         summary: 'Delete a git deploy key',
         security: [['bearerAuth' => []]],
         tags: ['Git'],
@@ -466,7 +466,7 @@ class GitController extends Controller
     public function deleteDeployKey(string $username): JsonResponse
     {
         $user = $this->projectOr404($username);
-        if (!DeployKey::delete($user)) {
+        if (! DeployKey::delete($user)) {
             return new JsonResponse(['message' => "Project '{$username}' has no deploy key."], 404);
         }
 
@@ -477,7 +477,7 @@ class GitController extends Controller
      * 202 with the task when the change was queued with a rebuild; otherwise
      * the change, made here.
      *
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      */
     private function queuedOrDone(GitActions $git, User $user, string $action, array $params, callable $run): JsonResponse
     {

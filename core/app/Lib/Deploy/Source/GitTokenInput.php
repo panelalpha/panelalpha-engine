@@ -12,7 +12,7 @@ namespace App\Lib\Deploy\Source;
  * Nothing here ever puts the value in a message. Unlike a repository URL, a
  * token is a secret, and `errors` reaches logs, MCP and transcripts.
  *
- * A `vault:<id>` is resolved by RequestVault in the controller, after
+ * A `vault:<key>` is resolved by RequestVault in the controller, after
  * validation -- so whether the real secret works is not knowable from here.
  */
 final class GitTokenInput
@@ -56,25 +56,25 @@ final class GitTokenInput
         }
         if (strlen($value) > self::MAX_LENGTH) {
             return self::problemOf($field, 'too_long',
-                'A Git token must be at most ' . self::MAX_LENGTH . ' characters.');
+                'A Git token must be at most '.self::MAX_LENGTH.' characters.');
         }
         if (self::isVaultReference($value)) {
-            return ctype_digit(substr($value, strlen(self::VAULT_PREFIX)))
+            return ctype_alnum(substr($value, strlen(self::VAULT_PREFIX)))
                 ? null
                 : self::problemOf($field, 'malformed_vault_reference',
-                    'A vault reference is `vault:<id>`, the id vault_secret_create returned.');
+                    'A vault reference is `vault:<key>`, as vault_secret_create returned it.');
         }
         if (preg_match('/[\x00-\x1F\x7F]/', $value) === 1) {
             return self::problemOf($field, 'malformed',
                 'A Git token must not contain control characters. This usually means a newline '
-                . 'came along with the paste.');
+                .'came along with the paste.');
         }
         // Before the space check: a header always contains one, and naming the
         // header is the more useful of the two things to say.
         if (self::hasAuthPrefix($value)) {
             return self::problemOf($field, 'has_auth_prefix',
                 'Send the token itself, not a whole Authorization header: drop everything '
-                . 'before the credential.');
+                .'before the credential.');
         }
         if (preg_match('/\s/', $value) === 1) {
             return self::problemOf($field, 'malformed',
@@ -101,7 +101,7 @@ final class GitTokenInput
             $value === '' => '(blank)',
             self::isVaultReference($value) => 'vault:…',
             strlen($value) <= 8 => str_repeat('•', strlen($value)),
-            default => substr($value, 0, 4) . str_repeat('•', 8),
+            default => substr($value, 0, 4).str_repeat('•', 8),
         };
     }
 
@@ -109,14 +109,14 @@ final class GitTokenInput
     private static function truncationProblem(string $field, string $value): ?array
     {
         foreach (self::MIN_LENGTH_BY_PREFIX as $prefix => $minLength) {
-            if (!str_starts_with($value, $prefix) || strlen($value) >= $minLength) {
+            if (! str_starts_with($value, $prefix) || strlen($value) >= $minLength) {
                 continue;
             }
             $forge = str_starts_with($prefix, 'glpat') ? 'GitLab' : 'GitHub';
 
             return self::problemOf($field, 'truncated',
-                "This starts like a {$forge} token but is " . strlen($value) . ' characters, '
-                . "short of the {$minLength} one has. The paste was probably cut off.");
+                "This starts like a {$forge} token but is ".strlen($value).' characters, '
+                ."short of the {$minLength} one has. The paste was probably cut off.");
         }
 
         return null;
@@ -147,6 +147,6 @@ final class GitTokenInput
     /** @return array<string, mixed> */
     private static function problemOf(string $field, string $code, string $message): array
     {
-        return ['field' => $field, 'code' => $field . '_' . $code, 'message' => $message];
+        return ['field' => $field, 'code' => $field.'_'.$code, 'message' => $message];
     }
 }

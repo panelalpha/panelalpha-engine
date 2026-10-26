@@ -2,6 +2,7 @@
 
 namespace App\Mcp;
 
+use App\Console\Commands\Mcp\GenerateApiToolsCommand;
 use App\Mcp\Tools\Api\ApiTool;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -20,7 +21,9 @@ use Throwable;
 class ToolPolicy
 {
     public const MODE_READONLY = 'readonly';
+
     public const MODE_MODIFY = 'modify';
+
     public const MODE_FULL = 'full';
 
     /**
@@ -39,26 +42,24 @@ class ToolPolicy
     /**
      * Reads that hand out a live credential. They change nothing, but a
      * readonly client may look, not log in, so these start at modify:
-     * smarthost passwords and tokens, the admin login generated for the
-     * deployed app, and files such as docker-compose.panelalpha.yml that hold
-     * the app's database password.
+     * the admin login generated for the deployed app, and files such as
+     * docker-compose.panelalpha.yml that hold the app's database password.
      */
     public const CREDENTIAL_TOOLS = [
-        'system_exim_config_get',
         'app_credentials_get',
         'file_download',
     ];
 
     /**
-     * @param array<string, mixed> $config
+     * @param  array<string, mixed>  $config
      */
     public function __construct(private array $config = [])
     {
-        $this->config = $config ?: (array)config('mcp-tools', []);
+        $this->config = $config ?: (array) config('mcp-tools', []);
     }
 
     /**
-     * @param array<int, class-string<Tool>> $tools
+     * @param  array<int, class-string<Tool>>  $tools
      * @return array<int, class-string<Tool>>
      */
     public function filter(array $tools): array
@@ -76,7 +77,7 @@ class ToolPolicy
             if (
                 $this->enabled($class, $name, $toolsets, $allowed)
                 && $this->permittedBy($mode, $class)
-                && !$this->denied($name, $denied, $regex)
+                && ! $this->denied($name, $denied, $regex)
             ) {
                 $kept[] = $class;
             }
@@ -86,9 +87,9 @@ class ToolPolicy
     }
 
     /**
-     * @param class-string<Tool> $class
-     * @param array<int, string> $toolsets
-     * @param array<int, string> $allowed
+     * @param  class-string<Tool>  $class
+     * @param  array<int, string>  $toolsets
+     * @param  array<int, string>  $allowed
      */
     private function enabled(string $class, string $name, array $toolsets, array $allowed): bool
     {
@@ -99,7 +100,7 @@ class ToolPolicy
     }
 
     /**
-     * @param array<int, string> $denied
+     * @param  array<int, string>  $denied
      */
     private function denied(string $name, array $denied, ?string $regex): bool
     {
@@ -113,12 +114,12 @@ class ToolPolicy
      * tool -- direct ones too, so a search never misses one -- sits in the
      * catalogue behind search_tools / execute_tools.
      *
-     * @param array<int, class-string<Tool>> $tools
+     * @param  array<int, class-string<Tool>>  $tools
      * @return array<int|string, class-string<Tool>|array<int, class-string<Tool>>>
      */
     public function layout(array $tools): array
     {
-        if (!filter_var($this->config['tool_search'] ?? false, FILTER_VALIDATE_BOOL)) {
+        if (! filter_var($this->config['tool_search'] ?? false, FILTER_VALIDATE_BOOL)) {
             return $tools;
         }
 
@@ -141,7 +142,7 @@ class ToolPolicy
      * under (`Api\Projects\ProjectListTool` is `projects`). Hand-written tools
      * live directly under App\Mcp\Tools and are grouped as "engine".
      *
-     * @param class-string<Tool> $class
+     * @param  class-string<Tool>  $class
      */
     public function toolsetOf(string $class): string
     {
@@ -154,22 +155,22 @@ class ToolPolicy
     }
 
     /**
-     * @param class-string<Tool> $class
+     * @param  class-string<Tool>  $class
      */
     public function nameOf(string $class): string
     {
-        return (new $class())->name();
+        return (new $class)->name();
     }
 
     /**
      * The HTTP verb behind a tool, or null when it is not an API tool. The two
      * hand-written tools only read, so they count as GET.
      *
-     * @param class-string<Tool> $class
+     * @param  class-string<Tool>  $class
      */
     public function verbOf(string $class): string
     {
-        $tool = new $class();
+        $tool = new $class;
 
         return $tool instanceof ApiTool ? strtoupper($tool->httpMethod()) : 'GET';
     }
@@ -178,9 +179,9 @@ class ToolPolicy
      * Whether a tool only reads, whatever verb it uses. Besides GET, that is an
      * operation that POSTs only to send a body (a git token has no business in a
      * query string): it carries `#[IsReadOnly]`, written at generation time from
-     * {@see \App\Console\Commands\Mcp\GenerateApiToolsCommand::READ_ONLY_OPERATIONS}.
+     * {@see GenerateApiToolsCommand::READ_ONLY_OPERATIONS}.
      *
-     * @param class-string<Tool> $class
+     * @param  class-string<Tool>  $class
      */
     public function readsOnly(string $class): bool
     {
@@ -190,12 +191,12 @@ class ToolPolicy
     /**
      * An unreadable annotation counts as a write, so it never widens what a mode allows.
      *
-     * @param class-string<Tool> $class
+     * @param  class-string<Tool>  $class
      */
     private function declaresReadOnly(string $class): bool
     {
         try {
-            return ((new $class())->annotations()['readOnlyHint'] ?? false) === true;
+            return ((new $class)->annotations()['readOnlyHint'] ?? false) === true;
         } catch (Throwable $e) {
             Log::warning('Could not read the annotations of an MCP tool; treating it as a write.', [
                 'tool' => $class,
@@ -209,7 +210,7 @@ class ToolPolicy
     /**
      * What a tool does to the server, for display: `read` or `write`.
      *
-     * @param class-string<Tool> $class
+     * @param  class-string<Tool>  $class
      */
     public function accessOf(string $class): string
     {
@@ -221,7 +222,7 @@ class ToolPolicy
     }
 
     /**
-     * @param class-string<Tool> $class
+     * @param  class-string<Tool>  $class
      */
     public function revealsCredential(string $class): bool
     {
@@ -232,7 +233,7 @@ class ToolPolicy
      * Whether this configuration's ceiling lets the tool through, whatever
      * toolsets and denials then do with it.
      *
-     * @param class-string<Tool> $class
+     * @param  class-string<Tool>  $class
      */
     public function permits(string $class): bool
     {
@@ -243,7 +244,7 @@ class ToolPolicy
      * A read is allowed in every mode, so a read-only POST is admitted by readonly
      * rather than being filtered out for the verb it had to use.
      *
-     * @param class-string<Tool> $class
+     * @param  class-string<Tool>  $class
      */
     private function permittedBy(string $mode, string $class): bool
     {
@@ -258,9 +259,9 @@ class ToolPolicy
     /** An unknown mode falls back to readonly, so a bad setting never grants more than intended. */
     public function mode(): string
     {
-        $mode = strtolower(trim((string)($this->config['permission_mode'] ?? self::MODE_FULL)));
+        $mode = strtolower(trim((string) ($this->config['permission_mode'] ?? self::MODE_FULL)));
 
-        if (!isset(self::MODE_VERBS[$mode])) {
+        if (! isset(self::MODE_VERBS[$mode])) {
             Log::warning('Unknown MCP_PERMISSION_MODE, falling back to readonly.', [
                 'given' => $mode,
                 'expected' => array_keys(self::MODE_VERBS),
@@ -273,7 +274,7 @@ class ToolPolicy
     }
 
     /**
-     * @param array<int, string> $patterns
+     * @param  array<int, string>  $patterns
      */
     private function matchesAny(string $name, array $patterns): bool
     {
@@ -288,15 +289,15 @@ class ToolPolicy
 
     private function regex(): ?string
     {
-        $raw = trim((string)($this->config['denied_regex'] ?? ''));
+        $raw = trim((string) ($this->config['denied_regex'] ?? ''));
 
         if ($raw === '') {
             return null;
         }
 
-        $pattern = '/' . str_replace('/', '\\/', $raw) . '/i';
+        $pattern = '/'.str_replace('/', '\\/', $raw).'/i';
 
-        if (!self::compiles($pattern)) {
+        if (! self::compiles($pattern)) {
             Log::warning('MCP_DENIED_TOOLS_REGEX is not a valid regular expression and was ignored.', [
                 'pattern' => $raw,
             ]);
@@ -326,12 +327,12 @@ class ToolPolicy
         if (is_array($raw)) {
             $values = $raw;
         } else {
-            $raw = trim((string)$raw);
+            $raw = trim((string) $raw);
             $values = $raw === '' ? [] : explode(',', $raw);
         }
 
         return array_values(array_filter(array_map(
-            fn (mixed $v): string => strtolower(trim((string)$v)),
+            fn (mixed $v): string => strtolower(trim((string) $v)),
             $values
         ), fn (string $v): bool => $v !== ''));
     }

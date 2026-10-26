@@ -8,16 +8,14 @@ use Closure;
 
 /**
  * The name a project's main domain is renamed to: free on this engine, as a
- * new project's domain has to be. The rename rewrites vhosts and domain rows
- * before the unique `users.domain` is saved, so it is refused before it starts.
+ * new project's domain has to be, and one the rename can serve. The rename rewrites
+ * vhosts and domain rows before the unique `users.domain` is saved, so it is refused before it starts.
  */
 final class FreeMainDomain implements ProblemRule
 {
     use RaisesProblem;
 
-    public function __construct(private readonly string $username)
-    {
-    }
+    public function __construct(private readonly string $username) {}
 
     public function validate(string $attribute, mixed $value, Closure $fail): void
     {
@@ -27,13 +25,9 @@ final class FreeMainDomain implements ProblemRule
             return;
         }
 
-        $taken = MainDomainRename::takenName($project, $value);
-        if ($taken !== null) {
-            $this->reject([
-                'field' => $attribute,
-                'code' => 'domain_taken',
-                'message' => "{$taken} is already on this engine.",
-            ], $fail);
+        $refusal = MainDomainRename::refusal($project, $value);
+        if ($refusal !== null) {
+            $this->reject(['field' => $attribute, ...$refusal], $fail);
         }
     }
 }

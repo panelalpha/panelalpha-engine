@@ -20,19 +20,18 @@ use App\Http\Requests\Files\StatRequest;
 use App\Http\Requests\Files\ThumbnailRequest;
 use App\Http\Requests\Files\UploadRequest;
 use App\Http\Requests\Files\ZipRequest;
-use App\System as EngineSystem;
+use App\Lib\Net\EgressRefusedException;
 use App\Lib\Project\FileThumbnail;
 use App\Lib\Project\ProjectFiles;
-use App\Lib\Net\EgressRefusedException;
+use App\System as EngineSystem;
 use App\System\Project\FileManager;
-use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Validation\ValidationException;
+use OpenApi\Attributes as OA;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\File\Exception\FileNotFoundException;
 use Symfony\Component\HttpFoundation\Response;
-use Illuminate\Validation\ValidationException;
-use OpenApi\Attributes as OA;
 
 class FileController extends Controller
 {
@@ -108,7 +107,7 @@ class FileController extends Controller
         $fileMan = $user->project($system)->fileManager();
 
         try {
-            $fileMan->remove($path, !empty($params['recursive']));
+            $fileMan->remove($path, ! empty($params['recursive']));
             if (basename($path) === '.htaccess') {
                 ProjectFiles::htaccessChanged($path);
             }
@@ -161,7 +160,7 @@ class FileController extends Controller
 
         $fileMan = $user->project()->fileManager();
         try {
-            $fileMan->mkdir($path, !empty($params['parents']));
+            $fileMan->mkdir($path, ! empty($params['parents']));
         } catch (\Exception $e) {
             return new JsonResponse([
                 'message' => $e->getMessage(),
@@ -219,7 +218,7 @@ class FileController extends Controller
                 true,
                 $level === null ? null : (int) $level,
                 $params['from_date'] ?? null,
-                !empty($params['ignore_empty']),
+                ! empty($params['ignore_empty']),
             );
         } catch (\Exception $e) {
             return new JsonResponse([
@@ -235,6 +234,9 @@ class FileController extends Controller
     #[OA\Post(
         path: '/projects/{username}/files/unzip',
         summary: 'Extract a ZIP archive',
+        description: 'Extracts a .zip, .tar.gz or .gz into path, which is created when missing. Nothing already '
+            .'in path is replaced or merged into: when path holds any entry the archive unpacks to at its top level '
+            .'(for a .gz, the unpacked file), the request is refused with 409 and nothing is extracted.',
         security: [['bearerAuth' => []]],
         tags: ['Files'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -247,9 +249,10 @@ class FileController extends Controller
         )),
         responses: [
             new OA\Response(response: 200, description: 'ZIP extracted', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse')),
+            new OA\Response(response: 409, description: 'The destination already holds an entry the archive unpacks to', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function unzip(string $username, ZipRequest $request): JsonResponse
+    public function unzip(string $username, ZipRequest $request, EngineSystem $system): JsonResponse
     {
         $user = $this->projectOr404($username);
 
@@ -260,12 +263,14 @@ class FileController extends Controller
          * }
          */
         $params = $request->validated();
-        $zipPath = $user->project()->resolvePath($params['zip_path']);
-        $path = $user->project()->resolvePath($params['path']);
+        $zipPath = $user->project($system)->resolvePath($params['zip_path']);
+        $path = $user->project($system)->resolvePath($params['path']);
 
-        $fileMan = $user->project()->fileManager();
+        $fileMan = $user->project($system)->fileManager();
         try {
             $fileMan->unzip($zipPath, $path);
+        } catch (ProblemException $e) {
+            throw $e;
         } catch (\Exception $e) {
             return new JsonResponse([
                 'message' => $e->getMessage(),
@@ -327,9 +332,9 @@ class FileController extends Controller
     #[OA\Post(
         path: '/projects/{username}/files/fetch',
         description: 'Download an http(s) URL into the project as the account. The engine fetches it from core, '
-            . 'so it refuses a URL whose host resolves to an internal address (loopback, link-local, a private or '
-            . 'reserved range, the Docker and tenant networks) or that redirects to one. The refusal is 422 with '
-            . '`problems[{field: url, code: host_refused}]`; RFC1918/ULA are allowed only with `EGRESS_ALLOW_PRIVATE=true`.',
+            .'so it refuses a URL whose host resolves to an internal address (loopback, link-local, a private or '
+            .'reserved range, the Docker and tenant networks) or that redirects to one. The refusal is 422 with '
+            .'`problems[{field: url, code: host_refused}]`; RFC1918/ULA are allowed only with `EGRESS_ALLOW_PRIVATE=true`.',
         summary: 'Fetch an http or https URL into the project',
         security: [['bearerAuth' => []]],
         tags: ['Files'],
@@ -571,8 +576,8 @@ class FileController extends Controller
         path: '/projects/{username}/files/list',
         summary: 'List the entries of a directory',
         description: 'Classic and dind projects alike: reads the account home, as the account. Directories come '
-            . 'first, then names in byte order; dot-entries are included unless show_hidden is false. Refuses a '
-            . 'path that resolves outside the home, and a path that is not a directory.',
+            .'first, then names in byte order; dot-entries are included unless show_hidden is false. Refuses a '
+            .'path that resolves outside the home, and a path that is not a directory.',
         security: [['bearerAuth' => []]],
         tags: ['Files'],
         parameters: [
@@ -644,7 +649,7 @@ class FileController extends Controller
         summary: 'Upload a file',
         description: 'Stores one file in the account, under `path` (relative to the home directory, e.g. /project). Over HTTP the file is a multipart form part. Over MCP pass file_name plus file_contents (base64, or text with file_encoding: text) for a small file, or file_url for anything the engine should download itself, such as a release archive; then project_deploy_archive deploys an uploaded .zip or .tar.gz. Plain text files can also be written directly with file_write.',
         x: ['mcp-description' => 'Stores one file under `path` (e.g. /project). Small: file_name + file_contents. '
-            . 'Anything larger: file_url, which the engine downloads.'],
+            .'Anything larger: file_url, which the engine downloads.'],
         security: [['bearerAuth' => []]],
         tags: ['Files'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -674,7 +679,7 @@ class FileController extends Controller
          */
         $params = $request->validated();
         $path = $user->project()->resolvePath($params['path']);
-        /** @var \Illuminate\Http\UploadedFile */
+        /** @var UploadedFile */
         $file = $request->file('file');
         try {
             ProjectFiles::upload($user, $path, $file);
@@ -740,9 +745,9 @@ class FileController extends Controller
         path: '/projects/{username}/files/thumbnail',
         summary: 'Get a webp thumbnail of an image file',
         description: 'Resizes a png, jpeg, gif or webp file into a cached webp thumbnail for the file-manager grid. '
-            . 'Supports every project kind. Refuses a file that is not one of those formats by content with '
-            . '`unsupported_image`, and one larger than 50 MB or 50 megapixels with `image_too_large`. Binary: '
-            . 'no MCP tool.',
+            .'Supports every project kind. Refuses a file that is not one of those formats by content with '
+            .'`unsupported_image`, and one larger than 50 MB or 50 megapixels with `image_too_large`. Binary: '
+            .'no MCP tool.',
         // A tool answers with JSON; this returns image bytes. file_download covers MCP file reads.
         x: ['mcp-hide' => true],
         security: [['bearerAuth' => []]],
@@ -840,5 +845,4 @@ class FileController extends Controller
             'success' => true,
         ]);
     }
-
 }

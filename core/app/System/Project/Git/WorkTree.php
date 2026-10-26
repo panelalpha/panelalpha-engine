@@ -5,7 +5,9 @@ namespace App\System\Project\Git;
 use App\Exceptions\DeployCancelledException;
 use App\Lib\Deploy\Source\GitRemoteProbe;
 use App\Lib\Deploy\Source\GitRepoInput;
+use App\Lib\Deploy\Source\GitTransport;
 use App\Lib\Deploy\Source\GitUrl;
+use App\Lib\Deploy\Source\SshSubmoduleRewrite;
 use App\Lib\Git\DeployKey;
 use App\Models\User as ModelsUser;
 use App\System as EngineSystem;
@@ -25,7 +27,9 @@ abstract class WorkTree
     use FastForwardPull;
 
     public const string STRATEGY_FF = 'ff';
+
     public const string STRATEGY_FORCE = 'force';
+
     public const string STRATEGY_PUSH_FIRST = 'push_first';
 
     protected const string BACKUP_REF = 'refs/panelalpha/backup';
@@ -41,6 +45,7 @@ abstract class WorkTree
     private const array REMOTE_SUBCOMMANDS = ['clone', 'fetch', 'pull', 'push', 'ls-remote', 'submodule'];
 
     protected string $absolutePath;
+
     protected string $pathKey;
 
     private bool $quiet = false;
@@ -56,14 +61,14 @@ abstract class WorkTree
     /**
      * Run a fully built argv as the project's user.
      *
-     * @param list<string> $cmd
+     * @param  list<string>  $cmd
      */
     abstract protected function runCommand(array $cmd, int $timeout): string;
 
     /**
      * runCommand() for a read, whose output stays out of a deploy log open meanwhile.
      *
-     * @param list<string> $cmd
+     * @param  list<string>  $cmd
      */
     abstract protected function runQuietCommand(array $cmd, int $timeout): string;
 
@@ -112,7 +117,7 @@ abstract class WorkTree
             return null;
         }
 
-        return self::isAbsolutePath($path) ? $path : $this->absolutePath . '/' . $path;
+        return self::isAbsolutePath($path) ? $path : $this->absolutePath.'/'.$path;
     }
 
     private static function isAbsolutePath(string $path): bool
@@ -148,14 +153,14 @@ abstract class WorkTree
     public function readFromHead(string $relativePath): ?string
     {
         try {
-            return $this->git(['show', 'HEAD:' . $relativePath]);
+            return $this->git(['show', 'HEAD:'.$relativePath]);
         } catch (GitException) {
             return null;
         }
     }
 
     /**
-     * @param list<string> $paths checkout-relative
+     * @param  list<string>  $paths  checkout-relative
      * @return list<string> the ones the repository tracks, as git spells them
      */
     public function trackedAmong(array $paths): array
@@ -215,7 +220,7 @@ abstract class WorkTree
 
         $this->assertUrlSafeForToken($repoUrl, $token);
 
-        $cmd = ['git', '-c', 'safe.directory=' . $target, 'clone', '--depth=1'];
+        $cmd = ['git', '-c', 'safe.directory='.$target, 'clone', '--depth=1'];
         if ($branch !== null && $branch !== '') {
             GitRef::assertName($branch);
             $cmd[] = '--branch';
@@ -267,27 +272,43 @@ abstract class WorkTree
      * so a pull that moves a submodule pointer deploys the new commit. Not optional for a
      * repository that vendors its dependencies so (nextcloud/server's `3rdparty`).
      *
-     * @param ?list<string> $paths only these submodules (and theirs, recursively); null for every one
+     * @param  ?list<string>  $paths  only these submodules (and theirs, recursively); null for every one
      * @return bool whether submodules were declared and asked for (not whether they all came down)
+     *
      * @throws GitException when the checkout has no repository at all
      */
     public function initSubmodules(?string $token = null, ?array $paths = null): bool
     {
         $this->requireRepository();
 
-        if (!is_file($this->absolutePath . '/.gitmodules') || $paths === []) {
+        if (! is_file($this->absolutePath.'/.gitmodules') || $paths === []) {
             return false;
         }
 
         $this->executeOverNetwork([
             'git',
-            '-c', 'safe.directory=' . $this->absolutePath,
+            '-c', 'safe.directory='.$this->absolutePath,
+            ...$this->submoduleUrlRewrites(),
             '-C', $this->absolutePath,
             'submodule', 'update', '--init', '--recursive', '--depth=1',
             ...($paths === null ? [] : ['--', ...$paths]),
         ], $token);
 
         return true;
+    }
+
+    /**
+     * Without a deploy key ssh has no key to offer, so the submodules addressed over it are read over https.
+     *
+     * @return list<string>
+     */
+    private function submoduleUrlRewrites(): array
+    {
+        if (DeployKey::stored($this->user()) !== null) {
+            return [];
+        }
+
+        return SshSubmoduleRewrite::configArgs((string) @file_get_contents($this->absolutePath.'/.gitmodules'));
     }
 
     /**
@@ -352,7 +373,8 @@ abstract class WorkTree
      * read or a probe is no part of a deploy that happens to be open.
      *
      * @template T
-     * @param callable(): T $read
+     *
+     * @param  callable(): T  $read
      * @return T
      */
     private function quietly(callable $read): mixed
@@ -373,7 +395,7 @@ abstract class WorkTree
     {
         $connected = $this->user()->getSiteGit($this->pathKey) !== null;
 
-        if (!$this->repositoryExistsLenient()) {
+        if (! $this->repositoryExistsLenient()) {
             return $this->missingRepositoryStatus($connected);
         }
 
@@ -405,7 +427,7 @@ abstract class WorkTree
 
     private function fetchConnectedBranch(bool $connected): void
     {
-        if (!$connected) {
+        if (! $connected) {
             throw new GitException('Git is not connected.', 422);
         }
         $siteGit = $this->user()->getSiteGit($this->pathKey);
@@ -416,7 +438,7 @@ abstract class WorkTree
      * Adds whether a connect is fetching in another request: connected is
      * still false then, but the caller should wait.
      *
-     * @param array<string, mixed> $status
+     * @param  array<string, mixed>  $status
      * @return array<string, mixed>
      */
     private function withConnectingState(array $status): array
@@ -463,13 +485,13 @@ abstract class WorkTree
                 continue;
             }
             [$branch, $isRemote] = $parsed;
-            if (!$isRemote || !isset($byName[$branch['name']])) {
+            if (! $isRemote || ! isset($byName[$branch['name']])) {
                 $byName[$branch['name']] = $branch;
             }
         }
 
         foreach ($this->remoteHeads() as $name) {
-            $byName[$name] ??= ['name' => $name, 'current' => false, 'tracking' => 'origin/' . $name];
+            $byName[$name] ??= ['name' => $name, 'current' => false, 'tracking' => 'origin/'.$name];
         }
 
         return array_values($byName);
@@ -509,7 +531,7 @@ abstract class WorkTree
             'current' => $head === '*',
             'tracking' => $upstream !== ''
                 ? $upstream
-                : ($isRemote ? 'origin/' . $name : null),
+                : ($isRemote ? 'origin/'.$name : null),
         ], $isRemote];
     }
 
@@ -665,14 +687,14 @@ abstract class WorkTree
 
     public function connect(string $repoUrl, string $branch, ?string $token, bool $repair = false): array
     {
-        if ($this->isDeployManaged() && !$repair) {
+        if ($this->isDeployManaged() && ! $repair) {
             return $this->connectDeployManaged($repoUrl, $branch, $token);
         }
 
         $siteGit = $this->user()->getSiteGit($this->pathKey);
         $repoExists = $this->repositoryExistsLenient();
 
-        if ($repair || ($siteGit !== null && !$repoExists)) {
+        if ($repair || ($siteGit !== null && ! $repoExists)) {
             return $this->connectRepair($repoUrl, $branch, $token, $siteGit, $repoExists);
         }
 
@@ -689,7 +711,7 @@ abstract class WorkTree
         }
 
         $this->persistSiteGit($repoUrl, $branch, $token);
-        if (!$repoExists) {
+        if (! $repoExists) {
             $this->clearConnecting();
         }
 
@@ -702,7 +724,7 @@ abstract class WorkTree
      */
     private function connectDeployManaged(string $repoUrl, string $branch, ?string $token): array
     {
-        if (!$this->repositoryExistsLenient()) {
+        if (! $this->repositoryExistsLenient()) {
             return $this->repairDeployCheckout($repoUrl, $branch, $token);
         }
 
@@ -754,13 +776,13 @@ abstract class WorkTree
 
     private function connectExistingRepository(string $repoUrl, string $branch, bool $alreadyConnected): void
     {
-        if (!$alreadyConnected) {
+        if (! $alreadyConnected) {
             $this->refuseWhileConnecting();
         }
         $pointUnbornHead = $this->keepCurrentBranch($branch);
         $this->ensureOriginMatches($repoUrl);
         if ($pointUnbornHead) {
-            $this->git(['symbolic-ref', 'HEAD', 'refs/heads/' . $branch]);
+            $this->git(['symbolic-ref', 'HEAD', 'refs/heads/'.$branch]);
         }
         $this->trackOriginBranch($branch);
     }
@@ -778,14 +800,14 @@ abstract class WorkTree
     }
 
     /**
-     * @param array<string, mixed> $status
+     * @param  array<string, mixed>  $status
      * @return array<string, mixed>
      */
     private function withSyncError(array $status, string $branch, ?string $syncError): array
     {
         if ($syncError !== null) {
-            $status['sync_error'] = 'Connected, but fetching ' . $branch . ' failed, so the work tree has none of '
-                . "the repository's files yet. Pull to fetch them. git said: " . $syncError;
+            $status['sync_error'] = 'Connected, but fetching '.$branch.' failed, so the work tree has none of '
+                ."the repository's files yet. Pull to fetch them. git said: ".$syncError;
         }
 
         return $status;
@@ -802,7 +824,7 @@ abstract class WorkTree
     {
         try {
             $this->gitOverNetwork(['fetch', '--depth=1', 'origin', $branch], $token);
-            $this->git(['reset', '--hard', 'origin/' . $branch]);
+            $this->git(['reset', '--hard', 'origin/'.$branch]);
             $this->setUpstreamTracking($branch);
 
             return null;
@@ -830,13 +852,13 @@ abstract class WorkTree
             return false;
         }
 
-        if (!$this->headCommitExists()) {
+        if (! $this->headCommitExists()) {
             return true;
         }
 
         throw new GitException(
             "The repository here is on branch {$current}, and connecting keeps its files as they are. "
-            . "Connect with branch {$current}, then change the branch to {$branch}.",
+            ."Connect with branch {$current}, then change the branch to {$branch}.",
             422,
         );
     }
@@ -856,7 +878,7 @@ abstract class WorkTree
     {
         $this->gitOverNetwork($branch === ''
             ? ['fetch', 'origin']
-            : ['fetch', 'origin', '+refs/heads/' . $branch . ':refs/remotes/origin/' . $branch], $token);
+            : ['fetch', 'origin', '+refs/heads/'.$branch.':refs/remotes/origin/'.$branch], $token);
     }
 
     private function refuseWhileConnecting(): void
@@ -928,7 +950,7 @@ abstract class WorkTree
             throw new GitException('Git is not connected.', 422);
         }
 
-        if (!$tokenProvided) {
+        if (! $tokenProvided) {
             return $this->status();
         }
 
@@ -969,7 +991,7 @@ abstract class WorkTree
     private function overwriteOrMerge(string $strategy, string $branch, ?string $token): void
     {
         if ($strategy === self::STRATEGY_FORCE) {
-            $this->resetHardTo('origin/' . $branch);
+            $this->resetHardTo('origin/'.$branch);
         } else {
             $this->pullPushFirst($branch, $token);
         }
@@ -994,7 +1016,7 @@ abstract class WorkTree
         $dirty = $this->hasWorkingTreeChanges();
         $ahead = $this->isAheadOfUpstream();
 
-        if (!$dirty && !$ahead) {
+        if (! $dirty && ! $ahead) {
             return $this->status() + ['nothing_to_push' => true];
         }
 
@@ -1013,7 +1035,7 @@ abstract class WorkTree
         if ($commitFirst) {
             $this->commitAll();
         }
-        $this->git(['push', 'origin', 'HEAD:' . $branch], $token);
+        $this->git(['push', 'origin', 'HEAD:'.$branch], $token);
     }
 
     /** Runs $step, putting the backup back and rethrowing when git fails. */
@@ -1040,7 +1062,7 @@ abstract class WorkTree
         if ($suggestion !== null) {
             $message .= " Did you mean '{$suggestion}'?";
         } elseif ($heads !== []) {
-            $message .= ' Its branches: ' . implode(', ', array_slice($heads, 0, 10)) . '.';
+            $message .= ' Its branches: '.implode(', ', array_slice($heads, 0, 10)).'.';
         }
 
         return new GitException($message, 422, 'git_branch_not_found');
@@ -1077,7 +1099,7 @@ abstract class WorkTree
         $this->assertOriginHasBranch($branch);
 
         $this->addToOriginFetch($branch);
-        $this->git(['checkout', '-B', $branch, 'origin/' . $branch]);
+        $this->git(['checkout', '-B', $branch, 'origin/'.$branch]);
         $this->setUpstreamTracking($branch);
 
         $this->saveConnection($siteGit['repo_url'], $branch, $siteGit['token']);
@@ -1101,7 +1123,7 @@ abstract class WorkTree
     private function assertOriginHasBranch(string $branch): void
     {
         try {
-            $this->git(['rev-parse', '--verify', '--end-of-options', 'origin/' . $branch]);
+            $this->git(['rev-parse', '--verify', '--end-of-options', 'origin/'.$branch]);
         } catch (GitException) {
             throw new GitException('Branch does not exist on remote.', 422);
         }
@@ -1143,7 +1165,7 @@ abstract class WorkTree
         }
 
         try {
-            $this->git(['rev-parse', '--verify', '--quiet', '--end-of-options', $ref . '^{commit}']);
+            $this->git(['rev-parse', '--verify', '--quiet', '--end-of-options', $ref.'^{commit}']);
         } catch (GitException) {
             throw $ref === 'HEAD'
                 ? new GitException('Nothing to revert', 422)
@@ -1153,13 +1175,13 @@ abstract class WorkTree
 
     private static function assertKnownStrategy(string $strategy): void
     {
-        if (!in_array($strategy, self::STRATEGIES, true)) {
+        if (! in_array($strategy, self::STRATEGIES, true)) {
             throw new GitException('Unknown pull strategy.', 422);
         }
     }
 
     /**
-     * @param array{repo_url: string, branch: string, token: ?string} $siteGit
+     * @param  array{repo_url: string, branch: string, token: ?string}  $siteGit
      */
     private static function connectedBranch(array $siteGit): string
     {
@@ -1182,8 +1204,8 @@ abstract class WorkTree
     /** One round trip: the remote answers, and has `$branch`. */
     private function assertRemoteHasBranch(string $branch, ?string $token): void
     {
-        $heads = $this->gitOverNetwork(['ls-remote', '--heads', 'origin', 'refs/heads/' . $branch], $token);
-        if (preg_match('#\srefs/heads/' . preg_quote($branch, '#') . '$#m', $heads) !== 1) {
+        $heads = $this->gitOverNetwork(['ls-remote', '--heads', 'origin', 'refs/heads/'.$branch], $token);
+        if (preg_match('#\srefs/heads/'.preg_quote($branch, '#').'$#m', $heads) !== 1) {
             throw $this->branchNotFound($branch, $token);
         }
     }
@@ -1233,7 +1255,7 @@ abstract class WorkTree
 
     private function createBackup(): void
     {
-        if (!$this->headCommitExists()) {
+        if (! $this->headCommitExists()) {
             return;
         }
 
@@ -1259,19 +1281,19 @@ abstract class WorkTree
         if ($branch === '' || $this->currentBranchName() !== $branch) {
             return;
         }
-        if ($this->configValue('branch.' . $branch . '.merge') !== '') {
+        if ($this->configValue('branch.'.$branch.'.merge') !== '') {
             return;
         }
-        $this->git(['config', 'branch.' . $branch . '.remote', 'origin']);
-        $this->git(['config', 'branch.' . $branch . '.merge', 'refs/heads/' . $branch]);
+        $this->git(['config', 'branch.'.$branch.'.remote', 'origin']);
+        $this->git(['config', 'branch.'.$branch.'.merge', 'refs/heads/'.$branch]);
     }
 
     /** Best-effort: origin/<branch> may not exist yet. */
     private function setUpstreamTracking(string $branch): void
     {
         try {
-            $this->git(['rev-parse', '--verify', '--end-of-options', 'origin/' . $branch]);
-            $this->git(['branch', '--set-upstream-to=origin/' . $branch, $branch]);
+            $this->git(['rev-parse', '--verify', '--end-of-options', 'origin/'.$branch]);
+            $this->git(['branch', '--set-upstream-to=origin/'.$branch, $branch]);
         } catch (GitException) {
         }
     }
@@ -1340,7 +1362,7 @@ abstract class WorkTree
     private function mergeOrigin(string $branch): void
     {
         try {
-            $this->git(['merge', 'origin/' . $branch]);
+            $this->git(['merge', 'origin/'.$branch]);
         } catch (GitException $e) {
             throw $this->abortedMerge($e);
         }
@@ -1359,7 +1381,7 @@ abstract class WorkTree
         $this->abortMerge();
 
         return $unmerged !== ''
-            ? new GitException('Merge conflict: ' . str_replace("\n", ', ', $unmerged), 422)
+            ? new GitException('Merge conflict: '.str_replace("\n", ', ', $unmerged), 422)
             : $failure;
     }
 
@@ -1388,8 +1410,8 @@ abstract class WorkTree
 
         $this->git(['add', '-A']);
         $this->git([
-            '-c', 'user.name=' . $name,
-            '-c', 'user.email=' . $email,
+            '-c', 'user.name='.$name,
+            '-c', 'user.email='.$email,
             'commit', '-m', 'Sync from PanelAlpha',
         ]);
     }
@@ -1413,7 +1435,7 @@ abstract class WorkTree
             ? $this->user()->domain
             : 'localhost';
 
-        return [$username, $username . '@' . $domain];
+        return [$username, $username.'@'.$domain];
     }
 
     /**
@@ -1421,7 +1443,7 @@ abstract class WorkTree
      * before .git is created, so a failed probe cannot leave a half-initialized
      * repository that blocks the next repair.
      *
-     * @param array{repo_url: string, branch: string, token: ?string}|null $siteGit
+     * @param  array{repo_url: string, branch: string, token: ?string}|null  $siteGit
      */
     private function connectRepair(
         string $repoUrl,
@@ -1453,11 +1475,11 @@ abstract class WorkTree
     }
 
     /**
-     * @param array{repo_url: string, branch: string, token: ?string}|null $siteGit
+     * @param  array{repo_url: string, branch: string, token: ?string}|null  $siteGit
      */
     private function assertRepairable(?array $siteGit, bool $repoExists): void
     {
-        if ($siteGit === null && !$this->isDeployManaged()) {
+        if ($siteGit === null && ! $this->isDeployManaged()) {
             $this->refuseWhileConnecting();
             throw new GitException('Git is not connected.', 422);
         }
@@ -1490,7 +1512,7 @@ abstract class WorkTree
     private function initRepository(string $branch, string $repoUrl): void
     {
         $this->git(['init']);
-        $this->git(['symbolic-ref', 'HEAD', 'refs/heads/' . $branch]);
+        $this->git(['symbolic-ref', 'HEAD', 'refs/heads/'.$branch]);
         $this->git(['remote', 'add', 'origin', $repoUrl]);
     }
 
@@ -1500,7 +1522,7 @@ abstract class WorkTree
      */
     protected function removeCreatedGitDir(): void
     {
-        $gitDir = rtrim($this->absolutePath, '/') . '/.git';
+        $gitDir = rtrim($this->absolutePath, '/').'/.git';
         try {
             $this->system()->exec(['sudo', 'rm', '-rf', $gitDir]);
         } catch (\Throwable) {
@@ -1517,7 +1539,7 @@ abstract class WorkTree
             return;
         }
 
-        if (!$this->urlsEquivalent($originUrl, $repoUrl)) {
+        if (! $this->urlsEquivalent($originUrl, $repoUrl)) {
             throw new GitException('Remote URL does not match the existing origin.', 422);
         }
 
@@ -1557,7 +1579,7 @@ abstract class WorkTree
     /** A cleared token is stored as '' so the deploy's clone stops using a stale one. */
     private function mirrorDeployCredentials(string $branch, ?string $token): void
     {
-        if (!$this->isDeployManaged()) {
+        if (! $this->isDeployManaged()) {
             return;
         }
 
@@ -1596,23 +1618,23 @@ abstract class WorkTree
     }
 
     /**
-     * @param list<string> $args
+     * @param  list<string>  $args
      */
     protected function git(array $args, ?string $token = null): string
     {
         return $this->execute(
-            ['git', '-c', 'safe.directory=' . $this->absolutePath, '-C', $this->absolutePath, ...$args],
+            ['git', '-c', 'safe.directory='.$this->absolutePath, '-C', $this->absolutePath, ...$args],
             $token,
         );
     }
 
     /**
-     * @param list<string> $args
+     * @param  list<string>  $args
      */
     private function gitOverNetwork(array $args, ?string $token = null): string
     {
         return $this->executeOverNetwork(
-            ['git', '-c', 'safe.directory=' . $this->absolutePath, '-C', $this->absolutePath, ...$args],
+            ['git', '-c', 'safe.directory='.$this->absolutePath, '-C', $this->absolutePath, ...$args],
             $token,
         );
     }
@@ -1622,14 +1644,14 @@ abstract class WorkTree
      * refuses older git's HTTP/2 fingerprint once the refs are listed; the same
      * request over HTTP/1.1 is let through, so that one failure is retried so.
      *
-     * @param list<string> $gitCommand full argv starting with `git`
+     * @param  list<string>  $gitCommand  full argv starting with `git`
      */
     private function executeOverNetwork(array $gitCommand, ?string $token, int $timeout = 600): string
     {
         try {
             return $this->execute($gitCommand, $token, $timeout);
         } catch (GitException $e) {
-            if (!GitUrl::refusedOverHttp2($e->getMessage())) {
+            if (! GitUrl::refusedOverHttp2($e->getMessage())) {
                 throw $e;
             }
 
@@ -1641,7 +1663,7 @@ abstract class WorkTree
      * Run a git argv as the project's user, with its credentials installed for
      * the one command, and every failure turned into a GitException.
      *
-     * @param list<string> $gitCommand full argv starting with `git`
+     * @param  list<string>  $gitCommand  full argv starting with `git`
      */
     protected function execute(array $gitCommand, ?string $token = null, int $timeout = 600): string
     {
@@ -1649,7 +1671,7 @@ abstract class WorkTree
         $key = null;
 
         try {
-            $this->sweepCredentialFiles($system, $gitCommand);
+            CredentialFiles::sweep($system, $this->credentialDir($gitCommand));
             $key = $this->deployKeyFor($gitCommand);
 
             return $this->runWithCredentials($system, $gitCommand, $token, $key, $timeout);
@@ -1667,7 +1689,7 @@ abstract class WorkTree
     /**
      * The deploy key goes along on every command that talks to a remote; an HTTPS remote ignores it.
      *
-     * @param list<string> $gitCommand
+     * @param  list<string>  $gitCommand
      * @return array<string, mixed>|null
      */
     private function deployKeyFor(array $gitCommand): ?array
@@ -1679,8 +1701,8 @@ abstract class WorkTree
      * Run $gitCommand with GIT_ASKPASS for a token and the deploy key installed, both
      * removed afterwards. Prompts are off either way: the tokenless case is the one that prompts.
      *
-     * @param list<string> $gitCommand
-     * @param array<string, mixed>|null $key
+     * @param  list<string>  $gitCommand
+     * @param  array<string, mixed>|null  $key
      */
     private function runWithCredentials(EngineSystem $system, array $gitCommand, ?string $token, ?array $key, int $timeout): string
     {
@@ -1689,10 +1711,11 @@ abstract class WorkTree
 
         try {
             $command = $this->outboundCommand($gitCommand);
-            $cmd = GitUrl::withoutPrompts($command);
+            $protocols = GitTransport::schemes($key !== null);
+            $cmd = GitUrl::withoutPrompts($command, $protocols);
             if ($token !== null && $token !== '') {
                 $askPass = $this->installAskPass($system, $token, $command);
-                $cmd = GitUrl::withAskPass($command, $askPass);
+                $cmd = GitUrl::withAskPass($command, $askPass, $protocols);
             }
             if ($key !== null) {
                 $sshFiles = $this->installSshKey($system, $key['private_key'], $command);
@@ -1703,7 +1726,7 @@ abstract class WorkTree
         } finally {
             foreach ([$askPass, ...$sshFiles] as $path) {
                 if ($path !== null) {
-                    $this->removeCredentialFile($system, $path);
+                    CredentialFiles::remove($system, $path);
                 }
             }
         }
@@ -1714,7 +1737,7 @@ abstract class WorkTree
      * does not talk to a remote. A redirecting remote must be refused rather
      * than silently lead the connection to another host.
      *
-     * @param list<string> $gitCommand
+     * @param  list<string>  $gitCommand
      * @return list<string>
      */
     private function outboundCommand(array $gitCommand): array
@@ -1728,7 +1751,7 @@ abstract class WorkTree
      * The repository URL a command talks to: an http(s) URL in its argv, else
      * the checkout's stored remote, for the askpass helper's host.
      *
-     * @param list<string> $gitCommand
+     * @param  list<string>  $gitCommand
      */
     private function remoteUrl(array $gitCommand): ?string
     {
@@ -1755,6 +1778,7 @@ abstract class WorkTree
         for ($i = 0; $i < count($args); $i++) {
             if (in_array($args[$i], ['-c', '-C'], true)) {
                 $i++;
+
                 continue;
             }
             if (str_starts_with($args[$i], '-')) {
@@ -1776,20 +1800,20 @@ abstract class WorkTree
         $hostKey = stripos($message, 'Host key verification failed') !== false;
         $refused = stripos($message, 'Permission denied (publickey') !== false;
 
-        if (!$withKey && ($hostKey || $refused)) {
-            return new GitException($message . ' This project has no deploy key, so the SSH remote cannot '
-                . 'authenticate. Create one with POST /projects/{name}/git/deploy-key, add its public key to the '
-                . 'repository as a deploy key and try again, or connect the repository\'s HTTPS URL with a token.',
+        if (! $withKey && ($hostKey || $refused)) {
+            return new GitException($message.' This project has no deploy key, so the SSH remote cannot '
+                .'authenticate. Create one with POST /projects/{name}/git/deploy-key, add its public key to the '
+                .'repository as a deploy key and try again, or connect the repository\'s HTTPS URL with a token.',
                 422, 'git_ssh_needs_deploy_key');
         }
         if ($hostKey) {
-            return new GitException($message . ' The server\'s SSH host key does not match the one pinned for this '
-                . 'host, so the connection was refused. If the host really changed its key, delete the deploy key '
-                . 'and create it again with `host` to pin the new one.', 400);
+            return new GitException($message.' The server\'s SSH host key does not match the one pinned for this '
+                .'host, so the connection was refused. If the host really changed its key, delete the deploy key '
+                .'and create it again with `host` to pin the new one.', 400);
         }
         if ($refused) {
-            return new GitException($message . ' The repository does not accept this project\'s deploy key: add its '
-                . 'public half (POST /projects/{name}/git/deploy-key returns it) to the repository as a deploy key.',
+            return new GitException($message.' The repository does not accept this project\'s deploy key: add its '
+                .'public half (POST /projects/{name}/git/deploy-key returns it) to the repository as a deploy key.',
                 422, 'git_ssh_key_refused');
         }
 
@@ -1800,7 +1824,7 @@ abstract class WorkTree
      * The deploy key and the pinned host keys as files the account can read,
      * beside where the askpass helper goes, for one command.
      *
-     * @param list<string> $gitCommand
+     * @param  list<string>  $gitCommand
      * @return array{0: string, 1: string} key path, known_hosts path
      */
     private function installSshKey(EngineSystem $system, string $privateKey, array $gitCommand): array
@@ -1811,14 +1835,14 @@ abstract class WorkTree
 
         try {
             foreach (['key' => $privateKey, 'known-hosts' => DeployKey::knownHosts($this->user())] as $kind => $content) {
-                $path = $baseDir . '/' . CredentialFiles::SSH_PREFIX . $kind . '-' . bin2hex(random_bytes(8));
+                $path = $baseDir.'/'.CredentialFiles::SSH_PREFIX.$kind.'-'.bin2hex(random_bytes(8));
                 $this->installCredentialFile($system, self::credentialTempFile($content, 'pa-git-ssh-'), $path, '0600');
                 $installed[] = $path;
                 $system->exec(['sudo', 'chown', $chown, $path]);
             }
         } catch (\Throwable $e) {
             foreach ($installed as $path) {
-                $this->removeCredentialFile($system, $path);
+                CredentialFiles::remove($system, $path);
             }
             throw $e;
         }
@@ -1833,7 +1857,7 @@ abstract class WorkTree
         if ($temp === false) {
             throw new \RuntimeException('Could not create a temporary Git credential file.');
         }
-        if (file_put_contents($temp, $content, LOCK_EX) === false || !chmod($temp, 0600)) {
+        if (file_put_contents($temp, $content, LOCK_EX) === false || ! chmod($temp, 0600)) {
             @unlink($temp);
             throw new \RuntimeException('Could not prepare a temporary Git credential file.');
         }
@@ -1855,87 +1879,44 @@ abstract class WorkTree
      * The GIT_ASKPASS helper carrying $token, owned by the account; removed again
      * when installing it fails part way.
      *
-     * @param list<string> $gitCommand
+     * @param  list<string>  $gitCommand
      * @return string the installed helper's path
      */
     private function installAskPass(EngineSystem $system, string $token, array $gitCommand): string
     {
-        $path = $this->credentialDir($gitCommand) . '/' . CredentialFiles::ASKPASS_PREFIX . bin2hex(random_bytes(8));
+        $path = $this->credentialDir($gitCommand).'/'.CredentialFiles::ASKPASS_PREFIX.bin2hex(random_bytes(8));
         $chown = $this->user()->getChownString() ?: $this->user()->username;
 
         try {
-            $host = self::talksToRemote($gitCommand)
-                ? GitUrl::hostOf((string) $this->remoteUrl($gitCommand))
-                : null;
+            $host = GitUrl::hostOf((string) $this->remoteUrl($gitCommand));
             $temp = self::credentialTempFile(GitUrl::askPassScript($token, $host), 'pa-git-askpass-');
             $this->installCredentialFile($system, $temp, $path, '0700');
             $system->exec(['sudo', 'chown', $chown, $path]);
         } catch (\Throwable $e) {
-            $this->removeCredentialFile($system, $path);
+            CredentialFiles::remove($system, $path);
             throw $e;
         }
 
         return $path;
     }
 
-    private function removeCredentialFile(EngineSystem $system, string $path): void
-    {
-        try {
-            $system->exec(['sudo', 'rm', '-f', $path]);
-        } catch (\Throwable $e) {
-            Log::warning('Could not remove temporary Git credential helper', [
-                'path' => $path,
-                'error' => $e->getMessage(),
-            ]);
-        }
-    }
-
-    /**
-     * Remove the {@see CredentialFiles} a killed earlier command left beside
-     * where this one installs its own. Never fatal to the git command; sudo,
-     * since the home is root-owned.
-     *
-     * @param list<string> $gitCommand
-     */
-    private function sweepCredentialFiles(EngineSystem $system, array $gitCommand): void
-    {
-        $baseDir = $this->credentialDir($gitCommand);
-
-        foreach (CredentialFiles::leftovers(@scandir($baseDir)) as $name) {
-            $path = $baseDir . '/' . $name;
-            if (!CredentialFiles::isStale($path)) {
-                continue;
-            }
-            try {
-                $system->exec(['sudo', 'rm', '-f', '--', $path]);
-            } catch (\Throwable $e) {
-                Log::warning('Could not sweep a stale Git credential file', [
-                    'path' => $path,
-                    'error' => $e->getMessage(),
-                ]);
-            }
-        }
-    }
-
     /**
      * Where a command's credential files go: beside its work tree, or in the home.
      *
-     * @param list<string> $gitCommand
+     * @param  list<string>  $gitCommand
      */
     private function credentialDir(array $gitCommand): string
     {
-        $workTree = $this->workingTreeFromGitArgs($gitCommand);
-
-        return $workTree !== null ? dirname($workTree) : rtrim($this->homeDirPath(), '/');
+        return CredentialFiles::directoryFor($this->homeDirPath(), $this->workingTreeFromGitArgs($gitCommand));
     }
 
     /**
-     * @param list<string> $gitArgs
+     * @param  list<string>  $gitArgs
      */
     private function workingTreeFromGitArgs(array $gitArgs): ?string
     {
         $idx = array_search('-C', $gitArgs, true);
-        if ($idx === false || !isset($gitArgs[$idx + 1])) {
+        if ($idx === false || ! isset($gitArgs[$idx + 1])) {
             return null;
         }
 
@@ -1944,13 +1925,13 @@ abstract class WorkTree
 
     private function requireRepository(): void
     {
-        if (!$this->repositoryExistsLenient()) {
+        if (! $this->repositoryExistsLenient()) {
             throw new GitException('No git repository at path', 422);
         }
     }
 
     /**
-     * @param array<string, mixed> $fields
+     * @param  array<string, mixed>  $fields
      * @return array<string, mixed>
      */
     private function statusEnvelope(array $fields): array

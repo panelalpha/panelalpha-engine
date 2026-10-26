@@ -65,4 +65,37 @@ class RepositoryAddressTest extends TestCase
         $this->assertFalse(RepositoryAddress::refused('https://github.com/owner/repo.git'));
         $this->assertFalse(RepositoryAddress::refused('git@github.com:owner/repo.git'));
     }
+
+    /**
+     * git and libcurl parse numeric IPv4 forms PHP's resolver does not, so a
+     * host that does not resolve is not one the engine can check.
+     *
+     * @return array<string, array{string}>
+     */
+    public static function hostsPhpDoesNotResolve(): array
+    {
+        return [
+            'hexadecimal loopback' => ['http://0x7f000001/x.git'],
+            'decimal integer loopback' => ['http://2130706433/x.git'],
+            'octal loopback' => ['http://0177.0.0.1/x.git'],
+            'hexadecimal metadata' => ['http://0xa9fea9fe/x.git'],
+            'a name nothing answers for' => ['https://unreachable.invalid/o/r.git'],
+        ];
+    }
+
+    #[DataProvider('hostsPhpDoesNotResolve')]
+    public function test_a_host_the_engine_cannot_resolve_is_refused(string $repo): void
+    {
+        OutboundUrl::setResolverForTests(static fn (string $host): array => []);
+
+        $this->assertTrue(RepositoryAddress::refused($repo), $repo);
+        $this->assertSame('host_refused', RepositoryAddress::problem($repo)['code'] ?? null);
+    }
+
+    public function test_a_bracketed_ipv6_scp_remote_yields_its_host_and_is_refused(): void
+    {
+        $this->assertSame('::1', RepositoryAddress::host('git@[::1]:x/y.git'));
+        $this->assertTrue(RepositoryAddress::refused('git@[::1]:x/y.git'));
+        $this->assertTrue(RepositoryAddress::refused('git@[fd00::1]:x/y.git'));
+    }
 }

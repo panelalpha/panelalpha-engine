@@ -143,14 +143,14 @@ class ProjectCreateHttpTest extends TestCase
     {
         foreach (self::uris() as $uri) {
             $this->assertBody($this->postJson($uri, ['username' => 'fresh', 'domain' => 'fresh.example.test', 'git_repo' => 'https://github.com/acme/app.git', 'git_token' => 'vault:999']), 422, [
-                'message' => "No vault entry for 'vault:999'. Use the `vault:<id>` vault_secret_create returned.",
-                'errors' => ['git_token' => ["No vault entry for 'vault:999'. Use the `vault:<id>` vault_secret_create returned."]],
-                'problems' => [['field' => 'git_token', 'code' => 'git_token_invalid', 'message' => "No vault entry for 'vault:999'. Use the `vault:<id>` vault_secret_create returned."]],
+                'message' => "No vault entry for 'vault:999'. Use the `vault:<key>` vault_secret_create returned.",
+                'errors' => ['git_token' => ["No vault entry for 'vault:999'. Use the `vault:<key>` vault_secret_create returned."]],
+                'problems' => [['field' => 'git_token', 'code' => 'git_token_invalid', 'message' => "No vault entry for 'vault:999'. Use the `vault:<key>` vault_secret_create returned."]],
             ]);
             $this->assertBody($this->postJson($uri, ['username' => 'fresh', 'domain' => 'fresh.example.test', 'env_vars' => ['A' => 'vault:999']]), 422, [
-                'message' => "No vault entry for 'vault:999'. Use the `vault:<id>` vault_secret_create returned.",
-                'errors' => ['env_vars' => ["No vault entry for 'vault:999'. Use the `vault:<id>` vault_secret_create returned."]],
-                'problems' => [['field' => 'env_vars', 'code' => 'env_vars_invalid', 'message' => "No vault entry for 'vault:999'. Use the `vault:<id>` vault_secret_create returned."]],
+                'message' => "No vault entry for 'vault:999'. Use the `vault:<key>` vault_secret_create returned.",
+                'errors' => ['env_vars' => ["No vault entry for 'vault:999'. Use the `vault:<key>` vault_secret_create returned."]],
+                'problems' => [['field' => 'env_vars', 'code' => 'env_vars_invalid', 'message' => "No vault entry for 'vault:999'. Use the `vault:<key>` vault_secret_create returned."]],
             ]);
         }
         $this->assertNothingCreated();

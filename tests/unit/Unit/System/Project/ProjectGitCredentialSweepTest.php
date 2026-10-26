@@ -6,8 +6,9 @@ use App\Models\User as ModelsUser;
 use App\System as EngineSystem;
 use App\System\Project\Git as ProjectGit;
 use App\System\Project\Git\CredentialFiles;
-use PHPUnit\Framework\TestCase;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\Process\Process;
+use Tests\TestCase;
 
 /**
  * A git command installs an askpass script carrying the project's token and a
@@ -110,6 +111,17 @@ class ProjectGitCredentialSweepTest extends TestCase
         $this->assertFileDoesNotExist($temp, 'the local copy of the token was left behind');
     }
 
+    public function test_a_failed_sweep_does_not_fail_the_git_command(): void
+    {
+        Log::spy();
+
+        $output = (new SweepableGit(new AskPassFailingSystem('find'), $this->home))
+            ->callExecute(['git', '-C', $this->home . '/project', 'status']);
+
+        $this->assertSame('', $output);
+        Log::shouldHaveReceived('warning')->once();
+    }
+
     private function executeWithToken(AskPassFailingSystem $system): void
     {
         try {
@@ -120,22 +132,12 @@ class ProjectGitCredentialSweepTest extends TestCase
         $this->assertNotSame('', $system->installed()[0], 'the helper was never installed');
     }
 
-    /** The classification itself, without a filesystem: a directory listing in. */
-    public function test_leftovers_are_only_the_credential_prefixes(): void
+    /** A work tree nested below the home gets its parent, not the home, as the credential directory. */
+    public function test_credentials_go_beside_the_work_tree(): void
     {
-        $this->assertSame(
-            [
-                CredentialFiles::ASKPASS_PREFIX . 'abc',
-                CredentialFiles::SSH_PREFIX . 'key-1',
-            ],
-            CredentialFiles::leftovers([
-                '.',
-                '..',
-                'README.md',
-                CredentialFiles::SSH_PREFIX . 'key-1',
-                CredentialFiles::ASKPASS_PREFIX . 'abc',
-            ])
-        );
+        $this->assertSame('/home/alice', CredentialFiles::directoryFor('/home/alice', '/home/alice/project'));
+        $this->assertSame('/home/alice/example.com', CredentialFiles::directoryFor('/home/alice', '/home/alice/example.com/public_html'));
+        $this->assertSame('/home/alice', CredentialFiles::directoryFor('/home/alice', null));
     }
 }
 
@@ -191,13 +193,51 @@ final class SweepRecordingSystem extends EngineSystem
         $argv = is_array($cmd) ? array_values($cmd) : [$cmd];
         $this->commands[] = $argv;
 
-        // `rm -f -- <path>` is the sweep's own command; carry it out for real so
-        // the test sees what the host would have done.
+        if (array_slice($argv, 0, 2) === ['sudo', 'find']) {
+            return $this->find($argv);
+        }
         if (($argv[0] ?? '') === 'rm' || array_slice($argv, 0, 2) === ['sudo', 'rm']) {
             @unlink((string) end($argv));
         }
 
         return '';
+    }
+
+    /**
+     * @param  list<string>  $argv
+     */
+    private function find(array $argv): string
+    {
+        $root = rtrim((string) ($argv[2] ?? ''), '/');
+        $maxDepth = null;
+        $minutes = 0;
+        foreach ($argv as $i => $arg) {
+            if ($arg === '-maxdepth') {
+                $maxDepth = (int) ($argv[$i + 1] ?? 0);
+            }
+            if ($arg === '-mmin') {
+                $minutes = (int) ltrim((string) ($argv[$i + 1] ?? ''), '+');
+            }
+        }
+
+        if (! is_dir($root)) {
+            return '';
+        }
+
+        $output = '';
+        $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS));
+        foreach ($files as $file) {
+            $relative = ltrim(substr($file->getPathname(), strlen($root)), '/');
+            if (! $file->isFile()
+                || ($maxDepth !== null && substr_count($relative, '/') >= $maxDepth)
+                || ($minutes > 0 && $file->getMTime() > time() - $minutes * 60)
+                || (! str_starts_with($file->getFilename(), CredentialFiles::ASKPASS_PREFIX) && ! str_starts_with($file->getFilename(), CredentialFiles::SSH_PREFIX))) {
+                continue;
+            }
+            $output .= $file->getPathname() . "\0";
+        }
+
+        return $output;
     }
 }
 

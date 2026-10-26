@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Deploy\Source;
 
+use App\Lib\Deploy\Source\GitTransport;
 use App\Lib\Deploy\Source\GitUrl;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -14,7 +15,7 @@ class GitUrlTest extends TestCase
         $token = "s3cret token'\nsecond-line";
         $path = tempnam(sys_get_temp_dir(), 'git-askpass-test-');
         $this->assertNotFalse($path);
-        file_put_contents($path, GitUrl::askPassScript($token));
+        file_put_contents($path, GitUrl::askPassScript($token, 'github.com'));
         chmod($path, 0700);
 
         try {
@@ -25,7 +26,7 @@ class GitUrlTest extends TestCase
             $this->assertStringNotContainsString($token, implode(' ', $command));
             $this->assertContains('https://github.com/org/repo.git', $command);
 
-            $process = new Process([$path, 'Password for https://git@github.com:']);
+            $process = new Process([$path, "Password for 'https://git@github.com':"]);
             $process->mustRun();
             $this->assertSame($token, $process->getOutput());
         } finally {
@@ -84,20 +85,19 @@ class GitUrlTest extends TestCase
         }
     }
 
-    /** Without a host the helper answers any prompt, the behaviour before host scoping. */
-    public function test_a_hostless_askpass_helper_still_answers(): void
+    /** A helper rendered without a host gives the token to no prompt. */
+    public function test_a_hostless_askpass_helper_answers_nothing(): void
     {
-        $path = tempnam(sys_get_temp_dir(), 'git-askpass-any-');
-        $this->assertNotFalse($path);
-        file_put_contents($path, GitUrl::askPassScript('token'));
-        chmod($path, 0700);
+        $this->assertHelperRefuses(GitUrl::askPassScript('token'), "Password for 'https://anywhere.example':");
+    }
 
-        try {
-            $process = new Process([$path, "Password for 'https://anywhere.example':"]);
-            $process->mustRun();
-            $this->assertSame('token', $process->getOutput());
-        } finally {
-            @unlink($path);
+    /** A prompt whose host cannot be read is refused, never answered. */
+    public function test_a_prompt_without_a_readable_host_is_refused(): void
+    {
+        $script = GitUrl::askPassScript('token', 'github.com');
+
+        foreach (['Password for https://git@github.com:', 'Password:', ''] as $prompt) {
+            $this->assertHelperRefuses($script, $prompt);
         }
     }
 
@@ -268,6 +268,19 @@ class GitUrlTest extends TestCase
         $this->assertSame(['GIT_ASKPASS=/home/u/.pa-askpass'], $askPass, 'only the real helper');
     }
 
+    /** Every wrapped command is limited to the transports the engine clones over; ssh only with a key. */
+    public function test_every_wrapped_command_carries_the_transport_policy(): void
+    {
+        $clone = GitUrl::withoutPrompts(['git', 'clone', 'https://h/o/r.git'], GitTransport::schemes());
+        $this->assertContains('GIT_ALLOW_PROTOCOL=http:https', $clone);
+
+        $askPass = GitUrl::withAskPass(['git', 'fetch'], '/tmp/ap', GitTransport::schemes());
+        $this->assertContains('GIT_ALLOW_PROTOCOL=http:https', $askPass);
+
+        $withSsh = GitUrl::withoutPrompts(['git', 'fetch'], GitTransport::schemes(true));
+        $this->assertContains('GIT_ALLOW_PROTOCOL=ssh:http:https', $withSsh);
+    }
+
     /** One helper for the create-time probe and the account's clone and fetches. */
     public function test_the_http11_retry_goes_right_after_git_bare_or_wrapped(): void
     {
@@ -283,5 +296,22 @@ class GitUrlTest extends TestCase
         $git = array_search('git', $retried, true);
         $this->assertSame(['git', '-c', 'http.version=HTTP/1.1', 'ls-remote'], array_slice($retried, (int) $git, 4));
         $this->assertSame(array_slice($wrapped, 0, (int) $git), array_slice($retried, 0, (int) $git), 'the env wrapper is kept');
+    }
+
+    private function assertHelperRefuses(string $script, string $prompt): void
+    {
+        $path = tempnam(sys_get_temp_dir(), 'git-askpass-refuse-');
+        $this->assertNotFalse($path);
+        file_put_contents($path, $script);
+        chmod($path, 0700);
+
+        try {
+            $process = new Process([$path, $prompt]);
+            $process->run();
+            $this->assertNotSame(0, $process->getExitCode(), $prompt);
+            $this->assertSame('', $process->getOutput(), $prompt);
+        } finally {
+            @unlink($path);
+        }
     }
 }

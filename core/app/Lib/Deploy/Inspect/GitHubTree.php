@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Inspect;
 
+use App\Lib\Deploy\Source\GitTransport;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
@@ -33,14 +35,12 @@ final class GitHubTree
     private ?float $deadline = null;
 
     /**
-     * @param ?\Closure(string, ?string): array{0: string, 1: ?string} $head
-     *        the commit and branch a ref names; `git ls-remote` when null
-     * @param ?float $budget seconds the whole of writeTo() may take; null
-     *        bounds each request only
+     * @param  ?\Closure(string, ?string): array{0: string, 1: ?string}  $head
+     *                                                                          the commit and branch a ref names; `git ls-remote` when null
+     * @param  ?float  $budget  seconds the whole of writeTo() may take; null
+     *                          bounds each request only
      */
-    public function __construct(private readonly ?\Closure $head = null, private readonly ?float $budget = null)
-    {
-    }
+    public function __construct(private readonly ?\Closure $head = null, private readonly ?float $budget = null) {}
 
     /**
      * Owner and name of a github.com HTTPS repository URL with nothing else in
@@ -51,7 +51,7 @@ final class GitHubTree
     public static function repository(string $repoUrl): ?array
     {
         $parts = parse_url(trim($repoUrl));
-        if (!is_array($parts)
+        if (! is_array($parts)
             || strtolower($parts['scheme'] ?? '') !== 'https'
             || strtolower($parts['host'] ?? '') !== 'github.com'
             || isset($parts['user'])
@@ -70,6 +70,7 @@ final class GitHubTree
      * Write $repoUrl at $branch (the default branch when null) into $dir.
      *
      * @return array{repository: string, branch: ?string, commit: ?string}
+     *
      * @throws TreeUnavailable
      */
     public function writeTo(string $dir, string $repoUrl, ?string $branch = null, ?string $subdirectory = null): array
@@ -112,7 +113,7 @@ final class GitHubTree
         }
 
         self::skeleton($dir, $entries);
-        $base = self::RAW . '/' . rawurlencode($owner) . '/' . rawurlencode($name) . '/' . self::encodePath($ref) . '/';
+        $base = self::RAW.'/'.rawurlencode($owner).'/'.rawurlencode($name).'/'.self::encodePath($ref).'/';
         $this->fetch($base, $dir, $decisive, $sizes, true);
         $this->link($base, $dir, $links, $sizes);
 
@@ -135,26 +136,28 @@ final class GitHubTree
      * Every directory and every file of the tree under $dir, files empty, and
      * an empty .git directory where a clone would have its own.
      *
-     * @param list<array{path: string, type: string, mode: string, size: ?int}> $entries
+     * @param  list<array{path: string, type: string, mode: string, size: ?int}>  $entries
+     *
      * @throws TreeUnavailable
      */
     public static function skeleton(string $dir, array $entries): void
     {
         // A checkout has a .git directory, and a Dockerfile that copies it
         // (`COPY .git/ ...`) is only usable when it is there.
-        if (!is_dir($dir . '/.git') && !@mkdir($dir . '/.git', 0755, true)) {
+        if (! is_dir($dir.'/.git') && ! @mkdir($dir.'/.git', 0755, true)) {
             throw new TreeUnavailable('Could not create the inspection workspace.');
         }
         foreach ($entries as $entry) {
-            $path = $dir . '/' . $entry['path'];
+            $path = $dir.'/'.$entry['path'];
             if ($entry['type'] === 'tree') {
-                if (!is_dir($path) && !@mkdir($path, 0755, true)) {
+                if (! is_dir($path) && ! @mkdir($path, 0755, true)) {
                     throw new TreeUnavailable("Could not create {$entry['path']}.");
                 }
+
                 continue;
             }
             $parent = dirname($path);
-            if (!is_dir($parent) && !@mkdir($parent, 0755, true)) {
+            if (! is_dir($parent) && ! @mkdir($parent, 0755, true)) {
                 throw new TreeUnavailable("Could not create {$entry['path']}.");
             }
             if (@file_put_contents($path, '') === false) {
@@ -168,22 +171,23 @@ final class GitHubTree
      * written copy differ from a clone.
      *
      * @return list<array{path: string, type: string, mode: string, size: ?int}>
+     *
      * @throws TreeUnavailable
      */
     private function tree(string $owner, string $name, string $ref): array
     {
-        $url = self::API . '/repos/' . rawurlencode($owner) . '/' . rawurlencode($name) . '/git/trees/' . rawurlencode($ref);
+        $url = self::API.'/repos/'.rawurlencode($owner).'/'.rawurlencode($name).'/git/trees/'.rawurlencode($ref);
         try {
             $response = $this->client()->accept('application/vnd.github+json')->get($url, ['recursive' => '1']);
         } catch (\Throwable $e) {
-            throw new TreeUnavailable('GitHub could not be reached: ' . $e->getMessage(), 0, $e);
+            throw new TreeUnavailable('GitHub could not be reached: '.$e->getMessage(), 0, $e);
         }
         // 403 and 429 are the rate limit, 404 a private or missing repository.
         if ($response->status() !== 200) {
             throw new TreeUnavailable("GitHub answered {$response->status()} for the file list.");
         }
         $body = $response->json();
-        if (!is_array($body) || !is_array($body['tree'] ?? null)) {
+        if (! is_array($body) || ! is_array($body['tree'] ?? null)) {
             throw new TreeUnavailable('GitHub returned no file list.');
         }
         if (($body['truncated'] ?? false) === true) {
@@ -194,7 +198,7 @@ final class GitHubTree
         foreach ($body['tree'] as $item) {
             $path = is_array($item) ? ($item['path'] ?? null) : null;
             $type = is_array($item) ? ($item['type'] ?? null) : null;
-            if (!is_string($path) || !self::safePath($path) || !in_array($type, ['blob', 'tree', 'commit'], true)) {
+            if (! is_string($path) || ! self::safePath($path) || ! in_array($type, ['blob', 'tree', 'commit'], true)) {
                 throw new TreeUnavailable('The file list holds an entry that cannot be written.');
             }
             // The clone checks submodules out; a file list cannot.
@@ -213,14 +217,15 @@ final class GitHubTree
     }
 
     /**
-     * @param list<string> $paths
-     * @param array<string, int> $sizes
+     * @param  list<string>  $paths
+     * @param  array<string, int>  $sizes
+     *
      * @throws TreeUnavailable when $strict and a file did not arrive whole
      */
     private function fetch(string $base, string $dir, array $paths, array $sizes, bool $strict): void
     {
         foreach ($this->download($base, $paths, $sizes, $strict) as $path => $body) {
-            if (@file_put_contents($dir . '/' . $path, $body) === false) {
+            if (@file_put_contents($dir.'/'.$path, $body) === false) {
                 throw new TreeUnavailable("Could not write {$path}.");
             }
         }
@@ -229,9 +234,10 @@ final class GitHubTree
     /**
      * The files that arrived whole, by path.
      *
-     * @param list<string> $paths
-     * @param array<string, int> $sizes
+     * @param  list<string>  $paths
+     * @param  array<string, int>  $sizes
      * @return array<string, string>
+     *
      * @throws TreeUnavailable when $strict and one did not
      */
     private function download(string $base, array $paths, array $sizes, bool $strict): array
@@ -246,7 +252,7 @@ final class GitHubTree
                 $requests[] = $pool->as($path)
                     ->withUserAgent(self::USER_AGENT)
                     ->timeout($timeout)
-                    ->get($base . self::encodePath($path));
+                    ->get($base.self::encodePath($path));
             }
 
             return $requests;
@@ -261,6 +267,7 @@ final class GitHubTree
                 if ($strict) {
                     throw new TreeUnavailable("Could not fetch {$path}.");
                 }
+
                 continue;
             }
             $bodies[$path] = $body;
@@ -273,8 +280,9 @@ final class GitHubTree
      * Symbolic links become links again, as a checkout makes them, when they
      * point inside the repository. Any other stays an empty file.
      *
-     * @param list<string> $paths
-     * @param array<string, int> $sizes
+     * @param  list<string>  $paths
+     * @param  array<string, int>  $sizes
+     *
      * @throws TreeUnavailable
      */
     private function link(string $base, string $dir, array $paths, array $sizes): void
@@ -285,8 +293,8 @@ final class GitHubTree
             if ($resolved === null) {
                 continue;
             }
-            $link = $dir . '/' . $path;
-            if (!@unlink($link) || !@symlink($target, $link)) {
+            $link = $dir.'/'.$path;
+            if (! @unlink($link) || ! @symlink($target, $link)) {
                 throw new TreeUnavailable("Could not write {$path}.");
             }
         }
@@ -309,6 +317,7 @@ final class GitHubTree
                     return null;
                 }
                 array_pop($parts);
+
                 continue;
             }
             $parts[] = $segment;
@@ -336,7 +345,7 @@ final class GitHubTree
         return true;
     }
 
-    private function client(): \Illuminate\Http\Client\PendingRequest
+    private function client(): PendingRequest
     {
         return Http::withUserAgent(self::USER_AGENT)->timeout($this->timeout());
     }
@@ -354,7 +363,7 @@ final class GitHubTree
         }
         $left = $this->deadline - microtime(true);
         if ($left <= 0) {
-            throw new TreeUnavailable('Reading the file list took longer than ' . $this->budget . ' s.');
+            throw new TreeUnavailable('Reading the file list took longer than '.$this->budget.' s.');
         }
 
         return min(self::TIMEOUT, $left);
@@ -365,27 +374,28 @@ final class GitHubTree
      * request over git's own protocol, which the API rate limit does not count.
      *
      * @return array{0: string, 1: ?string}
+     *
      * @throws TreeUnavailable
      */
     public static function lsRemote(string $repoUrl, ?string $branch, float $timeout = self::TIMEOUT): array
     {
         $refs = $branch === null || $branch === ''
             ? ['HEAD']
-            : ['refs/heads/' . $branch, 'refs/tags/' . $branch, 'refs/tags/' . $branch . '^{}'];
+            : ['refs/heads/'.$branch, 'refs/tags/'.$branch, 'refs/tags/'.$branch.'^{}'];
         $process = new Process(
             ['git', '-c', 'credential.helper=', '-c', 'core.askpass=', 'ls-remote', '--symref', '--', $repoUrl, ...$refs],
             // Outside any checkout: ls-remote reads the config of the one it runs in.
             sys_get_temp_dir(),
-            ['GIT_TERMINAL_PROMPT' => '0', 'GIT_ASKPASS' => '/bin/false', 'SSH_ASKPASS' => '/bin/false', 'LC_ALL' => 'C', 'LANG' => 'C'],
+            [...GitTransport::env(GitTransport::schemes()), 'GIT_TERMINAL_PROMPT' => '0', 'GIT_ASKPASS' => '/bin/false', 'SSH_ASKPASS' => '/bin/false', 'LC_ALL' => 'C', 'LANG' => 'C'],
             null,
             $timeout
         );
         try {
             $process->run();
         } catch (\Throwable $e) {
-            throw new TreeUnavailable('git ls-remote failed: ' . $e->getMessage(), 0, $e);
+            throw new TreeUnavailable('git ls-remote failed: '.$e->getMessage(), 0, $e);
         }
-        if (!$process->isSuccessful()) {
+        if (! $process->isSuccessful()) {
             throw new TreeUnavailable('git ls-remote failed.');
         }
 
@@ -394,6 +404,7 @@ final class GitHubTree
 
     /**
      * @return array{0: string, 1: ?string}
+     *
      * @throws TreeUnavailable
      */
     public static function parseLsRemote(string $output, ?string $branch): array
@@ -411,7 +422,7 @@ final class GitHubTree
         $wanted = $branch === null || $branch === ''
             ? ['HEAD']
             // A peeled tag is the commit; the bare one may be a tag object.
-            : ['refs/heads/' . $branch, 'refs/tags/' . $branch . '^{}', 'refs/tags/' . $branch];
+            : ['refs/heads/'.$branch, 'refs/tags/'.$branch.'^{}', 'refs/tags/'.$branch];
         foreach ($wanted as $ref) {
             if (isset($shas[$ref])) {
                 return [$shas[$ref], $default];

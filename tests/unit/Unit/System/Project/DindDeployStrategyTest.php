@@ -261,6 +261,15 @@ class DindDeployStrategyTest extends TestCase
                         $this->makeDirWithParents(dirname($path), $chown);
                         file_put_contents($path, $contents);
                     }
+
+                    public function writeFileReplacingPath(
+                        string $path,
+                        string $contents,
+                        ?string $chown = null,
+                        ?string $chmod = null,
+                    ): void {
+                        $this->filePutContents($path, $contents, $chown, $chmod);
+                    }
                 };
             }
         };

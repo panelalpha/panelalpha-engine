@@ -18,7 +18,7 @@ use Illuminate\Validation\ValidationException;
  * a POST -- anyone holding the link can repeat it without ever loading the
  * page -- so refusing to *render* the form is not the same as refusing the
  * write. Minting never touches a stored entry either: a new link is a new
- * entry with its own `vault:<id>`.
+ * entry with its own `vault:<key>`.
  *
  * Why it matters beyond tidiness: the secret can never be read back, so an
  * overwrite is undetectable after the fact. `use_count` and `last_used_at`

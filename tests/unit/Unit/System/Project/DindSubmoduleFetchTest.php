@@ -3,6 +3,8 @@
 namespace Tests\Unit\System\Project;
 
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
+use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Git\DeployKey;
 use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Project as ProjectAggregate;
@@ -80,7 +82,24 @@ class DindSubmoduleFetchTest extends TestCase
 
     public function test_a_submodule_that_cannot_be_fetched_fails_the_deploy_with_its_cause(): void
     {
-        $failing = static function (array $command): string {
+        try {
+            $this->repository($this->failingSubmodules())->fetchSubmodules('https://github.com/org/panel.git', 'pat');
+            $this->fail('a submodule fetch failure must fail the deploy');
+        } catch (\RuntimeException $e) {
+            $this->assertStringStartsWith(DeployFailureExplainer::SUBMODULE_FAILURE . ': ', $e->getMessage());
+
+            $match = DeployFailureExplainer::match($e->getMessage());
+            $this->assertSame('submodule-fetch-failed', $match['rule'] ?? null);
+            $this->assertStringContainsString('could not read Username', $match['message']);
+            $this->assertStringContainsString('git: {submodules: [...]}', $match['message']);
+            $this->assertStringContainsString('A submodule addressed over SSH (git@host:...)', $match['message']);
+        }
+    }
+
+    /** @return callable(list<string>): string */
+    private function failingSubmodules(): callable
+    {
+        return static function (array $command): string {
             if (in_array('submodule', $command, true)) {
                 throw new GitException(
                     "Cloning into '/app/packages/client-area'...\nfatal: could not read Username for 'https://github.com': terminal prompts disabled",
@@ -90,18 +109,49 @@ class DindSubmoduleFetchTest extends TestCase
 
             return "true\n";
         };
+    }
 
+    /** A redeploy of a checkout that deployed before keeps the submodule checkout it had, and says so. */
+    public function test_a_redeploy_keeps_the_previous_submodule_checkout_and_warns(): void
+    {
+        $logger = DeployLogger::start('alice');
         try {
-            $this->repository($failing)->fetchSubmodules('https://github.com/org/panel.git', 'pat');
-            $this->fail('a submodule fetch failure must fail the deploy');
-        } catch (\RuntimeException $e) {
-            $this->assertStringStartsWith(DeployFailureExplainer::SUBMODULE_FAILURE . ': ', $e->getMessage());
-
-            $match = DeployFailureExplainer::match($e->getMessage());
-            $this->assertSame('submodule-fetch-failed', $match['rule'] ?? null);
-            $this->assertStringContainsString('could not read Username', $match['message']);
-            $this->assertStringContainsString('git: {submodules: [...]}', $match['message']);
+            $this->repository($this->failingSubmodules())->fetchSubmodules('https://github.com/org/panel.git', 'pat', keepPrevious: true);
+            $warnings = array_values(array_filter($logger->read()['lines'], static fn (array $l): bool => $l['level'] === 'warn'));
+        } finally {
+            $logger->finish(DeployLogger::STATUS_SUCCESS);
+            DeployLogger::deleteUserLogs('alice');
         }
+
+        $this->assertCount(1, $warnings);
+        $this->assertStringStartsWith(DeployFailureExplainer::SUBMODULE_FAILURE . ': ', $warnings[0]['msg']);
+        $this->assertStringContainsString('the submodule checkout the previous deploy had', $warnings[0]['msg']);
+    }
+
+    /** Without a deploy key ssh has nothing to offer, so an ssh submodule URL is read over https. */
+    public function test_an_ssh_submodule_url_is_read_over_https_without_a_deploy_key(): void
+    {
+        file_put_contents($this->projectDir() . '/.gitmodules', "[submodule \"lib\"]\n\tpath = lib\n\turl = git@github.com:org/lib.git\n");
+        $runner = new FakeGitRunner();
+
+        $this->repository($runner)->fetchSubmodules('https://github.com/org/panel.git', null);
+
+        $command = $this->submoduleCommand($runner);
+        $at = array_search('url.https://github.com/.insteadOf=git@github.com:', $command, true);
+        $this->assertNotFalse($at, implode(' ', $command));
+        $this->assertSame('-c', $command[$at - 1]);
+    }
+
+    public function test_a_project_with_a_deploy_key_keeps_its_ssh_submodule_urls(): void
+    {
+        file_put_contents($this->projectDir() . '/.gitmodules', "[submodule \"lib\"]\n\tpath = lib\n\turl = git@github.com:org/lib.git\n");
+        $runner = new FakeGitRunner();
+        $runner->stdout = ['rev-parse --is-inside-work-tree' => "true\n"];
+
+        (new TestableGitRepository($this->dind([DeployKey::DETAIL => ['private_key' => 'k']]), $runner))
+            ->fetchSubmodules('https://github.com/org/panel.git', null);
+
+        $this->assertStringNotContainsString('insteadOf', implode(' ', $this->submoduleCommand($runner)));
     }
 
     /** A pull, a branch change and a push all redeploy through here, after the checkout moved. */
@@ -148,11 +198,12 @@ class DindSubmoduleFetchTest extends TestCase
         return $this->root . '/home/alice/project';
     }
 
-    private function dind(): Dind
+    /** @param array<string, mixed> $details */
+    private function dind(array $details = []): Dind
     {
         $model = new ModelsUser();
         $model->username = 'alice';
-        $model->setDetails(['template' => 'dind', 'git_repo' => 'https://github.com/org/panel.git']);
+        $model->setDetails(['template' => 'dind', 'git_repo' => 'https://github.com/org/panel.git', ...$details]);
         $runtime = (new ProjectAggregate($this->system(), $model))->runtime();
         $this->assertInstanceOf(Dind::class, $runtime);
 

@@ -18,10 +18,10 @@ final class GitRepoInput
 {
     public const MAX_LENGTH = 2048;
 
-    /** SSH only with a project's deploy key. {@see sshProblem()}. */
-    private const SCHEMES = ['http', 'https'];
+    /** The clone protocols this engine speaks over a URL. SSH only with a project's deploy key ({@see sshProblem()}). */
+    public const SCHEMES = ['http', 'https'];
 
-    private const SCP_STYLE = '#^[^@\s/]+@[^:\s/]+:[^\s]+$#';
+    private const SCP_STYLE = '#^[^@\s/]+@(\[[^\]]+\]|[^:\s/]+):[^\s]+$#';
 
     /**
      * Hosts where a repository is always `owner/repo`. A list rather than a
@@ -58,7 +58,7 @@ final class GitRepoInput
         }
 
         return self::isShorthand($value)
-            ? 'https://' . self::shorthandHost($host) . '/' . $value
+            ? 'https://'.self::shorthandHost($host).'/'.$value
             : $value;
     }
 
@@ -71,7 +71,7 @@ final class GitRepoInput
     {
         $value = trim($raw);
 
-        return !self::isSsh($value) && preg_match('#^[^/\s.:@]+/[^/\s]+$#', $value) === 1;
+        return ! self::isSsh($value) && preg_match('#^[^/\s.:@]+/[^/\s]+$#', $value) === 1;
     }
 
     /**
@@ -100,7 +100,7 @@ final class GitRepoInput
             return $raw;
         }
 
-        return 'https://' . ltrim($raw, '/');
+        return 'https://'.ltrim($raw, '/');
     }
 
     public static function isSsh(string $raw): bool
@@ -117,14 +117,15 @@ final class GitRepoInput
     public static function sshHost(string $raw): ?string
     {
         $raw = trim($raw);
-        if (!self::isSsh($raw)) {
+        if (! self::isSsh($raw)) {
             return null;
         }
         if (stripos($raw, 'ssh://') === 0) {
             $host = strtolower((string) parse_url($raw, PHP_URL_HOST));
             $port = (int) (parse_url($raw, PHP_URL_PORT) ?: 22);
         } else {
-            $host = strtolower(explode(':', substr($raw, strpos($raw, '@') + 1), 2)[0]);
+            preg_match(self::SCP_STYLE, $raw, $m);
+            $host = strtolower(trim($m[1], '[]'));
             $port = 22;
         }
         if ($host === '') {
@@ -138,7 +139,7 @@ final class GitRepoInput
      * An SSH remote for a project that holds a deploy key: refused only when
      * its host key is not pinned, since the clone would then fail on it.
      *
-     * @param callable(string): bool $pinned
+     * @param  callable(string): bool  $pinned
      * @return ?array<string, mixed>
      */
     public static function sshProblemWithKey(string $field, string $raw, callable $pinned): ?array
@@ -153,9 +154,9 @@ final class GitRepoInput
 
         return [
             'field' => $field,
-            'code' => $field . '_ssh_host_not_pinned',
+            'code' => $field.'_ssh_host_not_pinned',
             'message' => "The host key of {$host} is not pinned, so the clone could not verify the server. "
-                . 'Pin it with POST /projects/{name}/git/deploy-key and `host`.',
+                .'Pin it with POST /projects/{name}/git/deploy-key and `host`.',
             'expected' => 'an SSH remote on github.com, gitlab.com, bitbucket.org or a host pinned on the deploy key',
             'examples' => ['git@github.com:owner/repo.git', 'ssh://git@git.example.com:2222/owner/repo.git'],
         ];
@@ -168,18 +169,18 @@ final class GitRepoInput
      */
     public static function httpsEquivalent(string $raw): ?string
     {
-        if (!in_array(self::sshHost($raw), self::HTTPS_FORGES, true)) {
+        if (! in_array(self::sshHost($raw), self::HTTPS_FORGES, true)) {
             return null;
         }
         $parsed = RepoUrl::parse(trim($raw));
 
         return $parsed === null
             ? null
-            : 'https://' . $parsed['host'] . '/' . $parsed['owner'] . '/' . $parsed['repo'] . '.git';
+            : 'https://'.$parsed['host'].'/'.$parsed['owner'].'/'.$parsed['repo'].'.git';
     }
 
     /**
-     * @param bool $forToken a `git_token` came with it, so HTTP is out too
+     * @param  bool  $forToken  a `git_token` came with it, so HTTP is out too
      * @return ?array<string, mixed>
      */
     public static function problem(string $field, string $raw, bool $forToken = false): ?array
@@ -190,7 +191,7 @@ final class GitRepoInput
         }
         if (strlen($value) > self::MAX_LENGTH) {
             return self::problemOf($field, 'too_long',
-                'A repository URL must be at most ' . self::MAX_LENGTH . ' characters.');
+                'A repository URL must be at most '.self::MAX_LENGTH.' characters.');
         }
         if (self::isSsh($value)) {
             return self::sshProblem($field, $value);
@@ -202,19 +203,19 @@ final class GitRepoInput
 
             return self::problemOf($field, 'shorthand',
                 "'{$value}' is owner/repo shorthand, not a repository URL, and the host is not guessed. "
-                . "If it is on GitHub, send {$url}.",
+                ."If it is on GitHub, send {$url}.",
                 $url);
         }
 
         $url = self::normalise($value);
         $parts = parse_url($url);
-        if (!is_array($parts)) {
+        if (! is_array($parts)) {
             return self::problemOf($field, 'malformed',
                 "'{$value}' could not be read as a repository URL.");
         }
 
         $scheme = strtolower((string) ($parts['scheme'] ?? ''));
-        if (!in_array($scheme, self::SCHEMES, true)) {
+        if (! in_array($scheme, self::SCHEMES, true)) {
             return self::problemOf($field, 'unsupported_scheme',
                 "The engine clones over HTTPS; '{$scheme}' is not a scheme it can use.");
         }
@@ -227,7 +228,7 @@ final class GitRepoInput
         if (isset($parts['user']) || isset($parts['pass'])) {
             return self::problemOf($field, 'embedded_credentials',
                 'A repository URL must not embed credentials. Pass the token as `git_token` '
-                . 'instead, which is injected at clone time and never written to .git/config.',
+                .'instead, which is injected at clone time and never written to .git/config.',
                 GitUrl::sanitize($url));
         }
 
@@ -238,14 +239,14 @@ final class GitRepoInput
         if (count($segments) < 2 && in_array(strtolower($parts['host']), self::FORGE_HOSTS, true)) {
             return self::problemOf($field, 'incomplete',
                 "'{$value}' names an account on {$parts['host']}, not a repository. "
-                . 'Add the repository name.');
+                .'Add the repository name.');
         }
 
         // Last, so a caller with a token and a typo hears about the typo.
         if ($forToken && $scheme !== 'https') {
             return self::problemOf($field, 'token_requires_https',
                 'A Git token requires an HTTPS repository URL.',
-                'https://' . substr($url, strlen($scheme) + 3));
+                'https://'.substr($url, strlen($scheme) + 3));
         }
 
         return null;
@@ -260,15 +261,15 @@ final class GitRepoInput
     public static function sshProblem(string $field, string $value): array
     {
         $message = 'An SSH remote clones only with a project\'s deploy key, and a project has none until it '
-            . 'exists. Create the project without a repository, create its key with POST '
-            . '/projects/{name}/git/deploy-key, add the returned public key to the repository as a deploy key, '
-            . 'then connect the SSH remote with POST /projects/{name}/git/connect.';
+            .'exists. Create the project without a repository, create its key with POST '
+            .'/projects/{name}/git/deploy-key, add the returned public key to the repository as a deploy key, '
+            .'then connect the SSH remote with POST /projects/{name}/git/connect.';
         $https = self::httpsEquivalent($value);
 
         return self::problemOf(
             $field,
             'ssh_unsupported',
-            $https === null ? $message : $message . ' Or use ' . $https . ', with a token if it is private.',
+            $https === null ? $message : $message.' Or use '.$https.', with a token if it is private.',
             $https
         );
     }
@@ -291,7 +292,7 @@ final class GitRepoInput
     ): array {
         return array_filter([
             'field' => $field,
-            'code' => $field . '_' . $code,
+            'code' => $field.'_'.$code,
             'message' => $message,
             'expected' => 'https://<host>/<owner>/<repo>[.git]',
             'suggestion' => $suggestion,

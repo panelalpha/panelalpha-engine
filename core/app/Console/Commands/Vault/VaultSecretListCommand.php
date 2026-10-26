@@ -24,7 +24,7 @@ class VaultSecretListCommand extends Command
                             {--type= : Only entries of this type}
                             {--scope= : Only project or only global entries}';
 
-    protected $description = 'List vault entries: id, type, purpose, scope, status and dates -- never the secret';
+    protected $description = 'List vault entries: reference, type, purpose, scope, status and dates -- never the secret';
 
     public function handle(): int
     {
@@ -34,8 +34,8 @@ class VaultSecretListCommand extends Command
             $query->where('type', $type);
         }
         if (is_string($scope = $this->option('scope')) && $scope !== '') {
-            if (!in_array($scope, SecretVaultEntry::SCOPES, true)) {
-                $this->error('Scope must be one of: ' . implode(', ', SecretVaultEntry::SCOPES) . '.');
+            if (! in_array($scope, SecretVaultEntry::SCOPES, true)) {
+                $this->error('Scope must be one of: '.implode(', ', SecretVaultEntry::SCOPES).'.');
 
                 return self::FAILURE;
             }
@@ -70,7 +70,7 @@ class VaultSecretListCommand extends Command
             ], $entries),
         );
 
-        $this->line('The secret itself is never shown. Delete one with: vault:secret:delete <id>');
+        $this->line('The secret itself is never shown. Delete one with: vault:secret:delete <ref>');
 
         return self::SUCCESS;
     }

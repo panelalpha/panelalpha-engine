@@ -24,21 +24,21 @@ final class UploadedArchive
         /** The archive's resolved absolute path, inside the account home. */
         public readonly string $path,
         public readonly bool $isZip
-    ) {
-    }
+    ) {}
 
     /**
-     * @param string $zipPath as the caller gave it: absolute, or relative to
-     *        the account home
-     * @param string $homeDir the account home, without a trailing slash
+     * @param  string  $zipPath  as the caller gave it: absolute, or relative to
+     *                           the account home
+     * @param  string  $homeDir  the account home, without a trailing slash
+     *
      * @throws InvalidArgumentException when the path escapes the home or the
-     *         format is not one we extract
+     *                                  format is not one we extract
      */
     public static function inHome(string $zipPath, string $homeDir): self
     {
         $home = rtrim($homeDir, '/');
         $zipPath = self::anchoredInHome($zipPath, $home);
-        if (!is_file($zipPath)) {
+        if (! is_file($zipPath)) {
             throw new InvalidArgumentException("Archive not found: {$zipPath}");
         }
 
@@ -49,8 +49,8 @@ final class UploadedArchive
 
     private static function anchoredInHome(string $zipPath, string $home): string
     {
-        if (!str_starts_with($zipPath, $home . '/') && $zipPath !== $home) {
-            return $home . '/' . ltrim($zipPath, '/');
+        if (! str_starts_with($zipPath, $home.'/') && $zipPath !== $home) {
+            return $home.'/'.ltrim($zipPath, '/');
         }
 
         return $zipPath;
@@ -63,7 +63,7 @@ final class UploadedArchive
     private static function realPathInHome(string $zipPath, string $home): string
     {
         $real = realpath($zipPath);
-        if ($real === false || !str_starts_with($real, $home . '/')) {
+        if ($real === false || ! str_starts_with($real, $home.'/')) {
             throw new InvalidArgumentException('Archive path is outside the user home directory.');
         }
 
@@ -80,7 +80,7 @@ final class UploadedArchive
      * Every {@see ArchiveSafety} check on the staged copy, each listing run through $run.
      * The mode listing serves three checks: member types, symlink targets and the claimed size.
      *
-     * @param callable(list<string>): string $run
+     * @param  callable(list<string>): string  $run
      * @return list<string> the members
      */
     public function assertSafeContents(string $staged, callable $run): array
@@ -100,13 +100,13 @@ final class UploadedArchive
      * Each symlink member's target: tar prints it in the listing, zip stores
      * it as the member's contents.
      *
-     * @param list<string> $names
-     * @param callable(list<string>): string $run
+     * @param  list<string>  $names
+     * @param  callable(list<string>): string  $run
      * @return array<string, string>
      */
     private function linkTargets(string $staged, string $modes, array $names, callable $run): array
     {
-        if (!$this->isZip) {
+        if (! $this->isZip) {
             return ArchiveSafety::tarLinks($modes, $names);
         }
         $links = [];
@@ -166,6 +166,7 @@ final class UploadedArchive
     /**
      * Extracts as the account, never restoring an owner the archive asked for. By uid/gid via
      * `setpriv`: the account's passwd entry exists only on the host, so `sudo -u` fails in core.
+     * unzip writes the names `unzip -Z1` lists, a Unicode Path field included, so the checks see them.
      *
      * @return list<string>
      */
@@ -173,7 +174,7 @@ final class UploadedArchive
     {
         $asAccount = self::asAccount($uid, $gid);
         if ($this->isZip) {
-            return [...$asAccount, 'unzip', '-UU', '-o', $staged, '-d', $into];
+            return [...$asAccount, 'unzip', '-o', $staged, '-d', $into];
         }
 
         return [

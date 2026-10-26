@@ -81,7 +81,7 @@ A `start` script in your `package.json` takes precedence over the default the en
 
 ## Git submodules
 
-Submodules are fetched with the repository, and again on every pull, branch change and push, at the commit the repository records. A submodule that cannot be fetched fails the deploy. If the application needs only some of them, for example because the others are private, name those in `.panelalpha/panelalpha.yaml` at the top of the repository:
+Submodules are fetched with the repository, and again on every pull, branch change and push, at the commit the repository records. A submodule that cannot be fetched fails the first deploy; after that, it keeps the copy it had and the deploy log warns. A submodule addressed over SSH (`git@host:...`) is fetched over HTTPS unless the project has a deploy key. If the application needs only some of them, for example because the others are private, name those in `.panelalpha/panelalpha.yaml` at the top of the repository:
 
 ```yaml
 git:

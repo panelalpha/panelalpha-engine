@@ -2,11 +2,11 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Requests\DeployPlanInput;
-use App\Http\Requests\RecipeChoiceInput;
-use App\Http\Requests\ProjectSourceInspectRequest;
-use App\Http\Requests\SourceInspectRequest;
 use App\Exceptions\ProblemException;
+use App\Http\Requests\DeployPlanInput;
+use App\Http\Requests\ProjectSourceInspectRequest;
+use App\Http\Requests\RecipeChoiceInput;
+use App\Http\Requests\SourceInspectRequest;
 use App\Lib\Deploy\Inspect\AppInspector;
 use App\Lib\Deploy\Inspect\DeploymentSnapshot;
 use App\Lib\Deploy\Inspect\GitHubTree;
@@ -42,17 +42,17 @@ class SourceInspectionController extends Controller
         path: '/source/inspect',
         summary: 'Inspect an application source and report its stack, ports and services',
         description: 'Detects what an application is without deploying it. The source may be a Git '
-            . 'repository URL or the username of an existing project (its files under the '
-            . 'account home directory); a directory on this server is refused. A public github.com '
-            . 'repository is read from its file list and only the files detection reads are '
-            . 'fetched; any other Git source, or one that cannot be read that way, is cloned '
-            . 'shallow into a temporary directory and removed again. `source.method` says which '
-            . '(`tree` or `clone`). Values from .env files are '
-            . 'never returned - only the variable names. A project username returns the same '
-            . 'report as GET /projects/{username}/inspect, including the `deployment` snapshot '
-            . 'its last deploy froze and the `drift` between that and the files on disk - so a '
-            . 'caller that already has a username does not need the other endpoint. A token limited '
-            . 'to some projects may name only those as a project source.',
+            .'repository URL or the username of an existing project (its files under the '
+            .'account home directory); a directory on this server is refused. A public github.com '
+            .'repository is read from its file list and only the files detection reads are '
+            .'fetched; any other Git source, or one that cannot be read that way, is cloned '
+            .'shallow into a temporary directory and removed again. `source.method` says which '
+            .'(`tree` or `clone`). Values from .env files are '
+            .'never returned - only the variable names. A project username returns the same '
+            .'report as GET /projects/{username}/inspect, including the `deployment` snapshot '
+            .'its last deploy froze and the `drift` between that and the files on disk - so a '
+            .'caller that already has a username does not need the other endpoint. A token limited '
+            .'to some projects may name only those as a project source.',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             required: ['source'],
@@ -68,44 +68,44 @@ class SourceInspectionController extends Controller
                     type: 'string',
                     enum: ['git', 'project'],
                     description: 'How to read `source`. Detected from its shape when omitted. `path` '
-                        . 'is not accepted: inspecting an arbitrary server directory is not exposed '
-                        . 'over the API.'
+                        .'is not accepted: inspecting an arbitrary server directory is not exposed '
+                        .'over the API.'
                 ),
                 new OA\Property(property: 'branch', type: 'string', description: 'Git branch to inspect.'),
                 new OA\Property(
                     property: 'subdirectory',
                     type: 'string',
                     description: 'Inspect this directory inside the source instead of its root. For a '
-                        . 'project the source root is the account home directory, so this is a path '
-                        . 'under /home/<username> such as "project/apps/api" or "public_html".'
+                        .'project the source root is the account home directory, so this is a path '
+                        .'under /home/<username> such as "project/apps/api" or "public_html".'
                 ),
                 new OA\Property(
                     property: 'git_token',
                     type: 'string',
                     description: 'Access token for a private HTTPS repository. '
-                        . 'A `vault:<id>` of a `global` vault entry is accepted here in place of the '
-                        . 'literal token. A `project` entry is accepted while no project owns it yet, and '
-                        . 'inspecting does not assign it; one a project owns is refused. Omitted, the clone '
-                        . 'is anonymous.'
+                        .'A `vault:<key>` of a `global` vault entry is accepted here in place of the '
+                        .'literal token. A `project` entry is accepted while no project owns it yet, and '
+                        .'inspecting does not assign it; one a project owns is refused. Omitted, the clone '
+                        .'is anonymous.'
                 ),
                 new OA\Property(
                     property: 'recipe',
                     type: 'string',
                     description: 'Preview the deploy this recipe would produce instead of the one '
-                        . 'detection picks. Takes an id from `application.candidates` in a previous '
-                        . 'inspection, and is the same field the deploy endpoints accept - so what '
-                        . 'this previews is what deploying with it executes. An id this engine does '
-                        . 'not ship comes back as `application.issue` rather than an error.',
+                        .'detection picks. Takes an id from `application.candidates` in a previous '
+                        .'inspection, and is the same field the deploy endpoints accept - so what '
+                        .'this previews is what deploying with it executes. An id this engine does '
+                        .'not ship comes back as `application.issue` rather than an error.',
                     example: 'php'
                 ),
                 new OA\Property(
                     property: 'stages',
                     type: 'object',
                     description: 'Preview a deploy that overrides stages: the same `stages` payload the '
-                        . 'deploy endpoints take, reported here without deploying anything. A stage named '
-                        . 'replaces that stage in the returned plan; one left out keeps the platform '
-                        . "defaults. Each command in `application.stages` says where it came from in "
-                        . '`source`: manifest, app_config or request.'
+                        .'deploy endpoints take, reported here without deploying anything. A stage named '
+                        .'replaces that stage in the returned plan; one left out keeps the platform '
+                        .'defaults. Each command in `application.stages` says where it came from in '
+                        .'`source`: manifest, app_config or request.'
                 ),
             ],
         )),
@@ -152,17 +152,17 @@ class SourceInspectionController extends Controller
         path: '/projects/{username}/inspect',
         summary: "Inspect a project's deployed application files",
         description: "Reports what the project's files are - stack, ports, backing services, the "
-            . 'commands a deploy would run - alongside the snapshot the last deploy froze onto the '
-            . 'account, and lists where the two disagree. Reads /home/<username>/project by default '
-            . "(the main domain's document root for the classic PHP templates); `subdirectory` "
-            . 'selects another directory under the account home. Values from .env files are never '
-            . 'returned - only the variable names. This is POST /source/inspect with `type: '
-            . 'project`, addressed by username: same report, same field names, and readable with a '
-            . 'GET. The older spellings - the `/source-inspection` path and the `path` parameter - '
-            . 'still work and are deprecated.',
+            .'commands a deploy would run - alongside the snapshot the last deploy froze onto the '
+            .'account, and lists where the two disagree. Reads /home/<username>/project by default '
+            ."(the main domain's document root for the classic PHP templates); `subdirectory` "
+            .'selects another directory under the account home. Values from .env files are never '
+            .'returned - only the variable names. This is POST /source/inspect with `type: '
+            .'project`, addressed by username: same report, same field names, and readable with a '
+            .'GET. The older spellings - the `/source-inspection` path and the `path` parameter - '
+            .'still work and are deprecated.',
         x: ['mcp-description' => "What the project's files are - stack, ports, services, the commands a deploy "
-            . 'would run - next to what the last deploy recorded, and where the two differ. .env values '
-            . 'are never returned, only their names.'],
+            .'would run - next to what the last deploy recorded, and where the two differ. .env values '
+            .'are never returned, only their names.'],
         security: [['bearerAuth' => []]],
         tags: ['Deploy'],
         parameters: [
@@ -172,9 +172,9 @@ class SourceInspectionController extends Controller
                 in: 'query',
                 required: false,
                 description: 'Directory under the account home to inspect, e.g. "project", '
-                    . '"public_html" or "project/apps/api". Absolute paths are accepted when they '
-                    . 'are inside the home directory. Named as it is on POST /source/inspect; '
-                    . '`path` is accepted as a deprecated alias.',
+                    .'"public_html" or "project/apps/api". Absolute paths are accepted when they '
+                    .'are inside the home directory. Named as it is on POST /source/inspect; '
+                    .'`path` is accepted as a deprecated alias.',
                 schema: new OA\Schema(type: 'string'),
                 x: ['mcp-description' => 'Directory under the account home. Default: project.']
             ),
@@ -218,13 +218,13 @@ class SourceInspectionController extends Controller
                 'type',
                 'source_type_unsupported',
                 'Inspecting an arbitrary server directory is not supported. Use `type: project` '
-                    . 'with the project username, or a Git repository URL.'
+                    .'with the project username, or a Git repository URL.'
             );
         }
     }
 
     /**
-     * Clones a Git source. Its git_token may be a global `vault:<id>`, since an inspection belongs
+     * Clones a Git source. Its git_token may be a global `vault:<key>`, since an inspection belongs
      * to no project; no token clones anonymously.
      */
     private function cloneGitSource(string $source, ?string $branch, ?string $subdirectory): ResolvedSource
@@ -336,7 +336,7 @@ class SourceInspectionController extends Controller
     /**
      * What is running in the project, and then where its files have moved on from it.
      *
-     * @param array<string, mixed> $report
+     * @param  array<string, mixed>  $report
      * @return array{deployment: mixed, drift: mixed}
      */
     private function deploymentAndDrift(User $user, ResolvedSource $resolved, array $report): array
@@ -356,7 +356,7 @@ class SourceInspectionController extends Controller
 
     private function resolver(): SourceResolver
     {
-        return new SourceResolver(storage_path('app/source-inspect'), self::cloneTimeout(), new GitHubTree());
+        return new SourceResolver(storage_path('app/source-inspect'), self::cloneTimeout(), new GitHubTree);
     }
 
     /** As long as a deploy's clone may take (DEPLOY_CLONE_TIMEOUT), so inspect accepts what a deploy would. */

@@ -22,6 +22,7 @@ use App\System\Project\Git\WorkTree;
 class GitRepository extends WorkTree
 {
     private ?ProjectTree $tree = null;
+
     private ?ShellOperations $shell = null;
 
     public function __construct(
@@ -32,7 +33,7 @@ class GitRepository extends WorkTree
         $trimmed = trim((string) $relativePath);
 
         if ($trimmed === '') {
-            $this->absolutePath = $home . '/project';
+            $this->absolutePath = $home.'/project';
         } else {
             $this->absolutePath = $this->resolveRelative($home, $trimmed);
         }
@@ -43,7 +44,7 @@ class GitRepository extends WorkTree
     public static function forProjectDir(DindProject $project, string $projectDir): self
     {
         $home = rtrim($project->homeDirPath(), '/');
-        $relative = str_starts_with($projectDir, $home . '/')
+        $relative = str_starts_with($projectDir, $home.'/')
             ? substr($projectDir, strlen($home) + 1)
             : 'project';
 
@@ -178,30 +179,43 @@ class GitRepository extends WorkTree
     /**
      * The submodules the checkout records, or the ones the app config names. One that
      * cannot be fetched fails the deploy: a build without it fails later, on a missing
-     * file that says nothing about the submodule.
+     * file that says nothing about the submodule. $keepPrevious on a redeploy of a checkout
+     * that deployed before: its submodules keep the checkout they had, with a warning.
      */
-    public function fetchSubmodules(string $gitRepo, ?string $gitToken): void
+    public function fetchSubmodules(string $gitRepo, ?string $gitToken, bool $keepPrevious = false): void
     {
-        if (!is_file($this->absolutePath . '/.gitmodules')) {
+        if (! is_file($this->absolutePath.'/.gitmodules')) {
             return;
         }
         $logger = $this->project->shell()->logger();
         $paths = $this->wantedSubmodules($gitRepo);
         if ($paths !== null && $paths !== []) {
-            $logger?->info('Fetching only the submodules the app config names: ' . implode(', ', $paths));
+            $logger?->info('Fetching only the submodules the app config names: '.implode(', ', $paths));
         }
 
         try {
-            if (!$this->initSubmodules($gitToken, $paths)) {
+            if (! $this->initSubmodules($gitToken, $paths)) {
                 return;
             }
         } catch (DeployCancelledException $e) {
             throw $e;
         } catch (\Throwable $e) {
-            throw new \RuntimeException(DeployFailureExplainer::SUBMODULE_FAILURE . ': ' . GitUrl::sanitize($e->getMessage()), 0, $e);
+            $this->submodulesNotFetched($e, $keepPrevious);
+
+            return;
         }
 
         $logger?->ok('Submodules fetched');
+    }
+
+    /** @throws \RuntimeException unless $keepPrevious */
+    private function submodulesNotFetched(\Throwable $e, bool $keepPrevious): void
+    {
+        $failure = DeployFailureExplainer::SUBMODULE_FAILURE.': '.GitUrl::sanitize($e->getMessage());
+        if (! $keepPrevious) {
+            throw new \RuntimeException($failure, 0, $e);
+        }
+        $this->project->shell()->logger()?->warn($failure.'. The deploy goes on with the submodule checkout the previous deploy had.');
     }
 
     /**
@@ -266,6 +280,6 @@ class GitRepository extends WorkTree
             throw new \InvalidArgumentException('Project-relative paths only.');
         }
 
-        return $home . '/' . ltrim($trimmed, '/');
+        return $home.'/'.ltrim($trimmed, '/');
     }
 }

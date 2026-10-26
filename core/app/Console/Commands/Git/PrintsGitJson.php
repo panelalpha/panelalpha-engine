@@ -20,7 +20,7 @@ trait PrintsGitJson
     {
         parent::configure();
 
-        if (!$this->getDefinition()->hasOption('raw')) {
+        if (! $this->getDefinition()->hasOption('raw')) {
             $this->getDefinition()->addOption(
                 new InputOption('raw', null, InputOption::VALUE_NONE, 'Print raw JSON (for piping to jq)')
             );
@@ -30,7 +30,7 @@ trait PrintsGitJson
     protected function resolvePath(): ?string
     {
         $path = $this->option('path');
-        if (!is_string($path)) {
+        if (! is_string($path)) {
             return null;
         }
         $path = trim($path);
@@ -43,9 +43,10 @@ trait PrintsGitJson
      * project, run `$action` and print what it returns. A null from the
      * action prints nothing.
      *
-     * @param class-string<FormRequest> $rules
-     * @param array<string, mixed> $input
-     * @param callable(User, array<string, mixed>): mixed $action
+     * @param  class-string<FormRequest>  $rules
+     * @param  array<string, mixed>  $input
+     * @param  callable(User, array<string, mixed>): mixed  $action
+     *
      * @throws \JsonException
      */
     protected function runGit(string $rules, array $input, callable $action): int
@@ -66,20 +67,21 @@ trait PrintsGitJson
         }
 
         $decoded = json_decode($content, false, 512, JSON_THROW_ON_ERROR);
-        $this->line((string)json_encode($decoded, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+        $this->line((string) json_encode($decoded, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
 
         return self::SUCCESS;
     }
 
     /**
-     * @param class-string<FormRequest> $rules
-     * @param array<string, mixed> $input
+     * @param  class-string<FormRequest>  $rules
+     * @param  array<string, mixed>  $input
      * @return array<string, mixed>
+     *
      * @throws ValidationException
      */
     private function validated(string $rules, array $input): array
     {
-        $request = new $rules();
+        $request = new $rules;
         $validator = Validator::make($this->withVaultSecrets($input), $request->rules());
         if (method_exists($request, 'withValidator')) {
             $request->withValidator($validator);
@@ -89,16 +91,17 @@ trait PrintsGitJson
     }
 
     /**
-     * The input with a `vault:<id>` token read in its place, as the HTTP
+     * The input with a `vault:<key>` token read in its place, as the HTTP
      * request reads it; an unusable reference is a validation error.
      *
-     * @param array<string, mixed> $input
+     * @param  array<string, mixed>  $input
      * @return array<string, mixed>
+     *
      * @throws ValidationException
      */
     private function withVaultSecrets(array $input): array
     {
-        if (!RequestVault::isReference($input['token'] ?? null)) {
+        if (! RequestVault::isReference($input['token'] ?? null)) {
             return $input;
         }
 

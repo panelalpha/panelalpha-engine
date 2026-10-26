@@ -3,6 +3,8 @@
 use App\Http\Controllers\Web;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Route;
+use Rap2hpoutre\LaravelLogViewer\LogViewerController;
+
 /*
 |--------------------------------------------------------------------------
 | Web Routes
@@ -20,7 +22,7 @@ Route::get('/', function () {
 
 // Unauthenticated, so a development convenience only: never on an install.
 if (app()->environment('local') && config('app.debug')) {
-    Route::get('logs', [\Rap2hpoutre\LaravelLogViewer\LogViewerController::class, 'index']);
+    Route::get('logs', [LogViewerController::class, 'index']);
 }
 
 /*
@@ -32,6 +34,6 @@ if (app()->environment('local') && config('app.debug')) {
  * Never register this under /api: no bearer auth belongs here.
  */
 Route::get('/vault/{token}', [Web\VaultFormController::class, 'show'])
-    ->middleware('throttle:20,10');
+    ->middleware('throttle:vault-form');
 Route::post('/vault/{token}', [Web\VaultFormController::class, 'store'])
-    ->middleware('throttle:10,10');
+    ->middleware('throttle:vault-paste');

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Lib\Vault\RequestVault;
 use App\Lib\Vault\SecretMinter;
 use App\Models\SecretVaultEntry;
 use Illuminate\Http\JsonResponse;
@@ -11,16 +12,16 @@ use OpenApi\Attributes as OA;
 /**
  * One-time browser handoff of a secret the API caller will not send.
  *
- * The flow: `create` mints an entry and returns its reference `vault:<id>`
+ * The flow: `create` mints an entry and returns its reference `vault:<key>`
  * plus the URL of a form the *customer* opens and pastes the secret into. The
- * agent then passes `vault:<id>` in place of the secret in any parameter that
+ * agent then passes `vault:<key>` in place of the secret in any parameter that
  * accepts one (`git_token`, `cloudflare-api-token`, `env_vars` values).
  *
  * The URL carries a random token stored only as its sha-256, so a database
  * dump contains no live form links. The secret is stored encrypted and never
  * returned by any of these endpoints; `show` reports whether one is present.
  *
- * `scope` decides who may use it ({@see \App\Lib\Vault\RequestVault::get()}):
+ * `scope` decides who may use it ({@see RequestVault::get()}):
  * a `project` entry is claimed by the first project it is given to, a
  * `global` one is usable by any project that names it. Nothing is ever used
  * without being named.
@@ -32,21 +33,21 @@ class SecretVaultController extends Controller
     #[OA\Post(
         path: '/vault/secrets',
         summary: 'Create a vault slot for a secret that will be pasted in a browser',
-        description: "Mints a paste slot. Returns `ref` (`vault:<id>`, pass it where the secret would go -- "
-            . "e.g. the `git_token` field of project_create) and `url` (the form the customer opens and pastes "
-            . "the secret into, open for `url_expires_in` seconds). The secret expires only if `expires_in` "
-            . "is given; it is then refused and deleted automatically. "
-            . "**The secret never passes through the API caller** -- that is this mechanism's whole purpose, "
-            . "for agents that must not relay a private-repository token through a conversation. "
-            . "`scope` decides where it may be used: `project` (the default) belongs to the first project it "
-            . "is given to and is refused everywhere else; `global` may be used by any project that names it. "
-            . "Nothing uses a secret unasked. Give `purpose` so the entry can be recognised later: the secret "
-            . "is never readable again, so the listing is all you have. **A pasted secret is final** -- to "
-            . "replace one, delete it and create a new link. The form checks a `git_token` or `cloudflare_api_token` before saving it, with the "
-            . "same calls the engine makes when it uses one: a git token against `verify_with.repo_url` "
-            . "(required for the check), a Cloudflare token for its account and Tunnel access, plus the zone "
-            . "of `verify_with.hostname` when given. A refused token is not stored and the link stays open. "
-            . "`verification` on status then says whether it was checked.",
+        description: 'Mints a paste slot. Returns `ref` (`vault:<key>`, pass it whole where the secret would go -- '
+            .'e.g. the `git_token` field of project_create) and `url` (the form the customer opens and pastes '
+            .'the secret into, open for `url_expires_in` seconds). The secret expires only if `expires_in` '
+            .'is given; it is then refused and deleted automatically. '
+            ."**The secret never passes through the API caller** -- that is this mechanism's whole purpose, "
+            .'for agents that must not relay a private-repository token through a conversation. '
+            .'`scope` decides where it may be used: `project` (the default) belongs to the first project it '
+            .'is given to and is refused everywhere else; `global` may be used by any project that names it. '
+            .'Nothing uses a secret unasked. Give `purpose` so the entry can be recognised later: the secret '
+            .'is never readable again, so the listing is all you have. **A pasted secret is final** -- to '
+            .'replace one, delete it and create a new link. The form checks a `git_token` or `cloudflare_api_token` before saving it, with the '
+            .'same calls the engine makes when it uses one: a git token against `verify_with.repo_url` '
+            .'(required for the check), a Cloudflare token for its account and Tunnel access, plus the zone '
+            .'of `verify_with.hostname` when given. A refused token is not stored and the link stays open. '
+            .'`verification` on status then says whether it was checked.',
         security: [['bearerAuth' => []]],
         tags: ['Secret Vault'],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
@@ -56,18 +57,18 @@ class SecretVaultController extends Controller
                     property: 'type',
                     type: 'string',
                     description: 'The request field the reference will be passed in (e.g. `git_token`, `env_vars`). '
-                        . 'Free-form snake_case -- the field the caller will send `vault:<id>` in. '
-                        . 'The paste form shows help from `resources/vault/<type>.md` when that file exists, else the default help.',
+                        .'Free-form snake_case -- the field the caller will send `vault:<key>` in. '
+                        .'The paste form shows help from `resources/vault/<type>.md` when that file exists, else the default help.',
                     example: 'git_token'
                 ),
                 new OA\Property(
                     property: 'scope',
                     type: 'string',
                     enum: ['project', 'global'],
-                    description: "`project` (the default): usable by one project only -- the first one it is "
-                        . "given to claims it, and any other project is refused. `global`: usable by any project "
-                        . "that names it. Either way it is used only where a request passes its `vault:<id>`, "
-                        . "and there may be any number of each type.",
+                    description: '`project` (the default): usable by one project only -- the first one it is '
+                        .'given to claims it, and any other project is refused. `global`: usable by any project '
+                        .'that names it. Either way it is used only where a request passes its `vault:<key>`, '
+                        .'and there may be any number of each type.',
                     default: 'project',
                 ),
                 new OA\Property(
@@ -75,26 +76,26 @@ class SecretVaultController extends Controller
                     type: 'integer',
                     minimum: 60,
                     description: 'Seconds until the secret expires. After that it is refused and deleted, with '
-                        . 'no one having to remove it. Omitted, it never expires. A project that already used '
-                        . 'the secret keeps the copy it stored.',
+                        .'no one having to remove it. Omitted, it never expires. A project that already used '
+                        .'the secret keeps the copy it stored.',
                     example: 86400,
                 ),
                 new OA\Property(
                     property: 'project',
                     type: 'string',
                     description: 'Only with `scope: project`: the project that owns the secret from the start, '
-                        . 'so only that project can read it. The project need not exist yet. Omitted, the '
-                        . 'first project that reads the secret owns it.',
+                        .'so only that project can read it. The project need not exist yet. Omitted, the '
+                        .'first project that reads the secret owns it.',
                     example: 'shop',
                 ),
                 new OA\Property(
                     property: 'purpose',
                     type: 'string',
                     description: 'What this secret is for, in your words -- "deploy key for the shop repo", '
-                        . '"Cloudflare token for the staging zone". Shown on the paste form, so the person '
-                        . 'handing over a credential can see why, and returned by `list`. Several entries '
-                        . 'share one `type`, and the secret can never be read back, so this is what tells '
-                        . 'them apart later when deciding which to delete.',
+                        .'"Cloudflare token for the staging zone". Shown on the paste form, so the person '
+                        .'handing over a credential can see why, and returned by `list`. Several entries '
+                        .'share one `type`, and the secret can never be read back, so this is what tells '
+                        .'them apart later when deciding which to delete.',
                     maxLength: 255,
                     example: 'Deploy key for the shop repo',
                 ),
@@ -102,10 +103,10 @@ class SecretVaultController extends Controller
                     property: 'verify_with',
                     type: 'object',
                     description: 'What the pasted secret is checked against before it is saved. `git_token`: '
-                        . '`repo_url`, the HTTPS repository the token must be able to read. '
-                        . '`cloudflare_api_token`: `hostname` (optional), a domain whose zone the token must '
-                        . 'see. A refused token is not stored and the form asks again; an unreachable host '
-                        . 'saves it unchecked.',
+                        .'`repo_url`, the HTTPS repository the token must be able to read. '
+                        .'`cloudflare_api_token`: `hostname` (optional), a domain whose zone the token must '
+                        .'see. A refused token is not stored and the form asks again; an unreachable host '
+                        .'saves it unchecked.',
                     properties: [
                         new OA\Property(property: 'repo_url', type: 'string', example: 'https://github.com/acme/shop'),
                         new OA\Property(property: 'hostname', type: 'string', example: 'shop.example.com'),
@@ -138,10 +139,10 @@ class SecretVaultController extends Controller
         path: '/vault/secrets',
         summary: 'List vault entries',
         description: 'Entries, newest first. **The secret is never included** and cannot be read back by any '
-            . 'endpoint -- this is the inventory, not the values. Each row carries `ref` (`vault:<id>`, what '
-            . 'a request passes and what status or delete take), `type`, `scope`, `project` (the project a '
-            . '`project` entry belongs to, null until one claims it), `purpose`, `status` (pending, filled or '
-            . 'abandoned) and the dates. `purpose` is what tells entries of the same type apart.',
+            .'endpoint -- this is the inventory, not the values. Each row carries `ref` (`vault:<key>`, what '
+            .'a request passes and what status or delete take), `type`, `scope`, `project` (the project a '
+            .'`project` entry belongs to, null until one claims it), `purpose`, `status` (pending, filled or '
+            .'abandoned) and the dates. `purpose` is what tells entries of the same type apart.',
         security: [['bearerAuth' => []]],
         tags: ['Secret Vault'],
         parameters: [
@@ -164,10 +165,10 @@ class SecretVaultController extends Controller
         ]);
 
         $query = SecretVaultEntry::query()->orderByDesc('id')->limit(100);
-        if (!empty($validated['type'])) {
+        if (! empty($validated['type'])) {
             $query->where('type', $validated['type']);
         }
-        if (!empty($validated['scope'])) {
+        if (! empty($validated['scope'])) {
             $query->where('scope', $validated['scope']);
         }
 
@@ -177,7 +178,7 @@ class SecretVaultController extends Controller
     #[OA\Get(
         path: '/vault/secrets/{ref}',
         summary: 'Get one vault entry by its reference',
-        description: 'The status of one entry. `ref` is its `vault:<id>`, or the bare id. The secret is never included.',
+        description: 'The status of one entry. `ref` is its `vault:<key>`. The secret is never included.',
         security: [['bearerAuth' => []]],
         tags: ['Secret Vault'],
         parameters: [
@@ -194,7 +195,7 @@ class SecretVaultController extends Controller
     )]
     public function show(string $ref): JsonResponse
     {
-        $entry = $this->findByRef($ref);
+        $entry = SecretVaultEntry::findByReference($ref);
 
         if ($entry === null) {
             abort(new JsonResponse(['message' => 'Not found'], 404));
@@ -207,9 +208,9 @@ class SecretVaultController extends Controller
         path: '/vault/secrets/{ref}',
         summary: 'Delete a vault entry',
         description: 'Removes the entry and its secret. References to it stop resolving. This is also how a '
-            . 'secret is *replaced*: a stored secret can never be overwritten, so delete it and create a new '
-            . 'one. `ref` is its `vault:<id>`, or the bare id. A project that already used it keeps the '
-            . 'copy it stored.',
+            .'secret is *replaced*: a stored secret can never be overwritten, so delete it and create a new '
+            .'one. `ref` is its `vault:<key>`. A project that already used it keeps the '
+            .'copy it stored.',
         security: [['bearerAuth' => []]],
         tags: ['Secret Vault'],
         parameters: [
@@ -224,7 +225,7 @@ class SecretVaultController extends Controller
     )]
     public function destroy(string $ref): JsonResponse
     {
-        $entry = $this->findByRef($ref);
+        $entry = SecretVaultEntry::findByReference($ref);
 
         if ($entry !== null) {
             $entry->delete();
@@ -237,7 +238,7 @@ class SecretVaultController extends Controller
         path: '/vault/config',
         summary: 'Which global secrets are stored',
         description: 'Lists the global entries that have a secret pasted, as `globals` (ref, type, purpose). '
-            . 'Any project may use one by passing its `vault:<id>`; nothing uses one unasked.',
+            .'Any project may use one by passing its `vault:<key>`; nothing uses one unasked.',
         security: [['bearerAuth' => []]],
         tags: ['Secret Vault'],
         responses: [
@@ -272,13 +273,13 @@ class SecretVaultController extends Controller
     /** @return list<string> */
     private function scopeRule(): array
     {
-        return ['nullable', 'string', 'in:' . implode(',', SecretVaultEntry::SCOPES)];
+        return ['nullable', 'string', 'in:'.implode(',', SecretVaultEntry::SCOPES)];
     }
 
     /**
      * Minting goes through SecretMinter, which the console uses too, so the sealing rule cannot differ.
      *
-     * @param array<string, mixed> $validated
+     * @param  array<string, mixed>  $validated
      * @return array{0: SecretVaultEntry, 1: string}
      */
     private function mint(array $validated): array
@@ -318,15 +319,7 @@ class SecretVaultController extends Controller
      */
     private function formUrl(string $ref): string
     {
-        return rtrim((string) config('app.url'), '/') . '/vault/' . $ref;
-    }
-
-    /** `vault:<id>` or the bare id. */
-    private function findByRef(string $ref): ?SecretVaultEntry
-    {
-        $id = SecretVaultEntry::idFromReference($ref);
-
-        return $id === null ? null : SecretVaultEntry::query()->find($id);
+        return rtrim((string) config('app.url'), '/').'/vault/'.$ref;
     }
 
     /**

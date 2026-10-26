@@ -48,7 +48,7 @@ Create a project from https://github.com/acme/shop with the global
 acme Git token.
 ```
 
-The assistant passes the token's reference, such as `vault:7`, in place of the token. A project created without a token clones without one, even when the engine holds global tokens.
+The assistant passes the token's reference, such as `vault:Kq3xT9bL...`, in place of the token. A project created without a token clones without one, even when the engine holds global tokens.
 
 A project stores the token it was given. Deleting a vault entry does not take it away from projects that already used it; to change a project's token, give it the new one. Pasting again on the old link does not change a stored secret.
 
@@ -76,7 +76,7 @@ Use this when the code is not in git. After the first deploy, updating that proj
 
 The engine keeps a copy of the repository. Ask the assistant to pull, switch branch, or go back to the last deployed commit. A successful pull rebuilds the site. You do not ask for the rebuild as well. Switching branch, or going back to an earlier commit, rebuilds the same way.
 
-A repository that uses git submodules gets them fetched on every pull, branch change and push, so a submodule that moved in the repository is deployed at its new commit. A submodule that cannot be fetched fails the deploy: see Troubleshooting below.
+A repository that uses git submodules gets them fetched on every pull, branch change and push, so a submodule that moved in the repository is deployed at its new commit. Once the project has deployed, a submodule that cannot be fetched keeps the copy it had and the deploy log warns; on the first deploy it fails the deploy: see Troubleshooting below. A submodule addressed over SSH (`git@host:...`) is fetched over HTTPS unless the project has a deploy key.
 
 The engine checks the request at once: the repository answers, and the branch or commit exists. The pull or switch and the rebuild then run in the background, like any rebuild, and the assistant follows them until they end. Asking again while one is still running is refused and points at the one under way. A pull, branch change or revert asked for while a deploy, backup or restore is running on the project is refused too, and the answer says which one. If the new version fails, or the change is cancelled, while the previous one is still running, the site keeps serving the previous one, and the project stays on the branch and commit it was on.
 
@@ -126,7 +126,7 @@ Instead of asking for a pull each time, you can have your git host redeploy the 
 The URL is wrong, or the repository is private and no token was saved. Check the URL is `https://` with no username in it. For a private repository, ask the assistant to send the paste page again.
 
 **The deploy failed with "The repository's submodules could not be fetched".**
-The engine fetches the repository's submodules with the same token on every deploy, including after a pull or a push. A private submodule on another account or forge needs a token that can read it too. If the application does not need that submodule, the repository's `.panelalpha/panelalpha.yaml` can name the ones it does: `git: {submodules: [path/to/one]}`.
+The engine fetches the repository's submodules with the same token on every deploy, including after a pull or a push. A private submodule on another account or forge needs a token that can read it too. A submodule addressed over SSH is fetched over HTTPS when the project has no deploy key, with the git token when it is on the repository's own host; a private one elsewhere needs a deploy key that can read it. If the application does not need that submodule, the repository's `.panelalpha/panelalpha.yaml` can name the ones it does: `git: {submodules: [path/to/one]}`.
 
 **The repository is refused with `host_refused`.**
 The engine does not fetch from internal addresses: its own machine, the private networks and the Docker networks. This covers a repository, a submodule, and a file fetched by URL. It applies to a git server inside your own network too. The server operator can allow it in `/opt/panelalpha/shared-hosting/.env-core`: `EGRESS_ALLOW_PRIVATE=true` allows private network addresses, or `EGRESS_ALLOW_HOSTS=git.internal` allows named hosts only, comma separated (a name, never an address). Loopback and link-local addresses stay refused either way. Reload the engine after the change: [Change a setting](../02-getting-started/install.md#change-a-setting).

@@ -30,6 +30,7 @@ class MigrationVaultScopesTest extends VaultTestCase
         Schema::connection('sqlite')->create('secret_vault_entries', function (Blueprint $table) {
             $table->id();
             $table->char('ref_hash', 64)->unique();
+            $table->string('ref_key', 64)->nullable()->unique();
             $table->string('type');
             $table->string('scope', 16)->default('request');
             $table->string('purpose', 255)->nullable();

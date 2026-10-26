@@ -229,7 +229,7 @@ class EnvVarsHttpTest extends TestCase
         $entry->save();
 
         $response = $this->putJson("/api/projects/{$user->username}/env-vars", [
-            'env_vars' => ['TOKEN' => SecretVaultEntry::PREFIX . $entry->id],
+            'env_vars' => ['TOKEN' => $entry->reference()],
             'apply' => 'none',
         ]);
 

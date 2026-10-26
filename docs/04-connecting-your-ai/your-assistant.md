@@ -62,7 +62,7 @@ These settings live in `/opt/panelalpha/shared-hosting/.env-core`. If you edit t
 
 | Value | What the assistant can do |
 |---|---|
-| `readonly` | Look at what is switched on, change nothing. Inspecting a repository still works. The tools that hand out a password or a login (`system_exim_config_get`, `app_credentials_get`) are not offered. |
+| `readonly` | Look at what is switched on, change nothing. Inspecting a repository still works. The tools that hand out a password or a login (`app_credentials_get`, `file_download`) are not offered. |
 | `modify` | Create and change things, and blocks only DELETE routes. It is **not** a "no destructive actions" setting: the write tools that are not plain creations (`ssh_run`, `wp_cli_run`, `backup_restore`, `file_write`, `system_update`, `firewall_disable`, `project_rebuild`) still run. |
 | `full` | Everything, including deletion. **This is the default.** |
 
@@ -176,7 +176,7 @@ List the users on this WordPress site.
 Update all plugins on this site.
 ```
 
-Backups and domains work on WordPress that is already on this engine. The WordPress user, install and one-click-login actions need a WordPress site in its own container. WP-CLI and changing PHP need traditional PHP hosting: [If WordPress is already on this engine](../05-capabilities/wordpress-and-apps.md#if-wordpress-is-already-on-this-engine).
+WP-CLI, backups and domains work on WordPress that is already on this engine, in its own container or on traditional PHP hosting. The WordPress user, install and one-click-login actions need a WordPress site in its own container. Changing PHP needs traditional PHP hosting: [If WordPress is already on this engine](../05-capabilities/wordpress-and-apps.md#if-wordpress-is-already-on-this-engine).
 
 **Change the PHP version on traditional WordPress**
 
@@ -456,6 +456,7 @@ pae mcp:tool:list
 | `ssl_cert_get` | Get installed SSL cert for a domain |
 | `ssl_cert_install` | Install a custom SSL certificate on a domain |
 | `ssl_cert_list` | List installed SSL certificates for the domains of a project |
+| `ssl_check` | Check the certificate a domain really serves |
 
 ## MySQL databases
 
@@ -790,7 +791,7 @@ Used when a private repository or a Cloudflare tunnel needs a token. You paste t
 
 ### What you can see, and what you cannot
 
-A secret is never readable again. Not by your assistant, not by you, not by any command. What you can always see is the **inventory**: each entry's reference (`vault:<id>`), what kind of secret it is, what it is for, which project owns it, whether it has been filled in yet, and the dates.
+A secret is never readable again. Not by your assistant, not by you, not by any command. What you can always see is the **inventory**: each entry's reference (`vault:<key>`), what kind of secret it is, what it is for, which project owns it, whether it has been filled in yet, and the dates.
 
 Give a **purpose** when you ask for a link ("deploy key for the shop repo"). It is shown on the paste page, so whoever hands over a credential can see why it is wanted, and it appears in the listing afterwards. Since the value itself can never be read back, the purpose is usually the only thing that tells two entries of the same kind apart when you come to tidy up.
 
@@ -815,7 +816,7 @@ Create a project from https://github.com/acme/shop with the global
 acme Git token.
 ```
 
-The assistant passes the secret's reference, such as `vault:7`, in place of the token. A project created without a token gets none, even when the engine holds global secrets. Inspecting a repository can use a global secret, or a project secret that no project owns yet. Inspecting does not make the secret belong to anything; the first project given it does.
+The assistant passes the secret's reference, such as `vault:Kq3xT9bL...`, in place of the token. The reference is random, so a token that may not list the vault cannot use a secret by guessing it. A project created without a token gets none, even when the engine holds global secrets. Inspecting a repository can use a global secret, or a project secret that no project owns yet. Inspecting does not make the secret belong to anything; the first project given it does.
 
 The paste page closes after an hour. A secret is kept until it is deleted, unless you give it an expiry when you ask for the link ("keep it for 7 days"); after that it is refused and the engine deletes it by itself. A project stores the secret it was given, so deleting the vault entry does not take it away from projects that already used it. The engine never looks a secret up in the vault on a project's behalf.
 

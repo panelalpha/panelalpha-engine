@@ -176,6 +176,16 @@ class DomainPlanTest extends TestCase
         ];
     }
 
+    public function test_the_online_zone_holds_a_name_at_any_depth_below_it(): void
+    {
+        foreach (['shop.panelalpha.online', 'SHOP.PanelAlpha.Online.', 'a.b.panelalpha.online'] as $inside) {
+            $this->assertTrue(DomainPlan::inOnlineZone($inside), $inside);
+        }
+        foreach (['panelalpha.online', 'shop.example.com', 'shoppanelalpha.online'] as $outside) {
+            $this->assertFalse(DomainPlan::inOnlineZone($outside), $outside);
+        }
+    }
+
     /**
      * The proxy serves the exact label it registered, so the alias resolves,
      * reaches something that never heard of it, and fails TLS on the way.

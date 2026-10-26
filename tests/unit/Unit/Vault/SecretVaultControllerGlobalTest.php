@@ -4,10 +4,11 @@ namespace Tests\Unit\Vault;
 
 use App\Http\Controllers\SecretVaultController;
 use App\Models\SecretVaultEntry;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 
 /**
- * Minting in either scope, addressing by `vault:<id>`, and the config
+ * Minting in either scope, addressing by `vault:<key>`, and the config
  * endpoint that lists the globals.
  *
  * The controller is called directly rather than over the route, so these read
@@ -25,7 +26,7 @@ class SecretVaultControllerGlobalTest extends VaultTestCase
         $this->assertSame('global', $global['scope']);
 
         foreach ([$project, $global] as $data) {
-            $this->assertSame('vault:' . $data['id'], $data['ref']);
+            $this->assertMatchesRegularExpression('/^vault:[A-Za-z0-9]{24}$/', $data['ref']);
             $this->assertArrayNotHasKey('expires_in', $data, 'The secret does not expire.');
             $this->assertSame(SecretVaultEntry::TTL_SECONDS, $data['url_expires_in'], 'Its paste form does.');
         }
@@ -77,16 +78,28 @@ class SecretVaultControllerGlobalTest extends VaultTestCase
         $this->mint(['type' => 'git_token', 'scope' => 'request']);
     }
 
-    public function test_an_entry_is_addressed_by_its_reference_or_bare_id(): void
+    public function test_an_entry_is_addressed_by_its_reference(): void
     {
         [$entry] = $this->projectEntry('git_token', 'ghp_mine', 'shop');
 
-        foreach ([$entry->reference(), (string) $entry->id] as $ref) {
-            $data = json_decode((string) (new SecretVaultController())->show($ref)->getContent(), true)['data'];
-            $this->assertSame($entry->reference(), $data['ref']);
-            $this->assertSame('shop', $data['project']);
-            $this->assertSame('filled', $data['status']);
-            $this->assertArrayNotHasKey('secret', $data);
+        $data = json_decode((string) (new SecretVaultController())->show($entry->reference())->getContent(), true)['data'];
+        $this->assertSame($entry->reference(), $data['ref']);
+        $this->assertSame('shop', $data['project']);
+        $this->assertSame('filled', $data['status']);
+        $this->assertArrayNotHasKey('secret', $data);
+    }
+
+    public function test_an_entry_is_never_addressed_by_its_id(): void
+    {
+        [$entry] = $this->projectEntry('git_token', 'ghp_mine', 'shop');
+
+        foreach ([(string) $entry->id, 'vault:' . $entry->id] as $ref) {
+            try {
+                (new SecretVaultController())->show($ref);
+                $this->fail("{$ref} must not name the entry.");
+            } catch (HttpResponseException $e) {
+                $this->assertSame(404, $e->getResponse()->getStatusCode());
+            }
         }
     }
 

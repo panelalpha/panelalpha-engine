@@ -65,7 +65,7 @@ How many accounts a project may have comes from its plan limits.
 Deleting an SFTP account also ends the sessions it has open. To cut someone off without deleting the account, for example after a password leaked, ask the assistant to end the sessions:
 
 ```text
-End every open SFTP session of the account sftpuser1 on this project.
+End every open SFTP session of the account tshop_sftp1 on this project.
 ```
 
 To end the sessions of every SFTP account on the project at once, say "all SFTP sessions on this project". The answer says how many were open. People can log in again straight away unless you also change the password or delete the account.
@@ -137,7 +137,7 @@ In tshop, zip /project/notes into /project/notes.zip, then unzip it into
 /project/restored.
 ```
 
-Mode: modify. Tools: `file_zip`, `file_unzip`, `file_exists`. Check: the zip exists, and the unpacked folder has the same files. An archive with an entry that climbs out of the folder is refused.
+Mode: modify. Tools: `file_zip`, `file_unzip`, `file_exists`. Check: the zip exists, and the unpacked folder has the same files. An archive with an entry that climbs out of the folder is refused. Unpacking never replaces or merges into what is already there: if the folder already holds a file or folder of the same name as one the archive unpacks to at its top level (for a `.gz`, the unpacked file), the request is refused with 409 and nothing is extracted. Unpack into a new or empty folder instead; a folder that does not exist yet is created.
 
 **Delete**
 

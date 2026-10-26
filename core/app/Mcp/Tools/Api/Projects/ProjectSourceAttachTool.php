@@ -75,7 +75,7 @@ class ProjectSourceAttachTool extends ApiTool
             'name' => $schema->string()->required(),
             'git_repo' => $schema->string()->description('HTTPS clone URL, the same rule POST /projects applies. A schemeless github.com/owner/repo is accepted and has the scheme filled in. Example: https://github.com/owner/repo.git.')->required(),
             'git_branch' => $schema->string()->description('Branch or tag to deploy; omitted, the remote default branch.'),
-            'git_token' => $schema->string()->description('Optional HTTPS token injected at clone time. A `vault:<id>` from vault_secret_create is accepted here in place of the literal token. Never logged or returned.'),
+            'git_token' => $schema->string()->description('Optional HTTPS token injected at clone time. A `vault:<key>` from vault_secret_create is accepted here in place of the literal token. Never logged or returned.'),
             'env_vars' => $schema->object()->description('Optional KEY=value overrides, merged onto the ones the project already carries. An empty value removes that key; null clears them all.'),
             'recipe' => $schema->string()->description('Deploy with this recipe instead of the one detection picks. This deploy only. Example: php.'),
             'stages' => $schema->object()->description('Commands this deploy runs, per stage. This deploy only.'),

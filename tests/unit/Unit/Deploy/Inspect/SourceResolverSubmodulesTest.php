@@ -3,6 +3,7 @@
 namespace Tests\Unit\Deploy\Inspect;
 
 use App\Lib\Deploy\Inspect\SourceResolver;
+use App\Lib\Deploy\Source\GitRepoInput;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -104,7 +105,7 @@ class SourceResolverSubmodulesTest extends TestCase
         $this->git($meta, 'init -q --initial-branch=main');
         file_put_contents($meta . '/README.md', "a meta repository\n");
         $this->git($meta, 'add -A && git -c user.name=t -c user.email=t@example.com commit -qm meta');
-        $this->git($meta, 'submodule add -q ' . escapeshellarg($sub) . ' web');
+        $this->git($meta, 'submodule add -q ' . escapeshellarg('file://' . $sub) . ' web');
         $this->git($meta, 'commit -qm submodule');
 
         return $meta;
@@ -119,14 +120,15 @@ class SourceResolverSubmodulesTest extends TestCase
      * the fetch is exercised directly and the wiring is pinned separately,
      * below -- the defect was the call being absent, not the step being wrong.
      */
-    private function initSubmodules(string $checkout): void
+    private function initSubmodules(string $checkout, array $protocols = GitRepoInput::SCHEMES): void
     {
         $method = new \ReflectionMethod(SourceResolver::class, 'initSubmodules');
-        $method->invoke(new SourceResolver($this->tmpDir . '/workspace', 60), $checkout, null);
+        $method->invoke(new SourceResolver($this->tmpDir . '/workspace', 60, null, $protocols), $checkout, null);
     }
 
     public function test_the_application_inside_a_submodule_is_fetched(): void
     {
+        $file = ['https', 'http', 'file'];
         $meta = $this->metaRepository();
         $checkout = $this->tmpDir . '/checkout';
         $this->git($this->tmpDir, 'clone -q ' . escapeshellarg($meta) . ' ' . escapeshellarg($checkout));
@@ -134,10 +136,26 @@ class SourceResolverSubmodulesTest extends TestCase
         // What inspect saw before: the directory is there and it is empty.
         $this->assertFileDoesNotExist($checkout . '/web/composer.json');
 
-        $this->initSubmodules($checkout);
+        $this->initSubmodules($checkout, $file);
 
         $this->assertFileExists($checkout . '/web/composer.json', 'the submodule was not fetched');
         $this->assertFileExists($checkout . '/web/index.php');
+    }
+
+    /**
+     * The engine clones over http and https only, and a submodule's child
+     * clone reads the same restriction: a transport the engine does not speak
+     * is left unfetched rather than handed to git.
+     */
+    public function test_a_submodule_on_a_transport_the_engine_does_not_fetch_is_left_alone(): void
+    {
+        $meta = $this->metaRepository();
+        $checkout = $this->tmpDir . '/checkout';
+        $this->git($this->tmpDir, 'clone -q ' . escapeshellarg($meta) . ' ' . escapeshellarg($checkout));
+
+        $this->initSubmodules($checkout);
+
+        $this->assertFileDoesNotExist($checkout . '/web/composer.json', 'a file transport was fetched');
     }
 
     /** A repository with no submodules pays one stat and is untouched. */
@@ -283,6 +301,7 @@ class SourceResolverSubmodulesTest extends TestCase
     /** A nested .gitmodules is checked before its level is fetched, not left to --recursive. */
     public function test_a_nested_internal_submodule_is_not_contacted(): void
     {
+        $file = ['https', 'http', 'file'];
         $meta = $this->metaRepository();
         $sub = $this->tmpDir . '/sub';
         $this->addGitlink($sub, 'evil', "\turl = ssh://git@127.0.0.1/x.git");
@@ -292,7 +311,7 @@ class SourceResolverSubmodulesTest extends TestCase
         $checkout = $this->tmpDir . '/checkout';
         $this->git($this->tmpDir, 'clone -q ' . escapeshellarg($meta) . ' ' . escapeshellarg($checkout));
 
-        $contacts = $this->sshContacts(fn () => $this->initSubmodules($checkout));
+        $contacts = $this->sshContacts(fn () => $this->initSubmodules($checkout, $file));
 
         $this->assertFileExists($checkout . '/web/composer.json', 'the first level was not fetched');
         $this->assertSame([], preg_grep('/127\.0\.0\.1/', $contacts), 'a nested internal submodule was contacted');

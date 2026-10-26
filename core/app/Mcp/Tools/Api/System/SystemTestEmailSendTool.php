@@ -49,7 +49,7 @@ class SystemTestEmailSendTool extends ApiTool
     {
         return [
             'email' => $schema->string()->required(),
-            'config' => $schema->object()->description('Merged into the stored mail config and applied (Exim rebuilt) before the send; a field left out keeps its stored value.'),
+            'config' => $schema->object()->description('Merged into the stored mail config and applied (Exim rebuilt) before the send; a field left out keeps its stored value, and so does a password or API token sent as null.'),
         ];
     }
 }

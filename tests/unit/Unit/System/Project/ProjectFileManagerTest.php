@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Project;
 
+use App\Exceptions\ProblemException;
 use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Filesystem;
@@ -17,6 +18,9 @@ class ProjectFileManagerTest extends TestCase
 
     /** @var list<list<string>> every command the project ran */
     private array $commands = [];
+
+    /** @var array<string, string> links planted, link => target, just before an archive is unpacked */
+    private array $plantedBeforeUnpack = [];
 
     protected function setUp(): void
     {
@@ -249,7 +253,7 @@ class ProjectFileManagerTest extends TestCase
         }
     }
 
-    /** A link already in the destination took a member outside the home: unzip and tar write through it. */
+    /** A link already in the destination would take a member outside the home: unzip and tar write through it. */
     public function test_unzip_refuses_a_member_below_a_link_out_of_the_destination(): void
     {
         $this->requireCommand('zip');
@@ -269,14 +273,76 @@ class ProjectFileManagerTest extends TestCase
         symlink($outside . '/note', $this->homeDir . '/out/note');
 
         foreach (['bundle.zip', 'bundle.tar.gz', 'note.gz'] as $archive) {
-            try {
-                $files->unzip($archive, 'out');
-                $this->fail("{$archive} was extracted through the link");
-            } catch (\Exception $e) {
-                $this->assertStringContainsString('resolves outside the project home', $e->getMessage(), $archive);
-            }
+            $this->assertDestinationTaken(fn () => $files->unzip($archive, 'out'), $archive);
         }
         $this->assertSame([], array_values(array_diff(scandir($outside), ['.', '..'])));
+    }
+
+    /** tar lists `./ä/x` as `./\303\244/x` in the C locale, so no check on listed names sees the link. */
+    public function test_unzip_refuses_a_non_ascii_member_below_a_link_out_of_the_destination(): void
+    {
+        $this->requireCommand('tar');
+        $files = $this->fileManager();
+        $outside = $this->homeDir . '.outside';
+        mkdir($outside);
+        mkdir($this->homeDir . "/src/\u{e4}", 0777, true);
+        file_put_contents($this->homeDir . "/src/\u{e4}/x", 'escaped');
+        exec('tar -czf ' . escapeshellarg($this->homeDir . '/bundle.tar.gz') . ' -C ' . escapeshellarg($this->homeDir . '/src') . ' .');
+        mkdir($this->homeDir . '/out');
+        symlink($outside, $this->homeDir . "/out/\u{e4}");
+
+        $this->assertDestinationTaken(fn () => $files->unzip('bundle.tar.gz', 'out'), 'bundle.tar.gz');
+        $this->assertSame([], array_values(array_diff(scandir($outside), ['.', '..'])));
+    }
+
+    /** The account's container can plant a link in the destination while the archive is being unpacked. */
+    public function test_unzip_does_not_write_through_a_link_planted_during_the_unpack(): void
+    {
+        $this->requireCommand('tar');
+        $files = $this->fileManager();
+        $outside = $this->homeDir . '.outside';
+        mkdir($outside);
+        mkdir($this->homeDir . '/src/evil', 0777, true);
+        file_put_contents($this->homeDir . '/src/evil/x', 'escaped');
+        exec('tar -czf ' . escapeshellarg($this->homeDir . '/bundle.tar.gz') . ' -C ' . escapeshellarg($this->homeDir . '/src') . ' evil');
+        mkdir($this->homeDir . '/out');
+        $this->plantedBeforeUnpack = [$this->homeDir . '/out/evil' => $outside];
+
+        $this->assertDestinationTaken(fn () => $files->unzip('bundle.tar.gz', 'out'), 'bundle.tar.gz');
+        $this->assertSame([], array_values(array_diff(scandir($outside), ['.', '..'])));
+    }
+
+    public function test_unzip_refuses_a_destination_that_holds_an_entry_and_extracts_nothing(): void
+    {
+        $this->requireCommand('tar');
+        $files = $this->fileManager();
+        mkdir($this->homeDir . '/src');
+        file_put_contents($this->homeDir . '/src/index.php', 'new');
+        file_put_contents($this->homeDir . '/src/extra.txt', 'new');
+        exec('tar -czf ' . escapeshellarg($this->homeDir . '/site.tar.gz') . ' -C ' . escapeshellarg($this->homeDir . '/src') . ' index.php extra.txt');
+        mkdir($this->homeDir . '/public');
+        file_put_contents($this->homeDir . '/public/index.php', 'mine');
+
+        $e = $this->assertDestinationTaken(fn () => $files->unzip('site.tar.gz', 'public'), 'site.tar.gz');
+
+        $this->assertSame(409, $e->status);
+        $this->assertStringContainsString('/public already holds 1 of the entries the archive unpacks to (index.php)', $e->getMessage());
+        $this->assertSame('mine', file_get_contents($this->homeDir . '/public/index.php'));
+        $this->assertFileDoesNotExist($this->homeDir . '/public/extra.txt');
+        $this->assertSame([], glob($this->homeDir . '/.unzip-stage/*') ?: [], 'the unpacked copy is removed');
+    }
+
+    public function test_unzip_creates_a_missing_destination(): void
+    {
+        $this->requireCommand('tar');
+        $files = $this->fileManager();
+        mkdir($this->homeDir . '/src');
+        file_put_contents($this->homeDir . '/src/note.txt', 'restored');
+        exec('tar -czf ' . escapeshellarg($this->homeDir . '/bundle.tar.gz') . ' -C ' . escapeshellarg($this->homeDir . '/src') . ' note.txt');
+
+        $files->unzip('bundle.tar.gz', 'new/dir');
+
+        $this->assertSame('restored', file_get_contents($this->homeDir . '/new/dir/note.txt'));
     }
 
     /** The deploy's archive rules, here too: a link member pointing out of the archive. */
@@ -461,6 +527,18 @@ class ProjectFileManagerTest extends TestCase
         $this->assertGreaterThanOrEqual(3, $files->diskUsage('/'));
     }
 
+    private function assertDestinationTaken(callable $unzip, string $archive): ProblemException
+    {
+        try {
+            $unzip();
+        } catch (ProblemException $e) {
+            $this->assertSame('destination_exists', $e->problems[0]['code'], $archive);
+
+            return $e;
+        }
+        $this->fail("{$archive} was extracted over an entry already in the destination");
+    }
+
     private function userModel(string $username): ModelsUser
     {
         $model = new ModelsUser();
@@ -501,10 +579,14 @@ class ProjectFileManagerTest extends TestCase
     private function systemWithDirectFilesystem(): System
     {
         $commands = &$this->commands;
+        $planted = &$this->plantedBeforeUnpack;
 
-        return new class ($this->homeDir, $commands) extends System {
-            /** @param list<list<string>> $commands */
-            public function __construct(private string $homeRoot, private array &$commands)
+        return new class ($this->homeDir, $commands, $planted) extends System {
+            /**
+             * @param list<list<string>> $commands
+             * @param array<string, string> $planted
+             */
+            public function __construct(private string $homeRoot, private array &$commands, private array &$planted)
             {
             }
 
@@ -566,10 +648,22 @@ class ProjectFileManagerTest extends TestCase
                     $argv = array_slice($argv, 2);
                 }
 
+                if (in_array($argv[0] ?? '', ['tar', 'unzip'], true) && !in_array($argv[1] ?? '', ['-tzf', '-tvzf', '-Z1', '-Z', '-p'], true)) {
+                    $this->plantLinks();
+                }
+
                 $process = new Process($argv, $cwd);
                 $process->run();
 
                 return $process;
+            }
+
+            private function plantLinks(): void
+            {
+                foreach ($this->planted as $link => $target) {
+                    symlink($target, $link);
+                }
+                $this->planted = [];
             }
         };
     }

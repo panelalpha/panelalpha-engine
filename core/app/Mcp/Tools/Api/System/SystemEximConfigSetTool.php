@@ -51,6 +51,7 @@ class SystemEximConfigSetTool extends ApiTool
             'smtp_password',
             'smtp_implicit_tls',
             'sender_domain',
+            'clear_secrets',
         ];
     }
 
@@ -74,6 +75,7 @@ class SystemEximConfigSetTool extends ApiTool
             'smtp_password' => $schema->string(),
             'smtp_implicit_tls' => $schema->boolean(),
             'sender_domain' => $schema->string(),
+            'clear_secrets' => $schema->array()->description('Stored passwords or API tokens to clear.'),
         ];
     }
 }

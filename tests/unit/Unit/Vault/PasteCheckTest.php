@@ -15,8 +15,8 @@ use Symfony\Component\Process\Process;
  * A git_token paste is tried against the repository named at mint
  * time, by the same probe project_create uses, before it is stored.
  *
- * Offline on purpose: a local bare repository over file:// answers, a missing
- * path refuses, and a closed port is unreachable -- the real probe, no forge.
+ * Offline on purpose: a probe double decides each outcome, and the real
+ * probe's transport policy is covered by GitRemoteProbeTransportTest.
  */
 class PasteCheckTest extends VaultTestCase
 {
@@ -67,10 +67,39 @@ class PasteCheckTest extends VaultTestCase
 
     public function test_the_form_and_project_create_share_one_probe(): void
     {
-        $url = $this->bareRepo();
+        $probe = new class extends GitRemoteProbe
+        {
+            protected function run(array $command): array
+            {
+                return ['timedOut' => false, 'ok' => true, 'stderr' => ''];
+            }
+        };
+        $url = 'https://github.com/acme/shop.git';
 
-        $this->assertSame(GitProbeResult::VERIFIED, (new GitRemoteProbe())->check('git_repo', $url, $this->token())->outcome);
-        $this->assertNull((new GitRemoteProbe())->problem('git_repo', $url, $this->token()));
+        $this->assertSame(GitProbeResult::VERIFIED, $probe->check('git_repo', $url, $this->token())->outcome);
+        $this->assertNull($probe->problem('git_repo', $url, $this->token()));
+    }
+
+    /** A public repository: every probe, with or without a token, reads it. */
+    private function publicRepo(): void
+    {
+        $this->app->instance(PasteCheck::class, new PasteCheck(new class extends GitRemoteProbe {
+            public function check(string $repoField, string $repoUrl, ?string $token, string $tokenField = 'git_token'): GitProbeResult
+            {
+                return GitProbeResult::verified();
+            }
+        }));
+    }
+
+    /** The probe refuses the repository, as it does for a token it cannot authenticate. */
+    private function refusingProbe(): void
+    {
+        $this->app->instance(PasteCheck::class, new PasteCheck(new class extends GitRemoteProbe {
+            public function check(string $repoField, string $repoUrl, ?string $token, string $tokenField = 'git_token'): GitProbeResult
+            {
+                return GitProbeResult::refused(['field' => $repoField, 'code' => 'x', 'message' => 'refused']);
+            }
+        }));
     }
 
     /** A private repository: readable with a token, refused without one. */
@@ -82,6 +111,17 @@ class PasteCheckTest extends VaultTestCase
                 return $token === null
                     ? GitProbeResult::refused(['field' => $repoField, 'code' => 'x', 'message' => 'private'])
                     : GitProbeResult::verified();
+            }
+        }));
+    }
+
+    /** The probe learns nothing, as it does from a host that never accepts the connection. */
+    private function unreachableProbe(): void
+    {
+        $this->app->instance(PasteCheck::class, new PasteCheck(new class extends GitRemoteProbe {
+            public function check(string $repoField, string $repoUrl, ?string $token, string $tokenField = 'git_token'): GitProbeResult
+            {
+                return GitProbeResult::unchecked(['message' => 'The host did not answer.']);
             }
         }));
     }
@@ -104,7 +144,8 @@ class PasteCheckTest extends VaultTestCase
     /** Readable without credentials, so a working answer proves nothing about the token. */
     public function test_a_public_repository_saves_the_token_unchecked(): void
     {
-        $ref = $this->entryCheckedAgainst(['repo_url' => $this->bareRepo()]);
+        $this->publicRepo();
+        $ref = $this->entryCheckedAgainst(['repo_url' => 'https://github.com/acme/public.git']);
 
         $response = $this->post('/vault/' . $ref, ['secret' => $this->token()]);
 
@@ -117,7 +158,8 @@ class PasteCheckTest extends VaultTestCase
 
     public function test_a_refused_token_is_not_saved_and_the_link_stays_open(): void
     {
-        $ref = $this->entryCheckedAgainst(['repo_url' => 'file://' . $this->dir . '/missing.git']);
+        $this->refusingProbe();
+        $ref = $this->entryCheckedAgainst(['repo_url' => 'https://github.com/acme/shop.git']);
 
         $response = $this->post('/vault/' . $ref, ['secret' => $this->token()]);
 
@@ -130,16 +172,15 @@ class PasteCheckTest extends VaultTestCase
         $this->assertNull($entry->secret_encrypted);
 
         // And a working one can follow through the same link.
-        $entry->forceFill(['verify_with' => ['repo_url' => $this->bareRepo()]])->save();
+        $this->privateRepo();
         $this->post('/vault/' . $ref, ['secret' => $this->token()])->assertOk();
         $this->assertTrue($entry->refresh()->isSealed());
     }
 
     public function test_an_unreachable_host_saves_the_token_unchecked(): void
     {
-        // A private address is now refused outright (engine#786); an
-        // unresolvable public host is the unreachable case that is unchecked.
-        $ref = $this->entryCheckedAgainst(['repo_url' => 'https://unreachable.invalid/o/r.git']);
+        $this->unreachableProbe();
+        $ref = $this->entryCheckedAgainst(['repo_url' => 'https://93.184.216.34/o/r.git']);
 
         $response = $this->post('/vault/' . $ref, ['secret' => $this->token()]);
 

@@ -37,6 +37,25 @@ class ProjectFieldsTest extends TestCase
         $this->assertSame(['bob'], ProjectFields::namedIn($request, 'GET /projects/{username}/push/diff'));
     }
 
+    public function test_the_name_a_clone_or_staging_copy_is_created_under_is_a_named_project(): void
+    {
+        foreach (['clone', 'staging'] as $action) {
+            $request = Request::create('/api/projects/alice/' . $action, 'POST', ['new_username' => 'bob']);
+
+            $this->assertSame(['bob'], ProjectFields::namedIn($request, 'POST /projects/{username}/' . $action));
+        }
+    }
+
+    public function test_a_creation_that_gives_no_name_reports_the_field_it_left_out(): void
+    {
+        $clone = 'POST /projects/{username}/clone';
+
+        $this->assertSame('new_username', ProjectFields::missingCreationName(Request::create('/api/projects/alice/clone', 'POST'), $clone));
+        $this->assertSame('new_username', ProjectFields::missingCreationName(Request::create('/api/projects/alice/clone', 'POST', ['new_username' => '']), $clone));
+        $this->assertNull(ProjectFields::missingCreationName(Request::create('/api/projects/alice/clone', 'POST', ['new_username' => 'bob']), $clone));
+        $this->assertNull(ProjectFields::missingCreationName(Request::create('/api/projects/alice/push', 'POST'), 'POST /projects/{username}/push'));
+    }
+
     public function test_an_operation_with_no_such_field_names_nothing(): void
     {
         $request = Request::create('/api/projects/alice', 'PUT', ['target' => 'bob']);

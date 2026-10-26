@@ -4,7 +4,6 @@ namespace App\System\Project\Dind;
 
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Dind\DindAccountCleanup;
-use App\Lib\Deploy\Platform\PlatformStage;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\Generation\CancelledGeneration;
 use App\System\Project\Dind\Generation\GenerationState;
@@ -20,8 +19,7 @@ final class AccountTeardown
 {
     public function __construct(
         private DindProject $project,
-    ) {
-    }
+    ) {}
 
     public function delete(): void
     {
@@ -63,7 +61,7 @@ final class AccountTeardown
             }
         } catch (\Exception $e) {
             Log::warning(
-                "Could not wipe inner Docker data-root for {$username}: " . $e->getMessage(),
+                "Could not wipe inner Docker data-root for {$username}: ".$e->getMessage(),
             );
         }
     }
@@ -74,7 +72,7 @@ final class AccountTeardown
      */
     public function cancelRunningDeploy(): void
     {
-        if (!$this->isRedeploy()) {
+        if (! $this->isRedeploy()) {
             $this->abortRunningDeploy(stopInnerDocker: false);
 
             return;
@@ -99,9 +97,7 @@ final class AccountTeardown
     /** Decided from the project, not only the routing snapshot, which a redeploy takes a while after it started. */
     private function isRedeploy(): bool
     {
-        $user = $this->project->userModel();
-
-        return PlatformStage::phaseFor($user->getDeploymentStatus(), $user->hasDeployedBefore()) === PlatformStage::UPGRADE
+        return $this->project->userModel()->deploysAsUpgrade()
             || (new RoutingSnapshot($this->project))->entry() !== null;
     }
 
@@ -147,7 +143,7 @@ final class AccountTeardown
             $this->project->userAppExistingComposeFilePath(),
         ]));
         foreach ($paths as $path) {
-            if (!$filesystem->fileExists($path)) {
+            if (! $filesystem->fileExists($path)) {
                 continue;
             }
             $contents = $filesystem->fileGetContents($path);
@@ -217,7 +213,7 @@ final class AccountTeardown
             );
         } catch (\Exception $e) {
             Log::warning(
-                "Could not scan sibling compose files before deleting {$username}: " . $e->getMessage(),
+                "Could not scan sibling compose files before deleting {$username}: ".$e->getMessage(),
             );
 
             return null;
@@ -227,7 +223,7 @@ final class AccountTeardown
     }
 
     /**
-     * @param list<string> $sidecarRefs
+     * @param  list<string>  $sidecarRefs
      */
     private function purgeHostDockerCache(array $sidecarRefs = []): void
     {
@@ -244,13 +240,13 @@ final class AccountTeardown
             );
         } catch (\Exception $e) {
             Log::warning(
-                "Could not purge host Docker cache for {$username}: " . $e->getMessage(),
+                "Could not purge host Docker cache for {$username}: ".$e->getMessage(),
             );
         }
     }
 
     /**
-     * @param list<string> $command
+     * @param  list<string>  $command
      */
     private function tryStep(array $command, int $timeout = 300, bool $asUser = false): void
     {
@@ -262,7 +258,7 @@ final class AccountTeardown
             }
         } catch (\Exception $e) {
             Log::warning(
-                "Dind delete step failed for {$this->project->username()}: " . $e->getMessage(),
+                "Dind delete step failed for {$this->project->username()}: ".$e->getMessage(),
                 ['command' => $command],
             );
         }

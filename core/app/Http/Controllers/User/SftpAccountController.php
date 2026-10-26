@@ -7,14 +7,14 @@ use App\Http\Requests\SftpAccountStoreRequest;
 use App\Http\Requests\SftpAccountUpdateRequest;
 use App\Http\Resources\SftpAccountCollection;
 use App\Http\Resources\SftpAccountResource;
-use App\System;
+use App\Lib\Limits\ResourceLimit;
 use App\Models\SftpAccount;
 use App\Models\User;
-use Symfony\Component\HttpFoundation\JsonResponse;
-use Illuminate\Support\Facades\Log;
+use App\System;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
+use Symfony\Component\HttpFoundation\JsonResponse;
 
 class SftpAccountController extends Controller
 {
@@ -38,11 +38,12 @@ class SftpAccountController extends Controller
             ->where('username', $username)
             ->with('sftpAccounts')
             ->first();
-        if (!$user) {
+        if (! $user) {
             abort(new JsonResponse([
                 'message' => 'Project not found',
             ], 404));
         }
+
         return new SftpAccountCollection($user->sftpAccounts);
     }
 
@@ -77,14 +78,14 @@ class SftpAccountController extends Controller
         ],
     )]
     /**
-     * @param string $username
+     * @param  string  $username
      * @return SftpAccountResource
      */
     public function store($username, SftpAccountStoreRequest $request)
     {
         /** @var ?User */
         $user = User::query()->withCount('sftpAccounts')->where('username', $username)->first();
-        if (!$user) {
+        if (! $user) {
             abort(new JsonResponse([
                 'message' => 'Project not found',
             ], 404));
@@ -106,7 +107,7 @@ class SftpAccountController extends Controller
 
         $this->authMethods($params);
 
-        if (!empty($params['password'])) {
+        if (! empty($params['password'])) {
             $params['password'] = $this->hashPassword($params['password']);
         }
 
@@ -118,7 +119,7 @@ class SftpAccountController extends Controller
             'public_key' => $params['public_key'] ?? null,
         ]);
 
-        (new System())->sftp()->rebuildSftpAccounts();
+        (new System)->sftp()->rebuildSftpAccounts();
 
         return new SftpAccountResource($sftpAccount);
     }
@@ -151,7 +152,7 @@ class SftpAccountController extends Controller
         ],
     )]
     /**
-     * @param string $username
+     * @param  string  $username
      * @return SftpAccountResource
      */
     public function update($username, string $sftpUsername, SftpAccountUpdateRequest $request)
@@ -181,7 +182,7 @@ class SftpAccountController extends Controller
 
         $sftpAccount->update($newParams);
 
-        (new System())->sftp()->rebuildSftpAccounts();
+        (new System)->sftp()->rebuildSftpAccounts();
 
         return new SftpAccountResource($sftpAccount);
     }
@@ -206,7 +207,7 @@ class SftpAccountController extends Controller
 
         $sftpAccount = $this->accountOr404($user, $sftpUsername);
 
-        $this->endSessions($system, $sftpAccount->username);
+        $system->sftp()->endSessions([$sftpAccount->username]);
 
         $sftpAccount->delete();
 
@@ -219,9 +220,9 @@ class SftpAccountController extends Controller
         path: '/projects/{username}/sftp-accounts/{sftpUser}/kill-sessions',
         summary: 'End the open SFTP sessions of one account',
         description: 'Works for any project that has SFTP accounts, classic or container. Only the named account is '
-            . 'affected: the project\'s other accounts share its Linux uid, so killing by uid would end their '
-            . 'sessions too. A project or account that does not exist is a 404; an account with no open session '
-            . 'answers 0, so the call is safe to repeat.',
+            .'affected: the project\'s other accounts share its Linux uid, so killing by uid would end their '
+            .'sessions too. A project or account that does not exist is a 404; an account with no open session '
+            .'answers 0, so the call is safe to repeat.',
         security: [['bearerAuth' => []]],
         tags: ['SFTP Accounts'],
         parameters: [
@@ -252,8 +253,8 @@ class SftpAccountController extends Controller
         path: '/projects/{username}/sftp-accounts/kill-sessions',
         summary: 'End every open SFTP session of a project',
         description: 'Works for any project that has SFTP accounts, classic or container. Ends the sessions of '
-            . 'every account of the project and answers how many were open; a project with no SFTP account or no '
-            . 'open session answers 0.',
+            .'every account of the project and answers how many were open; a project with no SFTP account or no '
+            .'open session answers 0.',
         security: [['bearerAuth' => []]],
         tags: ['SFTP Accounts'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -280,18 +281,6 @@ class SftpAccountController extends Controller
         ]);
     }
 
-    /**
-     * Best-effort: a host whose sftp container is down must still delete the account.
-     */
-    private function endSessions(System $system, string $login): void
-    {
-        try {
-            $system->sftp()->killSessions([$login]);
-        } catch (\Throwable $e) {
-            Log::warning("SFTP session kill failed for {$login}: " . $e->getMessage());
-        }
-    }
-
     private function accountOr404(User $user, string $sftpUsername): SftpAccount
     {
         /** @var ?SftpAccount */
@@ -300,7 +289,7 @@ class SftpAccountController extends Controller
             ->where('username', $sftpUsername)
             ->first();
 
-        if (!$sftpAccount) {
+        if (! $sftpAccount) {
             abort(new JsonResponse([
                 'message' => 'Account not found',
             ], 404));
@@ -311,8 +300,8 @@ class SftpAccountController extends Controller
 
     private function refuseOverLimit(User $user): void
     {
-        $limit = $user->getSftpAccountsLimit();
-        if ($limit !== null && $limit <= $user->sftp_accounts_count) {
+        $limit = ResourceLimit::reached($user->getSftpAccountsLimit(), $user->sftp_accounts_count);
+        if ($limit !== null) {
             abort(new JsonResponse([
                 'message' => "SFTP accounts limit of {$limit} reached.",
                 'error_type' => 'sftp_accounts_limit_reached',
@@ -328,11 +317,11 @@ class SftpAccountController extends Controller
     private function assertAccountNameFree(User $user, string $name): void
     {
         if (
-            !Str::startsWith($name, $user->username . '_')
-            || !Str::after($name, $user->username . '_')
+            ! Str::startsWith($name, $user->username.'_')
+            || ! Str::after($name, $user->username.'_')
         ) {
             throw ValidationException::withMessages([
-                'username' => 'Username must start with ' . $user->username . '_',
+                'username' => 'Username must start with '.$user->username.'_',
             ]);
         }
 
@@ -346,8 +335,9 @@ class SftpAccountController extends Controller
     /**
      * Which of password and public-key auth the comma-separated `auth_method` asks for, each with its secret present.
      *
-     * @param array{auth_method: string, password: ?string, public_key: ?string} $params
+     * @param  array{auth_method: string, password: ?string, public_key: ?string}  $params
      * @return array{0: bool, 1: bool} password auth, key auth
+     *
      * @throws ValidationException
      */
     private function authMethods(array $params): array
@@ -355,7 +345,7 @@ class SftpAccountController extends Controller
         $authPassword = false;
         $authKey = false;
         foreach (explode(',', $params['auth_method']) as $authMethod) {
-            if (!in_array($authMethod, ['password', 'public_key'])) {
+            if (! in_array($authMethod, ['password', 'public_key'])) {
                 throw ValidationException::withMessages([
                     'auth_method' => 'Invalid auth_method',
                 ]);
@@ -382,7 +372,7 @@ class SftpAccountController extends Controller
     /** SHA-512 crypt (`$6$`, 5000 rounds) with a random salt. */
     private function hashPassword(string $password): string
     {
-        $salt = '$6$rounds=5000$' . bin2hex(random_bytes(16)) . '$';
+        $salt = '$6$rounds=5000$'.bin2hex(random_bytes(16)).'$';
 
         return crypt($password, $salt);
     }

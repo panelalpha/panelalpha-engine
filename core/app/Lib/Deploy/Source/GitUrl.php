@@ -20,14 +20,14 @@ class GitUrl
 
         return is_array($parsed)
             && strtolower((string) ($parsed['scheme'] ?? '')) === 'https'
-            && !empty($parsed['host'])
-            && !isset($parsed['user'])
-            && !isset($parsed['pass']);
+            && ! empty($parsed['host'])
+            && ! isset($parsed['user'])
+            && ! isset($parsed['pass']);
     }
 
     public static function assertSafeForToken(string $repoUrl): void
     {
-        if (!self::isHttpsWithoutCredentials($repoUrl)) {
+        if (! self::isHttpsWithoutCredentials($repoUrl)) {
             throw new \InvalidArgumentException(
                 'A Git token requires an HTTPS repository URL without embedded credentials.'
             );
@@ -50,7 +50,7 @@ class GitUrl
     }
 
     /**
-     * The host a token helper must see to answer, or '' to answer any host.
+     * The host a token helper must see to answer; '' answers no prompt.
      * A host that cannot be quoted into the helper is refused rather than
      * written into it unescaped.
      */
@@ -68,20 +68,18 @@ class GitUrl
     }
 
     /**
-     * A git command that cannot stop and ask a human for anything.
+     * No prompt may be answered: GIT_TERMINAL_PROMPT closes the terminal, and the askpass
+     * program points at /bin/false so a configured helper cannot sit there waiting.
      *
-     * Needed on every remote operation, not only the ones carrying a token:
-     * the tokenless case is the one that prompts. GIT_TERMINAL_PROMPT only
-     * closes the terminal, so an askpass program is pointed at /bin/false
-     * rather than left unset.
-     *
-     * @param list<string> $gitCommand
+     * @param  list<string>  $gitCommand
+     * @param  list<string>  $protocols  the transports this command may use; none adds no policy
      * @return list<string>
      */
-    public static function withoutPrompts(array $gitCommand): array
+    public static function withoutPrompts(array $gitCommand, array $protocols = []): array
     {
         return [
             'env',
+            ...self::transport($protocols),
             'GIT_TERMINAL_PROMPT=0',
             'GIT_ASKPASS=/bin/false',
             'SSH_ASKPASS=/bin/false',
@@ -90,10 +88,11 @@ class GitUrl
     }
 
     /**
-     * @param list<string> $gitCommand
+     * @param  list<string>  $gitCommand
+     * @param  list<string>  $protocols  the transports this command may use; none adds no policy
      * @return list<string>
      */
-    public static function withAskPass(array $gitCommand, string $askPassPath): array
+    public static function withAskPass(array $gitCommand, string $askPassPath, array $protocols = []): array
     {
         if ($askPassPath === '' || str_contains($askPassPath, "\0")) {
             throw new \InvalidArgumentException('Invalid GIT_ASKPASS path.');
@@ -101,11 +100,21 @@ class GitUrl
 
         return [
             'env',
+            ...self::transport($protocols),
             'GIT_TERMINAL_PROMPT=0',
             'SSH_ASKPASS=/bin/false',
-            'GIT_ASKPASS=' . $askPassPath,
+            'GIT_ASKPASS='.$askPassPath,
             ...$gitCommand,
         ];
+    }
+
+    /**
+     * @param  list<string>  $protocols
+     * @return list<string>
+     */
+    private static function transport(array $protocols): array
+    {
+        return $protocols === [] ? [] : [GitTransport::assignment($protocols)];
     }
 
     /**
@@ -121,7 +130,7 @@ class GitUrl
      * $command asking for HTTP/1.1: `-c http.version=HTTP/1.1` right after
      * `git`, so it also works behind an `env …` wrapper.
      *
-     * @param list<string> $command
+     * @param  list<string>  $command
      * @return list<string>
      */
     public static function overHttp11(array $command): array
@@ -133,7 +142,7 @@ class GitUrl
      * $command with redirects disabled: a remote that answers 3xx must be
      * refused rather than silently lead the connection to another host.
      *
-     * @param list<string> $command
+     * @param  list<string>  $command
      * @return list<string>
      */
     public static function withoutRedirects(array $command): array
@@ -145,14 +154,14 @@ class GitUrl
      * $command pinned to a checked address (git >= 2.37): the connection uses
      * the address the guard checked rather than a second lookup.
      *
-     * @param list<string> $command
+     * @param  list<string>  $command
      * @return list<string>
      */
     public static function withResolve(array $command, ?string $pin): array
     {
         return $pin === null || $pin === ''
             ? $command
-            : self::afterGit($command, ['-c', 'http.curloptResolve=' . $pin]);
+            : self::afterGit($command, ['-c', 'http.curloptResolve='.$pin]);
     }
 
     /**
@@ -199,8 +208,8 @@ class GitUrl
     }
 
     /**
-     * @param list<string> $command
-     * @param list<string> $options
+     * @param  list<string>  $command
+     * @param  list<string>  $options
      * @return list<string>
      */
     private static function afterGit(array $command, array $options): array
@@ -218,7 +227,7 @@ class GitUrl
      * Point git's ssh at one key and one known_hosts file, and nothing else:
      * no agent, no ~/.ssh, no prompt, and an unknown or changed host key fails.
      *
-     * @param list<string> $command an `env …` argv from withoutPrompts() or withAskPass()
+     * @param  list<string>  $command  an `env …` argv from withoutPrompts() or withAskPass()
      * @return list<string>
      */
     public static function withSshKey(array $command, string $keyPath, string $knownHostsPath): array
@@ -232,11 +241,11 @@ class GitUrl
             throw new \InvalidArgumentException('Expected an env argv.');
         }
 
-        $ssh = 'ssh -i ' . $keyPath . ' -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes'
-            . ' -o StrictHostKeyChecking=yes -o UserKnownHostsFile=' . $knownHostsPath
-            . ' -o GlobalKnownHostsFile=/dev/null';
+        $ssh = 'ssh -i '.$keyPath.' -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes'
+            .' -o StrictHostKeyChecking=yes -o UserKnownHostsFile='.$knownHostsPath
+            .' -o GlobalKnownHostsFile=/dev/null';
 
-        return ['env', 'GIT_SSH_COMMAND=' . $ssh, ...array_slice($command, 1)];
+        return ['env', 'GIT_SSH_COMMAND='.$ssh, ...array_slice($command, 1)];
     }
 
     public static function sanitize(string $repoUrl): string
@@ -252,13 +261,13 @@ class GitUrl
         }
 
         $scheme = $parsed['scheme'] ?? 'https';
-        $host = ($ssh && !empty($parsed['user']) ? $parsed['user'] . '@' : '') . $parsed['host'];
-        $port = isset($parsed['port']) ? ':' . $parsed['port'] : '';
+        $host = ($ssh && ! empty($parsed['user']) ? $parsed['user'].'@' : '').$parsed['host'];
+        $port = isset($parsed['port']) ? ':'.$parsed['port'] : '';
         $path = $parsed['path'] ?? '';
-        $query = isset($parsed['query']) ? '?' . $parsed['query'] : '';
-        $fragment = isset($parsed['fragment']) ? '#' . $parsed['fragment'] : '';
+        $query = isset($parsed['query']) ? '?'.$parsed['query'] : '';
+        $fragment = isset($parsed['fragment']) ? '#'.$parsed['fragment'] : '';
 
-        return $scheme . '://' . $host . $port . $path . $query . $fragment;
+        return $scheme.'://'.$host.$port.$path.$query.$fragment;
     }
 
     /**
@@ -269,7 +278,7 @@ class GitUrl
     {
         $url = trim($repoUrl);
         // parse_url() reads scp-style remotes as one opaque path.
-        $path = !str_contains($url, '://') && preg_match('#^(?:[^@/]+@)?[^:/]+:(.+)$#', $url, $m) === 1
+        $path = ! str_contains($url, '://') && preg_match('#^(?:[^@/]+@)?[^:/]+:(.+)$#', $url, $m) === 1
             ? $m[1]
             : (string) (parse_url($url, PHP_URL_PATH) ?: '');
         $path = (string) preg_replace('/\.git$/i', '', trim($path, '/'));

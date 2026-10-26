@@ -2,8 +2,8 @@
 
 namespace Tests\Unit\Vault;
 
-use App\Http\Controllers\SystemController;
 use App\Http\Controllers\User\AppUserController;
+use App\Http\Requests\EximConfigUpdateRequest;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
@@ -26,10 +26,11 @@ class VaultResolvedBeforeValidationTest extends VaultTestCase
     public function test_a_mail_secret_from_the_vault_is_checked_by_exim_secret(): void
     {
         [$entry] = $this->globalEntry('smtp_password', "pass\n*:evil:x");
-        $request = Request::create('/api/system/exim-config', 'PUT', ['smtp_password' => $entry->reference()]);
+        $request = EximConfigUpdateRequest::create('/api/system/exim-config', 'PUT', ['smtp_password' => $entry->reference()]);
+        $request->setContainer($this->app)->setRedirector($this->app->make('redirect'));
 
         try {
-            (new SystemController())->updateEximConfig($request);
+            $request->validateResolved();
             $this->fail('expected a 422');
         } catch (ValidationException $e) {
             $this->assertStringContainsString('line break', $e->errors()['smtp_password'][0]);
