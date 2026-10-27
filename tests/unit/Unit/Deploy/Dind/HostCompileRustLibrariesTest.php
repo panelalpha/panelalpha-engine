@@ -5,8 +5,10 @@ namespace Tests\Unit\Deploy\Dind;
 use App\System;
 use App\System\Project\Dind;
 use App\System\Project\Dind\HostCompile;
+use App\System\Project\Dind\InnerDocker;
 use App\System\Project\Dind\ShellOperations;
 use App\Lib\Deploy\Dind\DindHostBuilder;
+use App\Lib\Deploy\Dind\DindImageStore;
 use App\Lib\Deploy\Engine\ContainerEngine;
 use App\Lib\Deploy\Engine\EngineAccount;
 use App\Lib\Deploy\Platform\Runtime\RustRuntimeLibraries;
@@ -30,6 +32,9 @@ class HostCompileRustLibrariesTest extends TestCase
             /** @var list<array{image: string, script: string}> */
             public array $containers = [];
 
+            /** @var list<string> */
+            public array $pulls = [];
+
             /** @param list<int> $exitCodes */
             public function __construct(private bool $missing, private array $exitCodes)
             {
@@ -38,6 +43,12 @@ class HostCompileRustLibrariesTest extends TestCase
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
                 $cmd = is_array($cmd) ? $cmd : [$cmd];
+                // The host re-pulls a public image before its first container; not a container itself.
+                if (str_contains(implode(' ', $cmd), 'docker pull -q ')) {
+                    $this->pulls[] = (string) end($cmd);
+
+                    return $this->exit(0);
+                }
                 if (($cmd[1] ?? null) === 'test') {
                     $found = $this->missing && end($cmd) === '/home/acme/project/' . RustRuntimeLibraries::MISSING_FILE;
 
@@ -71,6 +82,9 @@ class HostCompileRustLibrariesTest extends TestCase
         $dind->method('engine')->willReturn($engine);
         $dind->method('engineAccount')->willReturn(new EngineAccount('acme', '/home/acme', '1001:1001'));
         $dind->method('shell')->willReturnCallback(fn (): ShellOperations => new ShellOperations($dind));
+        $inner = $this->createStub(InnerDocker::class);
+        $inner->method('imageStore')->willReturn(new DindImageStore());
+        $dind->method('innerDocker')->willReturn($inner);
 
         $compile = new HostCompile($dind);
         (new \ReflectionMethod($compile, 'bundleRustRuntimeLibraries'))

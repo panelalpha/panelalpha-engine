@@ -154,4 +154,19 @@ interface ImageStore
      * takes the push lock.
      */
     public function hostRebuildCommand(string $image, string $dockerfile): string;
+
+    /**
+     * Pull a public base image the account already holds again, so a moving
+     * tag follows upstream's patch releases. Prints whether it changed; fails
+     * when the pull does.
+     */
+    public function refreshCommand(EngineAccount $account, string $image): string;
+
+    /**
+     * On the host: pull a public build image again before a host build runs
+     * it. Never fatal; `['true']` when there is nothing upstream to follow.
+     *
+     * @return list<string>
+     */
+    public function hostRefreshImageArgv(string $image): array;
 }

@@ -66,6 +66,9 @@ class HostCompile
      */
     private bool $buildNetworkUnavailable = false;
 
+    /** @var array<string, true> public images already re-pulled on the host this deploy */
+    private array $refreshedOnHost = [];
+
     public function __construct(DindProject $project)
     {
         $this->project = $project;
@@ -1200,6 +1203,7 @@ class HostCompile
             $env = $this->withNodeModulesLinker($env, $projectDir, $appRoot);
             $build = $this->withLegacyOpenssl($build, $projectDir, $appRoot);
         }
+        $this->refreshHostImage($image);
         $process = $this->runHostBuild(
             static fn (HostBuilder $builder): array => $builder->nodeBuildArgv(
                 $account,
@@ -1276,6 +1280,30 @@ class HostCompile
         }
 
         return new \Exception($message !== '' ? $message : $fallback);
+    }
+
+    /**
+     * A public build image (`node:22-bookworm-slim`) is re-pulled once per
+     * deploy, so the host does not build on whatever copy it pulled first.
+     * Best-effort: a failed pull builds with that copy.
+     */
+    private function refreshHostImage(string $image): void
+    {
+        if (isset($this->refreshedOnHost[$image])) {
+            return;
+        }
+        $this->refreshedOnHost[$image] = true;
+        $argv = $this->project->innerDocker()->imageStore()->hostRefreshImageArgv($image);
+        if ($argv === ['true']) {
+            return;
+        }
+        try {
+            $this->project->system()->execOnHost($argv, [], 900);
+        } catch (\Throwable $e) {
+            $this->project->shell()->logger()?->info(
+                "Could not refresh base image {$image} on the host; building with the copy it has: ".$e->getMessage()
+            );
+        }
     }
 
     /**

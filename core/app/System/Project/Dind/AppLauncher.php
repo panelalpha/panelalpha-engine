@@ -779,11 +779,11 @@ final class AppLauncher
     ): void {
         if ($runtime === PlatformManifest::RUNTIME_NGINX) {
             $this->compileOnHost($afterReclaim);
-            $innerDocker->ensureImage(Images::NGINX_IMAGE);
+            $innerDocker->ensureCurrentImage(Images::NGINX_IMAGE);
         } elseif (StandaloneNodeServe::isStandaloneStrategy($strategy) || HostRunProject::isStrategy($strategy)) {
             $this->compileOnHost($afterReclaim);
             if (HostRunProject::isNode($strategy) || StandaloneNodeServe::isStandaloneStrategy($strategy)) {
-                $innerDocker->ensureImage(Images::nodeImage($this->project->userAppDirPath()));
+                $innerDocker->ensureCurrentImage(Images::nodeImage($this->project->userAppDirPath()));
             }
         } elseif (! $skipBuild) {
             $innerDocker->preloadFrameworkBaseImages($strategy, $runtime);

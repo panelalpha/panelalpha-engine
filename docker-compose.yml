@@ -12,7 +12,7 @@ services:
       context: ./dockerfiles
       dockerfile: Dockerfile-core
       target: php_nginx_prod
-    image: ghcr.io/panelalpha/engine-core:v2.0.2
+    image: ghcr.io/panelalpha/engine-core:v2.1.2-20261021
     pull_policy: missing
     restart: always
     post_start:
@@ -244,13 +244,14 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-phpmyadmin-users
-    image: ghcr.io/panelalpha/engine-phpmyadmin-users:20260526
+    image: ghcr.io/panelalpha/engine-phpmyadmin-users:v2.1.2-20261022
     pull_policy: missing
     restart: always
     hostname: phpmyadmin-users.shared-hosting.palocal
     volumes:
       - ./phpmyadmin-users/config.user.inc.php:/etc/phpmyadmin/config.user.inc.php
       - ./phpmyadmin-users/signon.php:/var/www/html/signon.php
+      - ./phpmyadmin-users/php-session.ini:/usr/local/etc/php/conf.d/99-session.ini
     links:
       - sites-db:db
     environment:
@@ -392,7 +393,7 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-lighthouse
-    image: ghcr.io/panelalpha/engine-lighthouse:20260526
+    image: ghcr.io/panelalpha/engine-lighthouse:v2.1.2-20261022
     pull_policy: missing
     init: true
     restart: "always"

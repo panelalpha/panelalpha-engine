@@ -180,6 +180,16 @@ final class FakeEngine implements ContainerEngine
             {
                 return 'true';
             }
+
+            public function refreshCommand(EngineAccount $account, string $image): string
+            {
+                return 'true';
+            }
+
+            public function hostRefreshImageArgv(string $image): array
+            {
+                return ['true'];
+            }
         };
     }
 

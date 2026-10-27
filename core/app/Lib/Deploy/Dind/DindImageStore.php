@@ -255,6 +255,34 @@ final class DindImageStore implements ImageStore
         );
     }
 
+    /**
+     * Re-pull a public base image the account already holds. A tag such as
+     * `node:22-bookworm-slim` moves with every upstream patch release, security
+     * fixes included, and {@see seedCommand()} never looks again once the
+     * account has it. The pull goes through registry-proxy like any public
+     * image. Prints whether the image changed; fails when the pull does, and
+     * the caller keeps the copy the account has.
+     */
+    public function refreshCommand(EngineAccount $account, string $image): string
+    {
+        $img = escapeshellarg($image);
+        $exec = $this->accountExec($account);
+        $id = "{$exec} docker image inspect -f '{{.Id}}' -- {$img} 2>/dev/null";
+
+        return "before=\$({$id}); {$exec} docker pull -q {$img} >/dev/null"
+            ." && if [ \"\$({$id})\" = \"\$before\" ]; then printf 'Base image %s is current\\n' {$img};"
+            ." else printf 'Updated base image %s\\n' {$img}; fi";
+    }
+
+    /**
+     * Whether $image has an upstream to follow: a public tag, not one of ours
+     * (no registry publishes those) and not pinned to a digest.
+     */
+    public static function followsUpstream(string $image): bool
+    {
+        return ImageTransfer::isSafeImageRef($image) && ! BuiltImage::isOurs($image) && ! str_contains($image, '@');
+    }
+
     /** The host's copy of $image, pulled when missing; a mutable tag is re-pulled first. */
     private static function hostCopyCommand(string $image, string $img): string
     {
@@ -487,5 +515,22 @@ final class DindImageStore implements ImageStore
             ."docker pull -q {$pullRef} >/dev/null && docker tag {$pullRef} {$img} && exit 0; "
             .'fi; exit 0',
         ];
+    }
+
+    /**
+     * A host build runs a public image by its plain name and never pulls it
+     * again, so the host's copy is whatever was pulled first. Re-pull it,
+     * through registry-proxy where the host mirrors Docker Hub. Never fatal:
+     * a failed pull keeps that copy.
+     *
+     * @return list<string>
+     */
+    public function hostRefreshImageArgv(string $image): array
+    {
+        if (! self::followsUpstream($image)) {
+            return ['true'];
+        }
+
+        return ['sh', '-c', 'docker pull -q '.escapeshellarg($image).' >/dev/null 2>&1; exit 0'];
     }
 }

@@ -45,7 +45,7 @@ class AppLauncherDiskFullRetryTest extends TestCase
 
         $this->retry($launcher, $failed, null, 'vite', 'nginx');
 
-        $this->assertSame(['reclaimStorage', 'ensureImage', 'preloadComposeImages', 'compose up'], $this->calls);
+        $this->assertSame(['reclaimStorage', 'ensureCurrentImage', 'preloadComposeImages', 'compose up'], $this->calls);
     }
 
     public function test_a_build_that_did_not_fill_the_disk_is_not_retried(): void
@@ -76,7 +76,7 @@ class AppLauncherDiskFullRetryTest extends TestCase
         $calls = &$this->calls;
         $inner = $this->createStub(InnerDocker::class);
         $inner->method('canAggressivelyReclaim')->willReturn(true);
-        foreach (['reclaimStorage', 'reclaimStorageIfNeeded', 'ensureImage', 'preloadFrameworkBaseImages', 'preloadComposeImages'] as $method) {
+        foreach (['reclaimStorage', 'reclaimStorageIfNeeded', 'ensureImage', 'ensureCurrentImage', 'preloadFrameworkBaseImages', 'preloadComposeImages'] as $method) {
             $inner->method($method)->willReturnCallback(function () use (&$calls, $method): void {
                 $calls[] = $method;
             });

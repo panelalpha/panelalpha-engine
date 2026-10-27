@@ -328,6 +328,14 @@ An engine host is a single-purpose machine. The installer replaces the resolver 
 
 Found a vulnerability? Please disclose it **privately**, never in a public issue. See [`SECURITY.md`](SECURITY.md), or use [manage.panelalpha.com/contact](https://manage.panelalpha.com/contact).
 
+## Made for AI, built with AI
+
+PanelAlpha Engine is a tool for AI agents, and we use them to build it too. A large part of the code, tests and documentation has been written or modified with AI coding agents, mainly Claude Code.
+
+AI writes, people decide. Every change is reviewed by a team member and tested on real servers before release. [`AGENTS.md`](AGENTS.md) tells a coding agent how to change this code and how to prove the change works.
+
+Using AI for your own pull request is fine too. Just review what you send and be ready to explain it. [How to contribute](CONTRIBUTING.md)
+
 ## License
 
 PanelAlpha Engine is open source under the [Apache License 2.0](LICENSE).
