@@ -4,11 +4,12 @@ namespace Tests\Unit\Hub;
 
 use App\Lib\Hub\HubSigner;
 use App\Lib\Hub\SpkiPin;
-use App\Models\HubConnection;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Sleep;
+use Mockery;
 
 /** hub:status, hub:disconnect and hub:tls-announce. */
 class HubLifecycleCommandsTest extends HubTestCase
@@ -38,7 +39,7 @@ class HubLifecycleCommandsTest extends HubTestCase
     public function test_disconnect_sends_a_signed_notice(): void
     {
         $this->connection($this->hubToken());
-        Http::fake([self::HUB . '/api/engine/v1/connection/disconnect' => Http::response(null, 204)]);
+        Http::fake([self::HUB.'/api/engine/v1/connection/disconnect' => Http::response(null, 204)]);
 
         $this->artisan('hub:disconnect')->assertExitCode(0);
 
@@ -54,17 +55,31 @@ class HubLifecycleCommandsTest extends HubTestCase
     public function test_a_replayed_notice_is_signed_again_and_resent_once(): void
     {
         $this->connection($this->hubToken());
-        Http::fake([self::HUB . '/*' => Http::sequence()->push(null, 409)->push(null, 204)]);
+        Http::fake([self::HUB.'/*' => Http::sequence()->push(null, 409)->push(null, 204)]);
 
         $this->artisan('hub:disconnect')->assertExitCode(0);
 
         Http::assertSentCount(2);
     }
 
+    public function test_disconnect_audits_the_tokens_it_revoked(): void
+    {
+        $this->connection($this->hubToken());
+        $this->hubToken();
+        Http::fake([self::HUB.'/api/engine/v1/connection/disconnect' => Http::response(null, 204)]);
+        Log::spy();
+
+        $this->artisan('hub:disconnect')->assertExitCode(0);
+
+        Log::shouldHaveReceived('info')
+            ->with('hub.disconnected', Mockery::on(fn (array $context): bool => $context['tokens_revoked'] === 2))
+            ->once();
+    }
+
     public function test_status_shows_the_hubs_view(): void
     {
         $this->connection($this->hubToken(), ['admin_sso']);
-        Http::fake([self::HUB . '/api/engine/v1/connection' => Http::response([
+        Http::fake([self::HUB.'/api/engine/v1/connection' => Http::response([
             'status' => 'connected', 'account' => ['id' => 42], 'license' => ['id' => 101], 'grants' => ['admin_sso'],
         ])]);
 
@@ -79,7 +94,7 @@ class HubLifecycleCommandsTest extends HubTestCase
     {
         $token = $this->hubToken();
         $connection = $this->connection($token);
-        Http::fake([self::HUB . '/api/engine/v1/connection' => Http::response(null, 403)]);
+        Http::fake([self::HUB.'/api/engine/v1/connection' => Http::response(['error' => 'connection_unknown'], 403)]);
 
         $this->artisan('hub:status')
             ->expectsOutputToContain('The Hub no longer knows this connection')
@@ -87,6 +102,28 @@ class HubLifecycleCommandsTest extends HubTestCase
 
         $this->assertNotNull($token->accessToken->fresh()->revoked_at);
         $this->assertNull($connection->fresh());
+    }
+
+    /** A CDN or WAF in front of the Hub answers 403 with no body, or with one of its own. */
+    public function test_status_keeps_the_connection_on_a_403_that_is_not_the_hubs_refusal(): void
+    {
+        $token = $this->hubToken();
+        $connection = $this->connection($token);
+        Http::fake([self::HUB.'/api/engine/v1/connection' => Http::sequence()
+            ->push(null, 403)
+            ->push('<html><body>Access denied</body></html>', 403, ['Content-Type' => 'text/html'])
+            ->push(['message' => 'Forbidden', 'error' => 'blocked'], 403)]);
+
+        foreach (range(1, 3) as $ignored) {
+            $this->artisan('hub:status')
+                ->expectsOutputToContain('The Hub answered')
+                ->expectsOutputToContain('Nothing was changed here')
+                ->doesntExpectOutputToContain('no longer knows')
+                ->assertExitCode(0);
+        }
+
+        $this->assertNull($token->accessToken->fresh()->revoked_at);
+        $this->assertNotNull($connection->fresh());
     }
 
     public function test_status_when_not_connected(): void
@@ -99,7 +136,7 @@ class HubLifecycleCommandsTest extends HubTestCase
     public function test_tls_announce_sends_a_changed_pin_and_stores_it(): void
     {
         $connection = $this->connection($this->hubToken());
-        Http::fake([self::HUB . '/api/engine/v1/connection/tls-pin' => Http::response(null, 204)]);
+        Http::fake([self::HUB.'/api/engine/v1/connection/tls-pin' => Http::response(null, 204)]);
         $pin = SpkiPin::fromFile($this->certificate);
 
         $this->artisan('hub:tls-announce', ['certificate' => $this->certificate])->assertExitCode(0);
@@ -127,7 +164,4 @@ class HubLifecycleCommandsTest extends HubTestCase
         $this->artisan('hub:tls-announce')->assertExitCode(0);
         Http::assertNothingSent();
     }
-
-
-
 }

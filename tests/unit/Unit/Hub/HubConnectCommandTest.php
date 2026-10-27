@@ -383,14 +383,14 @@ class HubConnectCommandTest extends HubTestCase
     public function test_the_address_connect_verified_from_is_exempt_from_the_api_jail_instead_of_the_replaced_one(): void
     {
         $old = $this->hubToken([], 'hc_OLD');
-        $this->connection($old, [], 'hc_OLD')->forceFill(['caller_ip' => '198.51.100.20'])->save();
+        $this->connection($old, [], 'hc_OLD')->forceFill(['caller_ips' => ['198.51.100.20' => now()->toIso8601ZuluString()]])->save();
         $this->fail2ban->files['/etc/fail2ban/panelalpha-api-ignoreip'] = "198.51.100.20 # PanelAlpha Connect\n";
         $this->withServerVariables(['REMOTE_ADDR' => '2.28.195.31']);
         $this->fakeHub([$this->approved()]);
 
         $this->artisan('hub:connect', ['code' => self::CODE, '--replace' => true])->assertExitCode(0);
 
-        $this->assertSame('2.28.195.31', HubConnection::active()?->caller_ip);
+        $this->assertSame(['2.28.195.31'], array_keys(HubConnection::active()?->caller_ips ?? []));
         $this->assertSame("2.28.195.31 # PanelAlpha Connect\n", $this->fail2ban->files['/etc/fail2ban/panelalpha-api-ignoreip']);
         $this->assertSame(1, $this->fail2ban->reloads);
     }

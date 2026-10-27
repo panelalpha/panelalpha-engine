@@ -3,13 +3,12 @@
 namespace App\Console\Commands\Projects;
 
 use App\Http\Requests\ProjectStagingRequest;
+use App\Lib\Domains\CopyDomain;
 use App\Lib\Helper;
-use App\Models\Domain;
 use App\Models\User;
 use App\System;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class ProjectStagingCommand extends Command
@@ -45,7 +44,7 @@ class ProjectStagingCommand extends Command
                 return 1;
             }
 
-            if ($this->hostingExists($source, $newUsername, $destDomain)) {
+            if ($this->hostingExists($source, $newUsername)) {
                 $this->error('Username not available.');
 
                 return 1;
@@ -91,22 +90,17 @@ class ProjectStagingCommand extends Command
         return $newUsername;
     }
 
-    /** The staging domain from --domain (without "www.") or generated, or null once a refusal has been printed. */
-    private function stagingDomain(User $source): ?string
+    /** The staging domain from --domain (without "www.") or planned, or null once a refusal has been printed. */
+    private function stagingDomain(User $source): ?CopyDomain
     {
-        $destDomain = self::lowercaseOption($this->option('domain'));
+        $destDomain = CopyDomain::forCopy($source->domain, self::lowercaseOption($this->option('domain')));
         if ($destDomain === null) {
-            $destDomain = Helper::generateCloneDomain($source->domain);
-            if ($destDomain === null) {
-                $this->error('Could not generate an available staging domain.');
+            $this->error('Could not generate an available staging domain.');
 
-                return null;
-            }
-        } elseif (Str::startsWith($destDomain, 'www.')) {
-            $destDomain = Str::after($destDomain, 'www.');
+            return null;
         }
 
-        if (Domain::domainOrAliasExists($destDomain)) {
+        if ($destDomain->isTaken()) {
             $this->error('Domain already exists.');
 
             return null;
@@ -115,11 +109,10 @@ class ProjectStagingCommand extends Command
         return $destDomain;
     }
 
-    private function hostingExists(User $source, string $newUsername, string $destDomain): bool
+    private function hostingExists(User $source, string $newUsername): bool
     {
         $probe = User::make([
             'username' => $newUsername,
-            'domain' => $destDomain,
             'email' => $source->email,
         ]);
 

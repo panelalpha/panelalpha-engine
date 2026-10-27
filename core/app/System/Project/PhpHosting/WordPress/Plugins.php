@@ -4,9 +4,6 @@ namespace App\System\Project\PhpHosting\WordPress;
 
 /**
  * Named plugin operations for a PHP hosting WordPress install.
- *
- * HTTP, artisan, and MCP tools are thin adapters around this. Path resolution
- * and the WP-CLI runner come from WpCli; a non-zero exit becomes Exception.
  */
 final class Plugins
 {
@@ -42,7 +39,7 @@ final class Plugins
      */
     public function get(string $slug, ?string $fields = null): array
     {
-        $args = ['plugin', 'get', $slug, '--format=json'];
+        $args = ['plugin', 'get', WpCli::positional($slug), '--format=json'];
         if ($fields !== null) {
             $args[] = '--fields='.$fields;
         }
@@ -66,7 +63,7 @@ final class Plugins
      */
     public function isInstalled(string $slug): array
     {
-        $result = $this->cli->run(['plugin', 'is-installed', $slug]);
+        $result = $this->cli->run(['plugin', 'is-installed', WpCli::positional($slug)]);
         $exitCode = $result['exit_code'] ?? 1;
         if ($exitCode !== 0 && $exitCode !== 1) {
             throw new Exception($this->cli->failureMessage($result));
@@ -83,7 +80,7 @@ final class Plugins
      */
     public function install(string $slug, bool $force = false): array
     {
-        $args = ['plugin', 'install', $slug];
+        $args = ['plugin', 'install', WpCli::positional($slug)];
         if ($force) {
             $args[] = '--force';
         }
@@ -97,7 +94,7 @@ final class Plugins
      */
     public function activate(string $slug): array
     {
-        $result = $this->cli->runOrFail(['plugin', 'activate', $slug]);
+        $result = $this->cli->runOrFail(['plugin', 'activate', WpCli::positional($slug)]);
 
         return $this->mutationBody($slug, $result['stdout']);
     }
@@ -107,7 +104,7 @@ final class Plugins
      */
     public function deactivate(string $slug): array
     {
-        $result = $this->cli->runOrFail(['plugin', 'deactivate', $slug]);
+        $result = $this->cli->runOrFail(['plugin', 'deactivate', WpCli::positional($slug)]);
 
         return $this->mutationBody($slug, $result['stdout']);
     }
@@ -117,7 +114,7 @@ final class Plugins
      */
     public function update(string $slug): array
     {
-        $result = $this->cli->runOrFail(['plugin', 'update', $slug]);
+        $result = $this->cli->runOrFail(['plugin', 'update', WpCli::positional($slug)]);
 
         return $this->mutationBody($slug, $result['stdout']);
     }
@@ -127,7 +124,7 @@ final class Plugins
      */
     public function delete(string $slug): array
     {
-        $result = $this->cli->runOrFail(['plugin', 'delete', $slug]);
+        $result = $this->cli->runOrFail(['plugin', 'delete', WpCli::positional($slug)]);
 
         return $this->mutationBody($slug, $result['stdout']);
     }
@@ -141,7 +138,7 @@ final class Plugins
      */
     public function search(string $term, ?string $fields = null, ?int $perPage = null): array
     {
-        $args = ['plugin', 'search', $term, '--format=json'];
+        $args = ['plugin', 'search', WpCli::positional($term), '--format=json'];
         if ($fields !== null) {
             $args[] = '--fields='.$fields;
         }

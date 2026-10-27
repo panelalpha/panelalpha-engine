@@ -23,8 +23,8 @@ You also need a **Cloudflare API token**. A tunnel needs these two permissions:
 
 If you also want to purge the cache or change the security level from the engine, add these two to the same token:
 
-- **Zone · Cache Purge**
-- **Zone · Settings · Edit**
+- **Zone · Cache Purge · Purge**
+- **Zone · Zone Settings · Edit**
 
 Create it in your Cloudflare dashboard, with the account and the zones selected under Resources. The engine's paste page repeats those steps when you open the link. A token with only the first two drives tunnels and DNS; the cache and security endpoints answer that the token is missing a permission until you add the other two.
 
@@ -62,13 +62,15 @@ From there the engine does the rest for you:
 
 Cloudflare caches your site at its edge. After a content change you can ask it to drop what it holds, and you can raise or lower how aggressively it screens visitors.
 
-- **Purge everything.** Clears the whole cache for the zone the domain is in. The next visitor gets a fresh copy from the engine.
-- **Purge single files.** Clears up to 30 URLs, for example the stylesheet and the page that changed.
-- **Security level.** One of `off`, `essentially_off`, `low`, `medium`, `high`, or `under_attack`. `under_attack` is the "I am under attack" mode: every visitor waits a few seconds before the site answers. Set it back to a normal level when the attack is over.
+- **Purge everything.** Clears the whole cache for the zone the domain is in. The next visitor gets a fresh copy from the engine. Refused while another project on this engine has a name in the same zone (the project's own staging copy does not count): purge single files then.
+- **Purge single files.** Clears up to 30 URLs, for example the stylesheet and the page that changed. Each URL must be on one of the project's own names: its domains, their aliases or its tunnel hostnames.
+- **Security level.** One of `off`, `essentially_off`, `low`, `medium`, `high`, or `under_attack`. `under_attack` is the "I am under attack" mode: every visitor waits a few seconds before the site answers. Set it back to a normal level when the attack is over. The level applies to the whole zone, so it is refused while another project on this engine has a name in the same zone (the project's own staging copy does not count); change it in the Cloudflare dashboard then.
+
+Each action names one of the project's domains or aliases, and works on the Cloudflare zone that exact name is in: an alias in another zone acts on that zone, not on the main domain's.
 
 The engine reads the current value first, so a page can show the level before you change it. The same page reports whether the domain's DNS record is proxied through Cloudflare; if it is not, visitors are going straight to the engine and the cache is not in the way.
 
-These actions are pure Cloudflare API calls, so they work on any project that has a token, including traditional PHP hosting. They are refused until the token has **Zone · Cache Purge** and **Zone · Settings · Edit**.
+These actions use the project's Cloudflare API token, and only a project deployed from a repository into its own container can hold one, as for tunnels. Traditional PHP hosting cannot use them. They are refused until the token has **Zone · Cache Purge · Purge** and **Zone · Zone Settings · Edit**. A refusal names the permission the call needed: reading the status needs Zone Settings Read and Zone DNS Read, which the **Edit** permissions above include.
 
 ## Check it worked
 
@@ -113,6 +115,9 @@ The name already exists on this engine. Pick a free name in your Cloudflare zone
 
 **"Cloudflare tunnels are not supported for this project."**
 The site is not running in a container. Deploy it from a repository, or point an A record at your VPS and use Let's Encrypt instead.
+
+**A cache purge or security-level change says Cloudflare is rate-limiting the token, or could not be reached.**
+Nothing was changed. Wait a few minutes and try again. A missing permission is named instead, and a request Cloudflare refused for another reason carries Cloudflare's own message.
 
 **Visitors see a Cloudflare certificate, not my project's.**
 Expected. HTTPS terminates at Cloudflare, so the project's own certificate is not the one visitors see.

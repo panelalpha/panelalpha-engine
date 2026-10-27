@@ -118,7 +118,7 @@ class AppUserController extends Controller
     )]
     public function store(string $username, Request $request): JsonResponse
     {
-        self::resolveVaultField($request, 'password', $username);
+        self::resolveVaultField($request, 'password', $this->projectOr404($username));
         /** @var array{login: string, email: string, password: string, role: string} $validated */
         $validated = $request->validate(self::newUserRules());
 
@@ -188,7 +188,7 @@ class AppUserController extends Controller
     )]
     public function resetPassword(string $username, string $userId, Request $request): JsonResponse
     {
-        self::resolveVaultField($request, 'password', $username);
+        self::resolveVaultField($request, 'password', $this->projectOr404($username));
         /** @var array{password: string} $validated */
         $validated = $request->validate([
             'password' => ['required', 'string', 'min:8'],
@@ -373,7 +373,7 @@ class AppUserController extends Controller
     )]
     public function install(string $username, Request $request): JsonResponse
     {
-        self::resolveVaultField($request, 'admin_password', $username);
+        self::resolveVaultField($request, 'admin_password', $this->projectOr404($username));
         /** @var array{url: string, title: string, admin_user: string, admin_email: string, admin_password: string} $validated */
         $validated = $request->validate([
             'url' => ['required', 'url'],
@@ -396,11 +396,15 @@ class AppUserController extends Controller
         });
     }
 
-    /** A `vault:<key>` read before validation, so the rules (min:8) see the secret. */
-    private static function resolveVaultField(Request $request, string $field, string $username): void
+    /**
+     * A `vault:<key>` read before validation, so the rules (min:8) see the secret.
+     * It takes the project found, never the name asked for: reading an unowned
+     * entry gives it to that project for good.
+     */
+    private static function resolveVaultField(Request $request, string $field, User $project): void
     {
         if ($request->has($field)) {
-            $request->merge([$field => RequestVault::resolve($field, $request->input($field), $username)]);
+            $request->merge([$field => RequestVault::resolve($field, $request->input($field), $project->username)]);
         }
     }
 }

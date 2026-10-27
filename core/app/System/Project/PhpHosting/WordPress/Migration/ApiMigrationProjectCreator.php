@@ -2,9 +2,8 @@
 
 namespace App\System\Project\PhpHosting\WordPress\Migration;
 
-use App\Http\Requests\UserStoreRequest;
 use App\Lib\Domains\DomainPlan;
-use Illuminate\Support\Facades\App;
+use App\Lib\Project\NewProjectInput;
 use Illuminate\Validation\ValidationException;
 use RuntimeException;
 
@@ -24,13 +23,8 @@ final class ApiMigrationProjectCreator implements MigrationProjectCreator
 
     public function create(string $username, ?string $domain = null): string
     {
-        $request = UserStoreRequest::create('/api/projects', 'POST', self::input($username, $domain));
-        $request->setContainer(App::getInstance());
-        $request->validateResolved();
-        App::instance('request', $request);
-
         try {
-            $user = $this->deployer->deploy($request);
+            $user = $this->deployer->deploy(NewProjectInput::fromArray(self::input($username, $domain)));
         } catch (ValidationException $e) {
             throw new RuntimeException(self::validationMessage($e), 0, $e);
         }

@@ -39,6 +39,18 @@ final class SslCheck
     ) {}
 
     /**
+     * The check of the project domain with exactly this name; null when no project has it.
+     *
+     * @return ?array<string, mixed>
+     */
+    public function forDomainName(string $name): ?array
+    {
+        $model = Domain::where('domain', $name)->first();
+
+        return $model === null ? null : $this->forDomain($model);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function forDomain(Domain $model): array

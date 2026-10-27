@@ -6,6 +6,7 @@ use App\Lib\Hub\HubClient;
 use App\Lib\Hub\HubException;
 use App\Lib\Hub\HubGrants;
 use App\Lib\Hub\HubLifecycle;
+use App\Lib\Hub\HubResponse;
 use App\Models\HubAccessLog;
 use App\Models\HubConnection;
 use App\Models\PersonalAccessToken;
@@ -72,7 +73,7 @@ class HubStatusCommand extends Command
             return;
         }
 
-        if ($response->status === 403) {
+        if ($response->connectionUnknown()) {
             HubLifecycle::forget('hub_unknown');
             $this->error('The Hub no longer knows this connection. Its tokens are revoked here; '
                 .'get a new code from Connect engine and run `pae hub:connect CODE` to connect again.');
@@ -81,6 +82,7 @@ class HubStatusCommand extends Command
         }
         if ($response->status !== 200) {
             $this->warn('The Hub answered: '.$response->message()." (HTTP {$response->status})");
+            $this->refusalHint($response);
 
             return;
         }
@@ -93,6 +95,13 @@ class HubStatusCommand extends Command
             ['Account', (string) ($json['account']['id'] ?? '?')],
             ['Grants', implode(', ', array_map('strval', (array) ($json['grants'] ?? []))) ?: 'base only'],
         ]);
+    }
+
+    private function refusalHint(HubResponse $response): void
+    {
+        if ($response->status === 403) {
+            $this->line('Nothing was changed here. If the connection was removed in PanelAlpha Connect, run `pae hub:disconnect`.');
+        }
     }
 
     private function recentCalls(): void

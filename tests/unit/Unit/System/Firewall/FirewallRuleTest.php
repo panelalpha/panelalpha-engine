@@ -173,6 +173,22 @@ class FirewallRuleTest extends TestCase
         $this->assertSame('host', FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7', 'scope' => 'host'])->with(['action' => 'deny'])->scope);
     }
 
+    public function test_an_edit_that_changes_the_direction_without_a_scope_gets_the_scope_a_new_rule_would(): void
+    {
+        $denyOut = FirewallRule::fromArray(['action' => 'deny', 'direction' => 'out', 'source' => '203.0.113.7']);
+        $denyIn = FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7']);
+
+        $this->assertSame('host', $denyOut->scope);
+        $this->assertSame('both', $denyOut->with(['direction' => 'in'])->scope);
+        $this->assertSame('both', $denyOut->with(['direction' => null])->scope);
+        $this->assertSame('both', $denyOut->with(['direction' => 'both'])->scope);
+        $this->assertSame('host', $denyOut->with(['direction' => 'in', 'scope' => 'host'])->scope);
+        $this->assertSame('both', $denyIn->with(['direction' => 'out'])->with(['direction' => 'in'])->scope);
+        $this->assertSame('host', $denyIn->with(['direction' => 'out'])->scope);
+        $this->assertSame('host', $denyOut->with(['direction' => 'out'])->scope);
+        $this->assertSame('host', FirewallRule::fromArray(['action' => 'allow', 'direction' => 'out', 'port' => '22'])->with(['direction' => 'in'])->scope);
+    }
+
     /** An edit that does not name the scope keeps the rule's own (engine#766). */
     public function test_an_edit_without_a_scope_keeps_the_rules_current_scope(): void
     {

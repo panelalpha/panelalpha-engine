@@ -140,6 +140,26 @@ class ProjectLimitCommandsTest extends TestCase
         }
     }
 
+    /** Docker starts no container with less than 6 MB, so the account would never come up. */
+    public function test_memory_below_dockers_minimum_is_refused(): void
+    {
+        $this->makeUser('alice', ['memory_limit' => 256]);
+
+        $this->assertSame(1, Artisan::call('project:limit:set', ['--project' => 'alice', '--memory-limit' => '5']));
+        $this->assertStringContainsString('at least 6 MB', Artisan::output());
+        $this->assertSame(256, User::findByUsername('alice')->getMemoryLimit());
+    }
+
+    /** A container project's account runs its own Docker daemon, so 128 MB is refused there and taken elsewhere. */
+    public function test_memory_below_a_container_projects_floor_is_refused_for_it(): void
+    {
+        $this->makeUser('dock', ['template' => 'dind', 'memory_limit' => 512]);
+
+        $this->assertSame(1, Artisan::call('project:limit:set', ['--project' => 'dock', '--memory-limit' => '128']));
+        $this->assertStringContainsString('dock: The memory limit of a container project must be at least 256 MB', Artisan::output());
+        $this->assertSame(512, User::findByUsername('dock')->getMemoryLimit());
+    }
+
     /** An unset memory limit reads back as the default the account runs with. */
     public function test_get_reports_the_default_for_an_unset_memory_limit(): void
     {

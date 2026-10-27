@@ -5,9 +5,10 @@ namespace Tests\Unit\System\Project\PhpHosting\WordPress;
 use App\Models\Domain;
 use App\Models\User;
 use App\System\Project;
-use App\System\Project\PhpHosting\WordPress\WpCli;
+use App\System\Project\FileManager;
 use App\System\Project\PhpHosting\WordPress\Exception as WordPressException;
 use App\System\Project\PhpHosting\WordPress\Options;
+use App\System\Project\PhpHosting\WordPress\WpCli;
 use Mockery;
 use PHPUnit\Framework\TestCase;
 
@@ -71,11 +72,25 @@ class OptionsTest extends TestCase
         );
         $this->assertSame(['option' => 'siteurl', 'value' => 'https://example.test'], $got);
         $this->assertSame(
-            ['option', 'update', 'home', 'https://example.test', '--path=/home/alice/other.test/public_html'],
+            ['option', 'update', 'home', '"https://example.test"', '--format=json', '--path=/home/alice/other.test/public_html'],
             $sequence[1]
         );
         $this->assertSame('home', $set['option']);
         $this->assertSame('https://example.test', $set['value']);
+    }
+
+    public function test_a_value_starting_with_a_dash_is_stored_as_sent(): void
+    {
+        $sequence = [];
+        $options = $this->optionsWithFakeRunner($sequence);
+
+        $set = $options->set('gmt_offset', '--exec=x');
+
+        $this->assertSame(
+            ['option', 'update', 'gmt_offset', '"--exec=x"', '--format=json', '--path=/home/alice/example.test/public_html'],
+            $sequence[0]
+        );
+        $this->assertSame('--exec=x', $set['value']);
     }
 
     public function test_get_nonzero_exit_throws(): void
@@ -96,8 +111,8 @@ class OptionsTest extends TestCase
     }
 
     /**
-     * @param list<list<string>> $sequence
-     * @param list<array{exit_code: int, stdout: string, stderr: string}> $results
+     * @param  list<list<string>>  $sequence
+     * @param  list<array{exit_code: int, stdout: string, stderr: string}>  $results
      */
     private function optionsWithFakeRunner(
         array &$sequence,
@@ -108,6 +123,8 @@ class OptionsTest extends TestCase
         $user->username = 'alice';
         $project = Mockery::mock(Project::class);
         $project->shouldReceive('homeDirPath')->andReturn('/home/alice');
+        $project->shouldReceive('resolvePath')
+            ->andReturnUsing(fn (string $path): string => (new FileManager($project))->resolvePath($path));
         $call = 0;
         $project->shouldReceive('runWpCli')
             ->andReturnUsing(function (array $args) use (&$sequence, &$call, $results): array {

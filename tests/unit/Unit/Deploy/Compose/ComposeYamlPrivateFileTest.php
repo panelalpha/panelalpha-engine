@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Deploy\Compose;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\DetectAppPort;
@@ -11,6 +12,8 @@ use PHPUnit\Framework\TestCase;
  * The run file holds env_vars and database passwords, so it is 0600 and the
  * account's. The core runs as www-data and cannot open it; port
  * detection must still read it, or every app falls back to 8080.
+ * Outside an account home nothing is the account's, so nothing goes
+ * through sudo: there it would only follow a link the plain read refused.
  */
 class ComposeYamlPrivateFileTest extends TestCase
 {
@@ -20,17 +23,15 @@ class ComposeYamlPrivateFileTest extends TestCase
     {
         parent::setUp();
         $this->dir = sys_get_temp_dir() . '/pa-private-compose-' . bin2hex(random_bytes(4));
-        mkdir($this->dir);
+        mkdir($this->dir . '/acme/project', 0777, true);
+        AccountHomeRead::useHomesDir($this->dir);
     }
 
     protected function tearDown(): void
     {
         ComposeYaml::readPrivilegedWith(null);
-        foreach (glob($this->dir . '/*') ?: [] as $file) {
-            @chmod($file, 0600);
-            @unlink($file);
-        }
-        @rmdir($this->dir);
+        AccountHomeRead::useHomesDir(null);
+        exec('rm -rf ' . escapeshellarg($this->dir));
         parent::tearDown();
     }
 
@@ -60,9 +61,29 @@ class ComposeYamlPrivateFileTest extends TestCase
         $this->assertSame([$path], array_values(array_unique($asked)));
     }
 
+    public function test_outside_an_account_home_an_unreadable_file_is_not_read_through_sudo(): void
+    {
+        if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            $this->markTestSkipped('root opens a 0000 file, so the plain read never fails');
+        }
+        mkdir(sys_get_temp_dir() . '/' . basename($this->dir) . '-clone');
+        $path = sys_get_temp_dir() . '/' . basename($this->dir) . '-clone/docker-compose.yml';
+        file_put_contents($path, "services: {}\n");
+        chmod($path, 0000);
+        ComposeYaml::readPrivilegedWith(function (): ?string {
+            $this->fail('a file outside every home was read through sudo');
+        });
+
+        try {
+            $this->assertNull(ComposeYaml::read($path));
+        } finally {
+            exec('rm -rf ' . escapeshellarg(dirname($path)));
+        }
+    }
+
     public function test_a_readable_file_never_goes_through_the_privileged_reader(): void
     {
-        $path = $this->dir . '/' . EngineArtifacts::RUN_COMPOSE;
+        $path = $this->dir . '/acme/project/' . EngineArtifacts::RUN_COMPOSE;
         file_put_contents($path, "services:\n  app:\n    image: acme/app\n");
         ComposeYaml::readPrivilegedWith(function (): ?string {
             $this->fail('a readable file was read through sudo');
@@ -82,7 +103,7 @@ class ComposeYamlPrivateFileTest extends TestCase
 
     private function unreadableRunFile(string $yaml): string
     {
-        $path = $this->dir . '/' . EngineArtifacts::RUN_COMPOSE;
+        $path = $this->dir . '/acme/project/' . EngineArtifacts::RUN_COMPOSE;
         file_put_contents($path, $yaml);
         chmod($path, 0000);
 

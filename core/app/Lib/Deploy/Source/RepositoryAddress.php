@@ -8,7 +8,8 @@ use App\Lib\Net\EgressRefusedException;
 /**
  * Whether a repository host is one core must not open a connection to: the
  * {@see OutboundUrl} guard for the git remotes core contacts itself (create,
- * inspection and its submodules, the vault paste check). The deploy itself
+ * inspection and its submodules, the vault paste check, an SSH remote's connect
+ * and the deploy key's host-key scan). The deploy itself
  * runs in the account's DinD, whose network refuses those ranges anyway.
  */
 final class RepositoryAddress
@@ -40,23 +41,42 @@ final class RepositoryAddress
         ];
     }
 
-    /**
-     * Why core must not contact $host, or null when it may: OutboundUrl::target() refuses an
-     * internal address and a host PHP cannot resolve, which closes numeric IPv4 forms.
-     */
+    /** Why core must not contact $host, or null when it may. */
     private static function refusalOf(string $host): ?string
     {
         try {
-            OutboundUrl::target(self::checkedUrl($host));
-        } catch (EgressRefusedException) {
-            $refused = OutboundUrl::refusedAddressOf($host);
-
-            return $refused === null ? self::unresolved($host) : self::message($host, $refused);
-        } catch (\InvalidArgumentException) {
-            return self::unresolved($host);
+            self::checkedAddress($host);
+        } catch (EgressRefusedException $e) {
+            return $e->getMessage();
         }
 
         return null;
+    }
+
+    /**
+     * The address core may connect to for $host, resolved once so the caller pins
+     * the connection to what was checked; $host itself when it is a literal address.
+     * OutboundUrl::target() refuses an internal address and a host PHP cannot
+     * resolve, which closes numeric IPv4 forms.
+     *
+     * @throws EgressRefusedException with the reason, when core must not contact $host
+     */
+    public static function checkedAddress(string $host): string
+    {
+        try {
+            return OutboundUrl::target(self::checkedUrl($host))->address() ?? $host;
+        } catch (EgressRefusedException) {
+            throw new EgressRefusedException(self::reasonRefusing($host));
+        } catch (\InvalidArgumentException) {
+            throw new EgressRefusedException(self::unresolved($host));
+        }
+    }
+
+    private static function reasonRefusing(string $host): string
+    {
+        $refused = OutboundUrl::refusedAddressOf($host);
+
+        return $refused === null ? self::unresolved($host) : self::message($host, $refused);
     }
 
     /** A URL carrying the host to the guard; only its host is read. */

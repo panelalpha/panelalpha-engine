@@ -31,6 +31,10 @@ class LogHubCalls
         return $response;
     }
 
+    /**
+     * An admin login names the app user it logs in as; the URL itself is never
+     * kept. A failure is swallowed: the log must never turn an answer into a 500.
+     */
     private function record(Request $request, PersonalAccessToken $token, int $status): void
     {
         try {
@@ -45,13 +49,11 @@ class LogHubCalls
                 'status' => $status,
                 'source_ip' => $request->ip(),
                 'token_id' => $token->id,
-                // Admin logins name who they log in as; the URL itself is never kept.
                 'detail' => is_string($appUser) ? substr('app user '.$appUser, 0, 191) : null,
             ]);
 
             HubConnectionCalls::note(HubTokens::connectionIdOf($token), $status, $request->ip());
         } catch (\Throwable) {
-            // The log must never turn an answer into a 500.
         }
     }
 }

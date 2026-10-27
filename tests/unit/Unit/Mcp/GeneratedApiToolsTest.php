@@ -309,6 +309,16 @@ class GeneratedApiToolsTest extends TestCase
         }
     }
 
+    /** A vault reference is `vault:<key>`; an entry's id names nothing, so a tool that says `vault:<id>` teaches a refused reference. */
+    public function test_no_tool_describes_a_vault_reference_by_its_id(): void
+    {
+        foreach ($this->generated() as $class) {
+            $tool = new $class();
+            $described = json_encode($tool->toArray(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            $this->assertStringNotContainsString('vault:<id>', (string) $described, $tool->name());
+        }
+    }
+
     public function test_generated_tools_are_registered_with_the_server(): void
     {
         $registered = (new ReflectionClass(\App\Mcp\Servers\EngineServer::class))

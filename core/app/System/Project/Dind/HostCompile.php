@@ -1153,14 +1153,14 @@ class HostCompile
         $filesystem = $this->project->system()->filesystem();
         $chown = $this->project->userModel()->getChownString();
         try {
-            $filesystem->filePutContents(
+            $filesystem->writeFileReplacingPath(
                 $appDir.'/'.PhpHostBuild::RUNTIME_MANIFEST_FILE,
                 $runtime,
                 $chown,
                 '644'
             );
             if ($composerLock !== null && trim($composerLock) !== '') {
-                $filesystem->filePutContents(
+                $filesystem->writeFileReplacingPath(
                     $appDir.'/'.PhpHostBuild::RUNTIME_LOCK_FILE,
                     $composerLock,
                     $chown,

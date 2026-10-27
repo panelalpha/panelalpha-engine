@@ -30,19 +30,19 @@ final class WelcomeBootstrap
         $system = $this->project->system();
         $fs = $system->filesystem();
         $system->exec(['sudo', 'mkdir', '-p', $appDir]);
-        $fs->filePutContents(
+        $fs->writeFileReplacingPath(
             $this->paths->composeFile(),
             DeployCompose::staticNginx(),
             null,
             '644'
         );
-        $fs->filePutContents(
+        $fs->writeFileReplacingPath(
             $appDir.'/'.NginxConfig::FILENAME,
             NginxConfig::site(null),
             null,
             '644'
         );
-        $fs->filePutContents(
+        $fs->writeFileReplacingPath(
             "{$appDir}/index.html",
             $this->welcomeHtml(),
             null,

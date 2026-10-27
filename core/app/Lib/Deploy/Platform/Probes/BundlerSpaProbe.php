@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Platform\Probes;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Platform\PlatformProbe;
 use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Runtime\NodeRuntime;
@@ -87,7 +88,7 @@ final class BundlerSpaProbe implements PlatformProbe
             if (! is_file($path)) {
                 continue;
             }
-            $dir = self::webpackOutputPath((string) @file_get_contents($path));
+            $dir = self::webpackOutputPath((string) AccountHomeRead::contents($path));
             if ($dir !== null) {
                 return NodeRuntime::safeOutputDir($dir, $default);
             }

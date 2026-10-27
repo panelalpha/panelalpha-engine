@@ -12,7 +12,9 @@ use Illuminate\Support\Facades\Log;
  */
 final class AccountMapping
 {
-    public const RECREATED = 'Recreated the account container: sysbox no longer mapped its image (sysbox was restarted while it ran)';
+    private const RECREATED = 'Recreated the account container';
+
+    private const SYSBOX_RESTARTED = 'sysbox was restarted while it ran';
 
     private const PROBE_TIMEOUT_SECONDS = 30;
 
@@ -24,9 +26,20 @@ final class AccountMapping
     /** Starting a container sysbox forgot fails on its own image, e.g. "open etc/docker/daemon.json: permission denied". */
     private const START_REFUSED = '/OCI runtime create failed:.*\b(?:open|lstat|stat|mkdir) \S+: permission denied/s';
 
+    /** What the last probe saw that made the image count as unmapped. */
+    private ?string $seen = null;
+
     public function __construct(
         private DindProject $project,
     ) {}
+
+    /** The account is recreated because its container's start was refused, not because a probe found it unmapped. */
+    public function afterRefusedStart(): self
+    {
+        $this->seen = 'its start was refused with permission denied on its own image';
+
+        return $this;
+    }
 
     /**
      * True when /root is not root's, or when exec is refused as by an account still running across a sysbox
@@ -37,10 +50,20 @@ final class AccountMapping
         try {
             $owner = trim($this->project->shell()->execQuiet(['stat', '-c', '%u', '/root'], [], self::PROBE_TIMEOUT_SECONDS));
         } catch (\Throwable $e) {
-            return $this->refusedAcrossSysboxRestart($e->getMessage()) ? true : null;
+            return $this->refusedAcrossSysboxRestart($e->getMessage()) ? $this->saw('exec into it was refused (unsafe procfs detected)') : null;
+        }
+        if (! ctype_digit($owner)) {
+            return null;
         }
 
-        return ctype_digit($owner) ? $owner !== '0' : null;
+        return $owner === '0' ? false : $this->saw("/root inside it was owned by uid {$owner} instead of root");
+    }
+
+    private function saw(string $what): bool
+    {
+        $this->seen = $what;
+
+        return true;
     }
 
     /**
@@ -56,6 +79,14 @@ final class AccountMapping
         $sysboxStarted = $this->sysboxStartedAt();
 
         return $containerStarted === null || $sysboxStarted === null || $containerStarted < $sysboxStarted;
+    }
+
+    private function startedBeforeSysbox(): bool
+    {
+        $containerStarted = $this->containerStartedAt();
+        $sysboxStarted = $this->sysboxStartedAt();
+
+        return $containerStarted !== null && $sysboxStarted !== null && $containerStarted < $sysboxStarted;
     }
 
     private function containerStartedAt(): ?int
@@ -135,6 +166,7 @@ final class AccountMapping
     /** The home and ~/docker are bind mounts, so the account keeps its data. */
     public function recreate(): void
     {
+        $recreated = self::RECREATED.': '.$this->cause();
         (new OuterLifecycle($this->project))->recreate();
         $this->project->awaitReady();
         if ($this->isUnmapped() !== false) {
@@ -143,7 +175,18 @@ final class AccountMapping
                 .'check that sysbox runs on the host (systemctl status sysbox).'
             );
         }
-        Log::warning($this->project->username().': '.self::RECREATED);
-        $this->project->shell()->logger()?->warn(self::RECREATED);
+        Log::warning($this->project->username().': '.$recreated);
+        $this->project->shell()->logger()?->warn($recreated);
+    }
+
+    /**
+     * What was seen, and a sysbox restart only when the container provably started before sysbox did:
+     * read before the recreate, which gives the container a new start time.
+     */
+    private function cause(): string
+    {
+        $seen = $this->seen ?? 'its image was unmapped';
+
+        return $this->startedBeforeSysbox() ? "{$seen}; ".self::SYSBOX_RESTARTED : $seen;
     }
 }

@@ -197,6 +197,19 @@ class EgressGuardTest extends TestCase
         $this->assertNull(EgressGuard::problem('git_repo', 'https://github.com/o/r.git'));
     }
 
+    public function test_a_host_that_does_not_resolve_is_refused(): void
+    {
+        OutboundUrl::setResolverForTests(static fn (string $host): array => []);
+
+        foreach (['http://0x7f000001:9/x.git', 'http://017700000001/x.git', 'https://no-such-host.invalid/o/r.git'] as $url) {
+            $problem = EgressGuard::problem('repo_url', $url);
+
+            $this->assertSame('host_refused', $problem['code'] ?? null, $url);
+            $this->assertSame('repo_url', $problem['field'] ?? null, $url);
+            $this->assertStringContainsString('could not be resolved', (string) ($problem['message'] ?? ''), $url);
+        }
+    }
+
     public function test_the_checked_address_is_pinned(): void
     {
         OutboundUrl::setResolverForTests(static fn (string $host): array => ['93.184.216.34']);

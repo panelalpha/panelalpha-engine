@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Platform\Runtime;
 
+use App\Lib\Deploy\AccountHomeRead;
+
 /**
  * Whether a Java build runs a JS tool, and which Node it gets when it does.
  *
@@ -47,7 +49,7 @@ final class JavaNodeTooling
             if (! is_file($path) || (int) @filesize($path) > self::MAX_BYTES) {
                 continue;
             }
-            $contents = @file_get_contents($path);
+            $contents = AccountHomeRead::contents($path);
             if (is_string($contents) && preg_match($pattern, $contents) === 1) {
                 return NodeRuntime::imageFor($root);
             }

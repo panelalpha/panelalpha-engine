@@ -177,8 +177,8 @@ class PhpStrategy
 
         try {
             $dir = rtrim($projectDir, '/').'/';
-            $system->filesystem()->filePutContents($dir.EngineArtifacts::RUN_PASSWD, $files['passwd'], $chown, '644');
-            $system->filesystem()->filePutContents($dir.EngineArtifacts::RUN_GROUP, $files['group'], $chown, '644');
+            $system->filesystem()->writeFileReplacingPath($dir.EngineArtifacts::RUN_PASSWD, $files['passwd'], $chown, '644');
+            $system->filesystem()->writeFileReplacingPath($dir.EngineArtifacts::RUN_GROUP, $files['group'], $chown, '644');
         } catch (\Exception $e) {
             $this->dind->shell()->logger()?->info('Could not write the account user files: '.$e->getMessage());
 

@@ -48,7 +48,7 @@ class BuildContextIgnoreWriter
 
         $excludeEnv = ! $generated && $this->emptyEnvIsUnread($projectDir, $dockerfile);
 
-        $this->dind->system()->filesystem()->filePutContents(
+        $this->dind->system()->filesystem()->writeFileReplacingPath(
             rtrim($projectDir, '/').'/'.$target,
             BuildContextIgnore::render($projectIgnore, $dockerfile, $reason === null, $generated, $excludeEnv),
             $chown,

@@ -69,4 +69,9 @@ final class TransportRecordingWorkTree extends WorkTree
 
         return '';
     }
+
+    protected function runsOnHost(): bool
+    {
+        return false;
+    }
 }

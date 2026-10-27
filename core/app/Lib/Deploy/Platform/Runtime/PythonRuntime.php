@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Platform\Runtime;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Detect\PlaceholderPage;
 use App\Lib\Deploy\Platform\ProjectContext;
 
@@ -470,7 +471,7 @@ final class PythonRuntime implements Runtime
      */
     private static function consoleScript(string $projectDir): ?string
     {
-        $pyproject = @file_get_contents($projectDir.'/pyproject.toml');
+        $pyproject = AccountHomeRead::contents($projectDir.'/pyproject.toml');
         if (! is_string($pyproject)
             || ! self::installsProject(ProjectContext::listRootFiles($projectDir), $pyproject)
         ) {
@@ -560,7 +561,7 @@ final class PythonRuntime implements Runtime
 
     private static function hasMainGuard(string $path): bool
     {
-        $contents = @file_get_contents($path);
+        $contents = AccountHomeRead::contents($path);
 
         return is_string($contents)
             && preg_match('/^if\s+__name__\s*==/m', $contents) === 1;
@@ -631,7 +632,7 @@ final class PythonRuntime implements Runtime
     private static function nestedServableModule(string $projectDir): ?array
     {
         foreach (self::djangoProjectLayout($projectDir) as $module) {
-            $contents = @file_get_contents($projectDir.'/'.$module[2]);
+            $contents = AccountHomeRead::contents($projectDir.'/'.$module[2]);
             if (! is_string($contents)) {
                 continue;
             }
@@ -768,7 +769,7 @@ final class PythonRuntime implements Runtime
      */
     private static function isDjangoManagePy(string $dir): bool
     {
-        $contents = @file_get_contents($dir.'/manage.py');
+        $contents = AccountHomeRead::contents($dir.'/manage.py');
         if (is_string($contents) && $contents !== ''
             && preg_match(
                 '/DJANGO_SETTINGS_MODULE|execute_from_command_line|from\s+django\b|import\s+django\b/',
@@ -849,7 +850,7 @@ final class PythonRuntime implements Runtime
             if (! is_file($path)) {
                 continue;
             }
-            $contents = @file_get_contents($path);
+            $contents = AccountHomeRead::contents($path);
             if (! is_string($contents)) {
                 continue;
             }

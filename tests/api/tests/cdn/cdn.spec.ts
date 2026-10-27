@@ -47,6 +47,20 @@ test.describe('CDN', () => {
     expect(body.errors?.files?.length).toBeGreaterThan(0);
   });
 
+  test('a purge of a URL outside the project is refused before Cloudflare is called', async ({
+    api,
+  }) => {
+    const user = await shared.get();
+
+    const response = await api.purgeCdnRaw(user.username, user.domain, {
+      files: ['https://not-this-project.example.test/style.css'],
+    });
+
+    await expectStatus(response, 422);
+    const body = response.body as { errors?: Record<string, string[]> };
+    expect(body.errors?.['files.0']?.length).toBeGreaterThan(0);
+  });
+
   test('an unknown security level is refused', async ({ api }) => {
     const user = await shared.get();
     const response = await api.setCdnSecurityLevelRaw(user.username, user.domain, {

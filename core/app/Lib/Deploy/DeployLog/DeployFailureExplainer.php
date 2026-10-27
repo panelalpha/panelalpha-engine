@@ -236,7 +236,7 @@ class DeployFailureExplainer
 
             return match ($cause) {
                 'missing' => $ref !== '' && BuiltImage::isOurs($ref)
-                    ? self::rebuiltBaseImage($ref)
+                    ? self::prunedBaseImage($ref)
                     : "{$image} could not be downloaded: its registry says it does not exist. That tag or "
                         .'repository was never published or has been removed, so the project has to name one that exists.',
                 'missing-or-private' => "{$image} could not be downloaded: Docker Hub refused it, which it does both for a "
@@ -255,9 +255,18 @@ class DeployFailureExplainer
     }
 
     /**
-     * A base image we build and the host no longer holds. docker.io never had
-     * that tag, so "never published" would send the reader to the wrong name.
+     * A base image we build that the host no longer holds, with no rebuild
+     * behind it. docker.io never had that tag, so "never published" would send
+     * the reader to the wrong name.
      */
+    private static function prunedBaseImage(string $ref): string
+    {
+        return "The base image {$ref} is one this engine builds and is no longer on this server, so the host build "
+            .'had nothing to run. Build it again with `pae system:image:prewarm` (select it with `pae configure prewarm`), '
+            .'then deploy again.';
+    }
+
+    /** A base image we build that the host no longer held, and that this deploy could not rebuild. */
     private static function rebuiltBaseImage(string $ref, ?string $reason = null): string
     {
         $sentence = "The base image {$ref} is not on this server and is one this engine builds; rebuilding it did "

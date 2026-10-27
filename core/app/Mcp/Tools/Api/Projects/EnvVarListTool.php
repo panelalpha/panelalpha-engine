@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     List the environment variables the engine holds for a project
 
-    Container projects only (`template: dind`, or a git project); a PHP hosting project answers 422. Lists the stored KEY/value pairs with every value masked, and the keys the last deploy applied. `reveal=1` returns the values instead. What the application actually sees also carries generated secrets and the recipe's own defaults; this is what the account set.
+    Container projects only (`template: dind`, or a git project); a PHP hosting project answers 422. Lists the stored KEY/value pairs with every value masked, and the keys the last deploy applied. `reveal=1` returns the values instead, except a value set from a `vault:<key>`, which stays masked. What the application actually sees also carries generated secrets and the recipe's own defaults; this is what the account set.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

@@ -143,9 +143,10 @@ class FileController extends Controller
         )),
         responses: [
             new OA\Response(response: 200, description: 'Directory created', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse')),
+            new OA\Response(response: 422, description: 'The project cannot write to the folder of path: problems[].code not_writable', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function mkdir(string $username, MkdirRequest $request): JsonResponse
+    public function mkdir(string $username, MkdirRequest $request, EngineSystem $system): JsonResponse
     {
         $user = $this->projectOr404($username);
 
@@ -156,11 +157,13 @@ class FileController extends Controller
          * }
          */
         $params = $request->validated();
-        $path = $user->project()->resolvePath($params['path']);
+        $path = $user->project($system)->resolvePath($params['path']);
 
-        $fileMan = $user->project()->fileManager();
+        $fileMan = $user->project($system)->fileManager();
         try {
             $fileMan->mkdir($path, ! empty($params['parents']));
+        } catch (ProblemException $e) {
+            throw $e;
         } catch (\Exception $e) {
             return new JsonResponse([
                 'message' => $e->getMessage(),
@@ -334,7 +337,10 @@ class FileController extends Controller
         description: 'Download an http(s) URL into the project as the account. The engine fetches it from core, '
             .'so it refuses a URL whose host resolves to an internal address (loopback, link-local, a private or '
             .'reserved range, the Docker and tenant networks) or that redirects to one. The refusal is 422 with '
-            .'`problems[{field: url, code: host_refused}]`; RFC1918/ULA are allowed only with `EGRESS_ALLOW_PRIVATE=true`.',
+            .'`problems[{field: url, code: host_refused}]`; RFC1918/ULA are allowed only with `EGRESS_ALLOW_PRIVATE=true`. '
+            .'A download that fails is 422 with `problems[{field: url, code: download_failed, reason}]`, reason one of '
+            .'resolve, connect, timeout, http (with http_status), tls, interrupted or other; a file the account cannot '
+            .'write is `problems[{field: path, code: write_failed}]`.',
         summary: 'Fetch an http or https URL into the project',
         security: [['bearerAuth' => []]],
         tags: ['Files'],
@@ -350,7 +356,7 @@ class FileController extends Controller
         responses: [
             new OA\Response(response: 200, description: 'File fetched', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 422, description: 'Validation error or a refused destination host', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 422, description: 'Validation error, a refused destination host, or a failed download', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function fetch(string $username, FetchRequest $request, EngineSystem $system): JsonResponse
@@ -372,6 +378,8 @@ class FileController extends Controller
             $fileMan->fetch($params['url'], $path, $params['filename'] ?? null);
         } catch (EgressRefusedException $e) {
             throw ProblemException::one('url', EgressRefusedException::CODE, $e->getMessage());
+        } catch (ProblemException $e) {
+            throw $e;
         } catch (\Exception $e) {
             return new JsonResponse([
                 'message' => $e->getMessage(),
@@ -665,6 +673,7 @@ class FileController extends Controller
         )),
         responses: [
             new OA\Response(response: 200, description: 'File uploaded', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse')),
+            new OA\Response(response: 422, description: 'The project cannot write to path', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function upload(string $username, UploadRequest $request): JsonResponse
@@ -683,6 +692,8 @@ class FileController extends Controller
         $file = $request->file('file');
         try {
             ProjectFiles::upload($user, $path, $file);
+        } catch (ProblemException $e) {
+            throw $e;
         } catch (\Exception $e) {
             return new JsonResponse([
                 'message' => $e->getMessage(),
@@ -814,6 +825,7 @@ class FileController extends Controller
         )),
         responses: [
             new OA\Response(response: 200, description: 'File written', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse')),
+            new OA\Response(response: 422, description: 'The project cannot write to the folder of path', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function putContents(string $username, PutContentsRequest $request): JsonResponse
@@ -835,6 +847,8 @@ class FileController extends Controller
             if (basename($path) === '.htaccess') {
                 ProjectFiles::htaccessChanged($path);
             }
+        } catch (ProblemException $e) {
+            throw $e;
         } catch (\Exception $e) {
             return new JsonResponse([
                 'message' => $e->getMessage(),

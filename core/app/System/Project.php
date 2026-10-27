@@ -4,8 +4,10 @@ namespace App\System;
 
 use App\Integrations\Statistics\Statistics;
 use App\Integrations\Tunnels\Cloudflare;
+use App\Integrations\Tunnels\PanelAlphaConnect;
 use App\Lib\Deploy\DeployLog\DeployLock;
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Project\ApiAccess;
 use App\Models\Backup as BackupRecord;
 use App\Models\Domain as DomainModel;
 use App\Models\ProxyRule;
@@ -20,6 +22,7 @@ use App\System\Project\Dind;
 use App\System\Project\Dind\CopiedImages;
 use App\System\Project\Dind\CopiedRunFile;
 use App\System\Project\Dind\CopyVolumes;
+use App\System\Project\Dind\HeldImage;
 use App\System\Project\Domain as DomainProject;
 use App\System\Project\FileManager;
 use App\System\Project\Ftp;
@@ -34,6 +37,9 @@ use Symfony\Component\Process\Process;
 
 class Project
 {
+    /** rsync's exit status when a file left the source while it was being copied. */
+    public const int RSYNC_VANISHED_FILES = 24;
+
     private Runtime $runtime;
 
     private ?DeploymentWorkflow $templateDeployment = null;
@@ -283,11 +289,12 @@ class Project
 
         $this->deleteBackups($user);
         $this->tearDownCloudflare($user);
+        PanelAlphaConnect::releaseProjectSites($user);
         $this->deleteProxyRules($user->username);
         $this->deleteDomains($user);
+        $this->deleteSftpLogins($user);
         $this->tearDownHosting();
         $this->deleteFtpLogins($user);
-        $this->deleteSftpLogins($user);
         $this->deleteMysqlDatabasesAndUsers($user);
         $this->deleteOwnedRows($user);
         DeployLogger::deleteUserLogs($user->username);
@@ -370,7 +377,8 @@ class Project
     /**
      * SFTP logins live in one host-wide logins.conf, rebuilt without these rows so none stays valid for the
      * next account given this uid and home. Best-effort: a host without the sftp profile must still delete.
-     * Open sessions end first, so none outlives the project and the OS user can be removed.
+     * Runs before the OS user and the home are removed: open sessions end first and cannot log in again, so
+     * none keeps writing into the home while it is removed.
      */
     private function deleteSftpLogins(ModelsUser $user): void
     {
@@ -683,9 +691,11 @@ class Project
     }
 
     /**
+     * $forceRecreate recreates every container, so none keeps a mount of files or volumes put back under it.
+     *
      * @return array{stdout: string, stderr: string, exit_code: ?int}
      */
-    public function startUserApp(): array
+    public function startUserApp(bool $forceRecreate = false): array
     {
         if (! $this->runtime instanceof Dind) {
             throw new \RuntimeException('startUserApp is not available for this project type.');
@@ -696,7 +706,20 @@ class Project
             throw new \RuntimeException('Cannot start application before deploy strategy is set.');
         }
 
-        return $app->start();
+        return $app->start($forceRecreate);
+    }
+
+    /**
+     * Why the user app just started is not running, read as a deploy reads it
+     * ({@see Dind\AppHealth::startFailure()}); null when it runs or there is none.
+     */
+    public function startedAppFailure(): ?string
+    {
+        if (! $this->hasUserApp() || ! $this->runtime instanceof Dind) {
+            return null;
+        }
+
+        return $this->runtime->appHealth()->startFailure();
     }
 
     public function syncGeneratedProxyRules(): void
@@ -741,6 +764,17 @@ class Project
         return $volumes->copyVolumeDataToIncoming($source->homeDirPath());
     }
 
+    /**
+     * A warning for each anonymous volume with data this project's copy
+     * leaves out ({@see CopyVolumes::anonymousVolumeWarnings()}).
+     *
+     * @return list<string>
+     */
+    public function anonymousVolumeWarnings(): array
+    {
+        return $this->copyVolumesForClone()?->anonymousVolumeWarnings() ?? [];
+    }
+
     public function copyVolumesForClone(): ?CopyVolumes
     {
         if ($this->runtime()->kind() !== 'dind') {
@@ -770,6 +804,42 @@ class Project
     }
 
     /**
+     * Store the env vars the files copied from $source were written with, so
+     * the next rebuild writes them again instead of dropping or reverting them.
+     */
+    public function adoptCopiedEnvVars(ModelsUser $source): void
+    {
+        if (! $this->runtime instanceof Dind) {
+            return;
+        }
+        $details = ModelsUser::copiedEnvDetails($source->getDetails());
+        if (is_array($details['env_vars'])) {
+            $details['env_vars'] = (new CopiedRunFile($this->runtime))
+                ->repointedEnvVars($source, ApiAccess::withoutReservedKeys($details['env_vars']));
+        }
+        if ($this->holdsDetails($details)) {
+            return;
+        }
+        $this->model->setDetails($details);
+        $this->model->save();
+    }
+
+    /**
+     * @param  array<string, mixed>  $details
+     */
+    private function holdsDetails(array $details): bool
+    {
+        $current = $this->model->getDetails();
+        foreach ($details as $key => $value) {
+            if (($current[$key] ?? null) !== $value) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
      * Get the images a run file copied into this project names into its account
      * ({@see CopiedImages}): the one at $path, or the project's own.
      */
@@ -780,7 +850,25 @@ class Project
         }
     }
 
-    public function copyHomeDirFrom(self $source): void
+    /**
+     * The image this project's account has under the tag a copied Railpack run
+     * file at $path names, held aside before {@see provideCopiedImages()}
+     * builds it again; null when there is none.
+     */
+    public function holdCopiedImage(string $path): ?HeldImage
+    {
+        if ($this->runtime instanceof Dind && $this->hasUserApp()) {
+            return (new CopiedImages($this->runtime))->holdRailpackImage($path);
+        }
+
+        return null;
+    }
+
+    /**
+     * $sourceRunning for a first copy taken while the source app still runs, so the one taken once
+     * it is stopped moves only what changed: a file the app removes meanwhile is not an error.
+     */
+    public function copyHomeDirFrom(self $source, bool $sourceRunning = false): void
     {
         $src = rtrim($source->homeDirPath(), '/').'/';
         $dest = rtrim($this->homeDirPath(), '/').'/';
@@ -788,7 +876,8 @@ class Project
         $excludes = $this->isDindTemplate() ? ['--exclude=docker/'] : [];
         $this->runCopyProcess(
             ['sudo', 'rsync', '-a', '--delete', ...$excludes, $src, $dest],
-            'Failed to rsync home directory from source'
+            'Failed to rsync home directory from source',
+            $sourceRunning ? [self::RSYNC_VANISHED_FILES] : [],
         );
 
         $this->fixPermissions();
@@ -957,8 +1046,9 @@ class Project
     }
 
     /**
-     * Hands a staged copy of the home, the directory itself and its contents, to the
-     * account under the home's own rules, so the account can read it before it is swapped in.
+     * Hands a staged copy of the home to the account under the home's own rules: its
+     * contents go to the account, the directory itself stays root-owned like the home
+     * root, so the account can use the copy but cannot add or swap its top-level entries.
      */
     public function handStagedHomeToAccount(string $stagedHome): void
     {
@@ -968,7 +1058,8 @@ class Project
         }
         $stagedHome = rtrim($stagedHome, '/');
 
-        $this->chownTree($stagedHome, $ids[0], $ids[1], 0);
+        $this->secureRootOwnedDirectory($stagedHome);
+        $this->chownTree($stagedHome, $ids[0], $ids[1], 1);
         $this->restoreProtectedDirectories($stagedHome);
     }
 
@@ -1049,10 +1140,10 @@ class Project
     private function restoreProtectedDirectories(string $home): void
     {
         $dockerDir = "{$home}/docker";
-        if ($this->isDindTemplate() && $this->system->filesystem()->directoryExists($dockerDir)) {
+        if ($this->isDindTemplate() && $this->isRealDirectory($dockerDir)) {
             $this->system->runProcess("sudo chown root:root {$dockerDir}");
         }
-        if ($this->system->filesystem()->directoryExists("{$home}/.panelalpha")) {
+        if ($this->isRealDirectory("{$home}/.panelalpha")) {
             $this->system->runProcess(['sudo', 'chmod', '700', "{$home}/.panelalpha"]);
         }
     }
@@ -1061,10 +1152,22 @@ class Project
     {
         foreach ($this->model->getDomains() as $domain) {
             $lscacheDir = $home.'/'.$domain->domain.'/.lscache';
-            if ($this->system->filesystem()->directoryExists($lscacheDir)) {
+            if ($this->isRealDirectory($lscacheDir)) {
                 $this->system->runProcess(['sudo', 'chown', '-R', 'nobody:'.$uid, $lscacheDir]);
             }
         }
+    }
+
+    /** chown and chmod follow a link named on their command line, so a link is never one of these directories. */
+    private function isRealDirectory(string $path): bool
+    {
+        $filesystem = $this->system->filesystem();
+        if (! $filesystem->isSymlink($path)) {
+            return $filesystem->directoryExists($path);
+        }
+        Log::warning("Leaving '{$path}' alone while fixing permissions: it is a symbolic link.");
+
+        return false;
     }
 
     private function isDindTemplate(): bool
@@ -1164,11 +1267,12 @@ class Project
 
     /**
      * @param  list<string>  $cmd
+     * @param  list<int>  $alsoAccepted  exit statuses that are not a failure here
      */
-    private function runCopyProcess(array $cmd, string $context): void
+    private function runCopyProcess(array $cmd, string $context, array $alsoAccepted = []): void
     {
         $process = $this->system->runProcess($cmd);
-        if ($process->isSuccessful()) {
+        if ($process->isSuccessful() || in_array($process->getExitCode(), $alsoAccepted, true)) {
             return;
         }
         $output = trim($process->getErrorOutput().' '.$process->getOutput());

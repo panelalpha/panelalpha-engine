@@ -90,6 +90,77 @@ class ProjectsContainerAppDatabasePushTest extends TestCase
         $this->assertDirectoryDoesNotExist($this->root.'/live/.pre-push-db');
     }
 
+    public function test_a_cleanup_failure_after_the_push_committed_keeps_the_database_it_created(): void
+    {
+        $stg = $this->containerProject('stg', 2002);
+        $live = $this->makeUser('live', ['template' => 'dind', 'UID' => 1001, 'GID' => 1001, 'mysql_prefix' => 'live_'], 'live.example.test');
+        $this->makeMainDomain($live, 'live.example.test');
+        $stg->staging = $live->id;
+        $stg->save();
+        $this->writeRunFile('stg', $stg);
+        $this->writeRunFile('live', $live);
+
+        $result = (new Projects($this->system(failRemoving: $this->root.'/live/.pre-push')))->pushToApp('stg', 'live');
+
+        $this->assertSame(['create live_app', 'drop live_app', 'create live_app', 'copy stg_app to live_app'], $this->mysql->log);
+        $this->assertTrue(AppDatabase::isOwnedBy($live));
+        $this->assertCount(1, $result->warnings);
+        $this->assertStringContainsString('The push was applied, but removing '.$this->root.'/live/.pre-push failed', $result->warnings[0]);
+        $this->assertSame('completed', User::findByUsernameOrFail('live')->getDetails()['async_status']['push'] ?? null);
+    }
+
+    public function test_a_cleanup_failure_after_the_push_committed_replays_no_rollback_dump(): void
+    {
+        [$stg, $live] = $this->stagingPair();
+        $this->writeRunFile('stg', $stg);
+        $this->writeRunFile('live', $live);
+
+        $result = (new Projects($this->system(failRemoving: $this->root.'/live/.pre-push')))->pushToApp('stg', 'live');
+
+        $this->assertSame(['dump live_app', 'drop live_app', 'create live_app', 'copy stg_app to live_app'], $this->mysql->log);
+        $this->assertDirectoryDoesNotExist($this->root.'/live/.pre-push-db');
+        $this->assertSame('pushed', Yaml::parseFile($this->root.'/live/project/'.EngineArtifacts::RUN_COMPOSE)['services']['app']['environment']['MARKER']);
+        $this->assertCount(1, $result->warnings);
+        $this->assertSame('completed', User::findByUsernameOrFail('live')->getDetails()['async_status']['push'] ?? null);
+        $this->assertNull(User::findByUsernameOrFail('live')->getDetails()['error'] ?? null);
+    }
+
+    public function test_a_failed_push_into_a_target_without_one_removes_the_database_user_and_password_it_provisioned(): void
+    {
+        $this->pairWithoutTargetDatabase();
+
+        $this->pushFails(files: false, databases: true);
+
+        $this->assertNoAppDatabaseOnLive();
+    }
+
+    public function test_a_failed_files_only_push_removes_the_empty_database_it_provisioned(): void
+    {
+        [$stg, $live] = $this->pairWithoutTargetDatabase();
+        $this->writeRunFile('stg', $stg);
+        $this->writeRunFile('live', $live);
+
+        $this->pushFails(files: true, databases: false);
+
+        $this->assertContains('create live_app', $this->mysql->log);
+        $this->assertNoAppDatabaseOnLive();
+    }
+
+    public function test_a_failed_files_only_push_keeps_a_database_the_server_already_had_under_that_name(): void
+    {
+        [$stg, $live] = $this->pairWithoutTargetDatabase();
+        $this->writeRunFile('stg', $stg);
+        $this->writeRunFile('live', $live);
+        $this->mysql->databases[] = 'live_app';
+
+        $this->pushFails(files: true, databases: false);
+
+        $this->assertContains('live_app', $this->mysql->databases);
+        $this->assertNotContains('drop live_app', $this->mysql->log);
+        $this->assertArrayNotHasKey('live_app', $this->mysql->users);
+        $this->assertSame([], User::findByUsernameOrFail('live')->mysqlDatabases()->pluck('database')->all());
+    }
+
     public function test_a_project_whose_database_lives_in_its_volumes_touches_no_mysql(): void
     {
         $live = $this->makeUser('live', ['template' => 'dind', 'UID' => 1001, 'GID' => 1001, 'mysql_prefix' => 'live_']);
@@ -101,6 +172,42 @@ class ProjectsContainerAppDatabasePushTest extends TestCase
 
         $this->assertSame([], $this->mysql->log);
         $this->assertSame([], $live->refresh()->mysqlDatabases()->pluck('database')->all());
+    }
+
+    private function pushFails(bool $files, bool $databases): void
+    {
+        try {
+            (new Projects($this->system(failStart: true)))->pushToApp('stg', 'live', files: $files, databases: $databases);
+            $this->fail('the push should have failed');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('start exploded', $e->getMessage());
+        }
+    }
+
+    private function assertNoAppDatabaseOnLive(): void
+    {
+        $live = User::findByUsernameOrFail('live');
+        $this->assertNotContains('live_app', $this->mysql->databases);
+        $this->assertArrayNotHasKey('live_app', $this->mysql->users);
+        $this->assertSame([], array_values(array_filter($this->mysql->grants, static fn (array $g): bool => $g[0] === 'live_app')));
+        $this->assertSame([], $live->mysqlDatabases()->pluck('database')->all());
+        $this->assertSame([], $live->mysqlUsers()->pluck('user')->all());
+        $this->assertNull(AppDatabase::credentialsOf($live));
+        $this->assertSame('failed', $live->getDetails()['async_status']['push'] ?? null);
+    }
+
+    /**
+     * @return array{0: User, 1: User}
+     */
+    private function pairWithoutTargetDatabase(): array
+    {
+        $live = $this->makeUser('live', ['template' => 'dind', 'UID' => 1001, 'GID' => 1001, 'mysql_prefix' => 'live_'], 'live.example.test');
+        $this->makeMainDomain($live, 'live.example.test');
+        $stg = $this->containerProject('stg', 2002);
+        $stg->staging = $live->id;
+        $stg->save();
+
+        return [$stg->refresh(), $live->refresh()];
     }
 
     /**
@@ -154,11 +261,16 @@ class ProjectsContainerAppDatabasePushTest extends TestCase
         file_put_contents($dir.EngineArtifacts::RUN_GROUP, "root:x:0:\napp:x:{$user->getGid()}:\n");
     }
 
-    private function system(bool $failStart = false): System
+    private function system(bool $failStart = false, ?string $failRemoving = null): System
     {
-        return new class($this->root, $this->mysql, $failStart) extends System
+        return new class($this->root, $this->mysql, $failStart, $failRemoving) extends System
         {
-            public function __construct(private string $root, private Mysql $server, private bool $failStart) {}
+            public function __construct(
+                private string $root,
+                private Mysql $server,
+                private bool $failStart,
+                private ?string $failRemoving,
+            ) {}
 
             public function project(User $model): Project
             {
@@ -234,6 +346,9 @@ class ProjectsContainerAppDatabasePushTest extends TestCase
             private function change(array $argv): int
             {
                 $args = array_values(array_filter(array_slice($argv, 2), static fn (string $a): bool => ! str_starts_with($a, '-')));
+                if (($argv[1] ?? '') === 'rm' && in_array($this->failRemoving, $args, true)) {
+                    return 1;
+                }
                 match ($argv[1] ?? '') {
                     'mkdir' => is_dir($args[0]) || mkdir($args[0], 0777, true),
                     'rm' => array_map(static fn (string $p) => exec('rm -rf '.escapeshellarg($p)), $args),

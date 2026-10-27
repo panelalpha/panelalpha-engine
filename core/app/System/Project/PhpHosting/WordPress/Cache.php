@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Log;
  * logged and reported, not raised; with plugins skipped there is nothing to
  * call, so that step is skipped. Goes through WpCli::runOrFail so a successful
  * flush shares the OpenLiteSpeed webserver-reload side effect of the raw
- * `cache flush` command. HTTP, artisan, and MCP tools are adapters.
+ * `cache flush` command.
  */
 final class Cache
 {

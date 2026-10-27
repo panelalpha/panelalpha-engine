@@ -10,7 +10,9 @@ use App\System;
  *
  * Optional path selects the install (null = main domain document root);
  * skipPlugins runs every operation with --skip-plugins --skip-themes. Named
- * modules use the shared WpCli; they do not resolve path or own a runner.
+ * modules use the shared WpCli; they do not resolve path or own a runner, and
+ * a non-zero exit in a named operation becomes Exception unless the module
+ * says otherwise. HTTP, artisan and MCP tools are thin adapters over them.
  */
 final class WordPress
 {

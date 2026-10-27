@@ -59,6 +59,8 @@ final class HubGrants
     }
 
     /**
+     * Always the explicit list: `api` with no route ability means no limit.
+     *
      * @param  array<int, string>  $grants
      * @return array<int, string>
      *
@@ -75,7 +77,6 @@ final class HubGrants
             $routes = array_merge($routes, self::OPTIONAL_ROUTES[$grant]);
         }
 
-        // Always the explicit list: `api` with no route ability means no limit.
         return TokenAbilities::build(api: true, mcp: false, routes: $routes);
     }
 

@@ -302,6 +302,26 @@ class ProxyRule extends Model
     }
 
     /**
+     * The enabled tcp or udp rule that already listens on this address and port.
+     * stream.conf renders a server block per rule and no server name, so nginx
+     * serves only one of two such rules.
+     */
+    public static function conflictingStreamRule(string $transport, string $listenIp, int $listenPort, ?int $ignoreId = null): ?self
+    {
+        $query = self::query()
+            ->where('enabled', true)
+            ->where('transport', $transport)
+            ->where('listen_ip', $listenIp)
+            ->where('listen_port', $listenPort);
+        if ($ignoreId !== null) {
+            $query->whereKeyNot($ignoreId);
+        }
+
+        /** @var ?self */
+        return $query->first();
+    }
+
+    /**
      * Scope to get only enabled rules.
      */
     public function scopeEnabled(Builder $query): Builder

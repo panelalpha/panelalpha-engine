@@ -4,6 +4,7 @@ namespace App\Http\Requests\Concerns;
 
 use App\Lib\Vault\RequestVault;
 use App\Rules\EximSecret;
+use App\Rules\EximUsername;
 use App\Rules\UpstreamHost;
 
 /**
@@ -12,17 +13,15 @@ use App\Rules\UpstreamHost;
 trait ValidatesEximConfig
 {
     /**
-     * The mail credentials, which may be a `vault:<key>`.
+     * The mail passwords and API tokens, which may be a `vault:<key>`. The
+     * usernames are not secrets: a reference sent for one is refused ({@see EximUsername}).
      *
      * @var list<string>
      */
     private const EXIM_SECRET_FIELDS = [
         'sendgrid_api_token',
-        'mailchannels_username',
         'mailchannels_password',
-        'amazon_ses_smtp_username',
         'amazon_ses_smtp_password',
-        'smtp_username',
         'smtp_password',
     ];
 
@@ -62,18 +61,19 @@ trait ValidatesEximConfig
         $host = ['string', 'nullable', new UpstreamHost];
         $port = self::EXIM_PORT_RULE;
         $secret = ['string', 'nullable', new EximSecret];
+        $username = [...$secret, new EximUsername];
         $rules = [
             'smarthost_provider' => 'string|nullable',
             'sendgrid_api_token' => $secret,
-            'mailchannels_username' => $secret,
+            'mailchannels_username' => $username,
             'mailchannels_password' => $secret,
             'amazon_ses_smtp_endpoint' => $host,
             'amazon_ses_starttls_port' => $port,
-            'amazon_ses_smtp_username' => $secret,
+            'amazon_ses_smtp_username' => $username,
             'amazon_ses_smtp_password' => $secret,
             'smtp_host' => $host,
             'smtp_port' => $port,
-            'smtp_username' => $secret,
+            'smtp_username' => $username,
             'smtp_password' => $secret,
             'smtp_implicit_tls' => 'boolean|nullable',
             'sender_domain' => [...$host, self::senderDomainIsNotAnAddress(...)],

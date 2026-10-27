@@ -106,7 +106,7 @@ class FirewallController extends Controller
             required: ['action'],
             properties: [
                 new OA\Property(property: 'action', type: 'string', enum: ['allow', 'deny']),
-                new OA\Property(property: 'scope', type: 'string', enum: ['host', 'published', 'both'], nullable: true, description: 'Default host: the host\'s own ports. published: ports Docker publishes; port and destination are the container\'s, and direction is in. Neither scope reaches the other. An inbound deny sent without a scope is both; a scope that is sent is kept.'),
+                new OA\Property(property: 'scope', type: 'string', enum: ['host', 'published', 'both'], nullable: true, description: 'Default host: the host\'s own ports. published: ports Docker publishes; port and destination are the container\'s, and direction is in. Neither scope reaches the other. An inbound deny sent without a scope is both; a scope that is sent is kept, except both on an outbound rule, which is host.'),
                 new OA\Property(property: 'direction', type: 'string', enum: ['in', 'out', 'both'], nullable: true, description: 'Default in. both: traffic from source coming in and to source going out, as one rule; needs source and no destination.'),
                 new OA\Property(property: 'protocol', type: 'string', enum: ['tcp', 'udp'], nullable: true, description: 'Omit for both. Required with a port range or list.'),
                 new OA\Property(property: 'port', type: 'string', nullable: true, example: '22', description: 'Destination port, range (30000:30009) or comma list.'),
@@ -139,8 +139,8 @@ class FirewallController extends Controller
     #[OA\Put(
         path: '/firewall/rules/{id}',
         summary: 'Edit a firewall rule',
-        description: 'A field not sent keeps its current value; send null to clear it. An edit that changes action without sending scope '
-            .'gets the scope a new rule with that action would get (an inbound deny is both, an allow is host); a published rule stays published. '
+        description: 'A field not sent keeps its current value; send null to clear it. An edit that changes action or direction without sending scope '
+            .'gets the scope a new rule with them would get (an inbound deny is both, an outbound deny and an allow are host); a published rule stays published. '
             .'The rule gets a new id when what it matches changes; an edit that would make it match the same traffic as another rule is refused.',
         security: [['bearerAuth' => []]],
         tags: ['Firewall'],

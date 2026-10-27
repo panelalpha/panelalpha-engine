@@ -2,17 +2,20 @@
 
 namespace App\System\Project\PhpHosting\WordPress\Migration\Steps;
 
-use App\Models\Setting;
 use App\Models\WordpressMigration;
 use App\System\Project\PhpHosting\WordPress\Migration\MigrationStep;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceConnection;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceUrl;
+use App\System\Project\PhpHosting\WordPress\Migration\SourceWordpressClient;
+use App\System\Project\PhpHosting\WordPress\Migration\TransferAddress;
 use RuntimeException;
 
 /**
  * Step 5: POST remote-sync with the destination URL on the kept domain
  * (incl. subdirectory), this migration's token, and the engine's IPv4 the
- * source pins that name to. The token never reaches step_log.
+ * source pins that name to. The token never reaches step_log. A transfer
+ * already holding the source's lock is taken over only when an import on this
+ * engine started it; any other one fails the step.
  */
 final class RemoteSyncStep implements MigrationStep
 {
@@ -40,7 +43,7 @@ final class RemoteSyncStep implements MigrationStep
 
         $destinationUrl = SourceUrl::destinationSiteUrl($label, $migration->source_url);
 
-        $response = $this->source->open($migration)->remoteSync($destinationUrl, $token, destinationIp: self::engineIpv4());
+        $response = $this->start($this->source->transfer($migration), $destinationUrl, $token);
 
         if (($response['success'] ?? null) !== true) {
             $message = is_string($response['message'] ?? null)
@@ -59,11 +62,28 @@ final class RemoteSyncStep implements MigrationStep
         $migration->markStepCompleted($this->name());
     }
 
-    /** The engine's public IPv4, where the source sends the destination's name; null when none is recorded. */
-    private static function engineIpv4(): ?string
+    /**
+     * @return array<array-key, mixed>
+     */
+    private function start(SourceWordpressClient $client, string $destinationUrl, string $token): array
     {
-        $ipv4 = trim((string) Setting::get('default_ipv4'));
+        try {
+            return $client->remoteSync($destinationUrl, $token, destinationIp: TransferAddress::ipv4());
+        } catch (RuntimeException $e) {
+            $holder = SourceWordpressClient::lockHolder($e);
+            if ($holder === null) {
+                throw $e;
+            }
+            if (! WordpressMigration::startedPluginMigration($holder)) {
+                throw new RuntimeException(
+                    "The source site is running a transfer this Engine did not start (migration {$holder}), "
+                    .'and the import does not take it over: resume once it has finished or its lock has expired',
+                    0,
+                    $e,
+                );
+            }
 
-        return filter_var($ipv4, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false ? null : $ipv4;
+            return $client->remoteSync($destinationUrl, $token, destinationIp: TransferAddress::ipv4(), force: true);
+        }
     }
 }

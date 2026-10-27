@@ -67,7 +67,7 @@ class WordpressMigrationHeartbeatTest extends WordpressMigrationTestCase
     {
         $this->freezeSecond();
         $migration = $this->migrationAtRemoteSync();
-        $http = new RoutedSourceHttpClient();
+        $http = (new RoutedSourceHttpClient())->requiringToken(self::SOURCE_TOKEN);
         $seen = [];
         $http->on('POST', self::REMOTE_SYNC, function () use ($http, $migration, &$seen): SourceHttpResponse {
             $http->wait(WordpressMigration::STALE_MINUTES + 5, fn () => $this->travel(60)->seconds(), self::REMOTE_SYNC);
@@ -91,7 +91,7 @@ class WordpressMigrationHeartbeatTest extends WordpressMigrationTestCase
     {
         $this->freezeSecond();
         $migration = $this->migrationAtRemoteSync();
-        $http = new RoutedSourceHttpClient();
+        $http = (new RoutedSourceHttpClient())->requiringToken(self::SOURCE_TOKEN);
         $http->on('POST', self::REMOTE_SYNC, function () use ($http, $migration): SourceHttpResponse {
             WordpressMigration::query()->whereKey($migration->id)->update(['run_id' => 'run-that-took-over']);
             $http->wait(5, fn () => $this->travel(60)->seconds(), self::REMOTE_SYNC);
@@ -112,20 +112,22 @@ class WordpressMigrationHeartbeatTest extends WordpressMigrationTestCase
         $this->assertSame(WordpressMigration::STEP_STATUS_PENDING, $record->stepStatus(WordpressMigration::STEP_REMOTE_SYNC));
         $this->assertSame([], $record->step_log);
         $this->assertNull($record->plugin_migration_id);
-        $this->assertCount(1, $http->calls);
+        $this->assertSame(1, $http->countWithToken('POST', self::REMOTE_SYNC));
     }
 
     public function test_a_finished_run_stops_keeping_its_claim_alive(): void
     {
         $migration = $this->migrationAtRemoteSync();
         $http = (new RoutedSourceHttpClient())
+            ->requiringToken(self::SOURCE_TOKEN)
             ->on('POST', self::REMOTE_SYNC, new SourceHttpResponse('{"success":true,"migration_id":"m1"}', 200));
 
         $this->module($http)->advanceOnce($migration);
+        $sent = $http->count('POST', self::REMOTE_SYNC);
         $this->travel(RunHeartbeat::INTERVAL_SECONDS)->seconds();
         $http->request('POST', self::REMOTE_SYNC);
 
-        $this->assertSame(2, $http->count('POST', self::REMOTE_SYNC));
+        $this->assertSame($sent + 1, $http->count('POST', self::REMOTE_SYNC));
     }
 
     private function module(RoutedSourceHttpClient $http): WordPressMigrationModule
@@ -150,6 +152,7 @@ class WordpressMigrationHeartbeatTest extends WordpressMigrationTestCase
         );
         $migration->storeResolvedSource('https://example.com', null, SourceSite::REST_WP_JSON);
         $migration->storeMigratorToken('dest-token');
+        $migration->storeSourceToken(self::SOURCE_TOKEN);
         foreach (WordPressMigrationModule::stepNames() as $step) {
             if ($step === WordpressMigration::STEP_REMOTE_SYNC) {
                 break;

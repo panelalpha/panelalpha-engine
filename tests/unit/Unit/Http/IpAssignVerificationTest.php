@@ -79,6 +79,41 @@ class IpAssignVerificationTest extends TestCase
         $this->assertSame(0, IpAssigned::query()->count());
     }
 
+    public function test_an_address_added_before_the_read_back_throws_is_taken_off_the_interface(): void
+    {
+        $user = $this->user('alice');
+        $subnet = IpSubnet::create(['ip' => '192.0.2.0', 'mask' => 29, 'family' => 4, 'is_shared' => 0]);
+        $system = $this->fakeSystem(interface: [], noDefaultRoute: false, readBackFails: true);
+        $this->app->instance(System::class, $system);
+
+        $response = $this->postJson('/api/ip/assign', [
+            'user_id' => $user->id,
+            'ip_subnet_id' => $subnet->id,
+            'ip_address' => '192.0.2.2',
+        ]);
+
+        $response->assertStatus(422);
+        $this->assertStringContainsString('Could not read addresses of interface eth0', (string) $response->json('errors.ip_address.0'));
+        $this->assertSame(0, IpAssigned::query()->count());
+        $this->assertCount(1, $this->removals($system, '192.0.2.2/29'), 'the address the add put there is taken off again');
+    }
+
+    public function test_an_address_whose_add_failed_is_left_on_the_interface(): void
+    {
+        $user = $this->user('alice');
+        $subnet = IpSubnet::create(['ip' => '192.0.2.0', 'mask' => 29, 'family' => 4, 'is_shared' => 0]);
+        $system = $this->fakeSystem(interface: [], noDefaultRoute: false, readBackFails: true, addFails: true);
+        $this->app->instance(System::class, $system);
+
+        $this->postJson('/api/ip/assign', [
+            'user_id' => $user->id,
+            'ip_subnet_id' => $subnet->id,
+            'ip_address' => '192.0.2.2',
+        ])->assertStatus(422);
+
+        $this->assertSame([], $this->removals($system, '192.0.2.2/29'), 'an address this call did not add is not its to remove');
+    }
+
     public function test_an_assignment_the_host_actually_took_is_reported(): void
     {
         $user = $this->user('alice');
@@ -128,8 +163,13 @@ class IpAssignVerificationTest extends TestCase
             'ip_address' => '192.0.2.2',
         ])->assertStatus(422);
 
-        $removed = array_filter($system->commands, static fn (array $argv): bool => array_slice($argv, 0, 4) === ['ip', 'addr', 'del', '192.0.2.2/29']);
-        $this->assertCount(1, $removed, 'the address is taken off the interface');
+        $this->assertCount(1, $this->removals($system, '192.0.2.2/29'), 'the address is taken off the interface');
+    }
+
+    /** @return list<list<string>> */
+    private function removals(System $system, string $cidr): array
+    {
+        return array_values(array_filter($system->commands, static fn (array $argv): bool => array_slice($argv, 0, 4) === ['ip', 'addr', 'del', $cidr]));
     }
 
     public function test_addresses_compare_by_value_not_spelling(): void
@@ -162,15 +202,17 @@ class IpAssignVerificationTest extends TestCase
     /**
      * @param list<string> $interface addresses the host interface answers with
      */
-    private function fakeSystem(array $interface, bool $noDefaultRoute): System
+    private function fakeSystem(array $interface, bool $noDefaultRoute, bool $readBackFails = false, bool $addFails = false): System
     {
-        return new class ($interface, $noDefaultRoute) extends System {
+        return new class ($interface, $noDefaultRoute, $readBackFails, $addFails) extends System {
             /** @var list<list<string>> */
             public array $commands = [];
 
             public function __construct(
                 private array $interface,
                 private bool $noDefaultRoute,
+                private bool $readBackFails,
+                private bool $addFails,
             ) {
             }
 
@@ -189,6 +231,14 @@ class IpAssignVerificationTest extends TestCase
                     return $this->noDefaultRoute
                         ? FakeProcess::failed('No default route found for IPv4')
                         : FakeProcess::ok("default via 10.0.0.1 dev eth0\n");
+                }
+
+                if (str_contains($joined, 'addr add') && $this->addFails) {
+                    return FakeProcess::failed('RTNETLINK answers: File exists');
+                }
+
+                if (str_contains($joined, 'addr show') && $this->readBackFails) {
+                    return FakeProcess::failed('Device "eth0" does not exist.');
                 }
 
                 if (str_contains($joined, 'addr show')) {

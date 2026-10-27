@@ -2,14 +2,16 @@
 
 namespace Tests\Unit\WordpressMigration;
 
-use App\Http\Controllers\WordpressMigrationController;
 use App\Http\Requests\WordpressMigrationStoreRequest;
 use App\Jobs\MigrateWordpress;
 use App\Models\WordpressMigration;
 use App\System\Project\PhpHosting\WordPress\Migration\EngineAddresses;
+use App\System\Project\PhpHosting\WordPress\Migration\MigratorPluginPackage;
+use App\System\Project\PhpHosting\WordPress\Migration\SourceFetchGuard;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceHttpResponse;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceProbe;
 use App\System\Project\PhpHosting\WordPress\Migration\WordpressMigratorZip;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
 use ZipArchive;
@@ -132,6 +134,22 @@ class WordpressMigrationMethodsHttpTest extends WordpressMigrationTestCase
         ])->assertStatus(202);
     }
 
+    public function test_the_connection_test_refuses_every_internal_source_with_the_same_answer(): void
+    {
+        $this->app->instance(
+            WordpressMigrationStoreRequest::SOURCE_RESOLVER,
+            static fn (string $host): array => $host === 'sites-db' ? ['172.20.0.2'] : [$host],
+        );
+
+        foreach (['http://172.18.0.5:5000/', 'http://10.0.0.1:8006/', 'http://sites-db:3306/', 'https://93.184.216.40/'] as $url) {
+            $this->postJson('/api/wordpress/migrations/test', [
+                'url' => $url,
+                'username' => 'admin',
+                'password' => 'secret',
+            ])->assertStatus(422)->assertJsonPath('errors.url.0', SourceFetchGuard::REFUSED);
+        }
+    }
+
     public function test_the_connection_test_answers_200_and_creates_nothing(): void
     {
         Queue::fake();
@@ -172,10 +190,29 @@ class WordpressMigrationMethodsHttpTest extends WordpressMigrationTestCase
 
     public function test_the_download_link_is_signed_instead_of_authenticated(): void
     {
-        $middleware = Route::getRoutes()->getByName(WordpressMigrationController::PLUGIN_PACKAGE_ROUTE)?->gatherMiddleware() ?? [];
+        $middleware = Route::getRoutes()->getByName(MigratorPluginPackage::ROUTE)?->gatherMiddleware() ?? [];
 
         $this->assertContains('signed', $middleware);
         $this->assertNotContains('auth:api', $middleware);
+    }
+
+    public function test_a_link_whose_package_does_not_decrypt_is_not_found(): void
+    {
+        $this->assertPackageNotFound('garbage');
+        $this->assertPackageNotFound('');
+    }
+
+    public function test_a_link_whose_package_is_not_a_token_is_not_found(): void
+    {
+        $this->assertPackageNotFound(Crypt::encryptString('not-a-token'));
+        $this->assertPackageNotFound(Crypt::encryptString(strtoupper(self::TOKEN)));
+    }
+
+    private function assertPackageNotFound(string $package): void
+    {
+        $this->getJson('/api/wordpress/migrations/plugin-package/download?' . http_build_query(['package' => $package]))
+            ->assertNotFound()
+            ->assertExactJson(['message' => 'Not found']);
     }
 
     private function fixtureZip(): WordpressMigratorZip

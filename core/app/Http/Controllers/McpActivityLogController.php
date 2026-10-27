@@ -2,10 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\McpActivityLogIndexRequest;
+use App\Http\Requests\McpActivityLogStoreRequest;
 use App\Models\McpActivityLog;
-use App\Models\PersonalAccessToken;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use OpenApi\Attributes as OA;
 
 class McpActivityLogController extends Controller
@@ -51,29 +51,10 @@ class McpActivityLogController extends Controller
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function index(Request $request): JsonResponse
+    public function index(McpActivityLogIndexRequest $request): JsonResponse
     {
-        $params = $request->validate([
-            'token_ids' => 'nullable|array|max:1000',
-            'token_ids.*' => 'integer|min:1',
-            'token_name' => 'nullable|string|max:255',
-            'project' => 'nullable|string|max:255',
-            'page' => 'nullable|integer|min:1',
-        ]);
-
-        $query = McpActivityLog::orderByDesc('created_at');
-
-        if (! empty($params['token_ids'])) {
-            $query->forTokenIds(array_map('intval', $params['token_ids']));
-        }
-
-        if (! empty($params['token_name'])) {
-            $query->tokenNameContains($params['token_name']);
-        }
-
-        if (! empty($params['project'])) {
-            $query->where('project', $params['project']);
-        }
+        $query = McpActivityLog::matching($request->tokenIds(), $request->tokenName(), $request->project())
+            ->orderByDesc('created_at');
 
         return response()->json($query->paginate(20)->withQueryString());
     }
@@ -104,24 +85,9 @@ class McpActivityLogController extends Controller
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function store(Request $request): JsonResponse
+    public function store(McpActivityLogStoreRequest $request): JsonResponse
     {
-        $data = $request->validate([
-            'token_name' => 'required|string|max:255',
-            'project' => 'nullable|string|max:255',
-            'tool_name' => 'required|string|max:255',
-            'input' => 'nullable|array',
-            'status' => 'required|in:success,error',
-            'error_message' => 'nullable|string',
-        ]);
-
-        // `token_name` names a panel-side token the engine cannot check, so the
-        // row records which engine token actually wrote it.
-        $user = $request->user();
-        $token = $user !== null && method_exists($user, 'currentAccessToken') ? $user->currentAccessToken() : null;
-        $data['token_id'] = $token instanceof PersonalAccessToken ? $token->id : null;
-
-        $log = McpActivityLog::create($data);
+        $log = McpActivityLog::create($request->entry());
 
         return response()->json(['data' => $log], 201);
     }

@@ -3,33 +3,36 @@
 namespace Tests\Unit\WordpressMigration;
 
 use App\Exceptions\ProblemException;
-use App\Http\Requests\UserStoreRequest;
 use App\Lib\Domains\DomainPlan;
+use App\Lib\Project\NewProjectInput;
+use App\Lib\Project\ProjectCreator;
 use App\Models\User;
 use App\System\Project\PhpHosting\WordPress\Migration\ApiMigrationProjectCreator;
+use App\System\Project\PhpHosting\WordPress\Migration\ControllerProjectDeployer;
 use App\System\Project\PhpHosting\WordPress\Migration\ProjectDeployer;
+use Illuminate\Support\Facades\Auth;
 use RuntimeException;
 
 /**
- * ApiMigrationProjectCreator builds a UserStoreRequest (the kept domain with
- * no tunnel, or tunnel=panelalpha for an allocated name) and waits on the
- * in-process deployer; the Docker deploy itself is stubbed.
+ * ApiMigrationProjectCreator validates the create (the kept domain with no
+ * tunnel, or tunnel=panelalpha for an allocated name) and waits on the
+ * in-process deployer; the Docker deploy itself is stubbed. The queue
+ * worker's request and authenticated user stay as they were.
  */
 class ApiMigrationProjectCreatorTest extends WordpressMigrationTestCase
 {
     public function test_create_returns_domain_from_deployed_user(): void
     {
         $seen = null;
-        $deployer = new class ($seen) implements ProjectDeployer {
-            public function __construct(private mixed &$seen)
-            {
-            }
+        $deployer = new class($seen) implements ProjectDeployer
+        {
+            public function __construct(private mixed &$seen) {}
 
-            public function deploy(UserStoreRequest $request): User
+            public function deploy(NewProjectInput $input): User
             {
                 $this->seen = [
-                    'username' => $request->input('username'),
-                    'tunnel' => $request->input('tunnel'),
+                    'username' => $input->params['username'],
+                    'tunnel' => $input->params['tunnel'],
                 ];
 
                 return User::make([
@@ -51,14 +54,13 @@ class ApiMigrationProjectCreatorTest extends WordpressMigrationTestCase
     public function test_a_kept_domain_is_requested_with_no_tunnel(): void
     {
         $seen = null;
-        $deployer = new class ($seen) implements ProjectDeployer {
-            public function __construct(private mixed &$seen)
-            {
-            }
+        $deployer = new class($seen) implements ProjectDeployer
+        {
+            public function __construct(private mixed &$seen) {}
 
-            public function deploy(UserStoreRequest $request): User
+            public function deploy(NewProjectInput $input): User
             {
-                $this->seen = $request->only(['username', 'domain', 'tunnel']);
+                $this->seen = array_intersect_key($input->params, array_flip(['username', 'domain', 'tunnel']));
 
                 return User::make(['username' => 'wpcom', 'domain' => 'wp.com']);
             }
@@ -74,10 +76,35 @@ class ApiMigrationProjectCreatorTest extends WordpressMigrationTestCase
         ], $seen);
     }
 
+    public function test_the_worker_keeps_its_request_and_authenticated_user(): void
+    {
+        $creator = new class extends ProjectCreator
+        {
+            public ?NewProjectInput $input = null;
+
+            public function create(NewProjectInput $input): User
+            {
+                $this->input = $input;
+
+                return User::make(['username' => 'wpcom', 'domain' => 'wp.com']);
+            }
+        };
+        $this->app->instance(ProjectCreator::class, $creator);
+        $request = $this->app->make('request');
+
+        $domain = (new ApiMigrationProjectCreator(new ControllerProjectDeployer))->create('wpcom', 'wp.com');
+
+        $this->assertSame('wp.com', $domain);
+        $this->assertSame('wpcom', $creator->input?->params['username']);
+        $this->assertSame($request, $this->app->make('request'));
+        $this->assertFalse(Auth::hasUser());
+    }
+
     public function test_create_wraps_problem_exception_message(): void
     {
-        $deployer = new class implements ProjectDeployer {
-            public function deploy(UserStoreRequest $request): User
+        $deployer = new class implements ProjectDeployer
+        {
+            public function deploy(NewProjectInput $input): User
             {
                 throw ProblemException::one(
                     'username',
@@ -97,8 +124,9 @@ class ApiMigrationProjectCreatorTest extends WordpressMigrationTestCase
 
     public function test_create_rejects_user_without_domain(): void
     {
-        $deployer = new class implements ProjectDeployer {
-            public function deploy(UserStoreRequest $request): User
+        $deployer = new class implements ProjectDeployer
+        {
+            public function deploy(NewProjectInput $input): User
             {
                 return User::make([
                     'username' => 'examplecom',

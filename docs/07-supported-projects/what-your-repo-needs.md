@@ -81,7 +81,7 @@ A `start` script in your `package.json` takes precedence over the default the en
 
 ## Git submodules
 
-Submodules are fetched with the repository, and again on every pull, branch change and push, at the commit the repository records. A submodule that cannot be fetched fails the first deploy; after that, it keeps the copy it had and the deploy log warns. A submodule addressed over SSH (`git@host:...`) is fetched over HTTPS unless the project has a deploy key. If the application needs only some of them, for example because the others are private, name those in `.panelalpha/panelalpha.yaml` at the top of the repository:
+Submodules are fetched with the repository, and again on every pull, branch change and push, at the commit the repository records. A submodule that cannot be fetched fails the first deploy. After that, a submodule the last deployed commit already had keeps whatever copy it had and the deploy log warns, while one the new commit adds fails the deploy. A rebuild clones the repository afresh, so it cannot keep a copy: a submodule the previous deploy had checked out fails the rebuild instead of deploying the app without it. A submodule addressed over SSH (`git@host:...`) is fetched over HTTPS unless the project has a deploy key. If the application needs only some of them, for example because the others are private, name those in `.panelalpha/panelalpha.yaml` at the top of the repository:
 
 ```yaml
 git:
@@ -111,5 +111,11 @@ Ask your assistant to inspect the repository and explain what it found. Most cas
 **Inspect says this cannot be deployed.**
 The engine found no way to start a website from these files. Often it is a library, or the start file is missing. Fix the repository before you deploy.
 
+**Inspect does not read a file that is a link.**
+An inspection reads only inside the repository it inspects. A symbolic link to another file in the repository is followed; one that leads out of the repository is not, and that file's contents are not read. Make it a regular file, or link it to a file inside the repository.
+
 **The build fails with "Cannot change ownership to uid …".**
 Every file in a build or image must be owned by a user and group id between 0 and 65535; an account cannot hold anything owned above that. This happens when a build extracts an archive made on another system, for example `tar` in a Flutter web build. Extract it with `tar --no-same-owner` (or set `TAR_OPTIONS=--no-same-owner` in that `RUN` step), or deploy the project's published image instead.
+
+**Inspect stops with "… is a symbolic link in the repository".**
+A file in your `.panelalpha/files` folder, or one the app's recipe supplies, goes to a path where your repository commits a symbolic link: a folder on the way, or the file itself. The engine writes these files only into real folders and never through a link, so the inspection stops instead. Commit a real folder or file at that path, or put the file in `.panelalpha/files` under the path the link points to.

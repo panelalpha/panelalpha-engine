@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Vault;
 
+use App\Lib\Http\OutboundUrl;
 use App\Models\SecretVaultEntry;
 use App\Models\Setting;
 use Illuminate\Database\Schema\Blueprint;
@@ -13,7 +14,8 @@ use Tests\TestCase;
  * The vault tables on an in-memory sqlite database, mirroring
  * SqliteTaskTestCase: the production database is a real MySQL on a host this
  * suite must not touch, so the migration runs by hand against the connection
- * the test configures.
+ * the test configures. A repository host a paste is checked against gets a
+ * fixed public address from a fake resolver, so no test asks the machine's DNS.
  */
 abstract class VaultTestCase extends TestCase
 {
@@ -63,10 +65,14 @@ abstract class VaultTestCase extends TestCase
             $table->timestamps();
         });
         Setting::clearRuntimeSettings();
+        OutboundUrl::setResolverForTests(
+            static fn (string $host): array => in_array($host, ['github.com', 'gitlab.com'], true) ? ['140.82.121.4'] : [],
+        );
     }
 
     protected function tearDown(): void
     {
+        OutboundUrl::setResolverForTests(null);
         Setting::clearRuntimeSettings();
         Schema::connection('sqlite')->dropIfExists('settings');
         Schema::connection('sqlite')->dropIfExists('secret_vault_entries');

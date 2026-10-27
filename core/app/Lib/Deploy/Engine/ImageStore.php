@@ -149,8 +149,9 @@ interface ImageStore
     /**
      * On the engine: rebuild $image on the host from $dockerfile and push it
      * to the cache registry when the host and the registry both lack it. Holds
-     * the push lock exclusive, so a second deploy waits and then finds the
-     * image the first one built instead of building it again.
+     * a lock of that image's own, so a second deploy waits and then finds the
+     * image the first one built instead of building it again; only the push
+     * takes the push lock.
      */
     public function hostRebuildCommand(string $image, string $dockerfile): string;
 }

@@ -3,6 +3,8 @@
 namespace App\Lib\Git;
 
 use App\Exceptions\ProblemException;
+use App\Lib\Deploy\Source\RepositoryAddress;
+use App\Lib\Net\EgressRefusedException;
 use App\Models\User;
 use App\System;
 use App\System\Project\Git\WorkTree;
@@ -17,7 +19,8 @@ use Illuminate\Support\Facades\DB;
  * leaves them as a 0600 file for the length of one git command
  * ({@see WorkTree::execute()}). Host keys are pinned:
  * github.com, gitlab.com and bitbucket.org from their published keys, any
- * other host from one ssh-keyscan when the caller names it.
+ * other host from one ssh-keyscan when the caller names it, and only when the
+ * egress guard lets core connect to it ({@see RepositoryAddress}).
  */
 class DeployKey
 {
@@ -238,15 +241,17 @@ class DeployKey
     }
 
     /**
-     * The host's keys, as known_hosts lines, read once and then trusted.
+     * The host's keys, as known_hosts lines, read once and then trusted. The scan
+     * connects to the address the egress guard checked, never to a second lookup.
      *
      * @return list<string>
      */
     private function scan(string $host): array
     {
         [$name, $port] = preg_match('/^\[(.+)\]:(\d+)$/', $host, $m) === 1 ? [$m[1], $m[2]] : [$host, '22'];
+        $address = self::checkedAddress($name);
         try {
-            $output = $this->system->exec(['ssh-keyscan', '-T', '10', '-p', $port, '-t', 'ed25519,ecdsa,rsa', $name]);
+            $output = $this->system->exec(['ssh-keyscan', '-T', '10', '-p', $port, '-t', 'ed25519,ecdsa,rsa', $address]);
         } catch (\Throwable) {
             $output = '';
         }
@@ -260,6 +265,21 @@ class DeployKey
         }
 
         return $lines;
+    }
+
+    /**
+     * @throws ProblemException when core must not open a connection to $name
+     */
+    private static function checkedAddress(string $name): string
+    {
+        try {
+            return RepositoryAddress::checkedAddress($name);
+        } catch (EgressRefusedException $e) {
+            throw ProblemException::one('host', EgressRefusedException::CODE, $e->getMessage(), [
+                'expected' => 'a git host on a public address',
+                'examples' => ['git.example.com', 'git.example.com:2222'],
+            ]);
+        }
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Detect;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Compose\AppRoot;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Platform\Probes\SvelteKitAdapter;
@@ -106,11 +107,11 @@ final class DeployabilityCheck
 
         // Under app_root when the manifest declares one -- phpBB uses phpBB/.
         $root = AppRoot::path($this->projectDir, $this->decision);
-        $json = @file_get_contents($root.'/composer.json');
+        $json = AccountHomeRead::contents($root.'/composer.json');
         if ($json === false) {
             return;
         }
-        $lock = @file_get_contents($root.'/composer.lock');
+        $lock = AccountHomeRead::contents($root.'/composer.lock');
 
         $issue = PhpExtensionAvailability::issue($json, $lock === false ? null : $lock);
         if ($issue !== null) {

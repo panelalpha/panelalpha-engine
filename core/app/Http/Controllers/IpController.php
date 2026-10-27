@@ -439,20 +439,25 @@ class IpController extends Controller
 
     /**
      * Sites rebuilt onto an address the host lacks would be dead, so the interface is
-     * read back and the assignment rolled back when the address is not there.
+     * read back and the assignment rolled back when the address is not there. An address
+     * this call added is taken off again; one whose add failed may belong to someone else.
      *
      * @throws ValidationException
      */
     private function addAddressToHostOrRollBack(System $system, IpAssigned $ip, IpSubnet $ipSubnet): void
     {
         $address = $ip->ip_address;
+        $added = false;
         try {
             $network = $system->network();
             $cmd = $network->generateIpAddressAddCommand($address, $ipSubnet->mask, $ipSubnet->family);
-            $system->runProcessOnHost($cmd);
+            $added = $system->runProcessOnHost($cmd)->isSuccessful();
             $applied = $network->interfaceHasAddress($address, $ipSubnet->mask, $ipSubnet->family);
         } catch (\Exception $e) {
             $this->rollBack($ip, "IP assignment {$address}");
+            if ($added) {
+                $this->removeUnusedAddress($system, $ip, $ipSubnet);
+            }
 
             Log::warning("Could not add IP address {$address} to network interface", [
                 'exception_message' => $e->getMessage(),

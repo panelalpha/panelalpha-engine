@@ -2,11 +2,7 @@
 
 namespace App\Http\Controllers;
 
-use App\Auth\TokenRotation;
-use App\Lib\Hub\HubAudit;
-use App\Lib\Hub\HubLifecycle;
-use App\Lib\Hub\HubTokens;
-use App\Models\HubConnection;
+use App\Auth\CallingToken;
 use App\Models\PersonalAccessToken;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -24,8 +20,10 @@ class TokenController extends Controller
     #[OA\Post(
         path: '/tokens/current/rotate',
         summary: 'Replace the calling token with a new one of the same name and abilities',
-        description: 'The new token expires in 30 days. The calling token keeps working for 10 minutes, and '
-            .'rotating it again within those 10 minutes returns the same new token.',
+        description: 'The new token is issued for as long as the calling token was: a token created to last '
+            .'one day is replaced by one that lasts one day from now, and a token without an expiry by one '
+            .'without. A PanelAlpha Connect token is replaced by one that expires in 30 days. The calling token '
+            .'keeps working for 10 minutes, and rotating it again within those 10 minutes returns the same new token.',
         security: [['bearerAuth' => []]],
         tags: ['Tokens'],
         x: ['mcp-hide' => true],
@@ -48,18 +46,7 @@ class TokenController extends Controller
             return new JsonResponse(['message' => 'Only a token can rotate itself.'], 400);
         }
 
-        $credential = TokenRotation::rotate($token);
-
-        if (($id = HubTokens::connectionIdOf($token)) !== null) {
-            HubConnection::query()->where('connection_id', $id)->update(['token_id' => $credential['token_id']]);
-            HubAudit::log('hub.token_rotated', [
-                'connection_id' => $id,
-                'old_token_id' => $token->id,
-                'new_token_id' => $credential['token_id'],
-            ]);
-        }
-
-        return new JsonResponse(['data' => $credential]);
+        return new JsonResponse(['data' => CallingToken::rotate($token)]);
     }
 
     #[OA\Delete(
@@ -80,8 +67,7 @@ class TokenController extends Controller
             return new JsonResponse(['message' => 'Only a token can revoke itself.'], 400);
         }
 
-        $token->forceFill(['revoked_at' => now()])->save();
-        HubLifecycle::tokenRevoked($token);
+        CallingToken::revoke($token);
 
         return new Response(null, 204);
     }

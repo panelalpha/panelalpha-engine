@@ -104,6 +104,20 @@ class RequestVault
         return is_string($value) && str_starts_with(trim($value), SecretVaultEntry::PREFIX);
     }
 
+    /**
+     * The keys of an array field (`env_vars`) whose value is a `vault:<key>`.
+     *
+     * @param  array<mixed>  $values
+     * @return list<string>
+     */
+    public static function referencedKeys(array $values): array
+    {
+        return array_values(array_filter(
+            array_keys(array_filter($values, self::isReference(...))),
+            'is_string'
+        ));
+    }
+
     /** The entry a reference names, whatever its state; null for a literal or an unknown key. */
     public static function entry(?string $value): ?SecretVaultEntry
     {

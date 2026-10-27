@@ -6,6 +6,7 @@ use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\DockerErrorException;
 use App\Exceptions\NotFoundException;
 use App\Jobs\DeployProject;
+use App\Lib\Http\OutboundUrl;
 use App\Models\Admin;
 use App\Models\DeployHook;
 use App\Models\SecretVaultEntry;
@@ -54,6 +55,7 @@ class GitCommandsTest extends DeployHookTestCase
         config(['app.debug' => false]);
 
         $this->fakeGitHost();
+        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'github.com' ? ['140.82.121.4'] : []);
 
         $this->redeploy = new SpyCheckoutRedeploy();
         $this->app->instance(CheckoutRedeploy::class, $this->redeploy);
@@ -62,6 +64,7 @@ class GitCommandsTest extends DeployHookTestCase
     protected function tearDown(): void
     {
         $this->restoreHost();
+        OutboundUrl::setResolverForTests(null);
         Schema::dropIfExists('secret_vault_entries');
         Schema::dropIfExists('admins');
 
@@ -503,6 +506,21 @@ class GitCommandsTest extends DeployHookTestCase
         $this->assertSame(0, $exit);
         $this->assertSame('ghp_from_vault', $user->fresh()->getSiteGit('public_html')['token']);
         $this->assertSame('alice', $entry->refresh()->project);
+    }
+
+    /** The entry is not read for a project that does not exist, so it is neither claimed nor counted as used. */
+    public function test_a_vault_reference_for_an_unknown_project_is_not_read(): void
+    {
+        $entry = $this->vaultEntry('ghp_from_vault');
+
+        foreach (['git:update-credentials' => [], 'git:connect' => ['--repo-url' => self::REPO, '--branch' => 'main']] as $command => $options) {
+            $failure = $this->failureOf($command, ['username' => 'nobody', '--token' => $entry->reference()] + $options);
+
+            $this->assertSame("Project 'nobody' not found.\n", $failure, $command);
+        }
+        $entry->refresh();
+        $this->assertNull($entry->project);
+        $this->assertSame(0, $entry->use_count);
     }
 
     public function test_an_unknown_vault_reference_is_refused_not_stored(): void

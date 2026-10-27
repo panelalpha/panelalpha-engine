@@ -26,7 +26,8 @@ interface WebhookRegistrar
     /**
      * The API addressing for a repository URL, or null when the URL cannot be
      * read. Deliberately does not require a canonical host: a client that named
-     * the provider may point this at a self-managed instance.
+     * the provider may point this at a self-managed instance, which may be asked
+     * where its API is served.
      */
     public function address(string $repoUrl): ?WebhookTarget;
 

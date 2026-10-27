@@ -338,7 +338,7 @@ class EnvFile
         if (! is_file($path)) {
             return null;
         }
-        $contents = @file_get_contents($path);
+        $contents = AccountHomeRead::contents($path);
 
         return is_string($contents) ? $contents : null;
     }

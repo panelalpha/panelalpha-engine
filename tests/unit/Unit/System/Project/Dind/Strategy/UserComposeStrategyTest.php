@@ -16,6 +16,8 @@ use App\System\Project\Dind\Strategy\UserComposeStrategy;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 use Symfony\Component\Yaml\Yaml;
+use Tests\Support\StagedRename;
+use Tests\Unit\System\Project\SuccessfulProcess;
 
 /**
  * The compose-strategy headline promise (ADR-0001, ticket 04): the client's
@@ -25,8 +27,8 @@ use Symfony\Component\Yaml\Yaml;
  *
  * Driven through the real {@see UserComposeStrategy}, over a stubbed
  * {@see System} that answers a fixed file map and captures every
- * `filePutContents()` write the same way the staged-temp-file-then-`sudo cp`
- * write actually happens (mirroring {@see \Tests\Unit\Deploy\Dind\HostCompilePhpPlatformPinTest}).
+ * write the same way the staged-temp-file-then-`sudo cp`-then-rename
+ * ({@see StagedRename}) write actually happens (mirroring {@see \Tests\Unit\Deploy\Dind\HostCompilePhpPlatformPinTest}).
  */
 class UserComposeStrategyTest extends TestCase
 {
@@ -94,16 +96,30 @@ class UserComposeStrategyTest extends TestCase
                 if (preg_match('/^sudo chmod (\S+) (\S+)$/', $line, $m) === 1) {
                     $this->modes[$m[2]] = $m[1];
                 }
+                if (($moved = StagedRename::of($cmd)) !== null) {
+                    $this->renamed(...$moved);
+                }
 
                 return '';
             }
 
+            private function renamed(string $from, string $to): void
+            {
+                foreach (['copiedTo', 'modes'] as $map) {
+                    if (array_key_exists($from, $this->{$map})) {
+                        $this->{$map}[$to] = $this->{$map}[$from];
+                        unset($this->{$map}[$from]);
+                    }
+                }
+            }
+
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $process = new Process(['php', '-r', 'exit(0);']);
-                $process->run();
+                if (($moved = StagedRename::of($cmd)) !== null) {
+                    $this->renamed(...$moved);
+                }
 
-                return $process;
+                return SuccessfulProcess::for($cmd);
             }
         };
     }
@@ -422,16 +438,25 @@ class UserComposeStrategyTest extends TestCase
                 if (preg_match('/^sudo cp (\S+) (\S+)$/', $line, $m) === 1 && is_file($m[1])) {
                     $this->copiedTo[$m[2]] = (string) file_get_contents($m[1]);
                 }
+                $this->renameStaged($cmd);
 
                 return '';
             }
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $process = new Process(['php', '-r', 'exit(0);']);
-                $process->run();
+                $this->renameStaged($cmd);
 
-                return $process;
+                return SuccessfulProcess::for($cmd);
+            }
+
+            private function renameStaged(string|array $cmd): void
+            {
+                [$staged, $target] = StagedRename::of($cmd) ?? [null, null];
+                if ($staged !== null && isset($this->copiedTo[$staged])) {
+                    $this->copiedTo[$target] = $this->copiedTo[$staged];
+                    unset($this->copiedTo[$staged]);
+                }
             }
         };
     }

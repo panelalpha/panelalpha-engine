@@ -8,6 +8,8 @@ use App\Http\Controllers\User\Wp\WpCliController;
 use App\Models\Domain;
 use App\Models\User;
 use App\System\Project;
+use App\System\Project\FileManager;
+use App\System\Project\PhpHosting\WordPress\Exception as WordPressException;
 use App\System\Project\PhpHosting\WordPress\WpCli;
 use Illuminate\Support\Facades\Route as RouteFacade;
 use Mockery;
@@ -27,7 +29,7 @@ class WpCommandsReachModuleTest extends TestCase
 
     public function test_wp_command_signature_takes_username_and_optional_path(): void
     {
-        $command = new WpCommand();
+        $command = new WpCommand;
         $this->assertSame('wordpress:command', $command->getName());
         $definition = $command->getDefinition();
         $this->assertTrue($definition->hasArgument('username'));
@@ -37,9 +39,8 @@ class WpCommandsReachModuleTest extends TestCase
 
     public function test_domain_wp_cli_help_names_wp_command_as_replacement(): void
     {
-        $command = new DomainWpCli();
+        $command = new DomainWpCli;
         $this->assertSame('domain:wp-cli', $command->getName());
-        $this->assertContains('domains:wp-cli', $command->getAliases());
         $this->assertStringContainsString('wordpress:command', $command->getDescription());
     }
 
@@ -49,6 +50,8 @@ class WpCommandsReachModuleTest extends TestCase
         $user->username = 'alice';
         $project = Mockery::mock(Project::class);
         $project->shouldReceive('homeDirPath')->andReturn('/home/alice');
+        $project->shouldReceive('resolvePath')
+            ->andReturnUsing(fn (string $path): string => (new FileManager($project))->resolvePath($path));
         $user->shouldReceive('project')->andReturn($project);
 
         $main = Mockery::mock(Domain::class);
@@ -67,11 +70,34 @@ class WpCommandsReachModuleTest extends TestCase
         $this->assertSame(['plugin', 'list', '--path=/home/alice/alice.test/public_html'], $merged);
     }
 
+    public function test_a_path_that_leaves_the_home_is_refused_before_wp_cli_runs(): void
+    {
+        $user = Mockery::mock(User::class)->makePartial();
+        $user->username = 'alice';
+        $project = Mockery::mock(Project::class);
+        $project->shouldReceive('homeDirPath')->andReturn('/home/alice');
+        $project->shouldReceive('resolvePath')
+            ->andReturnUsing(fn (string $path): string => (new FileManager($project))->resolvePath($path));
+        $project->shouldNotReceive('runWpCli');
+        $user->shouldReceive('project')->andReturn($project);
+
+        try {
+            WpCli::for($user, '../bob/public_html')->run(['core', 'version']);
+            $this->fail('Expected WordPressException');
+        } catch (WordPressException $e) {
+            $this->assertSame(422, $e->httpStatus);
+            $this->assertSame(
+                'The path ../bob/public_html does not name a directory inside the project home.',
+                $e->getMessage(),
+            );
+        }
+    }
+
     public function test_canonical_and_deprecated_http_routes_share_the_controller_action(): void
     {
         $uris = [];
         foreach (RouteFacade::getRoutes() as $route) {
-            if ($route->getActionName() === WpCliController::class . '@run') {
+            if ($route->getActionName() === WpCliController::class.'@run') {
                 $uris[] = $route->uri();
             }
         }

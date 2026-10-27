@@ -88,7 +88,11 @@ class HubConnectCommand extends Command
         }
     }
 
-    /** @throws HubException */
+    /**
+     * The code is sent as typed: the Hub ignores case, dashes and spaces.
+     *
+     * @throws HubException
+     */
     private function connectEngine(): int
     {
         $existing = HubConnection::active();
@@ -103,7 +107,6 @@ class HubConnectCommand extends Command
             return self::FAILURE;
         }
 
-        // Sent as typed: the Hub ignores case, dashes and spaces.
         $this->connectCode = trim((string) $this->argument('code'));
         if ($this->connectCode === '' || mb_strlen($this->connectCode) > self::CODE_MAX_LENGTH) {
             $this->error('That is not a connect code. Copy the command from Connect engine in PanelAlpha Connect.');
@@ -119,17 +122,7 @@ class HubConnectCommand extends Command
         $ip = $this->engineIp();
         $pin = SpkiPin::fromFile(SpkiPin::servedCertificatePath());
         $this->hub = new HubClient($base);
-
-        // Ctrl+C cancels the session and revokes anything minted. Needs pcntl,
-        // which core's php-cli has.
-        if (extension_loaded('pcntl')) {
-            $this->trap([\SIGINT, \SIGTERM], function (): void {
-                $this->newLine();
-                $this->warn('Cancelled.');
-                $this->abandon('operator_cancelled');
-                exit(self::FAILURE);
-            });
-        }
+        $this->cancelOnInterrupt();
 
         $session = $this->createSession($ip, $pin);
         if ($session === null) {
@@ -154,6 +147,21 @@ class HubConnectCommand extends Command
         return $this->deliver($approval, $grants, $ip, $pin, $base);
     }
 
+    /** Ctrl+C cancels the session and revokes anything minted. Needs pcntl, which core's php-cli has. */
+    private function cancelOnInterrupt(): void
+    {
+        if (! extension_loaded('pcntl')) {
+            return;
+        }
+
+        $this->trap([\SIGINT, \SIGTERM], function (): void {
+            $this->newLine();
+            $this->warn('Cancelled.');
+            $this->abandon('operator_cancelled');
+            exit(self::FAILURE);
+        });
+    }
+
     /** @throws HubException */
     private function engineIp(): string
     {
@@ -170,6 +178,8 @@ class HubConnectCommand extends Command
     }
 
     /**
+     * A code already names its license (or none), so no key is sent.
+     *
      * @return ?array{expires_at: int, interval: int}
      *
      * @throws HubException
@@ -181,7 +191,6 @@ class HubConnectCommand extends Command
             'hostname' => HostFacts::host(new System)['hostname'] ?? null,
         ], fn (mixed $v): bool => is_string($v) && $v !== '');
 
-        // A code already names its license (or none), so no key is sent.
         $response = $this->hub()->createSession([
             'product' => EngineIdentity::PRODUCT,
             'app_id' => EngineIdentity::appId(),
@@ -226,12 +235,15 @@ class HubConnectCommand extends Command
         ];
     }
 
-    /** @return ?array<string, mixed> the approval, or null when there is none */
+    /**
+     * A claimed code is approved already, so the first poll goes at once.
+     *
+     * @return ?array<string, mixed> the approval, or null when there is none
+     */
     private function waitForApproval(int $expiresAt, int $interval): ?array
     {
         $failures = 0;
         $expired = 'The code expired. Create a new one in PanelAlpha Connect.';
-        // A claimed code is approved already, so the first poll goes at once.
         $pollAtOnce = true;
 
         while (true) {
@@ -339,6 +351,10 @@ class HubConnectCommand extends Command
     }
 
     /**
+     * The token is named after its connection once there is one; until then,
+     * pending. One connection at a time: once the new one is stored, the one it
+     * replaces and anything a failed attempt left stop working.
+     *
      * @param  array<string, mixed>  $approval
      * @param  array<int, string>  $grants
      *
@@ -356,7 +372,6 @@ class HubConnectCommand extends Command
             throw new HubException('Refusing to mint a Hub token beyond the routes the Hub may call.');
         }
 
-        // Named after its connection once there is one; until then, pending.
         $new = HubTokens::mint($abilities);
         $this->mintedTokenId = (int) $new->accessToken->id;
 
@@ -392,8 +407,6 @@ class HubConnectCommand extends Command
         $connection = DB::transaction(function () use (
             $connectionId, $secret, $account, $license, $approval, $grants, $ip, $pin, $base
         ): HubConnection {
-            // One connection at a time: the one this replaces, and anything a
-            // failed attempt left, stops working now.
             HubTokens::revokeAll(except: $this->mintedTokenId);
             PersonalAccessToken::query()->whereKey($this->mintedTokenId)
                 ->update(['name' => HubTokens::nameFor($connectionId)]);

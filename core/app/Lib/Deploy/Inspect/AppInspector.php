@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Inspect;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\DetectProjectStrategy;
 use App\Lib\Deploy\Inspect\Report\AppConfigOrigin;
 use App\Lib\Deploy\Inspect\Report\ApplicationReport;
@@ -44,6 +45,22 @@ final class AppInspector
         ?string $recipe = null
     ): array {
         $projectDir = rtrim($projectDir, '/');
+
+        return AccountHomeRead::confinedTo($projectDir, static fn (): array => self::report($projectDir, $repoUrl, $plan, $recipe));
+    }
+
+    /**
+     * @return array{
+     *   application: array<string, mixed>,
+     *   metadata: array<string, mixed>,
+     *   ports: array<string, mixed>,
+     *   services: list<array<string, mixed>>,
+     *   environment: array<string, mixed>,
+     *   files: list<string>,
+     * }
+     */
+    private static function report(string $projectDir, ?string $repoUrl, ?DeployPlan $plan, ?string $recipe): array
+    {
         $context = ProjectContext::at($projectDir, $repoUrl);
         [$appConfig, $origin] = AppConfigOrigin::find($projectDir, $repoUrl);
         [$decision, $issue] = self::decide($projectDir, $repoUrl, $recipe);

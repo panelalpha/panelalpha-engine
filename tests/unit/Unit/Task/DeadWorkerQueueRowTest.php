@@ -81,7 +81,7 @@ class DeadWorkerQueueRowTest extends TestCase
         $task = $this->reservedStagingJob('stg267');
         $uuid = $task->job_id;
 
-        $this->assertSame([(int) $task->id], TaskReconciler::reconcile(false, 120));
+        $this->assertSame(self::retired([(int) $task->id]), TaskReconciler::reconcile(false, 120));
 
         $this->assertSame(Task::STATUS_CANCELLED, $task->refresh()->status);
         $this->assertSame(0, DB::table('jobs')->count(), 'the reserved row went with the task');
@@ -101,7 +101,7 @@ class DeadWorkerQueueRowTest extends TestCase
         $task = $this->reservedStagingJob('stg750');
         $this->assertTrue($task->markCancelled());
 
-        $this->assertSame([], TaskReconciler::reconcile(false, 120), 'nothing to retire');
+        $this->assertSame(self::retired(), TaskReconciler::reconcile(false, 120), 'nothing to retire');
 
         $this->assertSame(0, DB::table('jobs')->count(), 'the reserved row went all the same');
         $this->makeUser('stg750', ['template' => 'dind']);
@@ -131,7 +131,17 @@ class DeadWorkerQueueRowTest extends TestCase
         $task->details = [Task::WORKER => ['pid' => $pid, 'start' => \App\Lib\Deploy\DeployLog\ProcessIdentity::startTime($pid)]];
         $task->save();
 
-        $this->assertSame([], TaskReconciler::reconcile(false, 120));
+        $this->assertSame(self::retired(), TaskReconciler::reconcile(false, 120));
         $this->assertSame(1, DB::table('jobs')->count());
+    }
+
+    /**
+     * @param list<int> $orphaned
+     * @param list<int> $cancelled
+     * @return array{orphaned: list<int>, cancelled: list<int>}
+     */
+    private static function retired(array $orphaned = [], array $cancelled = []): array
+    {
+        return [TaskReconciler::RETIRED_ORPHANED => $orphaned, TaskReconciler::RETIRED_CANCELLED => $cancelled];
     }
 }

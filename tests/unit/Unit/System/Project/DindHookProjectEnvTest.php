@@ -7,6 +7,7 @@ use App\System;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
 use Symfony\Component\Process\Process;
+use Tests\Support\StagedRename;
 use Tests\TestCase;
 
 /**
@@ -37,7 +38,7 @@ class DindHookProjectEnvTest extends TestCase
         $envFile = array_key_first($this->written);
         $this->assertStringStartsWith('/home/alice/.panelalpha-hook-env-', $envFile);
         $this->assertSame("FOO_TOKEN='it'\\''s \$2y\$10\$abc'\n", $this->written[$envFile], 'PATH is left to the shell');
-        $this->assertContains(['sudo', 'chmod', '600', $envFile], $this->commands);
+        $this->assertContains(['sudo', 'chmod', '600', $this->stagedAs($envFile)], $this->commands);
 
         $run = $this->commandContaining('su');
         $this->assertStringContainsString("'hook-env' '{$envFile}' 'bash' '-c' 'exec bash \"\$0\" 1>&2' '/home/alice/.panelalpha-precheck.sh'", end($run));
@@ -84,6 +85,17 @@ class DindHookProjectEnvTest extends TestCase
         $this->fail("no `{$word}` command was run");
     }
 
+    /** The temp file the write staged and then renamed onto $path. */
+    private function stagedAs(string $path): string
+    {
+        foreach ($this->commands as $cmd) {
+            if ((StagedRename::of($cmd)[1] ?? null) === $path) {
+                return StagedRename::of($cmd)[0];
+            }
+        }
+        $this->fail("nothing was renamed onto {$path}");
+    }
+
     /** @param array<string, string> $envVars */
     private function dind(array $envVars): Dind
     {
@@ -109,16 +121,28 @@ class DindHookProjectEnvTest extends TestCase
                 if (($cmd[0] ?? '') === 'sudo' && ($cmd[1] ?? '') === 'cp') {
                     $this->written[$cmd[3]] = (string) file_get_contents($cmd[2]);
                 }
+                $this->renameStaged($cmd);
 
                 return '';
             }
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $process = new Process(['true']);
-                $process->run();
+                if (StagedRename::of($cmd) !== null) {
+                    $this->commands[] = (array) $cmd;
+                    $this->renameStaged((array) $cmd);
+                }
 
-                return $process;
+                return SuccessfulProcess::for($cmd);
+            }
+
+            private function renameStaged(array $cmd): void
+            {
+                [$staged, $target] = StagedRename::of($cmd) ?? [null, null];
+                if ($staged !== null && isset($this->written[$staged])) {
+                    $this->written[$target] = $this->written[$staged];
+                    unset($this->written[$staged]);
+                }
             }
         };
 

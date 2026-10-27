@@ -82,9 +82,9 @@ class AbstractApplication extends BaseApplication
      *
      * @return array{stdout: string, stderr: string, exit_code: ?int}
      */
-    public function start(): array
+    public function start(bool $forceRecreate = false): array
     {
-        return (new AppLauncher($this->project))->start();
+        return (new AppLauncher($this->project))->start($forceRecreate);
     }
 
     /**

@@ -22,18 +22,19 @@ final class Sso
     ) {}
 
     /**
+     * The token has the same shape as panelalpha-app.php users:sso (DinD).
+     *
      * @return array{url: string}
      */
     public function create(string $wpUser): array
     {
         $this->muPlugin()->ensure($this->cli->runsInContainer() ? '' : $this->cli->resolvePath());
 
-        // Same token shape as panelalpha-app.php users:sso (DinD).
         $expires = time() + 60;
         $token = (string) $expires.'_'.Str::random(64);
 
         $this->cli->runOrFail(
-            ['user', 'meta', 'update', $wpUser, 'panelalpha_sso', sha1($token)],
+            ['user', 'meta', 'update', WpCli::positional($wpUser), 'panelalpha_sso', sha1($token)],
         );
 
         $siteurl = trim($this->cli->runOrFail(

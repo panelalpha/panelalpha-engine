@@ -388,6 +388,17 @@ class DeployLogger
     }
 
     /**
+     * A create waiting for its files runs nothing: it is `running` with no lock until a
+     * deploy resumes its log, and that deploy is the one a cancel is meant for.
+     */
+    private static function isIdleWaitingForFiles(string $username): bool
+    {
+        $current = self::current($username);
+
+        return $current !== null && $current->isWaitingForFiles() && ! $current->lock->isHeld();
+    }
+
+    /**
      * The status and error a finish() line near the end of the log announced:
      * finish() writes it before the status, so a process killed in between
      * (telemetry's report is the slow part) leaves the verdict only there.
@@ -411,7 +422,7 @@ class DeployLogger
     {
         $logger = new self($username, '');
         $latest = $logger->readLatest();
-        if ($latest === null || ($latest['status'] ?? null) !== self::STATUS_RUNNING) {
+        if ($latest === null || ($latest['status'] ?? null) !== self::STATUS_RUNNING || self::isIdleWaitingForFiles($username)) {
             return ['cancelled' => false, 'pid' => null];
         }
 

@@ -37,6 +37,7 @@ class ProjectsPushFileRollbackTest extends TestCase
             'failStartTimes' => 0,
             'failCommand' => null,
             'restores' => [],
+            'startedCommits' => [],
         ];
         $this->writeHome('live', ['index.php' => 'live site', '.htaccess' => 'live rules']);
         $this->writeHome('stg', ['index.php' => 'staging site', 'new.php' => 'only on staging']);
@@ -70,6 +71,28 @@ class ProjectsPushFileRollbackTest extends TestCase
         $this->assertSame('staging site', file_get_contents($this->docroot('live') . '/index.php'));
         $this->assertFileExists($this->docroot('live') . '/new.php');
         $this->assertNoPushLeftovers();
+        $details = User::findByUsernameOrFail('live')->getDetails();
+        $this->assertSame('stg-commit', $details['git_commit'] ?? null);
+        $this->assertSame('Staging only', $details['deploy_label'] ?? null);
+    }
+
+    public function test_a_failed_push_puts_the_targets_deploy_snapshot_back_before_starting_it_again(): void
+    {
+        $this->record->failStartTimes = 1;
+
+        $this->pushFails('start exploded');
+
+        $this->assertSame(['stg-commit', 'live-commit'], $this->record->startedCommits);
+        $this->assertLiveKeepsItsDeploySnapshot();
+    }
+
+    public function test_a_push_refused_at_its_guards_keeps_the_targets_deploy_snapshot(): void
+    {
+        mkdir($this->live('.pre-push'));
+
+        $this->pushFails('Incomplete previous push (.pre-push present)');
+
+        $this->assertLiveKeepsItsDeploySnapshot();
     }
 
     public function test_a_failure_while_moving_the_home_aside_restores_it(): void
@@ -121,6 +144,15 @@ class ProjectsPushFileRollbackTest extends TestCase
         $this->assertLiveHomeIsUntouched();
     }
 
+    private function assertLiveKeepsItsDeploySnapshot(): void
+    {
+        $details = User::findByUsernameOrFail('live')->getDetails();
+        $this->assertSame('live-commit', $details['git_commit'] ?? null);
+        $this->assertSame('main', $details['git_branch'] ?? null);
+        $this->assertArrayNotHasKey('deploy_label', $details);
+        $this->assertSame('live_', $details['mysql_prefix'] ?? null);
+    }
+
     private function assertLiveHomeIsUntouched(): void
     {
         $this->assertSame('live site', file_get_contents($this->docroot('live') . '/index.php'));
@@ -156,10 +188,15 @@ class ProjectsPushFileRollbackTest extends TestCase
 
     private function stagingPair(): void
     {
-        $live = $this->makeUser('live', ['mysql_prefix' => 'live_']);
+        $live = $this->makeUser('live', ['mysql_prefix' => 'live_', 'git_commit' => 'live-commit', 'git_branch' => 'main']);
         $live->mysqlDatabases()->create(['database' => 'live_wp']);
         $live->mysqlUsers()->create(['user' => 'live_wp']);
-        $stg = $this->makeUser('stg', ['mysql_prefix' => 'stg_']);
+        $stg = $this->makeUser('stg', [
+            'mysql_prefix' => 'stg_',
+            'git_commit' => 'stg-commit',
+            'git_branch' => 'feature',
+            'deploy_label' => 'Staging only',
+        ]);
         $stg->mysqlDatabases()->create(['database' => 'stg_wp']);
         $stg->mysqlUsers()->create(['user' => 'stg_wp']);
         $stg->staging = $live->id;
@@ -197,8 +234,8 @@ class ProjectsPushFileRollbackTest extends TestCase
 
             public function project(User $model): Project
             {
-                return new class ($this->root . '/' . $model->username, $this->record) extends Project {
-                    public function __construct(private string $home, private object $record)
+                return new class ($this->root . '/' . $model->username, $this->record, $model) extends Project {
+                    public function __construct(private string $home, private object $record, private User $user)
                     {
                     }
 
@@ -227,6 +264,7 @@ class ProjectsPushFileRollbackTest extends TestCase
 
                     public function start(): void
                     {
+                        $this->record->startedCommits[] = $this->user->getDetails()['git_commit'] ?? null;
                         if ($this->record->failStartTimes > 0) {
                             $this->record->failStartTimes--;
                             throw new \RuntimeException('start exploded');

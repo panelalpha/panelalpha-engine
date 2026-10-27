@@ -42,6 +42,7 @@ class WordpressMigrationHtaccessTest extends WordpressMigrationTestCase
 
         $client = new SourceWordpressClient($http);
         $client->useSite(new SourceSite('https://example.com'));
+        $client->useSourceToken(self::SOURCE_TOKEN);
 
         $removed = [];
         $statuses = [200, 500];
@@ -98,6 +99,7 @@ class WordpressMigrationHtaccessTest extends WordpressMigrationTestCase
 
         $client = new SourceWordpressClient($http);
         $client->useSite(new SourceSite('https://example.com'));
+        $client->useSourceToken(self::SOURCE_TOKEN);
 
         $removed = [];
         $transfer = new MigrationTransfer(

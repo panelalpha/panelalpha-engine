@@ -4,9 +4,6 @@ namespace App\System\Project\PhpHosting\WordPress;
 
 /**
  * Named theme operations for a PHP hosting WordPress install.
- *
- * HTTP, artisan, and MCP tools are thin adapters around this. Path resolution
- * and the WP-CLI runner come from WpCli; a non-zero exit becomes Exception.
  */
 final class Themes
 {
@@ -42,7 +39,7 @@ final class Themes
      */
     public function get(string $slug, ?string $fields = null): array
     {
-        $args = ['theme', 'get', $slug, '--format=json'];
+        $args = ['theme', 'get', WpCli::positional($slug), '--format=json'];
         if ($fields !== null) {
             $args[] = '--fields='.$fields;
         }
@@ -66,7 +63,7 @@ final class Themes
      */
     public function isInstalled(string $slug): array
     {
-        $result = $this->cli->run(['theme', 'is-installed', $slug]);
+        $result = $this->cli->run(['theme', 'is-installed', WpCli::positional($slug)]);
         $exitCode = $result['exit_code'] ?? 1;
         if ($exitCode !== 0 && $exitCode !== 1) {
             throw new Exception($this->cli->failureMessage($result));
@@ -83,7 +80,7 @@ final class Themes
      */
     public function install(string $slug, bool $force = false): array
     {
-        $args = ['theme', 'install', $slug];
+        $args = ['theme', 'install', WpCli::positional($slug)];
         if ($force) {
             $args[] = '--force';
         }
@@ -97,7 +94,7 @@ final class Themes
      */
     public function activate(string $slug): array
     {
-        $result = $this->cli->runOrFail(['theme', 'activate', $slug]);
+        $result = $this->cli->runOrFail(['theme', 'activate', WpCli::positional($slug)]);
 
         return $this->mutationBody($slug, $result['stdout']);
     }
@@ -107,7 +104,7 @@ final class Themes
      */
     public function update(string $slug): array
     {
-        $result = $this->cli->runOrFail(['theme', 'update', $slug]);
+        $result = $this->cli->runOrFail(['theme', 'update', WpCli::positional($slug)]);
 
         return $this->mutationBody($slug, $result['stdout']);
     }
@@ -117,7 +114,7 @@ final class Themes
      */
     public function delete(string $slug): array
     {
-        $result = $this->cli->runOrFail(['theme', 'delete', $slug]);
+        $result = $this->cli->runOrFail(['theme', 'delete', WpCli::positional($slug)]);
 
         return $this->mutationBody($slug, $result['stdout']);
     }
@@ -131,7 +128,7 @@ final class Themes
      */
     public function search(string $term, ?string $fields = null, ?int $perPage = null): array
     {
-        $args = ['theme', 'search', $term, '--format=json'];
+        $args = ['theme', 'search', WpCli::positional($term), '--format=json'];
         if ($fields !== null) {
             $args[] = '--fields='.$fields;
         }

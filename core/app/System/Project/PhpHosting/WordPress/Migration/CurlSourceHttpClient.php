@@ -25,6 +25,11 @@ final class CurlSourceHttpClient implements SourceHttpClient
     /** Long enough for the source plugin to scan a whole site, short of the job's own timeout. */
     public const REQUEST_TIMEOUT_SECONDS = JobBudget::COMMAND_SECONDS;
 
+    /** Per request of the connection test, which holds an HTTP request and its PHP-FPM worker while it waits. */
+    public const CONNECTION_TEST_TIMEOUT_SECONDS = 20;
+
+    private const CONNECTION_TEST_CONNECT_TIMEOUT_SECONDS = 10;
+
     private \CurlHandle $handle;
 
     /** @var (callable(string): list<string>)|null */
@@ -33,14 +38,18 @@ final class CurlSourceHttpClient implements SourceHttpClient
     /** @var (Closure(): bool)|null */
     private ?Closure $keepWaiting = null;
 
+    private SourceIpPolicy $policy;
+
     /**
      * @param  (callable(string): list<string>)|null  $resolve  DNS lookup; tests pass a fixture
      */
     public function __construct(
         private readonly ?SourceIpPin $pin = null,
         ?callable $resolve = null,
+        ?SourceIpPolicy $policy = null,
     ) {
         $this->resolve = $resolve;
+        $this->policy = $policy ?? app(SourceIpPolicy::class);
         $handle = curl_init();
         if ($handle === false) {
             throw new RuntimeException('Could not initialize cURL for source WordPress client');
@@ -60,6 +69,24 @@ final class CurlSourceHttpClient implements SourceHttpClient
         curl_setopt($this->handle, CURLOPT_HEADER, true);
         curl_setopt($this->handle, CURLINFO_HEADER_OUT, true);
         curl_setopt($this->handle, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
+    }
+
+    /**
+     * A client for the connection test: each request gives up after $seconds,
+     * not after the queue job's budget, because an HTTP request waits on it.
+     *
+     * @param  (callable(string): list<string>)|null  $resolve  DNS lookup; tests pass a fixture
+     */
+    public static function forConnectionTest(
+        ?SourceIpPin $pin = null,
+        ?callable $resolve = null,
+        int $seconds = self::CONNECTION_TEST_TIMEOUT_SECONDS,
+    ): self {
+        $client = new self($pin, $resolve);
+        curl_setopt($client->handle, CURLOPT_CONNECTTIMEOUT, min($seconds, self::CONNECTION_TEST_CONNECT_TIMEOUT_SECONDS));
+        curl_setopt($client->handle, CURLOPT_TIMEOUT, $seconds);
+
+        return $client;
     }
 
     public function request(
@@ -161,12 +188,12 @@ final class CurlSourceHttpClient implements SourceHttpClient
     private function addressFor(string $url, string $host): ?string
     {
         if ($this->pin !== null && $this->pin->covers($host)) {
-            SourceFetchGuard::assertAddressAllowed($this->pin->ip);
+            SourceFetchGuard::assertAddressAllowed($this->pin->ip, $this->policy);
 
             return $this->pin->ip;
         }
 
-        $addresses = SourceFetchGuard::assertAllowed($url, $this->resolve);
+        $addresses = SourceFetchGuard::assertAllowed($url, $this->policy, $this->resolve);
 
         return filter_var($host, FILTER_VALIDATE_IP) === false ? $addresses[0] : null;
     }

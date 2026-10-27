@@ -34,7 +34,7 @@ final class MigrateDatabaseStep implements BatchedStep
         }
 
         $finished = (new MigrationTransfer(
-            $this->source->open($migration),
+            $this->source->transfer($migration),
             onProgress: fn (TransferProgress $progress) => $migration->storeTransferProgress($this->name(), $progress),
         ))->migrateDatabase($pluginMigrationId, $this->budget($migration));
 

@@ -16,6 +16,7 @@ use Illuminate\Support\Carbon;
  * @property int $to_token_id
  * @property string $plain_token
  * @property Carbon $expires_at
+ * @property ?Carbon $from_expires_at the old token's expiry before the grace replaced it
  */
 class TokenRotation extends Model
 {
@@ -23,13 +24,14 @@ class TokenRotation extends Model
 
     protected $table = 'personal_access_token_rotations';
 
-    protected $fillable = ['from_token_id', 'to_token_id', 'plain_token', 'expires_at'];
+    protected $fillable = ['from_token_id', 'to_token_id', 'plain_token', 'expires_at', 'from_expires_at'];
 
     protected $hidden = ['plain_token'];
 
     protected $casts = [
         'plain_token' => 'encrypted',
         'expires_at' => 'datetime',
+        'from_expires_at' => 'datetime',
     ];
 
     /** @return Builder<self> */

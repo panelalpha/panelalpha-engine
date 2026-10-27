@@ -2,12 +2,17 @@
 
 namespace Tests\Unit\WordpressMigration;
 
+use App\System\Project\PhpHosting\WordPress\Migration\Steps\InstallDestinationPluginStep;
+use App\System\Project\PhpHosting\WordPress\Migration\Steps\InstallSourcePluginStep;
 use App\System\Project\PhpHosting\WordPress\Migration\WordpressMigratorZip;
+use Illuminate\Support\Facades\Http;
 use RuntimeException;
 use ZipArchive;
 
 /**
  * Tag-archive fixture → install zip with wordpress-migrator/ root, no network.
+ * Only the release pinned by its SHA-256 is repacked; its version says whether
+ * it must require the token.
  */
 class WordpressMigratorZipTest extends WordpressMigrationTestCase
 {
@@ -115,6 +120,78 @@ class WordpressMigratorZipTest extends WordpressMigrationTestCase
         }
     }
 
+    public function test_a_release_before_the_token_was_required_is_still_repacked(): void
+    {
+        $this->fakeRelease('1.1.4');
+
+        $installZip = $this->download();
+
+        $this->assertFileExists($installZip);
+        $this->assertFalse(WordpressMigratorZip::requiresToken($installZip));
+    }
+
+    public function test_a_release_from_1_2_0_must_require_the_token(): void
+    {
+        $this->fakeRelease('1.2.0');
+
+        $this->assertTrue(WordpressMigratorZip::requiresToken($this->download()));
+    }
+
+    public function test_a_release_without_a_version_is_not_held_to_the_token(): void
+    {
+        $this->fakeRelease(null);
+
+        $this->assertFalse(WordpressMigratorZip::requiresToken($this->download()));
+    }
+
+    public function test_the_default_release_is_v1_1_4_pinned_by_its_checksum(): void
+    {
+        $this->assertSame(
+            'https://github.com/panelalpha/panelalpha-wordpress-migrator/releases/download/v1.1.4/wordpress-migrator.zip',
+            config('services.wordpress_migrator.release_url'),
+        );
+        $this->assertSame(
+            'f636ceb62c5be51525763f4ae71e669ac0c116d7988eb0190c94b8183a8cb13f',
+            config('services.wordpress_migrator.sha256'),
+        );
+    }
+
+    public function test_a_release_that_is_not_the_pinned_one_is_refused_and_leaves_nothing_behind(): void
+    {
+        $this->fakeRelease('1.1.4');
+        config(['services.wordpress_migrator.sha256' => str_repeat('0', 64)]);
+        $before = $this->migratorWorkDirs();
+
+        try {
+            $this->download();
+            $this->fail('A release whose SHA-256 is not the pinned one was repacked');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('not the pinned one', $e->getMessage());
+            $this->assertStringContainsString('WORDPRESS_MIGRATOR_SHA256', $e->getMessage());
+        }
+
+        $this->assertSame($before, $this->migratorWorkDirs());
+    }
+
+    public function test_the_pinned_checksum_is_compared_without_regard_to_case(): void
+    {
+        $this->fakeRelease('1.1.4');
+        config(['services.wordpress_migrator.sha256' => strtoupper((string) config('services.wordpress_migrator.sha256'))]);
+
+        $this->assertFileExists($this->download());
+    }
+
+    public function test_a_download_inside_a_request_gives_up_sooner_than_one_in_an_import_job(): void
+    {
+        $seconds = new \ReflectionProperty(WordpressMigratorZip::class, 'downloadSeconds');
+        $stepZip = static fn (object $step): WordpressMigratorZip => (new \ReflectionProperty($step, 'zip'))->getValue($step);
+
+        $this->assertSame(WordpressMigratorZip::REQUEST_DOWNLOAD_SECONDS, $seconds->getValue(app(WordpressMigratorZip::class)));
+        $this->assertSame(120, WordpressMigratorZip::REQUEST_DOWNLOAD_SECONDS);
+        $this->assertSame(WordpressMigratorZip::JOB_DOWNLOAD_SECONDS, $seconds->getValue($stepZip(new InstallDestinationPluginStep())));
+        $this->assertSame(WordpressMigratorZip::JOB_DOWNLOAD_SECONDS, $seconds->getValue($stepZip(new InstallSourcePluginStep())));
+    }
+
     public function test_download_failure_raises_clear_error(): void
     {
         try {
@@ -123,6 +200,37 @@ class WordpressMigratorZipTest extends WordpressMigrationTestCase
         } catch (RuntimeException $e) {
             $this->assertStringContainsString('download', strtolower($e->getMessage()));
         }
+    }
+
+    private function download(): string
+    {
+        $installZip = (new WordpressMigratorZip())->downloadAndRepack('https://releases.example/wordpress-migrator.zip');
+        $this->registerFixtureCleanup(dirname($installZip));
+
+        return $installZip;
+    }
+
+    private function fakeRelease(?string $version): void
+    {
+        $header = $version === null ? '' : " * Version: {$version}\n";
+        $archive = $this->buildTagArchiveFixture([
+            'wordpress-migrator.php' => "<?php\n/**\n * Plugin Name: WordPress Migrator\n{$header} */\n",
+            'config.php' => "<?php\nreturn ['token' => '', 'mode' => 'source'];\n",
+        ]);
+        $body = (string) file_get_contents($archive);
+        config(['services.wordpress_migrator.sha256' => hash('sha256', $body)]);
+        Http::fake(['releases.example/*' => Http::response($body)]);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function migratorWorkDirs(): array
+    {
+        $dirs = glob(sys_get_temp_dir() . '/wp-migrator-*', GLOB_ONLYDIR) ?: [];
+        sort($dirs);
+
+        return $dirs;
     }
 
     /**

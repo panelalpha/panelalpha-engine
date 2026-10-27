@@ -6,6 +6,7 @@ use App\Lib\Apis\Cloudflare;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /** Cache purges and zone settings: the three calls the CDN endpoints make. */
@@ -73,7 +74,35 @@ class CloudflareCdnTest extends TestCase
             $this->fail('a 403 must raise');
         } catch (CloudflareException $e) {
             $this->assertTrue($e->isPermissionDenied());
+            $this->assertFalse($e->isInvalidToken());
             $this->assertSame(403, $e->responseStatus());
+        }
+    }
+
+    /** @return array<string, array{int, array<string, mixed>}> */
+    public static function tokensCloudflareDoesNotAccept(): array
+    {
+        return [
+            'invalid or revoked' => [403, ['code' => 9109, 'message' => 'Invalid access token']],
+            'malformed' => [400, ['code' => 6003, 'message' => 'Invalid request headers', 'error_chain' => [
+                ['code' => 6111, 'message' => 'Invalid format for Authorization header'],
+            ]]],
+            'missing' => [400, ['code' => 9106, 'message' => 'Missing X-Auth-Key, X-Auth-Email or Authorization headers']],
+            'unauthenticated' => [401, ['code' => 1000, 'message' => 'Invalid API Token']],
+        ];
+    }
+
+    /** @param array<string, mixed> $error */
+    #[DataProvider('tokensCloudflareDoesNotAccept')]
+    public function test_a_token_cloudflare_does_not_accept_is_told_apart_from_a_missing_permission(int $status, array $error): void
+    {
+        Http::fake(['*' => Http::response(['success' => false, 'errors' => [$error]], $status)]);
+
+        try {
+            $this->client()->findZoneForHostname('shop.example.test');
+            $this->fail('a refused token must raise');
+        } catch (CloudflareException $e) {
+            $this->assertTrue($e->isInvalidToken());
         }
     }
 }

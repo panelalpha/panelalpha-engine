@@ -2,6 +2,7 @@
 
 namespace Tests\Unit;
 
+use App\Auth\TokenAbilities;
 use App\Http\Controllers\SystemController;
 use App\Http\Resources\UserResource;
 use App\Models\Ipv4NatMap;
@@ -156,7 +157,7 @@ class UnreadableSecretReportingTest extends TestCase
         $this->useAppKey(str_repeat('x', 32));
         $carol = $this->user(['git_token' => 'readable'], 'carol');
 
-        $report = SystemController::unreadableSecrets([$alice, $bob, $carol]);
+        $report = SystemController::unreadableSecrets(TokenAbilities::fromList(['*']), [$alice, $bob, $carol]);
 
         $this->assertSame(2, $report['count']);
         $this->assertSame(['alice', 'bob'], $report['projects']);
@@ -166,9 +167,32 @@ class UnreadableSecretReportingTest extends TestCase
 
     public function test_the_server_report_is_quiet_when_every_project_decodes(): void
     {
-        $report = SystemController::unreadableSecrets([$this->user(['git_token' => 'ghp-secret'])]);
+        $report = SystemController::unreadableSecrets(TokenAbilities::fromList(['*']), [$this->user(['git_token' => 'ghp-secret'])]);
 
         $this->assertSame(['count' => 0, 'projects' => [], 'warning' => null], $report);
+    }
+
+    public function test_a_token_scoped_to_projects_hears_only_about_its_own(): void
+    {
+        $alice = $this->user(['git_token' => 'ghp-secret']);
+        $bob = $this->user(['git_token' => 'ghp-secret'], 'bob');
+        $this->useAppKey(str_repeat('x', 32));
+        $users = [$alice, $bob];
+
+        $scoped = SystemController::unreadableSecrets($this->scopedTo(['bob', 'carol']), $users);
+        $none = SystemController::unreadableSecrets($this->scopedTo([]), $users);
+        $operator = SystemController::unreadableSecrets(TokenAbilities::fromList(TokenAbilities::build(api: true, mcp: true)), $users);
+
+        $this->assertSame(['bob'], $scoped['projects']);
+        $this->assertStringNotContainsString('alice', (string) $scoped['warning']);
+        $this->assertSame(['count' => 0, 'projects' => [], 'warning' => null], $none);
+        $this->assertSame(['alice', 'bob'], $operator['projects']);
+    }
+
+    /** @param list<string> $projects */
+    private function scopedTo(array $projects): TokenAbilities
+    {
+        return TokenAbilities::fromList(TokenAbilities::build(api: true, mcp: true, projects: $projects));
     }
 
     /** @param array<string, mixed> $details */

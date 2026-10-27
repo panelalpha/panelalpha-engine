@@ -5,7 +5,7 @@ namespace App\Lib\Hub;
 use App\Models\HubConnection;
 use App\Models\PersonalAccessToken;
 
-/** Forgetting a Hub connection: what the API and the CLI both need. */
+/** Forgetting a Hub connection, and keeping it in step with its token: what the API and the CLI both need. */
 final class HubLifecycle
 {
     /**
@@ -26,10 +26,27 @@ final class HubLifecycle
         return $revoked;
     }
 
+    /** A rotated Hub token hands its connection to the token that replaced it. */
+    public static function tokenRotated(PersonalAccessToken $old, int $newTokenId): void
+    {
+        $id = HubTokens::connectionIdOf($old);
+        if ($id === null) {
+            return;
+        }
+
+        HubConnection::query()->where('connection_id', $id)->update(['token_id' => $newTokenId]);
+        HubAudit::log('hub.token_rotated', [
+            'connection_id' => $id,
+            'old_token_id' => $old->id,
+            'new_token_id' => $newTokenId,
+        ]);
+    }
+
     /**
-     * The Hub revoked its own token. Only the connection that token names is
-     * dropped: on `hub:connect --replace` the Hub revokes the old token while
-     * the new connection is being completed.
+     * The Hub revoked its own token. Only a connection that token still holds
+     * is dropped: on `hub:connect --replace` the Hub revokes the old token while
+     * the new connection is being completed, and a token superseded by a
+     * rotation no longer holds its connection.
      */
     public static function tokenRevoked(PersonalAccessToken $token): void
     {
@@ -38,7 +55,7 @@ final class HubLifecycle
             return;
         }
 
-        $connections = HubConnection::query()->where('connection_id', $id)->get();
+        $connections = HubConnection::query()->where('connection_id', $id)->where('token_id', $token->id)->get();
         foreach ($connections as $connection) {
             self::audit($connection, 'hub', 1);
             $connection->delete();

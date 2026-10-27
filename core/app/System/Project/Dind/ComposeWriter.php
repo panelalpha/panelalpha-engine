@@ -257,7 +257,7 @@ class ComposeWriter
      */
     public function writeStaticNginxConf(string $projectDir, ?string $entry, ?string $chown): void
     {
-        $this->project->system()->filesystem()->filePutContents(
+        $this->project->system()->filesystem()->writeFileReplacingPath(
             $projectDir.'/'.NginxConfig::FILENAME,
             NginxConfig::site($entry),
             $chown,
@@ -304,7 +304,7 @@ class ComposeWriter
             </p>
         HTML;
 
-        $this->project->system()->filesystem()->filePutContents(
+        $this->project->system()->filesystem()->writeFileReplacingPath(
             "{$appDir}/index.html",
             self::infoPage(PlaceholderPage::WELCOME_TITLE, 'Your environment is ready', $body),
             null,
@@ -340,7 +340,7 @@ class ComposeWriter
             </p>
         HTML;
 
-        $this->project->system()->filesystem()->filePutContents(
+        $this->project->system()->filesystem()->writeFileReplacingPath(
             $index,
             self::infoPage(PlaceholderPage::NOT_CONFIGURED_TITLE, 'Project not ready yet', $body),
             $chown,

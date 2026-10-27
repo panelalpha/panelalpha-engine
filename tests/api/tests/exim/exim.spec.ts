@@ -115,6 +115,16 @@ test.describe('Exim configuration', () => {
     expect((await api.getEximConfig()).data.smtp_password_set).toBe(false);
   });
 
+  test('a username sent as a vault reference is refused, a username is not a secret', async ({
+    api,
+  }) => {
+    for (const field of ['mailchannels_username', 'amazon_ses_smtp_username', 'smtp_username']) {
+      const refused = await api.updateEximConfigRaw({ [field]: 'vault:aaaaaaaaaaaaaaaaaaaaaaaa' });
+      expectOneOf(refused.status, [422], field);
+      expect(JSON.stringify(refused.body), field).toContain('not a secret');
+    }
+  });
+
   const providerUpdates = [
     [
       'a plain SMTP smarthost',

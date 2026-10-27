@@ -168,7 +168,7 @@ class BuildContextIgnoreWriterTest extends TestCase
                         return (string) file_get_contents($path);
                     }
 
-                    public function filePutContents(string $path, string $contents, ?string $chown = null, ?string $chmod = null): void
+                    public function writeFileReplacingPath(string $path, string $contents, ?string $chown = null, ?string $chmod = null): void
                     {
                         file_put_contents($path, $contents);
                     }

@@ -791,7 +791,7 @@ Used when a private repository or a Cloudflare tunnel needs a token. You paste t
 
 ### What you can see, and what you cannot
 
-A secret is never readable again. Not by your assistant, not by you, not by any command. What you can always see is the **inventory**: each entry's reference (`vault:<key>`), what kind of secret it is, what it is for, which project owns it, whether it has been filled in yet, and the dates.
+A secret is never readable again. Not by your assistant, not by you, not by any command. An environment variable set from a `vault:<key>` stays masked in the project's variable list, even when the list is asked to show the values. What you can always see is the **inventory**: each entry's reference (`vault:<key>`), what kind of secret it is, what it is for, which project owns it, whether it has been filled in yet, and the dates.
 
 Give a **purpose** when you ask for a link ("deploy key for the shop repo"). It is shown on the paste page, so whoever hands over a credential can see why it is wanted, and it appears in the listing afterwards. Since the value itself can never be read back, the purpose is usually the only thing that tells two entries of the same kind apart when you come to tidy up.
 

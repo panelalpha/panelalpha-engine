@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Platform\Probes;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Runtime\NodeRuntime;
 
@@ -38,7 +39,7 @@ final class ViteOutputDir
         $config = null;
         foreach (self::CONFIGS as $name) {
             if (is_file($projectDir.'/'.$name)) {
-                $config = (string) @file_get_contents($projectDir.'/'.$name);
+                $config = (string) AccountHomeRead::contents($projectDir.'/'.$name);
                 break;
             }
         }

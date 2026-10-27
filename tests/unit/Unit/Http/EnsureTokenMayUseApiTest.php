@@ -5,11 +5,14 @@ namespace Tests\Unit\Http;
 use App\Auth\TokenAbilities;
 use App\Http\Middleware\EnsureTokenMayUseApi;
 use App\Mcp\Tools\Api\ApiTool;
+use App\Mcp\Tools\Api\Projects\ProjectCloneTool;
+use App\Mcp\Tools\Api\Projects\ProjectStagingTool;
 use App\Models\Admin;
 use App\Models\PersonalAccessToken;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Routing\Route;
+use ReflectionMethod;
 use Tests\TestCase;
 
 /**
@@ -183,6 +186,23 @@ class EnsureTokenMayUseApiTest extends TestCase
         $this->assertSame(403, $response->getStatusCode());
         $this->assertSame(
             'This token is limited to projects alice; GET /projects/{username} is outside it.',
+            $response->getData(true)['error'],
+        );
+    }
+
+    public function test_a_token_scoped_to_no_project_says_so(): void
+    {
+        $abilities = TokenAbilities::build(api: true, mcp: false, projects: []);
+
+        $response = $this->dispatched(
+            $abilities,
+            route: ['GET', 'api/projects/{username}'],
+            params: ['username' => 'alice'],
+        );
+
+        $this->assertSame(403, $response->getStatusCode());
+        $this->assertSame(
+            'This token is scoped to no project; GET /projects/{username} is outside it.',
             $response->getData(true)['error'],
         );
     }
@@ -366,10 +386,41 @@ class EnsureTokenMayUseApiTest extends TestCase
                 $this->assertSame(403, $response->getStatusCode(), $action);
                 $this->assertSame(
                     'This token is limited to projects alice; POST /projects/{username}/' . $action
-                        . ' must name the project it creates in new_username.',
+                        . ' must name the project it creates.',
                     $response->getData(true)['error'],
                 );
+                $this->assertSame(
+                    [[
+                        'field' => 'new_username',
+                        'code' => 'new_username_required',
+                        'message' => 'A project-scoped token must name the project this creates.',
+                    ]],
+                    $response->getData(true)['problems'],
+                );
             }
+        }
+    }
+
+    /** Over MCP the field is the tool's argument, and the sentence names no field to misread. */
+    public function test_a_tool_call_reads_the_missing_name_under_its_own_argument(): void
+    {
+        $abilities = TokenAbilities::build(api: false, mcp: true, projects: ['alice']);
+
+        foreach (['clone' => new ProjectCloneTool(), 'staging' => new ProjectStagingTool()] as $action => $tool) {
+            $response = $this->dispatched(
+                $abilities,
+                internal: true,
+                route: ['POST', 'api/projects/{username}/' . $action],
+                params: ['username' => 'alice'],
+            );
+
+            $rename = new ReflectionMethod($tool, 'withArgumentNames');
+            $body = $rename->invoke($tool, $response->getData(true));
+
+            $this->assertStringNotContainsString('new_username', json_encode($body), $action);
+            $this->assertSame(['new_name'], array_keys($body['errors']), $action);
+            $this->assertSame('new_name', $body['problems'][0]['field'], $action);
+            $this->assertSame('new_name_required', $body['problems'][0]['code'], $action);
         }
     }
 

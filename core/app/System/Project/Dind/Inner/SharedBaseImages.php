@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Dind\Inner;
 
+use App\Exceptions\DeployCancelledException;
 use App\Lib\Deploy\CacheManager\BuiltImage;
 use App\Lib\Deploy\CacheManager\ImageTransfer;
 use App\Lib\Deploy\CacheManager\NodeBuildImage;
@@ -477,10 +478,27 @@ class SharedBaseImages
                 self::BUILD_TIMEOUT_SECONDS
             );
         } catch (\Throwable $e) {
+            $this->failUnlessOnlyThePushFailed($image, $e);
+        }
+    }
+
+    /**
+     * A build that worked followed by a push that did not leaves the image on
+     * the host, which is all the host build runs: warn and go on. Anything
+     * else is a failed rebuild.
+     */
+    private function failUnlessOnlyThePushFailed(string $image, \Throwable $e): void
+    {
+        if ($e instanceof DeployCancelledException || ! $this->hostHasImage($image)) {
             throw new \RuntimeException(
                 "The base image {$image} is not on this server; rebuilding it failed. ".$e->getMessage()
             );
         }
+
+        $this->inner->host()->logWarn(
+            "Base image {$image} was rebuilt, but publishing it to the cache registry failed; this deploy goes on "
+            .'with the server\'s copy. '.$e->getMessage()
+        );
     }
 
     /** Does the *host* already have this image, i.e. is providing it a push rather than a compile? */

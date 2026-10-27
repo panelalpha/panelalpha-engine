@@ -9,8 +9,6 @@ namespace App\System\Project\PhpHosting\WordPress;
  * --activate` (installs the pack when needed and activates it). The older
  * `language core activate` is deprecated in favour of `site switch-language`;
  * install-with-activate covers both install and activate in one call.
- * HTTP, artisan, and MCP tools are adapters. Path resolution and the runner
- * come from WpCli; a non-zero exit becomes Exception.
  */
 final class Language
 {
@@ -24,7 +22,7 @@ final class Language
     public function set(string $language): array
     {
         $result = $this->cli->runOrFail(
-            ['language', 'core', 'install', $language, '--activate'],
+            ['language', 'core', 'install', WpCli::positional($language), '--activate'],
         );
 
         return [

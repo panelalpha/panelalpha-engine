@@ -8,6 +8,7 @@ use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Lib\Deploy\Source\GitRemoteProbe;
+use App\Lib\Http\OutboundUrl;
 use App\Lib\Project\CreateInspection;
 use App\Lib\Project\CreateInspector;
 use App\Models\Domain;
@@ -40,6 +41,7 @@ class ProjectCreateHttpTest extends TestCase
 
     protected function tearDown(): void
     {
+        OutboundUrl::setResolverForTests(null);
         Setting::clearRuntimeSettings();
         app(DeployPlanContext::class)->clear();
         app(RecipeChoiceContext::class)->clear();
@@ -282,6 +284,7 @@ class ProjectCreateHttpTest extends TestCase
      */
     public function test_the_create_probes_the_repository_through_the_container(): void
     {
+        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'github.com' ? ['140.82.121.4'] : []);
         $asked = new \ArrayObject();
         $this->app->instance(GitRemoteProbe::class, new class ($asked) extends GitRemoteProbe {
             public function __construct(private readonly \ArrayObject $asked)

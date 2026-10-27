@@ -104,6 +104,16 @@ export class UsersApi extends EngineApiBase {
     return response.json();
   }
 
+  /** PUT /projects/{username}/password without a status expectation. */
+  async setSitePasswordRaw(
+    username: string,
+    password: string
+  ): Promise<{ status: number; body: unknown }> {
+    return this.rawCall(
+      await this.api.put(`projects/${username}/password`, { data: { password } })
+    );
+  }
+
   /**
    * Updates a user (raw - no status expectation)
    */

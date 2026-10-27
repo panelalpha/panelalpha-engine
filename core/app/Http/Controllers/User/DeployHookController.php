@@ -54,11 +54,16 @@ class DeployHookController extends Controller
             .'the internet could not reach the hook at all. '
             .'422 when the checkout is not connected to git. With `register: true` the engine also creates the '
             .'webhook at the git provider the checkout came from, using the token the checkout itself clones with, '
-            .'and the response carries `registration` (`provider_hook_id` and `registered_at`); the token needs '
+            .'and the response carries `registration` (`provider_hook_id` and `registered_at`; a GitLab hook made '
+            .'before 2.2 cannot be signed, and `registration_warning` then says to rotate it); the token needs '
             .'permission to manage repository webhooks (GitHub admin:repo_hook, GitLab maintainer, Bitbucket admin), '
             .'else 422 `provider_token_missing` or `provider_permission_denied`; a provider that cannot be reached is '
-            .'502. The Engine hook is created either way, and `registration: null` with `registration_warning` says '
-            .'when the engine has no provider API for that host.',
+            .'502. The provider API is called only at a public address of the repository\'s host, pinned to the '
+            .'address checked, and a redirect is followed only on that same host; any other host is never called '
+            .'and the answer is 422 `host_refused`. The Engine hook is created either way, and `registration: null` with `registration_warning` says '
+            .'when the engine has no provider API for that host. When this call created the hook and the registration '
+            .'is then refused, the refusal carries the hook as a 201 would have answered it, `secret` included, in '
+            .'`problems[0].hook` (422) or `hook` (502): it is the only time that secret is shown.',
         summary: 'Create a push-to-deploy hook',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
@@ -105,7 +110,7 @@ class DeployHookController extends Controller
         $user = $this->projectOr404($username);
 
         return $this->respond(function () use ($hooks, $user, $request): JsonResponse {
-            $data = $hooks->create($user, $request->validated());
+            $data = $hooks->create($user, $request->hookParams());
 
             return new JsonResponse(['data' => $data], $data['created'] ? 201 : 200);
         });
@@ -190,7 +195,9 @@ class DeployHookController extends Controller
             .'The old URL answers 404 from this moment, so the new `url` and `secret` must be registered '
             .'in the git host again. The secret is shown ONCE, in this response, and can never be read again. '
             .'When the hook is registered at the provider, the provider webhook is updated with the new URL and '
-            .'secret in the same request. '
+            .'secret in the same request. When the provider refuses or cannot be reached, the hook is rotated '
+            .'anyway and `registration_warning` says why the webhook was not updated; one the provider answers 404 '
+            .'for is forgotten (`registration: null`), so a create with `register: true` can make a new one. '
             .'Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. '
             .'404 when the checkout has no hook; rotating '
             .'never creates one. On the Deploy-managed checkout every push to the tracked branch force-updates '
@@ -268,11 +275,12 @@ class DeployHookController extends Controller
         } catch (DeployHookNotFound $e) {
             return new JsonResponse(['message' => $e->getMessage()], 404);
         } catch (ProviderRegistrationRefused $e) {
+            $hook = $e->createdHook === null ? [] : ['hook' => $e->createdHook];
             if ($e->problemCode !== null) {
-                throw ProblemException::one('registration', $e->problemCode, $e->getMessage());
+                throw ProblemException::one('registration', $e->problemCode, $e->getMessage(), $hook);
             }
 
-            return new JsonResponse(['message' => $e->getMessage()], $e->httpStatus);
+            return new JsonResponse(['message' => $e->getMessage()] + $hook, $e->httpStatus);
         } catch (GitException $e) {
             return new JsonResponse(['message' => $e->getMessage()], $e->httpStatus);
         }

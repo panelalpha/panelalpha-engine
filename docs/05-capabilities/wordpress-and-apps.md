@@ -20,7 +20,7 @@ From there you can add a domain, take a backup, change PHP, run WP-CLI, or manag
 
 There are two kinds of WordPress on this engine, and they are not the same:
 
-- **Traditional PHP hosting.** Files live in `public_html`. Uploads show up on the site without a rebuild. You can change that domain's PHP version, set PHP memory, use FTP, backups, domains and WP-CLI. WordPress users, the install wizard and one-click login are not available on this kind. Neither is a Cloudflare tunnel.
+- **Traditional PHP hosting.** Files live in `public_html`. Uploads show up on the site without a rebuild. You can change that domain's PHP version, set PHP memory, use FTP, backups, domains and WP-CLI. WordPress users, the install wizard and one-click login are not available on this kind. Neither is Cloudflare: a tunnel, a cache purge or the security level.
 - **Its own container.** Files live in `project/`. This is what you get when the engine sets WordPress up for you, or when you deploy it from git. WordPress users, one-click login and the install wizard work here, as do WP-CLI, backups and domains. That includes WordPress from a Docker Compose file of your own, such as the official `wordpress` image next to a database.
 
 If an action is refused, see [Troubleshooting](#troubleshooting). Older versions called a project a "user". If output still says `username`, that is the project's name.
@@ -119,7 +119,7 @@ On WordPress in its own container, the engine finds the container that runs Word
 
 WordPress does not have to be at the top of the project. Two settings point the engine at it:
 
-- **path**: the WordPress directory as the container sees it. Give it in full, such as `/var/www/html/blog`, or relative to the container's working directory, such as `blog`.
+- **path**: the WordPress directory. On PHP hosting it is inside the project's home: give it relative to the home, such as `blog`, or in full. A path outside the home is read as inside it, the way the file manager reads one, and a path that climbs out of the home with `..` is refused. On WordPress in its own container, it is the directory as the container sees it: in full, such as `/var/www/html/blog`, or relative to the container's working directory, such as `blog`.
 - **service**: the Compose service whose container runs WordPress. Use it when more than one container has PHP and WordPress.
 
 ```text
@@ -176,13 +176,26 @@ The status also names why, in its `state`:
 | `no_config` | WordPress's files are there, but there is no `wp-config.php`. | Create one, or ask the assistant to run `wp config create`. |
 | `db_unreachable` | `wp-config.php` is there, but WordPress cannot connect to the database it names. | Check the database name, user, password and host in `wp-config.php`, and that the database is running. |
 | `no_core` | There is no WordPress at that path. | Check the path, or the service on a project with its own containers. |
-| `unknown` | WordPress is not installed, for a reason the engine cannot tell, for example output it does not recognise or no MySQL client to check the database with. | Run `wp core is-installed` through the assistant and read its output. |
+| `no_db_client` | WordPress is not installed or cannot reach its database; the engine checks the database with the MySQL client, and no container with WordPress has one. | Add a service on the `wordpress:cli` image with the same volumes and environment as the WordPress one. The engine's own WordPress recipe has one; redeploy a project made from it before that. |
+| `unknown` | WordPress is not installed, for a reason the engine cannot tell, for example output it does not recognise. | Run `wp core is-installed` through the assistant and read its output. |
+
+**"WP-CLI's database commands need the MySQL client …"**
+Exporting, importing or querying the database runs the MySQL client, which the official `wordpress` image does not include. The engine runs those commands in a container of the project that has WordPress and the client, such as a `wordpress:cli` service with the same volumes and environment as the WordPress one. The engine's own WordPress recipe has one; redeploy a project made from it before that.
+
+**"Could not remove the DEFINER clauses from …, so it was not imported"**
+A database import first removes the `DEFINER` clauses that views, triggers and routines from another server carry, by rewriting the file where it is. The file has them, and the folder it is in cannot be written by the user the import runs as. Put the file in a folder the project can write to, and import it from there.
+
+**"MySQL rejected … statement(s) in …, so it was not fully imported"**
+MySQL refused one or more statements of the SQL file during a database import; the message lists the first of them with their line numbers. WP-CLI reports such an import as a success, so the engine reads the MySQL client's errors instead. The statements MySQL accepted are already in the database. Fix the file, or the missing privilege or object a listed line names, and import it again.
 
 **"No running container of this project belongs to service …"**
 The service name is not one the project runs. Use the service name from the project's Compose file.
 
 **The install was refused.**
 Either the project is not one the engine can install WordPress onto, or the admin password is shorter than 8 characters.
+
+**"Insufficient permission to create directory …" when downloading WordPress.**
+On traditional PHP hosting the top level of the account belongs to root, so no new folder can be made there. Download into a folder below one the account owns, such as the domain folder: `/example.com/blog`, not `/blog` or `/tmp/wp`.
 
 **WordPress is up but shows the wrong address, or redirects to the old one.**
 WordPress stores its site address in its own database. Changing the project's domain does not update it. Ask the assistant to run the WP-CLI command that updates the site URL.

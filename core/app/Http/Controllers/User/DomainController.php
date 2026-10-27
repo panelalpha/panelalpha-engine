@@ -526,7 +526,7 @@ class DomainController extends Controller
             required: ['cert', 'key'],
             properties: [
                 new OA\Property(property: 'cert', type: 'string', description: 'PEM-encoded certificate'),
-                new OA\Property(property: 'key', type: 'string', description: 'PEM-encoded private key, or a `vault:<id>` from vault_secret_create (type `key`) holding it'),
+                new OA\Property(property: 'key', type: 'string', description: 'PEM-encoded private key, or a `vault:<key>` from vault_secret_create (type `key`) holding it'),
                 new OA\Property(property: 'ca', type: 'string', description: 'PEM-encoded CA bundle', nullable: true),
             ],
         )),

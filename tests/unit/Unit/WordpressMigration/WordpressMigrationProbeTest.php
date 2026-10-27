@@ -3,8 +3,12 @@
 namespace Tests\Unit\WordpressMigration;
 
 use App\Models\WordpressMigration;
+use App\System\Project\PhpHosting\WordPress\Migration\CurlSourceHttpClient;
+use App\System\Project\PhpHosting\WordPress\Migration\EngineAddresses;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceAccess;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceCheckFailed;
+use App\System\Project\PhpHosting\WordPress\Migration\SourceFetchGuard;
+use App\System\Project\PhpHosting\WordPress\Migration\SourceIpPolicy;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceHttpResponse;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceProbe;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceProbeCheck;
@@ -85,6 +89,26 @@ class WordpressMigrationProbeTest extends TestCase
 
         $this->assertSame('example.com', $added['domain']);
         $this->assertSame(['ok' => false, 'error_type' => 'domain_taken', 'message' => 'example.com already belongs to a project'], $refused);
+    }
+
+    public function test_every_internal_source_gets_the_same_answer_whatever_listens_there(): void
+    {
+        $dns = static fn (string $host): array => $host === 'sites-db' ? ['172.20.0.2'] : [];
+        $policy = new SourceIpPolicy(new class extends EngineAddresses {
+            public function ranges(): array
+            {
+                return ['93.184.216.40'];
+            }
+        });
+        $probe = new SourceProbe(static fn (SourceAccess $access) => new CurlSourceHttpClient($access->pin(), $dns, $policy), []);
+
+        $answers = array_map(
+            static fn (string $url): array => $probe->run(new SourceAccess(url: $url, username: 'admin', password: 'secret')),
+            ['http://172.18.0.5:5000/', 'http://10.0.0.1:8006/', 'http://sites-db:3306/', 'https://93.184.216.40/'],
+        );
+
+        $refused = ['ok' => false, 'error_type' => SourceCheckFailed::UNREACHABLE, 'message' => SourceFetchGuard::REFUSED];
+        $this->assertSame([$refused, $refused, $refused, $refused], $answers);
     }
 
     private function wordpress(): RoutedSourceHttpClient

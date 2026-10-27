@@ -104,7 +104,7 @@ class WordpressMigrationStoreRequest extends FormRequest
             try {
                 $pinned
                     ? SourceFetchGuard::assertShape($value)
-                    : SourceFetchGuard::assertAllowed($value, self::hostResolver());
+                    : SourceFetchGuard::assertAllowed($value, app(SourceIpPolicy::class), self::hostResolver());
             } catch (RuntimeException $e) {
                 $fail($e->getMessage());
             }

@@ -5,8 +5,8 @@ namespace Tests\Unit\Hub;
 use App\Auth\ApiSurface;
 use App\Auth\TokenAbilities;
 use App\Lib\Hub\HubGrants;
+use App\Models\Admin;
 use App\Models\HubAccessLog;
-use App\Models\HubConnection;
 use App\Models\PersonalAccessToken;
 use App\Models\TokenRotation;
 use Illuminate\Testing\TestResponse;
@@ -149,14 +149,87 @@ class HubTokenApiTest extends HubTestCase
         $this->assertSame(0, TokenRotation::query()->count(), 'the plain token is gone after the grace');
     }
 
+    public function test_rotating_again_after_the_new_token_was_revoked_issues_another(): void
+    {
+        $plain = Admin::rootAccount()->createToken('my-script', TokenAbilities::build(api: true, mcp: false))->plainTextToken;
+        $first = $this->withToken($plain)->postJson('/api/tokens/current/rotate')->assertOk()->json('data');
+        $this->withToken($first['token'])->deleteJson('/api/tokens/current')->assertNoContent();
+        $this->travel(6)->minutes();
+
+        $second = $this->withToken($plain)->postJson('/api/tokens/current/rotate')->assertOk()->json('data');
+        $again = $this->withToken($plain)->postJson('/api/tokens/current/rotate')->assertOk()->json('data');
+
+        $this->assertNotSame($first['token_id'], $second['token_id']);
+        $this->assertSame($second, $again, 'a retry within the grace period gets the same token');
+        $this->assertSame(1, TokenRotation::query()->count());
+        $this->withToken($second['token'])->getJson('/api/projects/all')->assertOk();
+
+        $this->travel(5)->minutes();
+        $this->withToken($plain)->getJson('/api/projects/all')->assertUnauthorized();
+    }
+
+    public function test_rotating_again_after_the_new_token_was_deleted_issues_another(): void
+    {
+        $plain = Admin::rootAccount()->createToken('my-script', TokenAbilities::build(api: true, mcp: false))->plainTextToken;
+        $first = $this->withToken($plain)->postJson('/api/tokens/current/rotate')->assertOk()->json('data');
+        PersonalAccessToken::query()->whereKey($first['token_id'])->delete();
+
+        $second = $this->withToken($plain)->postJson('/api/tokens/current/rotate')->assertOk()->json('data');
+
+        $this->assertNotSame($first['token_id'], $second['token_id']);
+        $this->withToken($second['token'])->getJson('/api/projects/all')->assertOk();
+    }
+
     public function test_any_token_may_rotate_itself(): void
     {
-        $plain = \App\Models\Admin::rootAccount()->createToken('my-script', TokenAbilities::build(api: true, mcp: false))->plainTextToken;
+        $plain = Admin::rootAccount()->createToken('my-script', TokenAbilities::build(api: true, mcp: false))->plainTextToken;
 
         $rotated = $this->withToken($plain)->postJson('/api/tokens/current/rotate')->assertOk()->json('data');
 
         $this->assertSame(['api'], $rotated['abilities']);
         $this->assertSame('my-script', PersonalAccessToken::query()->find($rotated['token_id'])->name);
+    }
+
+    public function test_a_rotated_token_lasts_as_long_as_the_calling_token_was_issued_for(): void
+    {
+        $plain = Admin::rootAccount()
+            ->createToken('short', TokenAbilities::build(api: true, mcp: false), now()->addDay())->plainTextToken;
+        $this->travel(12)->hours();
+
+        $rotated = $this->withToken($plain)->postJson('/api/tokens/current/rotate')->assertOk()->json('data');
+
+        /** @var PersonalAccessToken $new */
+        $new = PersonalAccessToken::query()->findOrFail($rotated['token_id']);
+        $this->assertEqualsWithDelta(now()->addDay()->timestamp, $new->expires_at->timestamp, 5);
+    }
+
+    public function test_a_token_without_an_expiry_rotates_into_one_without(): void
+    {
+        $plain = Admin::rootAccount()
+            ->createToken('forever', TokenAbilities::build(api: true, mcp: false))->plainTextToken;
+
+        $rotated = $this->withToken($plain)->postJson('/api/tokens/current/rotate')->assertOk()->json('data');
+
+        $this->assertNull($rotated['expires_at']);
+        $this->assertNull(PersonalAccessToken::query()->findOrFail($rotated['token_id'])->expires_at);
+    }
+
+    /** Rotating it again, once its new token was revoked, must not take the 10-minute grace for its lifetime. */
+    public function test_a_rotation_keeps_the_expiry_the_calling_token_was_issued_with(): void
+    {
+        $short = Admin::rootAccount()
+            ->createToken('short', TokenAbilities::build(api: true, mcp: false), now()->addDay());
+        $forever = Admin::rootAccount()
+            ->createToken('forever', TokenAbilities::build(api: true, mcp: false));
+        $issued = $short->accessToken->expires_at->timestamp;
+        $this->travel(12)->hours();
+
+        $this->withToken($short->plainTextToken)->postJson('/api/tokens/current/rotate')->assertOk();
+        $this->withToken($forever->plainTextToken)->postJson('/api/tokens/current/rotate')->assertOk();
+
+        $this->assertEqualsWithDelta(now()->addMinutes(10)->timestamp, $short->accessToken->fresh()->expires_at->timestamp, 5);
+        $this->assertSame($issued, TokenRotation::query()->where('from_token_id', $short->accessToken->id)->sole()->from_expires_at?->timestamp);
+        $this->assertNull(TokenRotation::query()->where('from_token_id', $forever->accessToken->id)->sole()->from_expires_at);
     }
 
     /** A12 */
@@ -186,11 +259,28 @@ class HubTokenApiTest extends HubTestCase
         $this->assertNotNull($connection->fresh());
     }
 
+    /** A12: the superseded token ends itself during its grace; the connection follows the new one. */
+    public function test_revoking_a_rotated_hub_token_leaves_its_connection_alone(): void
+    {
+        $old = $this->hubToken();
+        $connection = $this->connection($old);
+        $rotated = $this->withToken($old->plainTextToken)->postJson('/api/tokens/current/rotate')->assertOk()->json('data');
+
+        $this->withToken($old->plainTextToken)->deleteJson('/api/tokens/current')->assertNoContent();
+
+        $this->assertNotNull($old->accessToken->fresh()->revoked_at);
+        $this->assertSame($rotated['token_id'], $connection->fresh()?->token_id);
+        $this->withToken($rotated['token'])->getJson('/api/projects/all')->assertOk();
+
+        $this->withToken($rotated['token'])->deleteJson('/api/tokens/current')->assertNoContent();
+        $this->assertNull($connection->fresh());
+    }
+
     /** A12 */
     public function test_revoking_another_token_leaves_the_connection_alone(): void
     {
         $connection = $this->connection($this->hubToken());
-        $plain = \App\Models\Admin::rootAccount()->createToken('my-script', ['api'])->plainTextToken;
+        $plain = Admin::rootAccount()->createToken('my-script', ['api'])->plainTextToken;
 
         $this->withToken($plain)->deleteJson('/api/tokens/current')->assertNoContent();
 

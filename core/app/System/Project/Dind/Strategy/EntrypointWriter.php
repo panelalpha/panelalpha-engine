@@ -110,7 +110,7 @@ class EntrypointWriter
             'Using this project\'s own '.self::PROJECT_OVERRIDE
             .' — the platform\'s install, upgrade and start commands are not applied'
         );
-        $system->filesystem()->filePutContents(
+        $system->filesystem()->writeFileReplacingPath(
             AppRoot::path($projectDir, $decision).'/'.StageScript::FILENAME,
             $contents,
             $chown,
@@ -227,7 +227,7 @@ class EntrypointWriter
         // manifest with an app_root mounts only that subtree. Written to the
         // root it is invisible to the container, the shim falls through to
         // "serving directly", and every stage command is dropped in silence.
-        $this->dind->system()->filesystem()->filePutContents(
+        $this->dind->system()->filesystem()->writeFileReplacingPath(
             AppRoot::path($projectDir, $decision).'/'.StageScript::FILENAME,
             StageScript::render(
                 $manifest,

@@ -2,11 +2,8 @@
 
 namespace App\Console\Commands\Wordpress;
 
-use App\Models\WordpressMigration;
 use App\System\Project\PhpHosting\WordPress\Migration\ImportedDomainSwitch;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Log;
-use Throwable;
 
 /**
  * Visits every imported site still waiting for its domain's DNS: once the
@@ -21,21 +18,12 @@ class WordpressMigrateDnsSwitchCommand extends Command
 
     public function handle(ImportedDomainSwitch $switch): int
     {
-        $switched = 0;
-        $failed = 0;
-
-        foreach (WordpressMigration::awaitingDnsSwitch() as $migration) {
-            try {
-                $switched += $switch->check($migration) ? 1 : 0;
-            } catch (Throwable $e) {
-                $this->error("could not switch {$migration->target_label}: ".$e->getMessage());
-                Log::warning("WordPress import DNS switch failed for {$migration->target_label}: ".$e->getMessage());
-                $failed++;
-            }
+        $result = $switch->checkAwaiting();
+        foreach ($result['failures'] as $failure) {
+            $this->error("could not switch {$failure}");
         }
+        $this->line("{$result['switched']} switched, ".count($result['failures']).' failed');
 
-        $this->line("{$switched} switched, {$failed} failed");
-
-        return $failed > 0 ? self::FAILURE : self::SUCCESS;
+        return $result['failures'] === [] ? self::SUCCESS : self::FAILURE;
     }
 }

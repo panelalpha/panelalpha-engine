@@ -2,7 +2,7 @@ import { expect, test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
 import { expectStatus } from '@/helpers/expect-status';
 import { privilegesAsText } from '@/helpers/mysql-helpers';
-import { rand } from '@/helpers/random';
+import { rand, randomUsername } from '@/helpers/random';
 import { stagingUserPayload, waitUntilStagingActive } from '@/helpers/staging-helpers';
 
 test.describe('user staging', () => {
@@ -92,6 +92,44 @@ test.describe('user staging', () => {
       if (stagingUsername) {
         await api.deleteUserSafe(stagingUsername);
       }
+      await userFactory.deleteUser(source.username);
+    }
+  });
+
+  test('a classic WordPress is not staged or cloned without its databases', async ({
+    api,
+    userFactory,
+  }) => {
+    const source = await userFactory.createSimpleUser();
+    const newUsername = randomUsername(12);
+
+    try {
+      await api.putFileContents(
+        source.username,
+        `${source.domain}/public_html/wp-config.php`,
+        '<?php\n'
+      );
+
+      const refusals = {
+        staging: await api.createStagingRaw(source.username, {
+          new_username: newUsername,
+          copy_databases: false,
+        }),
+        clone: await api.cloneUserRaw(source.username, {
+          new_username: newUsername,
+          copy_databases: false,
+        }),
+      };
+      for (const [action, response] of Object.entries(refusals)) {
+        await expectStatus(response, 422);
+        expect(JSON.stringify(response.body), `the ${action} refusal names the code`).toContain(
+          'wordpress_copy_needs_databases'
+        );
+      }
+
+      await expectStatus(await api.getUserRaw(newUsername), 404);
+    } finally {
+      await api.deleteUserSafe(newUsername);
       await userFactory.deleteUser(source.username);
     }
   });

@@ -3,6 +3,7 @@
 namespace App\System\Project\Dind;
 
 use App\System\Project\Dind as DindProject;
+use App\System\Project\PhpHosting\WordPress\DatabaseClientMissing;
 use App\System\Project\PhpHosting\WordPress\MustUsePlugin;
 use App\System\Project\PhpHosting\WordPress\WordPressNotFound;
 use Illuminate\Support\Str;
@@ -16,6 +17,10 @@ use Illuminate\Support\Str;
  * when missing or stale, and execs WP-CLI there as the owner of wp-content,
  * so plugin installs land with the web server's ownership and the container's
  * own environment (database credentials) applies.
+ *
+ * WP-CLI's database commands shell out to mysql and mysqldump, which the
+ * official wordpress image lacks: they run in the first container that has a
+ * client as well, such as a wordpress:cli service beside the app.
  */
 class WordPressCli
 {
@@ -29,12 +34,19 @@ class WordPressCli
     /** The script's exit code when no container has PHP and WordPress at the requested path. */
     public const NOT_FOUND_EXIT = 71;
 
+    /** The script's exit code when a database command finds WordPress only where there is no MySQL client. */
+    public const NO_DATABASE_CLIENT_EXIT = 72;
+
+    /** The `wp db` subcommands that run the mysql, mysqldump or mysqlcheck client rather than PHP. */
+    public const DATABASE_CLIENT_COMMANDS = ['create', 'drop', 'reset', 'clean', 'check', 'optimize', 'repair', 'cli', 'query', 'export', 'import'];
+
     /**
      * Runs in the target container with its default user and working
      * directory. A relative path is taken from that directory; with none,
      * the usual install directories are tried, then a search below them.
-     * Prints the install path, the owner to run as and the size of the phar
-     * already there; exits 3 without PHP, 4 without WordPress.
+     * Prints the install path, the owner to run as, the size of the phar
+     * already there, 1 when the MySQL client is there (else 0) and the owner
+     * of the install directory; exits 3 without PHP, 4 without WordPress.
      */
     public const PROBE = <<<'SH'
         want=$1; phar=$2
@@ -59,21 +71,28 @@ class WordPressCli
         for o in "$found/wp-content" "$found/../app" "$found"; do
           if [ -d "$o" ]; then owner=$(stat -c %u:%g "$o" 2>/dev/null) && break; fi
         done
-        printf '%s\n%s\n%s\n' "$found" "${owner:-0:0}" "$(stat -c %s "$phar" 2>/dev/null || echo 0)"
+        client=0
+        command -v mysql >/dev/null 2>&1 && command -v mysqldump >/dev/null 2>&1 && command -v mysqlcheck >/dev/null 2>&1 && client=1
+        tree=$(stat -c %u:%g "$found" 2>/dev/null)
+        printf '%s\n%s\n%s\n%s\n%s\n' "$found" "${owner:-0:0}" "$(stat -c %s "$phar" 2>/dev/null || echo 0)" "$client" "${tree:-${owner:-0:0}}"
         SH;
 
     /**
      * Runs in the account as its user: $1 the requested path and $2 the
      * service (either may be empty), $3 the PHP memory limit, $4 code WP-CLI
-     * runs first, the rest WP-CLI's arguments. The last step
+     * runs first, $5 1 when the command needs the MySQL client, the rest
+     * WP-CLI's arguments. A database command runs as the owner of the install
+     * directory, so a dump it writes or reads there is the account's file. The last step
      * execs WP-CLI, so stdout, stderr and the exit code are WP-CLI's own.
      */
     public const SCRIPT = <<<'SH'
         set -u
-        want=$1; service=$2; memory=$3; mend=$4; shift 4
+        want=$1; service=$2; memory=$3; mend=$4; needs_client=$5; shift 5
         phar=__PHAR__; dest=__DEST__; probe=__PROBE__
         fail() { printf '%s %s\n' '__MARKER__' "$1" >&2; exit 70; }
         missing() { printf '%s %s\n' '__MARKER__' "$1" >&2; exit __NOT_FOUND__; }
+        no_client() { printf '%s %s\n' '__MARKER__' "$1" >&2; exit __NO_CLIENT__; }
+        without_client=
         [ -r "$phar" ] || fail 'WP-CLI is missing from this account. Rebuild the project to restore it.'
         size=$(stat -c %s "$phar")
         rows=$(docker ps --format '{{.ID}}|{{.Label "com.docker.compose.service"}}|{{.Image}}|{{.Names}}' 2>/dev/null)
@@ -85,7 +104,11 @@ class WordPressCli
         ids=$(printf '%s\n' "$rows" | awk -F'|' '{ p = 2; if ($2 $3 ~ /cli/) p = 3; else if ($2 ~ /wordpress|^wp/ || $3 ~ /wordpress/) p = 0; else if ($2 ~ /^(app|php|web|fpm)/) p = 1; print p, $1 }' | sort -s -n -k1,1 | cut -d' ' -f2)
         for id in $ids; do
           out=$(docker exec "$id" sh -c "$probe" sh "$want" "$dest" 2>/dev/null) || continue
-          { read -r path; read -r owner; read -r have; } <<< "$out"
+          { read -r path; read -r owner; read -r have; read -r client; read -r tree; } <<< "$out"
+          if [ "$needs_client" = 1 ]; then
+            [ "$client" = 1 ] || { without_client=1; continue; }
+            owner=$tree
+          fi
           if [ "$have" != "$size" ]; then
             docker exec -i "$id" sh -c 'cat > "$1.$$" && chmod 0644 "$1.$$" && mv -f "$1.$$" "$1"' sh "$dest" < "$phar" \
               || fail "Could not copy WP-CLI into the container: its /tmp is not writable."
@@ -96,6 +119,7 @@ class WordPressCli
             php -d "memory_limit=$memory" "$dest" "--path=$path" "--exec=$mend" ${root[@]+"${root[@]}"} "$@"
         done
         where=${service:+ in service $service}
+        [ -z "$without_client" ] || no_client "WP-CLI's database commands need the MySQL client (mysql, mysqldump and mysqlcheck), and no running container$where that has WordPress has one. Run them in a service whose image has the client, such as wordpress:cli with the same volumes."
         if [ -n "$want" ]; then
           missing "No WordPress with PHP was found at $want$where."
         fi
@@ -126,9 +150,11 @@ class WordPressCli
         $marker = strpos($stderr, self::MARKER);
         if ($exitCode !== 0 && $marker !== false) {
             $message = trim(substr($stderr, $marker + strlen(self::MARKER)));
-            throw $exitCode === self::NOT_FOUND_EXIT
-                ? new WordPressNotFound($message)
-                : new \RuntimeException($message);
+            throw match ($exitCode) {
+                self::NOT_FOUND_EXIT => new WordPressNotFound($message),
+                self::NO_DATABASE_CLIENT_EXIT => new DatabaseClientMissing($message),
+                default => new \RuntimeException($message),
+            };
         }
 
         return [
@@ -161,8 +187,18 @@ class WordPressCli
             '__PROBE__' => escapeshellarg(self::PROBE),
             '__MARKER__' => self::MARKER,
             '__NOT_FOUND__' => (string) self::NOT_FOUND_EXIT,
+            '__NO_CLIENT__' => (string) self::NO_DATABASE_CLIENT_EXIT,
         ]);
+        $needsClient = self::needsDatabaseClient($rest) ? '1' : '0';
 
-        return ['bash', '-c', $script, 'wp', $path, (string) $service, self::MEMORY_LIMIT, MustUsePlugin::MEND_ON_LOAD, ...$rest];
+        return ['bash', '-c', $script, 'wp', $path, (string) $service, self::MEMORY_LIMIT, MustUsePlugin::MEND_ON_LOAD, $needsClient, ...$rest];
+    }
+
+    /** @param  list<string>  $args */
+    public static function needsDatabaseClient(array $args): bool
+    {
+        $words = array_values(array_filter($args, fn (string $arg): bool => ! str_starts_with($arg, '-')));
+
+        return ($words[0] ?? null) === 'db' && in_array($words[1] ?? null, self::DATABASE_CLIENT_COMMANDS, true);
     }
 }

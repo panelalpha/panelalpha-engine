@@ -143,6 +143,26 @@ class WordpressMigrationDnsSwitchTest extends ImportTargetTestCase
         $this->assertSame(['wp.com'], $this->certificates);
     }
 
+    public function test_the_command_reports_a_refused_domain_and_fails(): void
+    {
+        $this->previewedImport();
+        Http::fake(['*' => Http::response('', 200)]);
+        $this->app->instance(ImportedDomainSwitch::class, new ImportedDomainSwitch(
+            static fn (): array => [self::ENGINE_IPV4],
+            requestCertificate: static function (): void {
+                throw new RuntimeException('the authority refused');
+            },
+            preview: $this->preview(),
+        ));
+
+        $exit = Artisan::call('wordpress:migrate:dns-switch');
+        $output = Artisan::output();
+
+        $this->assertSame(1, $exit);
+        $this->assertStringContainsString('could not switch wp.com: the authority refused', $output);
+        $this->assertStringContainsString('0 switched, 1 failed', $output);
+    }
+
     public function test_the_check_is_scheduled_every_fifteen_minutes(): void
     {
         /** @var Kernel $kernel */

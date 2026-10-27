@@ -2,7 +2,7 @@
 
 namespace App\System\Project\PhpHosting\WordPress\Migration;
 
-use App\Http\Requests\UserStoreRequest;
+use App\Lib\Project\NewProjectInput;
 use App\Models\User;
 
 /**
@@ -11,5 +11,5 @@ use App\Models\User;
  */
 interface ProjectDeployer
 {
-    public function deploy(UserStoreRequest $request): User;
+    public function deploy(NewProjectInput $input): User;
 }

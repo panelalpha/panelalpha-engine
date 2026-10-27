@@ -9,8 +9,9 @@ use RuntimeException;
 /**
  * The source site for one job run, shared by every step of that run. The site
  * is found once and stored on the record; a wp-admin session is opened at most
- * once per run, and only where wp-admin is needed. While a run is bound
- * ({@see keepAlive}), every source call it makes keeps the run's claim alive.
+ * once per run, and only where wp-admin is needed. Transfer calls carry the
+ * plugin's token ({@see transfer}). While a run is bound ({@see keepAlive}),
+ * every source call it makes keeps the run's claim alive.
  */
 final class SourceConnection
 {
@@ -54,6 +55,20 @@ final class SourceConnection
 
         $site = self::storedSite($migration) ?? $this->find($client, $migration);
         $client->useSite($site);
+
+        return $client;
+    }
+
+    /**
+     * A client for the plugin's transfer routes, sending the record's source
+     * token on every call.
+     */
+    public function transfer(WordpressMigration $migration): SourceWordpressClient
+    {
+        $client = $this->open($migration);
+        $access = SourceAccess::of($migration);
+        self::withSecret($access, $access->sourceToken, 'source token');
+        $client->useSourceToken((string) $access->sourceToken);
 
         return $client;
     }

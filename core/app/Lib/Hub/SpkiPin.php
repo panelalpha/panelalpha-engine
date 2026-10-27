@@ -37,7 +37,11 @@ final class SpkiPin
         return self::fromPem($pem);
     }
 
-    /** @throws HubException */
+    /**
+     * The PEM public key is the SubjectPublicKeyInfo, base64 between the markers.
+     *
+     * @throws HubException
+     */
     public static function fromPem(string $pem): string
     {
         $key = @openssl_pkey_get_public($pem);
@@ -46,7 +50,6 @@ final class SpkiPin
             throw new HubException('The certificate has no readable public key.');
         }
 
-        // The PEM public key is the SubjectPublicKeyInfo, base64 between the markers.
         $body = preg_replace('/-----[^-]+-----|\s+/', '', $details['key']);
         $der = base64_decode((string) $body, true);
         if ($der === false || $der === '') {

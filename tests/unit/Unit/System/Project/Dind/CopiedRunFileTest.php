@@ -159,6 +159,43 @@ class CopiedRunFileTest extends TestCase
         $this->assertSame('644', sprintf('%o', fileperms($dir.EngineArtifacts::RUN_PASSWD) & 0777));
     }
 
+    public function test_the_copy_mounts_its_own_home_not_the_sources(): void
+    {
+        [$live, $stg] = $this->pair(liveHasDatabase: false);
+        $this->writeRunFile([
+            'services' => [
+                'app' => [
+                    'image' => 'panelalpha/php:8.3',
+                    'volumes' => [
+                        '/home/live/.cache/composer:/var/cache/pa-composer',
+                        '/home/livestock/data:/data:ro',
+                        'appdata:/var/lib/app',
+                        './uploads:/app/uploads',
+                    ],
+                ],
+                'worker' => [
+                    'image' => 'acme/worker',
+                    'volumes' => [
+                        ['type' => 'bind', 'source' => '/home/live/.cache/composer', 'target' => '/cache'],
+                        ['type' => 'volume', 'source' => '/home/live', 'target' => '/named'],
+                    ],
+                ],
+            ],
+        ]);
+
+        $this->assertTrue($this->runFile($stg)->repointFrom($live, $this->path()));
+
+        $services = Yaml::parseFile($this->path())['services'];
+        $this->assertSame([
+            '/home/stg/.cache/composer:/var/cache/pa-composer',
+            '/home/livestock/data:/data:ro',
+            'appdata:/var/lib/app',
+            './uploads:/app/uploads',
+        ], $services['app']['volumes']);
+        $this->assertSame('/home/stg/.cache/composer', $services['worker']['volumes'][0]['source']);
+        $this->assertSame('/home/live', $services['worker']['volumes'][1]['source']);
+    }
+
     public function test_account_files_without_the_sources_entry_are_left_alone(): void
     {
         [$live, $stg] = $this->pair(liveHasDatabase: false);
@@ -169,6 +206,73 @@ class CopiedRunFileTest extends TestCase
         $this->runFile($stg)->repointFrom($live, $this->path());
 
         $this->assertSame($passwd, file_get_contents(dirname($this->path()).'/'.EngineArtifacts::RUN_PASSWD));
+    }
+
+    public function test_the_env_files_beside_the_run_file_get_the_copys_database_and_address(): void
+    {
+        [$live, $stg] = $this->pair();
+        $this->writeRunFile(['services' => ['app' => ['image' => 'acme/app']]]);
+        $this->writeEnvFile('.env', "# app\nAPP_URL=https://live.example.test\nNAME=\"My App\"\nDB_DATABASE=live_app\nDB_PASSWORD=live-secret\nMAIL_HOST=smtp.live.example.test\n", 0644);
+        $this->writeEnvFile('.env.default', "APP_URL=https://live.example.test/shop\nDB_DATABASE=external\n", 0600);
+        $this->writeEnvFile(EngineArtifacts::ENV_OVERRIDES, "SERVER_NAME='live.example.test'\n", 0600);
+
+        $this->runFile($stg)->repointFrom($live, $this->path());
+
+        $this->assertSame(
+            "# app\nAPP_URL=https://stg.example.test\nNAME=\"My App\"\nDB_DATABASE=stg_app\nDB_PASSWORD=stg-secret\nMAIL_HOST=smtp.live.example.test\n",
+            $this->envFile('.env')
+        );
+        $this->assertSame("APP_URL=https://stg.example.test/shop\nDB_DATABASE=external\n", $this->envFile('.env.default'));
+        $this->assertSame("SERVER_NAME=stg.example.test\n", $this->envFile(EngineArtifacts::ENV_OVERRIDES));
+        $this->assertSame('644', $this->envFileMode('.env'));
+        $this->assertSame('600', $this->envFileMode('.env.default'));
+        $this->assertSame('600', $this->envFileMode(EngineArtifacts::ENV_OVERRIDES));
+    }
+
+    public function test_a_pushed_env_file_keeps_every_line_it_does_not_repoint(): void
+    {
+        [$live, $stg] = $this->pair();
+        $this->writeRunFile(['services' => ['app' => ['image' => 'acme/app']]]);
+        $this->writeEnvFile('.env', "# keys\r\n"
+            ."export APP_URL=https://live.example.test # public\r\n"
+            ."JWT_KEY=\"-----BEGIN KEY-----\r\nDB_DATABASE=live_app\r\n-----END KEY-----\"\r\n"
+            ."DB_DATABASE = 'live_app' # app db\r\n", 0600);
+
+        $this->runFile($stg)->repointFrom($live, $this->path());
+
+        $this->assertSame(
+            "# keys\r\n"
+            ."export APP_URL=https://stg.example.test # public\r\n"
+            ."JWT_KEY=\"-----BEGIN KEY-----\r\nDB_DATABASE=live_app\r\n-----END KEY-----\"\r\n"
+            ."DB_DATABASE = 'stg_app' # app db\r\n",
+            $this->envFile('.env')
+        );
+    }
+
+    public function test_an_env_file_without_the_sources_values_is_left_as_it_was(): void
+    {
+        [$live, $stg] = $this->pair();
+        $this->writeRunFile(['services' => ['app' => ['image' => 'acme/app']]]);
+        $contents = "KEY = 'spaced'\nexport OTHER=\"x\"\n";
+        $this->writeEnvFile('.env', $contents, 0640);
+
+        $this->runFile($stg)->repointFrom($live, $this->path());
+
+        $this->assertSame($contents, $this->envFile('.env'));
+        $this->assertSame('640', $this->envFileMode('.env'));
+    }
+
+    public function test_a_symlinked_env_file_is_left_alone(): void
+    {
+        [$live, $stg] = $this->pair();
+        $this->writeRunFile(['services' => ['app' => ['image' => 'acme/app']]]);
+        file_put_contents($this->root.'/elsewhere.env', "APP_URL=https://live.example.test\n");
+        symlink($this->root.'/elsewhere.env', dirname($this->path()).'/.env');
+
+        $this->runFile($stg)->repointFrom($live, $this->path());
+
+        $this->assertTrue(is_link(dirname($this->path()).'/.env'));
+        $this->assertSame("APP_URL=https://live.example.test\n", file_get_contents($this->root.'/elsewhere.env'));
     }
 
     public function test_a_symlinked_run_file_is_refused(): void
@@ -213,6 +317,23 @@ class CopiedRunFileTest extends TestCase
     private function writeRunFile(array $compose): void
     {
         file_put_contents($this->path(), Yaml::dump($compose, 6, 2));
+    }
+
+    private function writeEnvFile(string $name, string $contents, int $mode): void
+    {
+        $path = dirname($this->path()).'/'.$name;
+        file_put_contents($path, $contents);
+        chmod($path, $mode);
+    }
+
+    private function envFile(string $name): string
+    {
+        return (string) file_get_contents(dirname($this->path()).'/'.$name);
+    }
+
+    private function envFileMode(string $name): string
+    {
+        return sprintf('%o', fileperms(dirname($this->path()).'/'.$name) & 0777);
     }
 
     private function path(): string

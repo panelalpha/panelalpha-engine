@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Platform\Runtime;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
@@ -33,7 +34,7 @@ final class GoEmbeddedFrontends
         $root = rtrim($projectDir, '/');
         $found = [];
         foreach (self::goFiles($root) as $relative) {
-            $source = @file_get_contents($root.'/'.$relative);
+            $source = AccountHomeRead::contents($root.'/'.$relative);
             if (! is_string($source) || ! str_contains($source, '//go:embed')) {
                 continue;
             }
@@ -68,7 +69,7 @@ final class GoEmbeddedFrontends
         $plan = [];
         foreach (self::missing($projectDir) as $frontend) {
             $abs = rtrim($projectDir, '/').($frontend['dir'] === '' ? '' : '/'.$frontend['dir']);
-            $package = json_decode((string) @file_get_contents($abs.'/package.json'), true);
+            $package = json_decode((string) AccountHomeRead::contents($abs.'/package.json'), true);
             $package = is_array($package) ? $package : [];
             $files = ProjectContext::listRootFiles($abs);
             $pm = JsPackageManager::detectPackageManager($files, $package);
@@ -101,7 +102,7 @@ final class GoEmbeddedFrontends
         $target = trim(($goDir === '' ? '' : $goDir.'/').$pattern, '/');
         $parent = dirname($target) === '.' ? '' : dirname($target);
         foreach (array_unique([$parent, $goDir]) as $dir) {
-            $package = json_decode((string) @file_get_contents($root.'/'.($dir === '' ? '' : $dir.'/').'package.json'), true);
+            $package = json_decode((string) AccountHomeRead::contents($root.'/'.($dir === '' ? '' : $dir.'/').'package.json'), true);
             if (is_array($package) && is_string($package['scripts']['build'] ?? null) && trim($package['scripts']['build']) !== '') {
                 return $dir;
             }

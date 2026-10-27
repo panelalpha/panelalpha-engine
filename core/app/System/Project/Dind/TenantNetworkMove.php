@@ -127,12 +127,13 @@ final class TenantNetworkMove
             if (! $filesystem->fileExists($file)) {
                 continue;
             }
+            $filesystem->assertNotSymlink($file);
             $yaml = $filesystem->fileGetContents($file);
             $repinned = AppDatabase::repinned($yaml, $address);
             if ($repinned !== $yaml) {
                 // The run file inlines env_vars and passwords; the overrides are 0644 wherever written.
                 $mode = basename($file) === EngineArtifacts::RUN_COMPOSE ? EngineArtifacts::RUN_COMPOSE_MODE : '644';
-                $filesystem->filePutContents($file, $repinned, $chown, $mode);
+                $filesystem->writeFileReplacingPath($file, $repinned, $chown, $mode);
                 $changed = true;
             }
         }

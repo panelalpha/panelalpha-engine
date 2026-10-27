@@ -9,6 +9,7 @@ use App\Lib\Limits\LimitSelection;
 use App\Lib\Limits\ResourceLimit;
 use App\Models\User;
 use App\System\Project\Dind;
+use App\System\Projects;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Collection;
 
@@ -73,6 +74,13 @@ class SetLimits extends Command
             return 1;
         }
 
+        $containerProblem = $this->containerMemoryProblem($projects, $selection);
+        if ($containerProblem !== null) {
+            $this->error($containerProblem);
+
+            return 1;
+        }
+
         $one = $this->option('username') ? $projects[0] : null;
         $this->warn($one !== null
             ? "Following limits will be set for user `{$one->username}`:"
@@ -83,6 +91,28 @@ class SetLimits extends Command
         return $this->confirm('Do you wish to continue?')
             ? $this->apply($projects, $selection)
             : 0;
+    }
+
+    /**
+     * A container project's account runs its own Docker daemon, so its floor is higher than Docker's.
+     *
+     * @param  array<User>|Collection<int, User>  $projects
+     */
+    private function containerMemoryProblem($projects, LimitSelection $selection): ?string
+    {
+        if (! $selection->has('memory_limit')) {
+            return null;
+        }
+        foreach ($projects as $user) {
+            $problem = Projects::isDind($user)
+                ? ProjectMemory::problem((int) $selection->all()['memory_limit'], container: true)
+                : null;
+            if ($problem !== null) {
+                return "{$user->username}: {$problem['message']}";
+            }
+        }
+
+        return null;
     }
 
     private function announce(LimitSelection $selection, int $width): void

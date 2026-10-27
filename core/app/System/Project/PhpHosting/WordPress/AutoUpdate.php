@@ -12,8 +12,7 @@ namespace App\System\Project\PhpHosting\WordPress;
  * auto-updates enable|disable --all`. The read also reports each plugin and
  * theme, since the aggregate cannot show a partly enabled type. A write sets
  * only the fields it is given and succeeds once every item has the requested
- * state, even when WP-CLI exits non-zero because some already had it. HTTP,
- * artisan, and MCP tools are adapters.
+ * state, even when WP-CLI exits non-zero because some already had it.
  */
 final class AutoUpdate
 {
@@ -70,6 +69,7 @@ final class AutoUpdate
         return $written;
     }
 
+    /** An undefined constant reads as minor: WordPress defaults to minor-only core updates. */
     private function readCore(): string
     {
         $result = $this->cli->run(
@@ -77,17 +77,18 @@ final class AutoUpdate
         );
 
         if (($result['exit_code'] ?? 1) !== 0) {
-            // Undefined constant: WordPress defaults to minor-only core updates.
             return 'minor';
         }
 
         return $this->mapCoreFromWp(trim($result['stdout']));
     }
 
+    /**
+     * true/false are PHP literals and go in raw; 'minor' is a string, and
+     * written raw it would be an undefined constant that breaks the site.
+     */
     private function writeCore(string $mode): void
     {
-        // true/false are PHP literals and go in raw; 'minor' is a string, and
-        // written raw it would be an undefined constant that breaks the site.
         $args = match ($mode) {
             'off' => ['false', '--raw'],
             'on' => ['true', '--raw'],
@@ -153,6 +154,10 @@ final class AutoUpdate
         return 'on';
     }
 
+    /**
+     * WP-CLI exits non-zero when some items already had the state ("Only
+     * enabled 3 of 4"). That is success as long as all now have it.
+     */
     private function writeTypeStatus(string $type, string $mode): void
     {
         $action = match ($mode) {
@@ -166,8 +171,6 @@ final class AutoUpdate
             return;
         }
 
-        // WP-CLI exits non-zero when some items already had the state
-        // ("Only enabled 3 of 4"). That is success as long as all now have it.
         foreach ($this->readItems($type) as $status) {
             if ($this->isEnabled($status) !== ($mode === 'on')) {
                 throw new Exception($this->cli->failureMessage($result));

@@ -200,6 +200,13 @@ EGRESS_ALLOW_HOSTS=git.internal,files.internal
 
 The first allows every private address. The second allows only the names you list, and it takes names, not addresses. Loopback, link-local and other reserved addresses stay refused either way.
 
+A WordPress import follows the same rule for its source: the site's URL, every address it redirects to, and `source_ip`. It also refuses the engine's own addresses. A refused URL gets the same answer, "Source WordPress URL must lead to a public address", whatever is listening there.
+
+The source site sends the import to the engine's default IPv4, or to the public address the IPv4 NAT map gives it (`pae system:nat:build` fills that map on a server behind 1:1 NAT). When that address is private, an import is refused with `engine_address_private` before anything is installed on the source, because a site on the internet cannot reach it. Set the engine's public address as its default IPv4 or map it in the NAT map, or, with the source on the same private network, set `EGRESS_ALLOW_PRIVATE=true`.
+
+**A git pull on traditional PHP hosting is refused with `host_refused` and "git 2.37 or newer is required".**
+On traditional PHP hosting, git runs on the VPS itself, and the engine holds each pull to the address it has just checked, so a name that changes its answer cannot lead the pull into your server's own network. git older than 2.37 ignores that setting without saying so, so the engine refuses the pull rather than run it unchecked. Ubuntu 22.04 ships git 2.34, and the installer warns about it. Upgrade git on the VPS (the git-core PPA that git-scm.com lists for Ubuntu has a current one), or add the git host's name to `EGRESS_ALLOW_HOSTS` as above to pull from it without the hold. The engine notices an upgraded git within an hour. Projects that run in their own container are not affected.
+
 **I want a different webserver.**
 Not supported. Sites are served through nginx-proxy only.
 

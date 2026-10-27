@@ -60,7 +60,7 @@ The version already online keeps serving while a rebuild runs. The new version s
 Cancel the deploy that is running on this project.
 ```
 
-A cancel ends the deploy at any step, including the final check. It never takes down a version that was already online. A cancelled rebuild removes only what it started itself, and a project that was stopped before stays stopped.
+A cancel ends the deploy at any step, including the final check. It never takes down a version that was already online. A cancelled rebuild removes only what it started itself, and a project that was stopped before stays stopped. When the engine could not read what was running as the rebuild started, the cancel removes nothing, since what the rebuild started may be what serves the site.
 
 ## Past deploys
 

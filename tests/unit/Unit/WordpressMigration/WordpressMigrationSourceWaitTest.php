@@ -11,26 +11,18 @@ use PHPUnit\Framework\TestCase;
 /**
  * curl asks the caller, before a request and about once a second while it
  * waits, whether to keep waiting; a false answer aborts the request. The
- * slow answer comes from a PHP built-in server on a private address, since
- * the fetch guard refuses loopback.
+ * slow answer comes from a PHP built-in server on this host's private
+ * address, reached through a name the operator allows.
  */
 class WordpressMigrationSourceWaitTest extends TestCase
 {
-    private const SLOW_SECONDS = 3;
+    use ServesSourceSite;
 
-    /** @var array{0: resource, 1: string}|null */
-    private ?array $server = null;
+    private const SLOW_SECONDS = 3;
 
     protected function tearDown(): void
     {
-        if ($this->server !== null) {
-            [$process, $dir] = $this->server;
-            proc_terminate($process);
-            proc_close($process);
-            array_map('unlink', glob($dir . '/*') ?: []);
-            rmdir($dir);
-            $this->server = null;
-        }
+        $this->stopSourceSite();
         parent::tearDown();
     }
 
@@ -85,43 +77,9 @@ class WordpressMigrationSourceWaitTest extends TestCase
 
     private function clientOnSlowServer(?string &$url): CurlSourceHttpClient
     {
-        $address = gethostbyname(gethostname());
-        if (filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false || str_starts_with($address, '127.')) {
-            $this->markTestSkipped('needs a non-loopback address of this host for the built-in server');
-        }
+        [$client, $base] = $this->clientOnSourceSite('<?php sleep('.self::SLOW_SECONDS.'); echo "scanned";');
+        $url = $base.'/slow';
 
-        $url = 'http://wp.example:' . $this->serve($address) . '/slow';
-
-        return new CurlSourceHttpClient(null, static fn (): array => [$address]);
-    }
-
-    private function serve(string $address): int
-    {
-        $dir = sys_get_temp_dir() . '/pa-source-wait-' . bin2hex(random_bytes(6));
-        mkdir($dir, 0o755, true);
-        file_put_contents($dir . '/router.php', '<?php sleep(' . self::SLOW_SECONDS . '); echo "scanned";');
-
-        $port = random_int(23000, 23999);
-        $process = proc_open(
-            sprintf('exec php -S %s:%d %s/router.php', $address, $port, $dir),
-            [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
-            $pipes
-        );
-        if (!is_resource($process)) {
-            $this->markTestSkipped('could not start a PHP built-in server');
-        }
-        $this->server = [$process, $dir];
-
-        for ($i = 0; $i < 50; $i++) {
-            $socket = @fsockopen($address, $port, $errno, $error, 0.1);
-            if (is_resource($socket)) {
-                fclose($socket);
-
-                return $port;
-            }
-            usleep(100_000);
-        }
-
-        $this->markTestSkipped('the built-in server did not come up');
+        return $client;
     }
 }

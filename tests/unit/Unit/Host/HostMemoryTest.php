@@ -97,10 +97,67 @@ class HostMemoryTest extends TestCase
         $this->assertStringContainsString('greater than 3297 MB', $problem['message'] ?? '');
     }
 
-    /** No floor of ours: a tiny static site may run on very little. */
-    public function test_any_positive_limit_that_fits_is_accepted(): void
+    /** No floor of ours beyond Docker's: a tiny static site may run on very little. */
+    public function test_any_limit_docker_takes_that_fits_is_accepted(): void
     {
         $this->assertNull(ProjectMemory::problem(32, $this->smallHost()));
+        $this->assertNull(ProjectMemory::problem(6, $this->smallHost()));
+    }
+
+    public function test_a_limit_below_dockers_minimum_is_refused_with_its_code(): void
+    {
+        $problem = ProjectMemory::problem(5, $this->smallHost());
+
+        $this->assertSame('memory_limit_too_small', $problem['code'] ?? null);
+        $this->assertSame(6, $problem['min_mb'] ?? null);
+        $this->assertSame('memory_limit', $problem['field'] ?? null);
+    }
+
+    /** Through the create request: the refusal carries its code, as the one above the maximum does. */
+    public function test_the_create_request_reports_a_too_small_limit_with_its_code(): void
+    {
+        HostMemoryProbe::fake($this->smallHost());
+        $request = UserStoreRequest::create('/api/users', 'POST', ['username' => 'shop4a2f', 'email' => 'ops@example.com', 'memory_limit' => 4]);
+        $request->setContainer($this->app);
+
+        try {
+            $request->validateResolved();
+            $this->fail('4 MB is below what Docker starts a container with');
+        } catch (ProblemException $e) {
+            $this->assertSame(['memory_limit_too_small'], array_column($e->problems, 'code'));
+        }
+    }
+
+    /** A container project's account runs its own Docker daemon: killed for memory at 112 MB, barely running at 128 MB. */
+    public function test_a_container_project_needs_room_for_its_own_docker_daemon(): void
+    {
+        $problem = ProjectMemory::problem(128, $this->smallHost(), container: true);
+
+        $this->assertSame('memory_limit_too_small', $problem['code'] ?? null);
+        $this->assertSame(256, $problem['min_mb'] ?? null);
+        $this->assertSame(
+            'The memory limit of a container project must be at least 256 MB, the least its own Docker daemon runs a site with (128 MB requested).',
+            $problem['message'] ?? null,
+        );
+        $this->assertNull(ProjectMemory::problem(256, $this->smallHost(), container: true));
+        $this->assertNull(ProjectMemory::problem(128, $this->smallHost()));
+    }
+
+    /** A create that makes a container project, named or through a git_repo, gets the container floor. */
+    public function test_the_create_request_refuses_a_container_project_below_its_floor(): void
+    {
+        HostMemoryProbe::fake($this->smallHost());
+        foreach ([['template' => 'dind'], ['git_repo' => 'https://github.com/octocat/Spoon-Knife']] as $kind) {
+            $request = UserStoreRequest::create('/api/users', 'POST', ['username' => 'shop4a2f', 'email' => 'ops@example.com', 'memory_limit' => 128] + $kind);
+            $request->setContainer($this->app);
+
+            try {
+                $request->validateResolved();
+                $this->fail('128 MB is below what a container project runs with: ' . json_encode($kind));
+            } catch (ProblemException $e) {
+                $this->assertSame([256], array_column($e->problems, 'min_mb'));
+            }
+        }
     }
 
     public function test_the_rule_reports_the_problem_with_its_code(): void

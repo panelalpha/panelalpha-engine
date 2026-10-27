@@ -10,9 +10,9 @@ use App\Http\Resources\PushDiffResource;
 use App\Http\Resources\UserResource;
 use App\Jobs\CreateStaging;
 use App\Jobs\PushState;
+use App\Lib\Domains\CopyDomain;
 use App\Lib\Helper;
 use App\Lib\Host\ProjectMemory;
-use App\Models\Domain;
 use App\Models\Task;
 use App\Models\User;
 use App\OpenApi\ApiDefinitions;
@@ -20,7 +20,6 @@ use App\System;
 use App\System\Projects;
 use App\System\Services\Mysql\TableDiff;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 
@@ -32,6 +31,8 @@ class StagingController extends Controller
             .'then copies files and volume data asynchronously. Source and destination must use the same '
             .'project template (e.g. dind). Returns HTTP 202 with the destination project; poll '
             .'`GET /projects/{dest}` until `async_status.staging` is `completed` or `failed`. '
+            .'An anonymous volume (an image\'s own VOLUME the compose file does not name) is not copied: '
+            .'the Task\'s `details.warnings` names each one that held data. '
             .'CLI equivalent: `php artisan project:staging`.',
         summary: 'Create a linked staging mirror of a live project',
         security: [['bearerAuth' => []]],
@@ -41,7 +42,9 @@ class StagingController extends Controller
                 new OA\Property(property: 'domain', type: 'string', nullable: true),
                 new OA\Property(
                     property: 'copy_databases',
-                    description: 'Copy the source project\'s MySQL databases under the destination prefix. Defaults to true.',
+                    description: 'Copy the source project\'s MySQL databases under the destination prefix. Defaults to true. '
+                        .'A classic WordPress site cannot be copied without them: false is refused with 422 '
+                        .'`wordpress_copy_needs_databases` before anything is copied.',
                     type: 'boolean',
                     nullable: true,
                 ),
@@ -96,19 +99,14 @@ class StagingController extends Controller
             ]);
         }
 
-        $destDomain = ! empty($params['domain']) ? $params['domain'] : null;
+        $destDomain = CopyDomain::forCopy($source->domain, $params['domain'] ?? null);
         if ($destDomain === null) {
-            $destDomain = Helper::generateCloneDomain($source->domain);
-            if ($destDomain === null) {
-                throw ValidationException::withMessages([
-                    'domain' => 'Could not generate an available staging domain for the clone.',
-                ]);
-            }
-        } elseif (Str::startsWith($destDomain, 'www.')) {
-            $destDomain = Str::after($destDomain, 'www.');
+            throw ValidationException::withMessages([
+                'domain' => 'Could not generate an available staging domain for the clone.',
+            ]);
         }
 
-        if (Domain::domainOrAliasExists($destDomain)) {
+        if ($destDomain->isTaken()) {
             throw ValidationException::withMessages([
                 'domain' => 'Domain already exists.',
             ]);
@@ -116,7 +114,6 @@ class StagingController extends Controller
 
         $probe = User::make([
             'username' => $newUsername,
-            'domain' => $destDomain,
             'email' => $source->email,
         ]);
         if ($probe->project()->hostingExists()) {
@@ -126,7 +123,7 @@ class StagingController extends Controller
         }
 
         // A staging copy keeps the source's memory limit, which must still fit this host.
-        ProjectMemory::assertFits(ProjectMemory::resolve($source->getMemoryLimit()));
+        ProjectMemory::assertFits(ProjectMemory::resolve($source->getMemoryLimit()), Projects::isDind($source));
 
         Projects::assertDatabaseNamesFit($source, $newUsername.'_');
 
@@ -143,7 +140,7 @@ class StagingController extends Controller
             details: [
                 'source' => $source->username,
                 'dest' => $dest->username,
-                'domain' => $destDomain,
+                'domain' => $dest->domain,
                 'action' => 'staging',
                 'copy_databases' => $copyDatabases,
             ],
@@ -165,6 +162,8 @@ class StagingController extends Controller
             .'tables alone. Returns HTTP 202 with the target project and a `task_id`; '
             .'poll `GET /tasks/{task_id}` for the push Task, or `GET /projects/{target}` until '
             .'`async_status.push` is `completed` or `failed`. '
+            .'An anonymous volume (an image\'s own VOLUME the compose file does not name) is not pushed: '
+            .'the Task\'s `details.warnings` names each one that held data. '
             .'CLI equivalent: `php artisan project:push`.',
         summary: 'Push project state to a paired staging or live project',
         security: [['bearerAuth' => []]],

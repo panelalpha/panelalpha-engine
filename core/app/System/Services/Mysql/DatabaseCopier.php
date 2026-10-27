@@ -121,6 +121,43 @@ class DatabaseCopier
     }
 
     /**
+     * A database a push created on the target gets, for each source user, what
+     * that user had on the source database, granted to the target user it maps
+     * to. Without it the target's users could not use the data, nor run the
+     * triggers whose DEFINER the copy gave them.
+     *
+     * @return list<string> a warning when no target user was granted anything
+     */
+    public function grantCreatedDatabase(string $from, string $to, DefinerMap $definers): array
+    {
+        $granted = false;
+        foreach ($definers->accounts() as $sourceUser => $targetUser) {
+            $privileges = $this->mysql->privileges()->showPrivileges($sourceUser)[$from] ?? null;
+            if ($privileges !== null) {
+                $this->mysql->privileges()->updatePrivileges($targetUser, $to, $privileges);
+                $granted = true;
+            }
+        }
+
+        return $granted ? [] : ["Created database '{$to}' with no grants: no user of the target maps to a source user with grants on '{$from}'."];
+    }
+
+    /**
+     * Drops a database a push created and takes back what grantCreatedDatabase()
+     * gave on it: MariaDB keeps a grant on a dropped name, and a database later
+     * created under that name would inherit it.
+     */
+    public function dropCreatedDatabase(string $database, DefinerMap $definers): void
+    {
+        if ($this->mysql->databases()->databaseExists($database)) {
+            $this->mysql->databases()->deleteDatabase($database);
+        }
+        foreach ($definers->accounts() as $targetUser) {
+            $this->mysql->privileges()->revokeIfExists($targetUser, $database);
+        }
+    }
+
+    /**
      * One table of $to, dropped and recreated from $from. The caller dumps the
      * target's own copy first, so a failure can put it back.
      */
@@ -152,7 +189,8 @@ class DatabaseCopier
 
     /**
      * Only the selected source tables, each dropped and recreated on its target
-     * database. A target database the project does not own is created first.
+     * database. A target database the project does not own is created first,
+     * with the grants the source users had on the source database.
      * The target's own copy of a replaced table is dumped before it is touched,
      * so a failure part way through restores what it already replaced, and a
      * failure in a later stage restores the whole selection. A restore that
@@ -164,6 +202,7 @@ class DatabaseCopier
     {
         $grouped = self::groupByTarget($tables, $source->getMysqlPrefix(), $target->getMysqlPrefix());
         $targetTables = $this->mysql->tables();
+        $definers = DefinerMap::between($source, $target);
         $rollbacks = [];
         $createdDatabases = [];
         $createdTables = [];
@@ -172,7 +211,7 @@ class DatabaseCopier
             $result = $this->replaceSelected(
                 $grouped,
                 $target,
-                DefinerMap::between($source, $target),
+                $definers,
                 $rollbackDir,
                 $targetTables,
                 $rollbacks,
@@ -182,6 +221,7 @@ class DatabaseCopier
         } catch (\Throwable $e) {
             $failures = $this->restoreTables(new TableReplacement(
                 new DatabaseCopyResult,
+                $definers,
                 $rollbacks,
                 $createdDatabases,
                 $createdTables,
@@ -189,7 +229,7 @@ class DatabaseCopier
             throw $failures === [] ? $e : new RollbackIncompleteException($e, $failures);
         }
 
-        return new TableReplacement($result, $rollbacks, $createdDatabases, $createdTables);
+        return new TableReplacement($result, $definers, $rollbacks, $createdDatabases, $createdTables);
     }
 
     /**
@@ -217,7 +257,7 @@ class DatabaseCopier
                 MysqlDatabase::create(['user_id' => $target->id, 'database' => $dest]);
                 $this->mysql->databases()->createDatabase($dest);
                 $createdDatabases[] = $dest;
-                $warnings[] = "Created database '{$dest}' without grants: the target does not own that database.";
+                array_push($warnings, ...$this->grantCreatedDatabase($selections[0]['database'], $dest, $definers));
             }
 
             foreach ($selections as $selection) {
@@ -259,9 +299,7 @@ class DatabaseCopier
 
         foreach ($replacement->createdDatabases as $database) {
             try {
-                if ($this->mysql->databases()->databaseExists($database)) {
-                    $this->mysql->databases()->deleteDatabase($database);
-                }
+                $this->dropCreatedDatabase($database, $replacement->definers);
             } catch (\Throwable $e) {
                 $failures[] = "dropping created database '{$database}'";
                 Log::warning("Push cleanup failed for database '{$database}': ".$e->getMessage());

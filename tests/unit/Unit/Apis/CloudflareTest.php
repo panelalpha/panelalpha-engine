@@ -4,6 +4,7 @@ namespace Tests\Unit\Apis;
 
 use App\Lib\Apis\Cloudflare;
 use App\Lib\Apis\Cloudflare\CloudflareException;
+use App\Lib\Apis\Cloudflare\ZoneNotFoundException;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -93,9 +94,37 @@ class CloudflareTest extends TestCase
             ], 200),
         ]);
 
-        $this->expectException(CloudflareException::class);
+        $this->expectException(ZoneNotFoundException::class);
         $this->expectExceptionMessage("Hostname 'other.org' is not under any Cloudflare zone");
 
         (new Cloudflare('test-token'))->findZoneForHostname('other.org');
+    }
+
+    public function test_a_rate_limited_zone_lookup_is_not_a_missing_zone(): void
+    {
+        Http::fake([
+            'api.cloudflare.com/client/v4/zones*' => Http::response([
+                'success' => false,
+                'errors' => [['code' => 10000, 'message' => 'Rate limited']],
+            ], 429),
+        ]);
+
+        try {
+            (new Cloudflare('test-token'))->findZoneForHostname('shop.example.com');
+            $this->fail('A rate-limited lookup must throw.');
+        } catch (CloudflareException $e) {
+            $this->assertNotInstanceOf(ZoneNotFoundException::class, $e);
+            $this->assertTrue($e->isRateLimited());
+            $this->assertTrue($e->isRefusedRequest());
+        }
+    }
+
+    public function test_a_server_error_is_not_a_refused_request(): void
+    {
+        $e = new CloudflareException('Cloudflare API request failed (HTTP 502)', 502);
+
+        $this->assertFalse($e->isRefusedRequest());
+        $this->assertFalse($e->isRateLimited());
+        $this->assertFalse((new CloudflareException('Cloudflare API returned a non-JSON response.'))->isRefusedRequest());
     }
 }

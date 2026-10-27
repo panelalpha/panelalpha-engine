@@ -31,7 +31,7 @@ class WpCliController extends Controller
                     property: 'path',
                     type: 'string',
                     nullable: true,
-                    description: 'WordPress directory. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
+                    description: 'WordPress directory. On PHP hosting it is inside the project home, read as the file manager reads a path: absolute, or relative to the home. A command that creates it (core download) needs it below an existing folder the project\'s account owns, such as the domain folder: the top of the home belongs to root. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
                     example: '/home/demo/demo.example/public_html',
                 ),
                 new OA\Property(

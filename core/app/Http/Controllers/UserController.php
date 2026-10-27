@@ -24,7 +24,7 @@ use App\Lib\Deploy\EnvVarOverrides;
 use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
-use App\Lib\Domains\DomainPlan;
+use App\Lib\Domains\CopyDomain;
 use App\Lib\Domains\MainDomainRename;
 use App\Lib\Helper;
 use App\Lib\Host\ProjectMemory;
@@ -33,10 +33,10 @@ use App\Lib\Project\CreateInspection;
 use App\Lib\Project\NewProjectInput;
 use App\Lib\Project\ProjectCreator;
 use App\Lib\Project\ProjectDeleter;
+use App\Lib\Project\ProjectNameCheck;
 use App\Lib\Project\ProjectRebuild;
 use App\Lib\Project\SourceAttacher;
 use App\Lib\Vault\RequestVault;
-use App\Models\Domain;
 use App\Models\User;
 use App\OpenApi\ApiDefinitions;
 use App\System;
@@ -53,11 +53,6 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class UserController extends Controller
 {
-    private const array NAME_UNAVAILABLE_MESSAGES = [
-        'taken' => 'Project name already in use.',
-        'unavailable' => 'Project name is not available on this host.',
-    ];
-
     use StreamsNdjson;
 
     /** How a create answers with what it found in the repository before cloning it. */
@@ -198,7 +193,7 @@ class UserController extends Controller
                 new OA\Property(property: 'domain_redirect_url', type: 'string', nullable: true, x: ['mcp-hide' => true]),
                 new OA\Property(property: 'email', type: 'string', format: 'email', example: 'john@example.com'),
                 new OA\Property(property: 'disk_space_limit', type: 'integer', example: 10240, description: 'MB, -1 for unlimited', x: ['mcp-hide' => true]),
-                new OA\Property(property: 'memory_limit', type: 'integer', example: 2048, description: 'MB. Omitted: memory_budget.default_project_mb, the RAM of the server less what is kept for the engine. Refused when larger than memory_budget.max_project_mb in GET /metrics/current', x: ['mcp-description' => 'MB. Default: the server\'s RAM less the engine\'s share, which is also the most allowed.']),
+                new OA\Property(property: 'memory_limit', type: 'integer', example: 2048, description: 'MB, at least 6, or 256 for a container project (template dind or a git_repo). Omitted: memory_budget.default_project_mb, the RAM of the server less what is kept for the engine. Refused when larger than memory_budget.max_project_mb in GET /metrics/current', x: ['mcp-description' => 'MB, at least 6, or 256 for a container project (template dind or a git_repo). Default: the server\'s RAM less the engine\'s share, which is also the most allowed.']),
                 new OA\Property(property: 'cpu_limit', type: 'number', format: 'float', example: 1.0, nullable: true, description: 'CPU cores, -1 for unlimited', x: ['mcp-hide' => true]),
                 new OA\Property(property: 'bandwidth_limit', type: 'integer', nullable: true, description: 'MB a month, -1 for unlimited', x: ['mcp-hide' => true]),
                 new OA\Property(property: 'mysql_databases_limit', type: 'integer', nullable: true, x: ['mcp-hide' => true]),
@@ -360,7 +355,7 @@ class UserController extends Controller
                 new OA\Property(property: 'domain_redirect_url', type: 'string', nullable: true),
                 new OA\Property(property: 'email', type: 'string', format: 'email', example: 'john@example.com'),
                 new OA\Property(property: 'disk_space_limit', type: 'integer', example: 10240, description: 'MB, -1 for unlimited'),
-                new OA\Property(property: 'memory_limit', type: 'integer', example: 2048, description: 'MB. Omitted: memory_budget.default_project_mb, the RAM of the server less what is kept for the engine. Refused when larger than memory_budget.max_project_mb in GET /metrics/current', x: ['mcp-description' => 'MB. Default: the server\'s RAM less the engine\'s share, which is also the most allowed.']),
+                new OA\Property(property: 'memory_limit', type: 'integer', example: 2048, description: 'MB, at least 6, or 256 for a container project (template dind or a git_repo). Omitted: memory_budget.default_project_mb, the RAM of the server less what is kept for the engine. Refused when larger than memory_budget.max_project_mb in GET /metrics/current', x: ['mcp-description' => 'MB, at least 6, or 256 for a container project (template dind or a git_repo). Default: the server\'s RAM less the engine\'s share, which is also the most allowed.']),
                 new OA\Property(property: 'cpu_limit', type: 'number', format: 'float', example: 1.0, nullable: true, description: 'CPU cores, -1 for unlimited'),
                 new OA\Property(property: 'bandwidth_limit', type: 'integer', nullable: true, description: 'MB a month, -1 for unlimited'),
                 new OA\Property(property: 'mysql_databases_limit', type: 'integer', nullable: true, description: '-1 for unlimited'),
@@ -770,7 +765,7 @@ class UserController extends Controller
             : null;
 
         return $rebuild->whileIdle($user, fn () => $this->startRedeploy(
-            $rebuild, $user, ProjectRebuild::REBUILD, $zipPath, $plan, $recipe, $stream, $envVars
+            $rebuild, $user, ProjectRebuild::REBUILD, $zipPath, $plan, $recipe, $stream, $envVars, $request->input('env_vars')
         ));
     }
 
@@ -781,6 +776,7 @@ class UserController extends Controller
      * resolved before anything starts, so a vault reference they cannot use is still a 422.
      *
      * @param  ?\Closure(): array<string, string>  $envVars  the env_vars to store, null to leave them
+     * @param  mixed  $sentEnvVars  the env_vars as sent, before their vault references were read
      */
     private function startRedeploy(
         ProjectRebuild $rebuild,
@@ -791,12 +787,13 @@ class UserController extends Controller
         ?string $recipe,
         bool $stream,
         ?\Closure $envVars,
+        mixed $sentEnvVars,
     ): JsonResponse|StreamedResponse {
         $env = $envVars !== null ? $envVars() : null;
         $deployLogger = $stream ? $this->openStreamLog($rebuild, $user, $action) : null;
 
         if ($env !== null) {
-            $user->setDetails(['env_vars' => $env]);
+            $user->setEnvVars($env, $sentEnvVars);
             $user->save();
         }
 
@@ -942,7 +939,7 @@ class UserController extends Controller
             : null;
 
         return $rebuild->whileIdle($user, fn () => $this->startRedeploy(
-            $rebuild, $user, ProjectRebuild::DEPLOY_ARCHIVE, $params['zip_path'], $plan, $recipe, $stream, $envVars
+            $rebuild, $user, ProjectRebuild::DEPLOY_ARCHIVE, $params['zip_path'], $plan, $recipe, $stream, $envVars, $request->input('env_vars')
         ));
     }
 
@@ -1049,7 +1046,9 @@ class UserController extends Controller
                 new OA\Property(property: 'domain', type: 'string', nullable: true),
                 new OA\Property(
                     property: 'copy_databases',
-                    description: 'Copy the source project\'s MySQL databases under the clone prefix. Defaults to true.',
+                    description: 'Copy the source project\'s MySQL databases under the clone prefix. Defaults to true. '
+                        .'A classic WordPress site cannot be copied without them: false is refused with 422 '
+                        .'`wordpress_copy_needs_databases` before anything is copied.',
                     type: 'boolean',
                     nullable: true,
                 ),
@@ -1068,7 +1067,11 @@ class UserController extends Controller
      * Creates a new project with the same resource limits and settings as the
      * source, derives a staging domain when none is provided, and copies the
      * source's home directory (including named Docker volumes) and project config
-     * files to the new project after provisioning completes.
+     * files to the new project after provisioning completes. A source on a free
+     * panelalpha.online name gets a clone with a new name of its own there,
+     * since a name below it would not be served over HTTPS. An anonymous volume
+     * (an image's own VOLUME the compose file does not name) is not copied: the
+     * response's `warnings` names each one that held data.
      *
      * Subdomains, FTP/SFTP accounts, MySQL databases/users and dedicated IP
      * addresses are NOT cloned.
@@ -1089,37 +1092,19 @@ class UserController extends Controller
         $cloneDomain = $this->cloneDomainName($srcUser, $params['domain'] ?? null);
         $this->assertMemoryLimitFits($srcUser);
         Projects::assertDatabaseNamesFit($srcUser, $newUsername.'_');
-        $newDetails = $srcUser->detailsForCopiedProject($newUsername);
-        $domainAliases = $this->wwwAliasIfFree($cloneDomain);
-
-        /** @var User */
-        $cloneUser = User::make([
-            'username' => $newUsername,
-            'domain' => $cloneDomain,
-            'email' => $srcUser->email,
-            'details' => $newDetails,
-        ]);
-
-        if ($cloneUser->project()->hostingExists()) {
-            throw ValidationException::withMessages([
-                'new_username' => 'Username not available.',
-            ]);
-        }
-
-        $cloneDomainModel = $this->unsavedMainDomain($cloneDomain, $domainAliases);
-
-        $cloneUser->save();
-        $cloneDomainModel->user_id = $cloneUser->id;
-        $cloneDomainModel->save();
+        $this->assertHostingFree($srcUser, $newUsername);
+        $cloneUser = $srcUser->makeClone($newUsername, $cloneDomain);
 
         try {
-            $system->projects()->clone($srcUser->username, $cloneUser->username, $copyDatabases);
+            $warnings = $system->projects()->clone($srcUser->username, $cloneUser->username, $copyDatabases)?->warnings ?? [];
             $cloneUser = $cloneUser->refresh();
         } catch (\Exception $e) {
             $this->cloneFailed($cloneUser, $e);
         }
 
-        return new UserResource($cloneUser);
+        $resource = new UserResource($cloneUser);
+
+        return $warnings === [] ? $resource : $resource->additional(['warnings' => $warnings]);
     }
 
     /** @throws ValidationException when no free name can be generated, or the name is taken */
@@ -1150,25 +1135,20 @@ class UserController extends Controller
     }
 
     /**
-     * The requested domain without `www.`, or a generated staging domain.
+     * The requested domain without `www.`, or a planned one ({@see CopyDomain}).
      *
      * @throws ValidationException when none can be generated, or the domain is taken
      */
-    private function cloneDomainName(User $srcUser, ?string $requested): string
+    private function cloneDomainName(User $srcUser, ?string $requested): CopyDomain
     {
-        $cloneDomain = ! empty($requested) ? $requested : null;
+        $cloneDomain = CopyDomain::forCopy($srcUser->domain, $requested);
         if ($cloneDomain === null) {
-            $cloneDomain = Helper::generateCloneDomain($srcUser->domain);
-            if ($cloneDomain === null) {
-                throw ValidationException::withMessages([
-                    'domain' => 'Could not generate an available staging domain for the clone.',
-                ]);
-            }
-        } elseif (Str::startsWith($cloneDomain, 'www.')) {
-            $cloneDomain = Str::after($cloneDomain, 'www.');
+            throw ValidationException::withMessages([
+                'domain' => 'Could not generate an available staging domain for the clone.',
+            ]);
         }
 
-        if (Domain::domainOrAliasExists($cloneDomain)) {
+        if ($cloneDomain->isTaken()) {
             throw ValidationException::withMessages([
                 'domain' => 'Domain already exists.',
             ]);
@@ -1177,39 +1157,21 @@ class UserController extends Controller
         return $cloneDomain;
     }
 
-    /** A clone keeps the source's memory limit, which must still fit this host. */
+    /** @throws ValidationException when an account by that name is already on the host */
+    private function assertHostingFree(User $srcUser, string $newUsername): void
+    {
+        $probe = User::make(['username' => $newUsername, 'email' => $srcUser->email]);
+        if ($probe->project()->hostingExists()) {
+            throw ValidationException::withMessages([
+                'new_username' => 'Username not available.',
+            ]);
+        }
+    }
+
+    /** A clone keeps the source's memory limit, which must still fit this host and the source's kind. */
     private function assertMemoryLimitFits(User $srcUser): void
     {
-        ProjectMemory::assertFits(ProjectMemory::resolve($srcUser->getMemoryLimit()));
-    }
-
-    /** @return list<string> the www alias, when it would answer and nothing holds it yet */
-    private function wwwAliasIfFree(string $cloneDomain): array
-    {
-        $wwwAliasAvailable = DomainPlan::wwwAliasWouldAnswer($cloneDomain)
-            && ! Domain::domainOrAliasExists('www.'.$cloneDomain);
-
-        return $wwwAliasAvailable ? ['www.'.$cloneDomain] : [];
-    }
-
-    /**
-     * The clone's main domain; its user_id is set once the user is saved.
-     *
-     * @param  list<string>  $aliases
-     */
-    private function unsavedMainDomain(string $cloneDomain, array $aliases): Domain
-    {
-        return Domain::make([
-            'user_id' => null,
-            'domain' => $cloneDomain,
-            'type' => 'main',
-            'details' => [
-                'document_root' => "/{$cloneDomain}/public_html",
-                'redirect_enabled' => false,
-                'redirect_url' => null,
-                'aliases' => $aliases,
-            ],
-        ]);
+        ProjectMemory::assertFits(ProjectMemory::resolve($srcUser->getMemoryLimit()), Projects::isDind($srcUser));
     }
 
     /** Destroys the half-made clone, best-effort, and reports the failure as a deploy problem. */
@@ -1232,7 +1194,7 @@ class UserController extends Controller
         summary: 'Check whether a project name is free',
         description: 'Answers 200 for every well-formed name: `valid` is true when the name is free. When it is not, '
             .'`valid` is false and `reason` says why: `taken` (another project uses it) or `unavailable` '
-            .'(reserved on this host). Only a name that breaks the naming rules is refused with 422.',
+            .'(reserved on this host). Only a missing name, or one that breaks the naming rules, is refused with 422.',
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
@@ -1248,7 +1210,7 @@ class UserController extends Controller
                     new OA\Property(property: 'message', type: 'string', example: 'Project name already in use.', description: 'Only when `valid` is false'),
                 ],
             )),
-            new OA\Response(response: 422, description: 'The name breaks the naming rules', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 422, description: 'The name is missing or breaks the naming rules', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     /**
@@ -1261,27 +1223,8 @@ class UserController extends Controller
          * }
          */
         $params = $request->validated();
-        $reason = $this->nameUnavailableReason($params['username']);
 
-        if ($reason === null) {
-            return new JsonResponse(['valid' => true]);
-        }
-
-        return new JsonResponse([
-            'valid' => false,
-            'reason' => $reason,
-            'message' => self::NAME_UNAVAILABLE_MESSAGES[$reason],
-        ]);
-    }
-
-    /** `taken` when a project uses the name, `unavailable` when the host reserves it, null when it is free. */
-    private function nameUnavailableReason(string $username): ?string
-    {
-        if (User::existsByUsername($username)) {
-            return 'taken';
-        }
-
-        return app(System::class)->isUsernameAvailable($username) ? null : 'unavailable';
+        return new JsonResponse(ProjectNameCheck::answer($params['username']));
     }
 
     #[OA\Get(
@@ -1322,7 +1265,7 @@ class UserController extends Controller
                     .'A PanelAlpha Online tunnel that is the old name itself is deleted with it; any other tunnel of the main domain has to be deleted first.'),
                 new OA\Property(property: 'email', type: 'string', format: 'email', nullable: true),
                 new OA\Property(property: 'disk_space_limit', type: 'integer', nullable: true, description: 'MB, -1 for unlimited; null clears the limit', x: ['mcp-nullable' => true]),
-                new OA\Property(property: 'memory_limit', type: 'integer', description: 'MB. Can be changed, not removed. Refused when larger than memory_budget.max_project_mb in GET /metrics/current'),
+                new OA\Property(property: 'memory_limit', type: 'integer', description: 'MB, at least 6, or 256 for a container project. Can be changed, not removed. Refused when larger than memory_budget.max_project_mb in GET /metrics/current'),
                 new OA\Property(property: 'cpu_limit', type: 'number', format: 'float', nullable: true, description: 'CPU cores, -1 for unlimited; null clears the limit', x: ['mcp-nullable' => true]),
                 new OA\Property(property: 'device_read_bps', type: 'integer', nullable: true, description: '-1 for unlimited; null clears the limit', x: ['mcp-nullable' => true]),
                 new OA\Property(property: 'device_write_bps', type: 'integer', nullable: true, description: '-1 for unlimited; null clears the limit', x: ['mcp-nullable' => true]),

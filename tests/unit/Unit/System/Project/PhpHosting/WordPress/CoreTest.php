@@ -6,10 +6,11 @@ use App\Models\Domain;
 use App\Models\User;
 use App\System\Project;
 use App\System\Project\FileManager;
-use App\System\Project\PhpHosting\WordPress\WpCli;
 use App\System\Project\PhpHosting\WordPress\Core;
+use App\System\Project\PhpHosting\WordPress\DatabaseClientMissing;
 use App\System\Project\PhpHosting\WordPress\Exception as WordPressException;
 use App\System\Project\PhpHosting\WordPress\WordPressNotFound;
+use App\System\Project\PhpHosting\WordPress\WpCli;
 use Mockery;
 use PHPUnit\Framework\TestCase;
 
@@ -118,6 +119,26 @@ class CoreTest extends TestCase
         $this->assertSame(['installed' => false, 'version' => '7.1.3', 'state' => Core::STATE_NOT_INSTALLED], $body);
     }
 
+    public function test_status_ignores_php_warnings_written_with_the_error_logs_timestamp(): void
+    {
+        $sequence = [];
+        $core = $this->coreWithFakeRunner(
+            $sequence,
+            results: [
+                [
+                    'exit_code' => 1,
+                    'stdout' => '',
+                    'stderr' => "[26-Oct-2026 18:02:15 UTC] PHP Warning:  Undefined array key \"HTTP_HOST\" in /var/www/html/wp-includes/functions.php on line 6567\n"
+                        . "Warning: Undefined array key \"HTTP_HOST\" in /var/www/html/wp-includes/functions.php on line 6567\n",
+                ],
+                self::DB_REACHABLE,
+                ['exit_code' => 0, 'stdout' => "7.2\n", 'stderr' => ''],
+            ],
+        );
+
+        $this->assertSame(Core::STATE_NOT_INSTALLED, $core->status()['state']);
+    }
+
     public function test_status_ignores_php_prefixed_notices_and_deprecations(): void
     {
         $sequence = [];
@@ -147,7 +168,7 @@ class CoreTest extends TestCase
                     'exit_code' => 1,
                     'stdout' => '',
                     'stderr' => "Warning: Undefined array key \"HTTP_HOST\" in /x.php on line 6473\n"
-                        . "Error: It seems, the WordPress core files do not have the proper file permissions.\n",
+                        ."Error: It seems, the WordPress core files do not have the proper file permissions.\n",
                 ],
                 self::DB_REACHABLE,
                 ['exit_code' => 1, 'stdout' => '', 'stderr' => 'Error: could not read version'],
@@ -168,8 +189,8 @@ class CoreTest extends TestCase
                 'exit_code' => 1,
                 'stdout' => '',
                 'stderr' => "Error: This does not seem to be a WordPress installation.\n"
-                    . "The used path is: /home/alice/example.test/public_html/\n"
-                    . "Pass --path=`path/to/wordpress` or run `wp core download`.\n",
+                    ."The used path is: /home/alice/example.test/public_html/\n"
+                    ."Pass --path=`path/to/wordpress` or run `wp core download`.\n",
             ]],
         );
 
@@ -209,15 +230,15 @@ class CoreTest extends TestCase
                 [
                     'exit_code' => 1,
                     'stdout' => '',
-                    'stderr' => "Error: Błąd łączenia się z bazą danych. Oznacza to, że nazwa użytkownika lub hasło "
-                        . "w pliku `wp-config.php` nie jest poprawne, albo nie można nawiązać połączenia z serwerem "
-                        . "bazy danych `db-does-not-exist.invalid`.\n",
+                    'stderr' => 'Error: Błąd łączenia się z bazą danych. Oznacza to, że nazwa użytkownika lub hasło '
+                        .'w pliku `wp-config.php` nie jest poprawne, albo nie można nawiązać połączenia z serwerem '
+                        ."bazy danych `db-does-not-exist.invalid`.\n",
                 ],
                 [
                     'exit_code' => 1,
                     'stdout' => '',
-                    'stderr' => "Error: Failed to get current SQL modes. Reason: ERROR 2005 (HY000): "
-                        . "Unknown server host 'db-does-not-exist.invalid' (-2)\n",
+                    'stderr' => 'Error: Failed to get current SQL modes. Reason: ERROR 2005 (HY000): '
+                        ."Unknown server host 'db-does-not-exist.invalid' (-2)\n",
                 ],
                 ['exit_code' => 0, 'stdout' => "7.1.3\n", 'stderr' => ''],
             ],
@@ -257,8 +278,8 @@ class CoreTest extends TestCase
                 [
                     'exit_code' => 1,
                     'stdout' => '',
-                    'stderr' => "Error: Failed to get current SQL modes. Reason: ERROR 1045 (28000): "
-                        . "Access denied for user 'wp'@'172.18.0.3' (using password: YES)\n",
+                    'stderr' => 'Error: Failed to get current SQL modes. Reason: ERROR 1045 (28000): '
+                        ."Access denied for user 'wp'@'172.18.0.3' (using password: YES)\n",
                 ],
                 ['exit_code' => 0, 'stdout' => '7.1.3', 'stderr' => ''],
             ],
@@ -267,7 +288,7 @@ class CoreTest extends TestCase
         $this->assertSame(Core::STATE_DB_UNREACHABLE, $core->status()['state']);
     }
 
-    public function test_status_without_a_mysql_client_is_unknown_not_db_unreachable(): void
+    public function test_status_without_a_mysql_client_says_so_rather_than_db_unreachable(): void
     {
         $sequence = [];
         $core = $this->coreWithFakeRunner(
@@ -281,7 +302,25 @@ class CoreTest extends TestCase
 
         $body = $core->status();
 
-        $this->assertSame(['installed' => false, 'version' => '6.8.3', 'state' => Core::STATE_UNKNOWN], $body);
+        $this->assertSame(['installed' => false, 'version' => '6.8.3', 'state' => Core::STATE_NO_DB_CLIENT], $body);
+    }
+
+    public function test_status_where_no_container_has_a_mysql_client_says_so(): void
+    {
+        $sequence = [];
+        $core = $this->coreWithFakeRunner(
+            $sequence,
+            results: [
+                ['exit_code' => 1, 'stdout' => '', 'stderr' => ''],
+                new DatabaseClientMissing('WP-CLI\'s database commands need the MySQL client'),
+                ['exit_code' => 0, 'stdout' => '6.8.3', 'stderr' => ''],
+            ],
+        );
+
+        $body = $core->status();
+
+        $this->assertSame(['installed' => false, 'version' => '6.8.3', 'state' => Core::STATE_NO_DB_CLIENT], $body);
+        $this->assertSame(['db', 'query', 'SELECT 1'], array_slice($sequence[1], 0, 3));
     }
 
     public function test_status_on_a_container_project_with_no_wordpress_is_no_core(): void
@@ -432,7 +471,7 @@ class CoreTest extends TestCase
             results: [[
                 'exit_code' => 0,
                 'stdout' => "Deprecated: Creation of dynamic property in /x.php on line 3\n"
-                    . '[{"version":"6.7.1","update_type":"minor","package_url":"https://downloads.wordpress.org/release/wordpress-6.7.1.zip"}]',
+                    .'[{"version":"6.7.1","update_type":"minor","package_url":"https://downloads.wordpress.org/release/wordpress-6.7.1.zip"}]',
                 'stderr' => '',
             ]],
         );
@@ -564,6 +603,41 @@ class CoreTest extends TestCase
         );
     }
 
+    public function test_download_checks_and_fills_the_same_directory_for_a_relative_path(): void
+    {
+        $sequence = [];
+        $checked = [];
+        $core = $this->coreWithFakeRunner(
+            $sequence,
+            results: [['exit_code' => 0, 'stdout' => "Success: WordPress downloaded.\n", 'stderr' => '']],
+            path: 'other.test/public_html/blog',
+            checkedFiles: $checked,
+        );
+
+        $body = $core->download();
+
+        $this->assertSame(['/home/alice/other.test/public_html/blog/wp-includes/version.php'], $checked);
+        $this->assertSame(['core', 'download', '--path=/home/alice/other.test/public_html/blog'], $sequence[0]);
+        $this->assertSame('/home/alice/other.test/public_html/blog', $body['path']);
+    }
+
+    public function test_download_into_a_path_outside_the_home_refuses_the_core_already_there(): void
+    {
+        $sequence = [];
+        $checked = [];
+        $core = $this->coreWithFakeRunner($sequence, path: '/tmp/wp', coreFilesPresent: true, checkedFiles: $checked);
+
+        try {
+            $core->download();
+            $this->fail('Expected WordPressException');
+        } catch (WordPressException $e) {
+            $this->assertSame(409, $e->httpStatus);
+            $this->assertStringContainsString('/home/alice/tmp/wp', $e->getMessage());
+            $this->assertSame(['/home/alice/tmp/wp/wp-includes/version.php'], $checked);
+            $this->assertSame([], $sequence, 'WP-CLI is never run');
+        }
+    }
+
     public function test_download_falls_back_to_the_request_when_wp_cli_does_not_name_the_version(): void
     {
         $sequence = [];
@@ -628,9 +702,9 @@ class CoreTest extends TestCase
     }
 
     /**
-     * @param list<list<string>> $sequence
-     * @param list<array{exit_code: int, stdout: string, stderr: string}> $results
-     * @param list<string> $checkedFiles
+     * @param  list<list<string>>  $sequence
+     * @param  list<array{exit_code: int, stdout: string, stderr: string}>  $results
+     * @param  list<string>  $checkedFiles
      */
     private function coreWithFakeRunner(
         array &$sequence,
@@ -644,6 +718,8 @@ class CoreTest extends TestCase
         $user->username = 'alice';
         $project = Mockery::mock(Project::class);
         $project->shouldReceive('homeDirPath')->andReturn('/home/alice');
+        $project->shouldReceive('resolvePath')
+            ->andReturnUsing(fn (string $path): string => (new FileManager($project))->resolvePath($path));
         $files = Mockery::mock(FileManager::class);
         $files->shouldReceive('isFile')->andReturnUsing(function (string $file) use (&$checkedFiles, $coreFilesPresent): bool {
             $checkedFiles[] = $file;
@@ -660,6 +736,9 @@ class CoreTest extends TestCase
                 }
                 $result = $results[$call] ?? ['exit_code' => 0, 'stdout' => '', 'stderr' => ''];
                 $call++;
+                if ($result instanceof \Throwable) {
+                    throw $result;
+                }
 
                 return $result;
             });

@@ -12,8 +12,9 @@ use Symfony\Component\HttpFoundation\IpUtils;
  * reach what core reaches over HTTP: the metadata service, the cache registry,
  * sites-phpmyadmin, host services.
  *
- * The rule is the tenant network's plus its IPv6 side, minus the private ranges
- * when the operator allows them ({@see config('egress.allow_private')}). An
+ * The rule is the tenant network's plus its IPv6 side and the IANA
+ * special-purpose ranges that are not globally reachable, minus the private
+ * ranges when the operator allows them ({@see config('egress.allow_private')}). An
  * allow-listed name ({@see config('egress.allow_hosts')}) skips only the
  * internal-address check: loopback, link-local, multicast and the reserved
  * ranges stay refused for it. A host is refused
@@ -35,17 +36,37 @@ final class OutboundUrl
     /** The IPv4 side of what EGRESS_ALLOW_PRIVATE may allow, as network and prefix length. */
     private const PRIVATE_IPV4_RANGES = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'];
 
-    /** The IPv4 ranges refused even for an allow-listed name: loopback, link-local, multicast, reserved. */
+    /** The documentation networks (RFC 5737): not internal, but never a real server either. */
+    private const DOCUMENTATION_IPV4_RANGES = ['192.0.2.0/24', '198.51.100.0/24', '203.0.113.0/24'];
+
+    /** The IPv4 ranges refused even for an allow-listed name: loopback, link-local, multicast, reserved, documentation. */
     private const ALWAYS_REFUSED_IPV4_RANGES = [
         '0.0.0.0/8', '127.0.0.0/8', '169.254.0.0/16', '192.0.0.0/24', '198.18.0.0/15', '224.0.0.0/4', '240.0.0.0/4',
+        ...self::DOCUMENTATION_IPV4_RANGES,
     ];
 
-    /** The IPv6 counterparts of TenantNetwork::REFUSED_RANGES: network, prefix length, private. */
+    /** The well-known NAT64 prefix (RFC 6052): its last 32 bits are the IPv4 address it reaches. */
+    private const NAT64_PREFIX = ['64:ff9b::', 96];
+
+    /**
+     * The IPv6 counterparts of TenantNetwork::REFUSED_RANGES and the IANA
+     * special-purpose blocks that are not globally reachable: network, prefix length, private.
+     */
     private const REFUSED_IPV6_RANGES = [
         'loopback' => ['::1', 128, false],
         'unspecified' => ['::', 128, false],
         'IPv4-mapped' => ['::ffff:0:0', 96, false],
+        'IPv4-compatible' => ['::', 96, false],
+        'local-use NAT64' => ['64:ff9b:1::', 48, true],
+        'discard-only' => ['100::', 64, false],
+        'dummy prefix' => ['100:0:0:1::', 64, false],
+        'IETF protocol assignments, Teredo, benchmarking' => ['2001::', 23, false],
+        'documentation' => ['2001:db8::', 32, false],
+        '6to4' => ['2002::', 16, false],
+        'documentation 3fff::/20' => ['3fff::', 20, false],
+        'segment routing' => ['5f00::', 16, false],
         'unique local' => ['fc00::', 7, true],
+        'site local' => ['fec0::', 10, true],
         'link local' => ['fe80::', 10, false],
         'multicast' => ['ff00::', 8, false],
     ];
@@ -206,10 +227,13 @@ final class OutboundUrl
         return self::firstRefused(self::resolve($host), self::allowsHost($host));
     }
 
-    /** IPv4 goes through {@see TenantNetwork::refuses()}; IPv6 mirrors its ranges. */
+    /**
+     * IPv4 goes through {@see TenantNetwork::refuses()} and the documentation
+     * ranges; IPv6 mirrors them, and a NAT64 address is judged as the IPv4 address it reaches.
+     */
     public static function refusesAddress(string $address): bool
     {
-        $address = trim($address, '[]');
+        $address = self::translated(trim($address, '[]'));
         $allowPrivate = self::allowsPrivate();
 
         if (filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false) {
@@ -217,7 +241,7 @@ final class OutboundUrl
                 return false;
             }
 
-            return TenantNetwork::refuses($address);
+            return TenantNetwork::refuses($address) || IpUtils::checkIp($address, self::DOCUMENTATION_IPV4_RANGES);
         }
 
         if (filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false) {
@@ -230,7 +254,7 @@ final class OutboundUrl
     /** What stays refused for an allow-listed name: everything but the private ranges. */
     private static function refusesForAllowedHost(string $address): bool
     {
-        $address = trim($address, '[]');
+        $address = self::translated(trim($address, '[]'));
         if (filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false) {
             return IpUtils::checkIp($address, self::ALWAYS_REFUSED_IPV4_RANGES);
         }
@@ -242,7 +266,19 @@ final class OutboundUrl
         return true;
     }
 
-    /** IPv4-mapped is refused whole: it is how an IPv4 metadata address is often written. */
+    /** A NAT64 address as the IPv4 address it reaches; any other address as it is. */
+    private static function translated(string $address): string
+    {
+        [$prefix, $bits] = self::NAT64_PREFIX;
+        $packed = filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false ? (string) inet_pton($address) : '';
+        if (strlen($packed) !== 16 || ! self::inRange($packed, (string) inet_pton($prefix), $bits)) {
+            return $address;
+        }
+
+        return (string) inet_ntop(substr($packed, 12));
+    }
+
+    /** IPv4-mapped and IPv4-compatible are refused whole: they are how an IPv4 metadata address is often written. */
     private static function refusesIpv6(string $address, bool $allowPrivate): bool
     {
         $packed = @inet_pton($address);

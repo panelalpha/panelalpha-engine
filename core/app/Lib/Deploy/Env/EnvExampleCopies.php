@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Env;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Platform\ProjectContext;
 
@@ -143,7 +144,7 @@ final class EnvExampleCopies
             if (! is_file($path)) {
                 continue;
             }
-            $raw = file_get_contents($path);
+            $raw = AccountHomeRead::contents($path);
             if (is_string($raw) && str_contains($raw, self::LOCAL)) {
                 return true;
             }
@@ -237,7 +238,7 @@ final class EnvExampleCopies
     private static function composeContents(string $projectDir): ?string
     {
         $path = ComposeFileInspector::firstIn($projectDir);
-        $raw = $path !== null && is_readable($path) ? @file_get_contents($path) : null;
+        $raw = $path !== null && is_readable($path) ? AccountHomeRead::contents($path) : null;
 
         return is_string($raw) && $raw !== '' ? $raw : null;
     }

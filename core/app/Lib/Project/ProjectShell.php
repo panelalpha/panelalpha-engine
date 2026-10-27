@@ -31,7 +31,7 @@ final class ProjectShell
     private static function refuse(): never
     {
         throw ValidationException::withMessages([
-            'command' => 'Shell commands are only supported for dind projects.',
+            'command' => 'Shell commands work only on container projects (template dind).',
         ]);
     }
 }

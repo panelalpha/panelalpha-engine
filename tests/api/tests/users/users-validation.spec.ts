@@ -209,6 +209,51 @@ test.describe('user creation validation', () => {
     }
   });
 
+  test("refuses a memory_limit below Docker's 6 MB minimum before it creates anything", async ({
+    api,
+    settings,
+  }) => {
+    const username = randomUsername();
+    const result = await api.createUserRaw({
+      username,
+      domain: randomDomain(settings.requireDomain()),
+      memory_limit: 4,
+    });
+    try {
+      await expectStatus(result, 422, JSON.stringify(result.body));
+      expect((result.body as { problems?: unknown[] }).problems).toContainEqual(
+        expect.objectContaining({ field: 'memory_limit', code: 'memory_limit_too_small' })
+      );
+    } finally {
+      await api.deleteUserSafe(username);
+    }
+  });
+
+  test('refuses a container project below the 256 MB its own Docker daemon needs', async ({
+    api,
+    settings,
+  }) => {
+    const username = randomUsername();
+    const result = await api.createUserRaw({
+      username,
+      domain: randomDomain(settings.requireDomain()),
+      template: 'dind',
+      memory_limit: 128,
+    });
+    try {
+      await expectStatus(result, 422, JSON.stringify(result.body));
+      expect((result.body as { problems?: unknown[] }).problems).toContainEqual(
+        expect.objectContaining({
+          field: 'memory_limit',
+          code: 'memory_limit_too_small',
+          min_mb: 256,
+        })
+      );
+    } finally {
+      await api.deleteUserSafe(username);
+    }
+  });
+
   test('lets at most one of two concurrent creations of the same username win', async ({
     api,
     settings,
@@ -280,6 +325,21 @@ test.describe('user update validation', () => {
       expectOneOf((await api.updateUserRaw(user.username, limit)).status, REJECTED);
     });
   }
+
+  test("refuses a memory_limit below Docker's 6 MB minimum and keeps the old one", async ({
+    api,
+  }) => {
+    const user = await shared.get();
+    const before = (await api.getUser(user.username)).data.config.memory_limit;
+
+    const result = await api.updateUserRaw(user.username, { memory_limit: 5 });
+
+    await expectStatus(result, 422, JSON.stringify(result.body));
+    expect((result.body as { problems?: unknown[] }).problems).toContainEqual(
+      expect.objectContaining({ field: 'memory_limit', code: 'memory_limit_too_small' })
+    );
+    expect((await api.getUser(user.username)).data.config.memory_limit).toBe(before);
+  });
 
   test('strips script payloads from profile fields', async ({ api, userFactory }) => {
     const user = await userFactory.createSimpleUser();

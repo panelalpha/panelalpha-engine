@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Push project state to a paired staging or live project
 
-    Copies application state from the source to a paired live or staging project (the pair is linked by `staging`), then swaps it in asynchronously. Source and destination must use the same project template. `tables` is only accepted for a classic project with `databases` true: it copies just the named source tables and leaves the target's other tables alone. Returns HTTP 202 with the target project and a `task_id`; poll `GET /tasks/{task_id}` for the push Task, or `GET /projects/{target}` until `async_status.push` is `completed` or `failed`. CLI equivalent: `php artisan project:push`.
+    Copies application state from the source to a paired live or staging project (the pair is linked by `staging`), then swaps it in asynchronously. Source and destination must use the same project template. `tables` is only accepted for a classic project with `databases` true: it copies just the named source tables and leaves the target's other tables alone. Returns HTTP 202 with the target project and a `task_id`; poll `GET /tasks/{task_id}` for the push Task, or `GET /projects/{target}` until `async_status.push` is `completed` or `failed`. An anonymous volume (an image's own VOLUME the compose file does not name) is not pushed: the Task's `details.warnings` names each one that held data. CLI equivalent: `php artisan project:push`.
     MARKDOWN)]
 #[IsDestructive]
 class ProjectPushTool extends ApiTool

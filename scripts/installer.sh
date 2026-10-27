@@ -930,6 +930,18 @@ download_panelalpha_engine() {
     download_engine_from_repository
 }
 
+# Traditional PHP hosting runs git on the host, pinned to the address the engine
+# checked with http.curloptResolve, which git before 2.37 ignores. The engine then
+# refuses such a pull unless the host is in EGRESS_ALLOW_HOSTS; the package
+# source is the operator's, so this only says so.
+warn_old_host_git() {
+    local version
+    version=$(git --version 2>/dev/null | sed -n 's/^git version \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p') || version=''
+    if [ -n "$version" ] && [ "$(printf '%s\n' 2.37 "$version" | sort -V | head -1)" != 2.37 ]; then
+        echo_warning "git ${version} is older than 2.37: on traditional PHP hosting the engine refuses a git pull from any host name not in EGRESS_ALLOW_HOSTS until git on this server is upgraded."
+    fi
+}
+
 # Host state: never deleted by an update, whatever an older release shipped at
 # that path. The same paths deploy-from-source.sh keeps out of its upload.
 ENGINE_HOST_STATE=(
@@ -2459,6 +2471,7 @@ install_docker_engine
 update_progress 25 "Download PanelAlpha engine package"
 echo_info "Download PanelAlpha engine package"
 download_panelalpha_engine
+warn_old_host_git
 
 update_progress 35 "Unzip PanelAlpha engine package"
 echo_info "Unzip PanelAlpha engine package"

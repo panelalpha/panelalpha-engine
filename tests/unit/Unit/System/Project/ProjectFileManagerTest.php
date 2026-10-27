@@ -10,6 +10,7 @@ use App\System\Project;
 use App\System\Project\FileManager;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\Process\Process;
+use Tests\Support\InfoZip;
 use Tests\TestCase;
 
 class ProjectFileManagerTest extends TestCase
@@ -21,6 +22,9 @@ class ProjectFileManagerTest extends TestCase
 
     /** @var array<string, string> links planted, link => target, just before an archive is unpacked */
     private array $plantedBeforeUnpack = [];
+
+    /** A directory whose `mv` plants a link at its destination first, put ahead of PATH for the move script. */
+    private ?string $mvShim = null;
 
     protected function setUp(): void
     {
@@ -332,6 +336,98 @@ class ProjectFileManagerTest extends TestCase
         $this->assertSame([], glob($this->homeDir . '/.unzip-stage/*') ?: [], 'the unpacked copy is removed');
     }
 
+    /** The account's container can create an entry after the destination was checked, before its rename. */
+    public function test_unzip_answers_destination_exists_when_an_entry_appears_before_its_rename(): void
+    {
+        $this->assertRaceAnswersDestinationExists(removedAfterTheRename: false);
+    }
+
+    /** The account can remove what it planted again before anything could take a second look at it. */
+    public function test_unzip_answers_destination_exists_when_the_raced_entry_is_gone_again(): void
+    {
+        $this->assertRaceAnswersDestinationExists(removedAfterTheRename: true);
+    }
+
+    /** A regular file the account creates in that window is its own file: the rename must not replace it. */
+    public function test_unzip_does_not_replace_a_file_that_appears_before_its_rename(): void
+    {
+        $this->requireCommand('tar');
+        $files = $this->fileManager();
+        mkdir($this->homeDir . '/src');
+        file_put_contents($this->homeDir . '/src/note.txt', 'archived');
+        exec('tar -czf ' . escapeshellarg($this->homeDir . '/bundle.tar.gz') . ' -C ' . escapeshellarg($this->homeDir . '/src') . ' note.txt');
+        mkdir($this->homeDir . '/race');
+        $this->plantAroundEachRename('printf mine > "$last"', removedAfter: false);
+
+        $e = $this->assertDestinationTaken(fn () => $files->unzip('bundle.tar.gz', 'race'), 'bundle.tar.gz');
+
+        $this->assertSame(409, $e->status);
+        $this->assertStringContainsString('note.txt could not be moved into /race: an entry of that name appeared there', $e->getMessage());
+        $this->assertStringNotContainsString('mv:', $e->getMessage());
+        $this->assertSame('mine', file_get_contents($this->homeDir . '/race/note.txt'));
+    }
+
+    public function test_unzip_does_not_replace_an_empty_folder_that_appears_before_its_rename(): void
+    {
+        $this->requireCommand('tar');
+        $files = $this->fileManager();
+        mkdir($this->homeDir . '/src/assets', 0777, true);
+        file_put_contents($this->homeDir . '/src/assets/app.css', 'archived');
+        exec('tar -czf ' . escapeshellarg($this->homeDir . '/bundle.tar.gz') . ' -C ' . escapeshellarg($this->homeDir . '/src') . ' assets');
+        mkdir($this->homeDir . '/race');
+        $this->plantAroundEachRename('mkdir "$last"', removedAfter: false);
+
+        $e = $this->assertDestinationTaken(fn () => $files->unzip('bundle.tar.gz', 'race'), 'bundle.tar.gz');
+
+        $this->assertSame(409, $e->status);
+        $this->assertStringContainsString('assets could not be moved into /race', $e->getMessage());
+        $this->assertSame([], array_values(array_diff(scandir($this->homeDir . '/race/assets'), ['.', '..'])));
+    }
+
+    public function test_unzip_refuses_a_destination_the_account_cannot_write_to(): void
+    {
+        $this->requireCommand('tar');
+        if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            $this->markTestSkipped('root writes to a 0555 directory.');
+        }
+        $files = $this->fileManager();
+        mkdir($this->homeDir . '/src');
+        file_put_contents($this->homeDir . '/src/note.txt', 'new');
+        exec('tar -czf ' . escapeshellarg($this->homeDir . '/bundle.tar.gz') . ' -C ' . escapeshellarg($this->homeDir . '/src') . ' note.txt');
+        mkdir($this->homeDir . '/locked', 0555);
+
+        try {
+            $files->unzip('bundle.tar.gz', 'locked');
+            $this->fail('an archive was extracted into a folder the account cannot write to');
+        } catch (ValidationException $e) {
+            $this->assertSame(['/locked is not writable.'], $e->errors()['path']);
+        } finally {
+            chmod($this->homeDir . '/locked', 0755);
+        }
+    }
+
+    private function assertRaceAnswersDestinationExists(bool $removedAfterTheRename): void
+    {
+        $this->requireCommand('tar');
+        $files = $this->fileManager();
+        $outside = $this->homeDir . '.outside';
+        mkdir($outside);
+        mkdir($this->homeDir . "/src/l\u{e4}b", 0777, true);
+        file_put_contents($this->homeDir . "/src/l\u{e4}b/x", 'escaped');
+        exec('tar -czf ' . escapeshellarg($this->homeDir . '/race.tar.gz') . ' -C ' . escapeshellarg($this->homeDir . '/src') . " l\u{e4}b");
+        mkdir($this->homeDir . '/race');
+        $this->plantLinkAroundEachRename($outside, $removedAfterTheRename);
+
+        $e = $this->assertDestinationTaken(fn () => $files->unzip('race.tar.gz', 'race'), 'race.tar.gz');
+
+        $this->assertSame(409, $e->status);
+        $this->assertStringContainsString("l\u{e4}b could not be moved into /race: an entry of that name appeared there", $e->getMessage());
+        $this->assertStringNotContainsString('unzip-stage', $e->getMessage());
+        $this->assertStringNotContainsString('mv:', $e->getMessage());
+        $this->assertSame([], array_values(array_diff(scandir($outside), ['.', '..'])));
+        $this->assertSame($removedAfterTheRename, !is_link($this->homeDir . "/race/l\u{e4}b"));
+    }
+
     public function test_unzip_creates_a_missing_destination(): void
     {
         $this->requireCommand('tar');
@@ -362,6 +458,61 @@ class ProjectFileManagerTest extends TestCase
             $this->assertArrayHasKey('zip_path', $e->errors());
         }
         $this->assertFalse(is_link($this->homeDir . '/out/etc'));
+    }
+
+    /** tar lists `x€` as `x\342\202\254` in the C locale: four components to a check that splits on `\`. */
+    public function test_unzip_refuses_a_link_climbing_out_past_a_non_ascii_directory(): void
+    {
+        $this->requireCommand('tar');
+        $files = $this->fileManager();
+        mkdir($this->homeDir . "/src/x\u{20ac}", 0777, true);
+        symlink("x\u{20ac}/../../../..", $this->homeDir . '/src/l');
+        exec('tar -czf ' . escapeshellarg($this->homeDir . '/links.tar.gz') . ' -C ' . escapeshellarg($this->homeDir . '/src') . " x\u{20ac} l");
+        mkdir($this->homeDir . '/out');
+
+        try {
+            $files->unzip('links.tar.gz', 'out');
+            $this->fail('an archive with a link out of it was extracted');
+        } catch (ValidationException $e) {
+            $this->assertStringContainsString('symbolic link', $e->errors()['zip_path'][0]);
+        }
+        $this->assertFalse(is_link($this->homeDir . '/out/l'));
+    }
+
+    public function test_unzip_extracts_a_tarball_whose_member_starts_with_a_non_ascii_character(): void
+    {
+        $this->requireCommand('tar');
+        $files = $this->fileManager();
+        mkdir($this->homeDir . "/src/\u{e4}", 0777, true);
+        file_put_contents($this->homeDir . "/src/\u{e4}/x", 'restored');
+        exec('tar -czf ' . escapeshellarg($this->homeDir . '/bundle.tar.gz') . ' -C ' . escapeshellarg($this->homeDir . '/src') . " \u{e4}");
+
+        $files->unzip('bundle.tar.gz', 'out');
+
+        $this->assertSame('restored', file_get_contents($this->homeDir . "/out/\u{e4}/x"));
+    }
+
+    /**
+     * `zip -r` on Linux or macOS flags a non-ASCII name as UTF-8. PHP-FPM runs in the C locale,
+     * where unzip would list and write it as `za#U017c...`; every unzip runs in UTF-8.
+     */
+    public function test_unzip_keeps_the_non_ascii_names_of_an_info_zip_archive(): void
+    {
+        $this->requireCommand('unzip');
+        $files = $this->fileManager();
+        $name = "za\u{17c}\u{f3}\u{142}\u{107}/\u{105}.txt";
+        InfoZip::utf8Flagged($this->homeDir . '/site.zip', $name);
+        $this->commands = [];
+
+        $files->unzip('site.zip', 'out');
+
+        $this->assertSame('x', file_get_contents($this->homeDir . '/out/' . $name));
+        $unzips = array_filter($this->commands, fn (array $argv): bool => in_array('unzip', $argv, true));
+        $this->assertNotSame([], $unzips);
+        foreach ($unzips as $argv) {
+            $at = (int) array_search('unzip', $argv, true);
+            $this->assertSame(['env', 'LC_ALL=C.UTF-8'], array_slice($argv, $at - 2, 2), implode(' ', $argv));
+        }
     }
 
     public function test_move_directory_contents_moves_children_only(): void
@@ -458,6 +609,41 @@ class ProjectFileManagerTest extends TestCase
         $this->assertSame('kept', file_get_contents($this->homeDir . '/inbox/big.bin'));
     }
 
+    /** A failed download is a short reason on `url`, never curl's own error text. */
+    public function test_a_failed_fetch_is_a_problem_on_url_with_a_short_reason(): void
+    {
+        $files = $this->fileManager(allowLocalFixtureServer: true);
+        $web = $this->homeDir . '/web';
+        mkdir($web);
+        mkdir($this->homeDir . '/inbox');
+        [$server, $port] = $this->serve($web);
+        try {
+            $missing = $this->fetchProblem($files, 'http://127.0.0.1:' . $port . '/missing.zip');
+        } finally {
+            $server->stop();
+        }
+        $closed = $this->fetchProblem($files, 'http://127.0.0.1:' . $port . '/plugin.zip');
+
+        $this->assertSame(['url', 'download_failed', 'http', 404], [$missing['field'], $missing['code'], $missing['reason'], $missing['http_status']]);
+        $this->assertSame('http://127.0.0.1:' . $port . '/missing.zip answered HTTP 404.', $missing['message']);
+        $this->assertSame(['url', 'download_failed', 'connect'], [$closed['field'], $closed['code'], $closed['reason']]);
+        $this->assertSame('Could not connect to 127.0.0.1.', $closed['message']);
+        $this->assertSame([], array_values(array_diff(scandir($this->homeDir . '/inbox'), ['.', '..'])));
+    }
+
+    /** @return array<string, mixed> */
+    private function fetchProblem(FileManager $files, string $url): array
+    {
+        try {
+            $files->fetch($url, 'inbox');
+        } catch (ProblemException $e) {
+            $this->assertStringNotContainsString('curl', $e->problems[0]['message']);
+
+            return $e->problems[0];
+        }
+        $this->fail("{$url} was fetched");
+    }
+
     public function test_a_path_that_escapes_the_home_is_refused_under_path(): void
     {
         $files = $this->fileManager();
@@ -527,6 +713,28 @@ class ProjectFileManagerTest extends TestCase
         $this->assertGreaterThanOrEqual(3, $files->diskUsage('/'));
     }
 
+    private function plantLinkAroundEachRename(string $target, bool $removedAfter): void
+    {
+        $this->plantAroundEachRename('ln -s ' . escapeshellarg($target) . ' "$last"', $removedAfter);
+    }
+
+    private function plantAroundEachRename(string $plant, bool $removedAfter): void
+    {
+        $mv = (string) (new \Symfony\Component\Process\ExecutableFinder())->find('mv');
+        $this->mvShim = $this->homeDir . '/.mv-shim';
+        mkdir($this->mvShim);
+        file_put_contents($this->mvShim . '/mv', implode("\n", [
+            '#!/bin/sh',
+            'for last; do :; done',
+            $plant,
+            escapeshellarg($mv) . ' "$@"; status=$?',
+            $removedAfter ? 'rm -f "$last"' : ':',
+            'exit $status',
+            '',
+        ]));
+        chmod($this->mvShim . '/mv', 0755);
+    }
+
     private function assertDestinationTaken(callable $unzip, string $archive): ProblemException
     {
         try {
@@ -580,14 +788,19 @@ class ProjectFileManagerTest extends TestCase
     {
         $commands = &$this->commands;
         $planted = &$this->plantedBeforeUnpack;
+        $mvShim = &$this->mvShim;
 
-        return new class ($this->homeDir, $commands, $planted) extends System {
+        return new class ($this->homeDir, $commands, $planted, $mvShim) extends System {
             /**
              * @param list<list<string>> $commands
              * @param array<string, string> $planted
              */
-            public function __construct(private string $homeRoot, private array &$commands, private array &$planted)
-            {
+            public function __construct(
+                private string $homeRoot,
+                private array &$commands,
+                private array &$planted,
+                private ?string &$mvShim,
+            ) {
             }
 
             public function projectHomeDirPath(string $username): string
@@ -648,11 +861,16 @@ class ProjectFileManagerTest extends TestCase
                     $argv = array_slice($argv, 2);
                 }
 
-                if (in_array($argv[0] ?? '', ['tar', 'unzip'], true) && !in_array($argv[1] ?? '', ['-tzf', '-tvzf', '-Z1', '-Z', '-p'], true)) {
+                $tool = ($argv[0] ?? '') === 'env' && ($argv[1] ?? '') === 'LC_ALL=C.UTF-8' ? array_slice($argv, 2) : $argv;
+                if (in_array($tool[0] ?? '', ['tar', 'unzip'], true) && !in_array($tool[1] ?? '', ['--quoting-style=escape', '-Z1', '-Z', '-p'], true)) {
                     $this->plantLinks();
                 }
 
-                $process = new Process($argv, $cwd);
+                $env = ['LC_ALL' => 'C'];
+                if ($this->mvShim !== null && ($argv[0] ?? '') === 'sh') {
+                    $env['PATH'] = $this->mvShim . ':' . getenv('PATH');
+                }
+                $process = new Process($argv, $cwd, $env);
                 $process->run();
 
                 return $process;

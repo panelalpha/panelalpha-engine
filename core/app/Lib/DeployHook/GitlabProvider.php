@@ -16,7 +16,8 @@ use Illuminate\Http\Request;
  * checked against it and nothing else, and is refused once its timestamp is
  * more than {@see SIGNATURE_TOLERANCE_SECONDS} from now.
  *
- * A delivery without one falls back to `X-Gitlab-Token`, compared in constant
+ * A delivery without one, or to a hook whose secret predates `whsec_` and so
+ * cannot sign, is checked by `X-Gitlab-Token` instead, compared in constant
  * time: either the secret itself (a hook registered by hand) or
  * {@see tokenFor()} of it (a hook the engine registered, which must not send
  * its signing key as a plain header). That proves only who sent it.
@@ -49,7 +50,13 @@ final class GitlabProvider implements HookProvider
             return false;
         }
 
-        return $this->signsTheBody($request) ? $this->validSignature($request, $secret) : $this->validToken($request, $secret);
+        return $this->signsTheBody($request, $secret) ? $this->validSignature($request, $secret) : $this->validToken($request, $secret);
+    }
+
+    /** Whether GitLab can sign with this secret: only a `whsec_` one, which a hook made before 2.2 does not hold. */
+    public static function canSignWith(string $secret): bool
+    {
+        return self::signingKey($secret) !== null;
     }
 
     private function validToken(Request $request, string $secret): bool
@@ -64,7 +71,7 @@ final class GitlabProvider implements HookProvider
 
     private function validSignature(Request $request, string $secret): bool
     {
-        $key = $this->signingKey($secret);
+        $key = self::signingKey($secret);
         $id = (string) $request->headers->get('webhook-id', '');
         $timestamp = (string) $request->headers->get('webhook-timestamp', '');
         if ($key === null || $id === '' || ! $this->isFresh($timestamp)) {
@@ -76,7 +83,7 @@ final class GitlabProvider implements HookProvider
         return $this->anySignatureIs($expected, (string) $request->headers->get('webhook-signature', ''));
     }
 
-    private function signingKey(string $secret): ?string
+    private static function signingKey(string $secret): ?string
     {
         if (! str_starts_with($secret, DeployHook::SIGNING_SECRET_PREFIX)) {
             return null;
@@ -114,12 +121,12 @@ final class GitlabProvider implements HookProvider
     }
 
     /**
-     * Only a signed delivery: whoever holds the token can send any body, so a
-     * body seen before proves nothing.
+     * Only a signed delivery to a secret that can sign: whoever holds the token
+     * can send any body, so a body seen before proves nothing.
      */
-    public function signsTheBody(Request $request): bool
+    public function signsTheBody(Request $request, string $secret): bool
     {
-        return $request->headers->has('webhook-signature');
+        return $request->headers->has('webhook-signature') && self::canSignWith($secret);
     }
 
     public function parse(Request $request): HookEvent

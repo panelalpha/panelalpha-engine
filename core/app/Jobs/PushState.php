@@ -6,6 +6,7 @@ use App\Jobs\Concerns\AttachTask;
 use App\Models\User;
 use App\Support\JobBudget;
 use App\System;
+use App\System\Project\Dind\CopyVolumes;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -94,8 +95,8 @@ class PushState implements ShouldQueue
             $this->removeIncoming($system, $to);
         }
 
-        $this->resumeAfterCopy($system, $from);
-        $this->resumeAfterCopy($system, $to);
+        $this->copyVolumesOf($system, $from)?->resumeSourceAfterCopy();
+        $this->copyVolumesOf($system, $to)?->resumeAfterCopy();
     }
 
     private function markPushFailed(User $to, string $error): void
@@ -118,15 +119,16 @@ class PushState implements ShouldQueue
         }
     }
 
-    private function resumeAfterCopy(System $system, ?User $user): void
+    private function copyVolumesOf(System $system, ?User $user): ?CopyVolumes
     {
         if ($user === null) {
-            return;
+            return null;
         }
 
         try {
-            $system->project($user)->copyVolumesForClone()?->resumeAfterCopy();
-        } catch (\Throwable $ignored) {
+            return $system->project($user)->copyVolumesForClone();
+        } catch (\Throwable) {
+            return null;
         }
     }
 }

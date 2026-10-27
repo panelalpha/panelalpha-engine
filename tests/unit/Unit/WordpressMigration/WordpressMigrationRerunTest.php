@@ -91,7 +91,7 @@ class WordpressMigrationRerunTest extends ImportTargetTestCase
         foreach (SourcePluginOnFailure::PLUGIN_STEPS as $step) {
             $this->assertSame(WordpressMigration::STEP_STATUS_PENDING, $migration->stepStatus($step));
         }
-        $this->assertNull($migration->plugin_migration_id);
+        $this->assertSame('mig-files', $migration->plugin_migration_id);
         $this->assertSame(WordpressMigration::STEP_INSTALL_SOURCE_PLUGIN, $migration->nextIncompleteStep()['name']);
         $this->assertSame('secret', $migration->secretsForWorker()['password']);
     }

@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Dind;
 
+use App\Exceptions\DeployCancelledException;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Detect\DockerfileFinder;
@@ -54,6 +55,8 @@ final class AppPortAlignment
      * The wait ends early once $stopped() says the copy no longer runs.
      *
      * @param  (\Closure(): bool)|null  $stopped
+     *
+     * @throws DeployCancelledException
      */
     public function alignTo(string $container, ?\Closure $stopped = null): bool
     {
@@ -72,6 +75,7 @@ final class AppPortAlignment
         $logger = $this->project->shell()->logger();
 
         try {
+            $filesystem->assertNotSymlink($composePath);
             $raw = $filesystem->fileGetContents($composePath);
             if ($raw === '') {
                 return false;
@@ -125,7 +129,7 @@ final class AppPortAlignment
                 "Recipe expected port {$mapping->container}, application bound {$actual}"
             );
             $parsed['services']['app']['ports'][0] = $mapping->forwardingTo($actual);
-            $filesystem->filePutContents(
+            $filesystem->writeFileReplacingPath(
                 $composePath,
                 ComposeYaml::dump($parsed, $raw, 6, 2),
                 $this->project->userModel()->getChownString(),
@@ -133,6 +137,8 @@ final class AppPortAlignment
             );
 
             return true;
+        } catch (DeployCancelledException $e) {
+            throw $e;
         } catch (\Exception $e) {
             Log::warning('Could not align the published app port: '.$e->getMessage());
 
@@ -141,12 +147,21 @@ final class AppPortAlignment
     }
 
     /**
+     * The wait ends at once on the deploy's cancel, which then stops the deploy.
+     *
      * @param  list<int>  $declared
      * @return list<int>
+     *
+     * @throws DeployCancelledException
      */
     private function settledCandidates(int $expected, array $declared, ?string $container, ?\Closure $stopped): array
     {
-        return self::awaitCandidates($expected, fn (): array => $this->listeningSockets($container), $this->sleep, $declared, $stopped);
+        $logger = $this->project->shell()->logger();
+        $ended = static fn (): bool => $logger?->isCancelled() === true || ($stopped !== null && $stopped());
+        $candidates = self::awaitCandidates($expected, fn (): array => $this->listeningSockets($container), $this->sleep, $declared, $ended);
+        $logger?->throwIfCancelled();
+
+        return $candidates;
     }
 
     /**

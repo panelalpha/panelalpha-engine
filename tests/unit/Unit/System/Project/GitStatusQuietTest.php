@@ -115,6 +115,11 @@ final class QuietRecordingWorkTree extends WorkTree
         return $this->answer();
     }
 
+    protected function runsOnHost(): bool
+    {
+        return false;
+    }
+
     private function answer(): string
     {
         if (!$this->repositoryExists) {

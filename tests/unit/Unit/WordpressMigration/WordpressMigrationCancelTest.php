@@ -146,9 +146,11 @@ class WordpressMigrationCancelTest extends ImportTargetTestCase
             $migration->markStepCompleted($step['name']);
         }
         $migration->storePluginMigrationId('mig-db');
+        $migration->storeSourceToken(str_repeat('cd', 32));
         $migration->storeResolvedSource('https://example.com', null, SourceSite::REST_WP_JSON);
         $batches = 0;
         $http = (new RoutedSourceHttpClient())
+            ->requiringToken(str_repeat('cd', 32))
             ->on('GET', 'https://example.com/wp-json/wp-migrator/v1/remote-sync/status/mig-db', new SourceHttpResponse('{"success":true,"status":{"status":"running","phase":"database"}}', 200))
             ->on('POST', 'https://example.com/wp-json/wp-migrator/v1/remote-sync/process-batch', function () use (&$batches, $migration): SourceHttpResponse {
                 $batches++;

@@ -19,7 +19,7 @@ use Illuminate\Support\Carbon;
  * @property ?string $license_id
  * @property ?string $license_name
  * @property string $ip
- * @property ?string $caller_ip where PanelAlpha Connect calls this engine from
+ * @property ?array<string, string> $caller_ips where PanelAlpha Connect calls this engine from: address => last seen (UTC, ISO 8601)
  * @property string $tls_spki
  * @property ?array<int, string> $grants
  * @property ?int $token_id
@@ -53,6 +53,7 @@ class HubConnection extends Model
     protected $casts = [
         'hub_secret' => 'encrypted',
         'grants' => 'array',
+        'caller_ips' => 'array',
         'connected_at' => 'datetime',
         'last_hub_call_at' => 'datetime',
     ];

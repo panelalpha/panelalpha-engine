@@ -369,7 +369,8 @@ class FileAndSshCommandsTest extends TestCase
         $this->assertSame([
             $this->confined('F:' . $this->home() . '/up/' . basename($local)),
             [
-                'sh', '-c', 'mkdir -p -- "$(dirname -- "$2")" && cat -- "$1" > "$2" && chmod 644 -- "$2"',
+                'sh', '-c', 'dir=$(dirname -- "$2"); mkdir -p -- "$dir" 2>/dev/null; '
+                    . '[ -w "$2" ] || { [ -d "$dir" ] && [ -w "$dir" ]; } || exit 6; cat -- "$1" > "$2" && chmod 644 -- "$2"',
                 'sh', $local, $this->home() . '/up/' . basename($local),
             ],
         ], $this->calls());
@@ -538,7 +539,7 @@ class FileAndSshCommandsTest extends TestCase
 
     public function test_ssh_refuses_a_project_that_is_not_dind(): void
     {
-        $this->assertFails(ValidationException::class, "Shell commands are only supported for dind projects.\n", 'project:ssh', [
+        $this->assertFails(ValidationException::class, "Shell commands work only on container projects (template dind).\n", 'project:ssh', [
             'project' => 'phpdemo', 'cmd' => 'ls',
         ]);
         $this->assertSame([], $this->calls());

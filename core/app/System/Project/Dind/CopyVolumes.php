@@ -10,6 +10,11 @@ use Illuminate\Support\Facades\Log;
  */
 final class CopyVolumes
 {
+    private const INSPECT_TIMEOUT_SECONDS = 30;
+
+    /** `docker inspect` per container: its compose service, then each `<volume>=<mount point>` tab-separated. */
+    private const MOUNTS_FORMAT = "{{index .Config.Labels \"com.docker.compose.service\"}}|{{range .Mounts}}{{.Name}}={{.Destination}}\t{{end}}";
+
     public function __construct(
         private DindProject $project,
         private ContainerOperations $containers,
@@ -30,8 +35,22 @@ final class CopyVolumes
 
     public function resumeAfterCopy(): void
     {
+        $this->resumeWith('up');
+    }
+
+    /**
+     * The copied source starts again as it was stopped: `up` would rewrite its
+     * run file first and apply what was stored for later, such as env vars.
+     */
+    public function resumeSourceAfterCopy(): void
+    {
+        $this->resumeWith('start');
+    }
+
+    private function resumeWith(string $action): void
+    {
         try {
-            $this->containers->projectAction('up');
+            $this->containers->projectAction($action);
         } catch (\Throwable $e) {
             Log::warning('Could not start inner app after copy', [
                 'username' => $this->project->username(),
@@ -240,6 +259,89 @@ final class CopyVolumes
     }
 
     /**
+     * One warning for each anonymous volume of this account that holds data
+     * and is mounted by one of its containers, which a copy leaves out, named
+     * by where it is mounted. When the containers cannot be read, every
+     * anonymous volume holding data is named.
+     *
+     * @return list<string>
+     */
+    public function anonymousVolumeWarnings(): array
+    {
+        $volumes = rtrim($this->project->homeDirPath(), '/').'/docker/volumes';
+        if (! $this->pathIsDirectoryAsRoot($volumes)) {
+            return [];
+        }
+        $withData = array_values(array_filter(
+            $this->anonymousVolumeEntriesAsRoot($volumes),
+            fn (string $volume): bool => $this->holdsDataAsRoot("{$volumes}/{$volume}/_data"),
+        ));
+        $mounts = $withData === [] ? [] : $this->anonymousMounts();
+        $leftOut = $mounts === null ? $withData : array_values(array_intersect($withData, array_keys($mounts)));
+
+        return array_map(
+            static fn (string $volume): string => self::anonymousVolumeWarning($volume, $mounts[$volume] ?? []),
+            $leftOut,
+        );
+    }
+
+    /**
+     * @param  list<string>  $mounts  `<service>:<mount point>` each
+     */
+    private static function anonymousVolumeWarning(string $volume, array $mounts): string
+    {
+        $where = $mounts === [] ? '' : ' ('.implode(', ', $mounts).')';
+
+        return 'Anonymous volume '.substr($volume, 0, 12).$where.' holds data that was not copied. '
+            .'Name it under the service\'s volumes: in the compose file to have it copied.';
+    }
+
+    /**
+     * Where each anonymous volume is mounted, read from the account's own
+     * containers; null when they cannot be read.
+     *
+     * @return array<string, list<string>>|null
+     */
+    private function anonymousMounts(): ?array
+    {
+        $script = 'ids=$(docker ps -aq) || exit 1; [ -n "$ids" ] || exit 0; docker inspect --format '
+            .escapeshellarg(self::MOUNTS_FORMAT).' $ids';
+        try {
+            return self::parseMounts(
+                $this->project->shell()->execQuiet(['bash', '-c', $script], [], self::INSPECT_TIMEOUT_SECONDS)
+            );
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * @return array<string, list<string>>
+     */
+    private static function parseMounts(string $inspect): array
+    {
+        $mounts = [];
+        foreach (preg_split('/\R/', trim($inspect)) ?: [] as $line) {
+            [$service, $list] = array_pad(explode('|', $line, 2), 2, '');
+            foreach (explode("\t", $list) as $mount) {
+                [$volume, $destination] = array_pad(explode('=', $mount, 2), 2, '');
+                if (self::isAnonymousVolume($volume) && $destination !== '') {
+                    $mounts[$volume][] = trim($service) === '' ? $destination : trim($service).':'.$destination;
+                }
+            }
+        }
+
+        return $mounts;
+    }
+
+    private function holdsDataAsRoot(string $path): bool
+    {
+        $process = $this->project->system()->runProcess(['sudo', 'find', $path, '-mindepth', '1', '-maxdepth', '1', '-print', '-quit']);
+
+        return $process->isSuccessful() && trim($process->getOutput()) !== '';
+    }
+
+    /**
      * @param  list<string>  $cmd
      */
     private function runVolumeProcess(array $cmd, string $message): void
@@ -254,10 +356,30 @@ final class CopyVolumes
      * The named volumes under the account's docker/volumes. Anonymous volumes
      * (64 hex characters) are left out: an image's own VOLUME the compose file
      * never names, which a copy has nowhere to put and the image recreates.
+     * {@see anonymousVolumeWarnings()} names the ones that held data.
      *
      * @return list<string>
      */
     private function listDockerVolumeEntriesAsRoot(string $volumesDir): array
+    {
+        return array_values(array_filter(
+            $this->volumeEntriesAsRoot($volumesDir),
+            static fn (string $entry): bool => ! self::isAnonymousVolume($entry),
+        ));
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function anonymousVolumeEntriesAsRoot(string $volumesDir): array
+    {
+        return array_values(array_filter($this->volumeEntriesAsRoot($volumesDir), self::isAnonymousVolume(...)));
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function volumeEntriesAsRoot(string $volumesDir): array
     {
         $process = $this->project->system()->runProcess(['sudo', 'ls', '-1', $volumesDir]);
         if (! $process->isSuccessful()) {
@@ -267,7 +389,7 @@ final class CopyVolumes
         $entries = [];
         foreach (preg_split('/\R/', trim($process->getOutput())) ?: [] as $entry) {
             $entry = trim($entry);
-            if ($entry === '' || $entry === 'metadata.db' || self::isAnonymousVolume($entry)) {
+            if ($entry === '' || $entry === 'metadata.db') {
                 continue;
             }
             $entries[] = $entry;

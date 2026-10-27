@@ -25,8 +25,9 @@ class WpCoreController extends WordPressController
             .'`installed`; `not_installed` (core, wp-config.php and the database are fine, '
             .'the WordPress tables are missing); `no_config` (core files, no wp-config.php); '
             .'`db_unreachable` (wp-config.php present, the database it names cannot be reached); '
-            .'`no_core` (no WordPress here, version is null); `unknown` (not installed, for a '
-            .'reason the engine cannot tell). A site that fails to load (a fatal error) is a 422, '
+            .'`no_core` (no WordPress here, version is null); `no_db_client` (not installed or '
+            .'the database is unreachable, which the engine cannot tell apart without a MySQL client); '
+            .'`unknown` (not installed, for a reason the engine cannot tell). A site that fails to load (a fatal error) is a 422, '
             .'not installed=false; pass skip_plugins to check past a broken plugin. Optional '
             .'`path` selects the install; omitted, the main domain document root is used.',
         security: [['bearerAuth' => []]],
@@ -38,7 +39,7 @@ class WpCoreController extends WordPressController
                 in: 'query',
                 required: false,
                 schema: new OA\Schema(type: 'string'),
-                description: 'WordPress directory. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
+                description: 'WordPress directory. On PHP hosting it is inside the project home, read as the file manager reads a path: absolute, or relative to the home. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
             ),
             new OA\Parameter(
                 name: 'service',
@@ -63,15 +64,17 @@ class WpCoreController extends WordPressController
                     new OA\Property(
                         property: 'state',
                         type: 'string',
-                        enum: ['installed', 'not_installed', 'no_config', 'db_unreachable', 'no_core', 'unknown'],
+                        enum: ['installed', 'not_installed', 'no_config', 'db_unreachable', 'no_core', 'no_db_client', 'unknown'],
                         description: 'installed: WordPress is installed. not_installed: core files, wp-config.php and '
                             .'a reachable database, but WordPress was never installed into it. no_config: core '
                             .'files without a wp-config.php. db_unreachable: wp-config.php is there but the MySQL '
                             .'client cannot connect to the database it names (`wp db query` fails with a client '
                             .'error such as ERROR 2005 or ERROR 1045). no_core: no WordPress core files at the path, or, '
                             .'on a project in its own containers, no running container with PHP and WordPress. '
+                            .'no_db_client: not installed or the database is unreachable; the engine probes the '
+                            .'database with the MySQL client, and no container with WordPress has one. '
                             .'unknown: not installed, for a reason the engine cannot tell, for example output it '
-                            .'does not recognise, or no MySQL client to probe the database with.',
+                            .'does not recognise.',
                     ),
                 ])],
             )),
@@ -99,7 +102,7 @@ class WpCoreController extends WordPressController
                 in: 'query',
                 required: false,
                 schema: new OA\Schema(type: 'string'),
-                description: 'WordPress directory. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
+                description: 'WordPress directory. On PHP hosting it is inside the project home, read as the file manager reads a path: absolute, or relative to the home. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
             ),
             new OA\Parameter(
                 name: 'service',
@@ -167,7 +170,12 @@ class WpCoreController extends WordPressController
                     property: 'path',
                     type: 'string',
                     nullable: true,
-                    description: 'Directory to download into. Omitted: the main domain document root.',
+                    description: 'Directory to download into, inside the project home, read as the file manager '
+                        .'reads a path: absolute, or relative to the home. On PHP hosting the top of the home belongs '
+                        .'to root, so a new directory must go below an existing folder the project\'s account owns, such '
+                        .'as the domain folder (`/example.com/blog`); `/blog` or `/tmp/wp` answer 422. The answer\'s '
+                        .'`path` is where it went, and the directory checked for an existing core. Omitted: the main '
+                        .'domain document root.',
                 ),
             ],
         )),
@@ -213,7 +221,7 @@ class WpCoreController extends WordPressController
                     property: 'path',
                     type: 'string',
                     nullable: true,
-                    description: 'WordPress directory. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
+                    description: 'WordPress directory. On PHP hosting it is inside the project home, read as the file manager reads a path: absolute, or relative to the home. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
                 ),
                 new OA\Property(
                     property: 'service',
@@ -268,7 +276,7 @@ class WpCoreController extends WordPressController
                     property: 'path',
                     type: 'string',
                     nullable: true,
-                    description: 'WordPress directory. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
+                    description: 'WordPress directory. On PHP hosting it is inside the project home, read as the file manager reads a path: absolute, or relative to the home. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
                 ),
                 new OA\Property(
                     property: 'service',

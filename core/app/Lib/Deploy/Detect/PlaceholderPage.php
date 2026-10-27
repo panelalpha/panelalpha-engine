@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Detect;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
@@ -35,7 +36,7 @@ final class PlaceholderPage
 
     public static function isOneOf(string $path): bool
     {
-        $raw = is_file($path) ? @file_get_contents($path) : null;
+        $raw = is_file($path) ? AccountHomeRead::contents($path) : null;
         if (! is_string($raw) || $raw === '') {
             return false;
         }

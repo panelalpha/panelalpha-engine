@@ -1216,21 +1216,23 @@ OUT;
 
     /**
      * A shared base image the engine builds and the host prune removed: the
-     * host build asks for it by its plain name, docker.io does not publish it,
-     * and it could not be rebuilt. "Never published" sends the reader to
-     * rename a tag no project controls.
+     * host build asks for it by its plain name and docker.io does not publish
+     * it. "Never published" sends the reader to rename a tag no project
+     * controls, and no rebuild ran, so none is said to have failed.
      */
-    public function test_a_pruned_engine_base_image_points_at_the_failed_rebuild(): void
+    public function test_a_pruned_engine_base_image_says_it_is_gone_and_how_to_build_it(): void
     {
-        $output = "Unable to find image 'panelalpha/php:8.3-apache-bookworm-pa20260924' locally\n"
-            . 'docker: Error response from daemon: manifest for '
-            . 'panelalpha/php:8.3-apache-bookworm-pa20260924 not found: manifest unknown.';
+        foreach (['panelalpha/php:8.3-apache-bookworm-pa20260924', 'panelalpha/ruby:3.3-slim-bookworm-pa0c53db49'] as $ref) {
+            $output = "Unable to find image '{$ref}' locally\n"
+                . "docker: Error response from daemon: manifest for {$ref} not found: manifest unknown.";
 
-        $message = (string) DeployFailureExplainer::explain($output);
+            $message = (string) DeployFailureExplainer::explain($output);
 
-        $this->assertStringContainsString('panelalpha/php:8.3-apache-bookworm-pa20260924', $message);
-        $this->assertStringContainsString('rebuilding it did not work', $message);
-        $this->assertStringNotContainsString('never published', $message);
+            $this->assertStringContainsString("The base image {$ref} is one this engine builds and is no longer on this server", $message);
+            $this->assertStringContainsString('pae system:image:prewarm', $message);
+            $this->assertStringNotContainsString('rebuild', $message);
+            $this->assertStringNotContainsString('never published', $message);
+        }
     }
 
     /**

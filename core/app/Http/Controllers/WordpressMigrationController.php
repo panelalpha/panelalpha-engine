@@ -2,18 +2,18 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\WordpressMigrationPluginPackageDownloadRequest;
+use App\Http\Requests\WordpressMigrationResumeRequest;
 use App\Http\Requests\WordpressMigrationStoreRequest;
 use App\Jobs\MigrateWordpress;
 use App\Models\WordpressMigration;
+use App\System\Project\PhpHosting\WordPress\Migration\MigrationStarter;
+use App\System\Project\PhpHosting\WordPress\Migration\MigratorPluginPackage;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceAccess;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceProbe;
 use App\System\Project\PhpHosting\WordPress\Migration\WordpressMigratorZip;
-use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use Illuminate\Http\Response;
-use Illuminate\Support\Facades\Crypt;
-use Illuminate\Support\Facades\URL;
 use InvalidArgumentException;
 use OpenApi\Attributes as OA;
 use RuntimeException;
@@ -22,15 +22,11 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 /**
  * Start, test, poll, resume, cancel and delete a WordPress site migration over REST and MCP,
  * and hand out the migrator plugin for the manual method. The
- * wordpress:migrate commands call the same model methods and queue the same
- * job. None of them carries its own step list.
+ * wordpress:migrate commands start through the same MigrationStarter and
+ * queue the same job. None of them carries its own step list.
  */
 class WordpressMigrationController extends Controller
 {
-    public const PLUGIN_PACKAGE_ROUTE = 'wordpress.migrations.plugin-package.download';
-
-    public const PLUGIN_PACKAGE_HOURS = 24;
-
     #[OA\Post(
         path: '/wordpress/migrations',
         summary: 'Start a WordPress site migration',
@@ -54,19 +50,25 @@ class WordpressMigrationController extends Controller
             .'project is created on it with no tunnel (or the existing `project` is used), the '
             .'source sends the transfer to this engine\'s IPv4 whatever the domain\'s DNS says, '
             .'and with PanelAlpha Connect a preview tunnel shows the site until the DNS points here. '
-            .'Then the engine issues the certificate and removes the preview by itself.',
+            .'Then the engine issues the certificate and removes the preview by itself. Every call to the '
+            .'source plugin\'s transfer routes carries the import\'s own token. A transfer already running on '
+            .'the source that this engine did not start is never taken over: remote_sync fails naming it, '
+            .'and a resume after it has finished goes on. An engine whose default IPv4 is not public, and not mapped '
+            .'to a public address in the IPv4 NAT map, answers 409 '
+            .'engine_address_private and stores nothing, since the source could not send the transfer to it; '
+            .'EGRESS_ALLOW_PRIVATE lifts that for a source on the same private network.',
         security: [['bearerAuth' => []]],
         tags: ['WordPress Migrations'],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             required: ['url'],
             properties: [
-                new OA\Property(property: 'url', type: 'string', description: 'Source WordPress site URL.', example: 'https://example.com/blog'),
+                new OA\Property(property: 'url', type: 'string', description: 'Source WordPress site URL. It, and every address it redirects to, must be public and not the Engine\'s own: loopback, link-local, private, reserved and Docker network addresses are refused, private ones unless the operator sets EGRESS_ALLOW_PRIVATE.', example: 'https://example.com/blog'),
                 new OA\Property(property: 'method', type: 'string', enum: WordpressMigration::METHODS, default: 'wp_admin', description: 'wp_admin logs into the source wp-admin and installs the migrator plugin; manual_plugin uses the plugin the user installed from the plugin package.'),
                 new OA\Property(property: 'login_url', type: 'string', nullable: true, description: 'wp_admin: the login page, when it is not <url>/wp-login.php (e.g. a custom login path).', example: 'https://example.com/secret-login'),
                 new OA\Property(property: 'username', type: 'string', nullable: true, description: 'wp_admin, required: wp-admin username on the source site (not a hosting account name).', example: 'admin'),
                 new OA\Property(property: 'password', type: 'string', nullable: true, description: 'wp_admin, required: wp-admin password. Never returned in any response; a started migration keeps it encrypted.', example: 'secret'),
                 new OA\Property(property: 'source_token', type: 'string', nullable: true, description: 'manual_plugin, required: the token from the plugin package (64 hex characters). Never returned; a started migration keeps it encrypted.'),
-                new OA\Property(property: 'source_ip', type: 'string', nullable: true, description: 'Reach the source at this public address with its own Host. Loopback, link-local, private, reserved and the Engine\'s own addresses are refused.'),
+                new OA\Property(property: 'source_ip', type: 'string', nullable: true, description: 'Reach the source at this public address with its own Host. Loopback, link-local, private, reserved and the Engine\'s own addresses are refused, private ones unless the operator sets EGRESS_ALLOW_PRIVATE.'),
                 new OA\Property(
                     property: 'domain',
                     type: 'string',
@@ -119,24 +121,13 @@ class WordpressMigrationController extends Controller
                     ]),
                 ],
             )),
+            new OA\Response(response: 409, description: 'The source could not send the transfer to this engine: problems[].code is engine_address_private, and the message names the address', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
             new OA\Response(response: 422, description: 'Validation error, or a refused target: problems[].code is domain_taken, domain_required, domain_mismatch, project_not_found, project_not_eligible, project_not_empty or name_taken', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function store(WordpressMigrationStoreRequest $request): JsonResponse
+    public function store(WordpressMigrationStoreRequest $request, MigrationStarter $starter): JsonResponse
     {
-        $access = SourceAccess::fromValidated($request->validated());
-
-        $migration = WordpressMigration::start(
-            sourceUrl: $access->url,
-            username: $access->username,
-            password: $access->password,
-            method: $access->method,
-            loginUrl: $access->loginUrl,
-            sourceIp: $access->sourceIp,
-            sourceToken: $access->sourceToken,
-            target: $request->target(),
-        );
-        MigrateWordpress::dispatch($migration->id);
+        $migration = $starter->start($request->validated(), $request->target());
 
         return new JsonResponse($migration->toStatusArray(), 202);
     }
@@ -152,24 +143,28 @@ class WordpressMigrationController extends Controller
             .'error_type is unreachable, tls (the certificate did not verify), not_wordpress, '
             .'cloudflare (a Cloudflare challenge blocks the login), login_failed (wrong wp-admin '
             .'credentials: offer the manual_plugin method), plugin_not_found, unauthorized '
-            .'(the plugin refused source_token), or one of the start\'s target refusals: domain_taken '
+            .'(the plugin refused source_token), engine_address_private (this engine\'s default IPv4 is not public '
+            .'and not mapped to a public address, so '
+            .'the source could not send the transfer to it), or one of the start\'s target refusals: domain_taken '
             .'(ask for another domain), domain_required (an IP source on an engine without PanelAlpha '
             .'Connect), domain_mismatch, project_not_found, project_not_eligible, project_not_empty or '
             .'name_taken. domain is the domain the import would get, from the site\'s own home '
             .'(lowercased, without www.) unless `domain` or `project` says otherwise; null when an IP '
-            .'source gets a panelalpha.online name. Send it as `domain` when starting.',
+            .'source gets a panelalpha.online name. Send it as `domain` when starting. The test '
+            .'gives up after '.SourceProbe::DEADLINE_SECONDS.' seconds of waiting on the source (error_type unreachable), and at '
+            .'most two tests run at once: one more answers 429, try it again in a moment.',
         security: [['bearerAuth' => []]],
         tags: ['WordPress Migrations'],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             required: ['url'],
             properties: [
-                new OA\Property(property: 'url', type: 'string', description: 'Source WordPress site URL.', example: 'https://example.com/blog'),
+                new OA\Property(property: 'url', type: 'string', description: 'Source WordPress site URL. It, and every address it redirects to, must be public and not the Engine\'s own: loopback, link-local, private, reserved and Docker network addresses are refused, private ones unless the operator sets EGRESS_ALLOW_PRIVATE.', example: 'https://example.com/blog'),
                 new OA\Property(property: 'method', type: 'string', enum: WordpressMigration::METHODS, default: 'wp_admin', description: 'wp_admin logs into the source wp-admin and installs the migrator plugin; manual_plugin uses the plugin the user installed from the plugin package.'),
                 new OA\Property(property: 'login_url', type: 'string', nullable: true, description: 'wp_admin: the login page, when it is not <url>/wp-login.php (e.g. a custom login path).', example: 'https://example.com/secret-login'),
                 new OA\Property(property: 'username', type: 'string', nullable: true, description: 'wp_admin, required: wp-admin username on the source site (not a hosting account name).', example: 'admin'),
                 new OA\Property(property: 'password', type: 'string', nullable: true, description: 'wp_admin, required: wp-admin password. Never returned in any response; a started migration keeps it encrypted.', example: 'secret'),
                 new OA\Property(property: 'source_token', type: 'string', nullable: true, description: 'manual_plugin, required: the token from the plugin package (64 hex characters). Never returned; a started migration keeps it encrypted.'),
-                new OA\Property(property: 'source_ip', type: 'string', nullable: true, description: 'Reach the source at this public address with its own Host. Loopback, link-local, private, reserved and the Engine\'s own addresses are refused.'),
+                new OA\Property(property: 'source_ip', type: 'string', nullable: true, description: 'Reach the source at this public address with its own Host. Loopback, link-local, private, reserved and the Engine\'s own addresses are refused, private ones unless the operator sets EGRESS_ALLOW_PRIVATE.'),
                 new OA\Property(property: 'domain', type: 'string', nullable: true, description: 'Domain the import would get; as on start.', example: 'example.com'),
                 new OA\Property(property: 'project', type: 'string', nullable: true, description: 'Existing classic project to import into; as on start.'),
                 new OA\Property(property: 'project_name', type: 'string', nullable: true, description: 'Name of the project the import would create; as on start.'),
@@ -184,11 +179,12 @@ class WordpressMigrationController extends Controller
                     new OA\Property(property: 'rest_mode', type: 'string', enum: ['wp_json', 'rest_route'], description: 'wp_json (/wp-json/) or rest_route (?rest_route=). Only when ok.'),
                     new OA\Property(property: 'wordpress_version', type: 'string', nullable: true, description: 'From the generator meta tag; null when the site hides it. Only when ok.'),
                     new OA\Property(property: 'domain', type: 'string', nullable: true, description: 'The domain the import would get; null when an IP source gets a panelalpha.online name. Only when ok.', example: 'example.com'),
-                    new OA\Property(property: 'error_type', type: 'string', enum: ['unreachable', 'tls', 'not_wordpress', 'cloudflare', 'login_failed', 'plugin_not_found', 'unauthorized', 'domain_taken', 'domain_required', 'domain_mismatch', 'project_not_found', 'project_not_eligible', 'project_not_empty', 'name_taken'], description: 'Only when not ok.'),
+                    new OA\Property(property: 'error_type', type: 'string', enum: ['unreachable', 'tls', 'not_wordpress', 'cloudflare', 'login_failed', 'plugin_not_found', 'unauthorized', 'engine_address_private', 'domain_taken', 'domain_required', 'domain_mismatch', 'project_not_found', 'project_not_eligible', 'project_not_empty', 'name_taken'], description: 'Only when not ok.'),
                     new OA\Property(property: 'message', type: 'string', description: 'Only when not ok.'),
                 ],
             )),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 429, description: 'Two tests are already running'),
         ],
     )]
     public function test(WordpressMigrationStoreRequest $request, SourceProbe $probe): JsonResponse
@@ -216,38 +212,18 @@ class WordpressMigrationController extends Controller
             )),
         ],
     )]
-    public function pluginPackage(): JsonResponse
+    public function pluginPackage(MigratorPluginPackage $package): JsonResponse
     {
-        $token = bin2hex(random_bytes(32));
-        $expiresAt = now()->addHours(self::PLUGIN_PACKAGE_HOURS);
-
-        return new JsonResponse([
-            'token' => $token,
-            'download_url' => URL::temporarySignedRoute(
-                self::PLUGIN_PACKAGE_ROUTE,
-                $expiresAt,
-                ['package' => Crypt::encryptString($token)],
-            ),
-            'expires_at' => $expiresAt->toIso8601String(),
-        ]);
+        return new JsonResponse($package->mint());
     }
 
     /**
      * The signed link from {@see pluginPackage}: the release zip with the token in config.php.
      */
-    public function downloadPluginPackage(Request $request, WordpressMigratorZip $zip): BinaryFileResponse|JsonResponse
+    public function downloadPluginPackage(WordpressMigrationPluginPackageDownloadRequest $request, WordpressMigratorZip $zip): BinaryFileResponse|JsonResponse
     {
         try {
-            $token = Crypt::decryptString((string) $request->query('package'));
-        } catch (DecryptException) {
-            return new JsonResponse(['message' => 'Not found'], 404);
-        }
-        if (preg_match('/^[0-9a-f]{64}$/', $token) !== 1) {
-            return new JsonResponse(['message' => 'Not found'], 404);
-        }
-
-        try {
-            $package = $zip->packageWithToken($token);
+            $package = $zip->packageWithToken($request->token());
         } catch (RuntimeException $e) {
             return new JsonResponse(['message' => $e->getMessage()], 502);
         }
@@ -271,7 +247,11 @@ class WordpressMigrationController extends Controller
             .'and finish 95-100; phase_percent is how far the current phase is. While the '
             .'database or files transfer, item is the table or file being sent and message counts '
             .'the chunks. updated_at is the run\'s heartbeat: a stale one while status is running '
-            .'means the run has stalled.',
+            .'means the run has stalled. warnings lists what the import noticed and went on with: '
+            .'plugin_unauthenticated means the source plugin is older than 1.2.0 and answers its transfer '
+            .'routes without a token, so anyone can copy the site while it is installed; the engine removes it '
+            .'(wp_admin), or the user must (manual_plugin, see notices), as soon as the import ends, fails or '
+            .'is cancelled.',
         security: [['bearerAuth' => []]],
         tags: ['WordPress Migrations'],
         parameters: [
@@ -290,6 +270,10 @@ class WordpressMigrationController extends Controller
                     new OA\Property(property: 'rest_mode', type: 'string', nullable: true, enum: ['wp_json', 'rest_route']),
                     new OA\Property(property: 'source_ip', type: 'string', nullable: true),
                     new OA\Property(property: 'notices', type: 'array', items: new OA\Items(type: 'string'), description: 'What the user still has to do by hand, e.g. remove the plugin from a manual_plugin source.'),
+                    new OA\Property(property: 'warnings', type: 'array', description: 'What the import noticed and went on with.', items: new OA\Items(type: 'object', properties: [
+                        new OA\Property(property: 'code', type: 'string', enum: ['plugin_unauthenticated']),
+                        new OA\Property(property: 'message', type: 'string'),
+                    ])),
                     new OA\Property(property: 'target_label', type: 'string', nullable: true),
                     new OA\Property(property: 'steps', type: 'array', items: new OA\Items(type: 'object')),
                     new OA\Property(property: 'step_log', type: 'array', items: new OA\Items(type: 'object')),
@@ -331,12 +315,21 @@ class WordpressMigrationController extends Controller
             .'created twice. A wp_admin migration that failed after its plugin reached the source '
             .'has had the plugin removed there; resume installs it again and restarts the '
             .'transfer. Rejects any other status with 409, including a running migration that is '
-            .'still reporting: wait for it.',
+            .'still reporting: wait for it. A migration that has had no activity for 7 days loses its '
+            .'stored password and tokens (step_log says secrets_expired): resume it with password '
+            .'(wp_admin) or source_token (manual_plugin) again, otherwise 422. A transfer it left '
+            .'unfinished then starts again from install_destination_plugin.',
         security: [['bearerAuth' => []]],
         tags: ['WordPress Migrations'],
         parameters: [
             new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
         ],
+        requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
+            properties: [
+                new OA\Property(property: 'password', type: 'string', nullable: true, description: 'wp_admin: the wp-admin password, required once it was cleared; replaces the stored one. Never returned.'),
+                new OA\Property(property: 'source_token', type: 'string', nullable: true, description: 'manual_plugin: the plugin token (64 hex characters), required once it was cleared; replaces the stored one. Never returned.'),
+            ],
+        )),
         responses: [
             new OA\Response(response: 202, description: 'Resume accepted', content: new OA\JsonContent(
                 properties: [
@@ -361,12 +354,13 @@ class WordpressMigrationController extends Controller
             new OA\Response(response: 409, description: 'Migration is neither failed nor stale', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'message', type: 'string')],
             )),
+            new OA\Response(response: 422, description: 'The cleared password or source_token was not sent', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function resume(int $id): JsonResponse
+    public function resume(WordpressMigrationResumeRequest $request, int $id): JsonResponse
     {
         $migration = self::findOr404($id);
-        self::or409(static fn () => $migration->resume());
+        self::or409(static fn () => $migration->resume($request->sourceSecret()));
         MigrateWordpress::dispatch($migration->id);
 
         return new JsonResponse($migration->fresh()->toStatusArray(), 202);

@@ -3,6 +3,7 @@
 namespace Tests\Unit\Http;
 
 use App\Http\Controllers\McpActivityLogController;
+use App\Http\Requests\McpActivityLogStoreRequest;
 use App\Models\Admin;
 use App\Models\McpActivityLog;
 use App\Models\PersonalAccessToken;
@@ -73,7 +74,7 @@ class McpActivityLogStoreTest extends TestCase
         ]);
         $request->setUserResolver(fn () => (new Admin())->withAccessToken($writer));
 
-        $response = (new McpActivityLogController())->store($request);
+        $response = (new McpActivityLogController())->store($this->formRequest($request));
 
         $this->assertSame(201, $response->getStatusCode());
         $row = McpActivityLog::firstOrFail();
@@ -96,12 +97,20 @@ class McpActivityLogStoreTest extends TestCase
             'error_message' => 'Downloading https://user:token@host/f.zip answered HTTP 401.',
         ]);
 
-        $response = (new McpActivityLogController())->store($request);
+        $response = (new McpActivityLogController())->store($this->formRequest($request));
 
         $this->assertSame(201, $response->getStatusCode());
         $this->assertSame(
             'Downloading https://[redacted]@host/f.zip answered HTTP 401.',
             McpActivityLog::firstOrFail()->error_message
         );
+    }
+
+    private function formRequest(Request $request): McpActivityLogStoreRequest
+    {
+        $form = McpActivityLogStoreRequest::createFrom($request);
+        $form->setContainer($this->app)->validateResolved();
+
+        return $form;
     }
 }

@@ -2,6 +2,8 @@
 
 namespace Tests\Unit\System\Project;
 
+use App\Lib\Deploy\Checkout\EngineArtifacts;
+use App\Lib\Deploy\Platform\Strategies;
 use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Project;
@@ -22,6 +24,8 @@ class DindCopyVolumesTest extends TestCase
     public bool $failComposeCreate = false;
 
     public bool $recordInnerCompose = false;
+
+    public ?string $innerInspect = null;
 
     public function logProcess(string $line): void
     {
@@ -194,6 +198,51 @@ class DindCopyVolumesTest extends TestCase
         $this->assertSame('seed', file_get_contents($this->volumeDataPath('bob', 'project_db') . '/marker.txt'));
     }
 
+    public function test_an_anonymous_volume_holding_data_is_named_with_where_it_is_mounted(): void
+    {
+        $this->mkdirVolumeData('alice', 'project_db', 'seed');
+        $this->mkdirVolumeData('alice', str_repeat('ab', 32), 'mysql data');
+        $this->mkdirVolumeDir('alice', str_repeat('cd', 32));
+        $this->innerInspect = 'db|' . str_repeat('ab', 32) . "=/var/lib/mysql\tproject_db=/data\t\n"
+            . 'web|' . str_repeat('cd', 32) . "=/var/www/html\t\n";
+
+        $warnings = $this->dindProject('alice')->app()->copyVolumes()->anonymousVolumeWarnings();
+
+        $this->assertSame(
+            [
+                'Anonymous volume abababababab (db:/var/lib/mysql) holds data that was not copied. '
+                . "Name it under the service's volumes: in the compose file to have it copied.",
+            ],
+            $warnings
+        );
+    }
+
+    public function test_an_anonymous_volume_no_container_mounts_is_not_named(): void
+    {
+        $this->mkdirVolumeData('alice', str_repeat('ab', 32), 'left behind by a removed container');
+        $this->innerInspect = "db|project_db=/data\t\n";
+
+        $this->assertSame([], $this->dindProject('alice')->app()->copyVolumes()->anonymousVolumeWarnings());
+    }
+
+    public function test_every_anonymous_volume_holding_data_is_named_when_the_containers_cannot_be_read(): void
+    {
+        $this->mkdirVolumeData('alice', str_repeat('ab', 32), 'mysql data');
+
+        $warnings = $this->dindProject('alice')->app()->copyVolumes()->anonymousVolumeWarnings();
+
+        $this->assertCount(1, $warnings);
+        $this->assertStringStartsWith('Anonymous volume abababababab holds data that was not copied.', $warnings[0]);
+    }
+
+    public function test_no_anonymous_volume_means_no_warning_and_no_container_lookup(): void
+    {
+        $this->mkdirVolumeData('alice', 'project_db', 'seed');
+
+        $this->assertSame([], $this->dindProject('alice')->app()->copyVolumes()->anonymousVolumeWarnings());
+        $this->assertSame([], array_values(array_filter($this->processLog, static fn (string $line): bool => str_contains($line, 'docker inspect'))));
+    }
+
     public function test_prepare_volumes_failure_does_not_remove_project_compose(): void
     {
         $project = $this->dindProject('alice');
@@ -230,13 +279,52 @@ class DindCopyVolumesTest extends TestCase
         );
     }
 
-    private function dindProject(string $username): Dind
+    public function test_a_copied_source_starts_again_without_rewriting_its_run_file(): void
+    {
+        $project = $this->dindProject('alice', Strategies::COMPOSE);
+        $runFile = $this->homeRoot . '/alice/project/' . EngineArtifacts::RUN_COMPOSE;
+        file_put_contents($runFile, "services:\n  app:\n    image: as-deployed\n");
+
+        $project->app()->copyVolumes()->resumeSourceAfterCopy();
+
+        $this->assertSame(['start'], $this->innerComposeActions());
+        $this->assertSame([], array_values(array_filter(
+            $this->processLog,
+            static fn (string $line): bool => str_starts_with($line, 'sudo cp '),
+        )));
+        $this->assertSame("services:\n  app:\n    image: as-deployed\n", file_get_contents($runFile));
+    }
+
+    public function test_a_push_target_resumes_with_up(): void
+    {
+        $project = $this->dindProject('bob');
+
+        $project->app()->copyVolumes()->resumeAfterCopy();
+
+        $this->assertSame(['up -d --remove-orphans'], $this->innerComposeActions());
+    }
+
+    /** @return list<string> what each compose command run inside the account was asked to do */
+    private function innerComposeActions(): array
+    {
+        $actions = [];
+        foreach ($this->processLog as $line) {
+            $unquoted = str_replace("'", '', $line);
+            if (str_contains($unquoted, ' compose --project-directory ')) {
+                $actions[] = substr($unquoted, strrpos($unquoted, '.yml ') + 5);
+            }
+        }
+
+        return $actions;
+    }
+
+    private function dindProject(string $username, string $strategy = 'express'): Dind
     {
         $model = new ModelsUser();
         $model->username = $username;
         $model->setDetails([
             'template' => 'dind',
-            'deploy_strategy' => 'express',
+            'deploy_strategy' => $strategy,
             'UID' => 1000,
             'GID' => 1000,
         ]);
@@ -329,6 +417,12 @@ class DindCopyVolumesTest extends TestCase
                     return FakeProcess::ok(implode("\n", $entries));
                 }
 
+                if (($parts[0] ?? '') === 'sudo' && ($parts[1] ?? '') === 'find') {
+                    $entries = is_dir($parts[2] ?? '') ? array_diff(scandir($parts[2]) ?: [], ['.', '..']) : [];
+
+                    return FakeProcess::ok($entries === [] ? '' : $parts[2] . '/' . reset($entries) . "\n");
+                }
+
                 if (($parts[0] ?? '') === 'sudo' && ($parts[1] ?? '') === 'mkdir') {
                     $target = end($parts) ?: '';
                     if (!is_dir($target)) {
@@ -367,6 +461,11 @@ class DindCopyVolumesTest extends TestCase
                 }
 
                 $parts = is_array($cmd) ? $cmd : (preg_split('/\s+/', (string) $cmd) ?: []);
+                if (str_contains(implode(' ', $parts), 'docker inspect')) {
+                    $this->test->logProcess('docker inspect');
+
+                    return $this->test->innerInspect ?? throw new \RuntimeException('inner daemon unreachable');
+                }
                 $this->runProcess($parts, $env, $timeout);
 
                 return '';

@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Platform\Dockerfile;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Template\TemplateLoader;
 
 /**
@@ -39,7 +40,7 @@ final class DockerIgnore
         }
         $path = trim($path, '/');
         $excluded = false;
-        foreach (preg_split('/\R/', (string) @file_get_contents($file)) ?: [] as $line) {
+        foreach (preg_split('/\R/', (string) AccountHomeRead::contents($file)) ?: [] as $line) {
             $line = trim($line);
             if ($line === '' || $line[0] === '#') {
                 continue;

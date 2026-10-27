@@ -15,6 +15,8 @@ use App\Lib\Deploy\Platform\Runtime\Php\PhpHostBuild;
 use App\Lib\Deploy\Platform\Runtime\PhpRuntime;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\StagedRename;
+use Tests\Unit\System\Project\SuccessfulProcess;
 
 /**
  * The host PHP build resolves for the engine's chosen PHP minor, not for the
@@ -103,11 +105,12 @@ class HostCompilePhpPlatformPinTest extends TestCase
             }
 
             /**
-             * Real writes go through `Filesystem::filePutContents()`, which
-             * stages the content in a real temp file and copies it out with
-             * `sudo cp <tmp> <target>`. Reading the temp file here, before the
-             * real filePutContents() unlinks it, is how the test observes what
-             * was actually written without a filesystem the account owns.
+             * Real writes go through `Filesystem::writeFileReplacingPath()`,
+             * which stages the content in a real temp file, copies it out with
+             * `sudo cp <tmp> <staged>` and renames that onto the target
+             * ({@see StagedRename}). Reading the temp file here, before it is
+             * unlinked, is how the test observes what was actually written
+             * without a filesystem the account owns.
              */
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
@@ -115,6 +118,7 @@ class HostCompilePhpPlatformPinTest extends TestCase
                 if (preg_match('/^sudo cp (\S+) (\S+)$/', $line, $m) === 1 && is_file($m[1])) {
                     $this->copiedTo[$m[2]] = (string) file_get_contents($m[1]);
                 }
+                $this->renameStaged($cmd);
 
                 return '';
             }
@@ -122,10 +126,19 @@ class HostCompilePhpPlatformPinTest extends TestCase
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
                 $this->commands[] = is_array($cmd) ? $cmd : [$cmd];
-                $process = new Process(['php', '-r', 'exit(0);']);
-                $process->run();
 
-                return $process;
+                $this->renameStaged($cmd);
+
+                return SuccessfulProcess::for($cmd);
+            }
+
+            private function renameStaged(string|array $cmd): void
+            {
+                [$staged, $target] = StagedRename::of($cmd) ?? [null, null];
+                if ($staged !== null && isset($this->copiedTo[$staged])) {
+                    $this->copiedTo[$target] = $this->copiedTo[$staged];
+                    unset($this->copiedTo[$staged]);
+                }
             }
         };
 

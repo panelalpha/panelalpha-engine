@@ -13,13 +13,13 @@ use OpenApi\Attributes as OA;
             type: 'string',
             nullable: true,
             example: 'production',
-            description: 'The value, null unless the request asked for `reveal=1`.'
+            description: 'The value, null unless the request asked for `reveal=1`. Always null for a value set from a `vault:<key>`.'
         ),
         new OA\Property(
             property: 'masked',
             type: 'boolean',
             example: true,
-            description: 'True when the value is withheld, always the inverse of what `reveal` asked for.'
+            description: 'True when the value is withheld: without `reveal=1`, and for a value set from a `vault:<key>` even with it.'
         ),
     ],
     type: 'object',

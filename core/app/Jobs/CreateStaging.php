@@ -117,7 +117,7 @@ class CreateStaging implements ShouldQueue
         }
 
         try {
-            (new System)->project($source)->copyVolumesForClone()?->resumeAfterCopy();
+            (new System)->project($source)->copyVolumesForClone()?->resumeSourceAfterCopy();
         } catch (\Throwable $ignored) {
         }
     }

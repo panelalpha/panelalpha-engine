@@ -152,7 +152,51 @@ class AccountMappingTest extends TestCase
         $this->assertSame(1, $this->awaited);
         $this->assertCount(3, $this->probes());
         Log::shouldHaveReceived('warning')->withArgs(
-            static fn (string $message): bool => $message === 'alice: ' . AccountMapping::RECREATED
+            static fn (string $message): bool => $message === 'alice: Recreated the account container: '
+                . '/root inside it was owned by uid 65534 instead of root; sysbox was restarted while it ran'
+        );
+    }
+
+    public function test_an_unmapped_account_started_since_sysbox_does_not_blame_a_sysbox_restart(): void
+    {
+        Log::spy();
+        $this->started['container'] = '2026-10-10T15:10:00.5Z';
+        $this->owners = ['1000', '1000', '0'];
+
+        $this->assertTrue((new AccountMapping($this->project()))->ensureMapped());
+
+        Log::shouldHaveReceived('warning')->withArgs(
+            static fn (string $message): bool => $message === 'alice: Recreated the account container: '
+                . '/root inside it was owned by uid 1000 instead of root'
+        );
+    }
+
+    public function test_unknown_start_times_do_not_blame_a_sysbox_restart(): void
+    {
+        Log::spy();
+        $this->started = ['container' => '', 'sysbox' => ''];
+        $this->owners = [new \RuntimeException(self::EXEC_REFUSED), new \RuntimeException(self::EXEC_REFUSED), '0'];
+
+        $this->assertTrue((new AccountMapping($this->project()))->ensureMapped());
+
+        Log::shouldHaveReceived('warning')->withArgs(
+            static fn (string $message): bool => $message === 'alice: Recreated the account container: '
+                . 'exec into it was refused (unsafe procfs detected)'
+        );
+    }
+
+    public function test_a_refused_start_says_so(): void
+    {
+        Log::spy();
+        $this->started['container'] = '2026-10-10T15:10:00.5Z';
+        $this->upError = new \RuntimeException(self::START_REFUSED);
+        $this->owners = ['0'];
+
+        (new OuterLifecycle($this->project()))->up();
+
+        Log::shouldHaveReceived('warning')->withArgs(
+            static fn (string $message): bool => $message === 'alice: Recreated the account container: '
+                . 'its start was refused with permission denied on its own image'
         );
     }
 

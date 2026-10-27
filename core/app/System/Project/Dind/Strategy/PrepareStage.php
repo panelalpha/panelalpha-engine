@@ -77,7 +77,7 @@ class PrepareStage
         $setupScriptPath = "{$projectDir}/".AppConfig::SETUP_SCRIPT;
         $chown = $this->dind->userModel()->getChownString();
         // Write script as the user (644) so execAsUser can read and execute it.
-        $this->dind->system()->filesystem()->filePutContents($setupScriptPath, $commands, $chown, '644');
+        $this->dind->system()->filesystem()->writeFileReplacingPath($setupScriptPath, $commands, $chown, '644');
         // Use a container-side timeout slightly shorter than the PHP-side timeout.
         // This ensures bash and all its child processes (docker compose run, etc.) are
         // killed by SIGTERM/SIGKILL *inside* the container before Symfony sends SIGKILL

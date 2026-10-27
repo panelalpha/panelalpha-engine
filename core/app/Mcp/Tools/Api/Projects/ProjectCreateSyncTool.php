@@ -95,7 +95,7 @@ class ProjectCreateSyncTool extends ApiTool
             'domain_redirect_url' => $schema->string(),
             'email' => $schema->string()->description('Example: john@example.com.'),
             'disk_space_limit' => $schema->integer()->description('MB, -1 for unlimited'),
-            'memory_limit' => $schema->integer()->description('MB. Default: the server\'s RAM less the engine\'s share, which is also the most allowed.'),
+            'memory_limit' => $schema->integer()->description('MB, at least 6, or 256 for a container project (template dind or a git_repo). Default: the server\'s RAM less the engine\'s share, which is also the most allowed.'),
             'cpu_limit' => $schema->number()->description('CPU cores, -1 for unlimited'),
             'bandwidth_limit' => $schema->integer()->description('MB a month, -1 for unlimited'),
             'mysql_databases_limit' => $schema->integer()->description('-1 for unlimited'),

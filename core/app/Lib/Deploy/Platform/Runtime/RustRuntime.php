@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Platform\Runtime;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
@@ -176,7 +177,7 @@ final class RustRuntime implements Runtime
 
     public static function binaryName(string $projectDir): ?string
     {
-        $manifest = @file_get_contents(rtrim($projectDir, '/').'/Cargo.toml');
+        $manifest = AccountHomeRead::contents(rtrim($projectDir, '/').'/Cargo.toml');
         if (! is_string($manifest) || $manifest === '') {
             return null;
         }

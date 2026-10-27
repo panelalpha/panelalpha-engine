@@ -29,7 +29,7 @@ class ProxyRuleCreateCommand extends Command
         {--transport= : Transport type (http, tcp, udp) - interactive if not provided}
         {--listen-port= : Listen port - interactive if not provided}
         {--listen-ip= : Listen IP (default: *)}
-        {--server-name= : Server name/hostname (for HTTP only); a user rule\'s is one of its project\'s domains or aliases}
+        {--server-name= : Server name/hostname (for HTTP only); a user rule\'s is one of its project\'s domains, and no rule\'s is an alias or a traditional PHP project\'s domain}
         {--upstream-host= : Upstream host - interactive if not provided}
         {--upstream-port= : Upstream port - interactive if not provided}
         {--upstream-protocol=http : Upstream protocol (for HTTP: http, https; for stream: leave empty)}

@@ -559,10 +559,11 @@ final class SourceResolver
         $git = ['git', ...self::UNATTENDED_GIT_CONFIG, '-C', $target];
 
         try {
-            if (! $this->submoduleUrlsAllowed($git, $target)) {
+            $pins = $this->submodulePins($git, $target);
+            if ($pins === null) {
                 return;
             }
-            $this->fetchSubmodules($git, $target, $askPass);
+            $this->fetchSubmodules($git, $target, $askPass, $pins);
             $this->initNestedSubmodules($target, $askPass, $level);
         } catch (InspectException) {
             return;
@@ -571,34 +572,57 @@ final class SourceResolver
 
     /**
      * `submodule init` fetches nothing: it writes each URL into .git/config as the fetch
-     * will use it, a relative `../` resolved, so those are what gets checked.
+     * will use it, a relative `../` resolved, so those are what gets checked. Each http(s)
+     * one is pinned to the address checked; null when any of them is refused.
      *
      * @param  list<string>  $git
+     * @return ?list<string>
      *
      * @throws InspectException
      */
-    private function submoduleUrlsAllowed(array $git, string $target): bool
+    private function submodulePins(array $git, string $target): ?array
     {
         $this->run([...$git, 'submodule', 'init'], 'Could not read submodules', $target);
-        foreach ($this->gitConfigValues($target, '^submodule\..*\.url$') as $url) {
-            if (RepositoryAddress::refused($url)) {
-                return false;
+        $pins = [];
+        try {
+            foreach ($this->gitConfigValues($target, '^submodule\..*\.url$') as $url) {
+                if (RepositoryAddress::refused($url)) {
+                    return null;
+                }
+                $pins[] = self::pinOf($url);
             }
+        } catch (\InvalidArgumentException) {
+            return null;
         }
 
-        return true;
+        return array_values(array_unique(array_filter($pins, static fn (?string $pin): bool => $pin !== null)));
+    }
+
+    /**
+     * @throws \InvalidArgumentException when the host no longer resolves, or resolves to an address core must not contact
+     */
+    private static function pinOf(string $url): ?string
+    {
+        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+
+        return in_array($scheme, GitRepoInput::SCHEMES, true) ? OutboundUrl::pin($url, GitRepoInput::SCHEMES) : null;
     }
 
     /**
      * Shallow, to match the --depth=1 clone; not --recursive, so each nested level is checked first.
+     * The pins reach the child git each submodule is cloned by through GIT_CONFIG_PARAMETERS.
      *
      * @param  list<string>  $git
+     * @param  list<string>  $pins
      *
      * @throws InspectException
      */
-    private function fetchSubmodules(array $git, string $target, ?string $askPass): void
+    private function fetchSubmodules(array $git, string $target, ?string $askPass, array $pins): void
     {
         $command = [...$git, 'submodule', 'update', '--depth=1'];
+        foreach ($pins as $pin) {
+            $command = GitUrl::withResolve($command, $pin);
+        }
         if ($askPass !== null) {
             $command = GitUrl::withAskPass($command, $askPass);
         }

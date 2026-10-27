@@ -88,7 +88,7 @@ final class RegistryLogin
             $system = $this->project->system();
             $system->filesystem()->makeDirWithParents($dir, $chown);
             $system->exec(['sudo', 'chmod', '700', $dir]);
-            $system->filesystem()->filePutContents($dir.'/config.json', $auth->dockerConfigJson(), $chown, '600');
+            $system->filesystem()->writeFileReplacingPath($dir.'/config.json', $auth->dockerConfigJson(), $chown, '600');
         } catch (\Throwable $e) {
             Log::warning("Could not write registry logins for {$this->project->username()}: ".$e->getMessage());
             $this->project->shell()->logger()?->warn('Could not use the registry-auth logins; pulling anonymously');

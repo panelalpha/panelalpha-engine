@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Compose;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Detect\DockerfileFinder;
 use App\Lib\Deploy\Platform\DockerfileBuilder;
 use App\Lib\Deploy\Port\EnvVarDefault;
@@ -793,7 +794,7 @@ class ComposeFileInspector
         if (! is_file($path) || ! is_readable($path)) {
             return null;
         }
-        $raw = @file_get_contents($path);
+        $raw = AccountHomeRead::contents($path);
 
         return is_string($raw) && $raw !== '' ? $raw : null;
     }

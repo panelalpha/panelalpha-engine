@@ -4,8 +4,10 @@ namespace Tests\Unit\System\Project;
 
 use App\Models\User as ModelsUser;
 use App\System;
+use App\System\Filesystem;
 use App\System\Project;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Process\Process;
 
 /**
  * Linux isolation owned by Project (formerly Account).
@@ -17,9 +19,9 @@ class ProjectLinuxLifecycleTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->tmpRoot = sys_get_temp_dir() . '/pa-project-linux-' . bin2hex(random_bytes(4));
-        mkdir($this->tmpRoot . '/home', 0777, true);
-        mkdir($this->tmpRoot . '/users', 0777, true);
+        $this->tmpRoot = sys_get_temp_dir().'/pa-project-linux-'.bin2hex(random_bytes(4));
+        mkdir($this->tmpRoot.'/home', 0777, true);
+        mkdir($this->tmpRoot.'/users', 0777, true);
     }
 
     protected function tearDown(): void
@@ -34,14 +36,14 @@ class ProjectLinuxLifecycleTest extends TestCase
         $source = $this->project($system, 'src', 'default');
         $dest = $this->project($system, 'dest', 'default');
 
-        mkdir($system->projectHomeDirPath('src') . '/www', 0777, true);
-        file_put_contents($system->projectHomeDirPath('src') . '/www/index.html', 'ok');
+        mkdir($system->projectHomeDirPath('src').'/www', 0777, true);
+        file_put_contents($system->projectHomeDirPath('src').'/www/index.html', 'ok');
         mkdir($system->projectHomeDirPath('dest'), 0777, true);
 
         $dest->copyHomeDirFrom($source);
 
         $this->assertContains('rsync-home-full', $system->journal);
-        $this->assertFileExists($system->projectHomeDirPath('dest') . '/www/index.html');
+        $this->assertFileExists($system->projectHomeDirPath('dest').'/www/index.html');
     }
 
     public function test_copy_home_dir_from_excludes_docker_for_dind(): void
@@ -56,6 +58,21 @@ class ProjectLinuxLifecycleTest extends TestCase
         $dest->copyHomeDirFrom($source);
 
         $this->assertContains('rsync-home-dind', $system->journal);
+    }
+
+    public function test_a_first_copy_from_a_running_source_accepts_files_that_vanished_meanwhile(): void
+    {
+        $system = $this->recordingSystem();
+        $source = $this->project($system, 'src', 'dind');
+        $dest = $this->project($system, 'dest', 'dind');
+        mkdir($system->projectHomeDirPath('src'), 0777, true);
+        mkdir($system->projectHomeDirPath('dest'), 0777, true);
+        $system->rsyncExit = Project::RSYNC_VANISHED_FILES;
+
+        $dest->copyHomeDirFrom($source, sourceRunning: true);
+
+        $this->expectExceptionMessage('Failed to rsync home directory from source');
+        $dest->copyHomeDirFrom($source);
     }
 
     public function test_copy_project_config_from_rsyncs_redis_and_php_fpm_pool_dirs(): void
@@ -103,7 +120,7 @@ class ProjectLinuxLifecycleTest extends TestCase
 
     public function test_project_clone_uses_project_for_home_and_config_copy(): void
     {
-        $source = file_get_contents(dirname(__DIR__, 5) . '/core/app/System/Projects.php');
+        $source = file_get_contents(dirname(__DIR__, 5).'/core/app/System/Projects.php');
         $this->assertStringNotContainsString('use App\System\Account', $source);
         $this->assertStringNotContainsString('new Account', $source);
         $this->assertStringContainsString('copyHomeDirFrom', $source);
@@ -118,7 +135,8 @@ class ProjectLinuxLifecycleTest extends TestCase
 
     private function userModel(string $username, string $template): ModelsUser
     {
-        $model = new class extends ModelsUser {
+        $model = new class extends ModelsUser
+        {
             public function getDomains(): array
             {
                 return [];
@@ -136,15 +154,17 @@ class ProjectLinuxLifecycleTest extends TestCase
 
     private function recordingSystem(bool $uidExists = false): System
     {
-        return new class ($this->tmpRoot, $uidExists) extends System {
+        return new class($this->tmpRoot, $uidExists) extends System
+        {
             /** @var list<string> */
             public array $journal = [];
+
+            public int $rsyncExit = 0;
 
             public function __construct(
                 private string $engineRoot,
                 private bool $uidExistsFlag,
-            ) {
-            }
+            ) {}
 
             public function engineDirPath(): string
             {
@@ -153,7 +173,7 @@ class ProjectLinuxLifecycleTest extends TestCase
 
             public function homesDirPath(): string
             {
-                return $this->engineRoot . '/home';
+                return $this->engineRoot.'/home';
             }
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
@@ -181,7 +201,7 @@ class ProjectLinuxLifecycleTest extends TestCase
                 return "1001\n";
             }
 
-            public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): \Symfony\Component\Process\Process
+            public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
                 $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
                 if (str_contains($line, 'rsync') && str_contains($line, '--exclude=docker/')) {
@@ -200,20 +220,23 @@ class ProjectLinuxLifecycleTest extends TestCase
                     $this->journal[] = 'docker-rm-dind';
                 }
 
-                return new class extends \Symfony\Component\Process\Process {
-                    public function __construct()
+                $exit = str_contains($line, 'rsync') ? $this->rsyncExit : 0;
+
+                return new class($exit) extends Process
+                {
+                    public function __construct(private int $exit)
                     {
                         parent::__construct(['true']);
                     }
 
                     public function isSuccessful(): bool
                     {
-                        return true;
+                        return $this->exit === 0;
                     }
 
                     public function getExitCode(): ?int
                     {
-                        return 0;
+                        return $this->exit;
                     }
 
                     public function getErrorOutput(): string
@@ -228,7 +251,7 @@ class ProjectLinuxLifecycleTest extends TestCase
                 };
             }
 
-            public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): \Symfony\Component\Process\Process
+            public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
                 return $this->runProcess($cmd, $env);
             }
@@ -238,9 +261,10 @@ class ProjectLinuxLifecycleTest extends TestCase
                 return $this->uidExistsFlag;
             }
 
-            public function filesystem(): \App\System\Filesystem
+            public function filesystem(): Filesystem
             {
-                return new class ($this) extends \App\System\Filesystem {
+                return new class($this) extends Filesystem
+                {
                     public function getHomeFilesystemMountPoint(): string
                     {
                         return '/home';
@@ -250,17 +274,22 @@ class ProjectLinuxLifecycleTest extends TestCase
                     {
                         return is_dir($path);
                     }
+
+                    public function isSymlink(string $path): bool
+                    {
+                        return is_link($path);
+                    }
                 };
             }
 
             private function simulateRsync(string $line): void
             {
-                if (!preg_match('/rsync -a --delete(?: --exclude=docker\/)? (.+) (.+)$/', $line, $m)) {
+                if (! preg_match('/rsync -a --delete(?: --exclude=docker\/)? (.+) (.+)$/', $line, $m)) {
                     return;
                 }
                 $src = rtrim(trim($m[1]), '/');
                 $dest = rtrim(trim($m[2]), '/');
-                if (!is_dir($dest)) {
+                if (! is_dir($dest)) {
                     mkdir($dest, 0777, true);
                 }
                 if (is_dir($src)) {
@@ -274,10 +303,10 @@ class ProjectLinuxLifecycleTest extends TestCase
                     if ($entry === '.' || $entry === '..') {
                         continue;
                     }
-                    $from = $src . '/' . $entry;
-                    $to = $dest . '/' . $entry;
+                    $from = $src.'/'.$entry;
+                    $to = $dest.'/'.$entry;
                     if (is_dir($from)) {
-                        if (!is_dir($to)) {
+                        if (! is_dir($to)) {
                             mkdir($to, 0777, true);
                         }
                         $this->copyDir($from, $to);
@@ -289,7 +318,7 @@ class ProjectLinuxLifecycleTest extends TestCase
 
             private function simulateRmRf(string $line): void
             {
-                if (!preg_match('/rm -rf (.+)$/', $line, $m)) {
+                if (! preg_match('/rm -rf (.+)$/', $line, $m)) {
                     return;
                 }
                 $path = trim($m[1]);
@@ -300,14 +329,14 @@ class ProjectLinuxLifecycleTest extends TestCase
 
             private function removeTree(string $dir): void
             {
-                if (!is_dir($dir)) {
+                if (! is_dir($dir)) {
                     return;
                 }
                 foreach (scandir($dir) ?: [] as $entry) {
                     if ($entry === '.' || $entry === '..') {
                         continue;
                     }
-                    $path = $dir . '/' . $entry;
+                    $path = $dir.'/'.$entry;
                     is_dir($path) ? $this->removeTree($path) : unlink($path);
                 }
                 rmdir($dir);
@@ -317,14 +346,14 @@ class ProjectLinuxLifecycleTest extends TestCase
 
     private function removeTree(string $dir): void
     {
-        if (!is_dir($dir)) {
+        if (! is_dir($dir)) {
             return;
         }
         foreach (scandir($dir) ?: [] as $entry) {
             if ($entry === '.' || $entry === '..') {
                 continue;
             }
-            $path = $dir . '/' . $entry;
+            $path = $dir.'/'.$entry;
             is_dir($path) ? $this->removeTree($path) : unlink($path);
         }
         rmdir($dir);

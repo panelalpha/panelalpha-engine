@@ -55,7 +55,7 @@ final class EngineArtifactMigration
                 $system->exec(['sudo', 'mv', '-f', $from, $to]);
             },
             static function (string $from, string $to) use ($system): void {
-                $system->exec(['sudo', 'cp', '-p', $from, $to]);
+                $system->exec(['sudo', 'cp', '-p', '--no-dereference', '--remove-destination', $from, $to]);
             },
             static function (string $path) use ($system): void {
                 $system->exec(['sudo', 'rm', '-f', $path]);

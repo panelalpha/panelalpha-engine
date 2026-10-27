@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Platform\Runtime;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
@@ -207,7 +208,7 @@ final class JavaRuntime implements Runtime
         if ($projectDir !== '') {
             foreach (self::GRADLE_SCRIPTS as $pattern) {
                 foreach (array_slice(glob($projectDir.$pattern) ?: [], 0, 100) as $file) {
-                    $scripts .= (@file_get_contents($file) ?: '')."\n";
+                    $scripts .= (AccountHomeRead::contents($file) ?: '')."\n";
                 }
             }
         }
@@ -327,7 +328,7 @@ final class JavaRuntime implements Runtime
         if ($projectDir === '' || ! is_file($projectDir.'/'.$relative)) {
             return null;
         }
-        $contents = @file_get_contents($projectDir.'/'.$relative);
+        $contents = AccountHomeRead::contents($projectDir.'/'.$relative);
 
         return is_string($contents) ? $contents : null;
     }

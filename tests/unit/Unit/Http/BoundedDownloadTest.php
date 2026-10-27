@@ -3,6 +3,7 @@
 namespace Tests\Unit\Http;
 
 use App\Lib\Http\BoundedDownload;
+use Illuminate\Http\Client\ConnectionException;
 use InvalidArgumentException;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
@@ -83,6 +84,58 @@ class BoundedDownloadTest extends TestCase
 
         $this->assertSame(200, $response->status());
         $this->assertSame('archive-bytes', file_get_contents($this->sink));
+    }
+
+    public function test_a_redirect_is_followed_only_when_asked(): void
+    {
+        file_put_contents($this->docroot . '/small.bin', 'archive-bytes');
+        file_put_contents($this->docroot . '/moved.php', '<?php header("Location: /small.bin", true, 302);');
+        [$server, $port] = $this->serve();
+
+        try {
+            $unfollowed = (new BoundedDownload(1024))->fetch('http://127.0.0.1:' . $port . '/moved.php', $this->sink);
+            $followed = (new BoundedDownload(1024, followRedirects: true))->fetch('http://127.0.0.1:' . $port . '/moved.php', $this->sink);
+        } finally {
+            $server->stop();
+        }
+
+        $this->assertSame(302, $unfollowed->status());
+        $this->assertSame(200, $followed->status());
+        $this->assertSame('archive-bytes', file_get_contents($this->sink));
+    }
+
+    public function test_the_cap_still_holds_behind_a_followed_redirect(): void
+    {
+        file_put_contents($this->docroot . '/big.bin', str_repeat('x', 64 * 1024));
+        file_put_contents($this->docroot . '/moved.php', '<?php header("Location: /big.bin", true, 302);');
+        [$server, $port] = $this->serve();
+
+        try {
+            (new BoundedDownload(1024, followRedirects: true))->fetch('http://127.0.0.1:' . $port . '/moved.php', $this->sink);
+            $this->fail('an oversized body behind a redirect was accepted');
+        } catch (InvalidArgumentException $e) {
+            $this->assertStringContainsString('MB limit', $e->getMessage());
+        } finally {
+            $server->stop();
+        }
+
+        $this->assertLessThan(64 * 1024, (int) @filesize($this->sink));
+    }
+
+    public function test_a_download_gives_up_after_its_timeout(): void
+    {
+        file_put_contents($this->docroot . '/stalled.php', '<?php sleep(5); echo "late";');
+        [$server, $port] = $this->serve();
+        $started = microtime(true);
+
+        try {
+            (new BoundedDownload(1024, timeoutSeconds: 1))->fetch('http://127.0.0.1:' . $port . '/stalled.php', $this->sink);
+            $this->fail('a stalled download was waited for');
+        } catch (ConnectionException) {
+            $this->assertLessThan(4, microtime(true) - $started);
+        } finally {
+            $server->stop();
+        }
     }
 
     private function fetch(int $port, string $path): void

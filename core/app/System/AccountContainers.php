@@ -150,9 +150,10 @@ final class AccountContainers
      * not finish. Reported for the operator; never removed here.
      *
      * @param  iterable<string>  $projects  usernames of every existing project
+     * @param  ?array<int, string>  $within  the accounts whose orphans to report, or null for every account
      * @return array{count: int, containers: list<array{name: string, state: string, project: string, cleanup: string}>, warning: ?string}
      */
-    public function orphanReport(iterable $projects): array
+    public function orphanReport(iterable $projects, ?array $within = null): array
     {
         $result = $this->system->runProcess([
             'sudo', 'docker', 'ps', '-a',
@@ -169,7 +170,19 @@ final class AccountContainers
             ];
         }
 
-        return self::report(self::orphansIn($result->getOutput(), $this->system->projectsDirPath(), $projects));
+        $orphans = self::orphansIn($result->getOutput(), $this->system->projectsDirPath(), $projects);
+
+        return self::report($within === null ? $orphans : self::orphansOf($orphans, $within));
+    }
+
+    /**
+     * @param  list<array{name: string, state: string, project: string, cleanup: string}>  $orphans
+     * @param  array<int, string>  $accounts
+     * @return list<array{name: string, state: string, project: string, cleanup: string}>
+     */
+    private static function orphansOf(array $orphans, array $accounts): array
+    {
+        return array_values(array_filter($orphans, fn (array $orphan): bool => in_array($orphan['project'], $accounts, true)));
     }
 
     /**

@@ -87,7 +87,7 @@ class FrameworkStrategy
         $system = $this->dind->system();
 
         if ($isNginx) {
-            $system->filesystem()->filePutContents(
+            $system->filesystem()->writeFileReplacingPath(
                 $projectDir.'/'.NginxConfig::FILENAME,
                 NginxConfig::contents(),
                 $chown,
@@ -125,7 +125,7 @@ class FrameworkStrategy
         if (DeployCompose::isStandaloneNodeOutput($decision)) {
             // Only a bundled server needs the probe script; a mounted project
             // is started by its own `package.json` script.
-            $system->filesystem()->filePutContents(
+            $system->filesystem()->writeFileReplacingPath(
                 $projectDir.'/'.StandaloneNodeServe::FILENAME,
                 StandaloneNodeServe::script(),
                 $chown,
@@ -169,7 +169,7 @@ class FrameworkStrategy
         $files = ProjectContext::listRootFiles($projectDir);
 
         $this->dind->strategy()->entrypoint()->write($decision, $projectDir, $chown, [], $appConfig);
-        $system->filesystem()->filePutContents(
+        $system->filesystem()->writeFileReplacingPath(
             $projectDir.'/'.DockerfileBuilder::FILENAME,
             DockerfileBuilder::generate($decision, $files, $projectDir),
             $chown,

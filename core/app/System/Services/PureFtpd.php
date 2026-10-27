@@ -3,7 +3,6 @@
 namespace App\System\Services;
 
 use App\Exceptions\DockerErrorException;
-use App\Lib\Limits\ResourceLimit;
 use App\System as EngineSystem;
 
 class PureFtpd
@@ -130,11 +129,10 @@ class PureFtpd
         ]);
     }
 
+    /** Only a positive quota is set: 0 and unlimited (any negative) set none. */
     private function enforcedQuota(?int $quota): ?int
     {
-        $enforced = ResourceLimit::enforced($quota);
-
-        return $enforced !== null && $enforced > 0 ? (int) $enforced : null;
+        return $quota !== null && $quota > 0 ? $quota : null;
     }
 
     /**

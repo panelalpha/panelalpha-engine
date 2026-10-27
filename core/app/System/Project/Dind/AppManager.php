@@ -248,7 +248,7 @@ class AppManager
         if ($script === null) {
             throw new \Exception('App management is not supported for this application');
         }
-        $this->dind->system()->filesystem()->filePutContents(
+        $this->dind->system()->filesystem()->writeFileReplacingPath(
             $scriptPath,
             $script,
             $this->dind->userModel()->getChownString(),

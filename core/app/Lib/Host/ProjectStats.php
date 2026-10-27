@@ -16,12 +16,16 @@ use Illuminate\Support\Facades\Log;
  * `docker stats`, nothing executed inside an account.
  *
  * The inner containers' cgroups nest under the DinD container's, and their
- * names live in the inner daemon's data root, /home/<project>/docker.
+ * names live in the inner daemon's data root, /home/<project>/docker. The
+ * samples are read back here too, for the API's latest values and histories.
  */
 class ProjectStats
 {
     /** A project sample older than this is not "now". */
     public const STALE_SECONDS = 300;
+
+    /** A host run is cut off well before the next minute's sample starts. */
+    public const HOST_TIMEOUT_SECONDS = 45;
 
     /** @var callable(string): string */
     private $runOnHost;
@@ -29,7 +33,11 @@ class ProjectStats
     /** @param (callable(string): string)|null $runOnHost runs a bash script on the host, returns stdout */
     public function __construct(?callable $runOnHost = null)
     {
-        $this->runOnHost = $runOnHost ?? fn (string $script): string => (new System)->execOnHost(['bash', '-c', $script]);
+        $this->runOnHost = $runOnHost ?? fn (string $script): string => (new System)->execOnHost(
+            ['timeout', '-k', '5', (string) self::HOST_TIMEOUT_SECONDS, 'bash', '-c', $script],
+            [],
+            self::HOST_TIMEOUT_SECONDS + 15
+        );
     }
 
     /** @return array{projects: int, containers: int} rows written */
@@ -177,31 +185,149 @@ class ProjectStats
     }
 
     /**
-     * The DinD totals from the latest sample, or null when there is no recent one.
+     * The DinD totals from each project's latest sample, in one query; a project
+     * with no recent sample is left out. Every project view reads this, so a
+     * table not migrated yet means no sample rather than a 500 on all of them.
      *
-     * @return ?array{cpu_percent: ?float, memory_bytes: ?int, memory_limit_bytes: ?int, sampled_at: string}
+     * @param  list<string>  $usernames
+     * @return array<string, array{cpu_percent: ?float, memory_bytes: ?int, memory_limit_bytes: ?int, sampled_at: string}>
      */
-    public static function latest(string $username, ?Carbon $now = null): ?array
+    public static function latestOf(array $usernames, ?Carbon $now = null): array
     {
-        $since = ($now ?? Carbon::now('UTC'))->copy()->setTimezone('UTC')->subSeconds(self::STALE_SECONDS);
-        // Every project view reads this: a table not migrated yet means no
-        // sample, not a 500 on all of them.
+        if ($usernames === []) {
+            return [];
+        }
+        $since = ($now ?? Carbon::now('UTC'))->copy()->setTimezone('UTC')->subSeconds(self::STALE_SECONDS)->format('Y-m-d H:i:s');
+
         try {
-            $row = DB::table('project_metrics')
-                ->where('username', $username)
-                ->where('timestamp', '>=', $since->format('Y-m-d H:i:s'))
-                ->orderByDesc('timestamp')
-                ->first();
+            $rows = DB::table('project_metrics')
+                ->joinSub(
+                    DB::table('project_metrics')
+                        ->selectRaw('username, MAX(timestamp) AS latest')
+                        ->whereIn('username', $usernames)
+                        ->where('timestamp', '>=', $since)
+                        ->groupBy('username'),
+                    'newest',
+                    fn ($join) => $join->on('project_metrics.username', '=', 'newest.username')->on('project_metrics.timestamp', '=', 'newest.latest')
+                )
+                ->orderBy('project_metrics.id')
+                ->get(['project_metrics.*']);
         } catch (QueryException) {
-            return null;
+            return [];
         }
 
-        return $row === null ? null : [
-            'cpu_percent' => $row->cpu_percent === null ? null : round((float) $row->cpu_percent, 2),
-            'memory_bytes' => $row->memory_bytes === null ? null : (int) $row->memory_bytes,
-            'memory_limit_bytes' => $row->memory_limit_bytes === null ? null : (int) $row->memory_limit_bytes,
-            'sampled_at' => Carbon::parse((string) $row->timestamp, 'UTC')->toIso8601ZuluString(),
+        $latest = [];
+        foreach ($rows as $row) {
+            $latest[(string) $row->username] = [
+                'cpu_percent' => $row->cpu_percent === null ? null : round((float) $row->cpu_percent, 2),
+                'memory_bytes' => $row->memory_bytes === null ? null : (int) $row->memory_bytes,
+                'memory_limit_bytes' => $row->memory_limit_bytes === null ? null : (int) $row->memory_limit_bytes,
+                'sampled_at' => Carbon::parse((string) $row->timestamp, 'UTC')->toIso8601ZuluString(),
+            ];
+        }
+
+        return $latest;
+    }
+
+    /**
+     * A project's DinD totals over a history range.
+     *
+     * @return array{data: list<array<string, mixed>>, meta: array{range: string, bucket_seconds: int, from: string, to: string}}
+     */
+    public static function history(string $username, string $range): array
+    {
+        $window = MetricBuckets::window($range);
+
+        $rows = DB::table(self::table('project_metrics', $window['bucket']))
+            ->selectRaw(MetricBuckets::sql($window['bucket']).' AS bucket, AVG(cpu_percent) AS cpu_percent, '
+                .'AVG(memory_bytes) AS memory_bytes, MAX(memory_limit_bytes) AS memory_limit_bytes')
+            ->where('username', $username)
+            ->where('timestamp', '>=', $window['start']->format('Y-m-d H:i:s'))
+            ->where('timestamp', '<', $window['end']->copy()->addSeconds($window['bucket'])->format('Y-m-d H:i:s'))
+            ->groupByRaw('bucket')
+            ->get();
+
+        $byBucket = [];
+        foreach ($rows as $row) {
+            $byBucket[(int) $row->bucket] = self::bucketValues($row);
+        }
+
+        return [
+            'data' => MetricBuckets::periods($window['start'], $window['end'], $window['bucket'], $byBucket),
+            'meta' => MetricBuckets::meta($range, $window),
         ];
+    }
+
+    /**
+     * Each container of a project with its history over a range.
+     *
+     * @return array{data: list<array<string, mixed>>, meta: array{range: string, bucket_seconds: int, from: string, to: string}}
+     */
+    public static function containerHistory(string $username, string $range): array
+    {
+        $window = MetricBuckets::window($range);
+        $rows = DB::table(self::table('project_container_metrics', $window['bucket']))
+            ->selectRaw('container_id, '.MetricBuckets::sql($window['bucket']).' AS bucket, AVG(cpu_percent) AS cpu_percent, '
+                .'AVG(memory_bytes) AS memory_bytes, MAX(memory_limit_bytes) AS memory_limit_bytes, MAX(name) AS name, MAX(service) AS service')
+            ->where('username', $username)
+            ->where('timestamp', '>=', $window['start']->format('Y-m-d H:i:s'))
+            ->where('timestamp', '<', $window['end']->copy()->addSeconds($window['bucket'])->format('Y-m-d H:i:s'))
+            ->groupBy('container_id')
+            ->groupByRaw('bucket')
+            ->get();
+
+        $containers = [];
+        foreach ($rows as $row) {
+            $id = (string) $row->container_id;
+            $containers[$id]['name'] ??= $row->name;
+            $containers[$id]['service'] ??= $row->service;
+            $containers[$id]['buckets'][(int) $row->bucket] = self::bucketValues($row);
+        }
+
+        $data = [];
+        foreach ($containers as $id => $c) {
+            $data[] = [
+                'container_id' => $id,
+                'name' => $c['name'],
+                'service' => $c['service'],
+                'history' => MetricBuckets::periods($window['start'], $window['end'], $window['bucket'], $c['buckets']),
+            ];
+        }
+
+        return ['data' => $data, 'meta' => MetricBuckets::meta($range, $window)];
+    }
+
+    /**
+     * Each container's latest sample; none when the project has no recent one.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public static function latestContainers(string $username): array
+    {
+        $since = Carbon::now('UTC')->subSeconds(self::STALE_SECONDS)->format('Y-m-d H:i:s');
+        $latest = DB::table('project_container_metrics')
+            ->where('username', $username)
+            ->where('timestamp', '>=', $since)
+            ->max('timestamp');
+        if ($latest === null) {
+            return [];
+        }
+
+        return DB::table('project_container_metrics')
+            ->where('username', $username)
+            ->where('timestamp', $latest)
+            ->orderBy('name')
+            ->get()
+            ->map(fn (object $row): array => [
+                'container_id' => (string) $row->container_id,
+                'name' => $row->name,
+                'service' => $row->service,
+                'cpu_percent' => $row->cpu_percent === null ? null : round((float) $row->cpu_percent, 2),
+                'memory_bytes' => $row->memory_bytes === null ? null : (int) $row->memory_bytes,
+                'memory_limit_bytes' => $row->memory_limit_bytes === null ? null : (int) $row->memory_limit_bytes,
+                'sampled_at' => Carbon::parse((string) $row->timestamp, 'UTC')->toIso8601ZuluString(),
+            ])
+            ->all();
     }
 
     /**
@@ -229,6 +355,10 @@ class ProjectStats
      * One run on the host. For each project container that is running: a `P`
      * line for its cgroup, and a `C` line for each container nested in it.
      *
+     * The inner daemon's data root is the tenant's to write, so a container's
+     * config.v2.json is read only when it is a regular file at its own path,
+     * checked on the opened descriptor, and every read is time-limited.
+     *
      * @param  list<string>  $usernames
      */
     public static function script(array $usernames): string
@@ -245,6 +375,11 @@ mem() {
     usec=$(awk '$1=="usage_usec"{print $2}' "$1/cpu.stat" 2>/dev/null || true)
     printf '%s\t%s\t%s\t%s' "${cur:-}" "${max:-}" "${inactive:-}" "${usec:-}"
 }
+config() {
+    cfg="$1/containers/$2/config.v2.json"
+    [ -f "$cfg" ] && [ ! -L "$cfg" ] || return 0
+    timeout -k 1 2 bash -c 'exec 3<"$1" && [ "$(readlink /proc/self/fd/3)" = "$1" ] && [ -f /proc/self/fd/3 ] && head -c 1048576 <&3' _ "$cfg" 2>/dev/null || true
+}
 docker ps --no-trunc --format '{{.ID}} {{.Names}}' 2>/dev/null | while read -r id name; do
     case "$want" in *" $name "*) ;; *) continue ;; esac
     dir=
@@ -253,12 +388,14 @@ docker ps --no-trunc --format '{{.ID}} {{.Names}}' 2>/dev/null | while read -r i
     done
     [ -n "$dir" ] || continue
     printf 'P\t%s\t%s\n' "$name" "$(mem "$dir")"
+    root=$(realpath -e "/home/$name/docker" 2>/dev/null) || root=
     for c in "$dir"/docker/*/; do
         [ -d "$c" ] || continue
         cid=$(basename "$c")
-        cfg="/home/$name/docker/containers/$cid/config.v2.json"
-        cname=$(grep -o '"Name":"[^"]*"' "$cfg" 2>/dev/null | head -n1 | cut -d'"' -f4)
-        svc=$(grep -o '"com.docker.compose.service":"[^"]*"' "$cfg" 2>/dev/null | head -n1 | cut -d'"' -f4)
+        json=
+        case "$cid" in *[!0-9a-f]*) ;; *) [ -z "$root" ] || json=$(config "$root" "$cid") ;; esac
+        cname=$(printf '%s' "$json" | grep -o '"Name":"[^"]*"' | head -n1 | cut -d'"' -f4)
+        svc=$(printf '%s' "$json" | grep -o '"com.docker.compose.service":"[^"]*"' | head -n1 | cut -d'"' -f4)
         printf 'C\t%s\t%s\t%s\t%s\t%s\n' "$name" "$cid" "${cname#/}" "$svc" "$(mem "$c")"
     done
 done
@@ -309,6 +446,25 @@ SH);
             'memory' => $current === null ? null : max(0, $current - $inactive),
             'limit' => ctype_digit($max) ? (int) $max : null,
             'usec' => ctype_digit($usec) ? (int) $usec : null,
+        ];
+    }
+
+    /**
+     * Minute rows are kept two days and hourly averages the month, so a
+     * bucket of an hour or more reads the averages.
+     */
+    private static function table(string $minutes, int $bucket): string
+    {
+        return $bucket >= 3600 ? $minutes.'_hourly' : $minutes;
+    }
+
+    /** @return array{cpu_percent: ?float, memory_bytes: ?int, memory_limit_bytes: ?int} */
+    private static function bucketValues(object $row): array
+    {
+        return [
+            'cpu_percent' => $row->cpu_percent === null ? null : round((float) $row->cpu_percent, 2),
+            'memory_bytes' => $row->memory_bytes === null ? null : (int) round((float) $row->memory_bytes),
+            'memory_limit_bytes' => $row->memory_limit_bytes === null ? null : (int) $row->memory_limit_bytes,
         ];
     }
 

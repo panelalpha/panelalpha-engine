@@ -37,6 +37,11 @@ test.describe('app users', () => {
     expect([200, 422], 'app roles answer 200 or 422').toContain(roles.status);
     expect([200, 422], 'the app user list answers 200 or 422').toContain(users.status);
 
+    if (users.status === 200) {
+      const userList = (users.body as { data: unknown }).data;
+      expect(Array.isArray(userList), 'the app users come under data').toBe(true);
+    }
+
     if (roles.status === 200) {
       const roleList = (roles.body as { data: string[] }).data;
       expect(Array.isArray(roleList), 'the roles payload is an array').toBe(true);

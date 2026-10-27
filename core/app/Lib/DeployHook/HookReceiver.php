@@ -32,8 +32,8 @@ use Illuminate\Support\Facades\RateLimiter;
  *     looked at yet, and nothing the request said is written down beyond the
  *     provider's name.
  *  3. Only now is the body read, because only now is it the sender's.
- *  4. Have we already acted on this delivery, or on this signed push body?
- *     A redelivery is a no-op, and so is a replay under a new delivery id.
+ *  4. Have we already seen this delivery, or this signed push body? A
+ *     redelivery is a no-op, and so is a replay under a new delivery id.
  *  5. What does it say, and is it for the branch this checkout tracks? A push
  *     can name several refs (Bitbucket sends them in one delivery); it deploys,
  *     once, if any of them is the tracked branch moving forward.
@@ -43,7 +43,7 @@ class HookReceiver
     /** Unverified requests (no recognised provider, or a bad signature) a single hook tolerates in a minute before 429. */
     private const int MAX_UNVERIFIED_REQUESTS_PER_MINUTE = 30;
 
-    /** How long a hook remembers a signed push body it acted on; a replay of an older one is acted on again. */
+    /** How long a hook remembers a signed push body it received; a replay of an older one is acted on again. */
     private const int DIGEST_RETENTION_DAYS = 90;
 
     /** @var list<HookProvider> */
@@ -102,7 +102,7 @@ class HookReceiver
         if (! $provider->verify($request, $secret)) {
             return false;
         }
-        if (! $provider->signsTheBody($request)) {
+        if (! $provider->signsTheBody($request, $secret)) {
             return ! $hook->expectsSignatures();
         }
 
@@ -179,7 +179,7 @@ class HookReceiver
         ?string $reason,
         ?RefChange $change,
     ): ?HookDelivery {
-        $guardBody = $this->guardsTheBody($provider, $request, $event, $outcome);
+        $guardBody = $this->guardsTheBody($hook, $provider, $request, $event);
         try {
             return DB::transaction(fn () => ! $guardBody || $this->firstSeen($hook, $request)
                 ? $this->record($hook, $provider->name(), $event, $outcome, $reason, $change)
@@ -189,12 +189,13 @@ class HookReceiver
         }
     }
 
-    /** Only a signed push that starts work is remembered: replaying an ignored one is ignored again anyway. */
-    private function guardsTheBody(HookProvider $provider, Request $request, HookEvent $event, string $outcome): bool
+    /**
+     * Every signed push is remembered, ignored ones too: whether a push deploys
+     * depends on the branch tracked when it arrives, which can change before a replay.
+     */
+    private function guardsTheBody(DeployHook $hook, HookProvider $provider, Request $request, HookEvent $event): bool
     {
-        return $event->kind === HookEvent::PUSH
-            && $provider->signsTheBody($request)
-            && in_array($outcome, HookDelivery::OUTCOMES_WITH_WORK, true);
+        return $event->kind === HookEvent::PUSH && $provider->signsTheBody($request, (string) $hook->secret());
     }
 
     private function startWork(DeployHook $hook, HookDelivery $delivery, string $outcome): void

@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Create a linked staging mirror of a live project
 
-    Creates a pending staging project linked to the live source via `staging`, then copies files and volume data asynchronously. Source and destination must use the same project template (e.g. dind). Returns HTTP 202 with the destination project; poll `GET /projects/{dest}` until `async_status.staging` is `completed` or `failed`. CLI equivalent: `php artisan project:staging`.
+    Creates a pending staging project linked to the live source via `staging`, then copies files and volume data asynchronously. Source and destination must use the same project template (e.g. dind). Returns HTTP 202 with the destination project; poll `GET /projects/{dest}` until `async_status.staging` is `completed` or `failed`. An anonymous volume (an image's own VOLUME the compose file does not name) is not copied: the Task's `details.warnings` names each one that held data. CLI equivalent: `php artisan project:staging`.
     MARKDOWN)]
 #[IsDestructive]
 class ProjectStagingTool extends ApiTool
@@ -73,7 +73,7 @@ class ProjectStagingTool extends ApiTool
             'name' => $schema->string()->required(),
             'new_name' => $schema->string()->description('Sent to the API as `new_username`.'),
             'domain' => $schema->string(),
-            'copy_databases' => $schema->boolean()->description('Copy the source project\'s MySQL databases under the destination prefix. Defaults to true.'),
+            'copy_databases' => $schema->boolean()->description('Copy the source project\'s MySQL databases under the destination prefix. Defaults to true. A classic WordPress site cannot be copied without them: false is refused with 422 `wordpress_copy_needs_databases` before anything is copied.'),
         ];
     }
 }

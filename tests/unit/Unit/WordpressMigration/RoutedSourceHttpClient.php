@@ -10,20 +10,34 @@ use Throwable;
 
 /**
  * Fixture source site answering by "METHOD url"; anything else is a 404. No network.
+ * {@see requiringToken} makes its migrator plugin refuse every call without the token.
  */
 final class RoutedSourceHttpClient implements SourceHttpClient
 {
     /** @var list<array{method: string, url: string, body: ?string, headers: array<string, string>}> */
     public array $calls = [];
 
-    /** @var array<string, SourceHttpResponse|Throwable|callable(array<string, string>): SourceHttpResponse> */
+    /** @var array<string, SourceHttpResponse|Throwable|callable(array<string, string>, ?string): SourceHttpResponse> */
     private array $routes = [];
 
     /** @var (Closure(): bool)|null */
     private ?Closure $keepWaiting = null;
 
+    private ?string $pluginToken = null;
+
     /**
-     * @param SourceHttpResponse|Throwable|callable(array<string, string>): SourceHttpResponse $answer
+     * The migrator plugin refuses its routes without this token, and answers
+     * an unknown migration with its own error, the way a current release does.
+     */
+    public function requiringToken(string $token): self
+    {
+        $this->pluginToken = $token;
+
+        return $this;
+    }
+
+    /**
+     * @param SourceHttpResponse|Throwable|callable(array<string, string>, ?string): SourceHttpResponse $answer
      */
     public function on(string $method, string $url, SourceHttpResponse|Throwable|callable $answer): self
     {
@@ -38,12 +52,29 @@ final class RoutedSourceHttpClient implements SourceHttpClient
             throw SourceRequestAborted::at($url);
         }
         $this->calls[] = ['method' => $method, 'url' => $url, 'body' => $body, 'headers' => $headers];
-        $answer = $this->routes[$method . ' ' . $url] ?? new SourceHttpResponse('<html>404</html>', 404, $url);
+        $answer = $this->pluginAnswer($url, $headers)
+            ?? $this->routes[$method . ' ' . $url]
+            ?? new SourceHttpResponse('<html>404</html>', 404, $url);
         if ($answer instanceof Throwable) {
             throw $answer;
         }
 
-        return $answer instanceof SourceHttpResponse ? $answer : $answer($headers);
+        return $answer instanceof SourceHttpResponse ? $answer : $answer($headers, $body);
+    }
+
+    /**
+     * @param array<string, string> $headers
+     */
+    private function pluginAnswer(string $url, array $headers): ?SourceHttpResponse
+    {
+        if ($this->pluginToken === null || ! str_contains(rawurldecode($url), 'wp-migrator/v1/')) {
+            return null;
+        }
+        if (($headers['X-Migrator-Token'] ?? null) !== $this->pluginToken) {
+            return self::restError(401, 'rest_forbidden');
+        }
+
+        return str_contains($url, 'panelalpha-token-check') ? self::restError(404, 'not_found') : null;
     }
 
     public function postMultipart(string $url, array $fields): SourceHttpResponse
@@ -77,6 +108,18 @@ final class RoutedSourceHttpClient implements SourceHttpClient
         return count(array_filter(
             $this->calls,
             static fn (array $call): bool => $call['method'] === $method && $call['url'] === $url,
+        ));
+    }
+
+    /**
+     * Calls that carried an X-Migrator-Token, leaving out the plugin check's calls without one.
+     */
+    public function countWithToken(string $method, string $url): int
+    {
+        return count(array_filter(
+            $this->calls,
+            static fn (array $call): bool => $call['method'] === $method && $call['url'] === $url
+                && isset($call['headers']['X-Migrator-Token']),
         ));
     }
 

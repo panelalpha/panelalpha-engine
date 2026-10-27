@@ -19,4 +19,15 @@ class DeployHookCreateRequest extends GitPathRequest
             'register' => ['nullable', 'boolean'],
         ];
     }
+
+    /**
+     * The validated input with `register` as a real boolean: the rule lets
+     * `1` and `"1"` through, and those ask for a registration as `true` does.
+     *
+     * @return array<string, mixed>
+     */
+    public function hookParams(): array
+    {
+        return ['register' => $this->boolean('register')] + $this->validated();
+    }
 }

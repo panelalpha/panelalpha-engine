@@ -6,7 +6,6 @@ use App\Lib\Deploy\Source\GitRepoInput;
 use App\Lib\Deploy\Source\GitTokenInput;
 use App\Lib\Domains\DomainPlan;
 use App\Lib\Host\ProjectMemory;
-use App\Lib\Limits\ResourceLimit;
 use App\Rules\AccountMemoryLimit;
 use App\Rules\DomainName;
 use App\Rules\EnvVarKeysNotReserved;
@@ -14,6 +13,7 @@ use App\Rules\GitAccessToken;
 use App\Rules\GitRepositoryUrl;
 use App\Rules\ProjectName;
 use App\Rules\RedirectUrl;
+use App\Rules\UnlimitedOrAtLeastZero;
 use App\System\Project\Git\Ref as GitRef;
 
 /**
@@ -33,13 +33,7 @@ final class NewProjectRules
      */
     public static function normalised(array $input): array
     {
-        $changes = [];
-        $nameField = 'username';
-
-        if (self::namesTheProjectAsName($input)) {
-            $changes['username'] = $input['name'];
-            $nameField = 'name';
-        }
+        [$changes, $nameField] = self::normalisedName($input);
 
         if (array_key_exists('domain', $input)) {
             $changes['domain'] = self::normalisedDomain($input['domain']);
@@ -55,6 +49,31 @@ final class NewProjectRules
         }
 
         return [$changes, $nameField];
+    }
+
+    /**
+     * Whether a create makes a container project: one named `dind`, or one with a `git_repo`, which deploys into it.
+     *
+     * @param  array<string, mixed>  $input
+     */
+    public static function createsContainer(array $input): bool
+    {
+        $gitRepo = $input['git_repo'] ?? null;
+
+        return ($input['template'] ?? null) === 'dind' || (is_string($gitRepo) && trim($gitRepo) !== '');
+    }
+
+    /**
+     * The project name alone, for a request that takes nothing else of a create.
+     *
+     * @param  array<string, mixed>  $input
+     * @return array{0: array<string, mixed>, 1: string}
+     */
+    public static function normalisedName(array $input): array
+    {
+        return self::namesTheProjectAsName($input)
+            ? [['username' => $input['name']], 'name']
+            : [[], 'username'];
     }
 
     /**
@@ -81,27 +100,28 @@ final class NewProjectRules
      *
      * @param  string  $nameField  what the caller called the project name
      * @param  mixed  $domain  the normalised `domain` field
+     * @param  bool  $container  whether the create makes a container project ({@see createsContainer()})
      * @return array<string, mixed>
      */
-    public static function rules(string $nameField, mixed $domain): array
+    public static function rules(string $nameField, mixed $domain, bool $container): array
     {
         return [
-            'username' => ['string', new ProjectName($nameField)],
+            'username' => self::nameRules($nameField),
             'domain' => 'string|regex:'.DomainName::REGEX,
             'domain_redirect_url' => ['url', 'nullable', new RedirectUrl],
             'email' => 'email',
-            'disk_space_limit' => 'integer|nullable|min:'.ResourceLimit::UNLIMITED,
-            'memory_limit' => ['integer', 'min:1', new AccountMemoryLimit],
-            'cpu_limit' => 'numeric|nullable|min:'.ResourceLimit::UNLIMITED,
-            'device_read_bps' => 'integer|nullable|min:'.ResourceLimit::UNLIMITED,
-            'device_write_bps' => 'integer|nullable|min:'.ResourceLimit::UNLIMITED,
-            'bandwidth_limit' => 'integer|nullable|min:'.ResourceLimit::UNLIMITED,
-            'mysql_databases_limit' => 'integer|nullable|min:'.ResourceLimit::UNLIMITED,
-            'ftp_accounts_limit' => 'integer|nullable|min:'.ResourceLimit::UNLIMITED,
-            'sftp_accounts_limit' => 'integer|nullable|min:'.ResourceLimit::UNLIMITED,
-            'addon_domains_limit' => 'integer|nullable|min:'.ResourceLimit::UNLIMITED,
-            'subdomains_limit' => 'integer|nullable|min:'.ResourceLimit::UNLIMITED,
-            'inodes_limit' => 'integer|nullable|min:'.ResourceLimit::UNLIMITED,
+            'disk_space_limit' => ['integer', 'nullable', new UnlimitedOrAtLeastZero],
+            'memory_limit' => ['integer', new AccountMemoryLimit(container: $container)],
+            'cpu_limit' => ['numeric', 'nullable', new UnlimitedOrAtLeastZero],
+            'device_read_bps' => ['integer', 'nullable', new UnlimitedOrAtLeastZero],
+            'device_write_bps' => ['integer', 'nullable', new UnlimitedOrAtLeastZero],
+            'bandwidth_limit' => ['integer', 'nullable', new UnlimitedOrAtLeastZero],
+            'mysql_databases_limit' => ['integer', 'nullable', new UnlimitedOrAtLeastZero],
+            'ftp_accounts_limit' => ['integer', 'nullable', new UnlimitedOrAtLeastZero],
+            'sftp_accounts_limit' => ['integer', 'nullable', new UnlimitedOrAtLeastZero],
+            'addon_domains_limit' => ['integer', 'nullable', new UnlimitedOrAtLeastZero],
+            'subdomains_limit' => ['integer', 'nullable', new UnlimitedOrAtLeastZero],
+            'inodes_limit' => ['integer', 'nullable', new UnlimitedOrAtLeastZero],
             'php_fpm_pool_settings' => 'string|nullable',
             'lsphp_settings' => 'string|nullable',
             'redis_config' => 'string|nullable',
@@ -122,6 +142,18 @@ final class NewProjectRules
             'stages' => 'array|nullable',
             'recipe' => 'string|nullable|max:64',
         ];
+    }
+
+    /**
+     * A project name's shape, without the `required` the caller decides: a
+     * create may leave the name to the engine.
+     *
+     * @param  string  $nameField  what the caller called the project name
+     * @return array<int, mixed>
+     */
+    public static function nameRules(string $nameField): array
+    {
+        return ['string', new ProjectName($nameField)];
     }
 
     /**

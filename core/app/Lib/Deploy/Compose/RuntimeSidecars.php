@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Compose;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\CacheManager\ImageTransfer;
 use App\Lib\Deploy\Port\EnvVarDefault;
 use App\Lib\Deploy\Sidecar\ComposeService;
@@ -165,7 +166,7 @@ final class RuntimeSidecars
         ?string $accountUser = null,
         ?string $projectDir = null
     ): array {
-        $raw = is_file($composePath) && is_readable($composePath) ? @file_get_contents($composePath) : null;
+        $raw = is_file($composePath) && is_readable($composePath) ? AccountHomeRead::contents($composePath) : null;
 
         return is_string($raw) && $raw !== ''
             ? self::fromYaml($raw, $backingServicesOnly, $imagePorts, $projectIdentity, $accountMemoryMb, $placeholderSeed, $passwords, $env, $accountUser, $projectDir)

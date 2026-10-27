@@ -35,7 +35,7 @@ final class SourceAttacher
         $this->assertEligible($user);
         $params = ProjectCreator::resolvedSource($input->params + ['username' => $user->username], $input);
         $this->inspection = $this->inspect($params, $plan, $recipe);
-        $this->storeSource($user, $params);
+        $this->storeSource($user, $params, $input->envVars);
 
         return $this->rebuild->queue(
             $user,
@@ -115,19 +115,19 @@ final class SourceAttacher
      * the env overrides merged onto the ones the project already carries.
      *
      * @param  array<string, mixed>  $params
+     * @param  mixed  $sentEnvVars  the env_vars as sent, before their vault references were read
      */
-    private function storeSource(User $user, array $params): void
+    private function storeSource(User $user, array $params, mixed $sentEnvVars): void
     {
-        $details = [
+        $user->setDetails([
             'git_repo' => $params['git_repo'],
             'git_branch' => $params['git_branch'] ?? null,
             'git_token' => $params['git_token'] ?? null,
-        ];
+        ]);
         if (array_key_exists('env_vars', $params)) {
-            $details['env_vars'] = EnvVarOverrides::applyIncoming($params['env_vars'], $user->getEnvVars());
+            $user->setEnvVars(EnvVarOverrides::applyIncoming($params['env_vars'], $user->getEnvVars()), $sentEnvVars);
         }
 
-        $user->setDetails($details);
         $user->save();
     }
 }

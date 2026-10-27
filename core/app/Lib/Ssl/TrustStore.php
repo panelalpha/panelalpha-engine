@@ -16,8 +16,9 @@ namespace App\Lib\Ssl;
  *
  * So the question is asked of the host's own root store rather than inferred
  * from a name. Null where it cannot be asked -- no CA bundle on the box, an
- * openssl build without the call -- because "we could not check" and "we
- * checked and it fails" must not collapse into one answer.
+ * openssl build without the call, intermediates that cannot be written out
+ * for it -- because "we could not check" and "we checked and it fails" must
+ * not collapse into one answer.
  *
  * No Laravel dependencies — unit-testable.
  */
@@ -27,7 +28,7 @@ final class TrustStore
      * Whether a chain leads to a root this host trusts.
      *
      * @param  string  $pem  the leaf, optionally followed by its intermediates
-     * @return ?bool null when no root store could be read
+     * @return ?bool null when the chain could not be checked
      */
     public static function verifies(string $pem, ?string $caBundle = null): ?bool
     {
@@ -51,11 +52,9 @@ final class TrustStore
         $leaf = array_shift($blocks);
         $untrusted = null;
         if ($blocks !== []) {
-            $untrusted = tempnam(sys_get_temp_dir(), 'pa-chain-');
-            if (is_string($untrusted)) {
-                file_put_contents($untrusted, implode(PHP_EOL, $blocks).PHP_EOL);
-            } else {
-                $untrusted = null;
+            $untrusted = self::writeIntermediates($blocks);
+            if ($untrusted === null) {
+                return null;
             }
         }
 
@@ -74,6 +73,29 @@ final class TrustStore
 
         // -1 is "the check itself failed", which is not the same as "untrusted".
         return $result === true ? true : ($result === false ? false : null);
+    }
+
+    /**
+     * The intermediates in a temp file, or null when they cannot be written in
+     * full: the leaf checked without them would read as untrusted.
+     *
+     * @param  list<string>  $blocks
+     */
+    private static function writeIntermediates(array $blocks): ?string
+    {
+        $path = @tempnam(sys_get_temp_dir(), 'pa-chain-');
+        if (! is_string($path)) {
+            return null;
+        }
+
+        $chain = implode(PHP_EOL, $blocks).PHP_EOL;
+        if (@file_put_contents($path, $chain) !== strlen($chain)) {
+            @unlink($path);
+
+            return null;
+        }
+
+        return $path;
     }
 
     /**

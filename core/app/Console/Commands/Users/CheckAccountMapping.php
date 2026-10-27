@@ -99,7 +99,7 @@ class CheckAccountMapping extends Command
                 continue;
             }
             $refused++;
-            $recreated += $this->recreate($name, new AccountMapping($project), 'start failed on an unmapped image', $dryRun) ? 1 : 0;
+            $recreated += $this->recreate($name, (new AccountMapping($project))->afterRefusedStart(), 'start failed on an unmapped image', $dryRun) ? 1 : 0;
         }
 
         return [$refused, $recreated];

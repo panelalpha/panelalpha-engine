@@ -14,7 +14,7 @@ import { skipUnless } from '@/helpers/test-helpers';
 const OUT_OF_SCOPE = 'limited to projects';
 
 /** The refusal of a creation that leaves the destination name to the engine. */
-const MUST_NAME = 'must name the project it creates in new_username';
+const MUST_NAME = 'must name the project it creates';
 
 /** A 4xx answered by the controller, which means the scope check let the call through. */
 const ANSWERED_BY_CONTROLLER = /"status":(409|422)/;
@@ -71,7 +71,10 @@ test.describe('project scope: clone and staging', () => {
           );
           const omitted = await session.call(tool, { name: alice.username });
           expectScopeRefusal(omitted, `${tool} without new_name`);
-          expect(failureText(omitted), 'the refusal names the field to send').toContain(MUST_NAME);
+          const text = failureText(omitted);
+          expect(text, 'the refusal says a name is needed').toContain(MUST_NAME);
+          expect(text, 'the refusal names the tool argument').toMatch(/field\W+new_name\b/);
+          expect(text, 'the refusal names no REST field').not.toContain('new_username');
         });
 
         await test.step(`${tool} reaches a name the scope lists`, async () => {
@@ -132,7 +135,9 @@ test.describe('project scope: clone and staging', () => {
         await test.step(`${action} without a destination name is 403`, async () => {
           const response = await post(action, {});
           await expectStatus(response, 403, `${action} with a name the engine would pick`);
-          expect(JSON.stringify(await response.json())).toContain(MUST_NAME);
+          const body = JSON.stringify(await response.json());
+          expect(body).toContain(MUST_NAME);
+          expect(body, 'the refusal names the field to send').toMatch(/field\W+new_username\b/);
         });
 
         await test.step(`${action} into a name the scope lists is not refused`, async () => {

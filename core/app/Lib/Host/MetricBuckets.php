@@ -6,7 +6,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
- * The history ranges and buckets GET /metrics/history uses, for the project
+ * The history ranges and buckets of GET /metrics/history and the project
  * histories, so a project chart lines up with the server chart.
  */
 final class MetricBuckets
@@ -61,5 +61,19 @@ final class MetricBuckets
         }
 
         return $periods;
+    }
+
+    /**
+     * @param  array{start: Carbon, end: Carbon, bucket: int}  $window
+     * @return array{range: string, bucket_seconds: int, from: string, to: string}
+     */
+    public static function meta(string $range, array $window): array
+    {
+        return [
+            'range' => $range,
+            'bucket_seconds' => $window['bucket'],
+            'from' => $window['start']->format('Y-m-d H:i:s'),
+            'to' => $window['end']->format('Y-m-d H:i:s'),
+        ];
     }
 }

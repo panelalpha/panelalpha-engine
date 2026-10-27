@@ -6,11 +6,14 @@ use App\Exceptions\MissingLinuxUserException;
 use App\Exceptions\NotFoundException;
 use App\Lib\Deploy\Credentials\AppCredentials;
 use App\Lib\Deploy\Platform\PlatformStage;
+use App\Lib\Domains\CopyDomain;
+use App\Lib\Domains\DomainPlan;
 use App\Lib\Host\ProjectMemory;
 use App\Lib\Limits\ResourceLimit;
 use App\Lib\Project\NewProjectDetails;
 use App\Lib\Project\ProjectIpAddresses;
 use App\Lib\Project\RuntimeSettings;
+use App\Lib\Vault\RequestVault;
 use App\System;
 use App\System\Project as AppSystemProject;
 use App\System\Project\Dind\AppDatabase;
@@ -98,6 +101,12 @@ class User extends Authenticatable
         'git_branch',
     ];
 
+    /**
+     * What a project's env files are written from, which keys its last deploy
+     * merged into `.env`, and which values a vault reference set.
+     */
+    private const COPIED_ENV_KEYS = ['env_vars', 'used_custom_env_vars', 'env_override_keys', self::DETAIL_VAULT_ENV_KEYS];
+
     /** What a project can do about its own unreadable secrets; the APP_KEY is a server matter. */
     public const UNREADABLE_SECRETS_REMEDY = 'Set each one again: env_vars, git_update_credentials for a Git '
         .'token, the cloudflare-api-token or registry-auth setting, or the site password.';
@@ -107,6 +116,9 @@ class User extends Authenticatable
 
     /** The only value that key stores; absent means the project is not protected. */
     public const string PROTECTED_ON = 'on';
+
+    /** The `details` key listing the env vars a vault reference set. */
+    public const string DETAIL_VAULT_ENV_KEYS = 'env_vault_keys';
 
     protected $fillable = [
         'username',
@@ -200,6 +212,24 @@ class User extends Authenticatable
     }
 
     /**
+     * The env details for a project the source's files were copied into, so
+     * its next rebuild writes the env files it was copied with. A key the
+     * source lacks is cleared: the copied files carry none of it.
+     *
+     * @param  array<string, mixed>  $sourceDetails  from getDetails()
+     * @return array<string, mixed>
+     */
+    public static function copiedEnvDetails(array $sourceDetails): array
+    {
+        $out = [];
+        foreach (self::COPIED_ENV_KEYS as $key) {
+            $out[$key] = $sourceDetails[$key] ?? null;
+        }
+
+        return $out;
+    }
+
+    /**
      * Resource limits plus the frozen deploy snapshot for a copied project.
      *
      * @param  array<string, mixed>  $extra
@@ -225,7 +255,21 @@ class User extends Authenticatable
         $this->setDetails($snapshot);
     }
 
-    public function makePendingStaging(string $destUsername, string $destDomain, string $source = 'api'): self
+    /**
+     * The copied deploy fields as they were before applyDeploySnapshotFrom(): one the project did not have then is removed.
+     *
+     * @param  array<string, mixed>  $snapshot  {@see copiedDeploySnapshot()} of its details then
+     */
+    public function restoreDeploySnapshot(array $snapshot): void
+    {
+        $this->details = array_merge(
+            array_diff_key($this->getDetails(), array_flip(self::COPIED_DEPLOY_KEYS)),
+            $snapshot,
+        );
+    }
+
+    /** Call once every check on the copy passed: a panelalpha.online name is bought here. */
+    public function makePendingStaging(string $destUsername, CopyDomain $copyDomain, string $source = 'api'): self
     {
         $newDetails = $this->detailsForCopiedProject($destUsername, [
             'async_status' => [
@@ -234,25 +278,55 @@ class User extends Authenticatable
             ],
         ]);
 
-        $dest = new self([
-            'username' => $destUsername,
-            'domain' => $destDomain,
+        return self::createCopy($destUsername, $copyDomain, [
             'email' => $this->email,
             'status' => 'pending',
             'staging' => $this->id,
             'details' => $newDetails,
         ]);
+    }
 
+    /** Call once every check on the clone passed: a panelalpha.online name is bought here. */
+    public function makeClone(string $destUsername, CopyDomain $copyDomain): self
+    {
+        return self::createCopy($destUsername, $copyDomain, [
+            'email' => $this->email,
+            'details' => $this->detailsForCopiedProject($destUsername),
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    private static function createCopy(string $destUsername, CopyDomain $copyDomain, array $attributes): self
+    {
+        $destDomain = $copyDomain->claim($destUsername);
+        try {
+            return self::saveCopy($destUsername, $destDomain, $copyDomain, $attributes);
+        } catch (\Throwable $failure) {
+            $copyDomain->release();
+            throw $failure;
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    private static function saveCopy(string $destUsername, string $destDomain, CopyDomain $copyDomain, array $attributes): self
+    {
+        $dest = new self(['username' => $destUsername, 'domain' => $destDomain] + $attributes);
         $dest->save();
         self::createMainDomain($dest, $destDomain);
+        $copyDomain->attachTo($dest);
 
         return $dest;
     }
 
-    /** The staging copy's main domain, with a www alias when no project holds that name yet. */
+    /** A copy's main domain, with a www alias when it would answer and no project holds that name yet. */
     private static function createMainDomain(self $dest, string $destDomain): void
     {
-        $wwwAliasAvailable = ! Domain::domainOrAliasExists('www.'.$destDomain);
+        $wwwAliasAvailable = DomainPlan::wwwAliasWouldAnswer($destDomain)
+            && ! Domain::domainOrAliasExists('www.'.$destDomain);
         $domainAliases = $wwwAliasAvailable ? ['www.'.$destDomain] : [];
 
         $domainModel = Domain::make([
@@ -1310,6 +1384,47 @@ class User extends Authenticatable
         }
 
         return $result;
+    }
+
+    /**
+     * Stores the env overrides, remembering which keys a `vault:<key>` set: such a
+     * value is the vault's, and is never revealed. `$sent` is the map the caller
+     * sent, references unread; a key it set to a value of its own is no longer
+     * the vault's.
+     *
+     * @param  array<string, string>  $vars
+     */
+    public function setEnvVars(array $vars, mixed $sent): void
+    {
+        $this->setDetails([
+            'env_vars' => $vars,
+            self::DETAIL_VAULT_ENV_KEYS => $this->vaultEnvKeysAfter(is_array($sent) ? $sent : [], $vars),
+        ]);
+    }
+
+    /**
+     * The env var keys whose stored value a vault reference set.
+     *
+     * @return list<string>
+     */
+    public function getVaultEnvKeys(): array
+    {
+        $keys = $this->getDetails()[self::DETAIL_VAULT_ENV_KEYS] ?? [];
+
+        return is_array($keys) ? array_values(array_filter($keys, 'is_string')) : [];
+    }
+
+    /**
+     * @param  array<mixed>  $sent
+     * @param  array<string, string>  $vars
+     * @return list<string>
+     */
+    private function vaultEnvKeysAfter(array $sent, array $vars): array
+    {
+        $kept = array_diff($this->getVaultEnvKeys(), array_map('strval', array_keys($sent)));
+        $keys = array_unique([...$kept, ...RequestVault::referencedKeys($sent)]);
+
+        return array_values(array_intersect($keys, array_keys($vars)));
     }
 
     private static function isUsableEnvVar(mixed $key, mixed $value): bool

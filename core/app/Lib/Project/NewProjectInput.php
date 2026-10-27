@@ -39,7 +39,7 @@ final class NewProjectInput
 
         $params = Validator::make(
             $input,
-            NewProjectRules::rules($nameField, $input['domain'] ?? null),
+            NewProjectRules::rules($nameField, $input['domain'] ?? null, NewProjectRules::createsContainer($input)),
             [],
             ['username' => $nameField],
         )->validate();

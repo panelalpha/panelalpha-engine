@@ -131,8 +131,9 @@ class ApiAccess
 
     /**
      * Mints a new token for an allowed project with the scope it already has,
-     * and revokes the one it replaces and any older one still tracked once the
-     * apply that carries the new one has succeeded.
+     * less any project deleted since, and revokes the one it replaces and any
+     * older one still tracked once the apply that carries the new one has
+     * succeeded.
      *
      * @param  ?int  $applyTaskId  set to the task the new token travels in
      * @return array<string, mixed> the entry, without the token
@@ -150,12 +151,10 @@ class ApiAccess
                 );
             }
 
-            $scope = $entry['scope'] ?? self::SCOPE_SELF;
-
             return $this->replaceToken(
                 $user->username,
                 $entry,
-                is_array($scope) ? $scope : (string) $scope,
+                self::rotatedScope($entry),
                 (bool) ($entry['mcp'] ?? false)
             );
         });
@@ -185,6 +184,22 @@ class ApiAccess
         }
 
         return true;
+    }
+
+    /**
+     * Takes a deleted project out of every allowance's list, so a project created
+     * later under its name is not handed to their next token. A list left empty
+     * stays empty: its token reaches no project, never itself or every project.
+     */
+    public function removeFromScopes(string $project): void
+    {
+        $this->mutate(function () use ($project): void {
+            $entries = $this->entries();
+            $kept = array_map(static fn (array $entry): array => self::withoutScopedProject($entry, $project), $entries);
+            if ($kept !== $entries) {
+                $this->store($kept);
+            }
+        });
     }
 
     /**
@@ -244,6 +259,10 @@ class ApiAccess
      */
     public static function scopeLabel(string|array $scope): string
     {
+        if ($scope === []) {
+            return 'no project';
+        }
+
         return is_array($scope) ? implode(', ', $scope) : $scope;
     }
 
@@ -343,6 +362,10 @@ class ApiAccess
      */
     private function recordAllowance(User $user, string|array $scope, bool $mcp): array
     {
+        if ($scope === []) {
+            throw self::scopeProblem($scope);
+        }
+
         $previous = $this->entryOf($user->username);
         if ($previous !== null && self::sameAllowance($previous, $scope, $mcp)) {
             return ['entry' => $previous, 'apply' => false, 'revoke' => null];
@@ -520,7 +543,7 @@ class ApiAccess
         if ($scope === self::SCOPE_SELF) {
             return [$project];
         }
-        if (! is_array($scope) || $scope === []) {
+        if (! is_array($scope)) {
             throw self::scopeProblem($scope);
         }
 
@@ -537,6 +560,55 @@ class ApiAccess
         }
 
         return array_values(array_unique($names));
+    }
+
+    /**
+     * The scope a rotation mints: a listed name that is no longer a project, or
+     * that the token being replaced no longer reaches, is never granted again --
+     * a project created later under a deleted project's name is someone else's.
+     *
+     * @param  array<string, mixed>  $entry
+     * @return string|list<string>
+     */
+    private static function rotatedScope(array $entry): string|array
+    {
+        $scope = $entry['scope'] ?? self::SCOPE_SELF;
+        if (! is_array($scope)) {
+            return (string) $scope;
+        }
+
+        $reached = self::projectsReachedBy(self::idOf($entry['token_id'] ?? null));
+
+        return array_values(array_filter(
+            $scope,
+            static fn (mixed $name): bool => is_string($name)
+                && ($reached === null || in_array($name, $reached, true))
+                && User::existsByUsername($name)
+        ));
+    }
+
+    /**
+     * @return null|list<string> null when the token is gone or reaches every project
+     */
+    private static function projectsReachedBy(?int $tokenId): ?array
+    {
+        $token = $tokenId === null ? null : PersonalAccessToken::query()->find($tokenId);
+
+        return $token instanceof PersonalAccessToken ? TokenAbilities::of($token)->projects() : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $entry
+     * @return array<string, mixed>
+     */
+    private static function withoutScopedProject(array $entry, string $project): array
+    {
+        $scope = $entry['scope'] ?? null;
+        if (is_array($scope) && in_array($project, $scope, true)) {
+            $entry['scope'] = array_values(array_diff($scope, [$project]));
+        }
+
+        return $entry;
     }
 
     private static function scopeProblem(mixed $scope): ProblemException

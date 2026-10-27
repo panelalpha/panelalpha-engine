@@ -3,6 +3,7 @@
 namespace App\Lib\Apis;
 
 use App\Lib\Apis\Cloudflare\CloudflareException;
+use App\Lib\Apis\Cloudflare\ZoneNotFoundException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
@@ -213,7 +214,7 @@ class Cloudflare
             // Three causes, and the operator can only tell them apart if all
             // three are named: the permission, the account resource, and
             // whether the zone is in this Cloudflare account at all.
-            throw new CloudflareException(
+            throw new ZoneNotFoundException(
                 'No Cloudflare zones are visible to this API token. Check that it has '
                 .'Zone:DNS Edit, that Zone Resources includes the zone this hostname is '
                 .'under, and that the zone belongs to the account the token selects.'
@@ -241,7 +242,7 @@ class Cloudflare
         }
 
         if ($best === null) {
-            throw new CloudflareException(
+            throw new ZoneNotFoundException(
                 "Hostname '{$hostname}' is not under any Cloudflare zone accessible with this API token."
             );
         }
@@ -652,7 +653,7 @@ class Cloudflare
             } else {
                 $message .= ' (HTTP '.$response->status().')';
             }
-            throw new CloudflareException($message, $response->status(), $e);
+            throw new CloudflareException($message, $response->status(), $e, self::errorsOf($errors));
         }
 
         $json = $response->json();
@@ -671,10 +672,37 @@ class Cloudflare
             }
             throw new CloudflareException(
                 'Cloudflare API error'.($parts !== [] ? ': '.implode('; ', $parts) : ''),
-                $response->status()
+                $response->status(),
+                errors: self::errorsOf($errors)
             );
         }
 
         return $json;
+    }
+
+    /**
+     * Cloudflare's errors as code and message, with the ones their error chains add.
+     *
+     * @return list<array{code: int, message: string}>
+     */
+    private static function errorsOf(mixed $errors): array
+    {
+        if (! is_array($errors)) {
+            return [];
+        }
+
+        $found = [];
+        foreach ($errors as $error) {
+            if (! is_array($error)) {
+                continue;
+            }
+            $found[] = [
+                'code' => is_numeric($error['code'] ?? null) ? (int) $error['code'] : 0,
+                'message' => is_scalar($error['message'] ?? null) ? (string) $error['message'] : '',
+            ];
+            array_push($found, ...self::errorsOf($error['error_chain'] ?? null));
+        }
+
+        return $found;
     }
 }

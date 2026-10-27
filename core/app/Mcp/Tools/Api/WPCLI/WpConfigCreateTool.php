@@ -90,7 +90,7 @@ class WpConfigCreateTool extends ApiTool
             'locale' => $schema->string()->description('WPLANG. Omitted: none. Example: en_US.'),
             'force' => $schema->boolean()->description('Overwrite an existing wp-config.php.'),
             'skip_check' => $schema->boolean()->description('Do not check the database connection first.'),
-            'path' => $schema->string()->description('WordPress directory. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.'),
+            'path' => $schema->string()->description('WordPress directory. On PHP hosting it is inside the project home, read as the file manager reads a path: absolute, or relative to the home. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.'),
             'service' => $schema->string()->description('Compose service whose container runs WordPress, on a project running in its own containers. Omitted: the first container with both PHP and WordPress.'),
             'skip_plugins' => $schema->boolean()->description('Run without loading plugins and themes (--skip-plugins --skip-themes), so a plugin or theme with a fatal error does not block the operation. Omitted: false.'),
         ];

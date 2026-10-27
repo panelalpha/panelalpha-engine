@@ -12,7 +12,8 @@ use RuntimeException;
 /**
  * Fixture JSON process-batch: database step ends on next_phase === files or
  * boolean finalized; after a network error only on status === completed.
- * The plugin's transfer routes are called with no wp-admin login.
+ * The plugin's transfer routes are called with no wp-admin login, and never
+ * without the source plugin's token.
  */
 class WordpressMigrationBatchTest extends WordpressMigrationTestCase
 {
@@ -41,10 +42,32 @@ class WordpressMigrationBatchTest extends WordpressMigrationTestCase
         $client = new SourceWordpressClient($http);
         $client->setBatchRetrySleepSeconds(0);
         $client->useSite(new SourceSite('https://example.com'));
+        $client->useSourceToken(self::SOURCE_TOKEN);
 
         (new MigrationTransfer($client))->migrateDatabase('mig-db-1');
 
         $this->assertTrue($http->calledUrlContaining('process-batch'));
+        $this->assertSame([self::SOURCE_TOKEN, self::SOURCE_TOKEN], array_map(
+            static fn (array $call): ?string => $call['headers']['X-Migrator-Token'] ?? null,
+            $http->calls,
+        ));
+    }
+
+    public function test_no_transfer_call_goes_out_without_the_source_token(): void
+    {
+        $http = new FakeSourceHttpClient();
+        $client = new SourceWordpressClient($http);
+        $client->setBatchRetrySleepSeconds(0);
+        $client->useSite(new SourceSite('https://example.com'));
+
+        try {
+            $client->processBatch('mig-db-1');
+            $this->fail('Expected a transfer call without the token to be refused');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('token', $e->getMessage());
+        }
+
+        $this->assertSame([], $http->calls);
     }
 
     public function test_database_loop_ends_on_boolean_finalized(): void
@@ -69,6 +92,7 @@ class WordpressMigrationBatchTest extends WordpressMigrationTestCase
         $client = new SourceWordpressClient($http);
         $client->setBatchRetrySleepSeconds(0);
         $client->useSite(new SourceSite('https://example.com'));
+        $client->useSourceToken(self::SOURCE_TOKEN);
 
         (new MigrationTransfer($client))->migrateDatabase('mig-db-2');
 
@@ -89,6 +113,7 @@ class WordpressMigrationBatchTest extends WordpressMigrationTestCase
         $client = new SourceWordpressClient($http);
         $client->setBatchRetrySleepSeconds(0);
         $client->useSite(new SourceSite('https://example.com'));
+        $client->useSourceToken(self::SOURCE_TOKEN);
 
         (new MigrationTransfer($client))->migrateDatabase('mig-db-3');
 
@@ -124,6 +149,7 @@ class WordpressMigrationBatchTest extends WordpressMigrationTestCase
         $client = new SourceWordpressClient($http);
         $client->setBatchRetrySleepSeconds(0);
         $client->useSite(new SourceSite('https://example.com'));
+        $client->useSourceToken(self::SOURCE_TOKEN);
 
         (new MigrationTransfer($client))->migrateDatabase('mig-db-4');
         $this->assertTrue(true);
@@ -155,6 +181,7 @@ class WordpressMigrationBatchTest extends WordpressMigrationTestCase
         $client = new SourceWordpressClient($http);
         $client->setBatchRetrySleepSeconds(0);
         $client->useSite(new SourceSite('https://example.com'));
+        $client->useSourceToken(self::SOURCE_TOKEN);
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('network error');
@@ -191,6 +218,7 @@ class WordpressMigrationBatchTest extends WordpressMigrationTestCase
         $client = new SourceWordpressClient($http);
         $client->setBatchRetrySleepSeconds(0);
         $client->useSite(new SourceSite('https://example.com'));
+        $client->useSourceToken(self::SOURCE_TOKEN);
 
         (new MigrationTransfer($client))->migrateFiles('mig-files-1');
 
@@ -237,6 +265,7 @@ class WordpressMigrationBatchTest extends WordpressMigrationTestCase
         $client = new SourceWordpressClient($http);
         $client->setBatchRetrySleepSeconds(0);
         $client->useSite(new SourceSite('https://example.com'));
+        $client->useSourceToken(self::SOURCE_TOKEN);
 
         $reports = [];
         (new MigrationTransfer(

@@ -63,6 +63,11 @@ final class CancellingWorkTree extends WorkTree
         throw new DeployCancelledException('Deployment cancelled by user');
     }
 
+    protected function runsOnHost(): bool
+    {
+        return false;
+    }
+
     protected function fetchAndSyncFreshInit(string $branch, ?string $token): ?string
     {
         return null;

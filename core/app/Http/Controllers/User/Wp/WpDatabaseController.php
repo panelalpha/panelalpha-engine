@@ -20,7 +20,11 @@ class WpDatabaseController extends WordPressController
         summary: 'Export the WordPress install database to a file',
         description: 'Runs `wp db export {file}` against the install\'s own database (wp-config '
             .'credentials and table prefix), not the engine MySQL account API. '
-            .'`file` is a path inside the project. Optional `path` selects the install.',
+            .'`file` is a path inside the project. The dump is readable and writable by the user that '
+            .'writes it only (mode 0600), and a file already there is narrowed the same way first. '
+            .'Optional `path` selects the install. On a project '
+            .'running in its own containers it runs in the first container with WordPress that also '
+            .'has the MySQL client, such as a wordpress:cli service.',
         security: [['bearerAuth' => []]],
         tags: ['WP-CLI'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -30,8 +34,8 @@ class WpDatabaseController extends WordPressController
                 new OA\Property(
                     property: 'file',
                     type: 'string',
-                    example: '/home/alice/example.test/public_html/backup.sql',
-                    description: 'Destination SQL file path inside the project.',
+                    example: '/home/alice/backup.sql',
+                    description: 'Destination SQL file path inside the project. Prefer one outside the document root.',
                 ),
                 new OA\Property(
                     property: 'tables',
@@ -44,7 +48,7 @@ class WpDatabaseController extends WordPressController
                     property: 'path',
                     type: 'string',
                     nullable: true,
-                    description: 'WordPress directory. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
+                    description: 'WordPress directory. On PHP hosting it is inside the project home, read as the file manager reads a path: absolute, or relative to the home. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
                 ),
                 new OA\Property(
                     property: 'service',
@@ -67,7 +71,7 @@ class WpDatabaseController extends WordPressController
                 ])],
             )),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 422, description: 'WP-CLI failed, or no WordPress install was found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'WP-CLI failed, no WordPress install was found, or no container with WordPress has the MySQL client', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     public function export(string $username, WpDatabaseExportRequest $request): JsonResponse
@@ -82,9 +86,15 @@ class WpDatabaseController extends WordPressController
         path: '/projects/{username}/wp/database/import',
         summary: 'Import a SQL file into the WordPress install database',
         description: 'Strips DEFINER clauses from the SQL file when needed, then runs '
-            .'`wp db import {file}` against the install\'s own database. Neither step loads '
+            .'`wp db import {file}` against the install\'s own database. Both steps run in one WP-CLI '
+            .'run, as the same user, and a file with DEFINER clauses that cannot be rewritten in place '
+            .'is not imported. Neither step loads '
             .'WordPress, so an empty database or a broken plugin does not block the import. '
-            .'`file` is a path inside the project. Optional `path` selects the install.',
+            .'`file` is a path inside the project. Optional `path` selects the install. On a project '
+            .'running in its own containers it runs in the first container with WordPress that also '
+            .'has the MySQL client, such as a wordpress:cli service. A statement MySQL rejects fails the '
+            .'import with 422, naming the first rejected lines, although WP-CLI itself reports success; '
+            .'the statements MySQL accepted stay in the database.',
         security: [['bearerAuth' => []]],
         tags: ['WP-CLI'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -101,7 +111,7 @@ class WpDatabaseController extends WordPressController
                     property: 'path',
                     type: 'string',
                     nullable: true,
-                    description: 'WordPress directory. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
+                    description: 'WordPress directory. On PHP hosting it is inside the project home, read as the file manager reads a path: absolute, or relative to the home. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
                 ),
                 new OA\Property(
                     property: 'service',
@@ -124,7 +134,7 @@ class WpDatabaseController extends WordPressController
                 ])],
             )),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 422, description: 'WP-CLI failed, or no WordPress install was found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'WP-CLI failed, MySQL rejected a statement of the file, no WordPress install was found, or no container with WordPress has the MySQL client', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     public function import(string $username, WpDatabaseImportRequest $request): JsonResponse

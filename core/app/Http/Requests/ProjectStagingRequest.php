@@ -6,6 +6,7 @@ use App\Exceptions\ProblemException;
 use App\Http\Requests\Concerns\LowercasesInput;
 use App\Models\User;
 use App\Rules\DomainName;
+use App\System;
 use App\System\Projects;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Validator;
@@ -45,7 +46,10 @@ class ProjectStagingRequest extends FormRequest
                 return;
             }
 
-            $problems = self::createProblems($source, $this->requestedMysqlPrefix());
+            $problems = [
+                ...self::createProblems($source, $this->requestedMysqlPrefix()),
+                ...app(System::class)->projects()->copyDatabasesProblems($source, $this->boolean('copy_databases', true)),
+            ];
             if ($problems !== []) {
                 throw ProblemException::of($problems);
             }

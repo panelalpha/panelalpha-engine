@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Platform\Probes;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Platform\PlatformProbe;
 use App\Lib\Deploy\Platform\ProjectContext;
 
@@ -69,7 +70,7 @@ final class ProcfileWebProbe implements PlatformProbe
     private static function readProjectFile(string $projectDir, string $name): ?string
     {
         $projectDir = rtrim($projectDir, '/');
-        $contents = @file_get_contents($projectDir.'/'.$name);
+        $contents = AccountHomeRead::contents($projectDir.'/'.$name);
 
         return is_string($contents) && $contents !== '' ? $contents : null;
     }

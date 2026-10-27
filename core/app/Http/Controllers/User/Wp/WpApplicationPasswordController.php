@@ -27,7 +27,7 @@ class WpApplicationPasswordController extends WordPressController
             new OA\Parameter(name: 'user', in: 'path', required: true, schema: new OA\Schema(type: 'string'), description: 'WordPress user login or ID.'),
             new OA\Parameter(
                 name: 'path',
-                description: 'WordPress directory. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
+                description: 'WordPress directory. On PHP hosting it is inside the project home, read as the file manager reads a path: absolute, or relative to the home. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
                 in: 'query',
                 required: false,
                 schema: new OA\Schema(type: 'string'),
@@ -75,7 +75,7 @@ class WpApplicationPasswordController extends WordPressController
                 new OA\Property(property: 'app_id', type: 'string', nullable: true, description: 'Optional application ID to attribute to the password.'),
                 new OA\Property(
                     property: 'path',
-                    description: 'WordPress directory. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
+                    description: 'WordPress directory. On PHP hosting it is inside the project home, read as the file manager reads a path: absolute, or relative to the home. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
                     type: 'string',
                     nullable: true,
                 ),
@@ -130,7 +130,7 @@ class WpApplicationPasswordController extends WordPressController
             new OA\Parameter(name: 'uuid', in: 'path', required: true, schema: new OA\Schema(type: 'string'), description: 'Application password UUID.'),
             new OA\Parameter(
                 name: 'path',
-                description: 'WordPress directory. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
+                description: 'WordPress directory. On PHP hosting it is inside the project home, read as the file manager reads a path: absolute, or relative to the home. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
                 in: 'query',
                 required: false,
                 schema: new OA\Schema(type: 'string'),

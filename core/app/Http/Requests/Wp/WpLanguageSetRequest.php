@@ -17,7 +17,7 @@ class WpLanguageSetRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'language' => 'required|string',
+            'language' => ['required', 'string', 'regex:'.WpCoreDownloadRequest::LOCALE_PATTERN],
             'path' => 'sometimes|nullable|string',
             'service' => ['sometimes', 'nullable', 'string', 'regex:/^[A-Za-z0-9][A-Za-z0-9_.-]*$/'],
             'skip_plugins' => 'sometimes|boolean',

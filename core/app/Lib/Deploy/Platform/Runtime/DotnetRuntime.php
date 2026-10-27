@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Platform\Runtime;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
@@ -120,7 +121,7 @@ final class DotnetRuntime implements Runtime
      */
     private static function solutionIsManaged(string $path): bool
     {
-        $contents = @file_get_contents($path);
+        $contents = AccountHomeRead::contents($path);
         if (! is_string($contents)) {
             return false;
         }
@@ -168,7 +169,7 @@ final class DotnetRuntime implements Runtime
             if (! preg_match('/\.(cs|fs|vb)proj$/', $relative) || self::looksLikeTests($relative)) {
                 continue;
             }
-            $contents = @file_get_contents(rtrim($projectDir, '/').'/'.$relative);
+            $contents = AccountHomeRead::contents(rtrim($projectDir, '/').'/'.$relative);
             if (! is_string($contents)) {
                 continue;
             }
@@ -208,7 +209,7 @@ final class DotnetRuntime implements Runtime
             return false;
         }
         $seen[$relative] = true;
-        $contents = @file_get_contents($root.'/'.$relative);
+        $contents = AccountHomeRead::contents($root.'/'.$relative);
         if (! is_string($contents)) {
             return false;
         }
@@ -273,7 +274,7 @@ final class DotnetRuntime implements Runtime
             if (++$checked > 200) {
                 break;
             }
-            $source = @file_get_contents($file->getPathname());
+            $source = AccountHomeRead::contents($file->getPathname());
             if (is_string($source) && preg_match('/\bHttpListener\b/', $source) === 1) {
                 return true;
             }
@@ -317,7 +318,7 @@ final class DotnetRuntime implements Runtime
             if (str_ends_with($relative, '.sln') || str_ends_with($relative, '.slnx')) {
                 continue;
             }
-            $contents = @file_get_contents(rtrim($projectDir, '/').'/'.$relative);
+            $contents = AccountHomeRead::contents(rtrim($projectDir, '/').'/'.$relative);
             if (! is_string($contents)) {
                 continue;
             }
@@ -346,7 +347,7 @@ final class DotnetRuntime implements Runtime
 
     private static function legacyFrameworkOf(string $projectDir, string $entry): ?string
     {
-        $contents = @file_get_contents(rtrim($projectDir, '/').'/'.$entry);
+        $contents = AccountHomeRead::contents(rtrim($projectDir, '/').'/'.$entry);
         if (! is_string($contents)
             || preg_match('/<TargetFrameworks?>/i', $contents) === 1
             || preg_match('/<TargetFrameworkVersion>\s*([^<]+?)\s*<\/TargetFrameworkVersion>/i', $contents, $m) !== 1
@@ -405,7 +406,7 @@ final class DotnetRuntime implements Runtime
             if (str_ends_with($relative, '.sln') || str_ends_with($relative, '.slnx')) {
                 continue;
             }
-            $contents = @file_get_contents($root.'/'.$relative);
+            $contents = AccountHomeRead::contents($root.'/'.$relative);
             if (! is_string($contents) || preg_match(self::NODE_EXEC, $contents) !== 1) {
                 continue;
             }
@@ -483,7 +484,7 @@ final class DotnetRuntime implements Runtime
     public static function publishFramework(string $projectDir, string $project): ?string
     {
         $root = rtrim($projectDir, '/');
-        $contents = @file_get_contents($root.'/'.$project);
+        $contents = AccountHomeRead::contents($root.'/'.$project);
         if (! is_string($contents)) {
             return null;
         }
@@ -513,7 +514,7 @@ final class DotnetRuntime implements Runtime
     private static function inheritedFrameworkList(string $root, string $dir): ?string
     {
         while (true) {
-            $props = @file_get_contents($root.($dir === '.' ? '' : '/'.$dir).'/Directory.Build.props');
+            $props = AccountHomeRead::contents($root.($dir === '.' ? '' : '/'.$dir).'/Directory.Build.props');
             if (is_string($props) && preg_match('/<TargetFrameworks?>/i', $props) === 1) {
                 return self::frameworkList($props);
             }

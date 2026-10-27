@@ -10,6 +10,7 @@ use App\Lib\Deploy\DeployLog\DeployLock;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Source\GitRepoInput;
 use App\Lib\Deploy\Source\GitUrl;
+use App\Lib\Deploy\Source\RepositoryAddress;
 use App\Lib\DeployHook\DeployHooks;
 use App\Lib\Net\EgressGuard;
 use App\Lib\Project\ProjectRebuild;
@@ -170,21 +171,37 @@ class GitActions
     /**
      * The connect runs `git ls-remote` and `git fetch` on the host, whose
      * network reaches the metadata service and internal services. A host the
-     * egress guard refuses is a 422 before anything is connected.
+     * egress guard refuses, or cannot resolve to check, is a 422 before
+     * anything is connected.
      *
      * @throws ProblemException
      */
     private function assertRemoteAllowed(string $repoUrl): void
     {
-        if ($repoUrl === '' || GitRepoInput::isSsh($repoUrl)) {
+        if ($repoUrl === '') {
+            return;
+        }
+        if (GitRepoInput::isSsh($repoUrl)) {
+            $this->assertSshRemoteAddressAllowed($repoUrl);
+
             return;
         }
 
-        try {
-            $problem = EgressGuard::problem('repo_url', $repoUrl);
-        } catch (\InvalidArgumentException) {
-            return;
+        $problem = EgressGuard::problem('repo_url', $repoUrl);
+        if ($problem !== null) {
+            throw ProblemException::of([$problem]);
         }
+    }
+
+    /**
+     * A pinned host key proves who answers, not where: the SSH host is checked
+     * like the deploy key's scan, refused when internal or unresolvable.
+     *
+     * @throws ProblemException
+     */
+    private function assertSshRemoteAddressAllowed(string $repoUrl): void
+    {
+        $problem = RepositoryAddress::problem($repoUrl, 'repo_url');
         if ($problem !== null) {
             throw ProblemException::of([$problem]);
         }

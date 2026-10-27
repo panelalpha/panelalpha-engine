@@ -2,12 +2,10 @@
 
 namespace App\Lib\Project;
 
-use App\Jobs\DeployProject;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Platform\AppConfig\AppConfigLocator;
 use App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource;
 use App\Lib\Deploy\Platform\Strategies;
-use App\Models\Task;
 use App\Models\Tunnel;
 use App\Models\User;
 use App\System;
@@ -17,8 +15,8 @@ use Throwable;
 /**
  * One project in a few normalized words: what it is, whether it is up, where
  * it answers and whether an admin can be logged in. Built for a list, so it
- * reads only the database, the deploy lock and one `docker ps` per request --
- * never anything inside an account.
+ * reads only the database (once for the whole list, {@see ProjectListFacts}),
+ * the deploy lock and one `docker ps` per request -- never anything inside an account.
  */
 final class ProjectOverview
 {
@@ -42,10 +40,12 @@ final class ProjectOverview
     private static ?array $running = null;
 
     /**
+     * @param  ?ProjectListFacts  $facts  loaded for the whole list the project is in; loaded for it alone when null
      * @return array{type: ?string, framework: ?string, label: ?string, status: string, public_url: ?string, admin_sso: bool}
      */
-    public static function for(User $user): array
+    public static function for(User $user, ?ProjectListFacts $facts = null): array
     {
+        $facts ??= ProjectListFacts::load([$user]);
         $details = $user->getDetails();
         $strategy = is_string($details['deploy_strategy'] ?? null) ? $details['deploy_strategy'] : null;
 
@@ -53,8 +53,8 @@ final class ProjectOverview
             'type' => self::type($details, $user->getGitRepo()),
             'framework' => $strategy,
             'label' => is_string($details['deploy_label'] ?? null) ? $details['deploy_label'] : null,
-            'status' => self::status($user, $details),
-            'public_url' => self::publicUrl($user),
+            'status' => self::status($user, $details, $facts),
+            'public_url' => self::publicUrl($user, $facts),
             'admin_sso' => self::adminSso($user, $details),
         ];
     }
@@ -91,14 +91,17 @@ final class ProjectOverview
     }
 
     /**
+     * A deployed project is down only when `docker ps` was read and lacks its
+     * container: an unreadable `docker ps` proves nothing either way.
+     *
      * @param  array<string, mixed>  $details
      */
-    public static function status(User $user, array $details): string
+    public static function status(User $user, array $details, ?ProjectListFacts $facts = null): string
     {
         if ($user->status === 'suspended') {
             return self::STATUS_SUSPENDED;
         }
-        if (self::isDeploying($user)) {
+        if (self::isDeploying($user, $facts ?? ProjectListFacts::load([$user]))) {
             return self::STATUS_BUILDING;
         }
 
@@ -112,23 +115,19 @@ final class ProjectOverview
 
         $running = self::runningContainers();
 
-        // An unreadable `docker ps` proves nothing either way.
         return $running !== null && ! isset($running[$user->username])
             ? self::STATUS_DOWN
             : self::STATUS_LIVE;
     }
 
     /** A tunnel is reachable from anywhere; a bare local domain may not be. */
-    public static function publicUrl(User $user): ?string
+    public static function publicUrl(User $user, ?ProjectListFacts $facts = null): ?string
     {
         if (! $user->exists) {
             return null;
         }
-        $tunnels = Tunnel::query()
-            ->where('user_id', $user->id)
-            ->with('domain')
-            ->orderBy('id')
-            ->get();
+        $facts ??= ProjectListFacts::load([$user]);
+        $tunnels = $facts->tunnelsOf($user);
         $tunnel = $tunnels->first(fn (Tunnel $t): bool => $t->domain?->domain === $user->domain) ?? $tunnels->first();
         if ($tunnel !== null) {
             return 'https://'.$tunnel->hostname;
@@ -137,7 +136,7 @@ final class ProjectOverview
         if (! is_string($user->domain) || $user->domain === '') {
             return null;
         }
-        $domain = $user->domains()->where('domain', $user->domain)->first();
+        $domain = $facts->mainDomainOf($user);
 
         return ($domain !== null && ! $domain->sslEnabled() ? 'http://' : 'https://').$user->domain;
     }
@@ -175,27 +174,21 @@ final class ProjectOverview
             : ['at' => INF, 'names' => $names === null ? null : array_fill_keys($names, true)];
     }
 
-    private static function isDeploying(User $user): bool
+    private static function isDeploying(User $user, ProjectListFacts $facts): bool
     {
-        if (DeployLogger::isLockedFor($user->username)) {
-            return true;
-        }
-
-        // Queued, not started yet: no lock until the worker picks it up.
-        return $user->exists && Task::query()
-            ->where('username', $user->username)
-            ->where('job_type', DeployProject::class)
-            ->whereNotIn('status', Task::TERMINAL_STATUSES)
-            ->exists();
+        return DeployLogger::isLockedFor($user->username) || $facts->hasQueuedDeploy($user);
     }
 
+    /** The status of the deploy latest.json names; one read of it, not one per question. */
     private static function lastDeployStatus(string $username): ?string
     {
         try {
-            $status = DeployLogger::current($username)?->readLatest()['status'] ?? null;
+            $latest = DeployLogger::readLatestFor($username);
         } catch (Throwable) {
             return null;
         }
+        $id = $latest['id'] ?? null;
+        $status = is_string($id) && $id !== '' ? ($latest['status'] ?? null) : null;
 
         return is_string($status) ? $status : null;
     }

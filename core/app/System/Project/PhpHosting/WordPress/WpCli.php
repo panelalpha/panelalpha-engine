@@ -8,6 +8,7 @@ use App\System;
 use App\System\Projects;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Raw WP-CLI invocation for a project's WordPress install.
@@ -84,6 +85,19 @@ final class WpCli
     }
 
     /**
+     * A caller's value for a positional argument. WP-CLI reads any argument
+     * starting with '-' as an option wherever it stands, and 2.8.1 ignores '--'.
+     */
+    public static function positional(string $value): string
+    {
+        if (str_starts_with($value, '-')) {
+            throw new Exception("'{$value}' starts with '-', which WP-CLI would read as an option.");
+        }
+
+        return $value;
+    }
+
+    /**
      * @param  array{exit_code?: int, stdout?: string, stderr?: string}  $result
      */
     public function failureMessage(array $result): string
@@ -100,13 +114,15 @@ final class WpCli
     }
 
     /**
-     * Absolute WP-CLI --path: the bound path when set, otherwise the project's
-     * main-domain document root.
+     * Absolute WP-CLI --path inside the project home: the bound path read the
+     * way the file manager reads one (absolute, or relative to the home), so a
+     * directory outside the home is never the WP-CLI container's own;
+     * otherwise the project's main-domain document root.
      */
     public function resolvePath(): string
     {
         if (is_string($this->path) && $this->path !== '') {
-            return $this->path;
+            return $this->homePath($this->path);
         }
 
         $domain = $this->user->getMainDomain();
@@ -127,6 +143,9 @@ final class WpCli
     }
 
     /**
+     * Adds --path unless the args carry one: in a container the bound path as
+     * the container sees it, or none, so the runner finds the install.
+     *
      * @param  list<string>  $args
      * @return list<string>
      */
@@ -139,7 +158,6 @@ final class WpCli
         }
 
         if ($this->runsInContainer()) {
-            // The container's own path, or none: the runner finds the install.
             if (is_string($this->path) && $this->path !== '') {
                 $args[] = '--path='.$this->path;
             }
@@ -189,6 +207,15 @@ final class WpCli
     public function runsInContainer(): bool
     {
         return Projects::isDind($this->user);
+    }
+
+    private function homePath(string $path): string
+    {
+        try {
+            return rtrim($this->user->project()->resolvePath($path), '/');
+        } catch (ValidationException) {
+            throw new Exception("The path {$path} does not name a directory inside the project home.");
+        }
     }
 
     private function absoluteDocumentRoot(Domain $domain): string

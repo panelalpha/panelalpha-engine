@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Wp;
 
+use App\Rules\WpCliArgument;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
@@ -17,8 +18,8 @@ class WpUserCreateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'login' => 'required|string',
-            'email' => 'required|email',
+            'login' => ['required', 'string', new WpCliArgument(WpCliArgument::LOGIN)],
+            'email' => ['required', 'email', new WpCliArgument],
             'password' => 'required|string|min:8',
             'role' => 'sometimes|nullable|string',
             'display_name' => 'sometimes|nullable|string',

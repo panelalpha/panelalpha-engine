@@ -476,9 +476,19 @@ class Dind implements DeployableDindProject, Runtime
         ));
         foreach ($appConfig->files() as $snippet) {
             $fullPath = "{$projectDir}/{$snippet['path']}";
+            $this->system()->filesystem()->assertNoSymlinkAbove($fullPath, $projectDir);
             $this->shell()->execAsUser(['mkdir', '-p', dirname($fullPath)]);
-            $this->system()->filesystem()->filePutContents($fullPath, $snippet['contents'], $chown, '644');
+            $this->system()->filesystem()->writeFileReplacingPath($fullPath, $snippet['contents'], $chown, self::snippetMode($snippet['path']));
         }
+    }
+
+    /**
+     * A root `.env` is owner-only like every root `.env` the engine writes: the account's
+     * Compose reads it, and ~/project is traversable by every uid on the host.
+     */
+    private static function snippetMode(string $relativePath): string
+    {
+        return preg_replace('#^(?:\./)+#', '', $relativePath) === '.env' ? '600' : '644';
     }
 
     /**

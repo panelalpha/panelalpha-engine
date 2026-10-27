@@ -18,6 +18,7 @@ final class RecordingMechanics implements DeployMechanics
     public array $startResult = ['exit_code' => 0, 'stdout' => '', 'stderr' => ''];
 
     public bool $dindWithoutGit = false;
+    public bool $removedAccount = false;
     public bool $hasGit = false;
     public ?string $envHint = null;
 
@@ -68,6 +69,11 @@ final class RecordingMechanics implements DeployMechanics
         if ($this->prepareException !== null) {
             throw $this->prepareException;
         }
+    }
+
+    public function removedTheAccount(): bool
+    {
+        return $this->removedAccount;
     }
 
     public function ingestApplicationSource(): void

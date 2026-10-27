@@ -6,6 +6,7 @@ use App\Lib\Deploy\Source\UploadedArchive;
 use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\InfoZip;
 
 /**
  * What an account is allowed to hand the extractor.
@@ -39,6 +40,12 @@ class UploadedArchiveTest extends TestCase
         parent::tearDown();
     }
 
+    /** The lookup as PHP itself would make it, for a home the test process can read. */
+    private static function locate(string $path): ?string
+    {
+        return is_file($path) ? (realpath($path) ?: null) : null;
+    }
+
     private function touchInHome(string $name): string
     {
         $path = $this->home . '/' . $name;
@@ -51,7 +58,7 @@ class UploadedArchiveTest extends TestCase
     {
         $path = $this->touchInHome('site.zip');
 
-        $archive = UploadedArchive::inHome($path, $this->home);
+        $archive = UploadedArchive::inHome($path, $this->home, self::locate(...));
 
         $this->assertSame(realpath($path), $archive->path);
         $this->assertTrue($archive->isZip);
@@ -61,7 +68,7 @@ class UploadedArchiveTest extends TestCase
     {
         $this->touchInHome('site.zip');
 
-        $archive = UploadedArchive::inHome('site.zip', $this->home);
+        $archive = UploadedArchive::inHome('site.zip', $this->home, self::locate(...));
 
         $this->assertSame(realpath($this->home . '/site.zip'), $archive->path);
     }
@@ -70,9 +77,38 @@ class UploadedArchiveTest extends TestCase
     {
         $this->touchInHome('site.zip');
 
-        $archive = UploadedArchive::inHome('site.zip', $this->home . '/');
+        $archive = UploadedArchive::inHome('site.zip', $this->home . '/', self::locate(...));
 
         $this->assertSame(realpath($this->home . '/site.zip'), $archive->path);
+    }
+
+    /**
+     * ~/.panelalpha is the account's alone (0700): the engine's PHP, another user, sees
+     * nothing there, so the file is looked up by the caller, as the account.
+     */
+    public function test_the_archive_is_looked_up_by_the_caller_not_by_php(): void
+    {
+        $asked = [];
+        $locate = function (string $path) use (&$asked): string {
+            $asked[] = $path;
+
+            return $this->home . '/.panelalpha/archives/site.zip';
+        };
+
+        $archive = UploadedArchive::inHome('/.panelalpha/archives/site.zip', $this->home, $locate);
+
+        $this->assertFileDoesNotExist($this->home . '/.panelalpha/archives/site.zip');
+        $this->assertSame([$this->home . '/.panelalpha/archives/site.zip'], $asked);
+        $this->assertSame($this->home . '/.panelalpha/archives/site.zip', $archive->path);
+        $this->assertTrue($archive->isZip);
+    }
+
+    public function test_where_the_lookup_lands_must_be_inside_the_home(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('outside the user home directory');
+
+        UploadedArchive::inHome('escape.zip', $this->home, static fn (string $path): string => '/etc/site.zip');
     }
 
     public function test_a_missing_archive_is_named_in_the_error(): void
@@ -80,7 +116,7 @@ class UploadedArchiveTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage('Archive not found');
 
-        UploadedArchive::inHome('nothing-here.zip', $this->home);
+        UploadedArchive::inHome('nothing-here.zip', $this->home, self::locate(...));
     }
 
     /**
@@ -97,7 +133,7 @@ class UploadedArchiveTest extends TestCase
             $this->expectException(InvalidArgumentException::class);
             $this->expectExceptionMessage('outside the user home directory');
 
-            UploadedArchive::inHome('escape.zip', $this->home);
+            UploadedArchive::inHome('escape.zip', $this->home, self::locate(...));
         } finally {
             @unlink($outside);
         }
@@ -110,14 +146,14 @@ class UploadedArchiveTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage('Unsupported archive format');
 
-        UploadedArchive::inHome('payload.php', $this->home);
+        UploadedArchive::inHome('payload.php', $this->home, self::locate(...));
     }
 
     public function test_the_format_is_read_case_insensitively(): void
     {
         $this->touchInHome('SITE.ZIP');
 
-        $this->assertTrue(UploadedArchive::inHome('SITE.ZIP', $this->home)->isZip);
+        $this->assertTrue(UploadedArchive::inHome('SITE.ZIP', $this->home, self::locate(...))->isZip);
     }
 
     /**
@@ -137,7 +173,7 @@ class UploadedArchiveTest extends TestCase
     {
         $this->touchInHome($name);
 
-        $archive = UploadedArchive::inHome($name, $this->home);
+        $archive = UploadedArchive::inHome($name, $this->home, self::locate(...));
 
         $this->assertSame($isZip, $archive->isZip);
         $this->assertSame($isZip ? 'archive.zip' : 'archive.tar.gz', $archive->stagedName());
@@ -146,14 +182,15 @@ class UploadedArchiveTest extends TestCase
     public function test_a_zip_is_listed_and_extracted_with_the_zip_tools(): void
     {
         $this->touchInHome('site.zip');
-        $archive = UploadedArchive::inHome('site.zip', $this->home);
+        $archive = UploadedArchive::inHome('site.zip', $this->home, self::locate(...));
 
-        $this->assertSame(['sudo', 'unzip', '-Z1', '/staged'], $archive->listNamesArgv('/staged'));
-        $this->assertSame(['sudo', 'unzip', '-Z', '/staged'], $archive->listModesArgv('/staged'));
+        $this->assertSame(['sudo', 'env', 'LC_ALL=C.UTF-8', 'unzip', '-Z1', '/staged'], $archive->listNamesArgv('/staged'));
+        $this->assertSame(['sudo', 'env', 'LC_ALL=C.UTF-8', 'unzip', '-Z', '/staged'], $archive->listModesArgv('/staged'));
+        $this->assertSame(['sudo', 'env', 'LC_ALL=C.UTF-8', 'unzip', '-p', '/staged', 'a/l'], $archive->readMemberArgv('/staged', 'a/l'));
         $this->assertSame(
             [
                 'sudo', 'setpriv', '--reuid', '1001', '--regid', '1001', '--clear-groups',
-                'unzip', '-o', '/staged', '-d', '/tmp/x',
+                'env', 'LC_ALL=C.UTF-8', 'unzip', '-o', '/staged', '-d', '/tmp/x',
             ],
             $archive->extractArgv(1001, 1001, '/staged', '/tmp/x')
         );
@@ -162,10 +199,10 @@ class UploadedArchiveTest extends TestCase
     public function test_a_tarball_is_listed_and_extracted_with_the_tar_tools(): void
     {
         $this->touchInHome('site.tar.gz');
-        $archive = UploadedArchive::inHome('site.tar.gz', $this->home);
+        $archive = UploadedArchive::inHome('site.tar.gz', $this->home, self::locate(...));
 
-        $this->assertSame(['sudo', 'tar', '-tzf', '/staged'], $archive->listNamesArgv('/staged'));
-        $this->assertSame(['sudo', 'tar', '-tvzf', '/staged'], $archive->listModesArgv('/staged'));
+        $this->assertSame(['sudo', 'tar', '--quoting-style=escape', '-tzf', '/staged'], $archive->listNamesArgv('/staged'));
+        $this->assertSame(['sudo', 'tar', '--quoting-style=escape', '-tvzf', '/staged'], $archive->listModesArgv('/staged'));
         $this->assertSame(
             [
                 'sudo', 'setpriv', '--reuid', '1001', '--regid', '1001', '--clear-groups', 'tar',
@@ -183,7 +220,7 @@ class UploadedArchiveTest extends TestCase
     public function test_extraction_never_restores_an_owner_or_a_mode(): void
     {
         $this->touchInHome('site.tar.gz');
-        $argv = UploadedArchive::inHome('site.tar.gz', $this->home)
+        $argv = UploadedArchive::inHome('site.tar.gz', $this->home, self::locate(...))
             ->extractArgv(1001, 1001, '/staged', '/tmp/x');
 
         $this->assertContains('--no-same-owner', $argv);
@@ -243,8 +280,8 @@ class UploadedArchiveTest extends TestCase
      */
     public function test_a_zip_member_is_written_under_the_name_its_listing_shows(): void
     {
-        $this->zipWithUnicodePath($this->home . '/named.zip', 'evil/x', 'safe/x');
-        $archive = UploadedArchive::inHome('named.zip', $this->home);
+        InfoZip::withUnicodePath($this->home . '/named.zip', 'evil/x', 'safe/x');
+        $archive = UploadedArchive::inHome('named.zip', $this->home, self::locate(...));
         $into = sys_get_temp_dir() . '/pa-unpack-' . bin2hex(random_bytes(8));
         mkdir($into);
         try {
@@ -259,13 +296,107 @@ class UploadedArchiveTest extends TestCase
         }
     }
 
+    /** @return array<string, array{callable(string, string): void}> */
+    public static function infoZipNames(): array
+    {
+        return [
+            'Unicode Path field' => [static fn (string $path, string $name) => InfoZip::withUnicodePath($path, $name, $name)],
+            'UTF-8 flag' => [InfoZip::utf8Flagged(...)],
+        ];
+    }
+
+    /**
+     * How `zip -r` on Linux or macOS stores a non-ASCII name. In the C locale PHP-FPM runs in,
+     * unzip would list and write it as `za#U017c...`; a UTF-8 one keeps the name.
+     */
+    #[DataProvider('infoZipNames')]
+    public function test_a_non_ascii_info_zip_name_is_listed_and_written_as_it_is_in_the_c_locale(callable $zip): void
+    {
+        $name = "za\u{17c}\u{f3}\u{142}\u{107}/\u{105}.txt";
+        $zip($this->home . '/site.zip', $name);
+        $archive = UploadedArchive::inHome('site.zip', $this->home, self::locate(...));
+        $into = sys_get_temp_dir() . '/pa-unpack-' . bin2hex(random_bytes(8));
+        mkdir($into);
+        try {
+            $listed = $this->listInCLocale($archive->listNamesArgv($archive->path));
+            $this->runInCLocale(array_slice($archive->extractArgv(1, 1, $archive->path, $into), 7));
+
+            $this->assertSame($name . "\n", $listed);
+            $this->assertSame('x', file_get_contents($into . '/' . $name));
+        } finally {
+            $this->runOk(['rm', '-rf', $into, $this->home . '/site.zip']);
+        }
+    }
+
+    /** @return array<string, array{array<string, string>, array<string, string>}> */
+    public static function linksUnzipWritesElsewhere(): array
+    {
+        return [
+            'byte 0xff' => [["\xff/l" => '../escape'], []],
+            'byte 0x7f' => [["\x7f/l" => '../escape'], []],
+            'control byte beside the ^A it is listed as' => [["\x01/l" => '../escape'], ['^A/l' => 'x']],
+            'VMS version' => [['d/a;1' => '..', 'd/b' => 'a/../..'], []],
+        ];
+    }
+
+    /**
+     * Each link passes the checks under the name `unzip -Z1` lists, and unzip writes it under
+     * another: `l -> ../escape` one level up, or `d/a -> ..` that `d/b` then climbs through.
+     *
+     * @param array<string, string> $links
+     * @param array<string, string> $files
+     */
+    #[DataProvider('linksUnzipWritesElsewhere')]
+    public function test_a_zip_link_unzip_would_write_under_another_name_is_refused(array $links, array $files): void
+    {
+        InfoZip::withLinks($this->home . '/site.zip', $links, $files);
+        $archive = UploadedArchive::inHome('site.zip', $this->home, self::locate(...));
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('unzip would rename');
+
+        $archive->assertSafeContents($archive->path, $this->listInCLocale(...));
+    }
+
+    /** Core lists in the C locale, where tar prints `x€` as `x\342\202\254`. */
+    public function test_a_tarball_link_climbing_out_past_a_non_ascii_directory_is_refused(): void
+    {
+        $src = $this->home . '/src';
+        mkdir($src . '/x€', 0777, true);
+        symlink('x€/../../../..', $src . '/l');
+        $this->runOk(['tar', '-czf', $this->home . '/app.tar.gz', '-C', $src, 'x€', 'l']);
+        $this->runOk(['rm', '-rf', $src]);
+        $archive = UploadedArchive::inHome('app.tar.gz', $this->home, self::locate(...));
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('symbolic link');
+
+        $archive->assertSafeContents($archive->path, $this->listInCLocale(...));
+    }
+
+    public function test_a_tarball_whose_members_start_with_a_non_ascii_character_is_accepted(): void
+    {
+        $src = $this->home . '/src';
+        mkdir($src . '/ä', 0777, true);
+        file_put_contents($src . '/ä/x', 'x');
+        file_put_contents($src . '/äbout.html', 'x');
+        symlink('x', $src . '/ä/l');
+        $this->runOk(['tar', '-czf', $this->home . '/app.tar.gz', '-C', $src, 'ä', 'äbout.html']);
+        $this->runOk(['rm', '-rf', $src]);
+        $archive = UploadedArchive::inHome('app.tar.gz', $this->home, self::locate(...));
+
+        $members = $archive->assertSafeContents($archive->path, $this->listInCLocale(...));
+
+        $this->assertEqualsCanonicalizing(['ä/', 'ä/x', 'ä/l', 'äbout.html'], $members);
+    }
+
     public function test_modes_are_normalised_as_the_account(): void
     {
         $this->touchInHome('site.zip');
 
         $this->assertSame(
             ['sudo', 'setpriv', '--reuid', '1001', '--regid', '1002', '--clear-groups', 'chmod', '-R', 'u+rwX,go=rX', '--', '/tmp/x'],
-            UploadedArchive::inHome('site.zip', $this->home)->normaliseModesArgv(1001, 1002, '/tmp/x')
+            UploadedArchive::inHome('site.zip', $this->home, self::locate(...))->normaliseModesArgv(1001, 1002, '/tmp/x')
         );
     }
 
@@ -277,7 +408,7 @@ class UploadedArchiveTest extends TestCase
      */
     private function unpackedModes(string $archiveName, array $paths): array
     {
-        $archive = UploadedArchive::inHome($archiveName, $this->home);
+        $archive = UploadedArchive::inHome($archiveName, $this->home, self::locate(...));
         $into = sys_get_temp_dir() . '/pa-unpack-' . bin2hex(random_bytes(8));
         mkdir($into);
         try {
@@ -295,18 +426,23 @@ class UploadedArchiveTest extends TestCase
         }
     }
 
-    /** One stored member whose header names it $headerName and whose Unicode Path field names it $unicodeName. */
-    private function zipWithUnicodePath(string $path, string $headerName, string $unicodeName): void
+    /** @param list<string> $argv */
+    private function listInCLocale(array $argv): string
     {
-        $extra = pack('vvCV', 0x7075, 5 + strlen($unicodeName), 1, crc32($headerName)) . $unicodeName;
-        $sizes = [crc32('x'), 1, 1, strlen($headerName), strlen($extra)];
-        $local = pack('VvvvvvVVVvv', 0x04034b50, 10, 0, 0, 0, 0x21, ...$sizes) . $headerName . $extra . 'x';
-        $central = pack(
-            'VvvvvvvVVVvvvvvVV',
-            0x02014b50, 0x031e, 10, 0, 0, 0, 0x21, ...$sizes, ...[0, 0, 0, 0100644 << 16, 0]
-        ) . $headerName . $extra;
-        $end = pack('VvvvvVVv', 0x06054b50, 0, 0, 1, 1, strlen($central), strlen($local), 0);
-        file_put_contents($path, $local . $central . $end);
+        return $this->runInCLocale(array_slice($argv, 1));
+    }
+
+    /**
+     * PHP-FPM's locale: it has no LANG or LC_*, so glibc runs its commands in C.
+     *
+     * @param list<string> $argv
+     */
+    private function runInCLocale(array $argv): string
+    {
+        $process = new \Symfony\Component\Process\Process($argv, null, ['LC_ALL' => 'C', 'LANG' => 'C']);
+        $process->mustRun();
+
+        return $process->getOutput();
     }
 
     /** @param list<string> $argv */

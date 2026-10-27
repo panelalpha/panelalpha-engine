@@ -101,7 +101,7 @@ final class DindImageStore implements ImageStore
         return self::sharedLock($this->pushCommand($image));
     }
 
-    /** The tag-and-push half, so the ad-hoc rebuild can hold a different lock around it. */
+    /** The tag-and-push half of {@see hostPublishCommand()}. */
     private function pushCommand(string $image): string
     {
         $img = escapeshellarg($image);
@@ -111,21 +111,28 @@ final class DindImageStore implements ImageStore
     }
 
     /**
-     * Rebuild one of our base images on the host, then publish it, under
-     * {@see PUSH_LOCK} exclusive: two deploys needing the same missing base
-     * cannot both build it (the second waits, then finds the first one's
-     * image) and a garbage-collect cannot run between the build and the push.
+     * Rebuild one of our base images on the host, then publish it. The build
+     * holds only this image's {@see buildLockPath()}: two deploys needing the
+     * same missing base cannot both build it (the second waits, then finds the
+     * first one's image), and every other image transfer goes on meanwhile.
+     * Only the push holds {@see PUSH_LOCK}, shared, which is all a
+     * garbage-collect needs.
      */
     public function hostRebuildCommand(string $image, string $dockerfile): string
     {
         $img = escapeshellarg($image);
         $has = "sudo docker image inspect -- {$img} >/dev/null 2>&1";
+        $lock = escapeshellarg(self::buildLockPath($image));
 
-        return self::exclusiveLock(
-            "if ! {$has}; then { {$this->hostBuildCommand($image, $dockerfile)}; }"
-            ." && { {$this->pushCommand($image)}; }"
-            .' fi'
-        );
+        return "( touch {$lock} 2>/dev/null; exec 8<{$lock} && flock -x 8"
+            ." && if ! {$has}; then { {$this->hostBuildCommand($image, $dockerfile)}; }"
+            ." && {$this->hostPublishCommand($image)}; fi )";
+    }
+
+    /** One lock file per image, beside {@see PUSH_LOCK} in /tmp of the core container. */
+    public static function buildLockPath(string $image): string
+    {
+        return '/tmp/panelalpha-base-build-'.sha1($image).'.lock';
     }
 
     /**
@@ -349,14 +356,6 @@ final class DindImageStore implements ImageStore
         $lock = escapeshellarg(self::PUSH_LOCK);
 
         return "( touch {$lock} 2>/dev/null; exec 9<{$lock} && flock -s 9 && { {$command}; } )";
-    }
-
-    /** Run $command holding {@see PUSH_LOCK} exclusive, so it never overlaps a push or a garbage-collect. */
-    private static function exclusiveLock(string $command): string
-    {
-        $lock = escapeshellarg(self::PUSH_LOCK);
-
-        return "( touch {$lock} 2>/dev/null; exec 9<{$lock} && flock -x 9 && { {$command}; } )";
     }
 
     private function bothRegistriesRunning(): string

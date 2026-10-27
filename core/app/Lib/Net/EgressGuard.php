@@ -58,7 +58,9 @@ final class EgressGuard
 
     /**
      * The problem a refused URL should be reported under, or null when it may
-     * be fetched. The code is stable so a client can act on it.
+     * be fetched. The code is stable so a client can act on it. A host that
+     * does not resolve here cannot be checked, so it is refused too: git and
+     * curl still read numeric forms such as `0x7f000001` as an address.
      *
      * @param  list<string>  $schemes
      * @return ?array{field: string, code: string, message: string}
@@ -69,7 +71,7 @@ final class EgressGuard
             self::assertAllowed($url, $schemes);
 
             return null;
-        } catch (EgressRefusedException $e) {
+        } catch (\InvalidArgumentException $e) {
             return ['field' => $field, 'code' => EgressRefusedException::CODE, 'message' => $e->getMessage()];
         }
     }

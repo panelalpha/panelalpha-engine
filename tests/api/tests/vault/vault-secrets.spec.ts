@@ -1,6 +1,6 @@
 import { expect, test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
-import { uniqueId } from '@/helpers/random';
+import { randomUsername, uniqueId } from '@/helpers/random';
 import { validateParsedApiResponse } from '@/helpers/validate-parsed-response';
 import { expectStatus } from '@/helpers/expect-status';
 import {
@@ -230,6 +230,33 @@ test.describe('secret vault', () => {
     }
 
     expectOneOf((await api.createVaultSecretRaw({})).status, [400, 422]);
+  });
+
+  test('a reference sent to a project that does not exist is not found before it is read', async ({
+    api,
+  }) => {
+    const created = await api.createVaultSecret({ type: 'password' });
+    const missing = randomUsername();
+
+    try {
+      // Unpasted, the entry would be refused with a 422 had it been read.
+      await expectStatus(
+        await api.setSitePasswordRaw(missing, created.data.ref),
+        404,
+        'site password'
+      );
+      await expectStatus(
+        await api.createMySqlUserRaw(missing, { name: 'vaultuser', password: created.data.ref }),
+        404,
+        'mysql user'
+      );
+
+      const entry = (await api.getVaultSecret(created.data.ref)).data;
+      expect(entry.project, 'the missing name did not claim the entry').toBeNull();
+      expect(entry.used_count, 'the entry was not read').toBe(0);
+    } finally {
+      await api.deleteVaultSecretSafe(created.data.ref);
+    }
   });
 
   test('the vault endpoints require authentication', async ({ playwright, settings }) => {

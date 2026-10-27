@@ -9,9 +9,7 @@ namespace App\System\Project\PhpHosting\WordPress;
  * constants (the default), variables such as $table_prefix, or all; for set,
  * all updates whichever exists and adds a constant otherwise. These commands
  * read wp-config.php without loading WordPress. Create writes a new
- * wp-config.php from database credentials. HTTP, artisan, and MCP tools
- * are adapters. Path resolution and the runner come from WpCli; a non-zero
- * exit becomes Exception.
+ * wp-config.php from database credentials.
  */
 final class Config
 {
@@ -50,7 +48,7 @@ final class Config
     public function get(string $name, string $type = 'constant', bool $json = false): array
     {
         $this->assertType($type);
-        $args = ['config', 'get', $name, '--type='.$type];
+        $args = ['config', 'get', WpCli::positional($name), '--type='.$type];
         if ($json) {
             $args[] = '--format=json';
         }
@@ -68,7 +66,8 @@ final class Config
     public function set(string $name, string $value, bool $raw = false, string $type = 'constant'): array
     {
         $this->assertType($type);
-        $args = ['config', 'set', $name, $value, '--type='.$type];
+        [$written, $raw] = self::writableValue($value, $raw);
+        $args = ['config', 'set', WpCli::positional($name), $written, '--type='.$type];
         if ($raw) {
             $args[] = '--raw';
         }
@@ -128,13 +127,28 @@ final class Config
     {
         $this->assertType($type);
         $result = $this->cli->runOrFail(
-            ['config', 'delete', $name, '--type='.$type],
+            ['config', 'delete', WpCli::positional($name), '--type='.$type],
         );
 
         return [
             'constant' => $name,
             'message' => trim($result['stdout']),
         ];
+    }
+
+    /**
+     * WP-CLI would read a value starting with '-' as an option, so it goes as
+     * the raw PHP that writes the same wp-config.php line.
+     *
+     * @return array{string, bool}
+     */
+    private static function writableValue(string $value, bool $raw): array
+    {
+        if (! str_starts_with($value, '-')) {
+            return [$value, $raw];
+        }
+
+        return [$raw ? '('.$value.')' : var_export($value, true), true];
     }
 
     private function assertType(string $type): void

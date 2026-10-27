@@ -25,16 +25,8 @@ final class SourceSite
     }
 
     /**
-     * REST URL of a route under the site, e.g. `/wp-migrator/v1/info`.
+     * REST URL of a route under a site, e.g. `/wp-migrator/v1/info`.
      *
-     * @param  array<string, string>  $query
-     */
-    public function restUrl(string $route, array $query = []): string
-    {
-        return self::restUrlFor($this->url, $this->restMode, $route, $query);
-    }
-
-    /**
      * @param  array<string, string>  $query
      */
     public static function restUrlFor(string $base, string $mode, string $route, array $query = []): string

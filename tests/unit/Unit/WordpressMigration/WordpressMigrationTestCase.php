@@ -5,6 +5,7 @@ namespace Tests\Unit\WordpressMigration;
 use App\Models\Setting;
 use App\Models\WordpressMigration;
 use App\System\Project\PhpHosting\WordPress\Migration as WordPressMigrationModule;
+use App\System\Project\PhpHosting\WordPress\Migration\EngineAddresses;
 use App\System\Project\PhpHosting\WordPress\Migration\MigrationStep;
 use App\System\Project\PhpHosting\WordPress\Migration\Steps\ClearSecretsStep;
 use App\System\Project\PhpHosting\WordPress\Migration\WordpressMigratorZip;
@@ -14,8 +15,9 @@ use Tests\TestCase;
 use Throwable;
 
 /**
- * In-memory sqlite + the wordpress_migrations migration files, mirroring
- * VaultTestCase / SqliteTaskTestCase so the suite never touches host MySQL.
+ * In-memory sqlite + the wordpress_migrations migration files and the IPv4 NAT
+ * map the transfer address reads, mirroring VaultTestCase / SqliteTaskTestCase
+ * so the suite never touches host MySQL.
  *
  * Sequence tests call advance with a substitute sequence. The last step stays
  * the real clear-secrets step unless a test replaces it. Collaborator tests
@@ -24,6 +26,8 @@ use Throwable;
 abstract class WordpressMigrationTestCase extends TestCase
 {
     protected const ENGINE_IPV4 = '203.0.113.7';
+
+    protected const SOURCE_TOKEN = '5e7c1b2a3d4f5061728394a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f';
 
     protected function setUp(): void
     {
@@ -43,17 +47,32 @@ abstract class WordpressMigrationTestCase extends TestCase
         foreach (glob(base_path('database/migrations/*_wordpress_migrations_table.php')) ?: [] as $file) {
             (require $file)->up();
         }
+        (require base_path('database/migrations/2026_05_28_120000_create_ipv4_nat_maps_table.php'))->up();
 
-        WordpressMigratorZip::clearCache();
+        $this->forgetMigratorZips();
         Setting::setRuntimeSettings(['default_ipv4' => self::ENGINE_IPV4]);
+        $this->app->instance(EngineAddresses::class, new class(self::ENGINE_IPV4) extends EngineAddresses {
+            public function __construct(private readonly string $ipv4) {}
+
+            public function ranges(): array
+            {
+                return [$this->ipv4];
+            }
+        });
     }
 
     protected function tearDown(): void
     {
         Setting::clearRuntimeSettings();
-        WordpressMigratorZip::clearCache();
+        $this->forgetMigratorZips();
         Schema::dropIfExists('wordpress_migrations');
+        Schema::dropIfExists('ipv4_nat_maps');
         parent::tearDown();
+    }
+
+    private function forgetMigratorZips(): void
+    {
+        (new \ReflectionProperty(WordpressMigratorZip::class, 'cache'))->setValue(null, []);
     }
 
     /**

@@ -70,7 +70,7 @@ Connect replaces its token every week by itself, and the token expires after 30 
 pae hub:status
 ```
 
-Shows the account, address, permissions, when the token expires, and the last 20 calls Connect made (admin logins highlighted).
+Shows the account, address, permissions, when the token expires, and the last 20 calls Connect made (admin logins highlighted). When Connect itself says it no longer knows the connection, the engine revokes Connect's tokens and forgets the connection.
 
 ```bash
 pae hub:disconnect
@@ -89,5 +89,6 @@ Revokes Connect's access immediately, then tells Connect. It works even when Con
 | `Denied on the Hub.` | The code was cancelled in Connect. Create a new one. |
 | `This engine is already connected to …` | Run the command again with `--replace` to move it. |
 | `The certificate on :2011 changed during connect` | Run the command again. |
+| `The Hub answered: … (HTTP 403)` from `pae hub:status` | Something in front of Connect refused the call (a firewall or bot rule). The engine changed nothing. If you removed the connection in Connect, run `pae hub:disconnect`. |
 
 When the engine's certificate is renewed with a new key, the engine tells Connect before it starts serving the new certificate. If Connect still reports a certificate problem, create a new code in Connect and run `pae hub:connect CODE --replace`.

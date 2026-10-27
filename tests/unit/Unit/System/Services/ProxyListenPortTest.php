@@ -138,6 +138,27 @@ SS;
         $this->assertNull($this->ports()->switchOnRefusal($parked));
     }
 
+    /** stream.conf renders no server name, so nginx would serve only one of the two. */
+    public function test_switching_on_a_stream_rule_beside_its_live_twin_is_refused(): void
+    {
+        foreach (['tcp' => 25212, 'udp' => 25213] as $transport => $port) {
+            $this->rule($transport, $port);
+            $parked = $this->rule($transport, $port, enabled: false);
+
+            $this->assertSame(ProxyRuleDuplicate::MESSAGE, $this->ports()->switchOnRefusal($parked), $transport);
+        }
+    }
+
+    public function test_switching_on_a_stream_rule_on_another_address_or_transport_of_a_live_port_is_allowed(): void
+    {
+        $this->rule('tcp', 25212);
+        $otherAddress = $this->rule('tcp', 25212, enabled: false, listenIp: '10.0.0.5');
+        $otherTransport = $this->rule('udp', 25212, enabled: false);
+
+        $this->assertNull($this->ports(tcp: '', udp: '')->switchOnRefusal($otherAddress));
+        $this->assertNull($this->ports(tcp: '', udp: '')->switchOnRefusal($otherTransport));
+    }
+
     public function test_switching_on_a_rule_takes_its_port_again(): void
     {
         $parked = $this->rule('tcp', 2011, enabled: false);
@@ -187,12 +208,12 @@ SS;
         return new ProxyListenPort($system);
     }
 
-    private function rule(string $transport, int $port, bool $enabled = true): ProxyRule
+    private function rule(string $transport, int $port, bool $enabled = true, string $listenIp = '*'): ProxyRule
     {
         return ProxyRule::query()->create([
             'owner_scope' => 'system',
             'transport' => $transport,
-            'listen_ip' => '*',
+            'listen_ip' => $listenIp,
             'listen_port' => $port,
             'upstream_host' => 'app',
             'upstream_port' => 3000,

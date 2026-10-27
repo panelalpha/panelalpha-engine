@@ -118,7 +118,7 @@ class GitlabProviderTest extends TestCase
         $request = $this->signedRequest();
 
         $this->assertTrue($provider->verify($request, self::SIGNING_SECRET));
-        $this->assertTrue($provider->signsTheBody($request));
+        $this->assertTrue($provider->signsTheBody($request, self::SIGNING_SECRET));
     }
 
     public function test_a_signed_delivery_whose_body_was_changed_is_refused(): void
@@ -159,12 +159,39 @@ class GitlabProviderTest extends TestCase
         $this->assertFalse((new GitlabProvider())->verify($request, self::SIGNING_SECRET));
     }
 
+    /**
+     * A secret made before 2.2 has no `whsec_` key, so a GitLab webhook that
+     * signs with a signing token of its own is checked by the token it sends.
+     */
+    public function test_a_signed_delivery_to_a_secret_that_cannot_sign_is_checked_by_its_token(): void
+    {
+        $provider = new GitlabProvider();
+        $request = $this->signedRequest();
+        $request->headers->set('X-Gitlab-Token', self::SECRET);
+
+        $this->assertTrue($provider->verify($request, self::SECRET));
+        $this->assertFalse($provider->signsTheBody($request, self::SECRET));
+        $this->assertFalse(GitlabProvider::canSignWith(self::SECRET));
+        $this->assertTrue(GitlabProvider::canSignWith(self::SIGNING_SECRET));
+    }
+
+    public function test_a_signed_delivery_to_a_secret_that_cannot_sign_still_needs_its_token(): void
+    {
+        $provider = new GitlabProvider();
+        $request = $this->signedRequest();
+
+        $this->assertFalse($provider->verify($request, self::SECRET));
+
+        $request->headers->set('X-Gitlab-Token', 'some-other-secret');
+        $this->assertFalse($provider->verify($request, self::SECRET));
+    }
+
     public function test_the_token_the_engine_registers_beside_a_signing_secret_verifies(): void
     {
         $request = $this->request('{}', ['HTTP_X_GITLAB_EVENT' => 'Push Hook', 'HTTP_X_GITLAB_TOKEN' => GitlabProvider::tokenFor(self::SIGNING_SECRET)]);
 
         $this->assertTrue((new GitlabProvider())->verify($request, self::SIGNING_SECRET));
-        $this->assertFalse((new GitlabProvider())->signsTheBody($request));
+        $this->assertFalse((new GitlabProvider())->signsTheBody($request, self::SIGNING_SECRET));
         $this->assertNotSame(self::SIGNING_SECRET, GitlabProvider::tokenFor(self::SIGNING_SECRET));
     }
 

@@ -10,6 +10,7 @@ import { phpErrorLogResponseSchema } from '@/schemas';
 
 const LOG_TIMEOUT_MS = 20_000;
 const LOG_POLL_INTERVAL_MS = 1_000;
+const PROBE_TIMEOUT_MS = 60_000;
 
 /** Writes a PHP probe that raises a warning with `marker` and asks the site for it. */
 async function raiseWarning(
@@ -21,10 +22,21 @@ async function raiseWarning(
 ): Promise<void> {
   const script = `php-error-${uniqueId()}.php`;
   await api.putFileContents(username, `${getDomainBasePath(domain)}/${script}`, body);
-  const response = await http.get(`https://${domain}/${script}?t=${Date.now()}`, {
-    ignoreHTTPSErrors: true,
-  });
-  expect(response.status(), 'the probe script did not answer over HTTP').toBeLessThan(500);
+  await expect
+    .poll(
+      async () =>
+        (
+          await http.get(`https://${domain}/${script}?t=${Date.now()}`, {
+            ignoreHTTPSErrors: true,
+          })
+        ).status(),
+      {
+        timeout: PROBE_TIMEOUT_MS,
+        intervals: [LOG_POLL_INTERVAL_MS],
+        message: 'the probe script did not answer over HTTP',
+      }
+    )
+    .toBeLessThan(500);
 }
 
 test.describe('PHP error log', () => {

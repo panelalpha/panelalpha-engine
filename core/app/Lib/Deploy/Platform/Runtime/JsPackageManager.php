@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Platform\Runtime;
 
+use App\Lib\Deploy\AccountHomeRead;
+
 /**
  * npm/yarn/pnpm/bun mechanics shared by every JS recipe: which manager a repo
  * uses, the install/build/start command for each, and the install-time quirks
@@ -401,7 +403,7 @@ class JsPackageManager
         if (! is_file($path)) {
             return false;
         }
-        $raw = file_get_contents($path);
+        $raw = AccountHomeRead::contents($path);
         if (! is_string($raw) || $raw === '') {
             return false;
         }
@@ -477,7 +479,7 @@ class JsPackageManager
         if (! is_file($path)) {
             return null;
         }
-        $raw = (string) @file_get_contents($path);
+        $raw = (string) AccountHomeRead::contents($path);
         if (preg_match('/^__metadata:/m', $raw) === 1) {
             return 2;
         }

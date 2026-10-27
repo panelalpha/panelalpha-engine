@@ -179,7 +179,7 @@ class UserComposeStrategy
             // whatever runs `compose up` against it — copy the source through
             // verbatim rather than leaving composeFileToRun() pointing at
             // nothing.
-            $system->filesystem()->filePutContents(
+            $system->filesystem()->writeFileReplacingPath(
                 $runPath,
                 $included === [] ? $raw : ComposeYaml::dump($parsed, $raw, 6, 2, ...$included),
                 $chown,
@@ -292,7 +292,7 @@ class UserComposeStrategy
         if ($system->filesystem()->fileExists($projectDir.'/'.EngineArtifacts::ENV_OVERRIDES)) {
             [$parsed] = ComposeEnvFiles::attach($parsed, EngineArtifacts::ENV_OVERRIDES);
         }
-        $system->filesystem()->filePutContents($runPath, ComposeYaml::dump($parsed, $raw, 6, 2, ...$included), $chown, EngineArtifacts::RUN_COMPOSE_MODE);
+        $system->filesystem()->writeFileReplacingPath($runPath, ComposeYaml::dump($parsed, $raw, 6, 2, ...$included), $chown, EngineArtifacts::RUN_COMPOSE_MODE);
         $this->dind->strategy()->installRailsHostInitializer($projectDir, $chown);
         $logger?->info('Hardened compose for hosting (resource limits, restart policy, isolation)');
     }
@@ -414,7 +414,7 @@ class UserComposeStrategy
         if ($workstation !== null) {
             $logger?->info('Not layering '.Paths::CLIENT_OVERRIDE_FILENAME.": {$workstation}, which is a development setup");
             // An empty copy, not none: without one Paths::composeFiles() layers the raw file.
-            $fs->filePutContents($copy, self::NOT_LAYERED_OVERRIDE, $chown, '644');
+            $fs->writeFileReplacingPath($copy, self::NOT_LAYERED_OVERRIDE, $chown, '644');
 
             return;
         }
@@ -446,7 +446,7 @@ class UserComposeStrategy
         foreach ($gone as $name) {
             $logger?->info('Dropped service '.$name.' from '.Paths::CLIENT_OVERRIDE_FILENAME.': the run file no longer has it');
         }
-        $fs->filePutContents($copy, $hardened['yaml'], $chown, '644');
+        $fs->writeFileReplacingPath($copy, $hardened['yaml'], $chown, '644');
     }
 
     /**

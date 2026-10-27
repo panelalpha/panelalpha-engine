@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Mcp;
 
+use App\Lib\Http\OutboundUrl;
 use App\Mcp\Tools\Api\UploadArguments;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
@@ -16,8 +17,16 @@ class UploadArgumentsTest extends TestCase
     /** @var array<int, string> */
     private array $cleanup = [];
 
+    /** The URL's address is checked first; example.com answers a fixed public address, not the test host's DNS. */
+    protected function setUp(): void
+    {
+        parent::setUp();
+        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'example.com' ? ['93.184.216.34'] : []);
+    }
+
     protected function tearDown(): void
     {
+        OutboundUrl::setResolverForTests(null);
         foreach ($this->cleanup as $path) {
             @unlink($path);
         }

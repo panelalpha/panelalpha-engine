@@ -5,12 +5,13 @@ namespace Tests\Unit\System\Project\PhpHosting\WordPress;
 use App\Models\Domain;
 use App\Models\User;
 use App\System\Project;
-use App\System\Project\PhpHosting\WordPress\WpCli;
-use App\System\Project\PhpHosting\WordPress\Exception as WordPressException;
+use App\System\Project\FileManager;
 use App\System\Project\PhpHosting\WordPress\ContainerMustUsePlugin;
 use App\System\Project\PhpHosting\WordPress\EnsuresMustUsePlugin;
+use App\System\Project\PhpHosting\WordPress\Exception as WordPressException;
 use App\System\Project\PhpHosting\WordPress\MustUsePlugin;
 use App\System\Project\PhpHosting\WordPress\Sso;
+use App\System\Project\PhpHosting\WordPress\WpCli;
 use Illuminate\Container\Container;
 use Mockery;
 use PHPUnit\Framework\TestCase;
@@ -94,6 +95,25 @@ class SsoTest extends TestCase
         $this->assertStringStartsWith('https://other.test/?panelalpha_sso=', $body['url']);
     }
 
+    public function test_the_must_use_plugin_and_wp_cli_use_one_directory_for_a_path_outside_the_home(): void
+    {
+        $sequence = [];
+        $sso = $this->ssoWithFakes(
+            $sequence,
+            results: [
+                ['exit_code' => 0, 'stdout' => 'ok', 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => 'https://other.test', 'stderr' => ''],
+            ],
+            installRoot: '/home/alice/tmp/wp',
+            path: '/tmp/wp',
+        );
+
+        $sso->create('editor');
+
+        $this->assertSame('--path=/home/alice/tmp/wp', $sequence[1][1][6]);
+        $this->assertSame('--path=/home/alice/tmp/wp', $sequence[2][1][3]);
+    }
+
     public function test_non_zero_exit_throws_with_command_output(): void
     {
         $sequence = [];
@@ -118,6 +138,21 @@ class SsoTest extends TestCase
         }
     }
 
+    public function test_a_user_starting_with_a_dash_never_reaches_wp_cli(): void
+    {
+        $sequence = [];
+        $sso = $this->ssoWithFakes($sequence);
+
+        try {
+            $sso->create('--exec=x');
+            $this->fail('Expected WordPressException');
+        } catch (WordPressException $e) {
+            $this->assertStringContainsString("starts with '-'", $e->getMessage());
+        }
+
+        $this->assertSame([], array_values(array_filter($sequence, static fn (array $step): bool => $step[0] === 'wpcli')));
+    }
+
     public function test_a_container_install_gets_the_plugin_written_through_wp_cli(): void
     {
         $calls = [];
@@ -135,7 +170,8 @@ class SsoTest extends TestCase
         $user->shouldNotReceive('getMainDomain');
 
         $previous = Container::getInstance();
-        Container::setInstance(new class extends Container {
+        Container::setInstance(new class extends Container
+        {
             public function resourcePath(string $path = ''): string
             {
                 return dirname(__DIR__, 7).'/core/resources/'.$path;
@@ -161,7 +197,7 @@ class SsoTest extends TestCase
         $dir = sys_get_temp_dir().'/pa-mu-'.bin2hex(random_bytes(4));
         $code = ContainerMustUsePlugin::writeCode("<?php // plugin\n");
         $run = static function () use ($dir, $code): void {
-            if (!defined('WPMU_PLUGIN_DIR')) {
+            if (! defined('WPMU_PLUGIN_DIR')) {
                 define('WPMU_PLUGIN_DIR', $dir);
             }
             eval($code);
@@ -183,8 +219,8 @@ class SsoTest extends TestCase
     }
 
     /**
-     * @param list<array{0: string, 1: mixed}> $sequence
-     * @param list<array{exit_code: int, stdout: string, stderr: string}> $results
+     * @param  list<array{0: string, 1: mixed}>  $sequence
+     * @param  list<array{exit_code: int, stdout: string, stderr: string}>  $results
      */
     private function ssoWithFakes(
         array &$sequence,
@@ -196,6 +232,8 @@ class SsoTest extends TestCase
         $user->username = 'alice';
         $project = Mockery::mock(Project::class);
         $project->shouldReceive('homeDirPath')->andReturn('/home/alice');
+        $project->shouldReceive('resolvePath')
+            ->andReturnUsing(fn (string $path): string => (new FileManager($project))->resolvePath($path));
         $call = 0;
         $project->shouldReceive('runWpCli')
             ->andReturnUsing(function (array $args) use (&$sequence, &$call, $results): array {

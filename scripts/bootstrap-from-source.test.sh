@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
-eval "$(sed -n '/^COMPOSER_LOCK_STAMP=/p; /^composer_needed() {/,/^}/p; /^core_artisan() {/p; /^existing_tokens() {/,/^}/p; /^served_cert_note() {/,/^}/p; /^dns_port_holder() {/,/^}/p; /^report_dns_port_holder() {/,/^}/p' "$SCRIPT_DIR/bootstrap-from-source.sh")"
+eval "$(sed -n '/^COMPOSER_LOCK_STAMP=/p; /^composer_needed() {/,/^}/p; /^core_artisan() {/p; /^existing_tokens() {/,/^}/p; /^served_cert_note() {/,/^}/p; /^dns_port_holder() {/,/^}/p; /^report_dns_port_holder() {/,/^}/p; /^warn_old_host_git() {/,/^}/p' "$SCRIPT_DIR/bootstrap-from-source.sh")"
 cd "$WORK_DIR" && mkdir -p core
 
 failures=0
@@ -126,6 +126,33 @@ expect_holder "another holder is warned about" "$WARNING/survived/"
 FAKE_SS=("$OTHER_LINE" '')
 expect_holder "a holder gone between two looks does not end the bootstrap" "$WARNING/survived/"
 unset -f ss step warn
+
+# Traditional PHP hosting pins its host-side git with http.curloptResolve, which
+# git before 2.37 ignores: the bootstrap says so, and only then.
+warn() { echo "warn: $1"; }
+FAKE_GIT=''
+git() { [ -n "$FAKE_GIT" ] || return 127; printf '%s\n' "$FAKE_GIT"; }
+expect_git_warning() { # expect_git_warning <label> <expected output>
+    local got
+    got=$(set -euo pipefail; warn_old_host_git; echo survived)
+    got=$(printf '%s\n' "$got" | tr '\n' '/')
+    if [ "$got" = "$2" ]; then
+        echo "PASS: $1"
+    else
+        echo "FAIL: $1 -- expected '$2', got '$got'"
+        failures=$((failures + 1))
+    fi
+}
+OLD_GIT_WARNING="warn: git 2.34 is older than 2.37: on traditional PHP hosting the engine refuses a git pull from any host name not in EGRESS_ALLOW_HOSTS until git on this server is upgraded."
+FAKE_GIT='git version 2.34.1'
+expect_git_warning "Ubuntu 22.04's git 2.34 is warned about" "$OLD_GIT_WARNING/survived/"
+FAKE_GIT='git version 2.37.0'
+expect_git_warning "git 2.37 says nothing" "survived/"
+FAKE_GIT='git version 2.43.0'
+expect_git_warning "git 2.43 says nothing" "survived/"
+FAKE_GIT=''
+expect_git_warning "no git says nothing and does not end the bootstrap" "survived/"
+unset -f git warn
 
 [ "$failures" -eq 0 ] && echo "All passed." || echo "${failures} failed."
 exit "$failures"

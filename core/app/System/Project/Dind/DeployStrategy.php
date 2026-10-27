@@ -379,6 +379,7 @@ class DeployStrategy
         if (! $fs->fileExists($override)) {
             return;
         }
+        $fs->assertNotSymlink($override);
         $defined = $this->servicesDefinedOutside($override);
         $trimmed = ComposeOverride::withoutUndefinedServices($fs->fileGetContents($override), $defined);
         if ($trimmed['dropped'] === [] || $trimmed['yaml'] === null) {
@@ -389,7 +390,7 @@ class DeployStrategy
                 "Not layering service {$name} from the app config's compose override: the application has no such service, and the override gives it no image or build"
             );
         }
-        $fs->filePutContents($override, $trimmed['yaml'], $chown, '644');
+        $fs->writeFileReplacingPath($override, $trimmed['yaml'], $chown, '644');
     }
 
     /**

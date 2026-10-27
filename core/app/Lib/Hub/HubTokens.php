@@ -8,7 +8,9 @@ use Laravel\Sanctum\NewAccessToken;
 
 /**
  * The Sanctum tokens the Hub holds, on the root admin: `hub:pending` while
- * the connect ceremony runs, `hub:<connection_id>` once it completed.
+ * the connect ceremony runs, `hub:<connection_id>` once it completed. Any
+ * token creator can pick such a name, so a Hub token is told by its `hub`
+ * mark, which only minting here sets and a rotation carries over.
  */
 final class HubTokens
 {
@@ -21,7 +23,10 @@ final class HubTokens
     /** @param array<int, string> $abilities */
     public static function mint(array $abilities, string $name = self::PENDING): NewAccessToken
     {
-        return Admin::rootAccount()->createToken($name, $abilities, now()->addDays(self::LIFETIME_DAYS));
+        $new = Admin::rootAccount()->createToken($name, $abilities, now()->addDays(self::LIFETIME_DAYS));
+        $new->accessToken->forceFill(['hub' => true])->save();
+
+        return $new;
     }
 
     public static function nameFor(string $connectionId): string
@@ -31,7 +36,7 @@ final class HubTokens
 
     public static function isHubToken(?PersonalAccessToken $token): bool
     {
-        return $token !== null && str_starts_with((string) $token->name, self::NAME_PREFIX);
+        return $token?->hub === true;
     }
 
     /** The connection a token was issued for, or null for a pending or foreign one. */
@@ -56,7 +61,7 @@ final class HubTokens
     public static function revokeAll(?int $except = null): int
     {
         return PersonalAccessToken::query()
-            ->where('name', 'like', self::NAME_PREFIX.'%')
+            ->where('hub', true)
             ->whereNull('revoked_at')
             ->when($except !== null, fn ($q) => $q->whereKeyNot($except))
             ->update(['revoked_at' => now()]);

@@ -67,7 +67,11 @@ use App\Http\Controllers\User\Wp\WpThemeController;
 use App\Http\Controllers\User\Wp\WpUserController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\WordpressMigrationController;
+use App\Http\Middleware\LimitConcurrentRequests;
 use App\Http\Middleware\PmaSso;
+use App\Rules\WpCliArgument;
+use App\System\Project\PhpHosting\WordPress\Migration\MigratorPluginPackage;
+use App\System\Project\PhpHosting\WordPress\Migration\SourceProbe;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -132,12 +136,15 @@ Route::get('/tasks/{id}/logs/stream', [TaskController::class, 'streamLogs']);
 Route::post('/tasks/{id}/cancel', [TaskController::class, 'cancel']);
 
 Route::post('/wordpress/migrations', [WordpressMigrationController::class, 'store']);
-Route::post('/wordpress/migrations/test', [WordpressMigrationController::class, 'test']);
+// Each test holds a PHP-FPM worker until the source answers or its deadline
+// passes; two at once leaves the rest of the pool to the REST API and MCP.
+Route::post('/wordpress/migrations/test', [WordpressMigrationController::class, 'test'])
+    ->middleware(LimitConcurrentRequests::using('wordpress-migration-test', 2, 2 * SourceProbe::DEADLINE_SECONDS));
 Route::post('/wordpress/migrations/plugin-package', [WordpressMigrationController::class, 'pluginPackage']);
 // Unauthenticated: the signature is the capability, and the link outlives the
 // panel request that minted it (the Client Area's download button follows it).
 Route::get('/wordpress/migrations/plugin-package/download', [WordpressMigrationController::class, 'downloadPluginPackage'])
-    ->name(WordpressMigrationController::PLUGIN_PACKAGE_ROUTE)
+    ->name(MigratorPluginPackage::ROUTE)
     ->withoutMiddleware('auth:api')
     ->middleware(['signed', 'throttle:plugin-package-download']);
 Route::get('/wordpress/migrations/{id}', [WordpressMigrationController::class, 'show']);
@@ -310,70 +317,79 @@ $projectRoutes = function (): void {
 
     Route::post('/{username}/wp/command', [WpCliController::class, 'run']);
 
-    Route::get('/{username}/wp/plugins/search', [WpPluginController::class, 'search']);
-    Route::get('/{username}/wp/plugins', [WpPluginController::class, 'index']);
-    Route::get('/{username}/wp/plugins/{plugin}', [WpPluginController::class, 'show']);
-    Route::get('/{username}/wp/plugins/{plugin}/installed', [WpPluginController::class, 'installed']);
-    Route::post('/{username}/wp/plugins/install', [WpPluginController::class, 'install']);
-    Route::post('/{username}/wp/plugins/{plugin}/activate', [WpPluginController::class, 'activate']);
-    Route::post('/{username}/wp/plugins/{plugin}/deactivate', [WpPluginController::class, 'deactivate']);
-    Route::post('/{username}/wp/plugins/{plugin}/update', [WpPluginController::class, 'update']);
-    Route::delete('/{username}/wp/plugins/{plugin}', [WpPluginController::class, 'destroy']);
-
-    Route::get('/{username}/wp/themes/search', [WpThemeController::class, 'search']);
-    Route::get('/{username}/wp/themes', [WpThemeController::class, 'index']);
-    Route::get('/{username}/wp/themes/{theme}', [WpThemeController::class, 'show']);
-    Route::get('/{username}/wp/themes/{theme}/installed', [WpThemeController::class, 'installed']);
-    Route::post('/{username}/wp/themes/install', [WpThemeController::class, 'install']);
-    Route::post('/{username}/wp/themes/{theme}/activate', [WpThemeController::class, 'activate']);
-    Route::post('/{username}/wp/themes/{theme}/update', [WpThemeController::class, 'update']);
-    Route::delete('/{username}/wp/themes/{theme}', [WpThemeController::class, 'destroy']);
-
-    Route::get('/{username}/wp/users', [WpUserController::class, 'index']);
-    Route::post('/{username}/wp/users', [WpUserController::class, 'store']);
-    Route::put('/{username}/wp/users/{user}', [WpUserController::class, 'update']);
-    Route::put('/{username}/wp/users/{user}/password', [WpUserController::class, 'setPassword']);
-    Route::delete('/{username}/wp/users/{user}', [WpUserController::class, 'destroy']);
-
-    Route::get('/{username}/wp/users/{user}/application-passwords', [WpApplicationPasswordController::class, 'index']);
-    Route::post('/{username}/wp/users/{user}/application-passwords', [WpApplicationPasswordController::class, 'store']);
-    Route::delete('/{username}/wp/users/{user}/application-passwords/{uuid}', [WpApplicationPasswordController::class, 'destroy']);
-
-    Route::post('/{username}/wp/users/{user}/sso', [WpUserController::class, 'createSso']);
-
-    Route::get('/{username}/wp/core', [WpCoreController::class, 'status']);
-    Route::get('/{username}/wp/core/updates', [WpCoreController::class, 'updates']);
-    Route::post('/{username}/wp/core/download', [WpCoreController::class, 'download']);
-    Route::post('/{username}/wp/core/install', [WpCoreController::class, 'install']);
-    Route::post('/{username}/wp/core/update', [WpCoreController::class, 'update']);
-
-    Route::get('/{username}/wp/maintenance', [WpMaintenanceController::class, 'show']);
-    Route::put('/{username}/wp/maintenance', [WpMaintenanceController::class, 'update']);
-    Route::post('/{username}/wp/cache/flush', [WpCacheController::class, 'flush']);
-
-    Route::get('/{username}/wp/config', [WpConfigController::class, 'index']);
-    Route::post('/{username}/wp/config', [WpConfigController::class, 'store']);
-    Route::get('/{username}/wp/config/{constant}', [WpConfigController::class, 'show']);
-    Route::put('/{username}/wp/config/{constant}', [WpConfigController::class, 'update']);
-    Route::delete('/{username}/wp/config/{constant}', [WpConfigController::class, 'destroy']);
-
-    Route::get('/{username}/wp/auto-update', [WpAutoUpdateController::class, 'show']);
-    Route::put('/{username}/wp/auto-update', [WpAutoUpdateController::class, 'update']);
-
-    Route::get('/{username}/wp/options', [WpOptionController::class, 'index']);
-    Route::get('/{username}/wp/options/{option}', [WpOptionController::class, 'show']);
-    Route::put('/{username}/wp/options/{option}', [WpOptionController::class, 'update']);
-
-    Route::post('/{username}/wp/search-replace', [WpSearchReplaceController::class, 'run']);
-    Route::put('/{username}/wp/language', [WpLanguageController::class, 'update']);
-    Route::post('/{username}/wp/database/export', [WpDatabaseController::class, 'export']);
-    Route::post('/{username}/wp/database/import', [WpDatabaseController::class, 'import']);
-
-    // Deprecated spelling of the line above, kept for one release so existing
-    // integrations do not break on a rename. Deliberately undocumented: an
-    // alias in the OpenAPI document would generate a second MCP tool for the
-    // one operation, and clients would have two names for one answer.
+    // Deprecated spelling of the line above, kept while the panel still calls
+    // it. Deliberately undocumented: an alias in the OpenAPI document would
+    // generate a second MCP tool for the one operation, and clients would have
+    // two names for one answer.
     Route::post('/{username}/wp-cli/command', [WpCliController::class, 'run']);
+
+    Route::where([
+        'plugin' => WpCliArgument::SLUG,
+        'theme' => WpCliArgument::SLUG,
+        'user' => WpCliArgument::LOGIN,
+        'uuid' => WpCliArgument::UUID,
+        'constant' => WpCliArgument::CONSTANT,
+        'option' => WpCliArgument::OPTION_NAME,
+    ])->group(function () {
+        Route::get('/{username}/wp/plugins/search', [WpPluginController::class, 'search']);
+        Route::get('/{username}/wp/plugins', [WpPluginController::class, 'index']);
+        Route::get('/{username}/wp/plugins/{plugin}', [WpPluginController::class, 'show']);
+        Route::get('/{username}/wp/plugins/{plugin}/installed', [WpPluginController::class, 'installed']);
+        Route::post('/{username}/wp/plugins/install', [WpPluginController::class, 'install']);
+        Route::post('/{username}/wp/plugins/{plugin}/activate', [WpPluginController::class, 'activate']);
+        Route::post('/{username}/wp/plugins/{plugin}/deactivate', [WpPluginController::class, 'deactivate']);
+        Route::post('/{username}/wp/plugins/{plugin}/update', [WpPluginController::class, 'update']);
+        Route::delete('/{username}/wp/plugins/{plugin}', [WpPluginController::class, 'destroy']);
+
+        Route::get('/{username}/wp/themes/search', [WpThemeController::class, 'search']);
+        Route::get('/{username}/wp/themes', [WpThemeController::class, 'index']);
+        Route::get('/{username}/wp/themes/{theme}', [WpThemeController::class, 'show']);
+        Route::get('/{username}/wp/themes/{theme}/installed', [WpThemeController::class, 'installed']);
+        Route::post('/{username}/wp/themes/install', [WpThemeController::class, 'install']);
+        Route::post('/{username}/wp/themes/{theme}/activate', [WpThemeController::class, 'activate']);
+        Route::post('/{username}/wp/themes/{theme}/update', [WpThemeController::class, 'update']);
+        Route::delete('/{username}/wp/themes/{theme}', [WpThemeController::class, 'destroy']);
+
+        Route::get('/{username}/wp/users', [WpUserController::class, 'index']);
+        Route::post('/{username}/wp/users', [WpUserController::class, 'store']);
+        Route::put('/{username}/wp/users/{user}', [WpUserController::class, 'update']);
+        Route::put('/{username}/wp/users/{user}/password', [WpUserController::class, 'setPassword']);
+        Route::delete('/{username}/wp/users/{user}', [WpUserController::class, 'destroy']);
+
+        Route::get('/{username}/wp/users/{user}/application-passwords', [WpApplicationPasswordController::class, 'index']);
+        Route::post('/{username}/wp/users/{user}/application-passwords', [WpApplicationPasswordController::class, 'store']);
+        Route::delete('/{username}/wp/users/{user}/application-passwords/{uuid}', [WpApplicationPasswordController::class, 'destroy']);
+
+        Route::post('/{username}/wp/users/{user}/sso', [WpUserController::class, 'createSso']);
+
+        Route::get('/{username}/wp/core', [WpCoreController::class, 'status']);
+        Route::get('/{username}/wp/core/updates', [WpCoreController::class, 'updates']);
+        Route::post('/{username}/wp/core/download', [WpCoreController::class, 'download']);
+        Route::post('/{username}/wp/core/install', [WpCoreController::class, 'install']);
+        Route::post('/{username}/wp/core/update', [WpCoreController::class, 'update']);
+
+        Route::get('/{username}/wp/maintenance', [WpMaintenanceController::class, 'show']);
+        Route::put('/{username}/wp/maintenance', [WpMaintenanceController::class, 'update']);
+        Route::post('/{username}/wp/cache/flush', [WpCacheController::class, 'flush']);
+
+        Route::get('/{username}/wp/config', [WpConfigController::class, 'index']);
+        Route::post('/{username}/wp/config', [WpConfigController::class, 'store']);
+        Route::get('/{username}/wp/config/{constant}', [WpConfigController::class, 'show']);
+        Route::put('/{username}/wp/config/{constant}', [WpConfigController::class, 'update']);
+        Route::delete('/{username}/wp/config/{constant}', [WpConfigController::class, 'destroy']);
+
+        Route::get('/{username}/wp/auto-update', [WpAutoUpdateController::class, 'show']);
+        Route::put('/{username}/wp/auto-update', [WpAutoUpdateController::class, 'update']);
+
+        Route::get('/{username}/wp/options', [WpOptionController::class, 'index']);
+        Route::get('/{username}/wp/options/{option}', [WpOptionController::class, 'show']);
+        Route::put('/{username}/wp/options/{option}', [WpOptionController::class, 'update']);
+
+        Route::post('/{username}/wp/search-replace', [WpSearchReplaceController::class, 'run']);
+        Route::put('/{username}/wp/language', [WpLanguageController::class, 'update']);
+        Route::post('/{username}/wp/database/export', [WpDatabaseController::class, 'export']);
+        Route::post('/{username}/wp/database/import', [WpDatabaseController::class, 'import']);
+    });
 
     Route::post('/{username}/ssh/command', [SshController::class, 'run']);
 

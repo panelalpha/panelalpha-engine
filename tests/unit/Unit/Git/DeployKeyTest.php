@@ -6,10 +6,12 @@ use App\Http\Resources\UserResource;
 use App\Lib\Deploy\Source\GitRepoInput;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Lib\Git\DeployKey;
+use App\Lib\Http\OutboundUrl;
 use App\Models\User;
 use App\System\Project\Git\CheckoutRedeploy;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Unit\DeployHook\DeployHookTestCase;
 use Tests\Unit\DeployHook\SpyCheckoutRedeploy;
 
@@ -28,6 +30,16 @@ class DeployKeyTest extends DeployHookTestCase
     private const GITHUB_ED25519 = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl';
     private const GITHUB_ED25519_FP = 'SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU';
 
+    /** What the substituted resolver answers; any other name does not resolve. */
+    private const DNS = [
+        'git.example.test' => ['140.82.121.10'],
+        'nothing.example.test' => ['140.82.121.11'],
+        'github.com' => ['140.82.121.4'],
+        'localhost' => ['127.0.0.1'],
+        'internal.example.test' => ['10.0.0.5'],
+        'rebind.example.test' => ['140.82.121.12', '10.0.0.5'],
+    ];
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -41,13 +53,15 @@ class DeployKeyTest extends DeployHookTestCase
         $this->app->instance(CheckoutRedeploy::class, new SpyCheckoutRedeploy());
         // ssh-keyscan answers from the shim: `example.test`'s key is GitHub's, so its fingerprint is known.
         file_put_contents($this->shim . '/ssh-keyscan', "#!/bin/sh\nprintf '%s\\n' \"ssh-keyscan \$*\" >> \"\$(dirname \"\$0\")/calls.log\"\n"
-            . "case \"\$*\" in *nothing.example.test*) exit 1;; esac\n"
+            . "case \"\$*\" in *140.82.121.11*) exit 1;; esac\n"
             . "echo '# git.example.test:2222 SSH-2.0-OpenSSH'\necho 'git.example.test " . self::GITHUB_ED25519 . "'\n");
         chmod($this->shim . '/ssh-keyscan', 0755);
+        OutboundUrl::setResolverForTests(static fn (string $host): array => self::DNS[$host] ?? []);
     }
 
     protected function tearDown(): void
     {
+        OutboundUrl::setResolverForTests(null);
         $this->restoreHost();
 
         parent::tearDown();
@@ -120,7 +134,7 @@ class DeployKeyTest extends DeployHookTestCase
             ['host' => '[git.example.test]:2222', 'pinned' => 'scanned', 'fingerprints' => [self::GITHUB_ED25519_FP]],
             $response->json('data.hosts.3'),
         );
-        $this->assertTrue($this->called('ssh-keyscan -T 10 -p 2222 -t ed25519,ecdsa,rsa git.example.test'));
+        $this->assertTrue($this->called('ssh-keyscan -T 10 -p 2222 -t ed25519,ecdsa,rsa 140.82.121.10'));
         $this->assertTrue(DeployKey::pins($user->fresh(), '[git.example.test]:2222'));
         $this->assertStringContainsString(
             '[git.example.test]:2222 ' . self::GITHUB_ED25519,
@@ -142,6 +156,81 @@ class DeployKeyTest extends DeployHookTestCase
         $this->postJson(self::URL . '/deploy-key', ['host' => 'nothing.example.test'])
             ->assertStatus(422)
             ->assertJsonPath('problems.0.code', 'host_unreachable');
+    }
+
+    /**
+     * The scan used to run against any name the host pattern accepted, so a
+     * tenant could make core open connections to internal addresses and time
+     * the answer. Numeric IPv4 forms PHP does not resolve are refused too.
+     *
+     * @return array<string, array{string}>
+     */
+    public static function internalHosts(): array
+    {
+        return [
+            'private literal' => ['10.255.255.1'],
+            'loopback name' => ['localhost:9'],
+            'metadata literal' => ['169.254.169.254:80'],
+            'hexadecimal loopback' => ['0x7f000001:9'],
+            'decimal integer loopback' => ['2130706433'],
+            'octal loopback' => ['0177.0.0.1:22'],
+            'hexadecimal metadata' => ['0xa9fea9fe:80'],
+            'name on a private address' => ['internal.example.test'],
+            'name mixing public and private answers' => ['rebind.example.test:2222'],
+            'name that does not resolve' => ['unresolved.example.test'],
+        ];
+    }
+
+    #[DataProvider('internalHosts')]
+    public function test_a_host_core_must_not_connect_to_is_refused_before_any_scan(string $host): void
+    {
+        $user = $this->project();
+
+        $response = $this->postJson(self::URL . '/deploy-key', ['host' => $host])
+            ->assertStatus(422)
+            ->assertJsonPath('problems.0.field', 'host')
+            ->assertJsonPath('problems.0.code', 'host_refused');
+
+        $this->assertStringContainsString('does not', (string) $response->json('problems.0.message'));
+        $this->assertSame([], array_filter($this->calls(), fn (string $c) => str_starts_with($c, 'ssh-keyscan')));
+        $this->assertNull(DeployKey::stored($user->fresh()));
+    }
+
+    public function test_the_scan_connects_to_the_address_resolved_once(): void
+    {
+        $user = $this->project();
+        $lookups = 0;
+        OutboundUrl::setResolverForTests(static function (string $host) use (&$lookups): array {
+            $lookups++;
+
+            return $lookups === 1 ? ['140.82.121.10'] : ['127.0.0.1'];
+        });
+
+        $this->postJson(self::URL . '/deploy-key', ['host' => 'git.example.test:2222'])->assertStatus(201);
+
+        $this->assertSame(1, $lookups);
+        $this->assertTrue($this->called('ssh-keyscan -T 10 -p 2222 -t ed25519,ecdsa,rsa 140.82.121.10'));
+        $this->assertFalse($this->called('ssh-keyscan -T 10 -p 2222 -t ed25519,ecdsa,rsa git.example.test'));
+        $this->assertStringContainsString('[git.example.test]:2222 ' . self::GITHUB_ED25519, DeployKey::knownHosts($user->fresh()));
+    }
+
+    /** A pinned host key proves who answers, not where: connect checks the SSH host's address too. */
+    public function test_an_ssh_remote_on_an_internal_host_is_refused_even_when_pinned(): void
+    {
+        $user = $this->project();
+        $this->postJson(self::URL . '/deploy-key')->assertStatus(201);
+        $key = DeployKey::stored($user->fresh());
+        $key['known_hosts']['internal.example.test'] = ['internal.example.test ' . self::GITHUB_ED25519];
+        $user = $user->fresh();
+        $user->setDetails([DeployKey::DETAIL => $key]);
+        $user->save();
+        $this->withoutRepository();
+
+        $this->postJson(self::URL . '/connect', ['repo_url' => 'git@internal.example.test:acme/app.git', 'branch' => 'main'])
+            ->assertStatus(422)
+            ->assertJsonPath('problems.0.field', 'repo_url')
+            ->assertJsonPath('problems.0.code', 'host_refused');
+        $this->assertFalse($this->called('ls-remote'));
     }
 
     public function test_delete_removes_the_key(): void

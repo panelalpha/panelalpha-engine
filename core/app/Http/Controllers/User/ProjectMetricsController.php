@@ -3,13 +3,9 @@
 namespace App\Http\Controllers\User;
 
 use App\Http\Controllers\Controller;
-use App\Lib\Host\MetricBuckets;
+use App\Http\Requests\MetricsRangeRequest;
 use App\Lib\Host\ProjectStats;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
-use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\Rule;
 use OpenApi\Attributes as OA;
 
 /**
@@ -53,30 +49,11 @@ class ProjectMetricsController extends Controller
             new OA\Response(response: 422, description: 'Unknown range', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function history(Request $request, string $username): JsonResponse
+    public function history(MetricsRangeRequest $request, string $username): JsonResponse
     {
         $project = $this->projectOr404($username);
-        $range = $this->range($request);
-        $window = MetricBuckets::window($range);
 
-        $rows = DB::table(self::table('project_metrics', $window['bucket']))
-            ->selectRaw(MetricBuckets::sql($window['bucket']).' AS bucket, AVG(cpu_percent) AS cpu_percent, '
-                .'AVG(memory_bytes) AS memory_bytes, MAX(memory_limit_bytes) AS memory_limit_bytes')
-            ->where('username', $project->username)
-            ->where('timestamp', '>=', $window['start']->format('Y-m-d H:i:s'))
-            ->where('timestamp', '<', $window['end']->copy()->addSeconds($window['bucket'])->format('Y-m-d H:i:s'))
-            ->groupByRaw('bucket')
-            ->get();
-
-        $byBucket = [];
-        foreach ($rows as $row) {
-            $byBucket[(int) $row->bucket] = self::values($row);
-        }
-
-        return new JsonResponse([
-            'data' => MetricBuckets::periods($window['start'], $window['end'], $window['bucket'], $byBucket),
-            'meta' => self::meta($range, $window),
-        ]);
+        return new JsonResponse(ProjectStats::history($project->username, $request->range()));
     }
 
     #[OA\Get(
@@ -111,113 +88,14 @@ class ProjectMetricsController extends Controller
             new OA\Response(response: 422, description: 'Unknown range', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function containers(Request $request, string $username): JsonResponse
+    public function containers(MetricsRangeRequest $request, string $username): JsonResponse
     {
         $project = $this->projectOr404($username);
 
         if (! $request->has('range')) {
-            return new JsonResponse(['data' => $this->latestContainers($project->username)]);
+            return new JsonResponse(['data' => ProjectStats::latestContainers($project->username)]);
         }
 
-        $range = $this->range($request);
-        $window = MetricBuckets::window($range);
-        $rows = DB::table(self::table('project_container_metrics', $window['bucket']))
-            ->selectRaw('container_id, '.MetricBuckets::sql($window['bucket']).' AS bucket, AVG(cpu_percent) AS cpu_percent, '
-                .'AVG(memory_bytes) AS memory_bytes, MAX(memory_limit_bytes) AS memory_limit_bytes, MAX(name) AS name, MAX(service) AS service')
-            ->where('username', $project->username)
-            ->where('timestamp', '>=', $window['start']->format('Y-m-d H:i:s'))
-            ->where('timestamp', '<', $window['end']->copy()->addSeconds($window['bucket'])->format('Y-m-d H:i:s'))
-            ->groupBy('container_id')
-            ->groupByRaw('bucket')
-            ->get();
-
-        $containers = [];
-        foreach ($rows as $row) {
-            $id = (string) $row->container_id;
-            $containers[$id]['name'] ??= $row->name;
-            $containers[$id]['service'] ??= $row->service;
-            $containers[$id]['buckets'][(int) $row->bucket] = self::values($row);
-        }
-
-        $data = [];
-        foreach ($containers as $id => $c) {
-            $data[] = [
-                'container_id' => $id,
-                'name' => $c['name'],
-                'service' => $c['service'],
-                'history' => MetricBuckets::periods($window['start'], $window['end'], $window['bucket'], $c['buckets']),
-            ];
-        }
-
-        return new JsonResponse(['data' => $data, 'meta' => self::meta($range, $window)]);
-    }
-
-    /** @return list<array<string, mixed>> */
-    private function latestContainers(string $username): array
-    {
-        $since = Carbon::now('UTC')->subSeconds(ProjectStats::STALE_SECONDS)->format('Y-m-d H:i:s');
-        $latest = DB::table('project_container_metrics')
-            ->where('username', $username)
-            ->where('timestamp', '>=', $since)
-            ->max('timestamp');
-        if ($latest === null) {
-            return [];
-        }
-
-        return DB::table('project_container_metrics')
-            ->where('username', $username)
-            ->where('timestamp', $latest)
-            ->orderBy('name')
-            ->get()
-            ->map(fn (object $row): array => [
-                'container_id' => (string) $row->container_id,
-                'name' => $row->name,
-                'service' => $row->service,
-                'cpu_percent' => $row->cpu_percent === null ? null : round((float) $row->cpu_percent, 2),
-                'memory_bytes' => $row->memory_bytes === null ? null : (int) $row->memory_bytes,
-                'memory_limit_bytes' => $row->memory_limit_bytes === null ? null : (int) $row->memory_limit_bytes,
-                'sampled_at' => Carbon::parse((string) $row->timestamp, 'UTC')->toIso8601ZuluString(),
-            ])
-            ->all();
-    }
-
-    /**
-     * Minute rows are kept two days and hourly averages the month, so a
-     * bucket of an hour or more reads the averages.
-     */
-    private static function table(string $minutes, int $bucket): string
-    {
-        return $bucket >= 3600 ? $minutes.'_hourly' : $minutes;
-    }
-
-    private function range(Request $request): string
-    {
-        return $request->validate([
-            'range' => ['sometimes', 'string', Rule::in(array_keys(MetricBuckets::RANGES))],
-        ])['range'] ?? MetricBuckets::DEFAULT_RANGE;
-    }
-
-    /** @return array{cpu_percent: ?float, memory_bytes: ?int, memory_limit_bytes: ?int} */
-    private static function values(object $row): array
-    {
-        return [
-            'cpu_percent' => $row->cpu_percent === null ? null : round((float) $row->cpu_percent, 2),
-            'memory_bytes' => $row->memory_bytes === null ? null : (int) round((float) $row->memory_bytes),
-            'memory_limit_bytes' => $row->memory_limit_bytes === null ? null : (int) $row->memory_limit_bytes,
-        ];
-    }
-
-    /**
-     * @param  array{start: Carbon, end: Carbon, bucket: int}  $window
-     * @return array{range: string, bucket_seconds: int, from: string, to: string}
-     */
-    private static function meta(string $range, array $window): array
-    {
-        return [
-            'range' => $range,
-            'bucket_seconds' => $window['bucket'],
-            'from' => $window['start']->format('Y-m-d H:i:s'),
-            'to' => $window['end']->format('Y-m-d H:i:s'),
-        ];
+        return new JsonResponse(ProjectStats::containerHistory($project->username, $request->range()));
     }
 }

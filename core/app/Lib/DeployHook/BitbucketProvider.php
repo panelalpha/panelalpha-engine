@@ -35,7 +35,7 @@ abstract class BitbucketProvider implements HookProvider
         return hash_equals(hash_hmac('sha256', $request->getContent(), $secret), strtolower($m[1]));
     }
 
-    public function signsTheBody(Request $request): bool
+    public function signsTheBody(Request $request, string $secret): bool
     {
         return true;
     }

@@ -121,7 +121,7 @@ class RubyStrategy
             RubyRuntime::imageFor($app->project),
             SystemPackages::for($app->gemfile())
         );
-        $this->dind->system()->filesystem()->filePutContents(
+        $this->dind->system()->filesystem()->writeFileReplacingPath(
             $app->project->projectDir.'/'.RubyDockerfile::FILENAME,
             (new RubyDockerfile($app, $port, $base))->render(),
             $chown,
@@ -179,7 +179,7 @@ class RubyStrategy
         if (! is_dir($dir)) {
             return;
         }
-        $this->dind->system()->filesystem()->filePutContents(
+        $this->dind->system()->filesystem()->writeFileReplacingPath(
             $dir.'/zz_panelalpha_hosts.rb',
             RailsProxy::hostAuthorizationInitializer($this->dind->publicAppUrl()),
             $chown,

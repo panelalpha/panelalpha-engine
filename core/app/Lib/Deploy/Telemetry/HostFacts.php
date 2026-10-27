@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Telemetry;
 
+use App\Auth\TokenAbilities;
 use App\Lib\Host\DataDisk;
 use App\Models\Setting;
 use App\Models\User;
@@ -84,6 +85,18 @@ class HostFacts
             'webserver' => self::webserver($system),
             'accounts' => self::accountCount(),
         ];
+    }
+
+    /**
+     * host() for the caller of GET /system/info: the capacity and identity of the
+     * machine itself, not of the engine. A token scoped to projects is a tenant's,
+     * and the machine's name, kernel and uptime are the operator's.
+     *
+     * @return ?array<string, mixed>
+     */
+    public static function hostFor(TokenAbilities $caller, System $system): ?array
+    {
+        return $caller->isProjectScoped() ? null : self::host($system);
     }
 
     /**

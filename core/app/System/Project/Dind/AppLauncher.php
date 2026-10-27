@@ -58,16 +58,17 @@ final class AppLauncher
 
     /**
      * A copy an earlier redeploy left still serves when a start fails: nothing is torn down under it.
+     * $forceRecreate when what the containers mount was put back under them, as a failed push does.
      *
      * @return array{stdout: string, stderr: string, exit_code: ?int}
      *
      * @throws \Exception
      */
-    public function start(): array
+    public function start(bool $forceRecreate = false): array
     {
         return ZeroDowntimeRedeploy::withHeldCopy(
             $this->project->username(),
-            $this->project->registryLogin()->during(fn (): array => $this->startWithLogins())
+            $this->project->registryLogin()->during(fn (): array => $this->startWithLogins($forceRecreate))
         );
     }
 
@@ -76,7 +77,7 @@ final class AppLauncher
      *
      * @throws \Exception
      */
-    private function startWithLogins(): array
+    private function startWithLogins(bool $forceRecreate): array
     {
         $model = $this->project->userModel();
         $strategy = $model->getDeployStrategy();
@@ -100,7 +101,7 @@ final class AppLauncher
             return $release;
         }
 
-        $up = $this->bringUp($skipBuild, $this->mustForceRecreate($strategy, $runtime), $reloadAfterReclaim);
+        $up = $this->bringUp($skipBuild, $forceRecreate || $this->mustForceRecreate($strategy, $runtime), $reloadAfterReclaim);
 
         return is_array($up) ? $up : $this->outcome($up);
     }

@@ -66,7 +66,7 @@ class RedirectUrlRuleTest extends TestCase
 
     public function test_project_create_reads_the_same_rule(): void
     {
-        $rules = \App\Lib\Project\NewProjectRules::rules('username', 'example.com');
+        $rules = \App\Lib\Project\NewProjectRules::rules('username', 'example.com', false);
 
         $this->assertContains(
             RedirectUrl::class,

@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Platform\AppConfig;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
@@ -20,7 +21,7 @@ final class LocalAppConfigSource implements AppConfigSource
         if (! is_file($path)) {
             return null;
         }
-        $contents = @file_get_contents($path);
+        $contents = AccountHomeRead::contents($path);
 
         return is_string($contents) ? $contents : null;
     }

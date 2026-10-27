@@ -28,6 +28,8 @@ class DeployHookActions
 
     public const PROVIDER_NOT_UPDATED_WARNING = 'The provider webhook could not be updated with the new URL and secret: update or re-register it in the git host.';
 
+    public const ROTATE_TO_SIGN_WARNING = 'The hook\'s secret predates signed calls, so GitLab was given it as a secret token only: rotate the hook to have GitLab sign every call.';
+
     public function __construct(
         private readonly DeployHooks $hooks,
         private readonly GitActions $git,
@@ -46,22 +48,48 @@ class DeployHookActions
     {
         return $this->git->onCheckout($user, $params['path'] ?? null, function (ProjectGit $git) use ($user, $params): array {
             $creation = $this->hooks->create($user, $git);
-            [, $warning] = $this->register($user, $git, $creation, $params);
+            $warning = $this->registerKeepingTheSecret($user, $git, $creation, $params);
 
-            $data = $this->describe($creation->hook, $this->hooks->warningFor($git)) + [
-                'created' => $creation->created,
-                'tls' => EngineTlsAdvisory::forProvider($params['provider'] ?? null),
-                'registration' => $this->registration($creation->hook),
-            ];
-            if ($creation->secret !== null) {
-                $data['secret'] = $creation->secret;
-            }
-            if ($warning !== null) {
-                $data['registration_warning'] = $warning;
-            }
-
-            return $data;
+            return $this->created($git, $creation, $params, $warning);
         });
+    }
+
+    /**
+     * A refused registration keeps the hook this call made, so the refusal carries
+     * that hook's answer: its secret cannot be shown by any later call.
+     *
+     * @param  array<string, mixed>  $params
+     *
+     * @throws ProviderRegistrationRefused
+     */
+    private function registerKeepingTheSecret(User $user, ProjectGit $git, HookCreation $creation, array $params): ?string
+    {
+        try {
+            return $this->register($user, $git, $creation, $params);
+        } catch (ProviderRegistrationRefused $e) {
+            throw $creation->secret === null ? $e : $e->withCreatedHook($this->created($git, $creation, $params, null));
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $params
+     * @return array<string, mixed>
+     */
+    private function created(ProjectGit $git, HookCreation $creation, array $params, ?string $warning): array
+    {
+        $data = $this->describe($creation->hook, $this->hooks->warningFor($git)) + [
+            'created' => $creation->created,
+            'tls' => EngineTlsAdvisory::forProvider($params['provider'] ?? null),
+            'registration' => $this->registration($creation->hook),
+        ];
+        if ($creation->secret !== null) {
+            $data['secret'] = $creation->secret;
+        }
+        if ($warning !== null) {
+            $data['registration_warning'] = $warning;
+        }
+
+        return $data;
     }
 
     /**
@@ -128,22 +156,22 @@ class DeployHookActions
      * Make the provider webhook when `register` was asked for. A hook that
      * already existed is registered with the secret it already holds; one
      * whose ciphertext no longer decrypts cannot be, which is a warning rather
-     * than a rotation the caller did not ask for.
+     * than a rotation the caller did not ask for. Answers the warning to
+     * return with the hook, if any.
      *
      * @param  array<string, mixed>  $params
-     * @return array{0: ?ProviderRegistration, 1: ?string}
      *
      * @throws ProviderRegistrationRefused
      */
-    private function register(User $user, ProjectGit $git, HookCreation $creation, array $params): array
+    private function register(User $user, ProjectGit $git, HookCreation $creation, array $params): ?string
     {
         if (($params['register'] ?? false) !== true || $creation->hook->isRegistered()) {
-            return [null, null];
+            return null;
         }
 
         $secret = $creation->secret ?? $creation->hook->secret();
         if ($secret === null) {
-            return [null, self::ROTATE_TO_REGISTER_WARNING];
+            return self::ROTATE_TO_REGISTER_WARNING;
         }
 
         $registration = $this->registrar->register(
@@ -153,11 +181,19 @@ class DeployHookActions
             $this->named($params),
         );
         if ($registration === null) {
-            return [null, self::NO_REGISTRAR_WARNING];
+            return self::NO_REGISTRAR_WARNING;
         }
         $creation->hook->rememberRegistration($registration->provider, $registration->hookId);
 
-        return [$registration, null];
+        return $this->unsignedWarning($registration, $secret);
+    }
+
+    /** GitLab signs only with a `whsec_` secret, which a hook made before 2.2 does not hold. */
+    private function unsignedWarning(ProviderRegistration $registration, string $secret): ?string
+    {
+        return $registration->provider === TlsInstructions::GITLAB && ! GitlabProvider::canSignWith($secret)
+            ? self::ROTATE_TO_SIGN_WARNING
+            : null;
     }
 
     /**
@@ -170,15 +206,33 @@ class DeployHookActions
         if (! $hook->isRegistered()) {
             return null;
         }
-        $done = $this->registrar->refresh(
-            $this->remote($user, $git),
-            (string) $hook->provider_hook_id,
-            $hook->url(),
-            $rotation->secret,
-            $hook->provider,
-        );
+        try {
+            $done = $this->registrar->refresh(
+                $this->remote($user, $git),
+                (string) $hook->provider_hook_id,
+                $hook->url(),
+                $rotation->secret,
+                $hook->provider,
+            );
+        } catch (ProviderRegistrationRefused $e) {
+            return $this->notRefreshed($hook, $e);
+        }
 
         return $done ? null : self::PROVIDER_NOT_UPDATED_WARNING;
+    }
+
+    /**
+     * The rotation stands whatever the provider answered: it is what retires a
+     * leaked URL and secret. A webhook the provider no longer shows (404) is
+     * forgotten, so a create with `register` can make a new one.
+     */
+    private function notRefreshed(DeployHook $hook, ProviderRegistrationRefused $refusal): string
+    {
+        if ($refusal->providerStatus === 404) {
+            $hook->forgetRegistration();
+        }
+
+        return self::PROVIDER_NOT_UPDATED_WARNING.' '.$refusal->getMessage();
     }
 
     /**

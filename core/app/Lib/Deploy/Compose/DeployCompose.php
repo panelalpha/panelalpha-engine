@@ -293,10 +293,12 @@ class DeployCompose
         return GeneratedCompose::render(FrameworkService::for($decision, $port, $publicUrl), $decision);
     }
 
+    /** The image Railpack built in the account, outside compose: no registry has it to pull. */
     public static function railpack(string $imageName, int $port): string
     {
         return GeneratedCompose::render([
             'image' => $imageName,
+            'pull_policy' => 'never',
             'ports' => ["{$port}:{$port}"],
             'restart' => 'unless-stopped',
             'labels' => [GeneratedCompose::LABEL => 'railpack'],

@@ -238,6 +238,15 @@ class FirewallHttpTest extends TestCase
         $this->putJson("/api/firewall/rules/{$deny['id']}", ['action' => 'allow'])->assertOk()->assertJsonPath('data.scope', 'host');
     }
 
+    public function test_an_outbound_deny_edited_inbound_without_a_scope_also_covers_published_ports(): void
+    {
+        $out = $this->postJson('/api/firewall/rules', ['action' => 'deny', 'direction' => 'out', 'source' => '203.0.113.7'])->assertOk()->json('data');
+        $this->assertSame('host', $out['scope']);
+
+        $in = $this->putJson("/api/firewall/rules/{$out['id']}", ['direction' => 'in'])->assertOk()->json('data');
+        $this->assertSame(['in', 'both'], [$in['direction'], $in['scope']]);
+    }
+
     public function test_a_rule_for_published_ports_is_added_edited_and_deleted(): void
     {
         $data = $this->postJson('/api/firewall/rules', ['action' => 'allow', 'scope' => 'published', 'protocol' => 'tcp', 'port' => '8080'])

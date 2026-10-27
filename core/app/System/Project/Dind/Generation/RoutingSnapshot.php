@@ -38,11 +38,12 @@ final class RoutingSnapshot
         $read = (new ProjectBindMounts($this->project))->read();
         if ($read === null || $read['running'] === []) {
             $state->forget(GenerationState::ROUTES);
-            $this->noteStoppedWhenNothingRuns($state, $read);
+            $this->noteStoppedOrUnread($state, $read);
 
             return;
         }
         $state->forget(GenerationState::STOPPED);
+        $state->forget(GenerationState::UNREAD);
         $details = $this->project->userModel()->getDetails();
         $served = $details['app_port'] ?? null;
         $state->put(GenerationState::ROUTES, [
@@ -156,16 +157,17 @@ final class RoutingSnapshot
 
     /**
      * Nothing running when the redeploy started: remember it, so a cancel can stop what the redeploy
-     * started instead of leaving it up. Not recorded when the containers could not be read.
+     * started instead of leaving it up. Containers that could not be read are noted apart, never as stopped.
      *
      * @param  ?array{mounts: list<string>, containers: list<string>, running: list<string>}  $read
      */
-    private function noteStoppedWhenNothingRuns(GenerationState $state, ?array $read): void
+    private function noteStoppedOrUnread(GenerationState $state, ?array $read): void
     {
-        if ($read === null) {
-            return;
-        }
-        $state->put(GenerationState::STOPPED, ['owner' => GenerationState::owner()]);
+        [$noted, $other] = $read === null
+            ? [GenerationState::UNREAD, GenerationState::STOPPED]
+            : [GenerationState::STOPPED, GenerationState::UNREAD];
+        $state->forget($other);
+        $state->put($noted, ['owner' => GenerationState::owner()]);
     }
 
     /**
@@ -177,6 +179,7 @@ final class RoutingSnapshot
     {
         $state = new GenerationState($this->project->username());
         $state->forget(GenerationState::STOPPED);
+        $state->forget(GenerationState::UNREAD);
         $entry = $state->get(GenerationState::ROUTES);
         if ($entry === null) {
             return null;

@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Check whether a project name is free
 
-    Answers 200 for every well-formed name: `valid` is true when the name is free. When it is not, `valid` is false and `reason` says why: `taken` (another project uses it) or `unavailable` (reserved on this host). Only a name that breaks the naming rules is refused with 422.
+    Answers 200 for every well-formed name: `valid` is true when the name is free. When it is not, `valid` is false and `reason` says why: `taken` (another project uses it) or `unavailable` (reserved on this host). Only a missing name, or one that breaks the naming rules, is refused with 422.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

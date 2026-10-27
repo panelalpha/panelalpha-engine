@@ -87,7 +87,8 @@ final class FirewallRule
 
     /**
      * Only a missing scope on an inbound deny becomes `both`; an explicit one is
-     * kept, except that an outbound deny has nothing published to close.
+     * kept, except `both` on an outbound rule, which becomes `host`: nothing
+     * published is reached going out.
      */
     private static function scopeFor(?string $scope, string $action, string $direction): string
     {
@@ -187,17 +188,33 @@ final class FirewallRule
     }
 
     /**
-     * An edit that changes the action without naming a scope gets the scope a
-     * new rule with that action would get; a published rule stays published.
+     * An edit that changes the action or the direction without naming a scope
+     * gets the scope a new rule with them would get; a published rule stays published.
      *
      * @param  array<string, mixed>  $changes
      */
     private function rederivesScope(array $changes): bool
     {
         return ! array_key_exists('scope', $changes)
-            && isset($changes['action'])
-            && $changes['action'] !== $this->action
+            && ($this->changesAction($changes) || $this->changesDirection($changes))
             && $this->scope !== self::PUBLISHED;
+    }
+
+    /** @param  array<string, mixed>  $changes */
+    private function changesAction(array $changes): bool
+    {
+        return isset($changes['action']) && $changes['action'] !== $this->action;
+    }
+
+    /**
+     * A direction sent as null is cleared to `in`, as on a new rule.
+     *
+     * @param  array<string, mixed>  $changes
+     */
+    private function changesDirection(array $changes): bool
+    {
+        return array_key_exists('direction', $changes)
+            && (self::trimmedOrNull($changes['direction']) ?? self::IN) !== $this->direction;
     }
 
     /**

@@ -14,8 +14,10 @@ Asking again later returns the same URL and does not show the secret again. It d
 
 You do this in your git host. The assistant cannot open your GitHub, GitLab, or Bitbucket account.
 
+The assistant can ask your git host to add the webhook for you, with the token the project clones with. If the git host refuses, because the project has no token or the token may not manage webhooks, the hook is still created and the refusal still gives you its URL and secret, this one time. Copy them and add the webhook yourself as below.
+
 - **GitHub**: repository or organization **Settings > Webhooks > Add webhook**. Payload URL: the hook's URL. Content type: `application/json`. Secret: the hook's secret. Trigger: "Just the push event".
-- **GitLab**: project **Settings > Webhooks**. URL: the hook's URL. Trigger: "Push events". On GitLab 19.0 or later, put the hook's secret in **Signing token** if GitLab lets you paste one there: every call is then signed, and a recorded call cannot be sent again with another body. Otherwise put it in **Secret token**. Never put it in both: the secret token travels in every call as plain text. A hook the assistant registers for you is set up signed.
+- **GitLab**: project **Settings > Webhooks**. URL: the hook's URL. Trigger: "Push events". On GitLab 19.0 or later, put the hook's secret in **Signing token** if GitLab lets you paste one there: every call is then signed, and a recorded call cannot be sent again with another body. Otherwise put it in **Secret token**. Never put it in both: the secret token travels in every call as plain text. A hook the assistant registers for you is set up signed, unless the hook was made before engine 2.2: rotate such a hook to have its calls signed. On a self-managed GitLab served under a path, such as `https://git.example.com/gitlab`, the engine finds that path by asking the instance where its API answers.
 - **Bitbucket Cloud**: repository **Settings > Webhooks > Add webhook**. URL: the hook's URL. Secret: the hook's secret. Triggers: "Repository > Push".
 - **Bitbucket Data Center**: repository **Settings > Webhooks > Create webhook**. URL: the hook's URL. Secret: the hook's secret. Events: "Repository > Push".
 
@@ -29,7 +31,7 @@ The hook follows the branch that copy is on now. A later change of branch is fol
 
 What the push changes depends on which copy the hook is for:
 
-- **The copy the engine deploys from.** A push makes that copy match the repository, then rebuilds the site. A tracked file you edited on the server is replaced. A file the repository does not know about is removed, except files the engine keeps for itself. Submodules are fetched at the commits the push records. Once the site has deployed, one that cannot be fetched keeps the copy it had and the deploy log warns; on the first deploy it fails the deploy: [Connecting with Git](connecting-with-git.md#troubleshooting). Once this hook exists, the repository is the only source of truth for that copy.
+- **The copy the engine deploys from.** A push makes that copy match the repository, then rebuilds the site. A tracked file you edited on the server is replaced. A file the repository does not know about is removed, except files the engine keeps for itself. Submodules are fetched at the commits the push records. Once the site has deployed, one the last deployed commit already had keeps whatever copy it had when it cannot be fetched, and the deploy log warns; one the push adds, or any on the first deploy, fails the deploy: [Connecting with Git](connecting-with-git.md#troubleshooting). Once this hook exists, the repository is the only source of truth for that copy.
 - **A folder the site keeps in git**, such as `public_html` on a WordPress project. A push only moves that folder forward. Uploads and a config the site wrote stay. There is no rebuild. If something on the server conflicts with the push (a tracked file edited on the server, a file sitting where the repository now wants to put one, or history that was rewritten), nothing changes. The answer names the paths.
 
 ```text
@@ -75,7 +77,7 @@ If the engine's address has changed since you saved the webhook, the assistant g
 Rotate the push-to-deploy hook for this project. I think the secret leaked.
 ```
 
-Rotating gives a new URL and a new secret, shown this once. The old URL stops answering immediately, so update the webhook in your git host. The history of earlier pushes stays.
+Rotating gives a new URL and a new secret, shown this once. The old URL stops answering immediately, so update the webhook in your git host. The history of earlier pushes stays. A webhook the assistant registered for you is updated with the rotation. If your git host refuses that or cannot be reached, the hook is rotated anyway, and you get the new URL and secret to enter in the git host yourself.
 
 Deleting removes the hook and that history. It does not change the files on the server. Remove the webhook in your git host as well, or it keeps calling an address that no longer answers. Deleting the project removes its hooks too.
 

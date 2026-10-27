@@ -5,6 +5,7 @@ namespace Tests\Unit\System\Project\PhpHosting\WordPress;
 use App\Models\Domain;
 use App\Models\User;
 use App\System\Project;
+use App\System\Project\FileManager;
 use App\System\Project\PhpHosting\WordPress\Exception as WordPressException;
 use App\System\Project\PhpHosting\WordPress\WpCli;
 use Mockery;
@@ -78,6 +79,26 @@ class WpCliTest extends TestCase
             ['core', 'version', '--path=/home/alice/other.test/public_html'],
             $captured
         );
+    }
+
+    public function test_a_relative_path_is_read_inside_the_home(): void
+    {
+        $captured = [];
+        $cli = $this->cliWithFakeRunner($captured, mainDocRoot: '/example.test/public_html', home: '/home/alice', path: 'blog/');
+
+        $cli->run(['core', 'version']);
+
+        $this->assertSame(['core', 'version', '--path=/home/alice/blog'], $captured);
+    }
+
+    public function test_an_absolute_path_outside_the_home_is_read_inside_it_as_the_file_manager_does(): void
+    {
+        $captured = [];
+        $cli = $this->cliWithFakeRunner($captured, mainDocRoot: '/example.test/public_html', home: '/home/alice', path: '/tmp/wp');
+
+        $cli->run(['core', 'version']);
+
+        $this->assertSame(['core', 'version', '--path=/home/alice/tmp/wp'], $captured);
     }
 
     public function test_path_inside_args_wins_over_bound_path(): void
@@ -192,8 +213,8 @@ class WpCliTest extends TestCase
     }
 
     /**
-     * @param list<string> $captured
-     * @param array{exit_code: int, stdout: string, stderr: string} $result
+     * @param  list<string>  $captured
+     * @param  array{exit_code: int, stdout: string, stderr: string}  $result
      */
     private function cliWithFakeRunner(
         array &$captured,
@@ -207,6 +228,8 @@ class WpCliTest extends TestCase
         $user->username = 'alice';
         $project = Mockery::mock(Project::class);
         $project->shouldReceive('homeDirPath')->andReturn($home);
+        $project->shouldReceive('resolvePath')
+            ->andReturnUsing(fn (string $path): string => (new FileManager($project))->resolvePath($path));
         $project->shouldReceive('runWpCli')
             ->once()
             ->andReturnUsing(function (array $args) use (&$captured, $result): array {

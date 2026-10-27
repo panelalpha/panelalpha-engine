@@ -3,15 +3,13 @@
 namespace App\Console\Commands\Domains;
 
 use App\Models\Domain;
+use App\Models\User;
 use App\System\Project\PhpHosting\WordPress\WpCli as WordPressWpCli;
 use Illuminate\Console\Command;
 use Illuminate\Support\Str;
 
 class WpCli extends Command
 {
-    /** The old spelling still answers, so nothing scripted against it breaks. */
-    protected $aliases = ['domains:wp-cli'];
-
     protected $signature = 'domain:wp-cli {domain} {arg*}';
 
     protected $description = 'Deprecated: prefer wordpress:command {username}. Runs WP-CLI as the domain\'s project user, using that domain\'s document root as --path if not provided.';
@@ -47,10 +45,7 @@ class WpCli extends Command
             $wpCliArgs[] = $arg;
         }
 
-        // A container project's install is found in its containers, not under a domain's document root.
-        $cli = WordPressWpCli::for($user);
-        $path = $hasPathInArgs || $cli->runsInContainer() ? null : $cli->resolveDomainPath($domain);
-        $result = WordPressWpCli::for($user, $path)->run($wpCliArgs);
+        $result = WordPressWpCli::for($user, $this->documentRootPath($user, $domain, $hasPathInArgs))->run($wpCliArgs);
 
         $this->line('stdout:');
         $this->info(trim($result['stdout']));
@@ -59,5 +54,13 @@ class WpCli extends Command
         $this->line('exit_code: '.$result['exit_code']);
 
         return 0;
+    }
+
+    /** A container project's install is found in its containers, not under a domain's document root. */
+    private function documentRootPath(User $user, Domain $domain, bool $hasPathInArgs): ?string
+    {
+        $cli = WordPressWpCli::for($user);
+
+        return $hasPathInArgs || $cli->runsInContainer() ? null : $cli->resolveDomainPath($domain);
     }
 }

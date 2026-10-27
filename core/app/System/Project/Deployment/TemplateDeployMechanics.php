@@ -62,6 +62,11 @@ final class TemplateDeployMechanics implements DeployMechanics
         $this->project->waitForAllRunning();
     }
 
+    public function removedTheAccount(): bool
+    {
+        return false;
+    }
+
     public function ingestApplicationSource(): void
     {
         if ($this->user()->hasGitProject()) {

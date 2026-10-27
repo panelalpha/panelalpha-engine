@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Platform\Runtime;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
@@ -279,7 +280,7 @@ final class GoRuntime implements Runtime
 
         foreach ($iterator as $file) {
             /** @var \SplFileInfo $file */
-            $contents = @file_get_contents($file->getPathname());
+            $contents = AccountHomeRead::contents($file->getPathname());
             if (! is_string($contents) || preg_match('/^package\s+main\s*$/m', $contents) !== 1) {
                 continue;
             }
@@ -409,7 +410,7 @@ final class GoRuntime implements Runtime
     private static function programNames(string $projectDir, ?string $sourceUrl): array
     {
         $names = [];
-        $contents = @file_get_contents($projectDir.'/go.mod');
+        $contents = AccountHomeRead::contents($projectDir.'/go.mod');
         if (is_string($contents) && preg_match('/^module\s+(\S+)/m', $contents, $m) === 1) {
             $names[] = basename((string) preg_replace('#/v\d+$#', '', trim($m[1], "\"'")));
         }

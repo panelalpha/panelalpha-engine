@@ -129,8 +129,8 @@ class RailpackStrategy
 
     /**
      * Build $projectDir into $imageName in this account. Also what a staging,
-     * clone or push uses to build the image a copied run file names, which
-     * only the source account had.
+     * clone or push uses to build the image a copied run file names from the
+     * copied tree.
      */
     public function buildImage(string $projectDir, ?string $chown, string $imageName): bool
     {
@@ -180,7 +180,7 @@ class RailpackStrategy
             'railpack prepare . --plan-out '.escapeshellarg($planPath)."\n";
 
         try {
-            $system->filesystem()->filePutContents($buildScriptPath, $prepareScript, $chown, '700');
+            $system->filesystem()->writeFileReplacingPath($buildScriptPath, $prepareScript, $chown, '700');
             $shell->execAsUser(['bash', $buildScriptPath], [], self::PREPARE_TIMEOUT_SECONDS);
             $planJson = $this->readPlan($planPath, $username);
 
@@ -206,7 +206,7 @@ class RailpackStrategy
                 ' --output '.escapeshellarg("type=docker,name={$imageName}").
                 ' . ';
 
-            $system->filesystem()->filePutContents($buildScriptPath, $buildScript, $chown, '700');
+            $system->filesystem()->writeFileReplacingPath($buildScriptPath, $buildScript, $chown, '700');
             $shell->execAsUser(['bash', $buildScriptPath], [], self::BUILD_TIMEOUT_SECONDS);
         } catch (\Exception $e) {
             Log::info(

@@ -34,15 +34,6 @@ final class ProviderRegistrar
     }
 
     /**
-     * Whether a registrar serves this checkout, so a caller can say "the client
-     * registers the URL itself" without asking the provider first.
-     */
-    public function serves(CheckoutRemote $remote, ?string $provider = null): bool
-    {
-        return $this->target($remote, $provider) !== null;
-    }
-
-    /**
      * Create the provider webhook holding `$secret` at `$url`.
      *
      * @return ?ProviderRegistration null when no registrar serves the
@@ -62,7 +53,7 @@ final class ProviderRegistrar
 
         $hookId = $registrar->create($target, (string) $remote->token, $url, $secret);
 
-        return new ProviderRegistration($registrar->name(), $hookId, now());
+        return new ProviderRegistration($registrar->name(), $hookId);
     }
 
     /**

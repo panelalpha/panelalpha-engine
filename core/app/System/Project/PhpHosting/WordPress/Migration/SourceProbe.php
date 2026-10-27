@@ -9,10 +9,15 @@ use RuntimeException;
  * The connection test behind `POST /wordpress/migrations/test`: the same
  * lookup a migration's first step does, synchronously, with no record and
  * nothing changed on the source (wp_admin logs in, manual_plugin asks the
- * plugin's token check). Every failure becomes an `error_type`.
+ * plugin's token check). Every failure becomes an `error_type`. It runs
+ * inside the HTTP request, so every source request together gets
+ * DEADLINE_SECONDS, not the queue job's budget.
  */
 final class SourceProbe
 {
+    /** How long one test may hold the HTTP request, and the PHP-FPM worker serving it. */
+    public const DEADLINE_SECONDS = 30;
+
     /** @var Closure(SourceAccess): SourceHttpClient */
     private Closure $httpFactory;
 
@@ -23,10 +28,13 @@ final class SourceProbe
      * @param  (Closure(SourceAccess): SourceHttpClient)|null  $httpFactory
      * @param  list<SourceProbeCheck>|null  $checks
      */
-    public function __construct(?Closure $httpFactory = null, ?array $checks = null)
-    {
+    public function __construct(
+        ?Closure $httpFactory = null,
+        ?array $checks = null,
+        private readonly int $deadlineSeconds = self::DEADLINE_SECONDS,
+    ) {
         $this->httpFactory = $httpFactory
-            ?? static fn (SourceAccess $access): SourceHttpClient => new CurlSourceHttpClient($access->pin());
+            ?? static fn (SourceAccess $access): SourceHttpClient => CurlSourceHttpClient::forConnectionTest($access->pin());
         $this->checks = $checks ?? self::defaultChecks();
     }
 
@@ -37,7 +45,7 @@ final class SourceProbe
      */
     public static function defaultChecks(): array
     {
-        return [new ImportDomainCheck];
+        return [new TransferAddressCheck, new ImportDomainCheck];
     }
 
     /**
@@ -45,7 +53,9 @@ final class SourceProbe
      */
     public function run(SourceAccess $access, TargetChoice $choice = new TargetChoice): array
     {
-        $client = new SourceWordpressClient(($this->httpFactory)($access));
+        $http = ($this->httpFactory)($access);
+        $http->whileWaiting($this->untilDeadline());
+        $client = new SourceWordpressClient($http);
 
         try {
             $site = $this->find($client, $access);
@@ -67,16 +77,35 @@ final class SourceProbe
             return [
                 'ok' => false,
                 'error_type' => $failure->errorType(),
-                'message' => $failure->getMessage(),
+                'message' => $this->messageFor($failure),
             ];
         }
+    }
+
+    /** @return Closure(): bool */
+    private function untilDeadline(): Closure
+    {
+        $deadline = microtime(true) + $this->deadlineSeconds;
+
+        return static fn (): bool => microtime(true) < $deadline;
+    }
+
+    private function messageFor(SourceCheckFailed $failure): string
+    {
+        if ($failure->getPrevious() instanceof SourceRequestAborted) {
+            return "The source site did not answer within {$this->deadlineSeconds} seconds.";
+        }
+
+        return $failure->getMessage();
     }
 
     private function find(SourceWordpressClient $client, SourceAccess $access): SourceSite
     {
         $resolver = new SourceSiteResolver($client);
 
-        return $access->usesManualPlugin() ? $resolver->findPlugin($access) : $resolver->logIn($access);
+        return $access->usesManualPlugin()
+            ? $resolver->findPlugin($access)
+            : $resolver->logIn($access, confirmAdminEmail: false);
     }
 
     private function wordpressVersion(SourceWordpressClient $client, SourceSite $site): ?string

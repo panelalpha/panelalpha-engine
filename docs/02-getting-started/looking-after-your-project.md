@@ -36,7 +36,7 @@ A restore overwrites the live project, so list backups first if you are unsure. 
 Make a staging copy of this project.
 ```
 
-You get a second project with its own hostname. Break it freely. When you are happy:
+You get a second project with its own hostname: `staging.` in front of the live one's, or, for a project on a free `panelalpha.online` name, a new name of its own there. Break it freely. When you are happy:
 
 ```text
 Push the staging copy live.

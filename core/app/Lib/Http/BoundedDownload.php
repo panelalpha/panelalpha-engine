@@ -13,7 +13,8 @@ use InvalidArgumentException;
  * The cap is read from the response's Content-Length before the body arrives
  * and counted again while the body streams, so an endless or chunked answer is
  * not written to disk in full before anybody can refuse it. Redirects are left
- * to the caller, which checks every hop against OutboundUrl.
+ * to the caller, which checks every hop against OutboundUrl; only a URL from the
+ * engine's own configuration may have them followed here.
  */
 final class BoundedDownload
 {
@@ -24,6 +25,8 @@ final class BoundedDownload
 
     public function __construct(
         private readonly int $maxBytes = OutboundUrl::MAX_DOWNLOAD_BYTES,
+        private readonly bool $followRedirects = false,
+        private readonly int $timeoutSeconds = self::TIMEOUT_SECONDS,
     ) {}
 
     /**
@@ -36,7 +39,7 @@ final class BoundedDownload
         $this->exceeded = false;
 
         try {
-            return Http::timeout(self::TIMEOUT_SECONDS)
+            return Http::timeout($this->timeoutSeconds)
                 ->withOptions($this->options($into, $pin))
                 ->get($url);
         } catch (ConnectionException $e) {
@@ -55,7 +58,7 @@ final class BoundedDownload
     {
         $options = [
             'sink' => $into,
-            'allow_redirects' => false,
+            'allow_redirects' => $this->followRedirects,
             'on_headers' => fn ($response) => $this->refuseWhen((int) $response->getHeaderLine('Content-Length') > $this->maxBytes),
             'progress' => fn ($total, $downloaded) => $this->refuseWhen($downloaded > $this->maxBytes),
         ];

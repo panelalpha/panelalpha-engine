@@ -2,6 +2,7 @@
 
 namespace App\System;
 
+use App\System;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
@@ -20,6 +21,15 @@ use Illuminate\Support\Str;
  */
 class Filesystem
 {
+    /** Root-only directory beside the account homes where a write into a home is staged, owned and moded. */
+    public const WRITE_STAGE_NAME = '.panelalpha-write-stage';
+
+    /** Reads and renames a file in a home without following a link; relative to core/. */
+    private const ACCOUNT_HOME_FILE = '/resources/system/account-home-file.py';
+
+    /** Its exit code when a directory on the path is a symlink, or the file itself is one. */
+    private const ACCOUNT_HOME_FILE_REFUSED = 3;
+
     /** @psalm-var ?FilesystemInfo */
     private static ?array $homeFilesystemInfo = null;
 
@@ -39,17 +49,132 @@ class Filesystem
 
     /**
      * Write $contents at $path without ever opening what is already there: a
-     * temp file next to $path, then `mv -T` over it, so a symlink at $path
-     * (one a tenant could plant) is replaced, never followed or entered.
+     * temp file, then `mv -T` over $path, so a symlink at $path (one a tenant
+     * could plant) is replaced, never followed or entered. Inside an account's
+     * home the temp file is owned and moded in the root-only write stage, so
+     * no chown or chmod ever names a path the tenant can swap for a link.
      */
     public function writeFileReplacingPath(string $path, string $contents, ?string $chown = null, ?string $chmod = null): void
     {
-        $dir = dirname($path);
-        $this->makeDirWithParents($dir, $chown);
-        $tmp = $path.'.tmp-'.bin2hex(random_bytes(8));
-        $this->copyContents($contents, $tmp);
-        $this->setOwnerAndMode($tmp, $chown, $chmod);
-        $this->system->exec(['sudo', 'mv', '-T', $tmp, $path]);
+        $this->makeDirWithParents(dirname($path), $chown);
+        $staged = $this->stagedPathFor($path);
+        try {
+            $this->copyContents($contents, $staged);
+            $this->setOwnerAndMode($staged, $chown, $chmod);
+            $this->renameOnto($staged, $path);
+        } catch (\Throwable $e) {
+            $this->system->runProcess(['sudo', 'rm', '-f', $staged]);
+            throw $e;
+        }
+    }
+
+    /** A temp name in the write stage for a path in an account's home, else one next to $path. */
+    private function stagedPathFor(string $path): string
+    {
+        if (! $this->isInAccountHome($path)) {
+            return $path.'.tmp-'.bin2hex(random_bytes(8));
+        }
+
+        return $this->writeStageFor(dirname($path)).'/'.bin2hex(random_bytes(8));
+    }
+
+    private function isInAccountHome(string $path): bool
+    {
+        $homes = rtrim($this->homesDir(), '/').'/';
+
+        return str_starts_with($path, $homes) && ! str_starts_with($path, $this->writeStage().'/') && $path !== $this->writeStage();
+    }
+
+    private function homesDir(): string
+    {
+        return $this->system instanceof System ? $this->system->homesDirPath() : EnginePaths::HOMES_DIR;
+    }
+
+    private function writeStage(): string
+    {
+        return rtrim($this->homesDir(), '/').'/'.self::WRITE_STAGE_NAME;
+    }
+
+    /**
+     * The write stage, once it is known to share a filesystem with $dir: only
+     * then is `mv -T` a rename. Anything else is refused, never copied across.
+     */
+    private function writeStageFor(string $dir): string
+    {
+        $stage = $this->writeStage();
+        $this->system->exec(['sudo', 'mkdir', '-p', '-m', '0700', $stage]);
+        $devices = $this->system->runProcess(['sudo', 'stat', '-c', '%d', $stage, $dir]);
+        $lines = preg_split('/\R/', trim($devices->getOutput())) ?: [];
+        if ($devices->getExitCode() !== 0 || count($lines) !== 2 || ! ctype_digit($lines[0]) || $lines[0] !== $lines[1]) {
+            throw new \RuntimeException("Refusing to write into '{$dir}': it is not on the filesystem of {$stage}, so the file cannot be renamed into place.");
+        }
+
+        return $stage;
+    }
+
+    /**
+     * Rename $staged onto $path. Inside an account's home every directory above
+     * $path may be one the tenant can swap for a symlink, or a `..` it chose,
+     * which would carry the rename into another account's tree: the path must
+     * stay in the account home it names, and {@see ACCOUNT_HOME_FILE} walks it
+     * without following a link and renames in the same system calls.
+     */
+    private function renameOnto(string $staged, string $path): void
+    {
+        if (! $this->isInAccountHome($path)) {
+            $this->system->exec(['sudo', 'mv', '-T', $staged, $path]);
+
+            return;
+        }
+        if (! $this->staysInTheAccountHomeItNames($path)) {
+            throw $this->renameRefused($path);
+        }
+        $renamed = $this->system->runProcess($this->accountHomeFileArgv('rename', rtrim($this->homesDir(), '/'), $staged, self::lexicalPath($path)));
+        if ($renamed->getExitCode() === self::ACCOUNT_HOME_FILE_REFUSED) {
+            throw $this->renameRefused($path);
+        }
+        if ($renamed->getExitCode() !== 0) {
+            throw new \RuntimeException("Cannot move '{$staged}' to '{$path}': ".trim($renamed->getErrorOutput()));
+        }
+    }
+
+    private function staysInTheAccountHomeItNames(string $path): bool
+    {
+        $homes = rtrim($this->homesDir(), '/');
+        $dir = self::lexicalPath(dirname($path));
+        $account = explode('/', substr($path, strlen($homes) + 1), 2)[0];
+
+        return $dir === $homes
+            || (! in_array($account, ['', '.', '..'], true) && str_starts_with($dir.'/', "{$homes}/{$account}/"));
+    }
+
+    private function renameRefused(string $path): \RuntimeException
+    {
+        return new \RuntimeException("Refusing to write '{$path}': a directory above it is a symlink or leads out of the account's home.");
+    }
+
+    /**
+     * @param  string  $root  the directory the walk starts from, as the host has it
+     * @return list<string>
+     */
+    private function accountHomeFileArgv(string $operation, string $root, string ...$paths): array
+    {
+        return ['sudo', 'python3', '-I', dirname(__DIR__, 2).self::ACCOUNT_HOME_FILE, $operation, $root, ...$paths];
+    }
+
+    /** $path with `.`, `..` and repeated slashes resolved by name alone, nothing on disk followed. */
+    private static function lexicalPath(string $path): string
+    {
+        $parts = [];
+        foreach (explode('/', $path) as $part) {
+            if ($part === '..') {
+                array_pop($parts);
+            } elseif ($part !== '' && $part !== '.') {
+                $parts[] = $part;
+            }
+        }
+
+        return '/'.implode('/', $parts);
     }
 
     /**
@@ -67,6 +192,20 @@ class Filesystem
         $this->copyContents($contents, $path);
 
         return true;
+    }
+
+    /**
+     * The refusal a write to $path would end in, for a step that has to come before
+     * that write: a directory between $root and $path that is a symlink.
+     */
+    public function assertNoSymlinkAbove(string $path, string $root): void
+    {
+        $root = self::lexicalPath($root);
+        for ($dir = dirname(self::lexicalPath($path)); str_starts_with($dir, $root.'/'); $dir = dirname($dir)) {
+            if ($this->isSymlink($dir)) {
+                throw $this->renameRefused($path);
+            }
+        }
     }
 
     public function assertNotSymlink(string $path): void
@@ -108,10 +247,26 @@ class Filesystem
     public function makeDirWithParents(string $target, ?string $chown = null): void
     {
         foreach (array_reverse($this->missingDirs($target)) as $d) {
-            $this->system->exec(['sudo', 'mkdir', $d]);
-            if ($chown) {
-                $this->system->exec(['sudo', 'chown', $chown, $d]);
-            }
+            $this->isInAccountHome($d) ? $this->makeDirReplacingPath($d, $chown) : $this->makeDir($d, $chown);
+        }
+    }
+
+    private function makeDir(string $dir, ?string $chown): void
+    {
+        $this->system->exec(['sudo', 'mkdir', $dir]);
+        $this->setOwnerAndMode($dir, $chown, null);
+    }
+
+    /** Made and owned in the write stage, then renamed into the home, like a file from writeFileReplacingPath(). */
+    private function makeDirReplacingPath(string $dir, ?string $chown): void
+    {
+        $staged = $this->writeStageFor(dirname($dir)).'/'.bin2hex(random_bytes(8));
+        try {
+            $this->makeDir($staged, $chown);
+            $this->renameOnto($staged, $dir);
+        } catch (\Throwable $e) {
+            $this->system->runProcess(['sudo', 'rm', '-rf', $staged]);
+            throw $e;
         }
     }
 
@@ -207,6 +362,9 @@ class Filesystem
     /** The temporary copy often holds a secret, so it is removed even when the copy fails. */
     public function fileGetContents(string $path): string
     {
+        if ($this->isInAccountHome($path)) {
+            return $this->readInsideAccountHome($path);
+        }
         $tmpFile = tempnam(sys_get_temp_dir(), 'tmp_');
 
         try {
@@ -216,6 +374,67 @@ class Filesystem
         } finally {
             @unlink($tmpFile);
         }
+    }
+
+    /**
+     * Read through stdout, never into a temp file: root may not open a file
+     * www-data owns in the sticky /tmp when fs.protected_regular is set.
+     */
+    private function readInsideAccountHome(string $path): string
+    {
+        $read = $this->system->runProcess($this->accountHomeReadArgv($path));
+        if ($read->getExitCode() !== 0) {
+            throw new \RuntimeException("Cannot read '{$path}': ".trim($read->getErrorOutput()));
+        }
+
+        return $read->getOutput();
+    }
+
+    /**
+     * $path resolved, then read by {@see ACCOUNT_HOME_FILE} from inside the
+     * resolved home without following a link, so a directory swapped for one
+     * after the check fails the read.
+     *
+     * @return list<string>
+     */
+    private function accountHomeReadArgv(string $path): array
+    {
+        [$home, $resolved] = $this->realPathInsideAccountHome($path);
+
+        return $this->accountHomeFileArgv('read', $home, $resolved);
+    }
+
+    /**
+     * The account home and $path with every symlink and `..` resolved, refused
+     * unless the path is still inside that home: as root, a tenant's link would
+     * otherwise hand the engine another account's file to copy into its own.
+     *
+     * @return array{0: string, 1: string}
+     */
+    private function realPathInsideAccountHome(string $path): array
+    {
+        $home = $this->accountHomeOf($path);
+        $resolved = $this->system->runProcess(['sudo', 'realpath', '-e', '--', $home, $path]);
+        $lines = preg_split('/\R/', trim($resolved->getOutput())) ?: [];
+        if ($resolved->getExitCode() !== 0) {
+            throw new \RuntimeException("Cannot read '{$path}': ".trim($resolved->getErrorOutput() ?: 'it does not exist.'));
+        }
+        if (count($lines) !== 2 || ! str_starts_with($lines[1], rtrim($lines[0], '/').'/')) {
+            throw new \RuntimeException("Refusing to read '{$path}': it resolves to a file outside {$home}.");
+        }
+
+        return [rtrim($lines[0], '/'), $lines[1]];
+    }
+
+    private function accountHomeOf(string $path): string
+    {
+        $homes = rtrim($this->homesDir(), '/');
+        $account = explode('/', substr($path, strlen($homes) + 1), 2)[0];
+        if (in_array($account, ['', '.', '..'], true)) {
+            throw new \RuntimeException("Refusing to read '{$path}': it names no account home.");
+        }
+
+        return $homes.'/'.$account;
     }
 
     public function filePutContents(string $path, string $contents, ?string $chown = null, ?string $chmod = null): void
@@ -305,7 +524,14 @@ class Filesystem
 
     public function cat(string $path): ?string
     {
-        return $this->outputOrNull(['sudo', 'cat', $path]);
+        if (! $this->isInAccountHome($path)) {
+            return $this->outputOrNull(['sudo', 'cat', $path]);
+        }
+        try {
+            return $this->outputOrNull($this->accountHomeReadArgv($path));
+        } catch (\RuntimeException) {
+            return null;
+        }
     }
 
     public function tail(string $path, int $lines): ?string

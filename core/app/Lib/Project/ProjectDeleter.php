@@ -71,6 +71,7 @@ class ProjectDeleter
             $user->project()->assertDeletable();
             $this->cancelQueued($user);
             $this->releaseApiAccess($user);
+            $this->removeFromApiAccessScopes($user);
             $this->destroy($user);
             $this->forgetTokenScopes($user->username);
         } finally {
@@ -113,6 +114,23 @@ class ProjectDeleter
             0,
             $failure,
         );
+    }
+
+    /**
+     * An allowance still naming this project would hand the name to the token
+     * its next rotation mints; when it cannot be taken out, the delete stops.
+     */
+    private function removeFromApiAccessScopes(User $user): void
+    {
+        try {
+            $this->apiAccess->removeFromScopes($user->username);
+        } catch (\Throwable $e) {
+            throw new \RuntimeException(
+                "Could not remove '{$user->username}' from the Engine API scope of other projects, so the project was not deleted: ".$e->getMessage(),
+                0,
+                $e,
+            );
+        }
     }
 
     /**

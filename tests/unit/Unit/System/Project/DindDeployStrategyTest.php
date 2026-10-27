@@ -201,6 +201,10 @@ class DindDeployStrategyTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
+                if (array_slice((array) $cmd, 0, 2) === ['sudo', 'realpath']) {
+                    return SuccessfulProcess::for($cmd);
+                }
+
                 return new class extends Process {
                     public function __construct()
                     {

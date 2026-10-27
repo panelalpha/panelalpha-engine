@@ -413,7 +413,9 @@ class GitController extends Controller
             .'The private key is stored encrypted and never returned. Host keys are pinned: github.com, '
             .'gitlab.com and bitbucket.org from their published keys; for another host pass `host` '
             .'(`git.example.com` or `git.example.com:2222`) and its keys are read once and pinned, with their '
-            .'`fingerprints` returned to check. 201 when the key was created, 200 when it existed; never '
+            .'`fingerprints` returned to check. A `host` that resolves to an internal address, or does not '
+            .'resolve at all, is refused 422 with `problems[{field: host, code: host_refused}]` before anything '
+            .'is connected. 201 when the key was created, 200 when it existed; never '
             .'rotates (delete and create again for a new key).',
         summary: 'Create a git deploy key',
         security: [['bearerAuth' => []]],

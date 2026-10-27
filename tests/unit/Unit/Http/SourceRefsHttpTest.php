@@ -6,13 +6,14 @@ use App\Http\Middleware\Authenticate;
 use App\Lib\Deploy\Source\GitRefs;
 use App\Lib\Deploy\Source\GitRefsUnavailableException;
 use App\Lib\Deploy\Source\GitRemoteProbe;
+use App\Lib\Http\OutboundUrl;
 use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
 
 /**
  * POST /api/source/refs: the branches and tags a remote advertises, and what
- * each refusal reads as. The probe is doubled, so what is asserted is the
- * endpoint's mapping, not a forge's answer.
+ * each refusal reads as. The probe and the address check's DNS are doubled, so
+ * what is asserted is the endpoint's mapping, not a forge's answer.
  */
 class SourceRefsHttpTest extends TestCase
 {
@@ -34,6 +35,13 @@ class SourceRefsHttpTest extends TestCase
         $this->withoutMiddleware(Authenticate::class);
         $this->probe = $this->fakeProbe();
         $this->app->instance(GitRemoteProbe::class, $this->probe);
+        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'github.com' ? ['140.82.121.4'] : []);
+    }
+
+    protected function tearDown(): void
+    {
+        OutboundUrl::setResolverForTests(null);
+        parent::tearDown();
     }
 
     public function test_it_lists_the_branches_and_tags_of_a_remote(): void

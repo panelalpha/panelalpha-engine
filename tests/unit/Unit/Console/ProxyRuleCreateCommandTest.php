@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Console;
 
+use App\Models\Domain;
 use App\Models\ProxyRule;
 use Tests\Support\InMemoryDatabase;
 use Tests\Support\RecordsWebserverApply;
@@ -21,8 +22,8 @@ class ProxyRuleCreateCommandTest extends TestCase
     {
         parent::setUp();
         $this->bootInMemoryDatabase();
-        $this->makeMainDomain($this->makeUser('alice'), 'shop.test');
-        $this->makeMainDomain($this->makeUser('bob'), 'bob.test');
+        $this->makeMainDomain($this->makeUser('alice', ['template' => 'dind']), 'shop.test');
+        $this->makeMainDomain($this->makeUser('bob', ['template' => 'dind']), 'bob.test');
         $this->recordWebserverApply();
     }
 
@@ -144,6 +145,27 @@ class ProxyRuleCreateCommandTest extends TestCase
         $this->create('--scope=system --transport=http --listen-port=8090 --server-name=shop.test --upstream-host=10.0.0.5 --upstream-port=80')
             ->assertExitCode(0);
         $this->assertSame(2, ProxyRule::query()->count());
+    }
+
+    /** As the API: a name whose domain's own site answers for it without rendering the rule is refused. */
+    public function test_a_rule_named_after_an_alias_or_a_traditional_php_projects_domain_is_refused(): void
+    {
+        $shop = Domain::query()->where('domain', 'shop.test')->sole();
+        $shop->addAlias('www.shop.test');
+        $shop->save();
+        $this->makeMainDomain($this->makeUser('carol'), 'carol.test');
+
+        $this->create('--scope=system --transport=http --listen-port=443 --server-name=www.shop.test --upstream-host=10.0.0.5 --upstream-port=8080')
+            ->expectsOutput('www.shop.test is an alias of shop.test, whose own site answers for it, so a rule named after it '
+                . 'would never be served. Name the rule shop.test: a rule for the domain serves its aliases too.')
+            ->assertExitCode(1);
+        $this->create('--scope=system --transport=http --listen-port=80 --server-name=carol.test --upstream-host=10.0.0.5 --upstream-port=8080')
+            ->expectsOutput('carol.test belongs to the traditional PHP project carol, whose own site answers for it, '
+                . 'so a rule named after it would never be served.')
+            ->assertExitCode(1);
+
+        $this->assertSame(0, ProxyRule::query()->count());
+        $this->assertWebserverApplied(0);
     }
 
     /** The values the API validates before they reach the shared nginx config verbatim. */

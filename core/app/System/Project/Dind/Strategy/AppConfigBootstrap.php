@@ -71,7 +71,7 @@ class AppConfigBootstrap
         $this->dind->noteAppConfigOverwritesTracked([EntrypointWriter::PROJECT_OVERRIDE]);
         $path = rtrim($projectDir, '/').'/'.EntrypointWriter::PROJECT_OVERRIDE;
         $this->dind->shell()->execAsUser(['mkdir', '-p', dirname($path)]);
-        $this->dind->system()->filesystem()->filePutContents($path, $script, $chown, '755');
+        $this->dind->system()->filesystem()->writeFileReplacingPath($path, $script, $chown, '755');
     }
 
     /**
@@ -117,14 +117,14 @@ class AppConfigBootstrap
                     "Removed from the app config's compose override, not allowed in hosting: {$what}"
                 );
             }
-            $fs->filePutContents($engineOverride, $hardened['yaml'], $chown, '644');
+            $fs->writeFileReplacingPath($engineOverride, $hardened['yaml'], $chown, '644');
             $this->removeIfExists($appConfigCompose, $system, $fs);
 
             return;
         }
 
         // The same answer inspect's RecipeFileOverlay lays over a clone.
-        $fs->filePutContents($appConfigCompose, (string) $appConfig->replacingCompose(), $chown, '644');
+        $fs->writeFileReplacingPath($appConfigCompose, (string) $appConfig->replacingCompose(), $chown, '644');
         $this->removeIfExists($engineOverride, $system, $fs);
     }
 

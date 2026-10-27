@@ -362,13 +362,34 @@ class HookReceiverTest extends DeployHookTestCase
         Queue::assertPushed(RunHookDelivery::class, 1);
     }
 
-    public function test_an_ignored_signed_push_leaves_no_payload_digest(): void
+    public function test_an_ignored_signed_push_is_remembered_too(): void
     {
         $this->receive($this->github('push', 'push-other-branch.json'));
         $replay = $this->receive($this->github('push', 'push-other-branch.json', 'guid-replayed'));
 
-        $this->assertSame(0, DB::table('hook_payload_digests')->count());
-        $this->assertSame(HookDelivery::OUTCOME_IGNORED, $replay->body['outcome']);
+        $this->assertSame(1, DB::table('hook_payload_digests')->count());
+        $this->assertSame(['outcome' => 'duplicate'], $replay->body);
+        Queue::assertNothingPushed();
+    }
+
+    /**
+     * An ignored push captured while another branch was tracked must not
+     * deploy once its branch becomes the tracked one: replayed under a fresh
+     * delivery id, it is still the body seen before.
+     */
+    public function test_an_ignored_signed_push_replayed_after_a_branch_change_deploys_nothing(): void
+    {
+        $this->receive($this->github('push', 'push-other-branch.json', 'guid-captured'));
+        $this->hook->user->putSiteGit('project', [
+            'repo_url' => 'https://github.com/octocat/Hello-World.git',
+            'branch' => 'feature/login',
+            'token' => null,
+        ]);
+
+        $replay = $this->receive($this->github('push', 'push-other-branch.json', 'guid-replayed'));
+
+        $this->assertSame(['outcome' => 'duplicate'], $replay->body);
+        $this->assertSame(0, HookDelivery::where('delivery_id', 'guid-replayed')->count());
         Queue::assertNothingPushed();
     }
 
@@ -612,6 +633,32 @@ class HookReceiverTest extends DeployHookTestCase
 
         $this->assertSame(['outcome' => 'duplicate'], $again->body);
         Queue::assertPushed(RunHookDelivery::class, 1);
+    }
+
+    /**
+     * A hook made before 2.2 holds a secret GitLab cannot sign with; a GitLab
+     * webhook that signs anyway still sends that secret as its token.
+     */
+    public function test_a_signed_gitlab_delivery_to_a_hook_made_before_signing_is_checked_by_its_token(): void
+    {
+        $request = $this->signedGitlab('push-main.json', 'msg_1');
+        $request->headers->set('X-Gitlab-Token', self::SECRET);
+
+        $response = $this->receive($request);
+
+        $this->assertSame(202, $response->status);
+        $this->assertSame(HookDelivery::OUTCOME_QUEUED, $this->onlyDelivery()->outcome);
+        $this->assertFalse($this->hook->fresh()?->expectsSignatures(), 'a token proves no signature');
+        $this->assertSame(0, DB::table('hook_payload_digests')->count(), 'nor the body');
+    }
+
+    public function test_a_signed_gitlab_delivery_to_a_hook_made_before_signing_still_needs_its_token(): void
+    {
+        $request = $this->signedGitlab('push-main.json', 'msg_1');
+        $request->headers->set('X-Gitlab-Token', 'forged');
+
+        $this->assertSame(401, $this->receive($request)->status);
+        Queue::assertNothingPushed();
     }
 
     public function test_a_forged_gitlab_request_cannot_claim_a_delivery_id(): void

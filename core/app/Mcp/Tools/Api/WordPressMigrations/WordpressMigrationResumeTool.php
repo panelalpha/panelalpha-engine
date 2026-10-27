@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Resume a failed or stalled WordPress migration
 
-    Re-queues a migration that is in status failed, or that is running or pending but stale (no heartbeat in progress.updated_at for 15 minutes, e.g. its worker died), and continues from the step that did not complete. Steps are safe to repeat: the project the import created is adopted, WordPress core and its database are not created twice. A wp_admin migration that failed after its plugin reached the source has had the plugin removed there; resume installs it again and restarts the transfer. Rejects any other status with 409, including a running migration that is still reporting: wait for it.
+    Re-queues a migration that is in status failed, or that is running or pending but stale (no heartbeat in progress.updated_at for 15 minutes, e.g. its worker died), and continues from the step that did not complete. Steps are safe to repeat: the project the import created is adopted, WordPress core and its database are not created twice. A wp_admin migration that failed after its plugin reached the source has had the plugin removed there; resume installs it again and restarts the transfer. Rejects any other status with 409, including a running migration that is still reporting: wait for it. A migration that has had no activity for 7 days loses its stored password and tokens (step_log says secrets_expired): resume it with password (wp_admin) or source_token (manual_plugin) again, otherwise 422. A transfer it left unfinished then starts again from install_destination_plugin.
     MARKDOWN)]
 #[IsDestructive]
 class WordpressMigrationResumeTool extends ApiTool
@@ -42,12 +42,25 @@ class WordpressMigrationResumeTool extends ApiTool
     }
 
     /**
+     * @return array<int, string>
+     */
+    protected function bodyParams(): array
+    {
+        return [
+            'password',
+            'source_token',
+        ];
+    }
+
+    /**
      * @return array<string, \Illuminate\JsonSchema\Types\Type>
      */
     public function schema(JsonSchema $schema): array
     {
         return [
             'id' => $schema->integer()->required(),
+            'password' => $schema->string()->description('wp_admin: the wp-admin password, required once it was cleared; replaces the stored one. Never returned.'),
+            'source_token' => $schema->string()->description('manual_plugin: the plugin token (64 hex characters), required once it was cleared; replaces the stored one. Never returned.'),
         ];
     }
 }

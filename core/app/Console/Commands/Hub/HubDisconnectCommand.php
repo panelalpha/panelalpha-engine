@@ -5,13 +5,13 @@ namespace App\Console\Commands\Hub;
 use App\Lib\Hub\HubClient;
 use App\Lib\Hub\HubException;
 use App\Lib\Hub\HubLifecycle;
-use App\Lib\Hub\HubTokens;
 use App\Models\HubConnection;
 use Illuminate\Console\Command;
 
 /**
- * Disconnect from PanelAlpha Connect. The tokens are revoked here first, so
- * the Hub loses access at once whether or not it hears about it.
+ * Disconnect from PanelAlpha Connect. The tokens are revoked and the
+ * connection forgotten first, so the Hub loses access at once whether or not
+ * it hears about it: the notice is best effort, the revocation is not.
  */
 class HubDisconnectCommand extends Command
 {
@@ -22,9 +22,7 @@ class HubDisconnectCommand extends Command
     public function handle(): int
     {
         $connection = HubConnection::active();
-
-        // Before telling the Hub: the notice is best effort, the revocation is not.
-        $revoked = HubTokens::revokeAll();
+        $revoked = HubLifecycle::forget('operator');
 
         if ($connection !== null) {
             try {
@@ -36,8 +34,6 @@ class HubDisconnectCommand extends Command
                 $this->warn('Could not tell the Hub ('.$e->getMessage().'). It loses access anyway.');
             }
         }
-
-        HubLifecycle::forget('operator');
 
         if ($connection === null) {
             $this->line($revoked > 0

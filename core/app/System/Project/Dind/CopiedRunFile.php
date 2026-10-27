@@ -5,6 +5,7 @@ namespace App\System\Project\Dind;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Compose\ComposeEnvironment;
 use App\Lib\Deploy\Compose\ComposeYaml;
+use App\Lib\Deploy\Env\EnvFileValues;
 use App\Models\User;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\Strategy\ManifestDatabase;
@@ -13,15 +14,23 @@ use App\System\Project\Dind\Strategy\ManifestDatabase;
  * A run file a staging, clone or push brought over from another project.
  *
  * The deploy wrote that project's application database credentials, its
- * public address and the account uid:gid its containers run as into the file
- * as literal values, so the copy would run on the other project's database,
- * answer as its domain and own none of its files. Every value the
+ * public address, the account uid:gid its containers run as and bind sources
+ * under its home into the file as literal values, so the copy would run on
+ * the other project's database, answer as its domain, own none of its files
+ * and mount directories its container does not have. Every value the
  * deploy derived from the source is replaced with the one it derives for this
  * project, through the same code; a value the project set for itself is left
- * as it is, because it never equals one the engine derived.
+ * as it is, because it never equals one the engine derived. The env files
+ * beside the run file came over with it and are repointed the same way.
  */
 final class CopiedRunFile
 {
+    /** The env files a deploy writes beside the run file. */
+    private const ENV_FILES = ['.env', '.env.default', EngineArtifacts::ENV_OVERRIDES];
+
+    /** The widest mode an env file is written back with, as the deploy writes them. */
+    private const ENV_MODE_CEILING = 0644;
+
     public function __construct(private DindProject $project) {}
 
     /**
@@ -33,8 +42,10 @@ final class CopiedRunFile
         (new CopiedApiAccess($this->project))->repointIn($path);
         $database = $this->databaseValues($source);
         $address = $this->addressValues($source);
+        $this->repointEnvFiles(dirname($path), $database, $address);
         $identity = $this->identityValues($source);
-        if ($database === [] && $address === [] && $identity === []) {
+        $home = $this->homeValues($source);
+        if ($database === [] && $address === [] && $identity === [] && $home === []) {
             return false;
         }
         $fs = $this->project->system()->filesystem();
@@ -48,7 +59,7 @@ final class CopiedRunFile
         if ($compose === null || $services === null) {
             return false;
         }
-        $repointed = $this->repointedServices($services, $database, $address, $identity);
+        $repointed = $this->repointedServices($services, $database, $address, $identity, $home);
         if ($repointed === $services) {
             return false;
         }
@@ -61,6 +72,61 @@ final class CopiedRunFile
         );
 
         return true;
+    }
+
+    /**
+     * The source's stored env vars for this project: a value the deploy
+     * derived from the source's database or address becomes this project's.
+     *
+     * @param  array<mixed>  $vars
+     * @return array<mixed>
+     */
+    public function repointedEnvVars(User $source, array $vars): array
+    {
+        return self::repointedEnvironment($vars, $this->databaseValues($source), $this->addressValues($source));
+    }
+
+    /**
+     * @param  array<string, list<array{0: string, 1: string}>>  $database
+     * @param  array<string, string>  $address
+     */
+    private function repointEnvFiles(string $projectDir, array $database, array $address): void
+    {
+        if ($database === [] && $address === []) {
+            return;
+        }
+        foreach (self::ENV_FILES as $name) {
+            $this->repointEnvFile(rtrim($projectDir, '/').'/'.$name, $database, $address);
+        }
+    }
+
+    /**
+     * A link is left alone: the file is the project's own, and writing it would
+     * replace the link with whatever it points at.
+     *
+     * @param  array<string, list<array{0: string, 1: string}>>  $database
+     * @param  array<string, string>  $address
+     */
+    private function repointEnvFile(string $path, array $database, array $address): void
+    {
+        $fs = $this->project->system()->filesystem();
+        if (! $fs->fileExists($path) || $fs->isSymlink($path)) {
+            return;
+        }
+        $contents = $fs->fileGetContents($path);
+        $repointed = EnvFileValues::replaced(
+            $contents,
+            static fn (string $key, string $value): string => self::repointedValue($key, $value, $database, $address)
+        );
+        if ($repointed === $contents) {
+            return;
+        }
+        $fs->writeFileReplacingPath(
+            $path,
+            $repointed,
+            $this->project->userModel()->getChownString(),
+            sprintf('%o', ($fs->mode($path) ?? 0600) & self::ENV_MODE_CEILING)
+        );
     }
 
     /**
@@ -131,13 +197,32 @@ final class CopiedRunFile
     }
 
     /**
+     * The source account's home against this project's: where a generated
+     * service bind-mounts the account's own directories from, such as its
+     * Composer cache.
+     *
+     * @return array<string, string>
+     */
+    private function homeValues(User $source): array
+    {
+        $from = rtrim($source->getHomeDir(), '/');
+        $to = rtrim($this->project->userModel()->getHomeDir(), '/');
+        if ($from === '' || $to === '' || $from === $to) {
+            return [];
+        }
+
+        return [$from => $to];
+    }
+
+    /**
      * @param  array<mixed>  $services
      * @param  array<string, list<array{0: string, 1: string}>>  $database
      * @param  array<string, string>  $address
      * @param  array<string, string>  $identity
+     * @param  array<string, string>  $home
      * @return array<mixed>
      */
-    private function repointedServices(array $services, array $database, array $address, array $identity): array
+    private function repointedServices(array $services, array $database, array $address, array $identity, array $home): array
     {
         $pin = $database === [] ? null : $this->databasePin();
         foreach ($services as $name => $service) {
@@ -155,10 +240,53 @@ final class CopiedRunFile
             ) {
                 $service['user'] = $identity[(string) $service['user']];
             }
+            if ($home !== [] && is_array($service['volumes'] ?? null)) {
+                $service['volumes'] = self::rehomedVolumes($service['volumes'], $home);
+            }
             $services[$name] = $service;
         }
 
         return $services;
+    }
+
+    /**
+     * Bind sources under the source's home moved under this project's, in the
+     * short `source:target[:mode]` form and the long one alike.
+     *
+     * @param  array<mixed>  $volumes
+     * @param  array<string, string>  $home
+     * @return array<mixed>
+     */
+    private static function rehomedVolumes(array $volumes, array $home): array
+    {
+        return array_map(static function (mixed $volume) use ($home): mixed {
+            if (is_string($volume)) {
+                $separator = strpos($volume, ':');
+
+                return $separator === false
+                    ? $volume
+                    : self::rehomedPath(substr($volume, 0, $separator), $home).substr($volume, $separator);
+            }
+            if (is_array($volume) && ($volume['type'] ?? null) === 'bind' && is_string($volume['source'] ?? null)) {
+                $volume['source'] = self::rehomedPath($volume['source'], $home);
+            }
+
+            return $volume;
+        }, $volumes);
+    }
+
+    /**
+     * @param  array<string, string>  $home
+     */
+    private static function rehomedPath(string $path, array $home): string
+    {
+        foreach ($home as $from => $to) {
+            if ($path === $from || str_starts_with($path, $from.'/')) {
+                return $to.substr($path, strlen($from));
+            }
+        }
+
+        return $path;
     }
 
     /**

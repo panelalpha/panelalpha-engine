@@ -92,7 +92,8 @@ trait PrintsGitJson
 
     /**
      * The input with a `vault:<key>` token read in its place, as the HTTP
-     * request reads it; an unusable reference is a validation error.
+     * request reads it; an unusable reference is a validation error. A project
+     * that does not exist is not found before the reference is read.
      *
      * @param  array<string, mixed>  $input
      * @return array<string, mixed>
@@ -105,9 +106,8 @@ trait PrintsGitJson
             return $input;
         }
 
-        $username = (string) $this->argument('username');
-        $project = User::existsByUsername($username) ? $username : null;
-        $input['token'] = RequestVault::resolve('token', $input['token'], $project);
+        $project = User::findByUsernameOrFail((string) $this->argument('username'));
+        $input['token'] = RequestVault::resolve('token', $input['token'], $project->username);
 
         return $input;
     }

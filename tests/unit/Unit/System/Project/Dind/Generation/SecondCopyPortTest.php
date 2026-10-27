@@ -331,7 +331,7 @@ class SecondCopyPortTest extends TestCase
     {
         $filesystem = $this->createStub(Filesystem::class);
         $filesystem->method('fileGetContents')->willReturnCallback(fn (string $path): string => $path === self::RUN_PATH ? $this->runFile : '');
-        $filesystem->method('filePutContents')->willReturnCallback(function (string $path, string $contents): void {
+        $filesystem->method('writeFileReplacingPath')->willReturnCallback(function (string $path, string $contents): void {
             if ($path === self::RUN_PATH) {
                 $this->runFile = $contents;
             }

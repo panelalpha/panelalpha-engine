@@ -8,11 +8,11 @@ use Symfony\Component\Console\Input\InputOption;
 /** The project, and --path and --service to pick its install, for every WordPress command. */
 trait SelectsWordPressInstall
 {
+    /** The project argument is prepended, so it stays first ahead of the signature's own. */
     public function __construct()
     {
         parent::__construct();
 
-        // Prepended, so the project stays the first argument ahead of the signature's own.
         $definition = $this->getDefinition();
         $definition->setArguments([
             new InputArgument('username', InputArgument::REQUIRED, 'Project username'),

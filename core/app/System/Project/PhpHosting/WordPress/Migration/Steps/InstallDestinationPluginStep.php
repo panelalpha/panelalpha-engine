@@ -26,7 +26,7 @@ final class InstallDestinationPluginStep implements MigrationStep
         private ?WordpressMigratorZip $zip = null,
         private ?AccountFileCopy $files = null,
     ) {
-        $this->zip ??= new WordpressMigratorZip;
+        $this->zip ??= new WordpressMigratorZip(WordpressMigratorZip::JOB_DOWNLOAD_SECONDS);
         $this->files ??= new AccountFileCopy;
     }
 
@@ -97,7 +97,7 @@ final class InstallDestinationPluginStep implements MigrationStep
             $migration->storeMigratorToken($token);
             $migration->markStepCompleted($this->name());
         } finally {
-            $this->files->remove($staged, $home);
+            $this->files->remove($staged, $home, $chown);
         }
     }
 

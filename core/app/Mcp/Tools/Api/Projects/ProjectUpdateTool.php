@@ -86,7 +86,7 @@ class ProjectUpdateTool extends ApiTool
             'domain' => $schema->string()->description('Renames the main domain. Not to a name under panelalpha.online (add it as a tunnel instead). A PanelAlpha Online tunnel that is the old name itself is deleted with it; any other tunnel of the main domain has to be deleted first.'),
             'email' => $schema->string(),
             'disk_space_limit' => $schema->integer()->description('MB, -1 for unlimited; null clears the limit')->nullable(),
-            'memory_limit' => $schema->integer()->description('MB. Can be changed, not removed. Refused when larger than memory_budget.max_project_mb in GET /metrics/current'),
+            'memory_limit' => $schema->integer()->description('MB, at least 6, or 256 for a container project. Can be changed, not removed. Refused when larger than memory_budget.max_project_mb in GET /metrics/current'),
             'cpu_limit' => $schema->number()->description('CPU cores, -1 for unlimited; null clears the limit')->nullable(),
             'device_read_bps' => $schema->integer()->description('-1 for unlimited; null clears the limit')->nullable(),
             'device_write_bps' => $schema->integer()->description('-1 for unlimited; null clears the limit')->nullable(),

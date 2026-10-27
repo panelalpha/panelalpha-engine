@@ -7,8 +7,10 @@ namespace App\System\Project\PhpHosting\WordPress;
  * moved to another host. WordPress finds the network and its main site by the
  * request's host in {prefix}site and {prefix}blogs, and network URLs come from
  * the siteurl row of {prefix}sitemeta, so a copy that keeps the source's host
- * there redirects to the source or answers "site not found". Subsites keep
- * their addresses. The tables change through `wp db query`, which reads
+ * there redirects to the source or answers "site not found". Every network
+ * and site on the main site's host moves with it, which in a subdirectory
+ * network is every site; subsites on hosts of their own keep them. The
+ * tables change through `wp db query`, which reads
  * wp-config.php without loading WordPress, so it runs whatever host WordPress
  * would boot on.
  */
@@ -62,15 +64,31 @@ final class MultisiteMainSite
         }
     }
 
-    /** The main site's host in the network tables; the siteurl row keeps its scheme and path. */
+    /** The main site's host, and every row on it, in the network tables; the siteurl row keeps its scheme and path. */
     public function pointTablesAt(WpCli $cli, string $host): void
     {
+        $onMainSiteHost = $this->onMainSiteHost($cli);
         $statements = [
-            sprintf('UPDATE `%s` SET domain = %s WHERE id = %d', $this->table('site'), self::quoted($host), $this->networkId),
-            sprintf('UPDATE `%s` SET domain = %s WHERE blog_id = %d', $this->table('blogs'), self::quoted($host), $this->mainSiteId),
+            sprintf('UPDATE `%s` SET domain = %s WHERE id = %d%s', $this->table('site'), self::quoted($host), $this->networkId, $onMainSiteHost),
+            sprintf('UPDATE `%s` SET domain = %s WHERE blog_id = %d%s', $this->table('blogs'), self::quoted($host), $this->mainSiteId, $onMainSiteHost),
             ...$this->siteUrlUpdate($cli, $host),
         ];
         $cli->runOrFail(['db', 'query', implode('; ', $statements).';']);
+    }
+
+    /**
+     * The rows still on the main site's host move with it, as the host
+     * rewrite moves every address on that host.
+     */
+    private function onMainSiteHost(WpCli $cli): string
+    {
+        $host = $this->firstValue($cli, sprintf(
+            'SELECT domain FROM `%s` WHERE blog_id = %d',
+            $this->table('blogs'),
+            $this->mainSiteId,
+        ));
+
+        return $host === '' ? '' : ' OR domain = '.self::quoted($host);
     }
 
     /** @return list<string> */
@@ -91,16 +109,16 @@ final class MultisiteMainSite
 
     private function networkSiteUrl(WpCli $cli): string
     {
-        $result = $cli->runOrFail([
-            'db',
-            'query',
-            sprintf(
-                "SELECT meta_value FROM `%s` WHERE site_id = %d AND meta_key = 'siteurl'",
-                $this->table('sitemeta'),
-                $this->networkId,
-            ),
-            '--skip-column-names',
-        ]);
+        return $this->firstValue($cli, sprintf(
+            "SELECT meta_value FROM `%s` WHERE site_id = %d AND meta_key = 'siteurl'",
+            $this->table('sitemeta'),
+            $this->networkId,
+        ));
+    }
+
+    private function firstValue(WpCli $cli, string $select): string
+    {
+        $result = $cli->runOrFail(['db', 'query', $select, '--skip-column-names']);
 
         return trim(explode("\n", trim($result['stdout']))[0]);
     }

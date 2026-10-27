@@ -3,7 +3,9 @@
 namespace Tests\Unit\Deploy\Compose;
 
 use App\Lib\Deploy\Compose\ServiceHardener;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Yaml\Yaml;
 
 /**
  * What a service from someone else's compose file is allowed to ask for.
@@ -546,6 +548,104 @@ class ServiceHardenerTest extends TestCase
         $this->assertSame(['${DATA_DIR:-./data}'], array_column($long['volumes'], 'source'));
     }
 
+    /** A lone field is a container path, not a source; one that interpolates may still become `source:target`. */
+    public function test_a_lone_field_is_an_anonymous_volume_unless_it_interpolates_to_a_bind(): void
+    {
+        $kept = ServiceHardener::withoutEscapes(['volumes' => ['/var/lib/mysql', '/anon/']], [], 'acct', '/nonexistent-core-view/acct/project');
+        $this->assertSame(['/var/lib/mysql', '/anon/'], $kept['volumes']);
+
+        $env = ['MOUNT' => ['/etc:/host-etc']];
+        foreach (['${MOUNT}', '/var/run/docker.sock', '/run'] as $mount) {
+            $service = ServiceHardener::withoutEscapes(['volumes' => [$mount, 'data:/data']], $env);
+
+            $this->assertSame(['data:/data'], $service['volumes'], $mount);
+        }
+    }
+
+    /**
+     * What `docker compose config` (Compose v5.6.0) made of each entry: an
+     * anonymous volume, a named one, or a bind from the source shown. A bind
+     * outside the checkout goes; whatever Compose does not bind stays.
+     *
+     * @return array<string, array{0: string, 1: bool}>
+     */
+    public static function composeShortMounts(): array
+    {
+        return [
+            'anonymous /anon' => ['/anon', true],
+            'anonymous ./rel' => ['./rel', true],
+            'anonymous ~/x' => ['~/x', true],
+            'anonymous relname' => ['relname', true],
+            'anonymous .' => ['.', true],
+            'anonymous ../' => ['../', true],
+            'anonymous /anon/' => ['/anon/', true],
+            'anonymous C:\\x' => ['C:\x', true],
+            'anonymous a:/etc' => ['a:/etc', true],
+            'anonymous /x{' => ['/x{', true],
+            'named relname:/data' => ['relname:/data', true],
+            'bind of the checkout' => ['./data:/srv:ro', true],
+            'bind ./{ in the checkout' => ['./{:/etc}', true],
+            'bind /a' => ['/a:/b', false],
+            'bind /anon, target ro' => ['/anon:ro', false],
+            'bind /x read-only' => ['/x:/y:ro', false],
+            'bind /x with a space' => ['/x :/y', false],
+            'bind /{/../etc' => ['/{/../etc:/x}', false],
+            'bind /[/../etc' => ['/[/../etc:/x]', false],
+            'bind ../../../{' => ['../../../{:/x}', false],
+            'bind /{/../etc, braces past the target' => ['/{/../etc:/../../home/acct/project/x}:/t', false],
+            'bind é:/../../../etc, out of the checkout' => ['é:/../../../etc:/y', false],
+            'bind c:\\x' => ['c:\x:/y', false],
+            'bind UNC share' => ['\\\\server\share:/y', false],
+        ];
+    }
+
+    #[DataProvider('composeShortMounts')]
+    public function test_a_short_mount_is_judged_as_compose_reads_it(string $volume, bool $kept): void
+    {
+        $service = ServiceHardener::withoutEscapes(['volumes' => [$volume, 'data:/data']], [], 'acct', '/nonexistent-core-view/acct/project');
+
+        $this->assertSame($kept ? [$volume, 'data:/data'] : ['data:/data'], $service['volumes']);
+    }
+
+    /** Compose interpolates before it splits, so a variable's value can carry the colon that makes it a bind. */
+    public function test_an_interpolated_short_mount_is_split_after_interpolation(): void
+    {
+        $env = [
+            'A' => ['/home/acct/.panelalpha/../../../etc:/../home/acct/project'],
+            'B' => ['/{/../etc:/b}'],
+            'DATA' => ['/var/lib/data'],
+        ];
+        $service = ServiceHardener::withoutEscapes(
+            ['volumes' => ['${A}:/hostetc', '${B}', '${C:-/{/../etc:/c}}', '${DATA}', 'data:/data']],
+            $env,
+            'acct',
+            '/nonexistent-core-view/acct/project'
+        );
+
+        $this->assertSame(['${DATA}', 'data:/data'], $service['volumes']);
+    }
+
+    /** Plain, single- and double-quoted YAML scalars are the same entry to Compose, and to the hardener. */
+    public function test_quoting_in_yaml_does_not_change_the_verdict(): void
+    {
+        $yaml = <<<'YAML'
+            volumes:
+              - /plain
+              - '/single'
+              - "/double"
+              - /plain/x:/y
+              - '/single/x:/y:ro'
+              - "/double/x:/z"
+              - /{/../etc:/p}
+              - '/{/../etc:/s}'
+              - "/[/../etc:/d]"
+            YAML;
+
+        $service = ServiceHardener::withoutEscapes(Yaml::parse($yaml), [], 'acct', '/nonexistent-core-view/acct/project');
+
+        $this->assertSame(['/plain', '/single', '/double'], $service['volumes']);
+    }
+
     public function test_an_interpolated_mount_that_stays_safe_is_kept_as_written(): void
     {
         $kept = [
@@ -961,6 +1061,10 @@ class ServiceHardenerTest extends TestCase
 
         $bind = ServiceHardener::harden('db', ['image' => 'postgres:18-alpine', 'volumes' => ['./pgdata:/var/lib/postgresql/data:rw']]);
         $this->assertSame(['PGDATA' => '/var/lib/postgresql/data'], $bind['environment']);
+
+        $anonymous = ServiceHardener::harden('db', ['image' => 'postgres', 'volumes' => ['/var/lib/postgresql/data']]);
+        $this->assertSame(['PGDATA' => '/var/lib/postgresql/data'], $anonymous['environment']);
+        $this->assertSame(['/var/lib/postgresql/data'], $anonymous['volumes']);
     }
 
     public function test_pgdata_is_left_alone_when_set_or_when_nothing_mounts_the_legacy_path(): void

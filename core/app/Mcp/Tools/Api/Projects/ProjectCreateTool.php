@@ -81,7 +81,7 @@ class ProjectCreateTool extends ApiTool
             'name' => $schema->string()->description('3-15 lowercase letters and digits, starting with a letter. Generated from the repository or domain when omitted. Example: johndoe.'),
             'domain' => $schema->string()->description('Only for a domain of the user\'s own, with tunnel: none. Omitted, the engine picks the best public name it can. Example: shop-4f2a.panelalpha.online.'),
             'email' => $schema->string()->description('Example: john@example.com.'),
-            'memory_limit' => $schema->integer()->description('MB. Default: the server\'s RAM less the engine\'s share, which is also the most allowed.'),
+            'memory_limit' => $schema->integer()->description('MB, at least 6, or 256 for a container project (template dind or a git_repo). Default: the server\'s RAM less the engine\'s share, which is also the most allowed.'),
             'template' => $schema->string()->description('dind runs the app in containers of its own; the other templates are classic shared hosting. This tool sends dind when it is omitted.'),
             'tunnel' => $schema->string()->description('Omitted, the Engine setting `default_tunnel` decides: none uses `<name>.<cert_domain>` and registers nothing; panelalpha and an unset setting both use the default ladder (a configured base domain first, a free panelalpha.online name otherwise). An explicit value here wins. One of: panelalpha, none.'),
             'git_repo' => $schema->string()->description('HTTPS clone URL; github.com/owner/repo also works. For an SSH remote, create the project without it, then git_deploy_key_create and git_connect. Example: https://github.com/owner/repo.git.'),

@@ -17,8 +17,8 @@ class WpSearchReplaceController extends WordPressController
     #[OA\Post(
         path: '/projects/{username}/wp/search-replace',
         summary: 'Search-replace a string in the WordPress install',
-        description: 'Runs `wp search-replace {search} {replacement}` with an optional list of '
-            .'extra WP-CLI arguments (tables, `--dry-run`, `--skip-columns=…`, and so on). '
+        description: 'Runs `wp search-replace {search} {replacement}`, optionally limited to some '
+            .'tables and with a few search-replace flags (`--dry-run`, `--skip-columns=…`, and so on). '
             .'Optional `path` selects the install.',
         security: [['bearerAuth' => []]],
         tags: ['WP-CLI'],
@@ -26,19 +26,21 @@ class WpSearchReplaceController extends WordPressController
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             required: ['search', 'replacement'],
             properties: [
-                new OA\Property(property: 'search', type: 'string', example: 'http://example.test'),
-                new OA\Property(property: 'replacement', type: 'string', example: 'https://example.com', description: 'Used as sent; an empty string removes the search string.'),
+                new OA\Property(property: 'search', type: 'string', example: 'http://example.test', description: "Must not start with '-': 422 with problems[].code search_option_like."),
+                new OA\Property(property: 'replacement', type: 'string', example: 'https://example.com', description: "Used as sent; an empty string removes the search string. Must not start with '-': 422 with problems[].code replacement_option_like."),
                 new OA\Property(
                     property: 'args',
                     type: 'array',
                     items: new OA\Items(type: 'string'),
-                    description: 'Extra WP-CLI arguments after search and replacement (e.g. --dry-run, table names).',
+                    description: 'Table names (a * wildcard works) and these flags only: --dry-run, --precise, '
+                        .'--all-tables, --all-tables-with-prefix, --regex, --skip-columns=<columns>, '
+                        .'--regex-delimiter=<character>. Anything else is refused.',
                 ),
                 new OA\Property(
                     property: 'path',
                     type: 'string',
                     nullable: true,
-                    description: 'WordPress directory. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
+                    description: 'WordPress directory. On PHP hosting it is inside the project home, read as the file manager reads a path: absolute, or relative to the home. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
                 ),
                 new OA\Property(
                     property: 'service',

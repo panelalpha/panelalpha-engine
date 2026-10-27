@@ -5,13 +5,15 @@ namespace Tests\Unit\Deploy\Inspect;
 use App\Lib\Deploy\Inspect\GitHubTree;
 use App\Lib\Deploy\Inspect\ResolvedSource;
 use App\Lib\Deploy\Inspect\SourceResolver;
+use App\Lib\Http\OutboundUrl;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 /**
  * A public github.com repository is read from its file list first, and cloned
  * whenever that cannot be done exactly. The clone here is redirected to a
- * local repository with git's `insteadOf`, so no test touches the network.
+ * local repository with git's `insteadOf`, and the egress check's DNS is a
+ * fake answering a public address, so no test touches the network.
  */
 class SourceResolverTreeTest extends TestCase
 {
@@ -29,6 +31,7 @@ class SourceResolverTreeTest extends TestCase
         if (trim((string) shell_exec('command -v git 2>/dev/null')) === '') {
             $this->markTestSkipped('git is not on PATH');
         }
+        OutboundUrl::setResolverForTests(static fn (string $host): array => ['140.82.121.4']);
         $this->tmp = sys_get_temp_dir() . '/resolver-tree-' . bin2hex(random_bytes(6));
         mkdir($this->tmp . '/origin', 0700, true);
         mkdir($this->tmp . '/home', 0700, true);
@@ -48,6 +51,7 @@ class SourceResolverTreeTest extends TestCase
 
     protected function tearDown(): void
     {
+        OutboundUrl::setResolverForTests(null);
         if ($this->home !== null) {
             $_SERVER['HOME'] = $_ENV['HOME'] = $this->home;
         }

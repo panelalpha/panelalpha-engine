@@ -6,9 +6,10 @@ use App\Models\Domain;
 use App\Models\User;
 use App\System;
 use App\System\Project;
-use App\System\Project\PhpHosting\WordPress\WpCli;
+use App\System\Project\FileManager;
 use App\System\Project\PhpHosting\WordPress\Cache;
 use App\System\Project\PhpHosting\WordPress\Exception as WordPressException;
+use App\System\Project\PhpHosting\WordPress\WpCli;
 use App\System\Services\Webserver;
 use Mockery;
 use PHPUnit\Framework\TestCase;
@@ -161,8 +162,8 @@ class CacheTest extends TestCase
     }
 
     /**
-     * @param list<list<string>> $sequence
-     * @param list<array{exit_code: int, stdout: string, stderr: string}> $results
+     * @param  list<list<string>>  $sequence
+     * @param  list<array{exit_code: int, stdout: string, stderr: string}>  $results
      */
     private function cacheWithFakeRunner(
         array &$sequence,
@@ -185,6 +186,8 @@ class CacheTest extends TestCase
         $user->username = 'alice';
         $project = Mockery::mock(Project::class);
         $project->shouldReceive('homeDirPath')->andReturn('/home/alice');
+        $project->shouldReceive('resolvePath')
+            ->andReturnUsing(fn (string $path): string => (new FileManager($project))->resolvePath($path));
         $call = 0;
         $project->shouldReceive('runWpCli')
             ->andReturnUsing(function (array $args) use (&$sequence, &$call, $results): array {

@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Platform\Probes;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Platform\PlatformProbe;
 use App\Lib\Deploy\Platform\ProjectContext;
 
@@ -65,7 +66,7 @@ final class AngularOutputProbe implements PlatformProbe
         if (! is_file($path)) {
             return [];
         }
-        $json = json_decode((string) @file_get_contents($path), true);
+        $json = json_decode((string) AccountHomeRead::contents($path), true);
         if (! is_array($json) || empty($json['projects']) || ! is_array($json['projects'])) {
             return [];
         }

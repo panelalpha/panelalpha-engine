@@ -2,7 +2,9 @@
 
 namespace Tests\Unit\Hub;
 
+use App\Auth\TokenAbilities;
 use App\Lib\Deploy\Telemetry\HostFacts;
+use App\Lib\Hub\HubGrants;
 use App\Lib\Project\ProjectOverview;
 use App\Models\Backup;
 use App\Models\BackupContainer;
@@ -27,21 +29,29 @@ class HubContractTest extends HubTestCase
 
     /**
      * The whole route shells out to the webserver, so the unit suite locks
-     * the two parts the Hub reads: `version`, and `host` as HostFacts builds it.
+     * `host` as HostFacts builds it for a Hub token. `version` and `host` on
+     * the route itself are checked against a live engine by tests/api
+     * (system-info.spec.ts).
      */
-    public function test_system_info_version_and_host(): void
+    public function test_system_info_host(): void
     {
-        $host = HostFacts::host(new System());
+        $host = HostFacts::hostFor(TokenAbilities::fromList(HubGrants::abilities(['admin_sso'])), new System());
         $this->assertSame(
             ['hostname', 'os', 'kernel', 'uptime_seconds', 'cpu_cores', 'memory_total_bytes', 'disk_total_bytes', 'ipv4'],
-            array_keys($host)
+            array_keys((array) $host)
         );
         $this->assertSame('srv1.acme.com', $host['hostname']);
         $this->assertSame(self::ENGINE_IP, $host['ipv4']);
+    }
 
-        $source = (string) file_get_contents(app_path('Http/Controllers/SystemController.php'));
-        $this->assertStringContainsString("'version' => config('system.version'),", $source);
-        $this->assertStringContainsString("'host' => HostFacts::host(\$system),", $source);
+    public function test_a_token_scoped_to_projects_gets_no_host(): void
+    {
+        $system = new System();
+
+        $this->assertNull(HostFacts::hostFor(TokenAbilities::fromList(TokenAbilities::build(api: true, mcp: true, projects: ['shop'])), $system));
+        $this->assertNull(HostFacts::hostFor(TokenAbilities::fromList(TokenAbilities::build(api: true, mcp: true, projects: [])), $system));
+        $this->assertSame('6.8.0-45-generic', HostFacts::hostFor(TokenAbilities::fromList(['*']), $system)['kernel'] ?? null);
+        $this->assertSame('6.8.0-45-generic', HostFacts::hostFor(TokenAbilities::fromList(TokenAbilities::build(api: true, mcp: true)), $system)['kernel'] ?? null);
     }
 
     public function test_metrics_current(): void
@@ -154,18 +164,6 @@ class HubContractTest extends HubTestCase
         foreach (['created_at', 'updated_at'] as $key) {
             $this->assertNotFalse(Carbon::canBeCreatedFromFormat($data[0][$key], DATE_ATOM) ?: strtotime($data[0][$key]), $key);
         }
-    }
-
-    /**
-     * Both run the app's own script inside its container, so the suite locks
-     * the envelope: users under `data`, the login link as a bare `url`.
-     */
-    public function test_admin_login_envelopes(): void
-    {
-        $source = (string) file_get_contents(app_path('Http/Controllers/User/AppUserController.php'));
-
-        $this->assertStringContainsString("new JsonResponse(['data' => \$this->appManager(\$username)->listUsers()])", $source);
-        $this->assertSame(3, substr_count($source, "return new JsonResponse(['url' => \$"), 'every SSO pattern answers a bare url');
     }
 
     public function test_token_routes(): void

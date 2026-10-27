@@ -1,4 +1,4 @@
-import { appendFileSync, mkdtempSync, rmSync, utimesSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdtempSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -11,6 +11,7 @@ import {
   recoverOrphanedResources,
   type RecoveryEngine,
   recordResource,
+  RESOURCE_REGISTRY_DIR,
   resourceFile,
 } from '@/helpers/resource-registry';
 
@@ -21,6 +22,14 @@ test.describe('resource-registry', () => {
   });
   test.afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('a unit spec records into its own registry, never the one a live run recovers from', () => {
+    const runId = `unit-isolation-${Math.random().toString(16).slice(2, 10)}`;
+    recordResource({ key: 'pwunit1', event: 'create-failed', taskId: 23 }, { runId });
+
+    expect(existsSync(resourceFile(runId, RESOURCE_REGISTRY_DIR))).toBe(false);
+    expect(readResourceEvents(resourceFile(runId)).map((event) => event.key)).toEqual(['pwunit1']);
   });
 
   test('appends one JSON line per event under the run id', () => {

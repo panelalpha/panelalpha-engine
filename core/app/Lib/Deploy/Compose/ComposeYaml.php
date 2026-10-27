@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Compose;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\System;
 use Symfony\Component\Yaml\Exception\ParseException;
@@ -85,11 +86,12 @@ final class ComposeYaml
     /**
      * The file's contents, through sudo when the core cannot open it: the run
      * file is the account's, 0600 ({@see EngineArtifacts::RUN_COMPOSE_MODE}).
+     * Only in an account home, where the root read refuses a link out of it.
      */
     public static function read(string $path): ?string
     {
-        $raw = @file_get_contents($path);
-        if (is_string($raw) || ! is_file($path)) {
+        $raw = AccountHomeRead::contents($path);
+        if (is_string($raw) || ! is_file($path) || ! AccountHomeRead::isInAccountHome($path)) {
             return is_string($raw) ? $raw : null;
         }
 

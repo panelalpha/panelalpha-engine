@@ -2,12 +2,10 @@
 
 namespace Tests\Unit\Hub;
 
-use App\Http\Controllers\ServerMetricsController;
 use App\Lib\Host\MetricBuckets;
 use App\Lib\Host\ProjectStats;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
-use ReflectionClassConstant;
 
 /** CPU and memory per project (its DinD container) and per container inside it. */
 class ProjectMetricsTest extends HubTestCase
@@ -25,6 +23,44 @@ class ProjectMetricsTest extends HubTestCase
 
         $this->assertSame(0, $code, implode("\n", $out));
         $this->assertStringContainsString("want=' shop o'\\''brien '", $script);
+    }
+
+    public function test_a_container_config_is_read_only_when_it_is_a_regular_file_at_its_own_path(): void
+    {
+        $root = $this->dataRoot();
+        $this->config($root, self::INNER, '{"Name":"/project-app-1"}');
+        $this->config($root . '/elsewhere', self::OUTER, '{"Name":"/someone-else-1"}');
+
+        $this->assertSame('{"Name":"/project-app-1"}', $this->readConfig($root, self::INNER));
+
+        unlink($root . '/containers/' . self::INNER . '/config.v2.json');
+        symlink($root . '/elsewhere/containers/' . self::OUTER . '/config.v2.json', $root . '/containers/' . self::INNER . '/config.v2.json');
+        $this->assertSame('', $this->readConfig($root, self::INNER), 'a linked file');
+
+        $this->removeTree($root . '/containers/' . self::INNER);
+        symlink($root . '/elsewhere/containers/' . self::OUTER, $root . '/containers/' . self::INNER);
+        $this->assertSame('', $this->readConfig($root, self::INNER), 'a linked container directory');
+
+        $this->removeTree($root);
+    }
+
+    public function test_a_fifo_in_place_of_a_container_config_does_not_block_the_sampler(): void
+    {
+        $root = $this->dataRoot();
+        mkdir($root . '/containers/' . self::INNER, 0700, true);
+        exec('mkfifo ' . escapeshellarg($root . '/containers/' . self::INNER . '/config.v2.json'));
+
+        $started = microtime(true);
+        $this->assertSame('', $this->readConfig($root, self::INNER));
+        $this->assertLessThan(1.5, microtime(true) - $started);
+
+        $this->removeTree($root);
+    }
+
+    public function test_the_whole_host_run_is_time_limited(): void
+    {
+        $this->assertLessThan(60, ProjectStats::HOST_TIMEOUT_SECONDS, 'shorter than the sampling interval');
+        $this->assertMatchesRegularExpression('/timeout -k 1 2 bash -c .*head -c 1048576/', ProjectStats::script(['shop']));
     }
 
     public function test_parse_reads_both_levels_and_drops_reclaimable_cache(): void
@@ -150,11 +186,26 @@ class ProjectMetricsTest extends HubTestCase
         $this->assertCount(60, $ranged['data'][0]['history']);
     }
 
-    public function test_the_buckets_are_the_server_history_buckets(): void
+    public function test_a_project_chart_lines_up_with_the_server_chart(): void
     {
-        $server = (new ReflectionClassConstant(ServerMetricsController::class, 'HISTORY_RANGES'))->getValue();
+        $this->project('shop');
+        $token = $this->adminToken();
 
-        $this->assertSame($server, MetricBuckets::RANGES);
+        Carbon::setTestNow(Carbon::now('UTC'));
+        try {
+            foreach (array_keys(MetricBuckets::RANGES) as $range) {
+                $server = $this->withToken($token)->getJson("/api/metrics/history?range={$range}")->assertOk()->json();
+                $project = $this->withToken($token)->getJson("/api/projects/shop/metrics/history?range={$range}")->assertOk()->json();
+
+                $this->assertSame($server['meta'], $project['meta'], $range);
+                $this->assertSame(array_column($server['data'], 'period'), array_column($project['data'], 'period'), $range);
+            }
+        } finally {
+            Carbon::setTestNow();
+        }
+
+        $this->assertSame('24h', $this->withToken($token)->getJson('/api/metrics/history')->assertOk()->json('meta.range'));
+        $this->withToken($token)->getJson('/api/metrics/history?range=12h')->assertUnprocessable()->assertJsonValidationErrors(['range']);
     }
 
     public function test_rollup_averages_complete_hours_once(): void
@@ -226,5 +277,34 @@ class ProjectMetricsTest extends HubTestCase
     private function row(string $table, Carbon $at, array $values): void
     {
         DB::table($table)->insert(['timestamp' => $at->format('Y-m-d H:i:s'), 'username' => 'shop'] + $values);
+    }
+
+    private function dataRoot(): string
+    {
+        $root = sys_get_temp_dir() . '/stats-root-' . bin2hex(random_bytes(4));
+        mkdir($root . '/containers', 0700, true);
+
+        return (string) realpath($root);
+    }
+
+    private function config(string $root, string $id, string $json): void
+    {
+        @mkdir($root . '/containers/' . $id, 0700, true);
+        file_put_contents($root . '/containers/' . $id . '/config.v2.json', $json);
+    }
+
+    /** Runs the host script's own config() function against a test data root. */
+    private function readConfig(string $root, string $id): string
+    {
+        preg_match('/^config\(\) \{\n.*?^\}\n/ms', ProjectStats::script(['shop']), $function);
+        $this->assertNotEmpty($function, 'the host script defines config()');
+        $command = $function[0] . 'config ' . escapeshellarg($root) . ' ' . escapeshellarg($id);
+
+        return (string) shell_exec('bash -c ' . escapeshellarg($command));
+    }
+
+    private function removeTree(string $path): void
+    {
+        exec('rm -rf ' . escapeshellarg($path));
     }
 }

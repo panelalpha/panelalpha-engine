@@ -18,9 +18,12 @@ use App\System\Project\Dind as DindProject;
  * `build:` is built from the copied tree by compose itself. That leaves an
  * image the source's deploy built outside compose -- Railpack's -- which is
  * built again here from the copied tree, because a tenant's image never goes
- * through the shared cache registry. One of those, or one of our own bases,
- * that still cannot be had fails with its name, not with a registry's
- * "not found".
+ * through the shared cache registry. It is built even when the account
+ * already has that tag: a push target keeps the one an earlier push built
+ * from older code, and the start does not build. A push holds that one
+ * aside first ({@see HeldImage}), so a failed push can put it back. One of
+ * those, or one of our own bases, that still cannot be had fails with its
+ * name, not with a registry's "not found".
  */
 final class CopiedImages
 {
@@ -40,13 +43,29 @@ final class CopiedImages
         });
     }
 
+    /**
+     * The image the account already has under the Railpack tag the run file at
+     * $composePath names, held before {@see provide()} builds that tag again.
+     */
+    public function holdRailpackImage(string $composePath): ?HeldImage
+    {
+        $fs = $this->project->system()->filesystem();
+        $image = $fs->fileExists($composePath) ? $this->railpackImage($fs->fileGetContents($composePath)) : null;
+
+        return $image === null ? null : HeldImage::hold($this->project, $image);
+    }
+
+    private function railpackImage(string $compose): ?string
+    {
+        return $this->project->userModel()->getDeployStrategy() === Strategies::RAILPACK
+            ? GeneratedCompose::appImage($compose)
+            : null;
+    }
+
     private function buildRailpackImage(string $compose, string $projectDir): void
     {
-        $image = GeneratedCompose::appImage($compose);
-        if ($this->project->userModel()->getDeployStrategy() !== Strategies::RAILPACK
-            || $image === null
-            || $this->project->innerDocker()->seeding()->hasImage($image)
-        ) {
+        $image = $this->railpackImage($compose);
+        if ($image === null) {
             return;
         }
         $built = $this->project->strategy()->railpack()->buildImage(

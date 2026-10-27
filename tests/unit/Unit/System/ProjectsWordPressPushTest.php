@@ -6,6 +6,7 @@ use App\Models\User;
 use App\System;
 use App\System\Project;
 use App\System\Project\Dind\CopyVolumes;
+use App\System\Project\Dind\HeldImage;
 use App\System\Project\PhpHosting\WordPress\ContainerSiteCopy;
 use App\System\Project\PhpHosting\WordPress\SiteCopy;
 use App\System\Projects;
@@ -32,12 +33,12 @@ class ProjectsWordPressPushTest extends TestCase
     {
         parent::setUp();
         $this->bootInMemoryDatabase();
-        $this->root = sys_get_temp_dir() . '/pa-wp-push-' . bin2hex(random_bytes(6));
+        $this->root = sys_get_temp_dir().'/pa-wp-push-'.bin2hex(random_bytes(6));
     }
 
     protected function tearDown(): void
     {
-        exec('rm -rf ' . escapeshellarg($this->root));
+        exec('rm -rf '.escapeshellarg($this->root));
         Mockery::close();
         parent::tearDown();
     }
@@ -107,7 +108,7 @@ class ProjectsWordPressPushTest extends TestCase
 
         $commands = array_map(static fn (array $args): string => $args[0], $live->calls);
         $this->assertLessThan(array_search('search-replace', $commands, true), array_search('db', $commands, true));
-        $this->assertStringContainsString("UPDATE `wp_blogs` SET domain = 'shop.example' WHERE blog_id = 1", $live->queries[1]);
+        $this->assertStringContainsString("UPDATE `wp_blogs` SET domain = 'shop.example' WHERE blog_id = 1", $live->queries[2]);
         $this->assertSame('shop.example', $live->constants['DOMAIN_CURRENT_SITE']);
     }
 
@@ -169,7 +170,8 @@ class ProjectsWordPressPushTest extends TestCase
     {
         $wordPress = static fn (User $user) => $sites[$user->username]->wordPress();
 
-        return new class ($this->system(), new SiteCopy($wordPress), new ContainerSiteCopy($wordPress)) extends Projects {
+        return new class($this->system(), new SiteCopy($wordPress), new ContainerSiteCopy($wordPress)) extends Projects
+        {
             public function __construct(
                 System $system,
                 private SiteCopy $fakeSiteCopy,
@@ -194,19 +196,17 @@ class ProjectsWordPressPushTest extends TestCase
     {
         $commands = &$this->commands;
 
-        return new class ($this->root, $commands) extends System {
+        return new class($this->root, $commands) extends System
+        {
             /** @param list<list<string>> $commands */
-            public function __construct(private string $root, private array &$commands)
-            {
-            }
+            public function __construct(private string $root, private array &$commands) {}
 
             public function project(User $model): Project
             {
-                return new class ($this->root . '/' . $model->username, $this->commands) extends Project {
+                return new class($this->root.'/'.$model->username, $this->commands) extends Project
+                {
                     /** @param list<list<string>> $commands */
-                    public function __construct(private string $home, private array &$commands)
-                    {
-                    }
+                    public function __construct(private string $home, private array &$commands) {}
 
                     public function homeDirPath(): string
                     {
@@ -223,48 +223,45 @@ class ProjectsWordPressPushTest extends TestCase
                         return false;
                     }
 
-                    public function start(): void
-                    {
-                    }
+                    public function start(): void {}
 
                     public function fixPermissions(): void
                     {
                         $this->commands[] = ['fixPermissions'];
                     }
 
-                    public function handStagedHomeToAccount(string $stagedHome): void
+                    public function handStagedHomeToAccount(string $stagedHome): void {}
+
+                    public function repointCopiedRunFile(User $source, ?string $path = null): void {}
+
+                    public function holdCopiedImage(string $path): ?HeldImage
                     {
+                        return null;
                     }
 
-                    public function repointCopiedRunFile(User $source, ?string $path = null): void
-                    {
-                    }
+                    public function provideCopiedImages(?string $path = null): void {}
 
-                    public function provideCopiedImages(?string $path = null): void
-                    {
-                    }
+                    public function adoptCopiedEnvVars(User $source): void {}
                 };
             }
 
             public function mysql(): Mysql
             {
-                return new class extends Mysql {
+                return new class extends Mysql
+                {
                     public function __construct()
                     {
                         parent::__construct(null);
                     }
 
-                    public function dumpToGzip(string $name, string $dest, ?string $table = null): void
-                    {
-                    }
+                    public function dumpToGzip(string $name, string $dest, ?string $table = null): void {}
 
-                    public function runSitesDbScript(string $script, string $failurePrefix): void
-                    {
-                    }
+                    public function runSitesDbScript(string $script, string $failurePrefix): void {}
 
                     public function tables(): Tables
                     {
-                        return new class extends Tables {
+                        return new class extends Tables
+                        {
                             public function __construct()
                             {
                                 parent::__construct(new PDO('sqlite::memory:'));

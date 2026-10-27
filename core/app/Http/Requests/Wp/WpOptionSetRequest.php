@@ -14,10 +14,10 @@ class WpOptionSetRequest extends FormRequest
         return true;
     }
 
+    /** The value is untrimmed and may be empty (see AppServiceProvider): '' clears an option. */
     public function rules(): array
     {
         return [
-            // Untrimmed and may be empty (see AppServiceProvider): '' clears an option.
             'value' => 'present|string',
             'path' => 'sometimes|nullable|string',
             'service' => ['sometimes', 'nullable', 'string', 'regex:/^[A-Za-z0-9][A-Za-z0-9_.-]*$/'],

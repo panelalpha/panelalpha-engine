@@ -20,6 +20,9 @@ interface DeployMechanics
 
     public function prepareHostingEnvironment(): void;
 
+    /** Whether a failed prepare removed the account again, leaving no project for a failed deploy to keep. */
+    public function removedTheAccount(): bool;
+
     public function ingestApplicationSource(): void;
 
     public function isApplicationEnvironmentRunning(): bool;

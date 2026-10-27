@@ -48,6 +48,9 @@ class FileManager
         .'elif [ -d "$1" ]; then if [ -L "$2" ]; then echo dir-link; else echo dir; fi; '
         .'else echo file; fi';
 
+    /** `sh -c` body for resolvedFile(): $1 the path. */
+    public const RESOLVED_FILE_SCRIPT = '[ -f "$1" ] && realpath -e -- "$1"';
+
     /** One find row per entry: name, type, size, mtime, mode, uid, gid, link target, target type. */
     private const ENTRY_FIELDS = '%f\0%y\0%s\0%T@\0%m\0%U\0%G\0%l\0%Y\0';
 
@@ -60,15 +63,42 @@ class FileManager
      */
     private const MOVE_UNPACKED_SCRIPT = 'src=$1; home=$(realpath -- "$2") || exit 1; '
         .'mkdir -p -- "$3" && cd -- "$3" || exit 1; case $(pwd -P) in "$home"|"$home"/*) ;; '
-        .'*) echo "Refusing $3: it resolves outside the project home" >&2; exit 3 ;; esac; '
+        .'*) echo "Refusing $3: it resolves outside the project home" >&2; exit 3 ;; esac; [ -w . ] || exit 6; '
         .'set --; for e in "$src"/* "$src"/.[!.]* "$src"/..?*; do '
         .'if [ -e "$e" ] || [ -L "$e" ]; then set -- "$@" "${e##*/}"; fi; done; '
         .'taken=0; for n; do if [ -e "./$n" ] || [ -L "./$n" ]; then printf \'%s\\0\' "$n"; taken=1; fi; done; '
         .'[ "$taken" = 0 ] || exit 4; '
-        .'for n; do mv -T -- "$src/$n" "./$n" || exit 1; done';
+        .'for n; do mv --update=none-fail -T -- "$src/$n" "./$n" || { printf \'%s\\0\' "$n"; exit 5; }; done';
+
+    /**
+     * `sh -c` body for writeAsUser(): $1 the staged source, $2 the target. The target's folder is created when
+     * missing; unless the target is a file the account can already write, a folder it cannot write to is refused.
+     */
+    private const WRITE_AS_USER_SCRIPT = 'dir=$(dirname -- "$2"); mkdir -p -- "$dir" 2>/dev/null; '
+        .'[ -w "$2" ] || { [ -d "$dir" ] && [ -w "$dir" ]; } || exit 6; cat -- "$1" > "$2" && chmod 644 -- "$2"';
+
+    /**
+     * `sh -c` body for mkdir(): $1 the directory, then mkdir's own arguments. A missing directory is refused,
+     * that folder printed, when the nearest folder above it that exists is not one the account can write to.
+     */
+    private const MKDIR_SCRIPT = 'p=${1%/}; shift; if [ ! -e "$p" ]; then d=$(dirname -- "$p"); '
+        .'while [ ! -e "$d" ]; do d=$(dirname -- "$d"); done; [ -d "$d" ] && [ -w "$d" ] || { printf %s "$d"; exit 6; }; fi; '
+        .'exec mkdir "$@"';
+
+    /** The write and mkdir scripts' exit code for a folder the account cannot write to. */
+    private const WRITE_UNWRITABLE_EXIT_CODE = 6;
 
     /** The move script's exit code for entries the destination already holds. */
     private const MOVE_TAKEN_EXIT_CODE = 4;
+
+    /**
+     * The move script's exit code for a rename that failed after the destination was checked and found writable:
+     * an entry appeared there in between, and may already be gone again, so it is not looked at a second time.
+     */
+    private const MOVE_RACED_EXIT_CODE = 5;
+
+    /** The move script's exit code for a destination the account cannot write to. */
+    private const MOVE_READ_ONLY_EXIT_CODE = 6;
 
     /** Names a refusal shows of the entries the destination already holds. */
     private const TAKEN_NAMES_SHOWN = 10;
@@ -107,7 +137,7 @@ class FileManager
      */
     public function resolvePath(string $path): string
     {
-        if (Str::startsWith($path, '/var/www')) {
+        if (self::isAtOrBelow($path, '/var/www')) {
             $legacyHome = $this->project->model()->getHomeDir() ?? $this->homeDirPath();
             $path = Str::replaceFirst('/var/www', $legacyHome, $path);
         }
@@ -120,11 +150,17 @@ class FileManager
             ]);
         }
         $home = $this->homeDirPath();
-        if ($absolute && Str::startsWith('/'.$clean, $home)) {
+        if ($absolute && self::isAtOrBelow('/'.$clean, $home)) {
             $clean = Str::after('/'.$clean, $home);
         }
 
         return $home.'/'.ltrim($clean, '/').($dir ? '/' : '');
+    }
+
+    /** By whole segments: `/home/alice2` is not below `/home/alice`. */
+    private static function isAtOrBelow(string $path, string $dir): bool
+    {
+        return $path === $dir || Str::startsWith($path, rtrim($dir, '/').'/');
     }
 
     /**
@@ -150,7 +186,12 @@ class FileManager
     {
         $path = $this->resolvePath($path);
         $this->assertInsideHome([$path]);
-        $this->assertSucceeded($this->runOnCore($parents ? ['mkdir', '-p', '--', $path] : ['mkdir', '--', $path]));
+        $options = $parents ? ['-p', '--'] : ['--'];
+        $process = $this->runOnCore(['sh', '-c', self::MKDIR_SCRIPT, 'sh', $path, ...$options, $path]);
+        if ($process->getExitCode() === self::WRITE_UNWRITABLE_EXIT_CODE) {
+            throw $this->unwritableFolder($process->getOutput());
+        }
+        $this->assertSucceeded($process);
     }
 
     public function moveUploadedFile(string $path, UploadedFile $file): void
@@ -170,10 +211,20 @@ class FileManager
     {
         $this->assertInsideHome([$target]);
         @chmod($source, 0644);
-        $this->assertSucceeded($this->runOnCore([
-            'sh', '-c', 'mkdir -p -- "$(dirname -- "$2")" && cat -- "$1" > "$2" && chmod 644 -- "$2"',
-            'sh', $source, $target,
-        ]));
+        $process = $this->runOnCore(['sh', '-c', self::WRITE_AS_USER_SCRIPT, 'sh', $source, $target]);
+        if ($process->getExitCode() === self::WRITE_UNWRITABLE_EXIT_CODE) {
+            throw $this->unwritableFolder(dirname($target));
+        }
+        $this->assertSucceeded($process);
+    }
+
+    private function unwritableFolder(string $dir): ProblemException
+    {
+        return ProblemException::one(
+            'path',
+            'not_writable',
+            $this->homeRelativePath($dir)." is not a folder the project's account can write to: choose a folder inside the project.",
+        );
     }
 
     /** Every link followed, the last one too: test -e answers for the target. */
@@ -200,6 +251,18 @@ class FileManager
         }
 
         return $this->runOnCore(['test', '-f', $path])->getExitCode() === 0;
+    }
+
+    /**
+     * Where the regular file at the absolute $path lands, every link followed, as the account sees
+     * it; null when there is none. Not confined: the caller judges where it lands, as UploadedArchive does.
+     */
+    public function resolvedFile(string $path): ?string
+    {
+        $process = $this->runOnCore(['sh', '-c', self::RESOLVED_FILE_SCRIPT, 'sh', $path]);
+        $target = rtrim($process->getOutput(), "\n");
+
+        return $process->getExitCode() === 0 && $target !== '' ? $target : null;
     }
 
     /**
@@ -560,7 +623,7 @@ class FileManager
     private function unpack(string $staged, string $unpacked, bool $isZip, bool $isTar): Process
     {
         if ($isZip) {
-            return $this->runOnCore(['unzip', '-o', $staged, '-d', $unpacked]);
+            return $this->runOnCore(UploadedArchive::unzipCommand('-o', $staged, '-d', $unpacked));
         }
         if ($isTar) {
             return $this->runOnCore(['tar', '-zxvf', $staged, '-C', $unpacked]);
@@ -581,7 +644,23 @@ class FileManager
         if ($process->getExitCode() === self::MOVE_TAKEN_EXIT_CODE) {
             throw $this->destinationTaken($path, explode("\0", rtrim($process->getOutput(), "\0")));
         }
+        if ($process->getExitCode() === self::MOVE_RACED_EXIT_CODE) {
+            throw $this->destinationTakenDuringMove($path, rtrim($process->getOutput(), "\0"));
+        }
+        if ($process->getExitCode() === self::MOVE_READ_ONLY_EXIT_CODE) {
+            throw ValidationException::withMessages(['path' => $this->homeRelativePath($path).' is not writable.']);
+        }
         $this->assertSucceeded($process);
+    }
+
+    private function destinationTakenDuringMove(string $path, string $name): ProblemException
+    {
+        return ProblemException::conflict(
+            'path',
+            'destination_exists',
+            "{$name} could not be moved into ".$this->homeRelativePath($path).': an entry of that name appeared there while the archive '
+                .'was being extracted. Entries extracted before it stay in place: extract into a folder that does not hold them.',
+        );
     }
 
     /** @param list<string> $names */
@@ -763,7 +842,7 @@ class FileManager
                 continue;
             }
 
-            $this->assertDownloaded($process, $current);
+            $this->assertDownloaded($process, $current, $status);
 
             return;
         }
@@ -803,12 +882,15 @@ class FileManager
         return OutboundUrl::absoluteUrl($url, $location);
     }
 
-    private function assertDownloaded(Process $process, string $url): void
+    private function assertDownloaded(Process $process, string $url, int $status): void
     {
-        if ($process->getExitCode() === self::CURL_FILE_TOO_LARGE) {
+        $code = (int) $process->getExitCode();
+        if ($code === self::CURL_FILE_TOO_LARGE) {
             throw new \Exception('The file at '.$url.' is larger than the '.intdiv($this->fetchMaxBytes, 1048576).' MB limit');
         }
-        $this->assertSucceeded($process);
+        if ($code !== 0) {
+            throw DownloadFailure::problem($code, $url, $status);
+        }
     }
 
     /** A seam for tests that fetch from a local fixture server. */

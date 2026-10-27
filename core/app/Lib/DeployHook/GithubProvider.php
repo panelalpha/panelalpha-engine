@@ -49,7 +49,7 @@ final class GithubProvider implements HookProvider
         return hash_equals($expected, strtolower($m[1]));
     }
 
-    public function signsTheBody(Request $request): bool
+    public function signsTheBody(Request $request, string $secret): bool
     {
         return true;
     }

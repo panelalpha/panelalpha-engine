@@ -4,6 +4,7 @@ namespace App\Http\Requests;
 
 use App\Http\Requests\Concerns\ReportsProblems;
 use App\Lib\Domains\DomainPlan;
+use App\Lib\Host\ProjectMemory;
 use App\Lib\Project\NewProjectRules;
 use App\Rules\ProjectName;
 use Illuminate\Foundation\Http\FormRequest;
@@ -31,7 +32,7 @@ class UserStoreRequest extends FormRequest
 
     public function rules(): array
     {
-        return NewProjectRules::rules($this->nameField, $this->input('domain'));
+        return NewProjectRules::rules($this->nameField, $this->input('domain'), NewProjectRules::createsContainer($this->all()));
     }
 
     /** `name` or `username`, whichever the caller sent. */
@@ -63,7 +64,8 @@ class UserStoreRequest extends FormRequest
             'domain_redirect_url' => ['expected' => 'an absolute URL', 'examples' => ['https://example.com/']],
             'email' => ['expected' => 'an email address', 'examples' => ['ops@example.com']],
             'disk_space_limit' => $count('an integer number of MB, -1 for unlimited', '10240'),
-            'memory_limit' => $count('an integer number of MB, 1 or more; omitted, the server default', '512'),
+            'memory_limit' => $count('an integer number of MB, '.ProjectMemory::MIN_MB.' or more, '.ProjectMemory::CONTAINER_MIN_MB
+                .' or more for a container project; omitted, the server default', '512'),
             'cpu_limit' => $count('a number of CPU cores, fractions allowed, -1 for unlimited', '1.5'),
             'bandwidth_limit' => $count('an integer number of MB a month, -1 for unlimited', '100000'),
             'inodes_limit' => $count('an integer, -1 for unlimited', '500000'),

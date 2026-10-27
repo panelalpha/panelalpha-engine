@@ -15,6 +15,13 @@ use PHPUnit\Framework\TestCase;
  */
 class OutboundUrlTest extends TestCase
 {
+    protected function tearDown(): void
+    {
+        OutboundUrl::setResolverForTests(null);
+        OutboundUrl::setPolicyForTests(null, null);
+        parent::tearDown();
+    }
+
     /** @return array<string, array{string}> */
     public static function refused(): array
     {
@@ -33,12 +40,32 @@ class OutboundUrlTest extends TestCase
             'multicast' => ['http://224.0.0.1/x'],
             'reserved 240/4' => ['http://240.0.0.1/x'],
             'host docker internal' => ['http://host.docker.internal/x'],
+            'documentation 192.0.2' => ['http://192.0.2.10/x'],
+            'documentation 198.51.100' => ['http://198.51.100.10/x'],
+            'documentation 203.0.113' => ['https://203.0.113.10:8443/acme/widgets.git'],
+            'benchmarking 198.18' => ['http://198.19.0.1/x'],
+            'ietf protocol assignments' => ['http://192.0.0.8/x'],
+            'metadata ipv4-compatible' => ['http://[::169.254.169.254]/x'],
+            'metadata through nat64' => ['http://[64:ff9b::169.254.169.254]/x'],
+            'private through nat64' => ['http://[64:ff9b::a00:5]/x'],
+            'documentation through nat64' => ['http://[64:ff9b::203.0.113.10]/x'],
+            'local-use nat64' => ['http://[64:ff9b:1::8c52:7904]/x'],
+            'discard-only ipv6' => ['http://[100::1]/x'],
+            'teredo' => ['http://[2001:0:4136:e378:8000:63bf:3fff:fdd2]/x'],
+            'benchmarking ipv6' => ['http://[2001:2::1]/x'],
+            'documentation ipv6' => ['http://[2001:db8::1]/x'],
+            'documentation ipv6 3fff' => ['http://[3fff:fff::1]/x'],
+            '6to4' => ['http://[2002:a9fe:a9fe::1]/x'],
+            'segment routing' => ['http://[5f00::1]/x'],
+            'site-local ipv6' => ['http://[fec0::1]/x'],
         ];
     }
 
     #[DataProvider('refused')]
     public function test_an_internal_address_is_refused(string $url): void
     {
+        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'host.docker.internal' ? ['172.17.0.1'] : []);
+
         $this->assertFalse(OutboundUrl::isAllowed($url), $url);
 
         $this->expectException(InvalidArgumentException::class);
@@ -51,6 +78,9 @@ class OutboundUrlTest extends TestCase
         return [
             'public ipv4' => ['https://93.184.216.34/x'],
             'public ipv6' => ['https://[2606:2800:220:1:248:1893:25c8:1946]/x'],
+            'public next to the documentation range' => ['https://203.0.114.1/x'],
+            'public ipv6 next to the ietf block' => ['https://[2001:200::1]/x'],
+            'public through nat64' => ['https://[64:ff9b::140.82.121.4]/x'],
             'scheme required' => ['https://example.com/file.zip'],
             'query and fragment' => ['https://example.com/a?b=c#d'],
         ];
@@ -59,7 +89,46 @@ class OutboundUrlTest extends TestCase
     #[DataProvider('allowed')]
     public function test_a_public_address_is_allowed(string $url): void
     {
+        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'example.com' ? ['93.184.216.34'] : []);
+
         $this->assertTrue(OutboundUrl::isAllowed($url), $url);
+    }
+
+    public function test_a_name_resolving_to_a_documentation_address_is_refused(): void
+    {
+        OutboundUrl::setResolverForTests(static fn (string $host): array => ['203.0.113.10']);
+
+        $this->assertFalse(OutboundUrl::isAllowed('https://gitlab.example.com:8443/acme/widgets.git'));
+        $this->assertSame('203.0.113.10', OutboundUrl::refusedAddressOf('gitlab.example.com'));
+    }
+
+    public function test_allowing_private_addresses_allows_them_through_nat64_but_not_the_documentation_ranges(): void
+    {
+        OutboundUrl::setPolicyForTests(true, []);
+
+        $this->assertTrue(OutboundUrl::isAllowed('http://[64:ff9b::a00:5]/x'));
+        $this->assertTrue(OutboundUrl::isAllowed('http://[64:ff9b:1::a00:5]/x'));
+        $this->assertTrue(OutboundUrl::isAllowed('http://[fec0::1]/x'));
+        $this->assertFalse(OutboundUrl::isAllowed('http://[64:ff9b::169.254.169.254]/x'));
+        $this->assertFalse(OutboundUrl::isAllowed('http://192.0.2.10/x'));
+        $this->assertFalse(OutboundUrl::isAllowed('http://[2001:db8::1]/x'));
+    }
+
+    public function test_an_allow_listed_name_is_still_refused_at_a_documentation_or_reserved_address(): void
+    {
+        OutboundUrl::setPolicyForTests(false, ['git.internal']);
+        $answer = '10.0.0.5';
+        OutboundUrl::setResolverForTests(static function (string $host) use (&$answer): array {
+            return [$answer];
+        });
+
+        $this->assertTrue(OutboundUrl::isAllowed('https://git.internal/x'));
+        foreach (['64:ff9b::a00:5', 'fd00::1'] as $answer) {
+            $this->assertTrue(OutboundUrl::isAllowed('https://git.internal/x'), $answer);
+        }
+        foreach (['198.51.100.7', '2001:db8::7', '64:ff9b::7f00:1', '2002:a9fe:a9fe::1'] as $answer) {
+            $this->assertFalse(OutboundUrl::isAllowed('https://git.internal/x'), $answer);
+        }
     }
 
     public function test_a_bad_scheme_or_missing_host_is_refused(): void

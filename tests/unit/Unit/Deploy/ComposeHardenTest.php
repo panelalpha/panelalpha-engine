@@ -96,6 +96,19 @@ class ComposeHardenTest extends TestCase
         $this->assertSame(['pw'], $result['compose']['services']['app']['secrets']);
     }
 
+    /** `- /anon` names no host path: it is the container path of an anonymous volume, and stays in the run file. */
+    public function test_an_anonymous_volume_is_kept_and_not_reported(): void
+    {
+        $result = ComposeHarden::applyReporting(
+            ['services' => ['db' => ['image' => 'busybox', 'volumes' => ['data:/data', '/anon', '/var/lib/mysql']]]],
+            accountUser: 'acct',
+            projectDir: '/nonexistent-core-view/acct/project'
+        );
+
+        $this->assertSame([], $result['removed']);
+        $this->assertSame(['data:/data', '/anon', '/var/lib/mysql'], $result['compose']['services']['db']['volumes']);
+    }
+
     public function test_apply_reporting_reports_nothing_for_a_clean_file(): void
     {
         $result = ComposeHarden::applyReporting(['services' => ['app' => ['image' => 'acme/app', 'volumes' => ['./data:/data']]]]);

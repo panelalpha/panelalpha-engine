@@ -60,16 +60,16 @@ final class ProxyListenPort
 
     /**
      * Why a stored, disabled rule may not be switched on: it takes its port again,
-     * and an http rule its name on that port, where the vhost holds one rule.
+     * an http rule its name on that port and a tcp/udp rule its address, where
+     * nginx serves one rule.
      */
     public function switchOnRefusal(ProxyRule $rule): ?string
     {
-        $refusal = $this->refusal($rule->transport, $rule->listen_ip ?? '*', (int) $rule->listen_port);
-        if ($refusal !== null || $rule->transport !== 'http') {
-            return $refusal;
-        }
+        $listenIp = $rule->listen_ip ?? '*';
+        $port = (int) $rule->listen_port;
 
-        return ProxyRuleDuplicate::refusal($rule->server_name, (int) $rule->listen_port, (int) $rule->id);
+        return $this->refusal($rule->transport, $listenIp, $port)
+            ?? ProxyRuleDuplicate::ruleRefusal($rule->transport, $listenIp, $port, $rule->server_name, (int) $rule->id);
     }
 
     /** A check that cannot run never refuses a rule. */

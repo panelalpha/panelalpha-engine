@@ -85,30 +85,111 @@ class AppDatabaseCopyTest extends TestCase
         $live = $this->withAppDatabase($this->user('live'));
         $this->mysql->grants[] = ['live_app', 'live_app', 'ALL PRIVILEGES'];
         $rollbacks = [];
-        $created = [];
+        $provisioned = null;
 
-        $result = $this->copy()->intoTarget($stg, $live, $this->rollbackDir, $rollbacks, $created);
+        $result = $this->copy()->intoTarget($stg, $live, $this->rollbackDir, $rollbacks, $provisioned);
 
         $this->assertSame(['stg_app' => 'live_app'], $result->databases);
         $this->assertSame(['live_app' => $this->rollbackDir . '/live_app.sql.gz'], $rollbacks);
-        $this->assertSame([], $created);
+        $this->assertNull($provisioned);
         $this->assertSame(['dump live_app', 'drop live_app', 'create live_app', 'copy stg_app to live_app'], $this->mysql->log);
         $this->assertSame('live-secret', AppDatabase::credentialsOf($live->refresh())['password'] ?? null);
     }
 
-    public function test_a_push_into_a_target_without_one_provisions_it_and_records_it_as_created(): void
+    public function test_a_push_into_a_target_without_one_provisions_it_and_records_it(): void
     {
         $stg = $this->withAppDatabase($this->user('stg'));
         $live = $this->user('live');
         $rollbacks = [];
-        $created = [];
+        $provisioned = null;
 
-        $this->copy()->intoTarget($stg, $live, $this->rollbackDir, $rollbacks, $created);
+        $this->copy()->intoTarget($stg, $live, $this->rollbackDir, $rollbacks, $provisioned);
 
         $this->assertSame([], $rollbacks);
-        $this->assertSame(['live_app'], $created);
+        $this->assertSame('live_app', $provisioned?->name);
         $this->assertSame(['create live_app', 'drop live_app', 'create live_app', 'copy stg_app to live_app'], $this->mysql->log);
         $this->assertArrayHasKey('live_app', $this->mysql->users);
+    }
+
+    public function test_removing_what_a_push_provisioned_leaves_no_database_user_grant_or_password(): void
+    {
+        $stg = $this->withAppDatabase($this->user('stg'));
+        $live = $this->user('live');
+        $rollbacks = [];
+        $provisioned = null;
+        $this->copy()->intoTarget($stg, $live, $this->rollbackDir, $rollbacks, $provisioned);
+
+        $provisioned?->remove($live);
+
+        $this->assertNotContains('live_app', $this->mysql->databases);
+        $this->assertArrayNotHasKey('live_app', $this->mysql->users);
+        $this->assertSame([], array_values(array_filter($this->mysql->grants, static fn (array $g): bool => $g[0] === 'live_app')));
+        $live = $live->refresh();
+        $this->assertSame([], $live->mysqlDatabases()->pluck('database')->all());
+        $this->assertSame([], $live->mysqlUsers()->pluck('user')->all());
+        $this->assertNull(AppDatabase::credentialsOf($live));
+    }
+
+    public function test_removing_what_a_push_provisioned_keeps_a_user_and_password_the_target_already_had(): void
+    {
+        $live = $this->user('live');
+        $live->mysqlUsers()->create(['user' => 'live_app']);
+        $live->setDetails([AppDatabase::PASSWORD_DETAIL => 'live-secret']);
+        $live->save();
+        $this->mysql->users['live_app'] = 'live-secret';
+        $provisioned = null;
+        $this->copy()->ensureTargetHasOne($live, $provisioned);
+
+        $provisioned?->remove($live);
+
+        $this->assertNotContains('live_app', $this->mysql->databases);
+        $this->assertArrayHasKey('live_app', $this->mysql->users);
+        $this->assertContains('revoke live_app on live_app', $this->mysql->log);
+        $this->assertSame([], array_values(array_filter($this->mysql->grants, static fn (array $g): bool => $g[0] === 'live_app')));
+        $live = $live->refresh();
+        $this->assertSame([], $live->mysqlDatabases()->pluck('database')->all());
+        $this->assertSame(['live_app'], $live->mysqlUsers()->pluck('user')->all());
+        $this->assertSame('live-secret', AppDatabase::credentialsOf($live)['password'] ?? null);
+    }
+
+    public function test_removing_what_a_files_only_push_provisioned_keeps_a_database_the_server_already_had(): void
+    {
+        $live = $this->user('live');
+        $this->mysql->databases[] = 'live_app';
+        $provisioned = null;
+        $this->copy()->ensureTargetHasOne($live, $provisioned);
+
+        $provisioned?->remove($live);
+
+        $this->assertSame(['live_app'], $this->mysql->databases);
+        $this->assertNotContains('drop live_app', $this->mysql->log);
+        $this->assertArrayNotHasKey('live_app', $this->mysql->users);
+        $this->assertSame([], $live->refresh()->mysqlDatabases()->pluck('database')->all());
+    }
+
+    public function test_removing_what_a_push_provisioned_drops_a_database_it_replaced_with_the_sources_data(): void
+    {
+        $stg = $this->withAppDatabase($this->user('stg'));
+        $live = $this->user('live');
+        $this->mysql->databases[] = 'live_app';
+        $rollbacks = [];
+        $provisioned = null;
+        $this->copy()->intoTarget($stg, $live, $this->rollbackDir, $rollbacks, $provisioned);
+
+        $provisioned?->remove($live);
+
+        $this->assertNotContains('live_app', $this->mysql->databases);
+    }
+
+    public function test_a_target_that_already_has_one_records_nothing_to_remove(): void
+    {
+        $live = $this->withAppDatabase($this->user('live'));
+        $provisioned = null;
+
+        $this->copy()->ensureTargetHasOne($live, $provisioned);
+
+        $this->assertNull($provisioned);
+        $this->assertSame([], $this->mysql->log);
     }
 
     private function copy(): AppDatabaseCopy

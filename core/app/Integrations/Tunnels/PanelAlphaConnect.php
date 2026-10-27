@@ -5,6 +5,7 @@ namespace App\Integrations\Tunnels;
 use App\Integrations\Monitoring\PanelAlphaMonitoring;
 use App\Lib\Apis\PanelAlpha;
 use App\Lib\Apis\PanelAlpha\PanelAlphaException;
+use App\Lib\Domains\AllocatedDomain;
 use App\Lib\Domains\DomainAllocator;
 use App\Lib\Domains\DomainPlan;
 use App\Models\Domain;
@@ -363,6 +364,40 @@ class PanelAlphaConnect
                 'hostname' => $tunnel->hostname,
                 'message' => $e->getMessage(),
             ]);
+        }
+    }
+
+    /**
+     * Every *.panelalpha.online site a project holds goes back to the proxy,
+     * which counts it against a quota the whole engine shares; its tunnel row goes with it.
+     */
+    public static function releaseProjectSites(User $user): void
+    {
+        $tunnels = Tunnel::query()
+            ->where('user_id', $user->id)
+            ->where('provider', Tunnel::PROVIDER_PANELALPHA)
+            ->get();
+        foreach ($tunnels as $tunnel) {
+            self::releaseSite($tunnel->hostname);
+            $tunnel->delete();
+        }
+    }
+
+    /** A name bought for a project or copy that was then never created goes back to the proxy. */
+    public static function releaseAllocated(AllocatedDomain $allocated): void
+    {
+        if ($allocated->tunnelProvider === Tunnel::PROVIDER_PANELALPHA && $allocated->allocation !== null) {
+            self::releaseSite($allocated->allocation['path_fqdn']);
+        }
+    }
+
+    /** Best-effort: a proxy that refuses or cannot be reached is logged, and the caller carries on. */
+    private static function releaseSite(string $pathFqdn): void
+    {
+        try {
+            (new self)->deleteSite($pathFqdn);
+        } catch (\Throwable $e) {
+            Log::warning("Could not release the PanelAlpha Online site {$pathFqdn}: ".$e->getMessage());
         }
     }
 

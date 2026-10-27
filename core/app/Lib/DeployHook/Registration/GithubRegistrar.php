@@ -38,7 +38,7 @@ final class GithubRegistrar extends ApiRegistrar
         }
 
         return new WebhookTarget(
-            apiBase: $host === 'github.com' ? self::API : 'https://'.$host.'/api/v3',
+            apiBase: $host === 'github.com' ? self::API : $this->origin($host, $parts).'/api/v3',
             repository: $m[1].'/'.$m[2],
         );
     }

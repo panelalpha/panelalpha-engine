@@ -5,9 +5,10 @@ namespace Tests\Unit\System\Project\PhpHosting\WordPress;
 use App\Models\Domain;
 use App\Models\User;
 use App\System\Project;
-use App\System\Project\PhpHosting\WordPress\WpCli;
+use App\System\Project\FileManager;
 use App\System\Project\PhpHosting\WordPress\Exception as WordPressException;
 use App\System\Project\PhpHosting\WordPress\Maintenance;
+use App\System\Project\PhpHosting\WordPress\WpCli;
 use Mockery;
 use PHPUnit\Framework\TestCase;
 
@@ -136,8 +137,8 @@ class MaintenanceTest extends TestCase
     }
 
     /**
-     * @param list<list<string>> $sequence
-     * @param list<array{exit_code: int, stdout: string, stderr: string}> $results
+     * @param  list<list<string>>  $sequence
+     * @param  list<array{exit_code: int, stdout: string, stderr: string}>  $results
      */
     private function maintenanceWithFakeRunner(
         array &$sequence,
@@ -148,6 +149,8 @@ class MaintenanceTest extends TestCase
         $user->username = 'alice';
         $project = Mockery::mock(Project::class);
         $project->shouldReceive('homeDirPath')->andReturn('/home/alice');
+        $project->shouldReceive('resolvePath')
+            ->andReturnUsing(fn (string $path): string => (new FileManager($project))->resolvePath($path));
         $call = 0;
         $project->shouldReceive('runWpCli')
             ->andReturnUsing(function (array $args) use (&$sequence, &$call, $results): array {

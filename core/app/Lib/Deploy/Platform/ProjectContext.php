@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Platform;
 
+use App\Lib\Deploy\AccountHomeRead;
+
 /**
  * The project under inspection: its directory, its root listing, and the
  * handful of reads that detection keeps repeating.
@@ -111,7 +113,7 @@ class ProjectContext
         if (! is_file($path)) {
             return null;
         }
-        $raw = @file_get_contents($path);
+        $raw = AccountHomeRead::contents($path);
 
         return is_string($raw) ? $raw : null;
     }
@@ -240,7 +242,7 @@ class ProjectContext
         if (! is_file($path)) {
             return null;
         }
-        $raw = @file_get_contents($path);
+        $raw = AccountHomeRead::contents($path);
         if (! is_string($raw) || $raw === '') {
             return null;
         }
@@ -278,7 +280,7 @@ class ProjectContext
             if (! is_file($path)) {
                 continue;
             }
-            $contents = @file_get_contents($path);
+            $contents = AccountHomeRead::contents($path);
 
             return is_string($contents) ? $contents : '';
         }

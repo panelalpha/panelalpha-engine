@@ -27,6 +27,7 @@ use App\Models\User;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Deployment\DeploymentWorkflow;
 use App\System\Project\Dind\AppHealth;
+use App\System\Project\FileManager;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\ServiceUnavailableHttpException;
 
@@ -222,17 +223,18 @@ class ProjectRebuild
 
     public function assertArchive(User $user, string $zipPath): void
     {
+        $files = $this->accountFiles($user);
         try {
-            UploadedArchive::inHome($zipPath, rtrim($this->homeOf($user), '/'));
+            UploadedArchive::inHome($zipPath, rtrim($files->homeDirPath(), '/'), $files->resolvedFile(...));
         } catch (\InvalidArgumentException $e) {
             throw ValidationException::withMessages(['zip_path' => $e->getMessage()]);
         }
     }
 
-    /** The home the archive import resolves zip_path against. */
-    protected function homeOf(User $user): string
+    /** The home the archive import resolves zip_path against, looked into as the account. */
+    protected function accountFiles(User $user): FileManager
     {
-        return $this->project($user)->homeDirPath();
+        return $this->project($user)->fileManager();
     }
 
     protected function project(User $user): ProjectAggregate

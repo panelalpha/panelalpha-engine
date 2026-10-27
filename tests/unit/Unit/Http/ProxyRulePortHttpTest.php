@@ -25,7 +25,7 @@ class ProxyRulePortHttpTest extends TestCase
         $this->recordWebserverApply();
         $this->withoutMiddleware(Authenticate::class);
         // A project may answer for its own domain; a system rule for any.
-        $this->makeMainDomain($this->makeUser('alice'), 'shop.test');
+        $this->makeMainDomain($this->makeUser('alice', ['template' => 'dind']), 'shop.test');
         $this->hostListens("LISTEN 0 4096 0.0.0.0:2011 0.0.0.0:*\nLISTEN 0 80 127.0.0.1:3306 0.0.0.0:*");
     }
 
@@ -124,6 +124,22 @@ class ProxyRulePortHttpTest extends TestCase
             ->assertJsonPath('errors.listen_port.0', 'A rule with the same transport, port, and server_name already exists');
 
         $this->assertFalse($duplicate->fresh()->enabled);
+    }
+
+    /** stream.conf renders no server name: nginx would serve one of two tcp rules on one address and port. */
+    public function test_re_enabling_a_disabled_stream_duplicate_is_refused(): void
+    {
+        $this->postJson('/api/proxy-rules', $this->rule('tcp', 17092))->assertSuccessful();
+        $this->postJson('/api/proxy-rules', $this->rule('tcp', 17092, ['enabled' => false]))->assertSuccessful();
+
+        /** @var ProxyRule $duplicate */
+        $duplicate = ProxyRule::query()->where('enabled', false)->sole();
+        $this->putJson("/api/proxy-rules/{$duplicate->id}", ['enabled' => true])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.listen_port.0', 'A rule with the same transport, port, and server_name already exists');
+
+        $this->assertFalse($duplicate->fresh()->enabled);
+        $this->assertWebserverApplied(2);
     }
 
     public function test_a_disabled_rule_is_stored_whatever_its_port_and_checked_when_enabled(): void

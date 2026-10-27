@@ -113,6 +113,46 @@ class ProjectDeleterApiAccessTest extends TestCase
     }
 
     /**
+     * The deleted project's name leaves another project's allowance, so its next
+     * rotation does not reach a project created again under that name.
+     */
+    public function test_deleting_a_project_takes_it_out_of_every_other_allowance(): void
+    {
+        $user = $this->makeUser($this->name, ['template' => 'dind']);
+        $keeper = $this->makeUser($this->name . 'k', ['template' => 'dind']);
+        $this->access->allow($keeper, [$keeper->username, $this->name], false);
+
+        $this->deleter()->delete($user);
+        $rotated = $this->access->rotate($keeper);
+
+        $this->assertSame([$keeper->username], $this->access->entryFor($keeper)['scope']);
+        $this->assertSame(
+            [$keeper->username],
+            TokenAbilities::of(PersonalAccessToken::findOrFail((int) $rotated['token_id']))->projects(),
+        );
+    }
+
+    public function test_an_allowance_that_keeps_the_name_fails_the_delete(): void
+    {
+        $user = $this->makeUser($this->name, ['template' => 'dind']);
+        $keeper = $this->makeUser($this->name . 'k', ['template' => 'dind']);
+        $this->access->allow($keeper, [$this->name], false);
+        $this->access = $this->accessFailingAtSection(2);
+        $destroyed = new ArrayObject();
+
+        $failure = null;
+        try {
+            $this->deleter($destroyed)->delete($user);
+        } catch (\RuntimeException $e) {
+            $failure = $e;
+        }
+
+        $this->assertStringContainsString('was not deleted', (string) $failure?->getMessage());
+        $this->assertSame([], $destroyed->getArrayCopy());
+        $this->assertSame([$this->name], $this->access->entryFor($keeper)['scope']);
+    }
+
+    /**
      * @param  list<string>  $surfaces
      * @param  ?list<string>  $projects
      */
@@ -139,6 +179,28 @@ class ProjectDeleterApiAccessTest extends TestCase
             protected function mutate(callable $work): mixed
             {
                 if ($this->locked['locked']) {
+                    throw new LockTimeoutException('lock not obtained');
+                }
+
+                return parent::mutate($work);
+            }
+        };
+    }
+
+    /** The setting's lock is not obtained from the given critical section on. */
+    private function accessFailingAtSection(int $failing): ApiAccess
+    {
+        return new class ($this->firewall, $failing) extends ApiAccess {
+            private int $sections = 0;
+
+            public function __construct(RecordingFirewall $firewall, private int $failing)
+            {
+                parent::__construct(firewall: $firewall);
+            }
+
+            protected function mutate(callable $work): mixed
+            {
+                if (++$this->sections >= $this->failing) {
                     throw new LockTimeoutException('lock not obtained');
                 }
 

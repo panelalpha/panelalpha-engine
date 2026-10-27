@@ -169,7 +169,35 @@ class ProjectCreator
             $this->inspection = self::inspectRepository($params, $input);
         }
 
+        return self::saveUnderAllocatedDomain($params, $input->nameField, $input->envVars);
+    }
+
+    /**
+     * Until its tunnel row is written, nothing else knows a panelalpha.online
+     * name was bought, so a create that fails before then gives it back here.
+     *
+     * @param  array<string, mixed>  $params
+     * @param  mixed  $sentEnvVars  the env_vars as sent, before their vault references were read
+     *
+     * @throws ProblemException
+     */
+    private static function saveUnderAllocatedDomain(array $params, string $nameField, mixed $sentEnvVars): User
+    {
         $allocated = self::allocateDomain($params);
+        try {
+            return self::saveOnAllocatedDomain($params, $allocated, $nameField, $sentEnvVars);
+        } catch (\Throwable $failure) {
+            PanelAlphaConnect::releaseAllocated($allocated);
+            throw $failure;
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $params
+     * @param  mixed  $sentEnvVars  the env_vars as sent, before their vault references were read
+     */
+    private static function saveOnAllocatedDomain(array $params, AllocatedDomain $allocated, string $nameField, mixed $sentEnvVars): User
+    {
         $params['domain'] = $allocated->domain;
         self::assertAllocatedDomainFree($params['domain']);
 
@@ -177,10 +205,10 @@ class ProjectCreator
             $params['template'] = 'dind';
         }
 
-        $user = self::newUser($params, $allocated);
+        $user = self::newUser($params, $allocated, $sentEnvVars);
         self::assertNameStillFree($user, $params['domain']);
 
-        $domain = self::saveNewProject($user, self::mainDomainFor($params), $input->nameField);
+        $domain = self::saveNewProject($user, self::mainDomainFor($params), $nameField);
 
         self::assignDedicatedIps($user, $params);
         self::recordOnlineTunnel($user, $domain, $allocated);
@@ -322,7 +350,7 @@ class ProjectCreator
 
     /**
      * The only check that leaves the machine, so it runs after the local ones and before the
-     * allocator spends a panelalpha.online label, which is never released. The probe runs in
+     * allocator spends a panelalpha.online label it would then have to give back. The probe runs in
      * core, which reaches addresses the project's own network refuses, so those are refused
      * first. It uses the token the clone will (none: anonymous) and asks for the branch too.
      *
@@ -376,7 +404,7 @@ class ProjectCreator
     private static function allocateDomain(array $params): AllocatedDomain
     {
         try {
-            return (new DomainAllocator)->allocate(
+            return app(DomainAllocator::class)->allocate(
                 $params['username'],
                 $params['domain'] ?? null,
                 $params['tunnel'] ?? null,
@@ -405,20 +433,19 @@ class ProjectCreator
 
     /**
      * @param  array<string, mixed>  $params
+     * @param  mixed  $sentEnvVars  the env_vars as sent, before their vault references were read
      */
-    private static function newUser(array $params, AllocatedDomain $allocated): User
+    private static function newUser(array $params, AllocatedDomain $allocated, mixed $sentEnvVars): User
     {
+        $envVars = EnvVarOverrides::applyIncoming($params['env_vars'] ?? [], []);
         /** @var User */
         $user = User::make([
             'username' => $params['username'],
             'domain' => $params['domain'],
             'email' => $params['email'] ?? null,
-            'details' => NewProjectDetails::build(
-                $params,
-                $allocated->toDetails(),
-                EnvVarOverrides::applyIncoming($params['env_vars'] ?? [], []),
-            ),
+            'details' => NewProjectDetails::build($params, $allocated->toDetails(), $envVars),
         ]);
+        $user->setEnvVars($envVars, $sentEnvVars);
 
         if (! empty($params['password']) && is_string($params['password'])) {
             self::enableSitePassword($user, $params['password']);

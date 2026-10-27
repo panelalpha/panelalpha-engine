@@ -2,43 +2,26 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\MetricsRangeRequest;
 use App\Lib\Host\DataDisk;
 use App\Lib\Host\HostMemoryProbe;
 use App\Lib\Host\ProjectMemory;
+use App\Lib\Host\ServerMetricsHistory;
 use Carbon\CarbonPeriod;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\Rule;
 use OpenApi\Attributes as OA;
 
 class ServerMetricsController extends Controller
 {
     /** @var list<string> */
-    private const BUCKET_METRICS = [
-        'cpu_percent', 'cpu_load_avg_1', 'cpu_load_avg_5', 'cpu_load_avg_15',
-        'ram_percent', 'swap_percent', 'disk_read_bps', 'disk_write_bps',
-        'disk_read_iops', 'disk_write_iops', 'net_in_bps', 'net_out_bps',
-        'net_in_pps', 'net_out_pps',
-    ];
+    private const BUCKET_METRICS = ServerMetricsHistory::SAMPLED_METRICS;
 
     /** A collector sample younger than this is "now". It writes every 5s by default. */
     private const FRESH_SAMPLE_SECONDS = 30;
-
-    /** @var list<string> BUCKET_METRICS plus what older rows lack. */
-    private const HISTORY_METRICS = [...self::BUCKET_METRICS, 'disk_percent'];
-
-    /** range => [span, bucket] in seconds; about 60-170 points each. */
-    private const HISTORY_RANGES = [
-        '1h' => [3600, 60],
-        '24h' => [86400, 600],
-        '7d' => [604800, 3600],
-        '30d' => [2592000, 21600],
-    ];
 
     #[OA\Get(
         path: '/metrics/current',
@@ -267,81 +250,9 @@ class ServerMetricsController extends Controller
             new OA\Response(response: 422, description: 'Unknown range', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function history(Request $request): JsonResponse
+    public function history(MetricsRangeRequest $request): JsonResponse
     {
-        $range = $request->validate([
-            'range' => ['sometimes', 'string', Rule::in(array_keys(self::HISTORY_RANGES))],
-        ])['range'] ?? '24h';
-        [$span, $bucketSeconds] = self::HISTORY_RANGES[$range];
-
-        $end = $this->floorToNearestSeconds(Carbon::now('UTC')->subSeconds($bucketSeconds), $bucketSeconds);
-        $start = $end->copy()->subSeconds($span - $bucketSeconds);
-
-        // Nothing in the window changes until the next bucket completes, and
-        // 30 days is ~0.6s of SQLite work, so each window is computed once.
-        $data = Cache::remember(
-            "metrics-history:{$range}:{$end->timestamp}",
-            $bucketSeconds,
-            fn (): array => $this->historyPeriods($start, $end, $bucketSeconds)
-        );
-
-        return new JsonResponse([
-            'data' => $data,
-            'meta' => [
-                'range' => $range,
-                'bucket_seconds' => $bucketSeconds,
-                'from' => $start->format('Y-m-d H:i:s'),
-                'to' => $end->format('Y-m-d H:i:s'),
-            ],
-        ]);
-    }
-
-    /**
-     * @return list<array<string, mixed>>
-     */
-    private function historyPeriods(Carbon $start, Carbon $end, int $bucketSeconds): array
-    {
-        $byBucket = [];
-        foreach ($this->historyQuery($start, $end->copy()->addSeconds($bucketSeconds), $bucketSeconds)->get() as $row) {
-            $byBucket[(int) $row->bucket] = $row;
-        }
-
-        $data = [];
-        for ($t = (int) $start->timestamp; $t <= (int) $end->timestamp; $t += $bucketSeconds) {
-            $period = ['period' => Carbon::createFromTimestampUTC($t)->format('Y-m-d H:i:s')];
-            if (isset($byBucket[$t])) {
-                foreach (self::HISTORY_METRICS as $metric) {
-                    $value = $byBucket[$t]->$metric;
-                    $period[$metric] = $value === null ? null : round((float) $value, 2);
-                }
-            }
-            $data[] = $period;
-        }
-
-        return $data;
-    }
-
-    // Grouped in SQL: 30 days of 5s samples is half a million rows, too many to
-    // bucket in PHP the way the short windows do.
-    private function historyQuery(Carbon $start, Carbon $end, int $bucketSeconds): Builder
-    {
-        $grammar = DB::connection()->getQueryGrammar();
-        $column = $grammar->wrap('timestamp');
-        $bucket = match (DB::connection()->getDriverName()) {
-            'sqlite' => "(CAST(strftime('%s', {$column}) AS INTEGER) / {$bucketSeconds}) * {$bucketSeconds}",
-            default => "(TIMESTAMPDIFF(SECOND, '1970-01-01 00:00:00', {$column}) DIV {$bucketSeconds}) * {$bucketSeconds}",
-        };
-        $averages = array_map(
-            fn (string $metric): string => 'AVG('.$grammar->wrap($metric).') AS '.$grammar->wrap($metric),
-            self::HISTORY_METRICS
-        );
-
-        return DB::table('server_metrics')
-            ->selectRaw("{$bucket} AS bucket, ".implode(', ', $averages))
-            ->where('timestamp', '>=', $start->format('Y-m-d H:i:s'))
-            ->where('timestamp', '<', $end->format('Y-m-d H:i:s'))
-            ->groupByRaw('bucket')
-            ->orderBy('bucket');
+        return new JsonResponse(ServerMetricsHistory::for($request->range()));
     }
 
     private function floorToNearestSeconds(Carbon $dt, int $seconds): Carbon

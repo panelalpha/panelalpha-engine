@@ -192,6 +192,24 @@ test.describe('Firewall rules', () => {
     expect(back).toMatchObject({ action: 'allow', scope: 'host' });
   });
 
+  test('an outbound deny edited inbound without a scope covers published ports too', async ({
+    api,
+  }) => {
+    const out = await createRule(api, created, {
+      action: 'deny',
+      direction: 'out',
+      protocol: 'tcp',
+      port: randomTestPort(),
+      source: randomTestNetAddress(),
+      comment: RULE_COMMENT,
+    });
+    expect(out.scope).toBe('host');
+
+    const inbound = (await api.updateFirewallRule(out.id, { direction: 'in' })).data;
+    created.add(inbound.id);
+    expect(inbound).toMatchObject({ action: 'deny', direction: 'in', scope: 'both' });
+  });
+
   test('rules the API cannot write safely are refused', async ({ api }) => {
     const port = randomTestPort();
     const source = randomTestNetAddress();

@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Read a domain's Cloudflare CDN status
 
-    Maps the domain to the Cloudflare zone the project token can see, then reports the zone's `security_level` and `development_mode` and whether the domain's DNS record is proxied. Works for classic and container-based projects: it is pure Cloudflare API work. Refuses with 422 when the project has no Cloudflare API token or the token lacks the scope, and with 404 when Cloudflare has no zone for the domain.
+    Maps the domain to the Cloudflare zone the project token can see, then reports the zone's `security_level` and `development_mode` and whether the domain's DNS record is proxied. Needs the project's Cloudflare API token, which only a container-based project can hold. Refuses with 422 when the project has no Cloudflare API token, or the token lacks Zone Settings Read or Zone DNS Read (the problem names which), and with 404 when Cloudflare has no zone for the domain. A token Cloudflare does not accept at all (invalid, expired or revoked) is refused with 422 `cloudflare_token_invalid`. A token that may not list the zone is refused with 422 naming Zone Read. When Cloudflare refuses the request for another reason, 422 `cloudflare_request_refused` carries its message; while it rate-limits the token, 503 `cloudflare_rate_limited`; when it fails or cannot be reached, 502 `cloudflare_unavailable`. Retry the last two later.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -61,7 +61,7 @@ class CdnGetTool extends ApiTool
     {
         return [
             'name' => $schema->string()->required(),
-            'domain' => $schema->string()->required(),
+            'domain' => $schema->string()->description('One of the project\'s domains or aliases. The zone and DNS record are those of this exact name.')->required(),
         ];
     }
 }

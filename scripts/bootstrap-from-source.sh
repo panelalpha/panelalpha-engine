@@ -131,6 +131,16 @@ resolve_public_ip() {
     step "Using host address ${PUBLIC_IP}"
 }
 
+# As installer.sh: git before 2.37 ignores the http.curloptResolve pin that
+# traditional PHP hosting's host-side git runs with.
+warn_old_host_git() {
+    local version
+    version=$(git --version 2>/dev/null | sed -n 's/^git version \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p') || version=''
+    if [ -n "$version" ] && [ "$(printf '%s\n' 2.37 "$version" | sort -V | head -1)" != 2.37 ]; then
+        warn "git ${version} is older than 2.37: on traditional PHP hosting the engine refuses a git pull from any host name not in EGRESS_ALLOW_HOSTS until git on this server is upgraded."
+    fi
+}
+
 check_prerequisites() {
     step "Checking prerequisites"
     . /etc/os-release
@@ -139,6 +149,7 @@ check_prerequisites() {
     *) warn "Untested distribution '${ID:-unknown}' — the stack expects Debian 12/13 or Ubuntu 22.04/24.04" ;;
     esac
     install_missing_tools
+    warn_old_host_git
     install_docker
     docker compose version >/dev/null 2>&1 || { echo "The docker compose plugin is missing." >&2; exit 1; }
     resolve_public_ip

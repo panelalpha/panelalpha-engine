@@ -39,8 +39,17 @@ class GitDeployHookCommand extends Command
             return $this->dispatchAction($params);
         } catch (ProviderRegistrationRefused $e) {
             $this->error($e->getMessage());
+            $this->printCreatedHook($e);
 
             return self::FAILURE;
+        }
+    }
+
+    /** A hook created before the refusal is printed: its secret is never shown again. */
+    private function printCreatedHook(ProviderRegistrationRefused $e): void
+    {
+        if ($e->createdHook !== null) {
+            $this->line((string) json_encode(['data' => $e->createdHook], JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
         }
     }
 

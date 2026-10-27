@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Detect;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Port\InternalPorts;
 use Generator;
@@ -69,7 +70,7 @@ final class DockerfileFinder
     /** The first port a Dockerfile declares it listens on, best first. */
     public static function exposedPort(string $dockerfilePath): ?int
     {
-        $contents = is_file($dockerfilePath) ? @file_get_contents($dockerfilePath) : null;
+        $contents = is_file($dockerfilePath) ? AccountHomeRead::contents($dockerfilePath) : null;
 
         return is_string($contents) ? self::exposedPortIn($contents) : null;
     }
@@ -541,7 +542,7 @@ final class DockerfileFinder
             return false;
         }
 
-        $contents = @file_get_contents($path);
+        $contents = AccountHomeRead::contents($path);
         if (! is_string($contents)) {
             return false;
         }

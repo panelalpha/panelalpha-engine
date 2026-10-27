@@ -2,50 +2,65 @@
 
 namespace App\System\Project\PhpHosting\WordPress\Migration;
 
-use Illuminate\Support\Facades\Http;
+use App\Lib\Http\BoundedDownload;
 use RuntimeException;
 use Throwable;
 use ZipArchive;
 
 /**
- * Downloads the migrator tag archive once per task and repacks it so WordPress
- * installs the plugin under wordpress-migrator/, not the GitHub tag folder.
+ * Downloads the pinned migrator release once per migration run, refuses it
+ * unless its SHA-256 is the pinned one, and repacks it so WordPress installs
+ * the plugin under wordpress-migrator/, not the GitHub tag folder. The run
+ * removes it when it ends ({@see discard}).
  */
 class WordpressMigratorZip
 {
+    /** The first release whose transfer routes refuse a call without the site's token. */
+    public const AUTHENTICATED_VERSION = '1.2.0';
+
     private const PLUGIN_DIR = 'wordpress-migrator';
 
     private const REQUIRED_ENTRY = 'wordpress-migrator.php';
 
     private const EXCLUDED = ['branding.php'];
 
+    /** A release zip is a few hundred kilobytes; a download past this is not one. */
+    private const MAX_RELEASE_BYTES = 20 * 1024 * 1024;
+
+    /** Inside an HTTP request a stalled download must not hold a PHP-FPM worker long. */
+    public const REQUEST_DOWNLOAD_SECONDS = 120;
+
+    /** A queued import job may wait as long as any bounded download. */
+    public const JOB_DOWNLOAD_SECONDS = 600;
+
     /** @var array<int, string> migration id => absolute path to install zip */
     private static array $cache = [];
 
+    public function __construct(
+        private readonly int $downloadSeconds = self::REQUEST_DOWNLOAD_SECONDS,
+    ) {}
+
     /**
      * Install zip path for this migration, downloading and repacking at most
-     * once per process for a given record id.
+     * once per run for a given record id, and again when the file is gone.
      */
     public function installZipFor(int $migrationId, ?string $releaseUrl = null): string
     {
-        if (isset(self::$cache[$migrationId])) {
+        if (isset(self::$cache[$migrationId]) && is_file(self::$cache[$migrationId])) {
             return self::$cache[$migrationId];
         }
 
+        self::discard($migrationId);
         $path = $this->downloadAndRepack($releaseUrl);
         self::$cache[$migrationId] = $path;
 
         return $path;
     }
 
-    public static function clearCache(): void
-    {
-        self::$cache = [];
-    }
-
     /**
-     * Delete the temp work directory for a migration after both plugin
-     * installs have read the zip. Ignores paths outside the migrator temp prefix.
+     * Delete the temp work directory for a migration once the plugin installs
+     * have read the zip, and when its run ends. Ignores paths outside the
+     * migrator temp prefix.
      */
     public static function discard(int $migrationId): void
     {
@@ -112,7 +127,8 @@ class WordpressMigratorZip
     }
 
     /**
-     * Download the configured (or given) release URL and repack for install.
+     * Download the configured (or given) release URL, refuse it unless it is
+     * the pinned release, and repack it for install.
      */
     public function downloadAndRepack(?string $releaseUrl = null): string
     {
@@ -125,35 +141,69 @@ class WordpressMigratorZip
 
         $tagZip = $tmpDir.'/tag.zip';
         try {
-            $response = Http::timeout(120)->get($url);
-        } catch (Throwable $e) {
-            self::removeDir($tmpDir);
-            throw new RuntimeException(
-                'Failed to download WordPress migrator release: '.$e->getMessage(),
-                0,
-                $e,
-            );
-        }
+            $this->download($url, $tagZip);
+            self::assertPinnedRelease($tagZip, $url);
 
-        if (! $response->successful()) {
-            self::removeDir($tmpDir);
-            throw new RuntimeException(
-                'Failed to download WordPress migrator release (HTTP '
-                .$response->status().'): '.$url
-            );
-        }
-
-        if (file_put_contents($tagZip, $response->body()) === false) {
-            self::removeDir($tmpDir);
-            throw new RuntimeException('Could not write downloaded migrator archive');
-        }
-
-        try {
             return $this->repackFromTagArchive($tagZip, $tmpDir);
         } catch (Throwable $e) {
             self::removeDir($tmpDir);
             throw $e;
         }
+    }
+
+    private function download(string $url, string $into): void
+    {
+        try {
+            $response = (new BoundedDownload(self::MAX_RELEASE_BYTES, followRedirects: true, timeoutSeconds: $this->downloadSeconds))->fetch($url, $into);
+        } catch (Throwable $e) {
+            throw new RuntimeException('Failed to download WordPress migrator release: '.$e->getMessage(), 0, $e);
+        }
+
+        if (! $response->successful()) {
+            throw new RuntimeException(
+                'Failed to download WordPress migrator release (HTTP '.$response->status().'): '.$url
+            );
+        }
+    }
+
+    private static function assertPinnedRelease(string $releaseZip, string $url): void
+    {
+        $expected = strtolower(trim((string) config('services.wordpress_migrator.sha256')));
+        $actual = (string) hash_file('sha256', $releaseZip);
+        if (! hash_equals($expected, $actual)) {
+            throw new RuntimeException(
+                "The WordPress migrator release at {$url} is not the pinned one: its SHA-256 is {$actual}, "
+                ."but WORDPRESS_MIGRATOR_SHA256 is '{$expected}'"
+            );
+        }
+    }
+
+    /**
+     * Whether this install zip is a release whose transfer routes must refuse
+     * a call without the site's token; false when it names no version.
+     */
+    public static function requiresToken(string $installZip): bool
+    {
+        $version = self::versionOf($installZip);
+
+        return $version !== null && version_compare($version, self::AUTHENTICATED_VERSION, '>=');
+    }
+
+    /**
+     * The `Version:` header of the plugin's main file, as WordPress reads it.
+     */
+    private static function versionOf(string $installZip): ?string
+    {
+        $zip = new ZipArchive;
+        if ($zip->open($installZip) !== true) {
+            return null;
+        }
+        $main = $zip->getFromName(self::PLUGIN_DIR.'/'.self::REQUIRED_ENTRY);
+        $zip->close();
+
+        return is_string($main) && preg_match('/^[ \t\/*#@]*Version:[ \t]*([0-9][0-9A-Za-z.+-]*)/mi', $main, $match) === 1
+            ? $match[1]
+            : null;
     }
 
     /**
@@ -333,8 +383,7 @@ class WordpressMigratorZip
             return $dirs[0];
         }
 
-        // Flat extract (no wrapper directory) — treat extract root as source.
-        if (is_file($extractDir.'/'.self::REQUIRED_ENTRY)) {
+        if (self::isFlatExtract($extractDir)) {
             return $extractDir;
         }
 
@@ -342,6 +391,12 @@ class WordpressMigratorZip
             'Migrator tag archive must contain a single top-level directory '
             .'with '.self::REQUIRED_ENTRY
         );
+    }
+
+    /** An archive with no wrapper directory: its extract root is the plugin source. */
+    private static function isFlatExtract(string $extractDir): bool
+    {
+        return is_file($extractDir.'/'.self::REQUIRED_ENTRY);
     }
 
     private static function addDirectoryToZip(ZipArchive $zip, string $sourceDir, string $prefix): void

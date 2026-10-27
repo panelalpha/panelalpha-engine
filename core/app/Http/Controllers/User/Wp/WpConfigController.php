@@ -32,7 +32,7 @@ class WpConfigController extends WordPressController
                 in: 'query',
                 required: false,
                 schema: new OA\Schema(type: 'string'),
-                description: 'WordPress directory. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
+                description: 'WordPress directory. On PHP hosting it is inside the project home, read as the file manager reads a path: absolute, or relative to the home. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
             ),
             new OA\Parameter(
                 name: 'service',
@@ -98,7 +98,7 @@ class WpConfigController extends WordPressController
                     property: 'path',
                     type: 'string',
                     nullable: true,
-                    description: 'WordPress directory. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
+                    description: 'WordPress directory. On PHP hosting it is inside the project home, read as the file manager reads a path: absolute, or relative to the home. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
                 ),
                 new OA\Property(
                     property: 'service',
@@ -149,7 +149,7 @@ class WpConfigController extends WordPressController
                 in: 'query',
                 required: false,
                 schema: new OA\Schema(type: 'string'),
-                description: 'WordPress directory. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
+                description: 'WordPress directory. On PHP hosting it is inside the project home, read as the file manager reads a path: absolute, or relative to the home. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
             ),
             new OA\Parameter(
                 name: 'service',
@@ -228,7 +228,7 @@ class WpConfigController extends WordPressController
                     property: 'path',
                     type: 'string',
                     nullable: true,
-                    description: 'WordPress directory. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
+                    description: 'WordPress directory. On PHP hosting it is inside the project home, read as the file manager reads a path: absolute, or relative to the home. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
                 ),
                 new OA\Property(
                     property: 'service',
@@ -280,7 +280,7 @@ class WpConfigController extends WordPressController
                 in: 'query',
                 required: false,
                 schema: new OA\Schema(type: 'string'),
-                description: 'WordPress directory. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
+                description: 'WordPress directory. On PHP hosting it is inside the project home, read as the file manager reads a path: absolute, or relative to the home. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.',
             ),
             new OA\Parameter(
                 name: 'service',

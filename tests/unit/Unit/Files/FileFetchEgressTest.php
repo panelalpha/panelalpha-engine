@@ -96,10 +96,28 @@ class FileFetchEgressTest extends TestCase
             . 'Set EGRESS_ALLOW_PRIVATE=true to allow a private address.');
     }
 
-    private function fakeSystem(?string $redirectTo = null): System
+    /** A download that fails answers a short reason on `url`, not curl's own error text. */
+    public function test_a_failed_download_is_a_download_failed_problem_without_curls_output(): void
     {
-        return new class ($this->tmpRoot, $redirectTo) extends System {
-            public function __construct(private string $root, private ?string $redirectTo)
+        $this->app->instance(System::class, $this->fakeSystem(curlExit: 7));
+
+        $response = $this->postJson('/api/projects/alice/files/fetch', [
+            'url' => 'http://93.184.216.34/plugin.zip',
+            'path' => 'project',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('problems.0.field', 'url');
+        $response->assertJsonPath('problems.0.code', 'download_failed');
+        $response->assertJsonPath('problems.0.reason', 'connect');
+        $response->assertJsonPath('problems.0.message', 'Could not connect to 93.184.216.34.');
+        $this->assertStringNotContainsString('curl', (string) $response->getContent());
+    }
+
+    private function fakeSystem(?string $redirectTo = null, int $curlExit = 0): System
+    {
+        return new class ($this->tmpRoot, $redirectTo, $curlExit) extends System {
+            public function __construct(private string $root, private ?string $redirectTo, private int $curlExit)
             {
             }
 
@@ -117,7 +135,7 @@ class FileFetchEgressTest extends TestCase
             {
                 $argv = array_slice((array) $cmd, 7);
                 if (in_array('curl', $argv, true)) {
-                    return $this->finished(0, $this->curlOutput($argv));
+                    return $this->finished($this->curlExit, $this->curlExit === 0 ? $this->curlOutput($argv) : '000');
                 }
 
                 $process = new Process($argv);
@@ -137,6 +155,11 @@ class FileFetchEgressTest extends TestCase
                     public function getExitCode(): ?int
                     {
                         return $this->code;
+                    }
+
+                    public function getErrorOutput(): string
+                    {
+                        return $this->code === 0 ? '' : "curl: ({$this->code}) Failed to connect to 93.184.216.34 port 80 after 3 ms: Could not connect to server";
                     }
 
                     public function getOutput(): string

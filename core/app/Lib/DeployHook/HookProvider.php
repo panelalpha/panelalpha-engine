@@ -24,8 +24,8 @@ interface HookProvider
     /** Whether the request proves it was sent by someone holding `$secret`. */
     public function verify(Request $request, string $secret): bool;
 
-    /** Whether verify() vouches for this request's body itself (an HMAC), not only for who sent it. */
-    public function signsTheBody(Request $request): bool;
+    /** Whether verify() vouches for this request's body itself (an HMAC) under `$secret`, not only for who sent it. */
+    public function signsTheBody(Request $request, string $secret): bool;
 
     /**
      * @throws InvalidPayload when the body is not what this provider sends

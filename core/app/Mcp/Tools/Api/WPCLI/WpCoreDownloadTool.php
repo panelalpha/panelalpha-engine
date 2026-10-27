@@ -72,7 +72,7 @@ class WpCoreDownloadTool extends ApiTool
             'name' => $schema->string()->required(),
             'locale' => $schema->string()->description('WordPress language to download. Omitted: en_US. Example: pl_PL.'),
             'version' => $schema->string()->description('WordPress version, or `latest`. Omitted: the latest release. Example: 6.7.1.'),
-            'path' => $schema->string()->description('Directory to download into. Omitted: the main domain document root.'),
+            'path' => $schema->string()->description('Directory to download into, inside the project home, read as the file manager reads a path: absolute, or relative to the home. On PHP hosting the top of the home belongs to root, so a new directory must go below an existing folder the project\'s account owns, such as the domain folder (`/example.com/blog`); `/blog` or `/tmp/wp` answer 422. The answer\'s `path` is where it went, and the directory checked for an existing core. Omitted: the main domain document root.'),
         ];
     }
 }

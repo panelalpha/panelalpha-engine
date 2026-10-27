@@ -127,13 +127,15 @@ class Kernel extends ConsoleKernel
 
     /**
      * Hourly removal of ACME challenges, expired vault entries (after a grace
-     * hour, so a status check still says `expired`) and spent or expired SSO
-     * tokens, since an unredeemed app token still holds a live session cookie.
+     * hour, so a status check still says `expired`), spent or expired SSO
+     * tokens, since an unredeemed app token still holds a live session cookie,
+     * and the source secrets of WordPress imports left idle for days.
      */
     private function scheduleExpiredSecretPurges(Schedule $schedule): void
     {
         $schedule->command('acme:challenge:prune')->hourly()->withoutOverlapping(self::MUTEX_HOURLY);
         $schedule->command('vault:purge')->hourly()->withoutOverlapping(self::MUTEX_HOURLY);
+        $schedule->command('wordpress:migrate:expire-secrets')->hourly()->withoutOverlapping(self::MUTEX_HOURLY);
         $schedule->command('model:prune', [
             '--model' => [AppSsoToken::class, MysqlSsoToken::class, TokenRotation::class],
         ])->hourly()->withoutOverlapping(self::MUTEX_HOURLY);
@@ -157,10 +159,14 @@ class Kernel extends ConsoleKernel
         $schedule->command('tunnels:expire')->everyFiveMinutes()->withoutOverlapping(self::MUTEX_FIVE_MINUTES);
     }
 
-    /** Renewals are exempt from Let's Encrypt's new-certificate rate limit; off-peak, never two at once. */
+    /**
+     * Renewals are exempt from Let's Encrypt's new-certificate rate limit; off-peak, never two at once.
+     * Proxy rules follow the server's certificates hourly, since certbot changes those outside the engine.
+     */
     private function scheduleCertificateRenewal(Schedule $schedule): void
     {
         $schedule->command('ssl:project-cert:renew')->dailyAt('03:10')->withoutOverlapping(self::MUTEX_DAILY);
+        $schedule->command('proxy:rule:refresh-certificates')->hourly()->withoutOverlapping(self::MUTEX_HOURLY);
     }
 
     /**

@@ -5,9 +5,10 @@ namespace Tests\Unit\System\Project\PhpHosting\WordPress;
 use App\Models\Domain;
 use App\Models\User;
 use App\System\Project;
-use App\System\Project\PhpHosting\WordPress\WpCli;
+use App\System\Project\FileManager;
 use App\System\Project\PhpHosting\WordPress\Exception as WordPressException;
 use App\System\Project\PhpHosting\WordPress\Themes;
+use App\System\Project\PhpHosting\WordPress\WpCli;
 use Mockery;
 use PHPUnit\Framework\TestCase;
 
@@ -193,6 +194,8 @@ class ThemesTest extends TestCase
         $user = Mockery::mock(User::class)->makePartial();
         $project = Mockery::mock(Project::class);
         $project->shouldReceive('homeDirPath')->andReturn('/home/alice');
+        $project->shouldReceive('resolvePath')
+            ->andReturnUsing(fn (string $path): string => (new FileManager($project))->resolvePath($path));
         $project->shouldReceive('runWpCli')->once()->andReturn([
             'exit_code' => 1,
             'stdout' => 'out-line',
@@ -210,8 +213,8 @@ class ThemesTest extends TestCase
     }
 
     /**
-     * @param list<string> $captured
-     * @param array{exit_code: int, stdout: string, stderr: string} $result
+     * @param  list<string>  $captured
+     * @param  array{exit_code: int, stdout: string, stderr: string}  $result
      */
     private function themesWithFakeRunner(
         array &$captured,
@@ -221,6 +224,8 @@ class ThemesTest extends TestCase
         $user = Mockery::mock(User::class)->makePartial();
         $project = Mockery::mock(Project::class);
         $project->shouldReceive('homeDirPath')->andReturn('/home/alice');
+        $project->shouldReceive('resolvePath')
+            ->andReturnUsing(fn (string $path): string => (new FileManager($project))->resolvePath($path));
         $project->shouldReceive('runWpCli')
             ->once()
             ->andReturnUsing(function (array $args) use (&$captured, $result): array {

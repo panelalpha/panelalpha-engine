@@ -39,7 +39,7 @@ class HubCallerAddressTest extends HubTestCase
         $this->callFrom(self::CONNECT, $token->plainTextToken)->assertOk();
         $this->callFrom(self::CONNECT, $token->plainTextToken)->assertOk();
 
-        $this->assertSame(self::CONNECT, $connection->fresh()->caller_ip);
+        $this->assertSame([self::CONNECT], array_keys($connection->fresh()->caller_ips));
         $this->assertSame(self::CONNECT." # PanelAlpha Connect\n", $this->fail2ban->files[self::API_LIST]);
         $this->assertSame(1, $this->fail2ban->reloads, 'written once, not on every call');
         $this->assertArrayNotHasKey(self::TRUSTED_LIST, $this->fail2ban->files, 'SSH, SFTP and FTP still ban it');
@@ -53,7 +53,7 @@ class HubCallerAddressTest extends HubTestCase
         $this->callFrom(self::CONNECT, $token->plainTextToken, '/api/projects')->assertForbidden();
         $this->callFrom(self::CONNECT, 'not-a-token')->assertUnauthorized();
 
-        $this->assertNull($connection->fresh()->caller_ip);
+        $this->assertNull($connection->fresh()->caller_ips);
         $this->assertSame(0, $this->fail2ban->reloads);
     }
 
@@ -66,16 +66,75 @@ class HubCallerAddressTest extends HubTestCase
         $this->assertSame(0, $this->fail2ban->reloads);
     }
 
-    public function test_a_new_address_replaces_the_old_one(): void
+    public function test_calls_alternating_between_two_addresses_exempt_both_and_reload_once_per_new_address(): void
     {
         $token = $this->hubToken();
-        $this->connection($token);
+        $connection = $this->connection($token);
 
+        foreach (['198.51.100.20', self::CONNECT, '198.51.100.20', self::CONNECT, '198.51.100.20'] as $ip) {
+            $this->callFrom($ip, $token->plainTextToken)->assertOk();
+        }
+
+        $this->assertSame(['198.51.100.20', self::CONNECT], array_keys($connection->fresh()->caller_ips));
+        $this->assertSame(
+            "198.51.100.20 # PanelAlpha Connect\n".self::CONNECT." # PanelAlpha Connect\n",
+            $this->fail2ban->files[self::API_LIST]
+        );
+        $this->assertSame(2, $this->fail2ban->reloads);
+    }
+
+    public function test_the_addresses_are_bounded_and_the_least_recently_seen_goes_first(): void
+    {
+        $token = $this->hubToken();
+        $connection = $this->connection($token);
+        $addresses = array_map(fn (int $n): string => "198.51.100.{$n}", range(1, HubCallerAddress::MAX_ADDRESSES + 1));
+
+        foreach ($addresses as $ip) {
+            $this->travel(1)->minutes();
+            $this->callFrom($ip, $token->plainTextToken)->assertOk();
+        }
+
+        $kept = array_keys($connection->fresh()->caller_ips);
+        $this->assertCount(HubCallerAddress::MAX_ADDRESSES, $kept);
+        $this->assertNotContains('198.51.100.1', $kept);
+        $this->assertStringNotContainsString('198.51.100.1 ', $this->fail2ban->files[self::API_LIST]);
+        $this->assertStringContainsString('198.51.100.9 # PanelAlpha Connect', $this->fail2ban->files[self::API_LIST]);
+    }
+
+    public function test_an_address_connect_stopped_calling_from_is_dropped(): void
+    {
+        $token = $this->hubToken();
+        $connection = $this->connection($token);
         $this->callFrom('198.51.100.20', $token->plainTextToken)->assertOk();
+
+        $this->travel(HubCallerAddress::FORGET_AFTER_DAYS * 24 - 1)->hours();
+        $this->callFrom(self::CONNECT, $token->plainTextToken)->assertOk();
+        $this->assertSame([self::CONNECT, '198.51.100.20'], array_keys($connection->fresh()->caller_ips));
+
+        $this->travel(2)->hours();
         $this->callFrom(self::CONNECT, $token->plainTextToken)->assertOk();
 
+        $this->assertSame([self::CONNECT], array_keys($connection->fresh()->caller_ips));
         $this->assertSame(self::CONNECT." # PanelAlpha Connect\n", $this->fail2ban->files[self::API_LIST]);
-        $this->assertSame(2, $this->fail2ban->reloads);
+        $this->assertSame(3, $this->fail2ban->reloads);
+    }
+
+    public function test_a_known_address_is_refreshed_hourly_without_touching_the_jail(): void
+    {
+        $token = $this->hubToken();
+        $connection = $this->connection($token);
+        $this->callFrom(self::CONNECT, $token->plainTextToken)->assertOk();
+        $first = $connection->fresh()->caller_ips[self::CONNECT];
+
+        $this->travel(30)->minutes();
+        $this->callFrom(self::CONNECT, $token->plainTextToken)->assertOk();
+        $this->assertSame($first, $connection->fresh()->caller_ips[self::CONNECT], 'not rewritten on every call');
+
+        $this->travel(HubCallerAddress::REFRESH_SECONDS)->seconds();
+        $this->callFrom(self::CONNECT, $token->plainTextToken)->assertOk();
+
+        $this->assertGreaterThan($first, $connection->fresh()->caller_ips[self::CONNECT]);
+        $this->assertSame(1, $this->fail2ban->reloads);
     }
 
     public function test_revoking_the_token_drops_the_address(): void
@@ -141,16 +200,17 @@ class HubCallerAddressTest extends HubTestCase
 
         $this->callFrom(self::CONNECT, $token->plainTextToken)->assertOk();
 
-        $this->assertSame(self::CONNECT, $connection->fresh()->caller_ip);
+        $this->assertSame([self::CONNECT], array_keys($connection->fresh()->caller_ips));
         $this->assertSame(0, $this->fail2ban->reloads);
         Log::shouldHaveReceived('warning')->withArgs(fn (string $m): bool => str_contains($m, 'the other firewall cannot exempt it'))->once();
     }
 
     public function test_sync_exempts_each_connected_address_once(): void
     {
-        $this->connection($this->hubToken([], 'hc_A'), [], 'hc_A')->forceFill(['caller_ip' => self::CONNECT])->save();
-        $this->connection($this->hubToken([], 'hc_B'), [], 'hc_B')->forceFill(['caller_ip' => self::CONNECT])->save();
-        $this->connection($this->hubToken([], 'hc_C'), [], 'hc_C')->forceFill(['caller_ip' => '2001:db8::7'])->save();
+        $seen = now()->toIso8601ZuluString();
+        $this->connection($this->hubToken([], 'hc_A'), [], 'hc_A')->forceFill(['caller_ips' => [self::CONNECT => $seen]])->save();
+        $this->connection($this->hubToken([], 'hc_B'), [], 'hc_B')->forceFill(['caller_ips' => [self::CONNECT => $seen]])->save();
+        $this->connection($this->hubToken([], 'hc_C'), [], 'hc_C')->forceFill(['caller_ips' => ['2001:db8::7' => $seen]])->save();
         $this->connection($this->hubToken([], 'hc_D'), [], 'hc_D');
 
         HubCallerAddress::sync();

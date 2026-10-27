@@ -9,6 +9,9 @@ use App\Lib\Deploy\Source\GitTransport;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Lib\Deploy\Source\SshSubmoduleRewrite;
 use App\Lib\Git\DeployKey;
+use App\Lib\Git\HostGitVersion;
+use App\Lib\Http\OutboundUrl;
+use App\Lib\Net\EgressRefusedException;
 use App\Models\User as ModelsUser;
 use App\System as EngineSystem;
 use App\System\Project\Git\Exception as GitException;
@@ -71,6 +74,12 @@ abstract class WorkTree
      * @param  list<string>  $cmd
      */
     abstract protected function runQuietCommand(array $cmd, int $timeout): string;
+
+    /**
+     * Whether git runs on the host, whose network reaches internal addresses. A DinD
+     * account's own network refuses them, so only a host command is pinned.
+     */
+    abstract protected function runsOnHost(): bool;
 
     public function absolutePath(): string
     {
@@ -377,7 +386,7 @@ abstract class WorkTree
      * @param  callable(): T  $read
      * @return T
      */
-    private function quietly(callable $read): mixed
+    protected function quietly(callable $read): mixed
     {
         $wasQuiet = $this->quiet;
         $this->quiet = true;
@@ -872,13 +881,16 @@ abstract class WorkTree
     /**
      * The connected branch only: on a shallow checkout a bare `fetch origin` pulls every branch's whole history.
      * The refspec names origin/<branch> because the deploy's clone is single-branch: without it a
-     * fetch of any other branch only reaches FETCH_HEAD.
+     * fetch of any other branch only reaches FETCH_HEAD. Submodules are not fetched with it: a
+     * submodule commit that cannot be fetched would fail the change itself, before the deploy
+     * fetches the submodules on its own terms ({@see initSubmodules()}).
      */
     private function fetchBranch(string $branch, ?string $token): void
     {
+        $fetch = ['-c', 'fetch.recurseSubmodules=false', 'fetch', 'origin'];
         $this->gitOverNetwork($branch === ''
-            ? ['fetch', 'origin']
-            : ['fetch', 'origin', '+refs/heads/'.$branch.':refs/remotes/origin/'.$branch], $token);
+            ? $fetch
+            : [...$fetch, '+refs/heads/'.$branch.':refs/remotes/origin/'.$branch], $token);
     }
 
     private function refuseWhileConnecting(): void
@@ -1743,8 +1755,81 @@ abstract class WorkTree
     private function outboundCommand(array $gitCommand): array
     {
         return self::talksToRemote($gitCommand)
-            ? GitUrl::withoutRedirects($gitCommand)
+            ? $this->pinnedOnHost(GitUrl::withoutRedirects($gitCommand))
             : $gitCommand;
+    }
+
+    /**
+     * A host command pinned to the addresses the egress guard accepts, resolved here, so a
+     * DNS answer that changed since the connect check cannot steer it to an internal address.
+     *
+     * @param  list<string>  $command
+     * @return list<string>
+     *
+     * @throws GitException 422 when a host no longer resolves, resolves to an address core must not
+     *                      contact, or needs a pin the host's git is too old to honour
+     */
+    private function pinnedOnHost(array $command): array
+    {
+        if (! $this->runsOnHost()) {
+            return $command;
+        }
+
+        try {
+            foreach ($this->addressedUrls($command) as $url) {
+                $command = GitUrl::withResolve($command, $this->hostPin($url));
+            }
+        } catch (\InvalidArgumentException $e) {
+            throw new GitException(GitUrl::sanitize($e->getMessage()), 422, EgressRefusedException::CODE);
+        }
+
+        return $command;
+    }
+
+    /**
+     * A name the operator allows in EGRESS_ALLOW_HOSTS may be fetched unpinned
+     * by a host git too old to honour the pin; any other is refused there.
+     *
+     * @throws \InvalidArgumentException when the host is refused, or the host's git cannot pin it
+     */
+    private function hostPin(string $url): ?string
+    {
+        $pin = OutboundUrl::pin($url, GitRepoInput::SCHEMES);
+        $host = (string) parse_url($url, PHP_URL_HOST);
+        if ($pin !== null && ! OutboundUrl::allowsHost($host)) {
+            HostGitVersion::of($this->system())->assertPins($host);
+        }
+
+        return $pin;
+    }
+
+    /**
+     * The http(s) URLs a command connects to: the one in its argv, else what git
+     * itself resolves origin to, insteadOf rewrites applied.
+     *
+     * @param  list<string>  $command
+     * @return list<string>
+     */
+    private function addressedUrls(array $command): array
+    {
+        $argument = self::urlArgument($command);
+        $urls = $argument !== null ? [$argument] : $this->originUrls(self::subcommandOf($command) === 'push');
+
+        return array_values(array_filter($urls, static fn (string $url): bool => in_array(
+            strtolower((string) parse_url($url, PHP_URL_SCHEME)), GitRepoInput::SCHEMES, true,
+        )));
+    }
+
+    /** @return list<string> */
+    private function originUrls(bool $push): array
+    {
+        try {
+            $out = $this->git(['remote', 'get-url', '--all', ...($push ? ['--push'] : []), 'origin']);
+        } catch (GitException) {
+            return [];
+        }
+
+        return array_values(array_filter(array_map('trim', explode("\n", $out)), static fn (string $url): bool => $url !== ''));
     }
 
     /**
@@ -1755,10 +1840,9 @@ abstract class WorkTree
      */
     private function remoteUrl(array $gitCommand): ?string
     {
-        foreach ($gitCommand as $arg) {
-            if (str_starts_with($arg, 'http://') || str_starts_with($arg, 'https://')) {
-                return $arg;
-            }
+        $argument = self::urlArgument($gitCommand);
+        if ($argument !== null) {
+            return $argument;
         }
 
         try {
@@ -1772,7 +1856,25 @@ abstract class WorkTree
     }
 
     /** @param list<string> $gitCommand */
+    private static function urlArgument(array $gitCommand): ?string
+    {
+        foreach ($gitCommand as $arg) {
+            if (str_starts_with($arg, 'http://') || str_starts_with($arg, 'https://')) {
+                return $arg;
+            }
+        }
+
+        return null;
+    }
+
+    /** @param list<string> $gitCommand */
     private static function talksToRemote(array $gitCommand): bool
+    {
+        return in_array(self::subcommandOf($gitCommand), self::REMOTE_SUBCOMMANDS, true);
+    }
+
+    /** @param list<string> $gitCommand */
+    private static function subcommandOf(array $gitCommand): ?string
     {
         $args = array_slice($gitCommand, 1);
         for ($i = 0; $i < count($args); $i++) {
@@ -1785,10 +1887,10 @@ abstract class WorkTree
                 continue;
             }
 
-            return in_array($args[$i], self::REMOTE_SUBCOMMANDS, true);
+            return $args[$i];
         }
 
-        return false;
+        return null;
     }
 
     /**

@@ -7,7 +7,8 @@ use App\System\Project\PhpHosting\WordPress\Migration\SourceWordpressClient;
 
 /**
  * remote-sync payload: destination_url is the target name with the source's
- * subdirectory and ?token=, and ip pins that name to the engine.
+ * subdirectory and ?token=, and ip pins that name to the engine, whose
+ * certificate for it does not exist yet (insecure_tls). force is off unless asked.
  */
 class WordpressMigrationPayloadTest extends WordpressMigrationTestCase
 {
@@ -35,6 +36,13 @@ class WordpressMigrationPayloadTest extends WordpressMigrationTestCase
         $this->assertStringContainsString('wp-content/cache', $payload['exclusions']);
         $this->assertTrue($payload['backup_database']);
         $this->assertTrue($payload['backup_files']);
+        $this->assertFalse($payload['force']);
+    }
+
+    public function test_remote_sync_payload_takes_over_the_sources_lock_only_when_asked(): void
+    {
+        $payload = SourceWordpressClient::remoteSyncPayload('https://example.com', 'tok', force: true);
+
         $this->assertTrue($payload['force']);
     }
 
@@ -59,6 +67,7 @@ class WordpressMigrationPayloadTest extends WordpressMigrationTestCase
 
         $this->assertSame('https://example.com/blog?token=' . $token, $payload['destination_url']);
         $this->assertSame(self::ENGINE_IPV4, $payload['ip']);
+        $this->assertTrue($payload['insecure_tls']);
     }
 
     public function test_remote_sync_payload_without_an_ip_sends_none(): void
@@ -66,5 +75,6 @@ class WordpressMigrationPayloadTest extends WordpressMigrationTestCase
         $payload = SourceWordpressClient::remoteSyncPayload('https://example.com', 'tok');
 
         $this->assertArrayNotHasKey('ip', $payload);
+        $this->assertArrayNotHasKey('insecure_tls', $payload);
     }
 }

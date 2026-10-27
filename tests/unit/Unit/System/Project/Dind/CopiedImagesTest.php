@@ -13,6 +13,7 @@ use App\System\Project\Dind\DeployStrategy;
 use App\System\Project\Dind\Inner\ImageSeeding;
 use App\System\Project\Dind\InnerDocker;
 use App\System\Project\Dind\RegistryLogin;
+use App\System\Project\Dind\ShellOperations;
 use App\System\Project\Dind\Strategy\RailpackStrategy;
 use Tests\TestCase;
 use Tests\Unit\System\Project\LocalHostSystem;
@@ -111,14 +112,40 @@ class CopiedImagesTest extends TestCase
         );
     }
 
-    public function test_a_railpack_image_already_in_the_account_is_not_built_again(): void
+    public function test_a_railpack_image_an_earlier_push_left_in_the_account_is_built_again_from_the_pushed_tree(): void
     {
-        $this->writeRunFile(DeployCompose::railpack('panelalpha-live-app:latest', 3000));
-        $this->present = ['panelalpha-live-app:latest'];
+        $this->writeRunFile(DeployCompose::railpack('panelalpha-stg-app:latest', 3000));
+        $this->present = ['panelalpha-stg-app:latest'];
 
         $this->images($this->user(Strategies::RAILPACK, null, null))->provide($this->path());
 
-        $this->assertSame(['compose ' . $this->path()], $this->calls);
+        $this->assertSame(
+            [
+                'railpack ' . $this->root . '/project 1002:1002 panelalpha-stg-app:latest',
+                'compose ' . $this->path(),
+            ],
+            $this->calls
+        );
+    }
+
+    public function test_the_railpack_image_a_push_target_already_has_is_held_before_it_is_built_again(): void
+    {
+        $this->writeRunFile(DeployCompose::railpack('panelalpha-stg-app:latest', 3000));
+        $this->present = ['panelalpha-stg-app:latest'];
+
+        $held = $this->images($this->user(Strategies::RAILPACK, null, null))->holdRailpackImage($this->path());
+
+        $this->assertSame('panelalpha-stg-app:pre-push', $held?->holdingTag());
+    }
+
+    public function test_nothing_is_held_for_a_tag_the_account_lacks_or_an_image_it_does_not_build(): void
+    {
+        $this->writeRunFile(DeployCompose::railpack('panelalpha-stg-app:latest', 3000));
+
+        $this->assertNull($this->images($this->user(Strategies::RAILPACK, null, null))->holdRailpackImage($this->path()));
+
+        $this->present = ['panelalpha-stg-app:latest'];
+        $this->assertNull($this->images($this->user(Strategies::PHP, 'php', null))->holdRailpackImage($this->path()));
     }
 
     public function test_a_railpack_build_that_fails_stops_the_copy_before_any_registry_is_asked(): void
@@ -151,6 +178,7 @@ class CopiedImagesTest extends TestCase
         $dind->method('registryLogin')->willReturn(new RegistryLogin($dind));
         $dind->method('innerDocker')->willReturn($this->innerDocker());
         $dind->method('strategy')->willReturn($this->strategy());
+        $dind->method('shell')->willReturnCallback(fn (): ShellOperations => new ShellOperations($dind));
 
         return new CopiedImages($dind);
     }

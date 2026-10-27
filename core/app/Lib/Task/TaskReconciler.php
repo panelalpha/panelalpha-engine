@@ -37,12 +37,18 @@ final class TaskReconciler
 {
     public const ORPHAN_MESSAGE = DeployLogger::INTERRUPTED_MESSAGE;
 
+    public const RETIRED_ORPHANED = 'orphaned';
+
+    public const RETIRED_CANCELLED = 'cancelled';
+
     /**
      * `$olderThanSeconds` spares a task that started moments ago: it may be between
-     * `markRunning()` and its job being pushed.
+     * `markRunning()` and its job being pushed. The ids it retired come back
+     * under `cancelled` when the task's deploy log says the deploy was cancelled,
+     * and under `orphaned` otherwise.
      *
      * @param  null|callable(Task): ?bool  $isPending  overrides the queue check
-     * @return list<int> the ids it retired
+     * @return array{orphaned: list<int>, cancelled: list<int>}
      */
     public static function reconcile(
         bool $dryRun = false,
@@ -55,10 +61,11 @@ final class TaskReconciler
             $query->where('started_at', '<', now()->subSeconds($olderThanSeconds));
         }
 
-        $retired = [];
+        $retired = [self::RETIRED_ORPHANED => [], self::RETIRED_CANCELLED => []];
         foreach ($query->get() as $task) {
-            if (self::retire($task, $dryRun, $isPending)) {
-                $retired[] = (int) $task->id;
+            $kind = self::retire($task, $dryRun, $isPending);
+            if ($kind !== null) {
+                $retired[$kind][] = (int) $task->id;
             }
         }
 
@@ -70,20 +77,22 @@ final class TaskReconciler
     }
 
     /**
-     * Whether the task is to be retired; outside a dry run it is, along with a dead worker's queue row.
+     * How the task is to be retired, or null to leave it; outside a dry run it is, along with
+     * a dead worker's queue row.
      *
      * @param  null|callable(Task): ?bool  $isPending
      */
-    private static function retire(Task $task, bool $dryRun, ?callable $isPending): bool
+    private static function retire(Task $task, bool $dryRun, ?callable $isPending): ?string
     {
         $latest = self::deployLogOf($task);
         $decision = self::decide($task, $latest, $isPending);
 
         if ($decision === null) {
-            return false;
+            return null;
         }
+        $kind = self::logWasCancelled($latest) ? self::RETIRED_CANCELLED : self::RETIRED_ORPHANED;
         if ($dryRun) {
-            return true;
+            return $kind;
         }
 
         self::apply($task, $decision, $latest);
@@ -91,7 +100,7 @@ final class TaskReconciler
             self::dropReservedJob($task);
         }
 
-        return true;
+        return $kind;
     }
 
     /**
@@ -144,7 +153,8 @@ final class TaskReconciler
 
     /**
      * The status this task should have, or null to leave it running. A deploy log's
-     * terminal status is the work's own verdict and is adopted whatever the queue says.
+     * terminal status is the work's own verdict and is adopted whatever the queue says;
+     * a cancelled log cancels the task, as the job would once it stopped.
      * Otherwise a dead worker's task is cancelled, and so is one whose job left the queue
      * with nothing finishing it; a pending job, or a queue that cannot tell (null), is left alone.
      *
@@ -156,6 +166,7 @@ final class TaskReconciler
         if ($latest !== null && ($latest['status'] ?? null) !== DeployLogger::STATUS_RUNNING) {
             return match ($latest['status']) {
                 DeployLogger::STATUS_SUCCESS, DeployLogger::STATUS_PARTIAL => Task::STATUS_COMPLETED,
+                DeployLogger::STATUS_CANCELLED => Task::STATUS_CANCELLED,
                 default => Task::STATUS_FAILED,
             };
         }
@@ -199,7 +210,28 @@ final class TaskReconciler
             return;
         }
 
+        if (self::logWasCancelled($latest)) {
+            self::cancelAsTheLogWas($task);
+
+            return;
+        }
+
         self::retireWithoutVerdict($task);
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $latest
+     */
+    private static function logWasCancelled(?array $latest): bool
+    {
+        return ($latest['status'] ?? null) === DeployLogger::STATUS_CANCELLED;
+    }
+
+    private static function cancelAsTheLogWas(Task $task): void
+    {
+        $task->markCancelled();
+        Log::warning('Task '.$task->id.' for '.$task->username
+            .' was reconciled to cancelled from its deploy log.');
     }
 
     /**

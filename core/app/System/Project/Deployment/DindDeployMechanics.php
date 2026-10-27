@@ -25,6 +25,8 @@ use RuntimeException;
  */
 final class DindDeployMechanics implements DeployMechanics
 {
+    private bool $removedTheAccount = false;
+
     public function __construct(
         private Dind $dind,
     ) {}
@@ -54,6 +56,10 @@ final class DindDeployMechanics implements DeployMechanics
         return $this->user()->getTemplate() === 'dind' && ! $this->user()->hasGitProject();
     }
 
+    /**
+     * The account build cannot be stopped part way: a cancel asked for meanwhile is honoured
+     * once it ends, and the new account is removed as after a failed build.
+     */
     public function prepareHostingEnvironment(): void
     {
         $project = $this->aggregate();
@@ -72,6 +78,12 @@ final class DindDeployMechanics implements DeployMechanics
         $project->fixPermissions();
         $project->configureQuota();
         $project->waitForAllRunning();
+        $this->deleteHostingIfItFails($project, fn () => $this->logger()?->throwIfCancelled());
+    }
+
+    public function removedTheAccount(): bool
+    {
+        return $this->removedTheAccount;
     }
 
     public function ingestApplicationSource(): void
@@ -239,7 +251,7 @@ final class DindDeployMechanics implements DeployMechanics
 
     /**
      * A pull, a branch change or a push moves the checkout, and with it the submodule commits it records.
-     * Once the project has deployed, a submodule that cannot be fetched keeps the checkout it had.
+     * Once the project has deployed, one the deployed commit already declared keeps its checkout when it cannot be fetched.
      */
     private function fetchSubmodulesOfCheckout(): void
     {
@@ -376,6 +388,7 @@ final class DindDeployMechanics implements DeployMechanics
             $step();
         } catch (\Exception $e) {
             $this->deleteHostingQuietly($project);
+            $this->removedTheAccount = true;
             throw $e;
         }
     }

@@ -68,14 +68,7 @@ class Set extends Command
         $this->line('');
         $this->info("Set project setting '{$key}' for '{$user->username}'");
         if ($key === Settings::KEY_CLOUDFLARE_API_TOKEN) {
-            $this->line('Token will be validated against the Cloudflare API and stored encrypted.');
-            $this->line('Required permissions: Account Cloudflare Tunnel Edit, Zone DNS Edit, Zone Cache Purge, Zone Settings Edit.');
-            // The permissions are not enough on their own, and neither omission
-            // explains itself: a token without the account resource answers
-            // "no accessible accounts", and one without the zone answers "not
-            // under any Cloudflare zone accessible with this API token".
-            $this->line('Account Resources must include the account, and Zone Resources the zones the project uses.');
-            $this->line('Create one at https://dash.cloudflare.com/profile/api-tokens (Create Custom Token).');
+            $this->explainCloudflareToken();
         }
 
         if (! $this->option('force') && ! $this->confirm('Continue?')) {
@@ -103,5 +96,19 @@ class Set extends Command
         $this->line('');
 
         return 0;
+    }
+
+    /**
+     * The permissions are not enough on their own, and neither omission
+     * explains itself: a token without the account resource answers "no
+     * accessible accounts", and one without the zone answers "not under any
+     * Cloudflare zone accessible with this API token".
+     */
+    private function explainCloudflareToken(): void
+    {
+        $this->line('Token will be validated against the Cloudflare API and stored encrypted.');
+        $this->line('Required permissions: Account Cloudflare Tunnel Edit and Zone DNS Edit; for the CDN also Zone Cache Purge and Zone Settings Edit.');
+        $this->line('Account Resources must include the account, and Zone Resources the zones the project uses.');
+        $this->line('Create one at https://dash.cloudflare.com/profile/api-tokens (Create Custom Token).');
     }
 }

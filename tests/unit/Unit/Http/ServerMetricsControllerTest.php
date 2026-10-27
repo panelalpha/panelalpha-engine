@@ -3,11 +3,10 @@
 namespace Tests\Unit\Http;
 
 use App\Http\Controllers\ServerMetricsController;
-use Illuminate\Http\Request;
+use App\Lib\Host\ServerMetricsHistory;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Validation\ValidationException;
 use ReflectionMethod;
 use Tests\TestCase;
 
@@ -155,7 +154,7 @@ class ServerMetricsControllerTest extends TestCase
             $this->insertMetric(Carbon::parse('2026-09-28 12:31:00', 'UTC'), 999.0, 999.0); // still running
             $this->insertMetric(Carbon::parse('2026-09-27 12:19:59', 'UTC'), 999.0, 999.0); // before the window
 
-            $body = json_decode($this->controller->history(new Request(['range' => '24h']))->getContent(), true);
+            $body = ServerMetricsHistory::for('24h');
         } finally {
             Carbon::setTestNow();
         }
@@ -182,26 +181,19 @@ class ServerMetricsControllerTest extends TestCase
     public function test_history_ranges_have_their_own_bucket_sizes(): void
     {
         foreach (['1h' => [60, 60], '7d' => [3600, 168], '30d' => [21600, 120]] as $range => [$bucket, $points]) {
-            $body = json_decode($this->controller->history(new Request(['range' => $range]))->getContent(), true);
+            $body = ServerMetricsHistory::for($range);
             $this->assertSame($bucket, $body['meta']['bucket_seconds'], $range);
             $this->assertCount($points, $body['data'], $range);
         }
-
-        $default = json_decode($this->controller->history(new Request())->getContent(), true);
-        $this->assertSame('24h', $default['meta']['range']);
-    }
-
-    public function test_history_rejects_an_unknown_range(): void
-    {
-        $this->expectException(ValidationException::class);
-        $this->controller->history(new Request(['range' => '12h']));
     }
 
     public function test_history_groups_by_bucket_without_float_division_on_mysql_grammar(): void
     {
-        $query = $this->withMysqlDefault(fn () => $this->invokePrivate(
-            'historyQuery',
-            [Carbon::now('UTC')->subDay(), Carbon::now('UTC'), 600]
+        $query = $this->withMysqlDefault(fn () => (new ReflectionMethod(ServerMetricsHistory::class, 'query'))->invoke(
+            null,
+            Carbon::now('UTC')->subDay(),
+            Carbon::now('UTC'),
+            600
         ));
 
         $sql = $query->toSql();

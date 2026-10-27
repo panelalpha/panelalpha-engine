@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Fetch an http or https URL into the project
 
-    Download an http(s) URL into the project as the account. The engine fetches it from core, so it refuses a URL whose host resolves to an internal address (loopback, link-local, a private or reserved range, the Docker and tenant networks) or that redirects to one. The refusal is 422 with `problems[{field: url, code: host_refused}]`; RFC1918/ULA are allowed only with `EGRESS_ALLOW_PRIVATE=true`.
+    Download an http(s) URL into the project as the account. The engine fetches it from core, so it refuses a URL whose host resolves to an internal address (loopback, link-local, a private or reserved range, the Docker and tenant networks) or that redirects to one. The refusal is 422 with `problems[{field: url, code: host_refused}]`; RFC1918/ULA are allowed only with `EGRESS_ALLOW_PRIVATE=true`. A download that fails is 422 with `problems[{field: url, code: download_failed, reason}]`, reason one of resolve, connect, timeout, http (with http_status), tls, interrupted or other; a file the account cannot write is `problems[{field: path, code: write_failed}]`.
     MARKDOWN)]
 #[IsDestructive]
 class FileFetchTool extends ApiTool

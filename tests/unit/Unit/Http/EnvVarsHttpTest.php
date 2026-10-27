@@ -218,15 +218,7 @@ class EnvVarsHttpTest extends TestCase
     public function test_a_vault_reference_is_stored_as_its_secret(): void
     {
         $user = $this->dindUser();
-        /** @var SecretVaultEntry $entry */
-        $entry = SecretVaultEntry::create([
-            'ref_hash' => SecretVaultEntry::hashRef('ref' . bin2hex(random_bytes(6))),
-            'type' => SecretVaultEntry::TYPE_ENV_VARS,
-            'scope' => SecretVaultEntry::SCOPE_PROJECT,
-            'project' => $user->username,
-        ]);
-        $entry->setSecret('s3cret');
-        $entry->save();
+        $entry = $this->vaultEntry(SecretVaultEntry::SCOPE_PROJECT, $user->username);
 
         $response = $this->putJson("/api/projects/{$user->username}/env-vars", [
             'env_vars' => ['TOKEN' => $entry->reference()],
@@ -235,5 +227,64 @@ class EnvVarsHttpTest extends TestCase
 
         $this->assertSame(200, $response->getStatusCode(), (string) $response->getContent());
         $this->assertSame(['KEEP' => 'yes', 'TOKEN' => 's3cret'], $user->refresh()->getEnvVars());
+    }
+
+    /**
+     * The vault never hands its secret to the caller: a value read from a project
+     * or a global entry stays masked when the listing reveals the others.
+     */
+    public function test_a_value_set_from_a_vault_reference_stays_masked_under_reveal(): void
+    {
+        foreach ([SecretVaultEntry::SCOPE_PROJECT, SecretVaultEntry::SCOPE_GLOBAL] as $scope) {
+            $user = $this->dindUser();
+            $entry = $this->vaultEntry($scope, $scope === SecretVaultEntry::SCOPE_PROJECT ? $user->username : null);
+            $this->putJson("/api/projects/{$user->username}/env-vars", [
+                'env_vars' => ['TOKEN' => $entry->reference()],
+                'apply' => 'none',
+            ])->assertStatus(200);
+
+            $response = $this->getJson("/api/projects/{$user->username}/env-vars?reveal=1");
+
+            $this->assertSame(200, $response->getStatusCode(), (string) $response->getContent());
+            $this->assertSame([
+                ['key' => 'KEEP', 'value' => 'yes', 'masked' => false],
+                ['key' => 'TOKEN', 'value' => null, 'masked' => true],
+            ], $response->json('data.vars'), $scope);
+            $this->assertStringNotContainsString('s3cret', (string) $response->getContent());
+        }
+    }
+
+    public function test_a_key_set_again_to_a_value_of_the_callers_own_is_revealed(): void
+    {
+        $user = $this->dindUser();
+        $entry = $this->vaultEntry(SecretVaultEntry::SCOPE_PROJECT, $user->username);
+        $this->putJson("/api/projects/{$user->username}/env-vars", [
+            'env_vars' => ['TOKEN' => $entry->reference()],
+            'apply' => 'none',
+        ])->assertStatus(200);
+
+        $this->putJson("/api/projects/{$user->username}/env-vars", [
+            'env_vars' => ['TOKEN' => 'mine'],
+            'apply' => 'none',
+        ])->assertStatus(200);
+
+        $this->getJson("/api/projects/{$user->username}/env-vars?reveal=1")
+            ->assertJsonPath('data.vars.1.value', 'mine')
+            ->assertJsonPath('data.vars.1.masked', false);
+    }
+
+    private function vaultEntry(string $scope, ?string $project): SecretVaultEntry
+    {
+        /** @var SecretVaultEntry $entry */
+        $entry = SecretVaultEntry::create([
+            'ref_hash' => SecretVaultEntry::hashRef('ref' . bin2hex(random_bytes(6))),
+            'type' => SecretVaultEntry::TYPE_ENV_VARS,
+            'scope' => $scope,
+            'project' => $project,
+        ]);
+        $entry->setSecret('s3cret');
+        $entry->save();
+
+        return $entry;
     }
 }

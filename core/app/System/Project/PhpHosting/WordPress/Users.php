@@ -5,8 +5,6 @@ namespace App\System\Project\PhpHosting\WordPress;
 /**
  * Named user operations for a PHP hosting WordPress install.
  *
- * HTTP, artisan, and MCP tools are thin adapters around this. Path resolution
- * and the WP-CLI runner come from WpCli; a non-zero exit becomes Exception.
  * Password set accepts a caller-provided value; there is no named generate-
  * and-print password operation.
  */
@@ -51,7 +49,7 @@ final class Users
     public function create(array $fields): array
     {
         $login = $fields['login'];
-        $args = ['user', 'create', $login, $fields['email'], '--user_pass='.$fields['password']];
+        $args = ['user', 'create', WpCli::positional($login), WpCli::positional($fields['email']), '--user_pass='.$fields['password']];
         if (! empty($fields['role'])) {
             $args[] = '--role='.$fields['role'];
         }
@@ -82,10 +80,13 @@ final class Users
      *     password?: string|null,
      * } $fields
      * @return array{user: string, message: string}
+     *
+     * The password goes in the same `user update`, so the profile and the
+     * password change together or not at all.
      */
     public function update(string $user, array $fields): array
     {
-        $args = ['user', 'update', $user];
+        $args = ['user', 'update', WpCli::positional($user)];
         if (array_key_exists('email', $fields) && is_string($fields['email']) && $fields['email'] !== '') {
             $args[] = '--user_email='.$fields['email'];
         }
@@ -101,7 +102,6 @@ final class Users
         if (array_key_exists('last_name', $fields) && is_string($fields['last_name']) && $fields['last_name'] !== '') {
             $args[] = '--last_name='.$fields['last_name'];
         }
-        // In the same `user update`, so the profile and the password change together or not at all.
         if (array_key_exists('password', $fields) && is_string($fields['password']) && $fields['password'] !== '') {
             $args[] = '--user_pass='.$fields['password'];
         }
@@ -115,7 +115,7 @@ final class Users
      */
     public function delete(string $user, ?string $reassign = null): array
     {
-        $args = ['user', 'delete', $user, '--yes'];
+        $args = ['user', 'delete', WpCli::positional($user), '--yes'];
         if (is_string($reassign) && $reassign !== '') {
             $args[] = '--reassign='.$reassign;
         }
@@ -132,7 +132,7 @@ final class Users
     public function setPassword(string $user, string $password): array
     {
         $result = $this->cli->runOrFail(
-            ['user', 'update', $user, '--user_pass='.$password],
+            ['user', 'update', WpCli::positional($user), '--user_pass='.$password],
         );
 
         return $this->mutationBody($user, $result['stdout']);

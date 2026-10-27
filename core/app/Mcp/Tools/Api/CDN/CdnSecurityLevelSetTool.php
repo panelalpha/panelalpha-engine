@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Set a domain's Cloudflare security level
 
-    Sets the Cloudflare zone `security_level`, including `under_attack` for the "I am under attack" mode. Works for classic and container-based projects: it is pure Cloudflare API work. Refuses with 422 when the project has no Cloudflare API token or the token lacks Zone Settings Edit, and with 404 when Cloudflare has no zone for the domain.
+    Sets the Cloudflare zone `security_level`, including `under_attack` for the "I am under attack" mode. The level applies to the whole zone, so it is refused with 409 `cloudflare_zone_shared` while another project on this engine has a hostname in the same zone; the project's own live or staging copy does not count. Needs the project's Cloudflare API token, which only a container-based project can hold. Refuses with 422 when the project has no Cloudflare API token or the token lacks Zone Settings Edit, and with 404 when Cloudflare has no zone for the domain. A token Cloudflare does not accept at all (invalid, expired or revoked) is refused with 422 `cloudflare_token_invalid`. A token that may not list the zone is refused with 422 naming Zone Read. When Cloudflare refuses the request for another reason, 422 `cloudflare_request_refused` carries its message; while it rate-limits the token, 503 `cloudflare_rate_limited`; when it fails or cannot be reached, 502 `cloudflare_unavailable`. Retry the last two later.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -71,7 +71,7 @@ class CdnSecurityLevelSetTool extends ApiTool
     {
         return [
             'name' => $schema->string()->required(),
-            'domain' => $schema->string()->required(),
+            'domain' => $schema->string()->description('One of the project\'s domains or aliases. The zone and DNS record are those of this exact name.')->required(),
             'level' => $schema->string()->description('One of: off, essentially_off, low, medium, high, under_attack. Example: under_attack.')->required(),
         ];
     }

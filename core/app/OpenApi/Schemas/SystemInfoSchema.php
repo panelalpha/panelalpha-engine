@@ -62,7 +62,7 @@ use OpenApi\Attributes as OA;
         new OA\Property(
             property: 'unreadable_secrets',
             description: 'Projects holding stored secrets the current APP_KEY cannot decrypt; each project\'s own '
-                .'`unreadable_secrets` names them.',
+                .'`unreadable_secrets` names them. A token scoped to projects sees only the projects in its scope.',
             properties: [
                 new OA\Property(property: 'count', type: 'integer', example: 0),
                 new OA\Property(property: 'projects', type: 'array', items: new OA\Items(type: 'string')),
@@ -79,7 +79,7 @@ use OpenApi\Attributes as OA;
             property: 'orphan_account_containers',
             description: 'Host containers started for a project account that no project owns any more, left by a '
                 .'create or delete that did not finish. The engine never removes them; each names the command '
-                .'that does.',
+                .'that does. A token scoped to projects sees only those of the projects in its scope.',
             properties: [
                 new OA\Property(property: 'count', type: 'integer', example: 0),
                 new OA\Property(
@@ -103,7 +103,7 @@ use OpenApi\Attributes as OA;
         ),
         new OA\Property(
             property: 'host',
-            description: 'The machine the engine runs on. Each field is null when it cannot be read.',
+            description: 'The machine the engine runs on. Each field is null when it cannot be read. Null for a token scoped to projects.',
             properties: [
                 new OA\Property(property: 'hostname', type: 'string', example: 'srv1', nullable: true),
                 new OA\Property(property: 'os', type: 'string', example: 'Ubuntu 24.04.3 LTS', nullable: true),
@@ -115,6 +115,7 @@ use OpenApi\Attributes as OA;
                 new OA\Property(property: 'ipv4', type: 'string', example: '203.0.113.7', nullable: true, description: 'The main public IPv4 (same as default_ipv4)'),
             ],
             type: 'object',
+            nullable: true,
         ),
     ],
     type: 'object',

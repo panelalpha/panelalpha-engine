@@ -59,7 +59,7 @@ Staging is a linked copy of a live site, for trying changes where visitors canno
 Make a staging copy of this project.
 ```
 
-You get a second project with its own hostname. Break it freely. When you are happy:
+You get a second project with its own hostname: `staging.` in front of the live one's, or, for a project on a free `panelalpha.online` name, a new name of its own there. Break it freely. When you are happy:
 
 ```text
 Push the staging copy live.
@@ -75,7 +75,9 @@ A project can have **one** staging copy, and a staging copy cannot itself have o
 Make a staging copy of this project without its databases.
 ```
 
-**A push replaces the other side's files and databases.** Both are pushed unless you say otherwise. Before it replaces a database, the engine saves a copy of the one it is about to overwrite, and puts it back if the push fails. The other project keeps its own database users and passwords, so the site there keeps connecting.
+A WordPress site on a traditional PHP project is the exception: its copy is pointed at the databases copied for it, so a staging copy or a clone of it without its databases is refused before anything is copied.
+
+**A push replaces the other side's files and databases.** Both are pushed unless you say otherwise. Before it replaces a database, the engine saves a copy of the one it is about to overwrite, and puts it back if the push fails. On a container project the pushed app has to come up: one that keeps restarting, is stopped, or still listens on no port after the time a deploy gives it to start, fails the push, and the other side is put back as it was. Once the other side is running the pushed site, the push is done: a leftover copy the engine then fails to remove is reported as a warning on the push, and nothing is put back. The other project keeps its own database users and passwords, so the site there keeps connecting. A database the other side does not have yet is created there, and its users get the permissions the pushed project's users had on it. If the push fails, that database is dropped again and those permissions are taken back.
 
 ```text
 Push the staging copy live, files only.
@@ -91,6 +93,10 @@ push only those tables.
 
 Container projects have no table push. On a container project, `databases` means the stored data volumes: they are pushed only together with the files, so a push with both left on carries both.
 
+Only the volumes your compose file names are copied. An anonymous volume, such as the data directory a database image declares for itself when the compose file gives that service no volume, or an entry that gives only the path inside the container (`- /var/lib/mysql`), is left out of a staging copy, a clone and a push, and the result's warnings name each one that held data. Name the volume in your compose file to have it copied.
+
+**A container project's environment variables go with its files.** A staging copy starts with the live project's variables, and a push that includes the files gives the other side the pushed project's variables, so a later rebuild keeps them. A value that names the project's own address or the database the engine made for it is changed to the copy's, both in the stored variables and in the copied `.env` files, so the copy answers as itself from the start.
+
 ## Cloning
 
 A clone is an independent copy, with no ongoing link and no later push.
@@ -99,7 +105,7 @@ A clone is an independent copy, with no ongoing link and no later push.
 Clone this project.
 ```
 
-It copies the files, the stored data and the plan limits. On a traditional PHP project it also copies the MySQL databases, with new users, new passwords and the same permissions, and the clone serves the copied site. To leave the databases out, say so: "Clone this project without its databases."
+It copies the files, the stored data, the environment variables and the plan limits. On a traditional PHP project it also copies the MySQL databases, with new users, new passwords and the same permissions, and the clone serves the copied site. To leave the databases out, say so: "Clone this project without its databases." A WordPress site on a traditional PHP project cannot be cloned without them, as for [staging](#staging).
 
 **It does not copy** subdomains, or FTP or SFTP accounts. On a container project it does not copy MySQL databases either: the application's own stored data is copied (unless you ask to leave the databases out, which leaves that data out too), but a database you created for it is not, so create one on the clone. Use clone as a starting template, not as a backup.
 
@@ -119,6 +125,8 @@ A suspended project is also skipped by the engine's automatic health checks, bec
 A project can be marked protected. While it is, an assistant or any other tool using a token cannot delete the project, suspend it, stop or restart it, rebuild or redeploy it, change its environment variables, or push into it. The engine refuses with `project_protected` and nothing runs.
 
 Only you can turn protection on or off, on the server, so a tool cannot lift it. The assistant can read the setting but not change it.
+
+A staging copy, a clone or a push from a protected project is still allowed. A container project is paused while its data is copied and then started again exactly as it was: environment variables saved without applying them stay unapplied.
 
 ```bash
 pae project:settings:set protected on --project=<name>
@@ -151,7 +159,7 @@ Only the keys you name are changed; the rest are left alone. To see what is set,
 
 If your repository commits its own `.env` file, the engine leaves that file exactly as committed. Your environment variables go into a separate file, `.env.panelalpha`, which each service that loads `.env` loads after it, so your values win. Code that reads `.env` straight from disk does not see them, and neither does a build step that reads `.env` while the site is being built, as Vite and Next.js do. Only the running application's environment has them. If you need a value at build time, either stop committing `.env`, or make the build read the value from the environment rather than from the file.
 
-The `.env`, `.env.default` and `.env.panelalpha` files the engine creates in the project folder are readable only by the project's own user. A `.env` it creates in a subfolder, from that folder's `.env.example` or empty because a compose `env_file:` names it, is readable by every user on the account, secrets included, because a Docker image may copy it in and read it as a user other than root. No other project can read either kind. A file that already exists keeps its permissions and is never made more readable, so a subfolder `.env` you made private stays private.
+The `.env`, `.env.default` and `.env.panelalpha` files the engine creates in the project folder are readable only by the project's own user, and so is a project-folder `.env` that an app config's `files` put there. Compose reads them as that user and hands the values to the application. A `.env` it creates in a subfolder, from that folder's `.env.example` or empty because a compose `env_file:` names it, is readable by every user on the account, secrets included, because a Docker image may copy it in and read it as a user other than root. No other project can read either kind, and a symlink to another project's file does not make the engine read it for a project either: detection, inspection and the deploy all refuse a file that a link puts in another project's home. A file that already exists keeps its permissions and is never made more readable, so a subfolder `.env` you made private stays private.
 
 If your application refuses to start because a setting is missing or still has a placeholder value, the engine recognises that specifically and says so: [Reading errors](../02-getting-started/reading-errors.md).
 
@@ -173,7 +181,7 @@ Show this project's limits. Raise its memory limit to 2048 MB and rebuild.
 
 **The rebuild is not optional.** The new limit is written into the running application when it is deployed, so changing the number without rebuilding changes nothing you can see.
 
-**Every project has a memory limit.** No project may have more than the server's RAM less what is kept for the engine, 512 MB by default; on a 4 GB server that is about 3.3 GB. A project created without a limit gets exactly that maximum. How much memory is free at the moment does not matter: a project is not refused because others are using memory, so projects together can be given more than the server has. Ask for the server's current metrics to see the numbers; they are under `memory_budget`.
+**Every project has a memory limit.** It is at least 6 MB, the least Docker starts a container with, and at least 256 MB for a container project, whose account runs its own Docker: measured, that Docker was stopped for lack of memory at 112 MB and only just ran a small static site at 128 MB. No project may have more than the server's RAM less what is kept for the engine, 512 MB by default; on a 4 GB server that is about 3.3 GB. A project created without a limit gets exactly that maximum. How much memory is free at the moment does not matter: a project is not refused because others are using memory, so projects together can be given more than the server has. Ask for the server's current metrics to see the numbers; they are under `memory_budget`.
 
 To keep more for the engine, or for other things the server runs, set `DEPLOY_ENGINE_MEMORY` (in MB) in the engine's environment; that lowers the maximum for every project. `DEPLOY_PROJECT_MEMORY_DEFAULT` gives projects created without a limit a smaller default.
 
@@ -209,8 +217,17 @@ One staging copy per project. Push to the existing pair, or delete the existing 
 **"Project is busy".**
 A staging copy or a push is already running on this project. Wait for it to finish and try again.
 
+**"A copy of it needs its own databases" (`wordpress_copy_needs_databases`).**
+You asked for a staging copy or a clone of a WordPress site on a traditional PHP project without its databases. Without them the copy would use the live site's database. Ask again with the databases.
+
 **I cloned a project and the site cannot reach its database.**
 A clone of a container project does not copy MySQL databases. Create the database and user on the clone, then update its environment variables to point at the new one: [Databases](databases.md). A traditional PHP project is copied with its databases, unless you asked for them to be left out. The copy has new database names and passwords, so a site that stores the old ones in its own files needs them updated.
+
+**A push fails with "the copied home holds a symbolic link at its top level".**
+The top level of a project's home holds only what the engine puts there, and the engine never puts a link there. A link at that level of the pushed project is refused before anything on the other side is replaced. Remove the named link from `/home/<project>/` on the server, then push again.
+
+**My staging copy or clone starts with an empty database.**
+The database kept its data in an anonymous volume, which a copy leaves out; the copy's warnings name it. Give that service a named volume in your compose file (for example `db_data:/var/lib/mysql`). The redeploy starts it on that new, empty volume, so export the data first and import it afterwards. Then make the copy again.
 
 **A push or a delete is refused with "project_protected".**
 The project is protected. Turn it off on the server, then ask again: [Protecting](#protecting).
@@ -309,7 +326,7 @@ Mode: modify. Tools: `env_var_list`, `env_var_set`, `task_get`. Check: the list 
 Clone tshop as tshopcopy. List what was not copied.
 ```
 
-Mode: modify. Tools: `project_clone`, `project_get`, `domain_list`, `mysql_database_list`, `ftp_account_list`. Check: the copy has the same limits and files, a staging-style domain, and no subdomains or FTP or SFTP accounts. A traditional PHP project's databases are copied under the new prefix with new users; a container project's are not.
+Mode: modify. Tools: `project_clone`, `project_get`, `domain_list`, `mysql_database_list`, `ftp_account_list`. Check: the copy has the same limits and files, a staging-style domain (a new `panelalpha.online` name when the source has one), and no subdomains or FTP or SFTP accounts. A traditional PHP project's databases are copied under the new prefix with new users; a container project's are not.
 
 **Staging and back**
 

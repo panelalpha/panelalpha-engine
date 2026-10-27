@@ -12,14 +12,6 @@ use Illuminate\Support\Facades\Route;
 class RouteServiceProvider extends ServiceProvider
 {
     /**
-     * Request attribute the `api` rate limiter skips on. An in-process dispatch
-     * from the CLI runs as root, and a throttle hit would write root-owned files
-     * into storage/framework/cache that the www-data web and queue processes
-     * cannot open (HTTP 500, Permission denied).
-     */
-    public const INTERNAL_DISPATCH_ATTRIBUTE = 'internal_dispatch';
-
-    /**
      * The path to the "home" route for your application.
      *
      * Typically, users are redirected here after authentication.
@@ -78,10 +70,6 @@ class RouteServiceProvider extends ServiceProvider
         // A floor against a runaway or leaked token, not a quota; the numbers
         // and why they are that high are in config/auth.php.
         RateLimiter::for('api', function (Request $request) {
-            if ($request->attributes->get(self::INTERNAL_DISPATCH_ATTRIBUTE) === true) {
-                return Limit::none();
-            }
-
             $token = $request->user()?->currentAccessToken();
             $tokenId = is_object($token) ? ($token->id ?? null) : null;
 

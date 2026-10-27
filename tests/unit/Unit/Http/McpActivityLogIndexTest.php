@@ -3,6 +3,7 @@
 namespace Tests\Unit\Http;
 
 use App\Http\Controllers\McpActivityLogController;
+use App\Http\Requests\McpActivityLogIndexRequest;
 use App\Models\Admin;
 use App\Models\McpActivityLog;
 use App\Models\PersonalAccessToken;
@@ -204,9 +205,8 @@ class McpActivityLogIndexTest extends TestCase
      */
     private function list(array $query): array
     {
-        $request = Request::create('/api/mcp-activity-logs', 'GET', $query);
-        $this->app->instance('request', $request);
+        $this->app->instance('request', Request::create('/api/mcp-activity-logs', 'GET', $query));
 
-        return (new McpActivityLogController)->index($request)->getData(true);
+        return (new McpActivityLogController)->index($this->app->make(McpActivityLogIndexRequest::class))->getData(true);
     }
 }

@@ -336,6 +336,21 @@ class Webserver implements WebserverInterface
         return $process->getExitCode() === 0;
     }
 
+    /**
+     * A proxy rule on 443 names a certificate on the server, which certbot or an administrator
+     * renews, replaces or removes outside the engine: follow it. True when nginx was reloaded.
+     */
+    public function refreshProxyRuleCertificates(): bool
+    {
+        $driver = $this->driver();
+        if (! $driver instanceof NginxProxy || ! $driver->refreshProxyRuleCertificates()) {
+            return false;
+        }
+        $driver->reloadRouting();
+
+        return true;
+    }
+
     public function rebuildDomains(): void
     {
         $driver = $this->driver();

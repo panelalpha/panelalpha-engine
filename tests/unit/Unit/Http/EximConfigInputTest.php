@@ -188,6 +188,38 @@ class EximConfigInputTest extends TestCase
         $this->assertStringNotContainsString('resolved-secret', (string) json_encode($data));
     }
 
+    /** @return array<string, array{string}> */
+    public static function usernameFields(): array
+    {
+        return [
+            'mailchannels_username' => ['mailchannels_username'],
+            'amazon_ses_smtp_username' => ['amazon_ses_smtp_username'],
+            'smtp_username' => ['smtp_username'],
+        ];
+    }
+
+    /**
+     * A username is not a secret, so it is not taken from the vault: a read of
+     * the settings returns it as stored, and a reference would suggest otherwise.
+     */
+    #[DataProvider('usernameFields')]
+    public function test_a_username_sent_as_a_vault_reference_is_refused(string $field): void
+    {
+        $this->putJson('/api/system/exim-config', [$field => 'vault:mt2eAbCdEfGhIjKlMnOpQrSt'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors([$field])
+            ->assertJsonPath("errors.{$field}.0", fn (string $message): bool => str_contains($message, 'not a secret'));
+
+        $this->postJson('/api/system/exim-send-test-email', [
+            'email' => 'ops@example.com',
+            'config' => [$field => 'vault:mt2eAbCdEfGhIjKlMnOpQrSt'],
+        ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(["config.{$field}"]);
+
+        $this->assertSame(json_decode(self::SAVED, true), array_filter(Setting::getEximConfig()));
+    }
+
     /** Exim::sendTestEmail() refuses what FILTER_VALIDATE_EMAIL refuses; that used to be its exception, a 500. */
     public function test_a_recipient_the_mail_code_would_refuse_is_a_422(): void
     {

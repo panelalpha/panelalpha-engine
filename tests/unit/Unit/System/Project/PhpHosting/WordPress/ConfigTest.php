@@ -5,9 +5,10 @@ namespace Tests\Unit\System\Project\PhpHosting\WordPress;
 use App\Models\Domain;
 use App\Models\User;
 use App\System\Project;
-use App\System\Project\PhpHosting\WordPress\WpCli;
+use App\System\Project\FileManager;
 use App\System\Project\PhpHosting\WordPress\Config;
 use App\System\Project\PhpHosting\WordPress\Exception as WordPressException;
+use App\System\Project\PhpHosting\WordPress\WpCli;
 use Mockery;
 use PHPUnit\Framework\TestCase;
 
@@ -228,6 +229,26 @@ class ConfigTest extends TestCase
         );
     }
 
+    public function test_a_value_starting_with_a_dash_goes_as_the_raw_php_that_writes_the_same_line(): void
+    {
+        $sequence = [];
+        $config = $this->configWithFakeRunner($sequence);
+
+        $quoted = $config->set('WP_MEMORY_LIMIT', '--exec=x');
+        $raw = $config->set('WP_POST_REVISIONS', '-1', raw: true);
+
+        $this->assertSame(
+            ['config', 'set', 'WP_MEMORY_LIMIT', "'--exec=x'", '--type=constant', '--raw', '--path=/home/alice/example.test/public_html'],
+            $sequence[0]
+        );
+        $this->assertSame(
+            ['config', 'set', 'WP_POST_REVISIONS', '(-1)', '--type=constant', '--raw', '--path=/home/alice/example.test/public_html'],
+            $sequence[1]
+        );
+        $this->assertSame('--exec=x', $quoted['value']);
+        $this->assertSame('-1', $raw['value']);
+    }
+
     public function test_delete_passes_argv_and_returns_body(): void
     {
         $sequence = [];
@@ -267,8 +288,8 @@ class ConfigTest extends TestCase
     }
 
     /**
-     * @param list<list<string>> $sequence
-     * @param list<array{exit_code: int, stdout: string, stderr: string}> $results
+     * @param  list<list<string>>  $sequence
+     * @param  list<array{exit_code: int, stdout: string, stderr: string}>  $results
      */
     private function configWithFakeRunner(
         array &$sequence,
@@ -279,6 +300,8 @@ class ConfigTest extends TestCase
         $user->username = 'alice';
         $project = Mockery::mock(Project::class);
         $project->shouldReceive('homeDirPath')->andReturn('/home/alice');
+        $project->shouldReceive('resolvePath')
+            ->andReturnUsing(fn (string $path): string => (new FileManager($project))->resolvePath($path));
         $call = 0;
         $project->shouldReceive('runWpCli')
             ->andReturnUsing(function (array $args) use (&$sequence, &$call, $results): array {

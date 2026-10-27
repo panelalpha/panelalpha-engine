@@ -139,7 +139,7 @@ class DeployArchiveCommand extends Command
         }
 
         $resolved = RequestVault::resolve('env_vars', $envVars, $user->username);
-        $user->setDetails(['env_vars' => EnvVarOverrides::applyIncoming($resolved, $user->getEnvVars())]);
+        $user->setEnvVars(EnvVarOverrides::applyIncoming($resolved, $user->getEnvVars()), $envVars);
         $user->save();
     }
 

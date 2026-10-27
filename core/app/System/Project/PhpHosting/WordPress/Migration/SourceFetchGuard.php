@@ -6,22 +6,27 @@ use RuntimeException;
 
 /**
  * Rejects source URLs the migration worker must not fetch: non-HTTP schemes,
- * loopback, and link-local (including cloud metadata). Private LAN addresses
- * stay allowed so a lab WordPress on RFC1918 can still be migrated.
+ * and a host with any address {@see SourceIpPolicy} refuses (loopback,
+ * link-local, private, reserved, Docker networks, the Engine's own). Every
+ * refused address gets the same answer, so a refusal says nothing about what
+ * listens there.
  */
 final class SourceFetchGuard
 {
+    public const REFUSED = 'Source WordPress URL must lead to a public address: loopback, link-local, private, '
+        ."reserved, Docker network and this Engine's own addresses are refused.";
+
     /**
      * Check the URL and every address its host resolves to.
      *
      * @return list<string> the checked addresses, the first of which a request should connect to
      */
-    public static function assertAllowed(string $url, ?callable $resolve = null): array
+    public static function assertAllowed(string $url, SourceIpPolicy $policy, ?callable $resolve = null): array
     {
         $host = self::assertShape($url);
         $addresses = self::addressesFor($host, $resolve);
         foreach ($addresses as $ip) {
-            self::assertAddressAllowed($ip);
+            self::assertAddressAllowed($ip, $policy, $host);
         }
 
         return $addresses;
@@ -52,12 +57,10 @@ final class SourceFetchGuard
         return trim($host, '[]');
     }
 
-    public static function assertAddressAllowed(string $ip): void
+    public static function assertAddressAllowed(string $ip, SourceIpPolicy $policy, ?string $host = null): void
     {
-        if (self::isBlockedAddress($ip)) {
-            throw new RuntimeException(
-                'Source WordPress URL must not target a loopback or link-local address'
-            );
+        if ($policy->refuses($ip, $host)) {
+            throw new RuntimeException(self::REFUSED);
         }
     }
 
@@ -165,47 +168,5 @@ final class SourceFetchGuard
         }
 
         return $addresses;
-    }
-
-    private static function isBlockedAddress(string $ip): bool
-    {
-        $packed = @inet_pton($ip);
-        if ($packed === false) {
-            return true;
-        }
-
-        if (strlen($packed) === 16) {
-            $v4Mapped = str_repeat("\0", 10)."\xff\xff";
-            if (substr($packed, 0, 12) === $v4Mapped) {
-                $mapped = inet_ntop(substr($packed, 12));
-
-                return is_string($mapped) && self::isBlockedAddress($mapped);
-            }
-            if ($packed === inet_pton('::1') || $packed === str_repeat("\0", 16)) {
-                return true;
-            }
-            $first = ord($packed[0]);
-            $second = ord($packed[1]);
-
-            return $first === 0xFE && ($second & 0xC0) === 0x80;
-        }
-
-        if (strlen($packed) !== 4) {
-            return true;
-        }
-
-        $long = unpack('N', $packed);
-        if (! is_array($long)) {
-            return true;
-        }
-        $value = $long[1];
-        if (($value & 0xFF000000) === 0x7F000000) {
-            return true;
-        }
-        if (($value & 0xFFFF0000) === 0xA9FE0000) {
-            return true;
-        }
-
-        return ($value & 0xFF000000) === 0;
     }
 }

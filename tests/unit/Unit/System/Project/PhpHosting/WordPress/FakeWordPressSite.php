@@ -23,6 +23,12 @@ final class FakeWordPressSite
     /** What a SELECT through `wp db query` answers: the network's siteurl row. */
     public string $networkSiteUrl = '';
 
+    /** What a SELECT of the main site's {prefix}blogs row answers: its host. */
+    public string $mainSiteHost = '';
+
+    /** Network tables holding real rows: when set, `wp db query` runs on them instead. */
+    public ?\PDO $networkTables = null;
+
     /** What `core is-installed` answers: an installed site, one that is not, or no WordPress at all. */
     public bool|\RuntimeException $installed = true;
 
@@ -81,7 +87,7 @@ final class FakeWordPressSite
             ['config', 'set'] => $this->write($this->constants, $words[2], $words[3]),
             ['config', 'list'] => $this->ok((string) json_encode($this->constantRows())),
             ['option', 'get'] => $this->read($this->options, $words[2]),
-            ['option', 'update'] => $this->write($this->options, $words[2], $words[3]),
+            ['option', 'update'] => $this->write($this->options, $words[2], $this->optionValue($args, $words[3])),
             ['search-replace', $words[1] ?? ''] => $this->searchReplace($words[1], $words[2], $args),
             ['db', 'query'] => $this->query($words[2]),
             ['cache', 'flush'] => $this->ok('Success: The cache was flushed.'),
@@ -109,7 +115,30 @@ final class FakeWordPressSite
     {
         $this->queries[] = $sql;
 
-        return $this->ok(str_starts_with($sql, 'SELECT') && $this->networkSiteUrl !== '' ? $this->networkSiteUrl . "\n" : '');
+        return $this->ok($this->networkTables === null ? $this->selected($sql) : $this->runOnNetworkTables($sql));
+    }
+
+    private function selected(string $sql): string
+    {
+        $value = match (true) {
+            !str_starts_with($sql, 'SELECT') => '',
+            str_contains($sql, 'blogs`') => $this->mainSiteHost,
+            default => $this->networkSiteUrl,
+        };
+
+        return $value === '' ? '' : $value . "\n";
+    }
+
+    private function runOnNetworkTables(string $sql): string
+    {
+        if (!str_starts_with($sql, 'SELECT')) {
+            $this->networkTables->exec($sql);
+
+            return '';
+        }
+        $rows = $this->networkTables->query($sql)->fetchAll(\PDO::FETCH_NUM);
+
+        return implode('', array_map(static fn (array $row): string => implode("\t", $row) . "\n", $rows));
     }
 
     /**
@@ -151,6 +180,16 @@ final class FakeWordPressSite
         }
 
         return $this->ok('Success');
+    }
+
+    /**
+     * What `option update` stores: the value as sent, or decoded under --format=json.
+     *
+     * @param list<string> $args
+     */
+    private function optionValue(array $args, string $value): string
+    {
+        return in_array('--format=json', $args, true) ? (string) json_decode($value) : $value;
     }
 
     /** @param list<string> $args */

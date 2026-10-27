@@ -4,8 +4,8 @@ namespace App\Http\Resources;
 
 use App\Lib\Deploy\Credentials\AppCredentials;
 use App\Lib\Host\ProjectDisk;
-use App\Lib\Host\ProjectStats;
 use App\Lib\Limits\ResourceLimit;
+use App\Lib\Project\ProjectListFacts;
 use App\Lib\Project\ProjectOverview;
 use App\Lib\Usage\ProjectBandwidth;
 use App\Models\User;
@@ -18,7 +18,11 @@ use Illuminate\Http\Resources\Json\JsonResource;
 class UserResource extends JsonResource
 {
     /**
-     * Transform the resource into an array.
+     * Transform the resource into an array. `unreadable_secrets` names the
+     * secrets stored for this project that cannot be decoded ([] when all
+     * decode); `app` is the same facts normalized: what it is, whether it is
+     * up, where it answers; `usage` is the CPU and memory of the project's DinD
+     * container, sampled every minute.
      *
      * @param  Request  $request
      * @return array|Arrayable|\JsonSerializable
@@ -29,6 +33,7 @@ class UserResource extends JsonResource
         assert(is_object($user) && get_class($user) === User::class);
 
         $user->loadMissing(['liveUser', 'stagingUser']);
+        $facts = $this->listFacts($request, $user);
 
         $resource = [
             'id' => $user->id,
@@ -48,13 +53,10 @@ class UserResource extends JsonResource
             'app_credentials' => $this->appCredentials($user),
             'disk' => $this->disk($user),
             'bandwidth' => $this->bandwidth($user, $request),
-            // Secrets stored for this project that cannot be decoded; [] when all decode.
             'unreadable_secrets' => $user->unreadableSecrets(),
             'warning' => $user->unreadableSecretsWarning(),
-            // The same facts normalized: what it is, whether it is up, where it answers.
-            'app' => ProjectOverview::for($user),
-            // CPU and memory of the project's DinD container, sampled every minute.
-            'usage' => ProjectStats::latest($user->username),
+            'app' => ProjectOverview::for($user, $facts),
+            'usage' => $facts->usageOf($user),
             'config' => $user->getConfig(),
             'email_verified_at' => $user->email_verified_at,
             'created_at' => $user->created_at,
@@ -109,6 +111,14 @@ class UserResource extends JsonResource
         ];
     }
 
+    /** Loaded once for a whole list by UserCollection; a project shown alone loads its own. */
+    private function listFacts(Request $request, User $user): ProjectListFacts
+    {
+        $facts = $request->attributes->get(ProjectListFacts::class);
+
+        return $facts instanceof ProjectListFacts && $facts->covers($user) ? $facts : ProjectListFacts::load([$user]);
+    }
+
     /**
      * Read once per request, so a project list costs one query however long it is.
      *
@@ -153,6 +163,7 @@ class UserResource extends JsonResource
         unset(
             $details['git_token'],
             $details['env_vars'],
+            $details[User::DETAIL_VAULT_ENV_KEYS],
             $details['app_credentials'],
             $details['site_git'],
             $details['git_deploy_key'],

@@ -5,9 +5,10 @@ namespace Tests\Unit\System\Project\PhpHosting\WordPress;
 use App\Models\Domain;
 use App\Models\User;
 use App\System\Project;
-use App\System\Project\PhpHosting\WordPress\WpCli;
+use App\System\Project\FileManager;
 use App\System\Project\PhpHosting\WordPress\Exception as WordPressException;
 use App\System\Project\PhpHosting\WordPress\Plugins;
+use App\System\Project\PhpHosting\WordPress\WpCli;
 use Mockery;
 use PHPUnit\Framework\TestCase;
 
@@ -199,6 +200,8 @@ class PluginsTest extends TestCase
         $user->username = 'alice';
         $project = Mockery::mock(Project::class);
         $project->shouldReceive('homeDirPath')->andReturn('/home/alice');
+        $project->shouldReceive('resolvePath')
+            ->andReturnUsing(fn (string $path): string => (new FileManager($project))->resolvePath($path));
         $project->shouldReceive('runWpCli')->once()->andReturn([
             'exit_code' => 1,
             'stdout' => 'out-line',
@@ -216,8 +219,8 @@ class PluginsTest extends TestCase
     }
 
     /**
-     * @param list<string> $captured
-     * @param array{exit_code: int, stdout: string, stderr: string} $result
+     * @param  list<string>  $captured
+     * @param  array{exit_code: int, stdout: string, stderr: string}  $result
      */
     private function pluginsWithFakeRunner(
         array &$captured,
@@ -228,6 +231,8 @@ class PluginsTest extends TestCase
         $user->username = 'alice';
         $project = Mockery::mock(Project::class);
         $project->shouldReceive('homeDirPath')->andReturn('/home/alice');
+        $project->shouldReceive('resolvePath')
+            ->andReturnUsing(fn (string $path): string => (new FileManager($project))->resolvePath($path));
         $project->shouldReceive('runWpCli')
             ->once()
             ->andReturnUsing(function (array $args) use (&$captured, $result): array {

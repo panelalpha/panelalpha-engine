@@ -311,7 +311,7 @@ class PrepareFromSource
     {
         $path = $this->dind->homeDirPath().'/'.AppConfig::PRE_CHECK_SCRIPT;
         $chown = $this->dind->userModel()->getChownString();
-        $this->dind->system()->filesystem()->filePutContents($path, $script, $chown, '644');
+        $this->dind->system()->filesystem()->writeFileReplacingPath($path, $script, $chown, '644');
 
         return $path;
     }

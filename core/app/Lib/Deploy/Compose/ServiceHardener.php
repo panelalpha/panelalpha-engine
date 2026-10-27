@@ -261,9 +261,7 @@ final class ServiceHardener
         }
 
         foreach ((array) ($service['volumes'] ?? []) as $volume) {
-            $target = is_array($volume)
-                ? (string) ($volume['target'] ?? '')
-                : (string) (self::splitFields(EnvVarDefault::resolve(trim((string) $volume)))[1] ?? '');
+            $target = is_array($volume) ? (string) ($volume['target'] ?? '') : self::shortMountTarget((string) $volume);
             if (rtrim(trim($target), '/') === self::LEGACY_POSTGRES_DATA) {
                 $service['environment'] = ServiceEnvironment::withDefaults(
                     $service['environment'] ?? [],
@@ -275,6 +273,14 @@ final class ServiceHardener
         }
 
         return $service;
+    }
+
+    /** The container side of a short mount: its second field, or the only one of an anonymous volume. */
+    private static function shortMountTarget(string $volume): string
+    {
+        $fields = self::splitFields(EnvVarDefault::resolve(trim($volume)));
+
+        return $fields[1] ?? $fields[0];
     }
 
     /**
@@ -1188,8 +1194,9 @@ final class ServiceHardener
     }
 
     /**
-     * Only the source side is a host path; a named volume has no leading
-     * slash and is not one of these.
+     * Compose interpolates the whole entry and only then splits it, so each
+     * value it can take is split as Compose splits it ({@see ShortVolume}):
+     * `- /var/lib/mysql` is an anonymous volume, `- /{/../etc:/x}` binds /etc.
      *
      * @param  array<string, list<?string>|string>  $env
      */
@@ -1198,9 +1205,29 @@ final class ServiceHardener
         if (preg_match(self::DOCKER_SOCKET_PATTERN, $volume) === 1) {
             return true;
         }
-        $source = self::splitFields(trim($volume))[0] ?? '';
+        $entries = ComposeInterpolation::candidates(trim($volume), $env);
+        if ($entries === null) {
+            return true;
+        }
+        foreach ($entries as $entry) {
+            if (self::isForbiddenShortEntry($entry, $accountUser, $projectDir)) {
+                return true;
+            }
+        }
 
-        return self::isForbiddenSourceIn($source, $env, $accountUser, $projectDir);
+        return false;
+    }
+
+    /** Only the source side is a host path; a named volume has no leading slash and is not one of these. */
+    private static function isForbiddenShortEntry(string $entry, ?string $accountUser, ?string $projectDir): bool
+    {
+        if (preg_match(self::DOCKER_SOCKET_PATTERN, $entry) === 1) {
+            return true;
+        }
+        $source = ShortVolume::source($entry);
+
+        return $source !== null
+            && (ShortVolume::isWindowsPath($source) || self::isForbiddenSource($source, $accountUser, $projectDir));
     }
 
     /**

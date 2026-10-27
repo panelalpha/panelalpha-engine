@@ -22,6 +22,9 @@ final class GenerationState
     /** The app ran nothing when a redeploy started: a cancel must leave it stopped again. */
     public const STOPPED = 'stopped';
 
+    /** The app's containers could not be read when a redeploy started: it may be live, so a cancel removes nothing. */
+    public const UNREAD = 'unread';
+
     private const FILE = 'generation.json';
 
     /** How long the sweep leaves an entry to the live process that wrote it. */

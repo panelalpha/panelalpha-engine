@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Wp;
 
+use App\Rules\WpCliArgument;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
@@ -17,7 +18,7 @@ class WpPluginSearchRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'term' => 'required|string',
+            'term' => ['required', 'string', new WpCliArgument],
             'path' => 'sometimes|nullable|string',
             'service' => ['sometimes', 'nullable', 'string', 'regex:/^[A-Za-z0-9][A-Za-z0-9_.-]*$/'],
             'skip_plugins' => 'sometimes|boolean',

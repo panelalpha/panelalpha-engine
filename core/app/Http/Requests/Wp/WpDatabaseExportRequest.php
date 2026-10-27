@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Wp;
 
+use App\Rules\WpCliArgument;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
@@ -17,7 +18,7 @@ class WpDatabaseExportRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'file' => 'required|string',
+            'file' => ['required', 'string', new WpCliArgument],
             'tables' => 'sometimes|array',
             'tables.*' => ['string', 'regex:/^[A-Za-z0-9_$-]+$/'],
             'path' => 'sometimes|nullable|string',

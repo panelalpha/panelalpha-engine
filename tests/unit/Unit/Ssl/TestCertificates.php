@@ -34,12 +34,40 @@ final class TestCertificates
     }
 
     /**
+     * An authority signed by $root, as a CA puts between its root and a leaf.
+     *
+     * @param  array{cert: string, key: \OpenSSLAsymmetricKey}  $root
+     * @return array{cert: string, key: \OpenSSLAsymmetricKey}
+     */
+    public static function intermediate(array $root, string $name = 'Throwaway Test Intermediate'): array
+    {
+        $key = self::key();
+        $csr = openssl_csr_new(['commonName' => $name, 'organizationName' => $name], $key, ['digest_alg' => 'sha256']);
+        $cert = openssl_csr_sign($csr, $root['cert'], $root['key'], 30, ['digest_alg' => 'sha256', 'x509_extensions' => 'v3_ca'], random_int(1, PHP_INT_MAX));
+        openssl_x509_export($cert, $pem);
+
+        return ['cert' => $pem, 'key' => $key];
+    }
+
+    /**
      * @param  list<string>  $names
      * @param  array{cert: string, key: \OpenSSLAsymmetricKey}  $authority
      */
     public static function signedBy(array $names, array $authority): string
     {
         return self::sign($names, self::key(), $authority['cert'], $authority['key'], 30);
+    }
+
+    /**
+     * @param  list<string>  $names
+     * @param  array{cert: string, key: \OpenSSLAsymmetricKey}  $authority
+     * @return array{cert: string, key: string}
+     */
+    public static function signedPairBy(array $names, array $authority, int $days = 30): array
+    {
+        $key = self::key();
+
+        return ['cert' => self::sign($names, $key, $authority['cert'], $authority['key'], $days), 'key' => self::export($key)];
     }
 
     /**

@@ -35,6 +35,8 @@ final class SourceUrl
      * Relative directory under the document root for the WordPress install.
      * Empty string means the document root itself. Trailing wp-login.php or
      * index.php is stripped (same behaviour as the panel ImportController).
+     * The admin URL is what users paste (…/wp-admin); the install lives one
+     * level above it.
      */
     public static function installSubdirectory(string $sourceUrl): string
     {
@@ -49,8 +51,6 @@ final class SourceUrl
             $path = $slash === false ? '' : substr($path, 0, $slash);
         }
 
-        // The admin URL is what users paste (…/wp-admin); the install lives
-        // one level above it.
         if ($path === '/wp-admin' || str_ends_with($path, '/wp-admin')) {
             $path = substr($path, 0, -strlen('/wp-admin'));
         }

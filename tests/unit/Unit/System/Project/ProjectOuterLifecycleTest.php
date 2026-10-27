@@ -9,6 +9,7 @@ use App\System\Project;
 use App\System\Services\Webserver;
 use LogicException;
 use Symfony\Component\Process\Process;
+use Tests\Support\StagedRename;
 use Tests\TestCase;
 
 class ProjectOuterLifecycleTest extends TestCase
@@ -341,6 +342,9 @@ class ProjectOuterLifecycleTest extends TestCase
                 if (str_contains($line, 'rm -rf')) {
                     $this->simulateRmRf($line);
                 }
+                if (preg_match('/^sudo mv -T (\S+) (\S+)$/', $line, $m) === 1 && file_exists($m[1])) {
+                    rename($m[1], $m[2]);
+                }
 
                 return '';
             }
@@ -370,8 +374,17 @@ class ProjectOuterLifecycleTest extends TestCase
                 if (str_contains($line, 'rm -rf')) {
                     $this->simulateRmRf($line);
                 }
+                if (($moved = StagedRename::of($cmd)) !== null && file_exists($moved[0])) {
+                    rename($moved[0], $moved[1]);
+                }
                 // The account's own container is on the host, under its Compose label.
                 $output = str_starts_with($line, 'sudo docker ps -a --filter name=^/alice$') ? "alice\n" : '';
+                if (is_array($cmd) && array_slice($cmd, 0, 4) === ['sudo', 'stat', '-c', '%d']) {
+                    $output = str_repeat("1\n", count($cmd) - 4);
+                }
+                if (is_array($cmd) && array_slice($cmd, 0, 4) === ['sudo', 'realpath', '-e', '--']) {
+                    $output = implode("\n", array_slice($cmd, 4))."\n";
+                }
 
                 return new class ($output) extends Process {
                     public function __construct(private string $output)
@@ -526,7 +539,7 @@ class ProjectOuterLifecycleTest extends TestCase
 
             private function simulateMkdir(string $line): void
             {
-                if (!preg_match('/mkdir(?: -p)? (.+)$/', $line, $m)) {
+                if (!preg_match('/mkdir(?: -p)?(?: -m \d+)? (.+)$/', $line, $m)) {
                     return;
                 }
                 $path = trim(explode(' &&', $m[1])[0]);

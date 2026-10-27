@@ -53,7 +53,7 @@ Come back here when you want to look up the sentence yourself. If none of the ro
 | The repository could not be read | The engine could not access the repository. | Check the URL. If it is private, supply an access token. |
 | The repository was not found | Wrong address, or private with no access. | Paste the URL into a browser in a private window - if you cannot see it, neither can the engine. |
 | The repository's submodules could not be fetched | A submodule is private, no longer exists at the commit the repository records, or sits on a host the git token does not cover. The reason from git follows the sentence. | Give the engine a token that can read the submodule; a private submodule addressed over SSH on another host needs a deploy key. If the application does not need it, name the ones it does under `git: {submodules: [...]}` in `.panelalpha/panelalpha.yaml`: [Connecting with Git](../05-capabilities/connecting-with-git.md#troubleshooting). |
-| The repository is refused with `host_refused` | The address leads to the engine's own machine or a private network, which the engine does not fetch from. | The server operator can allow a private git server: [Connecting with Git](../05-capabilities/connecting-with-git.md#troubleshooting). |
+| The repository is refused with `host_refused` | The address leads to the engine's own machine or a private network, which the engine does not fetch from, or the host name does not resolve, so the engine cannot check it. | The server operator can allow a private git server: [Connecting with Git](../05-capabilities/connecting-with-git.md#troubleshooting). |
 
 ## The application refuses to start
 

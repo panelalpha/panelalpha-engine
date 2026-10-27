@@ -49,6 +49,15 @@ final class DeploymentWorkflow
         return $this->disposition ??= new RetainProject;
     }
 
+    /**
+     * A project whose account a failed prepare removed again has nothing left to keep:
+     * it is rolled back as on the template path, so no project is left without an account.
+     */
+    private function dispositionFor(DeployMechanics $mechanics): FailureDisposition
+    {
+        return $mechanics->removedTheAccount() ? new RollBackProject : $this->disposition();
+    }
+
     public function run(?DeployLogger $deployLogger = null, ?callable $beforeRetention = null): void
     {
         $mechanics = $this->resolveMechanics();
@@ -61,6 +70,7 @@ final class DeploymentWorkflow
 
             if ($mechanics->isDindWithoutGit()) {
                 $mechanics->publishDomain($domain);
+                $deployLogger?->throwIfCancelled();
                 $deployLogger?->info(DeployLogger::WAITING_FOR_FILES);
 
                 return;
@@ -74,7 +84,7 @@ final class DeploymentWorkflow
             $stage = $deployLogger?->currentStage();
             $deployLogger?->finish(DeployLogger::STATUS_CANCELLED, $e->getMessage());
             $this->invokeBeforeRetention($beforeRetention, $deployLogger, $user->username, cancelled: true);
-            $this->disposition()->afterCancelled($user, $e->getMessage());
+            $this->dispositionFor($mechanics)->afterCancelled($user, $e->getMessage());
             throw ProblemException::deploy('deploy_cancelled', $e->getMessage(), $stage);
         } catch (\Exception $e) {
             $deployLogger?->recordFailureOutput($e->getMessage());
@@ -87,7 +97,7 @@ final class DeploymentWorkflow
             $stage = $deployLogger?->currentStage();
             $deployLogger?->finish(DeployLogger::STATUS_FAILED, $message);
             $this->invokeBeforeRetention($beforeRetention, $deployLogger, $user->username);
-            $this->disposition()->afterFailure($user, $message);
+            $this->dispositionFor($mechanics)->afterFailure($user, $message);
             throw ProblemException::deploy($match['rule'] ?? 'deploy_failed', $message, $stage);
         }
 
@@ -325,6 +335,7 @@ final class DeploymentWorkflow
      * archive normally sits inside it. Same contract otherwise: the deploy log
      * is finished here, a failure is recorded on the project, and a start failure
      * is a ProblemException; anything else is a plain exception for the caller to map.
+     * A failure or a cancel closes the log before the settle, which needs the deploy lock the log holds.
      */
     public function deployFromArchive(?DeployLogger $deployLogger, string $zipPath): void
     {
@@ -340,12 +351,16 @@ final class DeploymentWorkflow
             $succeeded = true;
         } catch (\InvalidArgumentException $e) {
             // A refused archive (the caller answers 422 on zip_path): nothing was replaced.
+            $deployLogger?->finish(DeployLogger::STATUS_FAILED, $e->getMessage());
             throw $e;
         } catch (DeployCancelledException $e) {
+            $deployLogger?->finish(DeployLogger::STATUS_CANCELLED, $e->getMessage());
             FailureRetention::retainAfterDeployCancelled($mechanics->user(), $e->getMessage());
             throw $e;
         } catch (\Exception $e) {
+            $deployLogger?->recordFailureOutput($e->getMessage());
             $message = DeployFailureExplainer::explain($e->getMessage()) ?? FailureOutput::withoutNoise($e->getMessage());
+            $deployLogger?->finish(DeployLogger::STATUS_FAILED, $message);
             FailureRetention::retainAfterDeployFailure($mechanics->user(), $message);
             throw $e;
         } finally {

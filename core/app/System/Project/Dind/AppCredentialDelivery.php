@@ -98,7 +98,7 @@ class AppCredentialDelivery
             $fs->makeDirWithParents($dir, $chown);
             $this->dind->system()->exec(['sudo', 'chmod', '700', $dir]);
         }
-        $fs->filePutContents($path, $contents, $chown, '600');
+        $fs->writeFileReplacingPath($path, $contents, $chown, '600');
         $this->written = $contents;
 
         // Names only: the values are in the file and behind the API, never in a log.

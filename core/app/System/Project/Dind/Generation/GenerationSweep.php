@@ -68,6 +68,8 @@ final class GenerationSweep
 
         try {
             if (self::checkoutOwnedElsewhere($project)) {
+                self::forgetStoppedAfterSuccess($project, $succeeded);
+
                 return null;
             }
             $done = self::settleHeld($project, $succeeded);
@@ -77,6 +79,14 @@ final class GenerationSweep
         self::logSettled($project, $done);
 
         return $done;
+    }
+
+    /** A redeploy that succeeded runs the app: a stopped mark an earlier one left no longer holds. */
+    private static function forgetStoppedAfterSuccess(DindProject $project, ?bool $succeeded): void
+    {
+        if ($succeeded === true) {
+            (new GenerationState($project->username()))->forget(GenerationState::STOPPED);
+        }
     }
 
     /**

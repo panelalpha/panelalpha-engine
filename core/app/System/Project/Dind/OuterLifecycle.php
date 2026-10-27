@@ -27,7 +27,7 @@ final class OuterLifecycle
             if (! self::isSysboxStartRefusal($e)) {
                 throw $e;
             }
-            (new AccountMapping($this->project))->recreate();
+            (new AccountMapping($this->project))->afterRefusedStart()->recreate();
 
             return;
         }

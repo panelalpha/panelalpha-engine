@@ -80,4 +80,26 @@ test.describe('user listing', () => {
 
     await expectStatus(response, 422);
   });
+
+  test('a request without a name is refused with 422, not a server error', async ({
+    authedRequest,
+  }) => {
+    const response = await authedRequest.post('projects/verify-new-username', { data: {} });
+
+    await expectStatus(response, 422);
+  });
+
+  test('name is accepted for username, as on project create', async ({
+    userFactory,
+    authedRequest,
+  }) => {
+    const user = await userFactory.createSimpleUser();
+
+    const response = await authedRequest.post('projects/verify-new-username', {
+      data: { name: user.username },
+    });
+
+    await expectStatus(response, 200);
+    expect(await response.json()).toMatchObject({ valid: false, reason: 'taken' });
+  });
 });

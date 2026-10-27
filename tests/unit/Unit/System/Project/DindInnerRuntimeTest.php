@@ -203,7 +203,7 @@ class DindInnerRuntimeTest extends TestCase
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
                 $argv = $this->withoutSudo($cmd);
-                if (($argv[0] ?? null) !== 'test') {
+                if (!in_array($argv[0] ?? null, ['test', 'stat', 'realpath', 'python3'], true)) {
                     throw new \LogicException('Unexpected process in test: ' . implode(' ', $argv));
                 }
                 $process = new Process($argv);

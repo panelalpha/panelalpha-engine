@@ -55,10 +55,18 @@ test.describe('deploy hook provider registration', () => {
         expect(JSON.stringify(refused.body), 'the refusal is the missing token').toMatch(
           /provider_token_missing/
         );
+        const refusal = refused.body as { problems?: { hook?: unknown }[] };
+        const carried = validateParsedApiResponse(
+          { data: refusal.problems?.[0]?.hook },
+          deployHookCreateResponseSchema
+        );
+        expect(carried.data.created, 'the refusal carries the hook it created').toBe(true);
+        expect(carried.data.secret, 'with the secret, shown this once').toBeTruthy();
 
         const shown = await api.getDeployHookRaw(user.username);
         await expectStatus(shown, 200);
         const parsed = validateParsedApiResponse(shown.body, deployHookShowResponseSchema);
+        expect(parsed.data.url, 'the hook the refusal carried').toBe(carried.data.url);
         expect(parsed.data.registration, 'nothing was registered').toBeNull();
         expect(parsed.data.registration_warning).toBeUndefined();
 

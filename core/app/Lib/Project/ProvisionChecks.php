@@ -47,9 +47,8 @@ final class ProvisionChecks
         }
 
         // Asked here as well as after the account is built, because allocation
-        // spends a label out of a namespace the whole fleet shares. A name
-        // burnt on a project that was never going to be created is gone for
-        // good -- PanelAlpha Online has no release.
+        // spends a label out of a namespace the whole fleet shares, and a name
+        // bought for a project that is then refused has to be given back.
         if (! $this->env->usernameAvailableOnHost($username)) {
             return [
                 'field' => $nameField,

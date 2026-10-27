@@ -32,6 +32,7 @@ use InvalidArgumentException;
  * @property list<array{name: string, status: string}> $steps
  * @property list<array{step: string, status: string, message?: string}>|null $step_log
  * @property array{step: string, phase_percent: ?float, item: ?string, message: ?string, updated_at: string}|null $progress
+ * @property list<array{code: string, message: string}>|null $warnings
  * @property ?string $password
  * @property ?string $migrator_token
  * @property ?string $plugin_migration_id
@@ -83,6 +84,22 @@ class WordpressMigration extends Model
 
     /** A run whose heartbeat is older than this is taken for dead. */
     public const STALE_MINUTES = 15;
+
+    /** An unfinished import without activity this long loses its password and tokens. */
+    public const SECRETS_KEPT_DAYS = 7;
+
+    public const LOG_SECRETS_EXPIRED = 'secrets_expired';
+
+    /** The steps that run on the destination plugin's token, from its install to the end of the transfer. */
+    private const TOKEN_STEPS = [
+        self::STEP_INSTALL_DESTINATION_PLUGIN,
+        self::STEP_INSTALL_SOURCE_PLUGIN,
+        self::STEP_VERIFY_SOURCE_PLUGIN,
+        self::STEP_REMOTE_SYNC,
+        self::STEP_MIGRATE_DATABASE,
+        self::STEP_MIGRATE_FILES,
+        self::STEP_FINALIZE,
+    ];
 
     public const STEP_STATUS_PENDING = 'pending';
 
@@ -139,6 +156,7 @@ class WordpressMigration extends Model
         'heartbeat_at',
         'created_database',
         'created_database_user',
+        'warnings',
     ];
 
     protected $hidden = [
@@ -151,6 +169,7 @@ class WordpressMigration extends Model
         'steps' => 'array',
         'step_log' => 'array',
         'progress' => 'array',
+        'warnings' => 'array',
         'password' => 'encrypted',
         'migrator_token' => 'encrypted',
         'created_project' => 'boolean',
@@ -223,10 +242,19 @@ class WordpressMigration extends Model
     /**
      * Re-open a failed record, or one whose run died (running or pending with
      * a stale heartbeat), so a caller can queue another run. Skips steps
-     * already `completed`. Does not queue the job.
+     * already `completed`. Does not queue the job. $sourceSecret replaces the
+     * wp-admin password (wp_admin) or plugin token (manual_plugin), and is
+     * required once {@see expireIdleSecrets} has cleared it.
      */
-    public function resume(): self
+    public function resume(?string $sourceSecret = null): self
     {
+        $missing = $this->missingSourceSecret();
+        if ($sourceSecret === null && $missing !== null) {
+            throw new InvalidArgumentException(
+                "The {$missing} was cleared after ".self::SECRETS_KEPT_DAYS.' days without activity: resume with it again',
+            );
+        }
+
         $updated = static::query()
             ->whereKey($this->getKey())
             ->where(fn (Builder $query) => $query
@@ -245,7 +273,63 @@ class WordpressMigration extends Model
             );
         }
 
-        return $this->refresh();
+        $this->refresh();
+        if ($sourceSecret !== null) {
+            $this->storeSourceSecret($sourceSecret);
+        }
+        if ($missing !== null) {
+            $this->restartUnfinishedTransfer();
+        }
+
+        return $this;
+    }
+
+    /**
+     * The field a resume must send again because it was cleared:
+     * `password` (wp_admin) or `source_token` (manual_plugin); null when
+     * stored, or when the record is not one a resume takes.
+     */
+    public function missingSourceSecret(): ?string
+    {
+        if (! in_array($this->status, [self::STATUS_FAILED, ...self::ACTIVE_STATUSES], true)) {
+            return null;
+        }
+        $secrets = $this->secretsForWorker();
+        if ($this->usesManualPlugin()) {
+            return $secrets['source_token'] === null ? 'source_token' : null;
+        }
+
+        return $secrets['password'] === null ? 'password' : null;
+    }
+
+    private function storeSourceSecret(string $secret): void
+    {
+        if ($this->usesManualPlugin()) {
+            $this->source_token = $secret;
+        } else {
+            $this->password = $secret;
+        }
+        $this->save();
+    }
+
+    /**
+     * The tokens were cleared with the source's secret: a transfer left
+     * unfinished starts again from the destination plugin's install, which
+     * writes a new token.
+     */
+    private function restartUnfinishedTransfer(): void
+    {
+        if (
+            $this->stepStatus(self::STEP_INSTALL_DESTINATION_PLUGIN) !== self::STEP_STATUS_COMPLETED
+            || $this->stepStatus(self::STEP_FINALIZE) === self::STEP_STATUS_COMPLETED
+        ) {
+            return;
+        }
+
+        $this->restartSteps(array_values(array_filter(
+            self::TOKEN_STEPS,
+            fn (string $step): bool => $this->stepStatus($step) !== null,
+        )));
     }
 
     /**
@@ -510,6 +594,8 @@ class WordpressMigration extends Model
     /**
      * The source plugin was removed after a failure: resume installs it again
      * and restarts the transfer, which the removed plugin can no longer continue.
+     * plugin_migration_id stays until remote-sync replaces it: the source may
+     * still hold that transfer's lock, which this import may take over.
      *
      * @param  list<string>  $steps
      */
@@ -518,8 +604,42 @@ class WordpressMigration extends Model
         foreach ($steps as $step) {
             $this->setStepStatus($step, self::STEP_STATUS_PENDING);
         }
-        $this->plugin_migration_id = null;
+    }
+
+    /**
+     * Whether an import on this engine started this transfer on its source
+     * site; any other transfer holding the source's lock is never taken over.
+     */
+    public static function startedPluginMigration(string $pluginMigrationId): bool
+    {
+        return static::query()->where('plugin_migration_id', $pluginMigrationId)->exists();
+    }
+
+    /**
+     * Something the import noticed but goes on with, shown in its status;
+     * one entry per code.
+     */
+    public function addWarning(string $code, string $message): void
+    {
+        $this->warnings = [...$this->warningsExcept($code), ['code' => $code, 'message' => $message]];
         $this->save();
+    }
+
+    public function removeWarning(string $code): void
+    {
+        $this->warnings = $this->warningsExcept($code);
+        $this->save();
+    }
+
+    /**
+     * @return list<array{code: string, message: string}>
+     */
+    private function warningsExcept(string $code): array
+    {
+        return array_values(array_filter(
+            $this->warnings ?? [],
+            static fn (array $warning): bool => ($warning['code'] ?? null) !== $code,
+        ));
     }
 
     /**
@@ -594,6 +714,16 @@ class WordpressMigration extends Model
     }
 
     /**
+     * Called by install_source_plugin before it uploads the plugin carrying
+     * this token, so a rerun reuses it and every source call can send it.
+     */
+    public function storeSourceToken(string $token): void
+    {
+        $this->source_token = $token;
+        $this->save();
+    }
+
+    /**
      * Decrypt password and migrator token for the worker. Never put these on
      * the job payload — call this from handle() instead.
      *
@@ -609,8 +739,8 @@ class WordpressMigration extends Model
     }
 
     /**
-     * Success of the last step (and deleting the row) clears every secret.
-     * A `failed` status must not call this.
+     * Success of the last step and a cancel clear every secret. A `failed`
+     * status keeps them for resume, until {@see expireIdleSecrets}.
      */
     public function clearSecrets(): void
     {
@@ -618,6 +748,51 @@ class WordpressMigration extends Model
         $this->migrator_token = null;
         $this->source_token = null;
         $this->save();
+    }
+
+    /**
+     * Clear the secrets of every import that has had no activity for
+     * SECRETS_KEPT_DAYS: failed, cancelling, or a run that died. Returns how many.
+     */
+    public static function expireIdleSecrets(): int
+    {
+        $cleared = 0;
+        foreach (self::whereIdleWithSecrets(self::query())->get() as $migration) {
+            $cleared += $migration->expireSecrets() ? 1 : 0;
+        }
+
+        return $cleared;
+    }
+
+    /** Only while still idle, so a resume that just stored a secret keeps it. */
+    private function expireSecrets(): bool
+    {
+        $cleared = self::whereIdleWithSecrets(static::query()->whereKey($this->getKey()))
+            ->update(['password' => null, 'migrator_token' => null, 'source_token' => null]);
+        if ($cleared !== 1) {
+            return false;
+        }
+
+        $this->refresh();
+        $this->appendStepLog(
+            self::LOG_SECRETS_EXPIRED,
+            self::STEP_STATUS_COMPLETED,
+            'Cleared the stored '.($this->usesManualPlugin() ? 'plugin token' : 'wp-admin password').' and tokens after '
+                .self::SECRETS_KEPT_DAYS.' days without activity: resume with it again, or cancel.',
+        );
+
+        return true;
+    }
+
+    private static function whereIdleWithSecrets(Builder $query): Builder
+    {
+        return $query
+            ->whereIn('status', self::UNFINISHED_STATUSES)
+            ->where('updated_at', '<', now()->subDays(self::SECRETS_KEPT_DAYS))
+            ->where(fn (Builder $secrets) => $secrets
+                ->whereNotNull('password')
+                ->orWhereNotNull('migrator_token')
+                ->orWhereNotNull('source_token'));
     }
 
     /**
@@ -632,8 +807,8 @@ class WordpressMigration extends Model
         }
 
         return [
-            'Remove the wordpress-migrator plugin from the source site when the migration has finished: '
-            .'it was installed by hand, and the Engine has no wp-admin access to remove it.',
+            'Remove the wordpress-migrator plugin from the source site as soon as the migration has finished, '
+            .'failed or been cancelled: it was installed by hand, and the Engine has no wp-admin access to remove it.',
         ];
     }
 
@@ -649,6 +824,7 @@ class WordpressMigration extends Model
      *     rest_mode: ?string,
      *     source_ip: ?string,
      *     notices: list<string>,
+     *     warnings: list<array{code: string, message: string}>,
      *     target_label: ?string,
      *     status: string,
      *     stale: bool,
@@ -673,6 +849,7 @@ class WordpressMigration extends Model
             'rest_mode' => $this->rest_mode,
             'source_ip' => $this->source_ip,
             'notices' => $this->notices(),
+            'warnings' => $this->warnings ?? [],
             'target_label' => $this->target_label,
             'status' => $this->status,
             'stale' => $this->isStale(),

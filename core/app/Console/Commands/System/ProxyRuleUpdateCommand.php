@@ -133,8 +133,18 @@ class ProxyRuleUpdateCommand extends Command
 
         $rule->update($updates);
         $this->info('Rule updated successfully.');
+        $this->warnAboutDefaultCertificate($rule);
         $this->applyProxyRules();
 
         return 0;
+    }
+
+    /** The warning PUT /proxy-rules/{id} returns for a live rule clients will warn about. */
+    private function warnAboutDefaultCertificate(ProxyRule $rule): void
+    {
+        $warning = ProxyRuleServerName::defaultCertificateWarning($rule);
+        if ($warning !== null) {
+            $this->warn($warning);
+        }
     }
 }

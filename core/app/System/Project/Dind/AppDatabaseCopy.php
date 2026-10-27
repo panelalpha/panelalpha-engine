@@ -50,14 +50,18 @@ final class AppDatabaseCopy
     /**
      * The target's application database replaced with the source's. One the
      * target already had is dumped into $rollbackDir first and recorded in
-     * $rollbacks; one it lacked is provisioned and recorded in $created, so a
-     * failed push drops it again.
+     * $rollbacks; one it lacked is provisioned and recorded in $provisioned,
+     * so a failed push removes it again.
      *
      * @param  array<string, string>  $rollbacks  destination database => rollback dump
-     * @param  list<string>  $created
      */
-    public function intoTarget(User $from, User $to, string $rollbackDir, array &$rollbacks, array &$created): DatabaseCopyResult
-    {
+    public function intoTarget(
+        User $from,
+        User $to,
+        string $rollbackDir,
+        array &$rollbacks,
+        ?ProvisionedAppDatabase &$provisioned,
+    ): DatabaseCopyResult {
         $source = AppDatabase::nameFor($from);
         $dest = AppDatabase::nameFor($to);
         $copier = $this->copier();
@@ -66,8 +70,7 @@ final class AppDatabaseCopy
             $rollbacks[$dest] = $copier->dumpRollback($dest, $rollbackDir);
             $copier->replaceDatabase($source, $dest, $rollbacks[$dest], $to, DefinerMap::between($from, $to));
         } else {
-            $created[] = $dest;
-            AppDatabase::provision($to, $this->mysql);
+            $this->provisionRecorded($to, ProvisionedAppDatabase::beforeReplacing($to, $this->mysql), $provisioned);
             $this->mysql->databases()->deleteDatabase($dest);
             $copier->copyDatabase($source, $dest, DefinerMap::between($from, $to));
         }
@@ -77,13 +80,24 @@ final class AppDatabaseCopy
 
     /**
      * A target the source's run file is pushed into without its data still
-     * gets a database of its own to point that file at.
+     * gets a database of its own to point that file at, recorded in
+     * $provisioned like one {@see intoTarget()} provisions.
      */
-    public function ensureTargetHasOne(User $to): void
+    public function ensureTargetHasOne(User $to, ?ProvisionedAppDatabase &$provisioned): void
     {
         if (! AppDatabase::isOwnedBy($to)) {
-            AppDatabase::provision($to, $this->mysql);
+            $this->provisionRecorded($to, ProvisionedAppDatabase::before($to, $this->mysql), $provisioned);
         }
+    }
+
+    /**
+     * Recorded before provisioning starts, so a provision that fails halfway
+     * is removed too.
+     */
+    private function provisionRecorded(User $to, ProvisionedAppDatabase $record, ?ProvisionedAppDatabase &$provisioned): void
+    {
+        $provisioned = $record;
+        AppDatabase::provision($to, $this->mysql);
     }
 
     private function copier(): DatabaseCopier

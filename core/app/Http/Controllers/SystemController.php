@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Auth\TokenAbilities;
 use App\Exceptions\DockerErrorException;
 use App\Http\Requests\EximConfigUpdateRequest;
 use App\Http\Requests\EximTestEmailSendRequest;
@@ -45,6 +46,7 @@ class SystemController extends Controller
         $system = new System;
         $webserver = $system->webserver();
         $url = self::engineUrl();
+        $caller = TokenAbilities::forCurrentRequest();
 
         $data = [
             'version' => config('system.version'),
@@ -56,8 +58,7 @@ class SystemController extends Controller
             'served_certificate' => self::servedCertificate($url),
             ...self::sitesDomain(),
             'default_ipv4' => Setting::get('default_ipv4'),
-            // Capacity and identity of the machine itself, not of the engine.
-            'host' => HostFacts::host($system),
+            'host' => HostFacts::hostFor($caller, $system),
             'default_ipv6' => Setting::get('default_ipv6'),
             'ipv4_nat_mode' => Ipv4NatMap::isNatModeEnabled(),
             'ipv4_nat_maps' => Ipv4NatMap::all(),
@@ -65,8 +66,8 @@ class SystemController extends Controller
             'latest_webserver_change' => $system->getLatestChangeWebserverInfo(),
             'latest_update' => $system->getLatestUpdateInfo(),
             'panelalpha_online' => self::panelalphaOnline(),
-            'unreadable_secrets' => self::unreadableSecrets(User::query()->cursor()),
-            'orphan_account_containers' => self::orphanAccountContainers($system),
+            'unreadable_secrets' => self::unreadableSecrets($caller, User::query()->cursor()),
+            'orphan_account_containers' => self::orphanAccountContainers($system, $caller),
         ];
 
         return new JsonResponse([
@@ -119,29 +120,31 @@ class SystemController extends Controller
     }
 
     /**
-     * Account containers no project owns. Reported only: the operator removes them, the engine never does.
+     * Account containers no project owns; a token scoped to projects sees only
+     * those of the projects in its scope. Reported only: the operator removes
+     * them, the engine never does.
      *
      * @return array{count: int, containers: list<array<string, string>>, warning: ?string}
      */
-    private static function orphanAccountContainers(System $system): array
+    private static function orphanAccountContainers(System $system, TokenAbilities $caller): array
     {
         return (new AccountContainers($system))
-            ->orphanReport(User::query()->pluck('username'));
+            ->orphanReport(User::query()->pluck('username'), $caller->projects());
     }
 
     /**
      * The one place that names the APP_KEY: a project only knows it cannot
      * decode its secrets, the server knows that many projects at once point
-     * at the key.
+     * at the key. A token scoped to projects sees only the projects in its scope.
      *
      * @param  iterable<User>  $users
      * @return array{count: int, projects: list<string>, warning: ?string}
      */
-    public static function unreadableSecrets(iterable $users): array
+    public static function unreadableSecrets(TokenAbilities $caller, iterable $users): array
     {
         $projects = [];
         foreach ($users as $user) {
-            if ($user->unreadableSecrets() !== []) {
+            if ($caller->mayReachProject((string) $user->username) && $user->unreadableSecrets() !== []) {
                 $projects[] = (string) $user->username;
             }
         }
@@ -667,19 +670,21 @@ class SystemController extends Controller
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
             description: 'Fields are merged into the stored config; one that is absent keeps its value, one sent as null or "" clears it. '
                 .'A password or API token (sendgrid_api_token, mailchannels_password, amazon_ses_smtp_password, smtp_password) sent as null or "" '
-                .'keeps its stored value, so the GET answer can be sent back unchanged; name it in `clear_secrets` to clear it.',
+                .'keeps its stored value, so the GET answer can be sent back unchanged; name it in `clear_secrets` to clear it. '
+                .'A password or API token may be a `vault:<key>`; a username (mailchannels_username, amazon_ses_smtp_username, '
+                .'smtp_username) is not a secret, and a `vault:` reference sent for one is refused with 422.',
             properties: [
                 new OA\Property(property: 'smarthost_provider', type: 'string', nullable: true),
                 new OA\Property(property: 'sendgrid_api_token', type: 'string', nullable: true),
-                new OA\Property(property: 'mailchannels_username', type: 'string', nullable: true),
+                new OA\Property(property: 'mailchannels_username', type: 'string', nullable: true, description: 'The username itself; a `vault:` reference is refused, since a username is not a secret.'),
                 new OA\Property(property: 'mailchannels_password', type: 'string', nullable: true),
                 new OA\Property(property: 'amazon_ses_smtp_endpoint', type: 'string', nullable: true),
                 new OA\Property(property: 'amazon_ses_starttls_port', type: 'string', nullable: true),
-                new OA\Property(property: 'amazon_ses_smtp_username', type: 'string', nullable: true),
+                new OA\Property(property: 'amazon_ses_smtp_username', type: 'string', nullable: true, description: 'The username itself; a `vault:` reference is refused, since a username is not a secret.'),
                 new OA\Property(property: 'amazon_ses_smtp_password', type: 'string', nullable: true),
                 new OA\Property(property: 'smtp_host', type: 'string', nullable: true),
                 new OA\Property(property: 'smtp_port', type: 'string', nullable: true),
-                new OA\Property(property: 'smtp_username', type: 'string', nullable: true),
+                new OA\Property(property: 'smtp_username', type: 'string', nullable: true, description: 'The username itself; a `vault:` reference is refused, since a username is not a secret.'),
                 new OA\Property(property: 'smtp_password', type: 'string', nullable: true),
                 new OA\Property(property: 'smtp_implicit_tls', type: 'boolean', nullable: true),
                 new OA\Property(property: 'sender_domain', type: 'string', nullable: true),
@@ -696,7 +701,7 @@ class SystemController extends Controller
             new OA\Response(response: 200, description: 'Config updated', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
-            new OA\Response(response: 422, description: 'Validation error: a host that is not a hostname or an IP, a port that is not 1-65535', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 422, description: 'Validation error: a host that is not a hostname or an IP, a port that is not 1-65535, a `vault:` reference for a username', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function updateEximConfig(EximConfigUpdateRequest $request, System $system): JsonResponse

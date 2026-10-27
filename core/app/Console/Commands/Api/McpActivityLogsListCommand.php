@@ -4,7 +4,6 @@ namespace App\Console\Commands\Api;
 
 use App\Models\McpActivityLog;
 use Illuminate\Console\Command;
-use Illuminate\Database\Eloquent\Builder;
 
 class McpActivityLogsListCommand extends Command
 {
@@ -26,10 +25,10 @@ class McpActivityLogsListCommand extends Command
         if ($tokenIds === null) {
             $this->error('--token-id takes a positive whole number.');
 
-            return 1;
+            return self::FAILURE;
         }
 
-        $rows = $this->filtered(McpActivityLog::query(), $tokenIds)
+        $rows = McpActivityLog::matching($tokenIds, (string) $this->option('token-name'), (string) $this->option('project'))
             ->orderByDesc('created_at')
             ->limit((int) $this->option('limit'))
             ->get(['id', 'token_id', 'token_name', 'tool_name', 'status', 'error_message', 'created_at'])
@@ -49,7 +48,7 @@ class McpActivityLogsListCommand extends Command
             $rows
         );
 
-        return 0;
+        return self::SUCCESS;
     }
 
     /** @return list<int>|null null when any given id is not a positive integer */
@@ -65,17 +64,5 @@ class McpActivityLogsListCommand extends Command
         }
 
         return $ids;
-    }
-
-    /** @param list<int> $tokenIds */
-    private function filtered(Builder $query, array $tokenIds): Builder
-    {
-        $tokenName = (string) $this->option('token-name');
-        $project = (string) $this->option('project');
-
-        return $query
-            ->when($tokenIds !== [], fn (Builder $q) => $q->forTokenIds($tokenIds))
-            ->when($tokenName !== '', fn (Builder $q) => $q->tokenNameContains($tokenName))
-            ->when($project !== '', fn (Builder $q) => $q->where('project', $project));
     }
 }

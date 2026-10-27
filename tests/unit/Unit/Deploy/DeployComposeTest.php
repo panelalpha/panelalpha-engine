@@ -242,6 +242,7 @@ class DeployComposeTest extends TestCase
         $this->assertArrayNotHasKey('build', $parsed['services']['app']);
         $this->assertArrayNotHasKey('volumes', $parsed['services']['app']);
         $this->assertSame('railpack', $parsed['services']['app']['labels']['panelalpha.generated']);
+        $this->assertSame('never', $parsed['services']['app']['pull_policy'], 'built in the account, on no registry');
     }
 
     public function test_skip_build_only_for_image_only_strategies(): void

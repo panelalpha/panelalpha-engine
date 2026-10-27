@@ -108,11 +108,13 @@ final class MigrationTransfer
     }
 
     /**
+     * Without a budget a run gets the standard one, never an unbounded loop.
+     *
      * @param  callable(array<string, mixed>): bool  $isCompleted
      */
     private function runBatches(string $migrationId, ?BatchBudget $budget, callable $isCompleted): bool
     {
-        $budget ??= new BatchBudget(PHP_INT_MAX, PHP_INT_MAX);
+        $budget ??= new BatchBudget;
         do {
             $budget->spend();
             try {
@@ -134,32 +136,34 @@ final class MigrationTransfer
     /**
      * Confirm transfer finished, then move .htaccess. If the destination HTTP
      * status changes, remove the file and append a warning on the migration step log.
+     * A transfer the source still reports running goes on within the budget,
+     * as in the transfer steps: false when it has not finished, and the next run continues.
      */
-    public function finalize(WordpressMigration $migration, string $migrationId, string $destinationSiteUrl): void
+    public function finalize(
+        WordpressMigration $migration,
+        string $migrationId,
+        string $destinationSiteUrl,
+        ?BatchBudget $budget = null,
+    ): bool {
+        if (! $this->transferFinished($migrationId, $budget)) {
+            return false;
+        }
+
+        $this->syncHtaccess($migration, $migrationId, $destinationSiteUrl);
+
+        return true;
+    }
+
+    private function transferFinished(string $migrationId, ?BatchBudget $budget): bool
     {
         $status = $this->client->migrationStatus($migrationId);
 
-        if (($status['status'] ?? null) === 'completed') {
-            $this->syncHtaccess($migration, $migrationId, $destinationSiteUrl);
-
-            return;
-        }
-
-        if (($status['phase'] ?? null) === 'database') {
-            $this->migrateDatabase($migrationId);
-            $this->syncHtaccess($migration, $migrationId, $destinationSiteUrl);
-
-            return;
-        }
-
-        if (($status['phase'] ?? null) === 'files') {
-            $this->migrateFiles($migrationId);
-            $this->syncHtaccess($migration, $migrationId, $destinationSiteUrl);
-
-            return;
-        }
-
-        throw new RuntimeException('Migration was interrupted');
+        return match (true) {
+            ($status['status'] ?? null) === 'completed' => true,
+            ($status['phase'] ?? null) === 'database' => $this->migrateDatabase($migrationId, $budget),
+            ($status['phase'] ?? null) === 'files' => $this->migrateFiles($migrationId, $budget),
+            default => throw new RuntimeException('Migration was interrupted'),
+        };
     }
 
     /**

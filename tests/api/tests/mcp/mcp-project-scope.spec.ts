@@ -18,6 +18,12 @@ interface TaskListItem {
   username: string | null;
 }
 
+interface ScopedSystemInfo {
+  host: unknown;
+  unreadable_secrets: { projects: string[] };
+  orphan_account_containers: { containers: { project: string }[] };
+}
+
 /** The API body a successful tool wraps under `data`. */
 function toolData(payload: McpPayload): unknown {
   const parsed: unknown = JSON.parse(mcpResultText(payload));
@@ -68,7 +74,18 @@ test.describe('MCP project scope', () => {
 
       expect(await session.describeTool('firewall_status')).toBeUndefined();
       expectMcpToolError(await session.call('firewall_status'), 'firewall_status');
-      await session.callOk('system_info');
+      const info = toolData(await session.callOk('system_info')) as { data: ScopedSystemInfo };
+      expect(info.data.host, "the host block is the operator's").toBeNull();
+      expect(
+        info.data.unreadable_secrets.projects.every((name) => name === alice.username),
+        'unreadable_secrets named another project'
+      ).toBe(true);
+      expect(
+        info.data.orphan_account_containers.containers.every(
+          (container) => container.project === alice.username
+        ),
+        'orphan_account_containers named another project'
+      ).toBe(true);
 
       const aliceTasks = await api.listTasks({ username: alice.username });
       const bobTasks = await api.listTasks({ username: bob.username });

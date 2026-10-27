@@ -8,6 +8,7 @@ use App\System\Project;
 use App\System\Project\Dind;
 use App\System\Project\Dind\WordPressCli;
 use App\System\Project\PhpHosting\WordPress\Core;
+use App\System\Project\PhpHosting\WordPress\DatabaseClientMissing;
 use App\System\Project\PhpHosting\WordPress\MustUsePlugin;
 use App\System\Project\PhpHosting\WordPress\WordPressNotFound;
 use PHPUnit\Framework\TestCase;
@@ -185,7 +186,9 @@ class WordPressCliTest extends TestCase
             return;
         }
         $owner = fileowner($root.'/wp-content').':'.filegroup($root.'/wp-content');
-        $this->assertSame("{$root}\n{$owner}\n3\n", $probe->getOutput());
+        $tree = fileowner($root).':'.filegroup($root);
+        $client = trim((string) shell_exec('command -v mysql && command -v mysqldump && command -v mysqlcheck')) !== '' ? '1' : '0';
+        $this->assertSame("{$root}\n{$owner}\n3\n{$client}\n{$tree}\n", $probe->getOutput());
 
         $missing = new Process(['sh', '-c', WordPressCli::PROBE, 'sh', $this->tmp.'/nowhere', $this->tmp.'/old.phar']);
         $missing->run();
@@ -241,7 +244,7 @@ class WordPressCliTest extends TestCase
 
         $exec = array_search('exec', $this->commands[0], true);
         $this->assertSame(['-u', '1000:1000', '-T', 'dind', 'bash', '-c'], array_slice($this->commands[0], $exec + 1, 6));
-        $this->assertSame(['wp', '', '', WordPressCli::MEMORY_LIMIT, MustUsePlugin::MEND_ON_LOAD, 'core', 'version'], array_slice($this->commands[0], -7));
+        $this->assertSame(['wp', '', '', WordPressCli::MEMORY_LIMIT, MustUsePlugin::MEND_ON_LOAD, '0', 'core', 'version'], array_slice($this->commands[0], -8));
     }
 
     public function test_no_wordpress_is_its_own_exception_and_other_script_failures_are_not(): void
@@ -261,6 +264,82 @@ class WordPressCliTest extends TestCase
         } catch (\RuntimeException $e) {
             $this->assertNotInstanceOf(WordPressNotFound::class, $e);
         }
+    }
+
+    public function test_a_database_command_runs_in_the_first_container_with_a_mysql_client(): void
+    {
+        $this->containers("wp1|wordpress|wordpress:latest\ncli1|wp-cli|wordpress:cli\ndb1|db|mysql:8.0");
+        $this->probe('wp1', "/var/www/html\n33:33\n1234\n0");
+        $this->probe('cli1', "/var/www/html\n33:33\n1234\n1\n1013:1013");
+
+        $process = $this->runScript(['db', 'export', '/var/www/html/backup.sql', '--tables=wp_posts']);
+
+        $this->assertSame(0, $process->getExitCode(), $process->getErrorOutput());
+        $this->assertSame(['probe wp1', 'probe db1', 'probe cli1', 'run cli1'], $this->calls());
+        $this->assertStringContainsString('-u 1013:1013', $process->getOutput(), 'as the owner of the tree the dump is written into');
+    }
+
+    public function test_any_other_command_still_runs_in_the_wordpress_container(): void
+    {
+        $this->containers("cli1|wp-cli|wordpress:cli\nwp1|wordpress|wordpress:latest");
+        $this->probe('wp1', "/var/www/html\n33:33\n1234\n0");
+        $this->probe('cli1', "/var/www/html\n33:33\n1234\n1\n1013:1013");
+
+        $tables = $this->runScript(['db', 'tables']);
+        $this->runScript(['plugin', 'list']);
+
+        $this->assertSame(['probe wp1', 'run wp1', 'probe wp1', 'run wp1'], $this->calls());
+        $this->assertStringContainsString('-u 33:33', $tables->getOutput());
+    }
+
+    public function test_a_database_command_with_no_mysql_client_anywhere_says_so(): void
+    {
+        $this->containers("wp1|wordpress|wordpress:latest\ndb1|db|mysql:8.0");
+        $this->probe('wp1', "/var/www/html\n33:33\n1234\n0");
+
+        $process = $this->runScript(['db', 'query', 'SELECT 1']);
+
+        $this->assertSame(WordPressCli::NO_DATABASE_CLIENT_EXIT, $process->getExitCode());
+        $this->assertSame(['probe wp1', 'probe db1'], $this->calls());
+        $this->assertStringContainsString("WP-CLI's database commands need the MySQL client", $process->getErrorOutput());
+        $this->assertStringContainsString('such as wordpress:cli', $process->getErrorOutput());
+    }
+
+    public function test_a_service_without_a_mysql_client_names_it(): void
+    {
+        $this->containers("wp1|wordpress|wordpress:latest\ncli1|wp-cli|wordpress:cli");
+        $this->probe('wp1', "/var/www/html\n33:33\n1234\n0");
+
+        $process = $this->runScript(['db', 'import', 'dump.sql'], 'wordpress');
+
+        $this->assertSame(WordPressCli::NO_DATABASE_CLIENT_EXIT, $process->getExitCode());
+        $this->assertStringContainsString('no running container in service wordpress that has WordPress has one', $process->getErrorOutput());
+    }
+
+    public function test_only_the_db_subcommands_that_run_the_client_need_it(): void
+    {
+        $this->assertTrue(WordPressCli::needsDatabaseClient(['db', 'query', 'SELECT 1']));
+        $this->assertTrue(WordPressCli::needsDatabaseClient(['--skip-plugins', 'db', 'export', '-', '--path=/x']));
+        $this->assertTrue(WordPressCli::needsDatabaseClient(['db', 'import', 'a.sql']));
+        $this->assertTrue(WordPressCli::needsDatabaseClient(['db', 'import', 'a.sql', '--exec=exec("sed -i x a.sql");']));
+        $this->assertFalse(WordPressCli::needsDatabaseClient(['db', 'tables']));
+        $this->assertFalse(WordPressCli::needsDatabaseClient(['db', 'size']));
+        $this->assertFalse(WordPressCli::needsDatabaseClient(['plugin', 'list']));
+        $this->assertFalse(WordPressCli::needsDatabaseClient(['option', 'get', 'db']));
+        $this->assertFalse(WordPressCli::needsDatabaseClient([]));
+    }
+
+    public function test_a_missing_mysql_client_is_its_own_exception(): void
+    {
+        $this->reply = $this->process(WordPressCli::NO_DATABASE_CLIENT_EXIT, '', WordPressCli::MARKER." WP-CLI's database commands need the MySQL client.\n");
+
+        try {
+            $this->dind()->wordPressCli()->run(Core::DB_PROBE);
+            $this->fail('Expected DatabaseClientMissing');
+        } catch (DatabaseClientMissing $e) {
+            $this->assertSame("WP-CLI's database commands need the MySQL client.", $e->getMessage());
+        }
+        $this->assertSame(['1', 'db', 'query', 'SELECT 1'], array_slice($this->commands[0], -4));
     }
 
     public function test_a_database_probe_without_a_mysql_client_comes_back_as_a_result(): void

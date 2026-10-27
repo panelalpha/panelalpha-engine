@@ -23,6 +23,8 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
      */
     private const LISTEN_PORTS = [80, 443];
 
+    private const HTTPS_PORT = 443;
+
     /**
      * A LISTEN (st 0A) row of /proc/net/tcp: `sl local_address rem_address st ...`.
      */
@@ -628,6 +630,25 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
     }
 
     /**
+     * Writes the proxy rules' own vhosts again only when they come out different; a vhost on 443 carries
+     * its certificate's fingerprint, so a renewal shows too. Domain rules never stand alone, so none are compiled.
+     *
+     * @return bool whether a vhost changed, so nginx has to reload
+     */
+    public function refreshProxyRuleCertificates(): bool
+    {
+        $ips = $this->getAllIpsVars();
+        $rules = (new RoutingCompiler($this->system))->compile([])['http'];
+        $vhosts = $this->proxyRuleVhosts($rules, $ips['ips_v6'] !== [], [...$ips['ips_v4'], ...$ips['ips_v6']]);
+        if ($vhosts === $this->renderedProxyRuleVhosts()) {
+            return false;
+        }
+        $this->writeProxyRuleVhosts($vhosts);
+
+        return true;
+    }
+
+    /**
      * Render persisted HTTP proxy rules to vhost config files, one per port and server name.
      *
      * @param  array<array>  $httpRules  HTTP rules from RoutingCompiler
@@ -636,15 +657,71 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
      */
     protected function renderProxyRuleVhosts(array $httpRules, bool $listenIpv6, array $hostIps = []): void
     {
+        $this->writeProxyRuleVhosts($this->proxyRuleVhosts($httpRules, $listenIpv6, $hostIps));
+    }
+
+    /**
+     * One vhost per port and server name. On 443 a rule takes the server's trusted certificate that
+     * covers its name, when there is one.
+     *
+     * @psalm-param list<HttpRule> $httpRules
+     *
+     * @return array<string, string> config path => contents, by path
+     */
+    private function proxyRuleVhosts(array $httpRules, bool $listenIpv6, array $hostIps): array
+    {
+        $vhostsDir = $this->domainsConfigsDirPath();
+        $certificates = app(ProxyRuleCertificate::class, ['system' => $this->system]);
+        $vhosts = [];
+        foreach ($this->groupStandaloneProxyRules($httpRules) as $identifier => $ruleGroup) {
+            $ruleGroup = self::withTrustedCertificate($certificates, $ruleGroup);
+            $vhosts["{$vhostsDir}/proxy-rule-{$identifier}.conf"] = self::renderHttpProxyRule(self::proxyRuleTemplateVars($ruleGroup), $listenIpv6, $hostIps);
+        }
+        ksort($vhosts);
+
+        return $vhosts;
+    }
+
+    /** @return array<string, string> config path => contents, by path */
+    private function renderedProxyRuleVhosts(): array
+    {
+        $vhosts = [];
+        foreach (glob($this->domainsConfigsDirPath().'/proxy-rule-*.conf') ?: [] as $configPath) {
+            $vhosts[$configPath] = (string) $this->system->filesystem()->cat($configPath);
+        }
+        ksort($vhosts);
+
+        return $vhosts;
+    }
+
+    /** @param  array<string, string>  $vhosts  config path => contents */
+    private function writeProxyRuleVhosts(array $vhosts): void
+    {
         $vhostsDir = $this->domainsConfigsDirPath();
         $this->system->exec("sudo mkdir -p {$vhostsDir}");
         $this->system->exec("sudo rm -f {$vhostsDir}/proxy-rule-*.conf");
-
-        foreach ($this->groupStandaloneProxyRules($httpRules) as $identifier => $ruleGroup) {
-            $configPath = "{$vhostsDir}/proxy-rule-{$identifier}.conf";
-            $vhostConfig = self::renderHttpProxyRule(self::proxyRuleTemplateVars($ruleGroup), $listenIpv6, $hostIps);
+        foreach ($vhosts as $configPath => $vhostConfig) {
             $this->system->filesystem()->filePutContents($configPath, $vhostConfig);
         }
+    }
+
+    /**
+     * @param  array<string, mixed>  $ruleGroup
+     * @return array<string, mixed>
+     */
+    private static function withTrustedCertificate(ProxyRuleCertificate $certificates, array $ruleGroup): array
+    {
+        if ((int) $ruleGroup['listen_port'] !== self::HTTPS_PORT) {
+            return $ruleGroup;
+        }
+        $files = $certificates->covering($ruleGroup['server_names']);
+
+        return $files === null ? $ruleGroup : array_merge($ruleGroup, [
+            'ssl_enabled' => true,
+            'ssl_cert_pem_file' => $files['pem'],
+            'ssl_cert_key_file' => $files['key'],
+            'ssl_cert_sha256' => $files['sha256'],
+        ]);
     }
 
     /**
@@ -735,6 +812,7 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
         if ($ruleGroup['ssl_enabled']) {
             $templateVars['ssl_cert_pem_file'] = $ruleGroup['ssl_cert_pem_file'];
             $templateVars['ssl_cert_key_file'] = $ruleGroup['ssl_cert_key_file'];
+            $templateVars['ssl_cert_sha256'] = $ruleGroup['ssl_cert_sha256'] ?? null;
         }
 
         return $templateVars;
@@ -754,7 +832,8 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
      *   upstream_port: int,
      *   ssl_enabled: bool,
      *   ssl_cert_pem_file?: ?string,
-     *   ssl_cert_key_file?: ?string
+     *   ssl_cert_key_file?: ?string,
+     *   ssl_cert_sha256?: ?string
      * } $vars
      */
     public static function renderHttpProxyRule(array $vars, bool $listenIpv6 = false, array $hostIps = []): string
@@ -808,7 +887,9 @@ NGINX;
             return '';
         }
 
-        return <<<NGINX
+        $fingerprint = empty($vars['ssl_cert_sha256']) ? '' : "    # certificate sha256 {$vars['ssl_cert_sha256']}\n";
+
+        return $fingerprint.<<<NGINX
     ssl_certificate {$vars['ssl_cert_pem_file']};
     ssl_certificate_key {$vars['ssl_cert_key_file']};
     ssl_protocols TLSv1.2 TLSv1.3;

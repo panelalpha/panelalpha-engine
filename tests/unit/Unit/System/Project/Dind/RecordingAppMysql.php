@@ -110,6 +110,16 @@ class RecordingAppMysql extends Mysql
             {
                 $this->server->users[$name] = $password;
             }
+
+            public function deleteUser(string $name): void
+            {
+                unset($this->server->users[$name]);
+                $this->server->grants = array_values(array_filter(
+                    $this->server->grants,
+                    static fn (array $grant): bool => $grant[0] !== $name,
+                ));
+                $this->server->log[] = "drop user {$name}";
+            }
         };
     }
 
@@ -136,6 +146,15 @@ class RecordingAppMysql extends Mysql
             public function updatePrivileges(string $user, string $database, string $privileges): void
             {
                 $this->server->grants[] = [$user, $database, $privileges];
+            }
+
+            public function revokeIfExists(string $user, string $database): void
+            {
+                $this->server->grants = array_values(array_filter(
+                    $this->server->grants,
+                    static fn (array $grant): bool => [$grant[0], $grant[1]] !== [$user, $database],
+                ));
+                $this->server->log[] = "revoke {$user} on {$database}";
             }
         };
     }

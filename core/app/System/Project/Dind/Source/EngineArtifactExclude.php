@@ -37,7 +37,7 @@ final class EngineArtifactExclude
         return new self(
             new GitRepository($dind),
             static function (string $path, string $contents) use ($dind, $chown): void {
-                $dind->system()->filesystem()->filePutContents($path, $contents, $chown, '644');
+                $dind->system()->filesystem()->writeFileReplacingPath($path, $contents, $chown, '644');
             },
         );
     }

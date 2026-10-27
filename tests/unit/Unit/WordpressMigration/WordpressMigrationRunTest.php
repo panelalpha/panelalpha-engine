@@ -103,7 +103,7 @@ class WordpressMigrationRunTest extends WordpressMigrationTestCase
         $module->advanceOnce($migration->fresh());
 
         $this->assertSame(WordpressMigration::STEP_STATUS_COMPLETED, $migration->fresh()->stepStatus(WordpressMigration::STEP_MIGRATE_FILES));
-        $this->assertSame(3, $http->count('POST', 'https://example.com/wp-json/wp-migrator/v1/remote-sync/process-batch'));
+        $this->assertSame(3, $http->countWithToken('POST', 'https://example.com/wp-json/wp-migrator/v1/remote-sync/process-batch'));
     }
 
     public function test_a_step_that_returns_unfinished_without_being_batched_fails(): void
@@ -183,6 +183,7 @@ class WordpressMigrationRunTest extends WordpressMigrationTestCase
             $migration->markStepCompleted($step['name']);
         }
         $migration->storePluginMigrationId('mig-files');
+        $migration->storeSourceToken(self::SOURCE_TOKEN);
         $migration->storeResolvedSource('https://example.com', null, SourceSite::REST_WP_JSON);
 
         return $migration->fresh();
@@ -193,6 +194,7 @@ class WordpressMigrationRunTest extends WordpressMigrationTestCase
         $sent = 0;
 
         return (new RoutedSourceHttpClient())
+            ->requiringToken(self::SOURCE_TOKEN)
             ->on('GET', 'https://example.com/wp-json/wp-migrator/v1/remote-sync/status/mig-files', new SourceHttpResponse(
                 json_encode(['success' => true, 'status' => ['status' => 'running', 'phase' => 'files']], JSON_THROW_ON_ERROR),
                 200,

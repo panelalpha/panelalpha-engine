@@ -123,6 +123,7 @@ class WordpressMigrationProgressTest extends WordpressMigrationTestCase
         $client = new SourceWordpressClient($http);
         $client->setBatchRetrySleepSeconds(0);
         $client->useSite(new SourceSite('https://example.com'));
+        $client->useSourceToken(self::SOURCE_TOKEN);
 
         $batch = $client->processBatch('mig-1');
 

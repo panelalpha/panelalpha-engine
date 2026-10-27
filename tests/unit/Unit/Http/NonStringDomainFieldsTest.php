@@ -65,7 +65,7 @@ class NonStringDomainFieldsTest extends TestCase
 
         $this->assertSame(['a.com'], $changes['domain']);
         $this->assertTrue(
-            Validator::make(['domain' => ['a.com']], NewProjectRules::rules('username', null))->fails()
+            Validator::make(['domain' => ['a.com']], NewProjectRules::rules('username', null, false))->fails()
         );
     }
 }

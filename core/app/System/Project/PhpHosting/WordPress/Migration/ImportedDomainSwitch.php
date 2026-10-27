@@ -8,6 +8,8 @@ use App\Models\Setting;
 use App\Models\User;
 use App\Models\WordpressMigration;
 use Closure;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * The DNS switch of an imported site, which is the engine's job: once the
@@ -31,6 +33,28 @@ final class ImportedDomainSwitch
         $this->probe ??= new DestinationProbe;
         $this->requestCertificate ??= self::requestEligibleCertificate(...);
         $this->preview ??= new PreviewTunnel;
+    }
+
+    /**
+     * Checks every imported site still waiting for its domain's DNS. One
+     * domain's failure is logged and does not stop the next.
+     *
+     * @return array{switched: int, failures: list<string>} each failure is "<domain>: <reason>"
+     */
+    public function checkAwaiting(): array
+    {
+        $switched = 0;
+        $failures = [];
+        foreach (WordpressMigration::awaitingDnsSwitch() as $migration) {
+            try {
+                $switched += $this->check($migration) ? 1 : 0;
+            } catch (Throwable $e) {
+                $failures[] = "{$migration->target_label}: ".$e->getMessage();
+                Log::warning("WordPress import DNS switch failed for {$migration->target_label}: ".$e->getMessage());
+            }
+        }
+
+        return ['switched' => $switched, 'failures' => $failures];
     }
 
     /**

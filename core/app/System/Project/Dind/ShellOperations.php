@@ -303,7 +303,7 @@ final class ShellOperations
         }
 
         $path = rtrim($this->project->homeDirPath(), '/').'/.panelalpha-hook-env-'.bin2hex(random_bytes(8));
-        $this->project->system()->filesystem()->filePutContents(
+        $this->project->system()->filesystem()->writeFileReplacingPath(
             $path,
             implode("\n", $lines)."\n",
             $user->getChownString() ?: $this->project->username(),

@@ -192,6 +192,59 @@ PEM;
         $this->assertQueuedApply('alice', (int) $first['token_id'], 2);
     }
 
+    public function test_removing_a_project_from_the_scopes_leaves_every_other_name(): void
+    {
+        $access = $this->access();
+        $this->makeUser('carol', self::CONTAINER_DETAILS);
+        $access->allow($this->user('alice'), ['alice', 'bob'], false);
+        $access->allow($this->user('carol'), ['bob'], false);
+        $access->allow($this->user('bob'), ApiAccess::SCOPE_SELF, false);
+
+        $access->removeFromScopes('bob');
+
+        $this->assertSame(['alice'], $access->entryFor($this->user('alice'))['scope']);
+        $this->assertSame([], $access->entryFor($this->user('carol'))['scope'], 'a list left empty is not widened to self');
+        $this->assertSame(ApiAccess::SCOPE_SELF, $access->entryFor($this->user('bob'))['scope']);
+    }
+
+    public function test_rotating_never_grants_a_name_its_token_no_longer_reaches(): void
+    {
+        $access = $this->access();
+        $first = $access->allow($this->user('alice'), ['alice', 'bob'], false);
+        $this->token((int) $first['token_id'])
+            ->forceFill(['abilities' => ['api', 'project', 'project:alice']])
+            ->save();
+
+        $second = $access->rotate($this->user('alice'));
+
+        $this->assertSame(['alice'], $second['scope']);
+        $this->assertSame(['api', 'project', 'project:alice'], $this->token((int) $second['token_id'])->abilities);
+    }
+
+    public function test_rotating_drops_a_name_that_is_no_longer_a_project(): void
+    {
+        $access = $this->access();
+        $access->allow($this->user('alice'), ['alice', 'bob'], false);
+        User::query()->where('username', 'bob')->delete();
+
+        $second = $access->rotate($this->user('alice'));
+
+        $this->assertSame(['alice'], $second['scope']);
+        $this->assertSame(['api', 'project', 'project:alice'], $this->token((int) $second['token_id'])->abilities);
+    }
+
+    public function test_rotating_a_scope_left_with_no_project_mints_a_token_that_reaches_none(): void
+    {
+        $access = $this->access();
+        $access->allow($this->user('alice'), ['bob'], false);
+        $access->removeFromScopes('bob');
+
+        $second = $access->rotate($this->user('alice'));
+
+        $this->assertSame([], $second['scope']);
+        $this->assertSame(['api', 'project'], $this->token((int) $second['token_id'])->abilities);
+    }
+
     public function test_rotating_a_project_that_is_not_allowed_is_refused(): void
     {
         $e = $this->refusal(fn () => $this->access()->rotate($this->user('alice')));

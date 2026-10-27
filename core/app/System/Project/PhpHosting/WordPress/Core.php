@@ -10,14 +10,14 @@ namespace App\System\Project\PhpHosting\WordPress;
  * a reachable database without WordPress tables. On an is-installed exit 1,
  * missing core and wp-config.php are read from WP-CLI's own messages, which
  * are never translated; the database is then probed with `wp db query`,
- * since WordPress's own connection error is in the site's language. Anything
- * the engine cannot tell is "unknown", never a guess. Install and update are
- * thin wrappers around WP-CLI. HTTP, artisan, and MCP tools are adapters.
- * Path resolution and the runner come from WpCli; a non-zero exit on install
- * or update becomes Exception. Any is-installed exit other than 0 or 1 (a
- * fatal error loading the site) is a failure, never "not installed", so a
- * caller does not install over a broken but existing site. Download is for
- * PHP hosting only and never writes over an existing core: there is no --force.
+ * since WordPress's own connection error is in the site's language. Without
+ * a MySQL client to probe with, the state says so. Anything else the engine
+ * cannot tell is "unknown", never a guess. Install and update are
+ * thin wrappers around WP-CLI; a non-zero exit on either becomes Exception.
+ * Any is-installed exit other than 0 or 1 (a fatal error loading the site) is
+ * a failure, never "not installed", so a caller does not install over a
+ * broken but existing site. Download is for PHP hosting only and never writes
+ * over an existing core: there is no --force.
  */
 final class Core
 {
@@ -34,6 +34,8 @@ final class Core
     public const STATE_DB_UNREACHABLE = 'db_unreachable';
 
     public const STATE_NO_CORE = 'no_core';
+
+    public const STATE_NO_DB_CLIENT = 'no_db_client';
 
     public const STATE_UNKNOWN = 'unknown';
 
@@ -52,11 +54,14 @@ final class Core
     /** Loads wp-config.php only and runs the MySQL client against the database it names. */
     public const DB_PROBE = ['db', 'query', 'SELECT 1'];
 
+    /** The shell's exit code when the probe's mysql client is not installed. */
+    private const COMMAND_NOT_FOUND_EXIT = 127;
+
     /** A MySQL or MariaDB client error code, from `mysql` (ERROR 2005) or `mysqlcheck` (Got error: 2005). */
     public const MYSQL_CLIENT_ERROR_PATTERN = '/\b(?:ERROR|Got error:) \d{4}\b/';
 
-    /** PHP diagnostics WordPress may print under CLI without anything being wrong. */
-    public const PHP_DIAGNOSTIC_PATTERN = '/^(?:PHP )?(?:Warning|Notice|Deprecated|Strict Standards):/';
+    /** PHP diagnostics WordPress may print under CLI without anything being wrong, with or without the error log's timestamp. */
+    public const PHP_DIAGNOSTIC_PATTERN = '/^(?:\[[^\]]*\]\s*)?(?:PHP )?(?:Warning|Notice|Deprecated|Strict Standards):/';
 
     public function __construct(
         private WpCli $cli,
@@ -109,7 +114,14 @@ final class Core
 
     private function databaseState(string $isInstalledOutput): string
     {
-        $probe = $this->cli->run(self::DB_PROBE);
+        try {
+            $probe = $this->cli->run(self::DB_PROBE);
+        } catch (DatabaseClientMissing) {
+            return self::STATE_NO_DB_CLIENT;
+        }
+        if (($probe['exit_code'] ?? 1) === self::COMMAND_NOT_FOUND_EXIT) {
+            return self::STATE_NO_DB_CLIENT;
+        }
         if (($probe['exit_code'] ?? 1) === 0) {
             return $this->withoutPhpDiagnostics($isInstalledOutput) === ''
                 ? self::STATE_NOT_INSTALLED
@@ -158,6 +170,7 @@ final class Core
     /**
      * Fetch WordPress core into the install directory with `wp core download`;
      * a directory that already holds core is a 409, a container project a 422.
+     * The directory is inside the home, the one the 409 check looked at.
      *
      * @return array{version: string|null, locale: string, path: string}
      */

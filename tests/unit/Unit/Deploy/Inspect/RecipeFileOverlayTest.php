@@ -25,7 +25,7 @@ class RecipeFileOverlayTest extends TestCase
 
     protected function tearDown(): void
     {
-        exec('rm -rf ' . escapeshellarg($this->dir));
+        exec('rm -rf ' . escapeshellarg($this->dir) . ' ' . escapeshellarg($this->dir . '-outside'));
         parent::tearDown();
     }
 
@@ -79,6 +79,36 @@ class RecipeFileOverlayTest extends TestCase
 
         $this->assertNotContains(EngineArtifacts::APP_CONFIG_COMPOSE, RecipeFileOverlay::apply($this->dir, null));
         $this->assertFileDoesNotExist($this->dir . '/' . EngineArtifacts::APP_CONFIG_COMPOSE);
+    }
+
+    /** Copied, a file linked out of the clone would be one inspect reads as the repository's own. */
+    public function test_a_repository_file_linked_out_of_the_clone_is_not_copied_into_it(): void
+    {
+        mkdir($this->dir . '-outside');
+        file_put_contents($this->dir . '-outside/.env', "APP_KEY=base64:core-secret\n");
+        $this->writeOwnAppConfig();
+        symlink($this->dir . '-outside/.env', $this->dir . '/.panelalpha/files/.env.example');
+
+        $this->assertNotContains('.env.example', RecipeFileOverlay::apply($this->dir, null));
+        $this->assertNotContains('APP_KEY', AppInspector::inspect($this->dir)['environment']['variables']);
+    }
+
+    public function test_a_repository_file_linked_inside_the_clone_is_copied(): void
+    {
+        mkdir($this->dir . '/config');
+        file_put_contents($this->dir . '/config/defaults.env', "APP_NAME=clone\n");
+        $this->writeOwnAppConfig();
+        symlink('../../config/defaults.env', $this->dir . '/.panelalpha/files/.env.example');
+
+        $this->assertContains('.env.example', RecipeFileOverlay::apply($this->dir, null));
+        $this->assertContains('APP_NAME', AppInspector::inspect($this->dir)['environment']['variables']);
+    }
+
+    private function writeOwnAppConfig(): void
+    {
+        mkdir($this->dir . '/.panelalpha/files', 0755, true);
+        file_put_contents($this->dir . '/.panelalpha/panelalpha.yaml', "description: x\n");
+        file_put_contents($this->dir . '/index.html', '<h1>clone</h1>');
     }
 
     /** The four files the `wordpress` manifest's detect block asks for. */

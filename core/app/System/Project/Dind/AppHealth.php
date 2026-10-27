@@ -943,6 +943,17 @@ SH;
     /** The checks that failed, so the deploy can act on their severities. */
     public const DETAIL_CHECKS = 'health_failed_checks';
 
+    /** Every key {@see remember()} writes. */
+    private const VERDICT_DETAILS = [
+        self::DETAIL_CHECKED,
+        self::DETAIL_HEALTHY,
+        self::DETAIL_REACHABLE,
+        self::DETAIL_REACHABLE_CODE,
+        self::DETAIL_SERVING,
+        self::DETAIL_CHECKS,
+        self::DETAIL_PORTS,
+    ];
+
     /**
      * What to say when an application publishes ports and answers on none of
      * them. Here rather than in the controller that used to own it, so the
@@ -1062,6 +1073,80 @@ SH;
     }
 
     /**
+     * Why an application started with no deploy log to report to (a push's) is not
+     * running ({@see notRunning()}), read as {@see report()} reads a deploy's: the same
+     * probe budget and wait for a slow start. Null when it runs. A start refused for
+     * this is undone, so the verdict from before it is put back.
+     */
+    public function startFailure(): ?string
+    {
+        $before = $this->containerSnapshot();
+        $previous = $this->verdictNow();
+        $report = $this->observe(self::DEPLOY_TIMEOUT, self::DEPLOY_ATTEMPTS, self::DEPLOY_DELAY, true);
+        if ($report === null || isset($report['error'])) {
+            return null;
+        }
+        if ($report['healthy'] !== null) {
+            $report = $this->awaitSlowStart($report, $before, null);
+        }
+        $failure = self::notRunning($this->withLateRestartLoop($report, $before));
+        if ($failure !== null) {
+            $this->putBackVerdict($previous);
+        }
+
+        return $failure;
+    }
+
+    /**
+     * What says a report's application is not running: nothing answered on any port it
+     * publishes, and it restarts, is stopped, or still listens on nothing. An app that
+     * answered, even an error, or publishes no port, is one a deploy calls partial instead.
+     *
+     * @param  array<string, mixed>  $report
+     */
+    public static function notRunning(array $report): ?string
+    {
+        $ports = (array) ($report['ports'] ?? []);
+        if ($ports === [] || ! self::nothingAt($ports)) {
+            return null;
+        }
+        foreach ((array) ($report['checks'] ?? []) as $check) {
+            if (is_array($check) && self::saysNotRunning($check)) {
+                return trim(implode(' ', array_filter([$check['title'] ?? null, $check['detail'] ?? null], is_string(...))));
+            }
+        }
+
+        return null;
+    }
+
+    /** @param  array<string, mixed>  $check */
+    private static function saysNotRunning(array $check): bool
+    {
+        return in_array($check['id'] ?? null, [self::CHECK_RESTART_LOOPING, self::CHECK_APP_STOPPED], true)
+            || SilentPortCheck::starting($check) !== [];
+    }
+
+    /** @return array<string, mixed> the remembered verdict, null for a key never written */
+    private function verdictNow(): array
+    {
+        $details = $this->dind->userModel()->getDetails();
+
+        return array_intersect_key($details, array_flip(self::VERDICT_DETAILS)) + array_fill_keys(self::VERDICT_DETAILS, null);
+    }
+
+    /** @param  array<string, mixed>  $verdict  from {@see verdictNow()} */
+    private function putBackVerdict(array $verdict): void
+    {
+        try {
+            $user = $this->dind->userModel();
+            $user->setDetails($verdict);
+            $user->save();
+        } catch (\Throwable $e) {
+            Log::debug('Could not put back the app health verdict: '.$e->getMessage());
+        }
+    }
+
+    /**
      * One answer is not an app that stays up: MintHCM answered 200, exited 0 a
      * second later and restart-looped behind a 502 while the deploy read green.
      *
@@ -1114,7 +1199,7 @@ SH;
      * @param  array<string, mixed>  $report
      * @return array<string, mixed>
      */
-    protected function awaitSlowStart(array $report, ?string $before, DeployLogger $logger): array
+    protected function awaitSlowStart(array $report, ?string $before, ?DeployLogger $logger): array
     {
         $starting = [];
         foreach ((array) ($report['checks'] ?? []) as $check) {
@@ -1125,7 +1210,7 @@ SH;
             return $report;
         }
 
-        $logger->info(sprintf(
+        $logger?->info(sprintf(
             'Still starting: %s listens on nothing yet; waiting up to %s more',
             implode(', ', array_unique($starting)),
             self::duration($budget)
@@ -1133,7 +1218,7 @@ SH;
         $deadline = $this->clock() + $budget;
         $bound = false;
         while ($this->clock() < $deadline) {
-            $logger->throwIfCancelled();
+            $logger?->throwIfCancelled();
             $this->pause(min(self::START_POLL_SECONDS, max(1, $deadline - $this->clock())));
             $after = $this->containerSnapshot();
             if ($after !== null && self::restartLoopBetween($before, $after) !== null) {

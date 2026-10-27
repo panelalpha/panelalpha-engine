@@ -20,7 +20,7 @@ final class SourceSiteResolver
      *
      * @throws SourceCheckFailed
      */
-    public function logIn(SourceAccess $access): SourceSite
+    public function logIn(SourceAccess $access, bool $confirmAdminEmail = true): SourceSite
     {
         $failure = null;
         $tried = [];
@@ -31,7 +31,7 @@ final class SourceSiteResolver
                     continue;
                 }
                 $tried[$site->url.' '.$site->loginUrl] = true;
-                $this->client->logIn($site, (string) $access->username, (string) $access->password);
+                $this->client->logIn($site, (string) $access->username, (string) $access->password, $confirmAdminEmail);
 
                 return $site;
             } catch (Throwable $e) {

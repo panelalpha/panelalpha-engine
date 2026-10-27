@@ -74,4 +74,9 @@ class Git extends WorkTree
 
         return $this->runCommand($cmd, $timeout);
     }
+
+    protected function runsOnHost(): bool
+    {
+        return ! $this->project->runsInDind();
+    }
 }

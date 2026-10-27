@@ -41,7 +41,7 @@ final class Files
         $projectDir = $this->tree()->appDirPath();
         $chown = $user->getChownString();
 
-        $archive = UploadedArchive::inHome($zipPath, $home);
+        $archive = UploadedArchive::inHome($zipPath, $home, $this->project->project()->fileManager()->resolvedFile(...));
         $uid = $user->getUid();
         $gid = $user->getGid();
         if ($uid === null || $gid === null) {

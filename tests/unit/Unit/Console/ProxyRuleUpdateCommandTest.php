@@ -24,7 +24,7 @@ class ProxyRuleUpdateCommandTest extends TestCase
         parent::setUp();
         $this->bootInMemoryDatabase();
         $this->recordWebserverApply();
-        $this->makeMainDomain($this->makeUser('alice'), 'shop.test');
+        $this->makeMainDomain($this->makeUser('alice', ['template' => 'dind']), 'shop.test');
         $this->rule = ProxyRule::query()->create([
             'owner_scope' => 'user',
             'username' => 'alice',
@@ -91,7 +91,7 @@ class ProxyRuleUpdateCommandTest extends TestCase
     /** A rule named after another project's site cannot be renamed here, so it can only be switched off. */
     public function test_a_rule_on_another_projects_site_can_only_be_switched_off(): void
     {
-        $this->makeMainDomain($this->makeUser('bob'), 'bob.test');
+        $this->makeMainDomain($this->makeUser('bob', ['template' => 'dind']), 'bob.test');
         $this->rule->update(['server_name' => 'bob.test']);
 
         $this->update('--upstream-port=8081')
@@ -126,6 +126,48 @@ class ProxyRuleUpdateCommandTest extends TestCase
 
         $this->assertFalse($duplicate->fresh()->enabled);
         $this->assertWebserverApplied(0);
+    }
+
+    /** stream.conf renders no server name, so a second live tcp rule on one address and port must not be switched on. */
+    public function test_re_enabling_a_disabled_stream_duplicate_is_refused(): void
+    {
+        $stream = ['owner_scope' => 'system', 'username' => null, 'transport' => 'tcp', 'listen_ip' => '*',
+            'listen_port' => 3306, 'upstream_host' => '10.0.0.9', 'upstream_port' => 3306];
+        ProxyRule::query()->create($stream + ['enabled' => true]);
+        /** @var ProxyRule $duplicate */
+        $duplicate = ProxyRule::query()->create($stream + ['enabled' => false]);
+
+        $this->artisan("proxy:rule:update {$duplicate->id} --enabled=1 --no-interaction --force")
+            ->expectsOutput('A rule with the same transport, port, and server_name already exists')
+            ->assertExitCode(1);
+
+        $this->assertFalse($duplicate->fresh()->enabled);
+        $this->assertWebserverApplied(0);
+    }
+
+    /** Switching on a rule clients will warn about says so, as PUT /proxy-rules/{id} does. */
+    public function test_switching_on_a_wildcard_rule_on_443_warns_about_the_default_certificate(): void
+    {
+        /** @var ProxyRule $wildcard */
+        $wildcard = ProxyRule::query()->create([
+            'owner_scope' => 'system',
+            'username' => null,
+            'transport' => 'http',
+            'listen_ip' => '*',
+            'listen_port' => 443,
+            'server_name' => '*.shop.test',
+            'upstream_host' => '10.0.0.9',
+            'upstream_port' => 8443,
+            'enabled' => false,
+        ]);
+
+        $this->artisan("proxy:rule:update {$wildcard->id} --enabled=1 --no-interaction --force")
+            ->expectsOutputToContain('Rule updated successfully')
+            ->expectsOutputToContain("served with the host's default self-signed certificate")
+            ->assertExitCode(0);
+        $this->artisan("proxy:rule:update {$wildcard->id} --enabled=0 --no-interaction --force")
+            ->doesntExpectOutputToContain('self-signed')
+            ->assertExitCode(0);
     }
 
     public function test_disabling_a_rule_is_applied(): void

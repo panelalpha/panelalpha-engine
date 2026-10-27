@@ -23,6 +23,7 @@ use App\System\Project\PhpHosting\WordPress\Migration\Steps\RemoteSyncStep;
 use App\System\Project\PhpHosting\WordPress\Migration\Steps\RemovePluginsStep;
 use App\System\Project\PhpHosting\WordPress\Migration\Steps\ResolveSourceStep;
 use App\System\Project\PhpHosting\WordPress\Migration\Steps\VerifySourcePluginStep;
+use App\System\Project\PhpHosting\WordPress\Migration\WordpressMigratorZip;
 use InvalidArgumentException;
 use RuntimeException;
 use Throwable;
@@ -33,9 +34,11 @@ use Throwable;
  * of a batched one), and says whether another run must follow. A requested
  * cancel is carried out by the next run instead of a step. Source calls keep
  * the claim alive while they wait; a run that lost its claim to another one
- * stops without touching the record.
+ * stops without touching the record. The plugin zip a run downloaded is
+ * removed when the run ends, however it ends.
  *
- * Status transitions stay on the record. The controller queues the job.
+ * Status transitions stay on the record. MigrationStarter queues the job for
+ * a new record, the controller for a resume or a cancel.
  * The queue job is an adapter that constructs this module with no arguments.
  * Tests pass a substitute sequence; callers other than tests use the production sequence.
  */
@@ -137,6 +140,7 @@ final class Migration
             return $this->slice($migration->refresh(), $runId);
         } finally {
             $this->source->keepAlive(null);
+            WordpressMigratorZip::discard($migration->id);
             $migration->releaseRun($runId);
         }
     }

@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Wp;
 
+use App\Rules\WpCliArgument;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
@@ -17,7 +18,7 @@ class WpApplicationPasswordCreateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => 'required|string',
+            'name' => ['required', 'string', new WpCliArgument],
             'app_id' => 'sometimes|nullable|string',
             'path' => 'sometimes|nullable|string',
             'service' => ['sometimes', 'nullable', 'string', 'regex:/^[A-Za-z0-9][A-Za-z0-9_.-]*$/'],

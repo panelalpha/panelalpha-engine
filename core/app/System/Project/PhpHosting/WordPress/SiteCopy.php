@@ -11,7 +11,8 @@ use App\System\Services\Mysql\DatabaseCopyResult;
  * database and answering as the source's domain, and a push leaves the target
  * on the source's wp-config.php and addresses. Every step reads wp-config.php
  * or runs without plugins and themes, so a broken plugin cannot stop it.
- * On a multisite only the main site moves; subsites keep their addresses.
+ * On a multisite the main site moves with every site on its host, which in
+ * a subdirectory network is every site; subsites on their own hosts stay.
  */
 final class SiteCopy
 {

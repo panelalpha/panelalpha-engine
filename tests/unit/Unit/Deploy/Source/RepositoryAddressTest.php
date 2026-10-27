@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\Source;
 
 use App\Lib\Deploy\Source\RepositoryAddress;
 use App\Lib\Http\OutboundUrl;
+use App\Lib\Net\EgressRefusedException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
@@ -90,6 +91,54 @@ class RepositoryAddressTest extends TestCase
 
         $this->assertTrue(RepositoryAddress::refused($repo), $repo);
         $this->assertSame('host_refused', RepositoryAddress::problem($repo)['code'] ?? null);
+    }
+
+    /**
+     * Whatever the system resolver makes of a numeric IPv4 form, it is refused:
+     * glibc reads it as the loopback or metadata address, another resolver not at all.
+     *
+     * @return array<string, array{string}>
+     */
+    public static function numericForms(): array
+    {
+        return [
+            'hexadecimal loopback' => ['0x7f000001'],
+            'decimal integer loopback' => ['2130706433'],
+            'octal loopback' => ['0177.0.0.1'],
+            'hexadecimal metadata' => ['0xa9fea9fe'],
+            'short loopback' => ['127.1'],
+        ];
+    }
+
+    #[DataProvider('numericForms')]
+    public function test_a_numeric_ipv4_form_has_no_address_core_may_connect_to(string $host): void
+    {
+        $this->expectException(EgressRefusedException::class);
+
+        RepositoryAddress::checkedAddress($host);
+    }
+
+    public function test_the_checked_address_is_the_one_resolved_and_a_literal_is_itself(): void
+    {
+        OutboundUrl::setResolverForTests(static fn (string $host): array => ['140.82.121.4', '2606:50c0:8000::153']);
+
+        $this->assertSame('140.82.121.4', RepositoryAddress::checkedAddress('github.com'));
+        $this->assertSame('140.82.121.4', RepositoryAddress::checkedAddress('140.82.121.4'));
+    }
+
+    public function test_a_refused_host_names_the_address_it_resolved_to(): void
+    {
+        OutboundUrl::setResolverForTests(static fn (string $host): array => ['169.254.169.254']);
+
+        try {
+            RepositoryAddress::checkedAddress('metadata.example.test');
+            $this->fail('An internal address was allowed.');
+        } catch (EgressRefusedException $e) {
+            $this->assertSame(
+                'metadata.example.test resolves to 169.254.169.254, which this engine does not fetch from.',
+                $e->getMessage(),
+            );
+        }
     }
 
     public function test_a_bracketed_ipv6_scp_remote_yields_its_host_and_is_refused(): void

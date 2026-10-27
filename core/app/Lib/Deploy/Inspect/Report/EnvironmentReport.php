@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Inspect\Report;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Env\EnvTemplates;
 use App\Lib\Deploy\EnvFile;
 
@@ -85,7 +86,7 @@ final class EnvironmentReport
     private function contents(string $name): ?string
     {
         $path = $this->projectDir.'/'.$name;
-        $contents = is_file($path) ? @file_get_contents($path) : null;
+        $contents = is_file($path) ? AccountHomeRead::contents($path) : null;
 
         return is_string($contents) && $contents !== '' ? $contents : null;
     }

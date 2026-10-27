@@ -10,8 +10,9 @@ use Throwable;
  * transport (process memory). Never logs the wp-admin password or migrator token.
  *
  * The plugin's transfer routes need no wp-admin session, only the site
- * ({@see useSite}); installing, activating and deleting the plugin need one
- * ({@see logIn}).
+ * ({@see useSite}) and the token the plugin carries ({@see useSourceToken}),
+ * which every transfer call sends; installing, activating and deleting the
+ * plugin need a session ({@see logIn}).
  */
 final class SourceWordpressClient
 {
@@ -21,7 +22,19 @@ final class SourceWordpressClient
 
     private const TOKEN_CHECK_MIGRATION_ID = 'panelalpha-token-check';
 
+    private const TOKEN_CHECK_STATUS_ID = 'panelalpha_token_check';
+
+    /** The routes that send the site away, as {@see answersWithoutToken} asks them without a token. */
+    private const TRANSFER_ROUTES = [
+        ['POST', '/wp-migrator/v1/remote-sync'],
+        ['POST', '/wp-migrator/v1/remote-sync/process-batch'],
+        ['GET', '/wp-migrator/v1/remote-sync/status/'.self::TOKEN_CHECK_STATUS_ID],
+        ['POST', '/wp-migrator/v1/transfer-htaccess'],
+    ];
+
     private string $homeUrl = '';
+
+    private ?string $sourceToken = null;
 
     private string $restMode = SourceSite::REST_WP_JSON;
 
@@ -63,6 +76,14 @@ final class SourceWordpressClient
     }
 
     /**
+     * The token in the source plugin's config.php, sent on every transfer call.
+     */
+    public function useSourceToken(string $token): void
+    {
+        $this->sourceToken = $token;
+    }
+
+    /**
      * Tests may set this to 0 so fixture retries do not sleep.
      */
     public function setBatchRetrySleepSeconds(int $seconds): void
@@ -74,8 +95,11 @@ final class SourceWordpressClient
      * Build the JSON body for POST …/remote-sync.
      * destination_url is the destination site URL (incl. subdirectory) plus ?token=.
      * ip, when given, is where the plugin sends the destination's name
-     * (CURLOPT_RESOLVE, TLS unverified), so the transfer reaches this engine
-     * while the domain's DNS still points at the old server.
+     * (CURLOPT_RESOLVE), so the transfer reaches this engine while the
+     * domain's DNS still points at the old server; insecure_tls goes with it,
+     * since this engine has no certificate for that name yet. force takes over
+     * a transfer holding the source's lock, so only a caller that knows it
+     * started that transfer sets it.
      *
      * @param  list<string>  $extraExclusions
      * @return array{
@@ -83,8 +107,9 @@ final class SourceWordpressClient
      *     backup_database: true,
      *     backup_files: true,
      *     exclusions: string,
-     *     force: true,
+     *     force: bool,
      *     ip?: string,
+     *     insecure_tls?: true,
      * }
      */
     public static function remoteSyncPayload(
@@ -92,6 +117,7 @@ final class SourceWordpressClient
         string $token,
         array $extraExclusions = ['wp-content/cache'],
         ?string $destinationIp = null,
+        bool $force = false,
     ): array {
         $payload = [
             'destination_url' => rtrim($destinationSiteUrl, '/').'?token='.$token,
@@ -103,19 +129,21 @@ final class SourceWordpressClient
                 '*.sql',
                 ...$extraExclusions,
             ]),
-            'force' => true,
+            'force' => $force,
         ];
 
-        return $destinationIp === null ? $payload : $payload + ['ip' => $destinationIp];
+        return $destinationIp === null ? $payload : $payload + ['ip' => $destinationIp, 'insecure_tls' => true];
     }
 
     /**
      * Log into wp-admin at the site's login URL. On success the ajax nonce is
-     * returned; cookies stay on $this->http.
+     * returned; cookies stay on $this->http. WordPress's admin e-mail check is
+     * answered only with $confirmAdminEmail: the session already exists behind
+     * it, and answering it changes the site.
      *
      * @throws SourceCheckFailed on bad credentials, a missing nonce or a Cloudflare block
      */
-    public function logIn(SourceSite $site, string $username, string $password): string
+    public function logIn(SourceSite $site, string $username, string $password, bool $confirmAdminEmail = true): string
     {
         $this->useSite($site);
         $home = $site->url;
@@ -132,7 +160,7 @@ final class SourceWordpressClient
             throw SourceCheckFailed::cloudflare();
         }
 
-        if (WpAdminHtml::isEmailVerificationAlert($postResponse->body)) {
+        if ($confirmAdminEmail && WpAdminHtml::isEmailVerificationAlert($postResponse->body)) {
             $this->submitEmailVerification($postResponse->body, $loginUrl);
             $this->http->request('POST', $loginUrl, $query);
         }
@@ -193,6 +221,32 @@ final class SourceWordpressClient
     }
 
     /**
+     * Whether any transfer route answers a call without the token, as releases
+     * before 1.2.0 do. Changes nothing on the source: those calls carry no
+     * destination or migration.
+     */
+    public function answersWithoutToken(): bool
+    {
+        $this->assertSite();
+        foreach (self::TRANSFER_ROUTES as [$method, $route]) {
+            if (! $this->refusesCallWithoutToken($method, $route)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function refusesCallWithoutToken(string $method, string $route): bool
+    {
+        $response = $method === 'POST'
+            ? $this->http->request('POST', $this->endpoint($route), '{}', ['Content-Type' => 'application/json'])
+            : $this->http->request($method, $this->endpoint($route));
+
+        return $response->status === 401 || $response->status === 403;
+    }
+
+    /**
      * Past the permission check, `/info` answers the made-up migration id with
      * its own not-found error; a missing route is WordPress's `rest_no_route`.
      */
@@ -210,17 +264,13 @@ final class SourceWordpressClient
 
     /**
      * Upload and leave the migrator plugin installed (active or inactive is fine;
-     * call {@see activatePlugin} next).
+     * call {@see activatePlugin} next). A copy already on the site is removed
+     * first, so the installed plugin is the one in this zip, with its token.
      */
     public function installPluginFromZip(string $zipPath): void
     {
         $this->assertAdminSession();
-
-        $list = $this->http->request('POST', $this->homeUrl.'/wp-admin/plugins.php');
-        $plugins = WpAdminHtml::plugins($list->body);
-        if (isset($plugins['active'][self::PLUGIN_SLUG]) || isset($plugins['inactive'][self::PLUGIN_SLUG])) {
-            return;
-        }
+        $this->deletePlugin(self::PLUGIN_SLUG);
 
         $uploadPage = $this->http->request(
             'GET',
@@ -316,18 +366,24 @@ final class SourceWordpressClient
         string $token,
         array $extraExclusions = ['wp-content/cache'],
         ?string $destinationIp = null,
+        bool $force = false,
     ): array {
         $this->assertSite();
 
-        $params = self::remoteSyncPayload($destinationSiteUrl, $token, $extraExclusions, $destinationIp);
+        $params = self::remoteSyncPayload($destinationSiteUrl, $token, $extraExclusions, $destinationIp, $force);
 
-        try {
-            return $this->postJson($this->endpoint('/wp-migrator/v1/remote-sync'), $params);
-        } catch (Throwable $e) {
-            $this->changeRestMode();
+        return $this->pluginCall('POST', '/wp-migrator/v1/remote-sync', $params);
+    }
 
-            return $this->postJson($this->endpoint('/wp-migrator/v1/remote-sync'), $params);
-        }
+    /**
+     * The migration a refused remote-sync names as holding the source's lock,
+     * in the plugin's own wording; null for any other failure.
+     */
+    public static function lockHolder(Throwable $failure): ?string
+    {
+        return preg_match('/Another migration is already in progress\. Migration ID: ([A-Za-z0-9_]+)/', $failure->getMessage(), $match) === 1
+            ? $match[1]
+            : null;
     }
 
     /**
@@ -421,17 +477,7 @@ final class SourceWordpressClient
     {
         $this->assertSite();
 
-        try {
-            $response = $this->getJson(
-                $this->endpoint('/wp-migrator/v1/remote-sync/status/'.rawurlencode($migrationId))
-            );
-        } catch (Throwable $e) {
-            $this->changeRestMode();
-            $response = $this->getJson(
-                $this->endpoint('/wp-migrator/v1/remote-sync/status/'.rawurlencode($migrationId))
-            );
-        }
-
+        $response = $this->pluginCall('GET', '/wp-migrator/v1/remote-sync/status/'.rawurlencode($migrationId));
         $status = $response['status'] ?? [];
 
         return is_array($status) ? $status : [];
@@ -444,19 +490,7 @@ final class SourceWordpressClient
     {
         $this->assertSite();
 
-        $params = ['migration_id' => $migrationId];
-        try {
-            $response = $this->postJson(
-                $this->endpoint('/wp-migrator/v1/transfer-htaccess'),
-                $params,
-            );
-        } catch (Throwable $e) {
-            $this->changeRestMode();
-            $response = $this->postJson(
-                $this->endpoint('/wp-migrator/v1/transfer-htaccess'),
-                $params,
-            );
-        }
+        $response = $this->pluginCall('POST', '/wp-migrator/v1/transfer-htaccess', ['migration_id' => $migrationId]);
 
         if (($response['success'] ?? false) === false) {
             throw new RuntimeException(
@@ -505,27 +539,62 @@ final class SourceWordpressClient
     }
 
     /**
-     * @param  array<array-key, mixed>  $params
+     * One call to a transfer route, with the source token. It goes again in the
+     * other REST mode only when it did not reach the plugin (no answer, a
+     * missing route, or a page that is not the REST API); an answer from the
+     * plugin itself, an error included, is never sent again.
+     *
+     * @param  array<array-key, mixed>|null  $params
      * @return array<array-key, mixed>
      */
-    private function postJson(string $url, array $params): array
+    private function pluginCall(string $method, string $route, ?array $params = null): array
     {
-        $body = json_encode($params, JSON_THROW_ON_ERROR);
-        $response = $this->http->request('POST', $url, $body, [
-            'Content-Type' => 'application/json',
-        ]);
+        $body = $params === null ? null : json_encode($params, JSON_THROW_ON_ERROR);
+        $headers = ['X-Migrator-Token' => $this->requireSourceToken()]
+            + ($body === null ? [] : ['Content-Type' => 'application/json']);
+
+        $response = $this->sendToPlugin($method, $route, $body, $headers);
+        if ($response === null || ! self::reachedPlugin($response)) {
+            $this->changeRestMode();
+            $response = $this->http->request($method, $this->endpoint($route), $body, $headers);
+        }
 
         return $this->parsePluginResponse($response);
     }
 
     /**
-     * @return array<array-key, mixed>
+     * @param  array<string, string>  $headers
      */
-    private function getJson(string $url): array
+    private function sendToPlugin(string $method, string $route, ?string $body, array $headers): ?SourceHttpResponse
     {
-        $response = $this->http->request('GET', $url);
+        try {
+            return $this->http->request($method, $this->endpoint($route), $body, $headers);
+        } catch (SourceRequestAborted $e) {
+            throw $e;
+        } catch (Throwable) {
+            return null;
+        }
+    }
 
-        return $this->parsePluginResponse($response);
+    /**
+     * A JSON answer other than WordPress's `rest_no_route` came from the plugin.
+     */
+    private static function reachedPlugin(SourceHttpResponse $response): bool
+    {
+        try {
+            return ($response->json()['code'] ?? null) !== 'rest_no_route';
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    private function requireSourceToken(): string
+    {
+        if ($this->sourceToken === null || $this->sourceToken === '') {
+            throw new RuntimeException('The source plugin token is not set; no transfer call goes out without it');
+        }
+
+        return $this->sourceToken;
     }
 
     /**
@@ -533,20 +602,7 @@ final class SourceWordpressClient
      */
     private function runProcessBatch(string $migrationId): array
     {
-        $params = ['migration_id' => $migrationId];
-        try {
-            return $this->postJson(
-                $this->endpoint('/wp-migrator/v1/remote-sync/process-batch'),
-                $params,
-            );
-        } catch (Throwable $e) {
-            $this->changeRestMode();
-
-            return $this->postJson(
-                $this->endpoint('/wp-migrator/v1/remote-sync/process-batch'),
-                $params,
-            );
-        }
+        return $this->pluginCall('POST', '/wp-migrator/v1/remote-sync/process-batch', ['migration_id' => $migrationId]);
     }
 
     /**

@@ -97,8 +97,9 @@ class AppServiceProvider extends ServiceProvider
     /**
      * Raw WP-CLI (`wp/command` and the legacy `wp-cli/command`), and the named
      * operations that write a value: config constants and variables, a new
-     * wp-config.php (its database password), options, search-replace. Both prefixes, because routes/api.php registers the
-     * project route group under `projects` and `users` alike.
+     * wp-config.php (its database password), options, search-replace. Both
+     * prefixes, because routes/api.php registers the project route group under
+     * `projects` and `users` alike.
      */
     private static function takesVerbatimWordPressInput(Request $request): bool
     {

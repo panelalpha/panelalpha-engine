@@ -76,6 +76,20 @@ class AccountContainersTest extends TestCase
         ]], $system->ran);
     }
 
+    public function test_a_report_within_some_accounts_names_only_their_orphans(): void
+    {
+        $owned = ['rvgotify'];
+
+        $within = (new AccountContainers($this->system(FakeProcess::ok(self::PS))))->orphanReport($owned, ['pwbd1c1d74', 'rvgotify']);
+        $none = (new AccountContainers($this->system(FakeProcess::ok(self::PS))))->orphanReport($owned, []);
+        $every = (new AccountContainers($this->system(FakeProcess::ok(self::PS))))->orphanReport($owned);
+
+        $this->assertSame(['pwbd1c1d74'], array_column($within['containers'], 'project'));
+        $this->assertStringNotContainsString('swkorphan', (string) $within['warning']);
+        $this->assertSame(['count' => 0, 'containers' => [], 'warning' => null], $none);
+        $this->assertSame(['swkorphan', 'pwbd1c1d74'], array_column($every['containers'], 'project'));
+    }
+
     public function test_a_failed_listing_is_a_warning_not_a_clean_bill(): void
     {
         $system = $this->system(FakeProcess::failed('Cannot connect to the Docker daemon'));

@@ -67,7 +67,7 @@ class ProjectEnvironment
         [$baseContents, $keyAdded] = $this->withLaravelAppKey($user, $baseContents, $source, $overrides, $logger);
         [$baseContents, $requiredUrls, $generated] = $this->withComposeRequiredValues($baseContents, $overrides, $logger);
         if ($baseContents !== null) {
-            $fs->filePutContents($defaultPath, $baseContents, $chown, self::OWNER_ONLY);
+            $fs->writeFileReplacingPath($defaultPath, $baseContents, $chown, self::OWNER_ONLY);
         }
 
         $tracked = $overrides !== [] && $this->envIsTracked();
@@ -295,7 +295,7 @@ class ProjectEnvironment
         $fs = $system->filesystem();
         $path = $projectDir.'/'.EngineArtifacts::ENV_OVERRIDES;
         if ($values !== []) {
-            $fs->filePutContents($path, EnvFile::merge('', $values), $chown, self::OWNER_ONLY);
+            $fs->writeFileReplacingPath($path, EnvFile::merge('', $values), $chown, self::OWNER_ONLY);
 
             return $this->syncRunFileEnvOverrides(true);
         }
@@ -368,7 +368,7 @@ class ProjectEnvironment
 
     private function writeEnv(string $path, string $contents, ?string $chown): void
     {
-        $this->dind->system()->filesystem()->filePutContents($path, $contents, $chown, $this->envMode($path));
+        $this->dind->system()->filesystem()->writeFileReplacingPath($path, $contents, $chown, $this->envMode($path));
     }
 
     /**
@@ -600,6 +600,7 @@ class ProjectEnvironment
         if (! $fs->fileExists($runPath)) {
             return [];
         }
+        $fs->assertNotSymlink($runPath);
 
         $raw = (string) $fs->fileGetContents($runPath);
         $compose = ComposeYaml::parse($raw);
@@ -615,7 +616,7 @@ class ProjectEnvironment
         }
 
         if ($updated !== $compose) {
-            $fs->filePutContents(
+            $fs->writeFileReplacingPath(
                 $runPath,
                 ComposeYaml::dump($updated, $raw, 6, 2),
                 $this->dind->userModel()->getChownString(),
@@ -894,7 +895,7 @@ class ProjectEnvironment
                 $logger
             );
         }
-        $fs->filePutContents($copy['dest'], $contents, $chown, $this->envMode($copy['dest'], self::NEW_NESTED_COPY));
+        $fs->writeFileReplacingPath($copy['dest'], $contents, $chown, $this->envMode($copy['dest'], self::NEW_NESTED_COPY));
         $logger?->info(
             $copy['example'] === ''
                 ? 'Created empty '.$copy['relative'].' (required by compose env_file)'
@@ -928,7 +929,7 @@ class ProjectEnvironment
                 if ($fs->fileExists($dest)) {
                     continue;
                 }
-                $fs->filePutContents($dest, '', $chown, $this->emptyEnvFileMode($relative, $dest));
+                $fs->writeFileReplacingPath($dest, '', $chown, $this->emptyEnvFileMode($relative, $dest));
                 $logger?->info("Created empty {$relative} (required by compose env_file)");
             }
         }

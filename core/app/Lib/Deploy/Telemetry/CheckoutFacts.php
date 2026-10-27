@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Telemetry;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Source\GitUrl;
 
 /**
@@ -168,7 +169,7 @@ final class CheckoutFacts
             return false;
         }
 
-        $contents = @file_get_contents($path, false, null, 0, 64 * 1024);
+        $contents = AccountHomeRead::contents($path, 64 * 1024);
 
         return is_string($contents) && str_contains($contents, 'filter=lfs');
     }

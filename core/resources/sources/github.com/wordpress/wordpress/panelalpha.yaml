@@ -6,4 +6,6 @@ description: >-
   outside the checkout a redeploy empties, and the stack reads them through
   env_file. wp-content lives on a volume seeded from the checkout, so uploads,
   plugins and themes survive a redeploy; a must-use plugin provides user
-  management and SSO.
+  management and SSO. A wp-cli service on wordpress:cli carries the MySQL
+  client WP-CLI's database commands need; db-auth moves the wordpress user to
+  mysql_native_password, the only one of MySQL 8's logins that client has.

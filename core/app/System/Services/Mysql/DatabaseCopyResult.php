@@ -23,6 +23,14 @@ final class DatabaseCopyResult
     ) {}
 
     /**
+     * @param  list<string>  $warnings
+     */
+    public function withWarnings(array $warnings): self
+    {
+        return new self($this->databases, $this->users, $this->passwords, [...$this->warnings, ...$warnings]);
+    }
+
+    /**
      * The copied databases as the `[{source, dest}]` a task details block carries.
      *
      * @return list<array{source: string, dest: string}>
