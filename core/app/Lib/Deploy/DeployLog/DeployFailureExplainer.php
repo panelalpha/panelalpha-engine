@@ -25,6 +25,12 @@ class DeployFailureExplainer
     private const REGISTRY_REFUSAL = '/unauthorized|authentication required|authorization failed'
         .'|no basic auth credentials|denied: requested access|\b40[13]\b/i';
 
+    private const DATABASE_AUTH_FAILURE = '/(password authentication failed for user|Access denied for user .{0,40}using password'
+        .'|authentication failed.{0,40}MongoServerError)/i';
+
+    private const DATABASE_KEEPS_OLD_PASSWORD = 'The database was created by an earlier deploy and still expects the old password — '
+        .'delete the application\'s database volume, or recreate the application, and deploy again.';
+
     public static function explain(string $output): ?string
     {
         $match = self::match($output);
@@ -65,6 +71,12 @@ class DeployFailureExplainer
     public static function ruleIds(): array
     {
         return array_keys(self::rules());
+    }
+
+    /** The way out when what a dependency answered is a refused database login. */
+    private static function databaseAuthAdvice(string $quoted): string
+    {
+        return preg_match(self::DATABASE_AUTH_FAILURE, $quoted) === 1 ? ' '.self::DATABASE_KEEPS_OLD_PASSWORD : '';
     }
 
     /** A quoted line, cut to a length a failure message can carry. */
@@ -350,10 +362,11 @@ class DeployFailureExplainer
                     if ($probe !== '') {
                         $sentence .= ' Its health check said: '.self::sentence(self::clip($probe));
                     }
+                    if ($said !== '') {
+                        $sentence .= ' It printed: '.self::sentence(self::clip($said));
+                    }
 
-                    return $said === ''
-                        ? $sentence.' The full output is in the deploy log.'
-                        : $sentence.' It printed: '.self::clip($said).' The full output is in the deploy log.';
+                    return $sentence.self::databaseAuthAdvice($probe.' '.$said).' The full output is in the deploy log.';
                 },
             ],
 
@@ -820,10 +833,8 @@ class DeployFailureExplainer
             // A datastore created by an earlier deploy keeps the password it was initialised
             // with; the env var is only read at first start.
             'database-auth-failed' => [
-                '/(password authentication failed for user|Access denied for user .{0,40}using password|authentication failed.{0,40}MongoServerError)/i',
-                static fn (): string => 'The application could not sign in to its database. The database was created by an earlier deploy '
-                        .'and still expects the old password — delete the application\'s database volume, or recreate the '
-                        .'application, and deploy again.',
+                self::DATABASE_AUTH_FAILURE,
+                static fn (): string => 'The application could not sign in to its database. '.self::DATABASE_KEEPS_OLD_PASSWORD,
             ],
 
             // Project setup.

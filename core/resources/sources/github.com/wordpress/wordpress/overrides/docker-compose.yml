@@ -2,8 +2,13 @@ services:
   db:
     image: mysql:8.0
     restart: unless-stopped
+    # The image reads the passwords only into an empty datadir; this wrapper
+    # sets them on one made earlier too, so the volume always matches db.env.
+    entrypoint: ["/bin/bash", "/etc/panelalpha/mysql-entrypoint.sh"]
+    command: ["mysqld"]
     volumes:
       - db_data:/var/lib/mysql
+      - ./panelalpha/mysql-entrypoint.sh:/etc/panelalpha/mysql-entrypoint.sh:ro
     # MYSQL_PASSWORD and MYSQL_ROOT_PASSWORD, written once by hooks/prepare.sh
     # outside ~/project so a redeploy does not regenerate them.
     env_file:

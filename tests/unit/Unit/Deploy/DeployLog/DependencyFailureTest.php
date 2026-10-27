@@ -172,6 +172,28 @@ class DependencyFailureTest extends TestCase
         $this->assertSame('dependency-failed', DeployFailureExplainer::match($stderr)['rule']);
     }
 
+    /** The dependency rule matches first, so it has to carry the way out the login rule would give. */
+    public function test_a_refused_database_login_names_the_way_out(): void
+    {
+        $line = DependencyFailure::describe('project-db-1', 'unhealthy', DependencyFailure::cause(self::MYSQL_LOGS), DependencyFailure::probe(self::MYSQL_HEALTH));
+
+        $message = (string) DeployFailureExplainer::explain(FailureOutput::select($line));
+
+        $this->assertStringContainsString('(using password: YES). It printed: ', $message);
+        $this->assertStringContainsString('The database was created by an earlier deploy and still expects the old password', $message);
+        $this->assertStringEndsWith('The full output is in the deploy log.', $message);
+    }
+
+    public function test_another_dependency_failure_gets_no_password_advice(): void
+    {
+        $line = DependencyFailure::describe('project-limbas_pgsql-1', 'unhealthy', DependencyFailure::cause(self::PGSQL_LOGS));
+
+        $message = (string) DeployFailureExplainer::explain(FailureOutput::select($line));
+
+        $this->assertStringContainsString('did not start (unhealthy)', $message);
+        $this->assertStringNotContainsString('old password', $message);
+    }
+
     public function test_a_bracket_in_the_probe_output_cannot_end_its_quote_early(): void
     {
         $line = DependencyFailure::describe('project-db-1', 'unhealthy', 'started', 'failed [code 2] here');
