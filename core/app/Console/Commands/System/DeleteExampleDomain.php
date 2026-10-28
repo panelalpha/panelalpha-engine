@@ -27,7 +27,6 @@ class DeleteExampleDomain extends Command
             return 0;
         }
 
-        // Find the example domain by the flag we set during creation
         $domain = Domain::findExampleDomain();
         if (! $domain) {
             $this->warn('Could not find example domain to delete.');
@@ -50,19 +49,17 @@ class DeleteExampleDomain extends Command
 
         $this->info("Found example domain: {$domain->domain} (user: {$user->username})");
 
-        // Use the users:delete command to properly clean up everything
         $shouldDelete = $this->option('force') || $this->confirm("This will completely delete the example user '{$user->username}' and all associated data. Continue?");
 
         if ($shouldDelete) {
-            $commandArgs = ['username' => [$user->username]];
+            $commandArgs = ['project' => [$user->username]];
             if ($this->option('force')) {
                 $commandArgs['--force'] = true;
             }
 
-            $exitCode = $this->call('users:delete', $commandArgs);
+            $exitCode = $this->call('project:delete', $commandArgs);
 
             if ($exitCode === 0) {
-                // Reset the setting only after successful deletion
                 Setting::set('example-domain-created', '');
                 $this->info('Example domain and user deleted successfully.');
 
