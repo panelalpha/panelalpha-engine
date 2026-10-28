@@ -144,10 +144,10 @@ class ConfigTest extends TestCase
         $sequence = [];
         $config = $this->configWithFakeRunner($sequence);
 
-        $config->create(['dbname' => 'db', 'dbuser' => 'u', 'dbpass' => '', 'skip_check' => true]);
+        $config->create(['dbname' => 'db', 'dbuser' => 'u', 'dbpass' => '', 'dbhost' => 'db.test', 'skip_check' => true]);
 
         $this->assertSame([
-            'config', 'create', '--dbname=db', '--dbuser=u', '--dbpass=', '--skip-check',
+            'config', 'create', '--dbname=db', '--dbuser=u', '--dbpass=', '--dbhost=db.test', '--skip-check',
             '--path=/home/alice/example.test/public_html',
         ], $sequence[0]);
     }

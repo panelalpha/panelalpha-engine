@@ -2,6 +2,8 @@
 
 namespace App\System\Project\PhpHosting\WordPress;
 
+use App\System\Project\Dind\AppDatabase;
+
 /**
  * Named wp-config operations for a PHP hosting WordPress install.
  *
@@ -83,7 +85,8 @@ final class Config
     /**
      * Writes a new wp-config.php (WP-CLI `config create`), e.g. after a core
      * download. Without force an existing file is a failure; without
-     * skip_check WP-CLI first connects to the database.
+     * skip_check WP-CLI first connects to the database. Without dbhost,
+     * {@see defaultDatabaseHost()} picks the host.
      *
      * @param array{
      *     dbname: string,
@@ -101,6 +104,7 @@ final class Config
      */
     public function create(array $fields): array
     {
+        $fields['dbhost'] ??= $this->defaultDatabaseHost();
         $args = ['config', 'create'];
         foreach (['dbname', 'dbuser', 'dbpass', 'dbhost', 'dbprefix', 'dbcharset', 'dbcollate', 'locale'] as $key) {
             if (isset($fields[$key])) {
@@ -118,6 +122,24 @@ final class Config
         return [
             'message' => trim($result['stdout']),
         ];
+    }
+
+    /**
+     * On PHP hosting the projects' MySQL server, which the engine's own
+     * installer writes too: localhost there is the account's PHP container.
+     * In the project's own containers the host wp-config.php already names,
+     * its compose database service; null, WP-CLI's localhost, without one.
+     */
+    private function defaultDatabaseHost(): ?string
+    {
+        if (! $this->cli->runsInContainer()) {
+            return AppDatabase::hostname();
+        }
+
+        $current = $this->cli->run(['config', 'get', 'DB_HOST']);
+        $host = trim($current['stdout']);
+
+        return $current['exit_code'] === 0 && $host !== '' ? $host : null;
     }
 
     /**

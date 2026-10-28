@@ -83,7 +83,7 @@ class WpConfigCreateTool extends ApiTool
             'dbname' => $schema->string()->required(),
             'dbuser' => $schema->string()->required(),
             'dbpass' => $schema->string()->description('Omitted: no password.'),
-            'dbhost' => $schema->string()->description('Omitted: localhost.'),
+            'dbhost' => $schema->string()->description('Omitted: on PHP hosting, the projects\' MySQL server, as GET /projects/{username}/mysql/server-info reports it; on a project running in its own containers, the host its wp-config.php already names, such as the compose database service, else localhost.'),
             'dbprefix' => $schema->string()->description('Table prefix. Omitted: wp_.'),
             'dbcharset' => $schema->string()->description('Omitted: utf8.'),
             'dbcollate' => $schema->string()->description('Omitted: empty.'),

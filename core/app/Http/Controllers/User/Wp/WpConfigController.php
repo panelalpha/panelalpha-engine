@@ -87,7 +87,13 @@ class WpConfigController extends WordPressController
                 new OA\Property(property: 'dbname', type: 'string'),
                 new OA\Property(property: 'dbuser', type: 'string'),
                 new OA\Property(property: 'dbpass', type: 'string', description: 'Omitted: no password.'),
-                new OA\Property(property: 'dbhost', type: 'string', description: 'Omitted: localhost.'),
+                new OA\Property(
+                    property: 'dbhost',
+                    type: 'string',
+                    description: 'Omitted: on PHP hosting, the projects\' MySQL server, as GET /projects/{username}/mysql/server-info reports it; '
+                        .'on a project running in its own containers, the host its wp-config.php already names, such as the compose database service, '
+                        .'else localhost.',
+                ),
                 new OA\Property(property: 'dbprefix', type: 'string', description: 'Table prefix. Omitted: wp_.'),
                 new OA\Property(property: 'dbcharset', type: 'string', description: 'Omitted: utf8.'),
                 new OA\Property(property: 'dbcollate', type: 'string', description: 'Omitted: empty.'),
