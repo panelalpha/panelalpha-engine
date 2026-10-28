@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: ./Dockerfile
-    image: ghcr.io/panelalpha/engine-user-php-ls:v2.1.2-20261022
+    image: ghcr.io/panelalpha/engine-user-php-ls:v2.2.0-20261028
     pull_policy: missing
     restart: always
     hostname: {{ $user }}

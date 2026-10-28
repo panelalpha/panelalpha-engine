@@ -10,6 +10,7 @@ ENV PUBLIC_HOST=localhost \
 
 COPY rootfs /
 RUN set -ex && \
+    apk upgrade --no-cache && \
     apk add --no-cache \
         --virtual .build-deps \
         build-base \

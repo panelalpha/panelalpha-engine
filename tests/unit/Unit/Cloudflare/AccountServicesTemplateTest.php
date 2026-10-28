@@ -67,7 +67,7 @@ class AccountServicesTemplateTest extends TestCase
 
         $this->assertStringContainsString('exec s6-svscan /run/service', $entrypoint);
         // Versioned with the engine, like engine-core: the image ships s6.
-        $this->assertStringContainsString('image: ghcr.io/panelalpha/engine-user-dind:v2.0.2', $compose);
+        $this->assertStringContainsString('image: ghcr.io/panelalpha/engine-user-dind:v2.2.0-20261028', $compose);
         $this->assertStringContainsString('./services/:/etc/s6/account/:ro', $compose);
         // Docker mounts tmpfs noexec; s6 execs run scripts from the scan dir.
         $this->assertStringContainsString('/run/service:mode=755,size=4m,exec', $compose);

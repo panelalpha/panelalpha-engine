@@ -1,1 +1,3 @@
 FROM litespeedtech/openlitespeed:1.9.0-lsphp85
+
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*

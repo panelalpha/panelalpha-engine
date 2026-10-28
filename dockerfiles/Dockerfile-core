@@ -1,6 +1,7 @@
 FROM debian:trixie-slim AS php_prod
 
 RUN apt-get update -y \
+    && apt-get upgrade -y \
     && apt-get install -y \
         lsb-release \
         zip \

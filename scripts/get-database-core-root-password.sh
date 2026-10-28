@@ -10,7 +10,7 @@ CONTAINER_NAME="core-db"
 PROJECT=$(docker ps -a --filter "label=com.docker.compose.project.working_dir=$ENGINE_DIR" \
   --format '{{.Label "com.docker.compose.project"}}' | head -n 1)
 VOLUME_NAME="${PROJECT:-$(basename "$ENGINE_DIR")}_database-core-data"
-IMAGE="ghcr.io/panelalpha/app-database:20260525"
+IMAGE="ghcr.io/panelalpha/app-database:v2.2.0-20261028"
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   if ! docker pull "$IMAGE"; then
     docker build --tag "$IMAGE" - <"$ENGINE_DIR/dockerfiles/Dockerfile-database"

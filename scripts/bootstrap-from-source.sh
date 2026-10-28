@@ -18,7 +18,7 @@
 set -euo pipefail
 
 ENGINE_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
-COMPOSER_IMAGE='ghcr.io/panelalpha/engine-composer:v2.0.1'
+COMPOSER_IMAGE='ghcr.io/panelalpha/engine-composer:v2.2.0-20261028'
 
 # The composer image, built from dockerfiles/Dockerfile-composer when no tag is
 # published or the published one's PHP is older than core's composer.json asks

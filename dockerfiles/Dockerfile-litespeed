@@ -1,1 +1,3 @@
 FROM litespeedtech/litespeed:6.3.5-lsphp85
+
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*

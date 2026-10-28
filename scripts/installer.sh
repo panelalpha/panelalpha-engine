@@ -43,7 +43,7 @@ else
     ENGINE_REPO='https://github.com/panelalpha/engine.git'
 fi
 # A repository clone carries no vendor directory; composer install fills it.
-COMPOSER_IMAGE='ghcr.io/panelalpha/engine-composer:v2.0.1'
+COMPOSER_IMAGE='ghcr.io/panelalpha/engine-composer:v2.2.0-20261028'
 
 # Tagged with the engine version, not a build date, so the tag moves whenever
 # core/composer.json's PHP constraint does -- an unpublished tag does not pull

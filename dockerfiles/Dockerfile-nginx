@@ -21,6 +21,7 @@ RUN apt-get update \
     && cp objs/ngx_http_brotli_filter_module.so objs/ngx_http_brotli_static_module.so /out/
 
 FROM nginx:1.31.1
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 COPY --from=brotli /out/ /usr/lib/nginx/modules/
 # The nginx-proxy config includes these by glob, so it also starts on an image without them.
 COPY nginx/modules-enabled/ /etc/nginx/modules-enabled/
