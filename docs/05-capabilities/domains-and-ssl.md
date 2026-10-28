@@ -122,7 +122,7 @@ The engine does not sign mail itself. A DKIM signature comes from a relay (SendG
 
 The installed certificate is the file the webserver was told to load. What a browser receives can differ: DNS may point somewhere else, a CDN may sit in front, or a renewal may be waiting for a webserver reload. `ssl_check` (or `pae ssl:check shop.example.com`) connects to the site over HTTPS, as a browser does, and reads the certificate it is given:
 
-- **public** is the server the domain's DNS points to, which is what visitors get. Its verdict is the overall `status`: `trusted`, `self_signed`, `untrusted_issuer`, `expired`, `not_yet_valid` or `domain_mismatch`; or `not_resolving`, `unreachable` and `refused_address` when there was no certificate to judge.
+- **public** is the server the domain's DNS points to, which is what visitors get. Its verdict is the overall `status`: `trusted`, `self_signed`, `untrusted_issuer`, `expired`, `not_yet_valid`, `domain_mismatch` or `unreadable`; or `not_resolving`, `unreachable` and `refused_address` when there was no certificate to judge.
 - **engine** is this server, whatever DNS says. `serves_installed: false` means it serves something other than the installed certificate.
 - **dns** shows where the name points and whether that is this server (`points_here`).
 
@@ -225,6 +225,8 @@ the chain are the files in /project/certs of tshop.
 ```
 
 Mode: modify. Tools: `file_download`, `ssl_cert_install` with `cert`, `key`, `ca`, `ssl_cert_get`. Check: the key is not echoed back in the answer, and `ssl_cert_get` shows the new certificate.
+
+To keep the private key out of the chat, ask for a paste link for it first (`vault_secret_create` with type `key`), paste the key on that page, and install the certificate with the `vault:<key>` reference in place of the key.
 
 **Name under panelalpha.online, with sibling names**
 

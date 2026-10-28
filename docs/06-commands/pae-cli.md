@@ -146,7 +146,7 @@ For projects deployed from git, these act on the checkout the engine owns. A pul
 | `pae git:commits {project}` | Lists recent commits. |
 | `pae git:revert {project}` | Returns the checkout to the last deployed commit, then rebuilds. |
 | `pae git:update-credentials {project}` | Replaces the stored git access token. |
-| `pae git:deploy-hook {project}` | Creates the push-to-deploy hook and prints its URL and secret; the secret is shown only this once. Run again, it prints the same URL without the secret. `--rotate` issues a new URL and secret, `--delete` removes the hook, `--path` picks another checkout, `--provider` narrows the TLS setup notes to one git host. |
+| `pae git:deploy-hook {project}` | Creates the push-to-deploy hook and prints its URL and secret; the secret is shown only this once. Run again, it prints the same URL without the secret. `--register` also adds the webhook at GitHub, GitLab or Bitbucket with the project's git token, `--rotate` issues a new URL and secret, `--delete` removes the hook, `--path` picks another checkout, `--provider` narrows the TLS setup notes to one git host. |
 | `pae git:deploy-key {project}` | Creates the project's SSH deploy key and prints its public half to add to the repository. Run again, it prints the same key. `--host` also trusts a git server other than github.com, gitlab.com and bitbucket.org, `--delete` removes the key. |
 
 Context: [Connecting with Git](../05-capabilities/connecting-with-git.md), [Push to deploy](../05-capabilities/push-to-deploy.md).

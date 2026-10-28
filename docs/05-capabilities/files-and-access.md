@@ -81,10 +81,13 @@ Two possible causes, in order of likelihood. Either the files went to the accoun
 The path is outside the account's home directory, or the account has hit its disk quota. Ask the assistant to check the project's usage against its limits.
 
 **"... is not a folder the project's account can write to" on upload, write or new folder.**
-The folder exists but does not belong to the account, so nothing was written or created; the answer is a 422 on `path`. On traditional PHP hosting the top level of the account (`/`) is one of these folders. Upload into the folder the site is served from instead: `/project`, or `/public_html` on traditional PHP hosting.
+The folder exists but does not belong to the account, so nothing was written or created; the answer is a 422 on `path`. On traditional PHP hosting the top level of the account (`/`) is one of these folders. Upload into the folder the site is served from instead: `/project`, or the domain's `/<domain>/public_html` on traditional PHP hosting. The code is `not_writable`.
 
 **"Could not connect to ...", "... answered HTTP 404." or "... timed out." when fetching a URL.**
-The engine could not download the address, so nothing was written; the answer is a 422 on `url` with the code `download_failed` and a `reason` (`resolve`, `connect`, `timeout`, `http` with `http_status`, `tls`, `interrupted`). Check that the address opens from the internet, without a login, and fetch it again.
+The engine could not download the address, so nothing was written; the answer is a 422 on `url` with the code `download_failed` and a `reason` (`resolve`, `connect`, `timeout`, `http` with `http_status`, `tls`, `interrupted`, `other`). Check that the address opens from the internet, without a login, and fetch it again. When the download worked but the file could not be saved where you asked, the answer is a 422 on `path` with `write_failed`: pick a folder the project can write to.
+
+**Unzip answers 409 `destination_exists`.**
+The folder already holds a file or folder with the same name as one the archive unpacks to at its top level. Unpacking never replaces or merges, so nothing was extracted; the answer names the entries. Unpack into a new or empty folder, or move the existing entries away first.
 
 **The FTP account connects but shows an empty folder.**
 It is looking at the directory it was configured with. Check that against where the site's files actually are - for repository deploys, `/project`; on traditional PHP hosting, the domain's `/<domain>/public_html`.
