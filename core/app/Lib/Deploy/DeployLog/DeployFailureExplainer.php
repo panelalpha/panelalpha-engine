@@ -555,7 +555,8 @@ class DeployFailureExplainer
             // `out of memory` stays bare — the kernel writes it that way in `Memory cgroup out
             // of memory: Killed process ...`.
             //
-            // A host build is not in the account's cgroup, so the plan is not what ran out.
+            // A host build is not in the account's cgroup, so the plan is not what ran out. A build in
+            // the account is held to the lower of the two (InnerBuildGuard).
             'out-of-memory' => [
                 '/(exit code: 137|signal:\s*killed|OOMKilled'
                     // BuildKit's form when the step's cgroup refused an allocation,
@@ -571,7 +572,8 @@ class DeployFailureExplainer
                         .'the server (DEPLOY_BUILD_MEMORY, 8 GB or half its RAM by default), not by the plan. '
                         .'Raising the project\'s memory limit does not change it. The full build output is '
                         .'in the deploy log.'
-                    : 'The build ran out of memory. This project needs more RAM than the plan allows.',
+                    : 'The build ran out of memory. It may use the project\'s memory limit or the server\'s build '
+                        .'memory (DEPLOY_BUILD_MEMORY, 8 GB or half its RAM by default), whichever is lower.',
             ],
 
             // Below `out-of-memory`: a Java build that spawned a Node frontend usually died

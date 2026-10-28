@@ -297,12 +297,15 @@ OUT;
         }
     }
 
-    public function test_a_kill_inside_the_account_still_names_the_plan(): void
+    /** A build in the account is held to the lower of the project's limit and the server's build memory. */
+    public function test_a_kill_inside_the_account_names_both_limits(): void
     {
         $match = DeployFailureExplainer::match('#12 ERROR: process "/bin/sh -c npm run build" did not complete successfully: exit code: 137');
 
         $this->assertSame('out-of-memory', $match['rule'] ?? null);
-        $this->assertStringContainsString('than the plan allows', $match['message']);
+        $this->assertStringContainsString('the project\'s memory limit', $match['message']);
+        $this->assertStringContainsString('DEPLOY_BUILD_MEMORY', $match['message']);
+        $this->assertStringNotContainsString('does not change it', $match['message']);
     }
 
     /**

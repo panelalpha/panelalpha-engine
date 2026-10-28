@@ -38,8 +38,12 @@ class AppLauncherTest extends TestCase
 
         $this->assertStringContainsString('$this->startWithLogins($forceRecreate)', $this->methodBody($source, 'start'));
         $this->assertStringContainsString(
-            '$forceRecreate || $this->mustForceRecreate($strategy, $runtime)',
+            '$this->releaseThenBringUp($skipBuild, $forceRecreate,',
             $this->methodBody($source, 'startWithLogins')
+        );
+        $this->assertStringContainsString(
+            '$forceRecreate || $this->mustForceRecreate($strategy, $runtime)',
+            $this->methodBody($source, 'releaseThenBringUp')
         );
     }
 

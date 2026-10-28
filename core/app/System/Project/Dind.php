@@ -28,6 +28,7 @@ use App\System\Project\Dind\ContainerOperations;
 use App\System\Project\Dind\DeployStrategy;
 use App\System\Project\Dind\HostCompile;
 use App\System\Project\Dind\HostDiskGuard;
+use App\System\Project\Dind\InnerBuildGuard;
 use App\System\Project\Dind\InnerDocker;
 use App\System\Project\Dind\Networking;
 use App\System\Project\Dind\OuterLifecycle;
@@ -100,6 +101,8 @@ class Dind implements DeployableDindProject, Runtime
     private ?AppCredentialDelivery $appCredentials = null;
 
     private ?RegistryLogin $registryLogin = null;
+
+    private ?InnerBuildGuard $innerBuildGuard = null;
 
     public function __construct(
         private readonly ProjectAggregate $project,
@@ -359,6 +362,12 @@ class Dind implements DeployableDindProject, Runtime
     public function registryLogin(): RegistryLogin
     {
         return $this->registryLogin ??= new RegistryLogin($this);
+    }
+
+    /** Image builds in the account's own daemon, held to the build memory while the engine builds. */
+    public function innerBuildGuard(): InnerBuildGuard
+    {
+        return $this->innerBuildGuard ??= new InnerBuildGuard($this);
     }
 
     /** The login a manifest's `credentials:` declares, written into the account. */

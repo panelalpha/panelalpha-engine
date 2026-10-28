@@ -195,7 +195,13 @@ The application gets a little less than the number you set. The project itself n
 
 Memory limits are the ones that bite. A build that runs out of memory fails with a message that looks like a code problem but is not: [Reading errors](../02-getting-started/reading-errors.md).
 
-**Some builds do not use the project's memory limit.** Frontend assets, Java, Rust and PHP dependencies are often built on the server, in a separate build container, before the application starts. When `DEPLOY_BUILD_MEMORY` in `.env-core` is left empty, the default, that container gets 8192 MB. Set or not, it never gets more than half the server's RAM, nor the server's RAM less `DEPLOY_ENGINE_MEMORY` (512 MB by default). Only one such build runs at a time, and if the server still runs out of memory, the build is what the kernel stops first. Setting `DEPLOY_BUILD_MEMORY` fixes the figure for every build on the server, up to that ceiling. The deploy log states the figure, and where it came from, in a line starting `Host build container memory`. If a build like this runs out of memory, raise `DEPLOY_BUILD_MEMORY` (it helps up to that ceiling), or deploy on a server with more RAM.
+**A build gets the server's build memory, not the whole server.** When `DEPLOY_BUILD_MEMORY` in `.env-core` is left empty, the default, a build gets 8192 MB. Set or not, it never gets more than half the server's RAM, nor the server's RAM less `DEPLOY_ENGINE_MEMORY` (512 MB by default). Setting `DEPLOY_BUILD_MEMORY` fixes the figure for every build on the server, up to that ceiling. Whatever the figure, if memory runs out while a build runs, the build is what the kernel stops first, before the application.
+
+Frontend assets, Java, Rust and PHP dependencies are often built on the server, in a separate build container, before the application starts. That build does not use the project's memory limit: it gets the build memory above, and only one such build runs at a time. The deploy log states the figure, and where it came from, in a line starting `Host build container memory`.
+
+The image a project builds itself, from its `Dockerfile`, its compose file or an automatic build, is built inside the project. It gets the same build memory, but never more than the project's own memory limit. The deploy log states the figure in a line starting `Image build memory`.
+
+If a build runs out of memory, raise the project's memory limit when that is the lower of the two, otherwise raise `DEPLOY_BUILD_MEMORY` (it helps up to that ceiling), or deploy on a server with more RAM.
 
 ## Cron jobs
 
@@ -242,7 +248,7 @@ The project is protected. Turn it off on the server, then ask again: [Protecting
 The application reads that value while it is being built, so it needs a rebuild. See [Environment variables](#environment-variables).
 
 **I raised the memory limit and the application still runs out.**
-You did not rebuild, or the application needs more than the limit you set. See [Limits](#limits). The application gets a little less than the number you chose. If it is the *build* that runs out, check the deploy log for `Host build container memory`: it says whether the build was sized by the server or by `DEPLOY_BUILD_MEMORY`. See [Limits](#limits).
+You did not rebuild, or the application needs more than the limit you set. See [Limits](#limits). The application gets a little less than the number you chose. If it is the *build* that runs out, check the deploy log for `Host build container memory` or `Image build memory`: they say how much the build was given and why. See [Limits](#limits).
 
 **The assistant says stored secrets cannot be decoded.**
 Ask the assistant to list the affected secrets and check the engine's system information. The engine's encryption key, `APP_KEY` in `/opt/panelalpha/shared-hosting/.env-core`, may be invalid or may have changed since the secrets were stored. The project's environment variables, Git token, Cloudflare token, registry login or site password then read as empty, and the next save of the project, a redeploy included, stores them empty. Put the previous `APP_KEY` back before you change or redeploy the project. If you no longer have it, ask the assistant to set each named secret again. The application's database password is the exception: it is kept, and deploys are refused until it can be read, because a new one would lock the application out of its own database.

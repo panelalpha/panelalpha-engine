@@ -40,6 +40,9 @@ final class ContainerOperations
     /** Service actions that start the app again. */
     private const STARTING_SERVICE_ACTIONS = ['start', 'restart'];
 
+    /** Actions whose `up` builds an image the account lacks, held as a deploy's build is. */
+    private const BUILDING_ACTIONS = ['up', 'pull'];
+
     public function __construct(
         private DindProject $project,
         private ShellOperations $shell,
@@ -134,13 +137,22 @@ final class ContainerOperations
                 (new AccountMapping($this->project))->ensureMapped();
             }
             $this->refreshRunFileBefore($action);
-            $stdout = $action === 'pull' ? $this->pullAndUp() : $this->runProjectAction($action);
+            $stdout = $this->runAction($action);
             $this->clearStoppedByRequest($action);
 
             return ['stdout' => $stdout, 'stderr' => '', 'exit_code' => 0];
         } catch (\Exception $e) {
             return ['stdout' => '', 'stderr' => $e->getMessage(), 'exit_code' => 1];
         }
+    }
+
+    private function runAction(string $action): string
+    {
+        $run = fn (): string => $action === 'pull' ? $this->pullAndUp() : $this->runProjectAction($action);
+
+        return in_array($action, self::BUILDING_ACTIONS, true)
+            ? $this->project->innerBuildGuard()->during($run)
+            : $run();
     }
 
     private function pullAndUp(): string

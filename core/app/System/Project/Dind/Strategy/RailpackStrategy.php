@@ -207,7 +207,9 @@ class RailpackStrategy
                 ' . ';
 
             $system->filesystem()->writeFileReplacingPath($buildScriptPath, $buildScript, $chown, '700');
-            $shell->execAsUser(['bash', $buildScriptPath], [], self::BUILD_TIMEOUT_SECONDS);
+            $this->dind->innerBuildGuard()->during(
+                fn (): string => $shell->execAsUser(['bash', $buildScriptPath], [], self::BUILD_TIMEOUT_SECONDS)
+            );
         } catch (\Exception $e) {
             Log::info(
                 "Railpack build failed for {$username} (unsupported project or build error), falling back to nginx compose.",

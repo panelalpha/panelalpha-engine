@@ -96,14 +96,22 @@ final class AppLauncher
 
         $reloadAfterReclaim = fn () => $this->preloadImages($strategy, $runtime, $skipBuild, $model->getDeployImage(), afterReclaim: true);
 
-        $release = $this->runRelease($skipBuild, $reloadAfterReclaim);
-        if ($release !== null) {
-            return $release;
-        }
-
-        $up = $this->bringUp($skipBuild, $forceRecreate || $this->mustForceRecreate($strategy, $runtime), $reloadAfterReclaim);
+        $build = fn (): Process|array => $this->releaseThenBringUp($skipBuild, $forceRecreate, $strategy, $runtime, $reloadAfterReclaim);
+        $up = $skipBuild ? $build() : $this->project->innerBuildGuard()->during($build);
 
         return is_array($up) ? $up : $this->outcome($up);
+    }
+
+    /**
+     * Everything that builds: the Procfile release's image, then `up` and the swap's own build.
+     *
+     * @param  \Closure(): void  $reload  puts back the images the ENOSPC reclaim deletes
+     * @return Process|array{stdout: string, stderr: string, exit_code: ?int} an array ends the start as it is
+     */
+    private function releaseThenBringUp(bool $skipBuild, bool $forceRecreate, ?string $strategy, ?string $runtime, \Closure $reload): Process|array
+    {
+        return $this->runRelease($skipBuild, $reload)
+            ?? $this->bringUp($skipBuild, $forceRecreate || $this->mustForceRecreate($strategy, $runtime), $reload);
     }
 
     /** A checkout moved aside is still what the running containers read: they are recreated onto the new one, as a stop before the wipe did. */

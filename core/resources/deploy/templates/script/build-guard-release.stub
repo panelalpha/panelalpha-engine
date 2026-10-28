@@ -1,0 +1,2 @@
+# $1 guard file  $2 token: stops this build's guard, never one a later build started.
+if [ "$(cat "$1" 2>/dev/null)" = "$2" ]; then rm -f "$1"; fi
