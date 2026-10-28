@@ -2,12 +2,15 @@
 
 namespace App\Console\Commands\Backup\Project;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Models\Backup as BackupRecord;
 use App\Models\User;
 use Illuminate\Console\Command;
 
 class DeleteCommand extends Command
 {
+    use ConfirmsChanges;
+
     protected $signature = 'project:backup:delete
         {project : Project username}
         {backup : Backup ID}
@@ -31,6 +34,10 @@ class DeleteCommand extends Command
         if ($record === null || $record->user_id !== $user->id) {
             $this->error("Backup '{$backupId}' not found for project '{$username}'.");
 
+            return 1;
+        }
+
+        if ($this->refusedWithoutConfirmation()) {
             return 1;
         }
 

@@ -131,6 +131,21 @@ class VaultSecretCommandsTest extends VaultTestCase
         $this->assertNull(SecretVaultEntry::query()->find($entry->id));
     }
 
+    /** confirm() answers no without a terminal, so this used to print "Left alone." and exit 0. */
+    public function test_delete_without_a_terminal_or_force_is_refused_and_keeps_the_entry(): void
+    {
+        [$entry] = $this->entry(['secret' => 'ghp_pasted']);
+
+        $exit = Artisan::call('vault:secret:delete', ['ref' => $entry->reference(), '--no-interaction' => true]);
+
+        $this->assertSame(1, $exit);
+        $this->assertSame(
+            "This change needs confirmation: pass --force to apply it without a prompt.\n",
+            Artisan::output()
+        );
+        $this->assertNotNull($entry->fresh());
+    }
+
     public function test_delete_refuses_an_id(): void
     {
         [$global] = $this->globalEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_shared');

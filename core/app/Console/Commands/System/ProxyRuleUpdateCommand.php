@@ -3,6 +3,7 @@
 namespace App\Console\Commands\System;
 
 use App\Console\Commands\Concerns\AppliesProxyRules;
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Models\ProxyRule;
 use App\Rules\UpstreamHost;
 use App\System;
@@ -16,6 +17,7 @@ use Illuminate\Validation\Rule;
 class ProxyRuleUpdateCommand extends Command
 {
     use AppliesProxyRules;
+    use ConfirmsChanges;
 
     /** The old spelling still answers, so nothing scripted against it breaks. */
     protected $aliases = ['proxy-rule:update'];
@@ -108,6 +110,10 @@ class ProxyRuleUpdateCommand extends Command
 
                 return 1;
             }
+        }
+
+        if ($this->refusedWithoutConfirmation()) {
+            return 1;
         }
 
         $this->info('Current values:');

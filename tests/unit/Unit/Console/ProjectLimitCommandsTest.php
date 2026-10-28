@@ -62,6 +62,17 @@ class ProjectLimitCommandsTest extends TestCase
         $this->assertSame(256, User::findByUsername('alice')->getMemoryLimit());
     }
 
+    public function test_force_sets_the_limits_without_a_prompt(): void
+    {
+        $this->makeUser('alice', ['memory_limit' => 256]);
+
+        $this->artisan('project:limit:set --project=alice --memory-limit=512 --force --no-interaction')
+            ->expectsOutputToContain('Limits have been updated.')
+            ->assertExitCode(0);
+
+        $this->assertSame(512, User::findByUsername('alice')->getMemoryLimit());
+    }
+
     public function test_set_writes_every_selected_limit(): void
     {
         $this->makeUser('alice');

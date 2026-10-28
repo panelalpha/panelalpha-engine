@@ -3,12 +3,14 @@
 namespace App\Console\Commands\System;
 
 use App\Console\Commands\Concerns\AppliesProxyRules;
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Models\ProxyRule;
 use Illuminate\Console\Command;
 
 class ProxyRuleDeleteCommand extends Command
 {
     use AppliesProxyRules;
+    use ConfirmsChanges;
 
     /** The old spelling still answers, so nothing scripted against it breaks. */
     protected $aliases = ['proxy-rule:delete'];
@@ -32,6 +34,10 @@ class ProxyRuleDeleteCommand extends Command
         if (! $rule) {
             $this->error("Rule with ID {$id} not found.");
 
+            return 1;
+        }
+
+        if ($this->refusedWithoutConfirmation()) {
             return 1;
         }
 

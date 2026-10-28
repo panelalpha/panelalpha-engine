@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Domains;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Console\Commands\Concerns\ResolvesProject;
 use App\Models\Domain;
 use App\Models\Tunnel;
@@ -11,6 +12,7 @@ use Symfony\Component\Console\Helper\Table;
 
 class DomainsDelete extends Command
 {
+    use ConfirmsChanges;
     use ResolvesProject;
 
     protected $aliases = ['domains:delete', 'projects:domains:delete'];
@@ -66,6 +68,10 @@ class DomainsDelete extends Command
         if ($domain->subdomains()->exists()) {
             $this->error("Cannot delete domain '{$domain->domain}' while subdomains still exist.");
 
+            return 1;
+        }
+
+        if ($this->refusedWithoutConfirmation()) {
             return 1;
         }
 

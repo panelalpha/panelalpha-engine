@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Domains;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Console\Commands\Concerns\ResolvesProject;
 use App\Lib\Domains\NewDomain;
 use App\Lib\Helpers\UpstreamSpec;
@@ -20,6 +21,7 @@ use Symfony\Component\Console\Helper\Table;
  */
 class DomainsCreate extends Command
 {
+    use ConfirmsChanges;
     use ResolvesProject;
 
     protected $aliases = ['domains:create', 'projects:domains:create'];
@@ -44,6 +46,10 @@ class DomainsCreate extends Command
 
         $request = $this->validatedRequest();
         if ($request === null) {
+            return 1;
+        }
+
+        if ($this->refusedWithoutConfirmation()) {
             return 1;
         }
 

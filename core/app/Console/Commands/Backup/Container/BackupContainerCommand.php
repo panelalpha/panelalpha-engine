@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Backup\Container;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use Illuminate\Console\Command;
 
 /**
@@ -10,6 +11,8 @@ use Illuminate\Console\Command;
  */
 abstract class BackupContainerCommand extends Command
 {
+    use ConfirmsChanges;
+
     protected const DRIVERS = ['local', 's3', 'ftp', 'ftps', 'sftp'];
 
     /** Every option both commands take, after the command name. */

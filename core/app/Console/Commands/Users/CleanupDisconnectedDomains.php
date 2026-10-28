@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Users;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Console\Commands\Concerns\ProjectOptions;
 use App\Console\Commands\Concerns\SelectsProjects;
 use App\Models\User;
@@ -10,12 +11,13 @@ use Illuminate\Database\Eloquent\Collection;
 
 class CleanupDisconnectedDomains extends Command
 {
+    use ConfirmsChanges;
     use SelectsProjects;
 
     /** Older spellings still answer, so nothing scripted against them breaks. */
     protected $aliases = ['projects:cleanup-disconnected-domains', 'users:cleanup-disconnected-domains'];
 
-    protected $signature = 'project:domain:cleanup'.ProjectOptions::SIGNATURE;
+    protected $signature = 'project:domain:cleanup'.ProjectOptions::SIGNATURE.' {--force : Skip confirmation}';
 
     protected $description = 'Remove a project\'s config files for domains no longer in the database (per project; system:domain:cleanup does the same for webserver-level vhosts)';
 
@@ -52,11 +54,15 @@ class CleanupDisconnectedDomains extends Command
                 continue;
             }
 
+            if ($this->refusedWithoutConfirmation()) {
+                return 1;
+            }
+
             $this->info('  Found '.count($unusedDomains).' disconnected domains: ');
             foreach ($unusedDomains as $unusedDomain) {
                 $this->info('    '.$unusedDomain);
             }
-            if (! $this->confirm('  Continue with cleanup of these domains?')) {
+            if (! $this->option('force') && ! $this->confirm('  Continue with cleanup of these domains?')) {
                 $this->info('  Skipping.');
 
                 continue;

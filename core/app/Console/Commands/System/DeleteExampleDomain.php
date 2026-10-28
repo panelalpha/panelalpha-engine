@@ -2,12 +2,15 @@
 
 namespace App\Console\Commands\System;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Models\Domain;
 use App\Models\Setting;
 use Illuminate\Console\Command;
 
 class DeleteExampleDomain extends Command
 {
+    use ConfirmsChanges;
+
     /** The old spelling still answers, so nothing scripted against it breaks. */
     protected $aliases = ['system:delete-example-domain'];
 
@@ -39,6 +42,10 @@ class DeleteExampleDomain extends Command
             Setting::set('example-domain-created', '');
 
             return 0;
+        }
+
+        if ($this->refusedWithoutConfirmation()) {
+            return 1;
         }
 
         $this->info("Found example domain: {$domain->domain} (user: {$user->username})");

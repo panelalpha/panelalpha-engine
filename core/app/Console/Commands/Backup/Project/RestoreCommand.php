@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Backup\Project;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Models\Backup as BackupRecord;
 use App\Models\User;
 use Illuminate\Console\Command;
@@ -9,6 +10,8 @@ use LogicException;
 
 class RestoreCommand extends Command
 {
+    use ConfirmsChanges;
+
     protected $signature = 'project:backup:restore
         {project : Project username}
         {backup : Backup ID}
@@ -46,6 +49,10 @@ class RestoreCommand extends Command
         if ($this->restoreFilterNonEmpty($only) && $this->restoreFilterNonEmpty($exclude)) {
             $this->error('Cannot combine include and exclude');
 
+            return 1;
+        }
+
+        if ($this->refusedWithoutConfirmation()) {
             return 1;
         }
 

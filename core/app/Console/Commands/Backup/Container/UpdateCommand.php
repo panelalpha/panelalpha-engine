@@ -38,6 +38,10 @@ class UpdateCommand extends BackupContainerCommand
             return 1;
         }
 
+        if ($this->refusedWithoutConfirmation()) {
+            return 1;
+        }
+
         $this->showChanges($container, $updates);
 
         if (! $this->option('force') && ! $this->confirm('Apply these changes?')) {

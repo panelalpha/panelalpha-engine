@@ -3,6 +3,7 @@
 namespace App\Console\Commands\System;
 
 use App\Console\Commands\Concerns\AppliesProxyRules;
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Console\Commands\Concerns\ResolvesProject;
 use App\Models\ProxyRule;
 use App\Models\User;
@@ -20,6 +21,7 @@ use Illuminate\Validation\Rule;
 class ProxyRuleCreateCommand extends Command
 {
     use AppliesProxyRules;
+    use ConfirmsChanges;
     use ResolvesProject;
 
     /** The old spelling still answers, so nothing scripted against it breaks. */
@@ -45,6 +47,10 @@ class ProxyRuleCreateCommand extends Command
 
         $rule = $this->readRule();
         if ($rule === null) {
+            return 1;
+        }
+
+        if ($this->refusedWithoutConfirmation()) {
             return 1;
         }
 

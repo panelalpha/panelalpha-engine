@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Vault;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Models\SecretVaultEntry;
 use Illuminate\Console\Command;
 
@@ -17,6 +18,8 @@ use Illuminate\Console\Command;
  */
 class VaultSecretDeleteCommand extends Command
 {
+    use ConfirmsChanges;
+
     protected $signature = 'vault:secret:delete
                             {ref : The vault:<key> from vault:secret:list}
                             {--force : Skip the confirmation}';
@@ -33,6 +36,10 @@ class VaultSecretDeleteCommand extends Command
         if ($entry === null) {
             $this->error("No vault entry for '{$ref}'. Use a reference from vault:secret:list.");
 
+            return self::FAILURE;
+        }
+
+        if ($this->refusedWithoutConfirmation()) {
             return self::FAILURE;
         }
 

@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Domains;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Console\Commands\Concerns\ResolvesProject;
 use App\Integrations\Tunnels\TunnelManager;
 use App\Lib\Apis\Cloudflare\CloudflareException;
@@ -15,6 +16,7 @@ use Symfony\Component\Console\Helper\Table;
 
 class DomainsSetProxy extends Command
 {
+    use ConfirmsChanges;
     use ResolvesProject;
 
     protected $aliases = ['domains:set-proxy', 'projects:domains:set-proxy'];
@@ -62,6 +64,10 @@ class DomainsSetProxy extends Command
 
         $listenPorts = $this->resolveListenPorts();
         if ($listenPorts === null) {
+            return 1;
+        }
+
+        if ($this->refusedWithoutConfirmation()) {
             return 1;
         }
 

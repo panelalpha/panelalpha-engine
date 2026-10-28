@@ -88,6 +88,10 @@ class CreateCommand extends BackupContainerCommand
             return 1;
         }
 
+        if ($this->refusedWithoutConfirmation()) {
+            return 1;
+        }
+
         $this->info('New backup container:');
         $this->line("  Name: {$name}");
         $this->line("  Driver: {$driver}");

@@ -2,12 +2,15 @@
 
 namespace App\Console\Commands\Backup\Container;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Models\Backup as BackupRecord;
 use App\Models\BackupContainer;
 use Illuminate\Console\Command;
 
 class DeleteCommand extends Command
 {
+    use ConfirmsChanges;
+
     protected $signature = 'backup:container:delete {container : Container ID or name}
         {--delete-backups : Delete backups before removing the container}
         {--force : Skip confirmation}';
@@ -34,6 +37,10 @@ class DeleteCommand extends Command
         if ($hasBackups && ! $this->option('delete-backups')) {
             $this->error('Cannot delete backup container while backups exist.');
 
+            return 1;
+        }
+
+        if ($this->refusedWithoutConfirmation()) {
             return 1;
         }
 

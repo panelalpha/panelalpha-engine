@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Domains;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Console\Commands\Concerns\ResolvesProject;
 use App\Integrations\Tunnels\TunnelManager;
 use App\Lib\Apis\Cloudflare\CloudflareException;
@@ -14,6 +15,7 @@ use Symfony\Component\Console\Helper\Table;
 
 class DomainsDeleteTunnel extends Command
 {
+    use ConfirmsChanges;
     use ResolvesProject;
 
     /**
@@ -85,6 +87,10 @@ class DomainsDeleteTunnel extends Command
 
                 return 1;
             }
+        }
+
+        if ($this->refusedWithoutConfirmation()) {
+            return 1;
         }
 
         $this->line('');

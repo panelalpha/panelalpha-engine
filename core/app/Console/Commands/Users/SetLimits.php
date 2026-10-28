@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Users;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Console\Commands\Concerns\ProjectOptions;
 use App\Console\Commands\Concerns\SelectsProjects;
 use App\Lib\Host\ProjectMemory;
@@ -15,6 +16,7 @@ use Illuminate\Database\Eloquent\Collection;
 
 class SetLimits extends Command
 {
+    use ConfirmsChanges;
     use SelectsProjects;
 
     /** Older spellings still answer, so nothing scripted against them breaks. */
@@ -32,7 +34,8 @@ class SetLimits extends Command
             .implode('', array_map(
                 static fn (ResourceLimit $l): string => " {--{$l->option}=}",
                 ResourceLimit::all()
-            ));
+            ))
+            .' {--force : Skip confirmation}';
 
         parent::__construct();
     }
@@ -81,6 +84,10 @@ class SetLimits extends Command
             return 1;
         }
 
+        if ($this->refusedWithoutConfirmation()) {
+            return 1;
+        }
+
         $one = $this->option('username') ? $projects[0] : null;
         $this->warn($one !== null
             ? "Following limits will be set for user `{$one->username}`:"
@@ -88,7 +95,7 @@ class SetLimits extends Command
         // The two headings have always padded their rows differently.
         $this->announce($selection, $one !== null ? 20 : 16);
 
-        return $this->confirm('Do you wish to continue?')
+        return $this->option('force') || $this->confirm('Do you wish to continue?')
             ? $this->apply($projects, $selection)
             : 0;
     }

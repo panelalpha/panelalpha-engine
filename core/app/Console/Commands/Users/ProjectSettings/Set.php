@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Users\ProjectSettings;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Console\Commands\Concerns\ResolvesProject;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Models\User;
@@ -10,6 +11,7 @@ use Illuminate\Console\Command;
 
 class Set extends Command
 {
+    use ConfirmsChanges;
     use ResolvesProject;
 
     protected $aliases = ['projects:settings:set'];
@@ -65,8 +67,12 @@ class Set extends Command
             return 1;
         }
 
+        if ($this->refusedWithoutConfirmation()) {
+            return 1;
+        }
+
         $this->line('');
-        $this->info("Set project setting '{$key}' for '{$user->username}'");
+        $this->info("About to set project setting '{$key}' for '{$user->username}'.");
         if ($key === Settings::KEY_CLOUDFLARE_API_TOKEN) {
             $this->explainCloudflareToken();
         }

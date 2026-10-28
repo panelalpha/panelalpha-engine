@@ -74,7 +74,7 @@ The settings themselves are ordinary lines in `.env-core` and you can still edit
 | `pae project:staging {project}` | Creates a linked staging copy. |
 | `pae project:push {project} {target}` | Pushes state between a staging pair. |
 | `pae project:limit:get --project={project}` | Shows disk, memory and CPU limits. |
-| `pae project:limit:set --project={project} --memory-limit=512` | Changes a limit. Memory is in megabytes, at least 6 (256 for a container project), and may not exceed what projects may have on this server. Every project has a memory limit, so it can be changed but not removed. Any other limit takes `-1` for unlimited. |
+| `pae project:limit:set --project={project} --memory-limit=512` | Changes a limit. Memory is in megabytes, at least 6 (256 for a container project), and may not exceed what projects may have on this server. Every project has a memory limit, so it can be changed but not removed. Any other limit takes `-1` for unlimited. Asks you to confirm; `--force` skips that. |
 | `pae project:network:move --all` | Moves running projects created before this version onto the isolated network. The project container stays up. An application using the server's MySQL may restart, and its site is unavailable until it answers again. A stopped project is left alone; start it and run the command again. `--project={project}` moves one. |
 | `pae project:ssh {project} '{command}'` | Runs one command inside the project. |
 | `pae project:delete {project}` | Deletes the project and everything in it. Asks you to confirm. Without a terminal, such as in a script, it refuses and changes nothing unless you add `--force`. Work still queued for the project is cancelled first. While a deploy or rebuild, staging copy, push, backup or restore is running on it, the delete is refused and changes nothing; cancel that task or wait for it, then delete again. |
@@ -380,4 +380,4 @@ bash /opt/panelalpha/shared-hosting/scripts/pae-command.sh register
 List them with `pae project:deploy:list` - the value you want is `username`.
 
 **A destructive command is asking me to confirm and I am in a script.**
-Most take `--force` to skip the prompt. Be certain before you use it: `pae project:delete --all --force` deletes every project on your VPS with no further questions.
+Most take `--force` to skip the prompt. Run with `--no-interaction` and without `--force`, such a command changes nothing, says so on stderr and exits with 1. Be certain before you use `--force`: `pae project:delete --all --force` deletes every project on your VPS with no further questions.

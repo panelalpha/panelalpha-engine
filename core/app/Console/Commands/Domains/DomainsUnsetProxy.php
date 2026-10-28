@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Domains;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Console\Commands\Concerns\ResolvesProject;
 use App\Integrations\Tunnels\TunnelManager;
 use App\Lib\Apis\Cloudflare\CloudflareException;
@@ -13,6 +14,7 @@ use Symfony\Component\Console\Helper\Table;
 
 class DomainsUnsetProxy extends Command
 {
+    use ConfirmsChanges;
     use ResolvesProject;
 
     protected $aliases = ['domains:unset-proxy', 'projects:domains:unset-proxy'];
@@ -95,6 +97,10 @@ class DomainsUnsetProxy extends Command
             $this->warn("No user HTTP proxy rules for {$fqdn} on ports ".implode(', ', $listenPorts).'.');
 
             return 0;
+        }
+
+        if ($this->refusedWithoutConfirmation()) {
+            return 1;
         }
 
         $this->line('');
