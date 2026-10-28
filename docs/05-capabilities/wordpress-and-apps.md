@@ -2,7 +2,7 @@
 
 WordPress is a main way to use the engine, not an extra. Many hosting accounts on it are WordPress sites. You can ask the engine to set up a new one without bringing your own code, deploy one you already keep in git, or look after a WordPress site that is already running here.
 
-This page covers all three, then day-to-day work: logging in, users, WP-CLI, and the other known apps the engine treats specially.
+This page covers all three, how to move a WordPress site here from another host, then day-to-day work: logging in, users, WP-CLI, and the other known apps the engine treats specially.
 
 ## If WordPress is already on this engine
 
@@ -20,7 +20,7 @@ From there you can add a domain, take a backup, change PHP, run WP-CLI, or manag
 
 There are two kinds of WordPress on this engine, and they are not the same:
 
-- **Traditional PHP hosting.** Files live in `public_html`. Uploads show up on the site without a rebuild. You can change that domain's PHP version, set PHP memory, use FTP, backups, domains and WP-CLI. WordPress users, the install wizard and one-click login are not available on this kind. Neither is Cloudflare: a tunnel, a cache purge or the security level.
+- **Traditional PHP hosting.** Files live in the domain's folder, `/<domain>/public_html`. Uploads show up on the site without a rebuild. You can change that domain's PHP version, set PHP memory, use FTP, backups, domains and WP-CLI, which also covers WordPress users and plugins. The App users tools, with the install wizard, are not available on this kind; the WP-CLI operations below cover users and a one-time login link instead. Cloudflare is not available either: a tunnel, a cache purge or the security level.
 - **Its own container.** Files live in `project/`. This is what you get when the engine sets WordPress up for you, or when you deploy it from git. WordPress users, one-click login and the install wizard work here, as do WP-CLI, backups and domains. That includes WordPress from a Docker Compose file of your own, such as the official `wordpress` image next to a database.
 
 If an action is refused, see [Troubleshooting](#troubleshooting). Older versions called a project a "user". If output still says `username`, that is the project's name.
@@ -93,7 +93,7 @@ It returns a link that logs you straight into the WordPress admin. The link is s
 
 ## Manage WordPress users
 
-For a site the engine set up, you can manage its WordPress users from the chat:
+You can manage a site's WordPress users from the chat. On WordPress in its own container the engine uses its App users actions; on any WordPress, including traditional PHP hosting, it can use the WP-CLI user operations (`wp_user_*`) instead:
 
 ```text
 List the users on this WordPress site.
@@ -126,6 +126,53 @@ WordPress does not have to be at the top of the project. Two settings point the 
 Run `wp core version` on this site, with WordPress in the blog directory.
 List the plugins of the WordPress in the shop service.
 ```
+
+### Named WordPress operations
+
+For common jobs the assistant does not have to write a WP-CLI command. Each of these is its own tool (`wp_*`), its own API route under `/projects/{project}/wp/`, and its own `pae wordpress:*` command:
+
+- **Plugins and themes**: search wordpress.org, list, read one, check whether one is installed, install, activate, update and delete. Plugins can also be deactivated; a theme is switched off by activating another one.
+- **Users**: list (by `role`, with chosen `fields`), create (with `send_email` to send the welcome mail), update, set a password, delete, application passwords, and a one-time login link.
+- **Core**: status, available updates, download, install (with `skip_email`) and update.
+- **Site settings**: maintenance mode, cache flush, `wp-config.php` (list, create from database details, read, set and delete constants or variables), options, auto-updates, site language.
+- **Search and replace** in the database, for example after a domain change.
+- **Database export and import.** An export can be limited to some `tables`.
+
+All of them take the same `path` and `service` as above, and `skip_plugins`, which loads WordPress without its plugins and themes, so a site with a broken plugin can still be managed. Plugin and theme lists take `fields` and `status`, and search takes `fields` and `per_page`. A value that starts with `-`, such as a slug, login or option name, is refused, so it cannot be read as a WP-CLI option.
+
+A database export is readable by the project's own user only, so the webserver cannot serve it and answers 403 if someone asks for it by URL.
+
+## Move a WordPress site here
+
+The engine can copy a WordPress site from another host into a project here, with its files, database and domain. Ask the assistant to test the source first; a test creates nothing:
+
+```text
+Can you import https://example.com into this engine? Test it first.
+```
+
+There are two ways to reach the source site:
+
+- **wp-admin login** (`wp_admin`). Give the wp-admin user name and password. If the site uses a custom login page, give its address too (`login_url`). The engine logs in, installs its migrator plugin, and removes it again when the import is cancelled.
+- **Migrator plugin** (`manual_plugin`). Ask for the plugin package. You get a download link that works for 24 hours and a token. Install the plugin on the source site yourself, then start the import with that token. Remove the plugin from the source when the import is done.
+
+A test answers the domain the site would get, or why the import would fail: `unreachable`, `tls`, `not_wordpress`, `cloudflare`, `login_failed`, `plugin_not_found` or `unauthorized`, or the same codes a start would refuse with. At most two tests run at the same time (a third is refused with 429), and each one stops after 30 seconds.
+
+**Where the site goes.** By default it keeps its own domain, the source's address without `www.`, in a new traditional PHP project. You can choose:
+
+- `domain`: another domain for the site. Its links are rewritten to it.
+- `project`: an existing traditional PHP project to import into, as long as its site folder holds nothing but the placeholder page.
+- `project_name`: the name of the new project.
+- `source_ip`: the public address of the source server, when the domain's DNS already points somewhere else.
+
+A start is refused with 422 `domain_taken` when a project here already has the domain, and `domain_required` when the source is given as an IP address and the engine has no PanelAlpha Connect. It is refused with 409 `engine_address_private` when the source site could not reach this engine: see [Install](../02-getting-started/install.md).
+
+**While the domain still points to the old host.** With [PanelAlpha Connect](../02-getting-started/connect-to-panelalpha-connect.md), the import opens a preview of the site on a `panelalpha.online` address (`preview_url`). The import status shows the DNS record to set. Every 15 minutes the engine checks the domain; once it points here, the engine requests the certificate and removes the preview. Without Connect there is no preview: the site answers on its domain once DNS points here.
+
+**Following, resuming and cancelling.** The status shows how far the whole run is, the step it is on, and the file or table it is sending. A failed import, or one that has not moved for 15 minutes, can be resumed. Cancelling removes the project, files and database the import made here, and on a `wp_admin` source the migrator plugin. A finished, failed or cancelled import can be deleted from the list.
+
+**Secrets.** The wp-admin password and the plugin token are kept encrypted and never shown. If an import sits idle for 7 days, they are cleared; resuming it then asks for them again.
+
+**For the server operator.** Each import installs one pinned release of the migrator plugin, checked by its SHA-256. To use another release, set both `WORDPRESS_MIGRATOR_RELEASE_URL` and `WORDPRESS_MIGRATOR_SHA256` in `/opt/panelalpha/shared-hosting/.env-core`. The source, and every address it redirects to, must be public and not the engine's own; a source on your own private network needs `EGRESS_ALLOW_PRIVATE=true` ([Install](../02-getting-started/install.md)).
 
 ## Deploying a WordPress project from your own repository
 
@@ -268,14 +315,23 @@ jdoe@example.com, reset that user's password, then delete the user.
 
 Mode: full. Tools: `app_user_list`, `app_user_create` with `role`, `app_user_reset_password`, `app_user_delete`. Check: the new user has the editor role, the old password stops working after the reset, and the user is gone from the list.
 
-**WP-CLI (traditional PHP hosting)**
+**WP-CLI**
 
 ```text
 On the traditional WordPress site tphpwp, run `wp core version`, then update
-all plugins.
+all plugins. Do the same on twp.
 ```
 
-Mode: modify. Tools: `wp_cli_run` with `args`. Check: the version comes back, the plugin update output is reported, and the same request on `twp` (a container project) is refused with the reason.
+Mode: modify. Tools: `wp_cli_run` with `args`, `wp_plugin_update`. Check: the version comes back and the plugin update output is reported on both `tphpwp` (traditional PHP hosting) and `twp` (a container project).
+
+**Import a WordPress site**
+
+```text
+Test whether https://example.com can be imported with the wp-admin user
+admin, then import it and tell me which DNS record to set.
+```
+
+Mode: modify. Tools: `wordpress_migration_test`, `wordpress_migration_create`, `wordpress_migration_get`. Check: the test creates nothing and names the domain, the import runs to `completed`, and the status names the DNS record and, with PanelAlpha Connect, a `preview_url`.
 
 **New WordPress on traditional PHP hosting**
 
@@ -297,4 +353,4 @@ Mode: read. Tools: `source_inspect`. Check: the answer names the known app and t
 
 ## From the server
 
-Run WP-CLI on a site over SSH with `pae domain:wp-cli <domain> <command>`. See [CLI commands](../06-commands/pae-cli.md).
+Run WP-CLI on a project over SSH with `pae wordpress:command <project> <command>`, or use a named operation such as `pae wordpress:plugin:list <project>`. Import a site with `pae wordpress:migrate <url>`. `pae domain:wp-cli` still works but is deprecated. See [CLI commands](../06-commands/pae-cli.md#wordpress).

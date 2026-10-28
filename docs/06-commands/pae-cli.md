@@ -190,11 +190,46 @@ A remote store needs its own connection details. `pae backup:container:create --
 | `pae sites:base-domain {domain}` | Shows or sets the name new projects are given a site under. |
 | `pae domain:php-directives {domain}` | Shows the PHP settings for that hostname, on traditional PHP hosting. |
 | `pae domain:php-directives:set {domain} --settings='{"memory_limit":"256M"}'` | Replaces the whole set of PHP settings for that hostname. `--clear` removes them. Naming one setting drops the others. |
-| `pae domain:wp-cli {domain} {command}` | Runs a WP-CLI command on a WordPress site. |
+| `pae domain:wp-cli {domain} {command}` | Deprecated: use `pae wordpress:command` below. Runs a WP-CLI command on a WordPress site. |
 
 Extra routing is managed with `pae proxy:rule:list`, `pae proxy:rule:create`, `pae proxy:rule:update` and `pae proxy:rule:delete`. Most sites never need one.
 
 Context: [Domains and HTTPS](../05-capabilities/domains-and-ssl.md) · [Cloudflare](../05-capabilities/cloudflare.md).
+
+## WordPress
+
+Every command takes the project first. They work on traditional PHP hosting and on WordPress in the project's own containers. Each one also takes `--path=` (the WordPress directory), `--service=` (the Compose service that runs WordPress) and `--skip-plugins` (load WordPress without its plugins and themes, for a site a broken plugin stops).
+
+| Command | What it does |
+|---|---|
+| `pae wordpress:command {project} {args}` | Runs any WP-CLI command, for example `pae wordpress:command shop plugin list`. |
+| `pae wordpress:plugin:list {project}` | Lists plugins. `--fields=` and `--status=` narrow it. Also `plugin:get`, `plugin:search {term}` (`--per-page=`), `plugin:is-installed`, `plugin:install` (`--force`), `plugin:activate`, `plugin:deactivate`, `plugin:update` and `plugin:delete`, each with the plugin's slug. |
+| `pae wordpress:theme:list {project}` | Lists themes, with the same options. Also `theme:get`, `theme:search`, `theme:is-installed`, `theme:install`, `theme:activate`, `theme:update` and `theme:delete`. |
+| `pae wordpress:user:list {project}` | Lists users. `--role=` and `--fields=` narrow it. Also `user:create {login} {email} {password}` (`--role=`, `--send-email`), `user:update {user}`, `user:password {user} {password}`, `user:delete {user}` (`--reassign=`) and `user:sso {user}` for a one-time login link. |
+| `pae wordpress:user:application-password:list {project} {user}` | Lists a user's application passwords. Also `:create {user} {name}` and `:delete {user} {uuid}`. |
+| `pae wordpress:core:status {project}` | Whether WordPress is installed, and the `state` when it is not. Also `core:check-update`, `core:update {version}`, `core:install {url} {title} {admin_user} {admin_email} {admin_password}` (`--skip-email`) and `core:download` (`--locale=`, `--wp-version=`; traditional PHP hosting only, never over an existing WordPress). |
+| `pae wordpress:cache:flush {project}` | Flushes the object cache and the page caches of the known caching plugins. |
+| `pae wordpress:maintenance:get {project}` / `maintenance:set {project} {1\|0}` | Reads or switches maintenance mode. |
+| `pae wordpress:config:list {project}` | Lists `wp-config.php` entries. Also `config:get`, `config:set`, `config:delete` (`--type=constant`, `variable` or `all`) and `config:create {dbname} {dbuser}`. |
+| `pae wordpress:option:list {project}` | Lists options. Also `option:get {option}` and `option:set {option} {value}`. |
+| `pae wordpress:auto-update:get {project}` / `auto-update:set {project} {core} {plugins} {themes}` | Reads or sets automatic updates: core `off`, `on` or `minor`; plugins and themes `off` or `on`. |
+| `pae wordpress:language:set {project} {language}` | Sets the site language, for example `pl_PL`. |
+| `pae wordpress:search-replace {project} {search} {replacement}` | Replaces a string in the database. Takes only its own flags and table names after that. |
+| `pae wordpress:database:export {project} {file}` | Exports the database to a file only the project's user can read. `--tables=` (comma-separated) limits it. Also `database:import {project} {file}`. |
+
+### Importing a site
+
+| Command | What it does |
+|---|---|
+| `pae wordpress:migrate {url} {username?}` | Starts an import and prints its id. `{username}` is the wp-admin user, left out for `manual_plugin`. `--method=wp_admin` (the default, with the wp-admin user) or `manual_plugin`, `--login-url=`, `--source-ip=`, `--domain=`, `--project=`, `--project-name=`. The password, or the plugin token for `manual_plugin`, comes from `WORDPRESS_MIGRATE_PASSWORD` or `WORDPRESS_MIGRATE_SOURCE_TOKEN`, or a prompt; it is never taken on the command line. |
+| `pae wordpress:migrate:status {id}` | Shows how far an import is, its target, the preview address and the DNS record to set. |
+| `pae wordpress:migrate:resume {id}` | Resumes a failed or stalled import. |
+| `pae wordpress:migrate:cancel {id}` | Cancels an import and removes what it made here. |
+| `pae wordpress:migrate:delete {id}` | Deletes the record of a finished, failed or cancelled import. |
+
+Scheduled: `wordpress:migrate:dns-switch` (every 15 minutes: requests the certificate and removes the preview once an imported domain points here) and `wordpress:migrate:expire-secrets` (every hour: clears the passwords and tokens of imports idle for 7 days).
+
+Context: [WordPress and known apps](../05-capabilities/wordpress-and-apps.md).
 
 ## Tokens
 
