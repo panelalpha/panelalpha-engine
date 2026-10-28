@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\User;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\DeployCancelRequest;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\DeployTimings;
 use App\Lib\Task\ProcessTreeKiller;
@@ -125,7 +126,8 @@ class DeployLogController extends Controller
     #[OA\Post(
         path: '/projects/{username}/deploy-cancel',
         summary: 'Cancel a running or queued deploy: mark cancelled, kill the subprocess tree, clean up',
-        description: 'A deploy still waiting in the queue has no process yet: its task is cancelled, and the answer names it in `task_id`.',
+        description: 'A deploy still waiting in the queue has no process yet: its task is cancelled, and the answer names it in `task_id`. '
+            .'Container projects only (`template: dind`); a PHP hosting project answers 422 with the code `'.DeployCancelRequest::CONTAINER_ONLY.'`.',
         security: [['bearerAuth' => []]],
         tags: ['Deploy'],
         parameters: [
@@ -138,11 +140,12 @@ class DeployLogController extends Controller
             new OA\Response(response: 409, description: 'No running or queued deploy', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'message', type: 'string')],
             )),
+            new OA\Response(response: 422, description: 'The project is not a container project', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function cancel(string $username): JsonResponse
+    public function cancel(string $username, DeployCancelRequest $request): JsonResponse
     {
-        $user = $this->getDindUser($username);
+        $user = $this->projectOr404($username);
 
         $result = DeployLogger::requestCancel($username);
         if (! $result['cancelled']) {

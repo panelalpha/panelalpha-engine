@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Cancel a running or queued deploy: mark cancelled, kill the subprocess tree, clean up
 
-    A deploy still waiting in the queue has no process yet: its task is cancelled, and the answer names it in `task_id`.
+    A deploy still waiting in the queue has no process yet: its task is cancelled, and the answer names it in `task_id`. Container projects only (`template: dind`); a PHP hosting project answers 422 with the code `deploy_cancel_container_only`.
     MARKDOWN)]
 #[IsDestructive]
 class DeployCancelTool extends ApiTool
