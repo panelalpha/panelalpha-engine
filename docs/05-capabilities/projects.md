@@ -122,7 +122,7 @@ A suspended project is also skipped by the engine's automatic health checks, bec
 
 ## Protecting
 
-A project can be marked protected. While it is, an assistant or any other tool using a token cannot delete the project, suspend it, stop or restart it, rebuild or redeploy it, change its environment variables, or push into it. The engine refuses with `project_protected` and nothing runs.
+A project can be marked protected. While it is, an assistant or any other tool using a token cannot delete the project, suspend it, stop or restart it, rebuild or redeploy it, change its environment variables, or push into it. The engine refuses with `project_protected` and nothing runs. Starting it (`up`) is refused too when that would write its run file again from the compose file, so environment variables saved without applying them cannot be applied that way.
 
 Only you can turn protection on or off, on the server, so a tool cannot lift it. The assistant can read the setting but not change it.
 
@@ -178,6 +178,8 @@ Every project has plan limits: disk, memory, CPU, bandwidth, and how many databa
 ```text
 Show this project's limits. Raise its memory limit to 2048 MB and rebuild.
 ```
+
+**-1 means unlimited.** Every limit except memory takes `-1` for unlimited, a number of 0 or more, or nothing (`null`), which means no limit was set. Any other negative number is refused. The engine stores and answers `-1` as it is: an unlimited project reports `disk.limit_bytes: -1`, and its usage reports `-1` as the maximum. `pae project:limit:get` prints "no limit" for both. An unlimited CPU or disk I/O limit is left out of the project's container settings.
 
 **The rebuild is not optional.** The new limit is written into the running application when it is deployed, so changing the number without rebuilding changes nothing you can see.
 

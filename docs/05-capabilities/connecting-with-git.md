@@ -152,7 +152,7 @@ Revoke that token at your git host and create a new one. Ask the assistant to se
 Is the project name tshop free on this engine?
 ```
 
-Mode: read. Tools: `project_verify_name`. Check: the answer says free or taken, and a name that breaks the rules (for example `Shop-1`) is refused with the reason.
+Mode: read. Tools: `project_verify_name`. Check: the answer says free, taken or unavailable on this host (200 with `valid`, and a `reason` when it is not free), and only a name that breaks the rules (for example `Shop-1`) is refused, with 422 and the reason.
 
 **Look before deploying**
 
