@@ -8,6 +8,24 @@ Update when PanelAlpha releases a fix. If a deploy failed for a reason PanelAlph
 
 The update restarts the engine, so a connected assistant will disconnect for under a minute and then reconnect.
 
+## Before you update to 2.2
+
+Read this if you update from 2.1 or earlier.
+
+- **Vault references change.** Every vault entry gets a random 24-character key, and a reference is now `vault:<key>`. Old `vault:<id>` references, such as `vault:7`, stop working. After the update, run `pae vault:secret:list` and replace the old references wherever you or your software stored them.
+- **git on traditional PHP hosting.** If the server's git is older than 2.37 (Ubuntu 22.04 ships 2.34), a git pull or push on traditional PHP hosting to a host not listed in `EGRESS_ALLOW_HOSTS` is refused with `host_refused`. The installer warns about it. Upgrade git on the server, or list the git host in `EGRESS_ALLOW_HOSTS`: [Install](install.md). Projects in their own container are not affected.
+- **Software that calls the engine's API** should check these changes:
+  - Project limits: `-1` means unlimited on every limit except memory, and `null` means no limit set. An unlimited project now reports `-1` instead of `null`, and `cpu_limit` and `bandwidth_limit` accept `-1`. A memory limit below 6 MB, or 256 MB for a container project, is refused with `memory_limit_too_small`: [Limits](../05-capabilities/projects.md#limits).
+  - Project name check (`POST /projects/verify-new-username`, `project_verify_name`): a taken or unavailable name answers 200 with `valid: false` and a `reason`, not 422.
+  - Unzip never replaces or merges: an existing entry of the same name is 409 `destination_exists`.
+  - Mail settings (`GET /system/exim-config`) no longer return the SMTP, Mailchannels and SES passwords or the SendGrid token. Each is `null`, with a `<field>_set` flag. Saving an empty value keeps the stored secret; `clear_secrets` names the ones to remove. The user names no longer take a `vault:` reference.
+  - The assistant activity log's `token_name` filter finds names that contain the text, ignoring case, instead of an exact match.
+  - A token limited to some projects must name the new project (`new_username`) when it clones or makes a staging copy, and the name must be on its list.
+  - A staging copy or clone of a WordPress site on traditional PHP hosting without its databases is refused with 422 `wordpress_copy_needs_databases`.
+  - Renaming a main domain to a `panelalpha.online` name is refused (`domain_proxy_zone`), as is renaming one that other tunnels forward to (`domain_has_tunnels`).
+  - An HTTP proxy rule named after a domain alias, or after a traditional PHP project's domain, is refused.
+  - `pae domain:wp-cli` is deprecated in favour of `pae wordpress:command`, and its `domains:wp-cli` alias is removed.
+
 ## From the server
 
 Log in to your VPS as `root`.
