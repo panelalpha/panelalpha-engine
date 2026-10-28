@@ -24,6 +24,8 @@ The installer checks the operating system and refuses anything else. It does not
 
 **No public IPv4 address?** The engine still works, but the install command is different. Read [Troubleshooting](#troubleshooting) before you install.
 
+**Does your provider put a firewall in front of the VPS?** Some do, for example Hetzner Cloud Firewalls or AWS security groups. The engine cannot see or change that firewall, so open the ports in [A firewall in front of the VPS](#a-firewall-in-front-of-the-vps) yourself.
+
 ## 1. Run the installer
 
 ```bash
@@ -136,6 +138,33 @@ Show me this engine's outgoing email settings, then send a test message to me@ex
 ```
 
 To send through a provider, tell the assistant which one and give it your details. Avoid pasting live passwords or keys into a chat you might share later.
+
+## A firewall in front of the VPS
+
+The engine runs its own firewall on the VPS (see [Security](../05-capabilities/security.md)). Some providers add a second one in front of the VPS, set in their control panel: Hetzner Cloud Firewalls, AWS security groups, DigitalOcean Cloud Firewalls and similar. The engine does not see that one. When it blocks a port, everything works from your own address and times out from everywhere else.
+
+Open these inbound ports in the provider's firewall:
+
+| Port (TCP) | Who connects | Who must be allowed |
+|---|---|---|
+| 80 | Visitors, and Let's Encrypt checking that a domain is yours | Everyone, if you want Let's Encrypt certificates |
+| 443 | Visitors to your sites | Everyone who should see your sites |
+| 2011 | Your AI assistant, REST API clients, PanelAlpha Connect, and git hosts calling a [push-to-deploy](../05-capabilities/push-to-deploy.md) hook | Your own addresses, plus the addresses of those services |
+| 22 | You, over SSH | Your own addresses |
+| 2222 | SFTP clients | Whoever uploads files over SFTP |
+| 21 and 30000-30009 | FTP clients | Whoever uploads files over FTP |
+
+Port 80 needs the most care. Let's Encrypt checks a domain from several places on the internet and does not publish their addresses, so it cannot be allowed one address at a time. The engine also renews every certificate on its own before it expires, and each renewal is checked the same way. Keep port 80 open to everyone for as long as you use Let's Encrypt certificates, not only for the first request. If you cannot, install your own certificate instead (see [Domains and SSL](../05-capabilities/domains-and-ssl.md)), or publish the site through a [Cloudflare tunnel](../05-capabilities/cloudflare.md), which needs no inbound port at all.
+
+Port 2011 can stay closed to the rest of the internet. For push-to-deploy, allow only the addresses your git host sends webhooks from. GitHub lists them under `hooks` at `https://api.github.com/meta`. GitLab.com and Bitbucket publish theirs in their own documentation. These lists change from time to time, so check them again if deliveries start to fail.
+
+Signs that a firewall in front of the VPS is the problem:
+
+- A Let's Encrypt request fails with `Timeout during connect (likely firewall problem)`, although the domain points at the VPS.
+- A webhook delivery in GitHub shows `failed to connect to host`.
+- Your assistant connects from your office but not from home, or the other way round.
+
+The engine's own firewall also lets a blocked connection time out, so check it first: `pae firewall:status` on the VPS shows what it allows. When it allows the port and the connection still times out from outside, the block is in front of the VPS.
 
 ## Next
 

@@ -141,6 +141,9 @@ Mode: read. Tools: `ssl_check`. Check: `status` is `trusted`, `dns.points_here` 
 **The certificate request fails with a DNS error.**
 The A record is not pointing here yet. Confirm with `nslookup shop.example.com` from somewhere other than your VPS. Also check nothing is blocking port 80 - Let's Encrypt uses it to verify ownership, even though your site will run on 443.
 
+**The certificate request fails with `Timeout during connect (likely firewall problem)`.**
+DNS is fine, but Let's Encrypt cannot reach port 80 on the VPS. Most often a firewall in your provider's control panel lets only some addresses in, so the site opens for you and not for Let's Encrypt. Port 80 has to be open to everyone, also later for automatic renewals. See [A firewall in front of the VPS](../02-getting-started/install.md#a-firewall-in-front-of-the-vps).
+
 **The browser warns that the connection is not private.**
 Either DNS is not pointing here yet, or the certificate was never issued. Ask the assistant to run `ssl_check` on the domain: `dns.points_here` answers the first, `engine.certificate.status` the second. Then ask it to request the certificate again.
 

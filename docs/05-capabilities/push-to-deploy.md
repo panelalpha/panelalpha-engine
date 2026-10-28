@@ -57,6 +57,8 @@ If it is not (the engine signed it itself, it has expired, it is for a different
 
 If the engine has no public address, the assistant says so separately. No git host on the internet can reach the hook, whatever the certificate is.
 
+A firewall in your provider's control panel can block the hook too, and the engine cannot see it. GitHub then shows `failed to connect to host` on the delivery. Allow port 2011 from your git host's webhook addresses: [A firewall in front of the VPS](../02-getting-started/install.md#a-firewall-in-front-of-the-vps) says where each host lists them.
+
 The lasting fix, once a domain points at the VPS, is a trusted certificate: [Install](../02-getting-started/install.md#troubleshooting), under "I want a real certificate on an engine that is already self-signed". Trusting the certificate on your own computer only tells your assistant to accept it. It does nothing for GitHub, GitLab, or Bitbucket.
 
 ## Did the push actually deploy?
