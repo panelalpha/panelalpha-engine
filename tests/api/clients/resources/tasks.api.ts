@@ -8,13 +8,20 @@ import {
 } from '@/types';
 import { EngineApiBase } from '../engine-api-base';
 
-function taskLogQuery(params?: { since?: string | number; after_id?: number }): string {
+function taskLogQuery(params?: {
+  since?: string | number;
+  after_id?: number;
+  limit?: number;
+}): string {
   const query = new URLSearchParams();
   if (params?.since !== undefined) {
     query.set('since', String(params.since));
   }
   if (params?.after_id !== undefined) {
     query.set('after_id', String(params.after_id));
+  }
+  if (params?.limit !== undefined) {
+    query.set('limit', String(params.limit));
   }
   const suffix = query.toString();
   return suffix.length > 0 ? `?${suffix}` : '';
@@ -93,7 +100,7 @@ export class TasksApi extends EngineApiBase {
 
   async listTaskLogsRaw(
     id: number,
-    params?: { since?: string | number; after_id?: number }
+    params?: { since?: string | number; after_id?: number; limit?: number }
   ): Promise<{ status: number; body: any }> {
     const response = await this.api.get(`tasks/${id}/logs${taskLogQuery(params)}`);
     return this.rawCall(response);

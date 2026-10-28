@@ -7,7 +7,7 @@ export interface TaskDiagnosticsApi {
   getTaskRaw(id: number, afterId?: number): Promise<{ status: number; body: unknown }>;
   listTaskLogsRaw(
     id: number,
-    params?: { after_id?: number }
+    params?: { after_id?: number; limit?: number }
   ): Promise<{ status: number; body: unknown }>;
   getDeployLogRaw?(username: string): Promise<{ status: number; body: unknown }>;
 }
@@ -42,6 +42,8 @@ export interface TaskDiagnostics {
 const DEFAULT_PAGES = 10;
 const DEFAULT_BUDGET_MS = 20_000;
 const DEFAULT_TAIL_LINES = 80;
+/** The engine's largest log page; its default is smaller and would leave the tail of a long log unread. */
+const LOG_PAGE_ROWS = 2000;
 const SHORT_TAIL_LINES = 40;
 const MAX_LINE_CHARS = 400;
 const SHORT_MAX_CHARS = 6_000;
@@ -105,7 +107,10 @@ async function gather(
 
   try {
     for (let page = 0; page < maxPages; page++) {
-      const response = await within(deadline, api.listTaskLogsRaw(d.taskId, { after_id: cursor }));
+      const response = await within(
+        deadline,
+        api.listTaskLogsRaw(d.taskId, { after_id: cursor, limit: LOG_PAGE_ROWS })
+      );
       const body = response.body as { data?: TaskLogLine[]; meta?: { next_after_id?: number } };
       if (response.status !== 200 || !Array.isArray(body?.data)) {
         d.notes.push(`GET tasks/${d.taskId}/logs answered ${response.status}`);
