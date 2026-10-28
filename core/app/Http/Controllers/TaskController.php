@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Auth\TokenAbilities;
 use App\Http\Controllers\Concerns\StreamsNdjson;
 use App\Http\Requests\TaskListRequest;
+use App\Http\Requests\TaskLogPageRequest;
 use App\Http\Resources\TaskLogCollection;
 use App\Http\Resources\TaskLogResource;
 use App\Http\Resources\TaskResource;
@@ -12,6 +13,7 @@ use App\Http\Resources\TaskSummaryCollection;
 use App\Lib\Task\LogStreamLimiter;
 use App\Lib\Task\ProcessTreeKiller;
 use App\Lib\Task\TaskCanceller;
+use App\Lib\Task\TaskLogPage;
 use App\Models\Task;
 use App\Models\TaskLog;
 use App\System;
@@ -27,6 +29,12 @@ class TaskController extends Controller
 
     /** Silence after which the log stream checks that its reader is still there. */
     public const STREAM_HEARTBEAT_SECONDS = 2;
+
+    private const AFTER_ID_DESCRIPTION = 'The offset cursor: only log rows with an id above it are returned. '
+        .'Start at 0, then send the `next_after_id` of the previous page.';
+
+    private const LIMIT_DESCRIPTION = 'Log rows in one page, 1 to '.TaskLogPage::MAX_LIMIT.'. '
+        .TaskLogPage::DEFAULT_LIMIT.' rows of typical deploy output are about 100 KB.';
 
     private float $lastFrameAt = 0.0;
 
@@ -163,11 +171,27 @@ class TaskController extends Controller
     #[OA\Get(
         path: '/tasks/{id}',
         summary: 'Poll a task status and new log lines after a cursor',
+        description: 'Returns the task and a page of at most `limit` log rows after `after_id`. While `more` '
+            .'is true there are rows after this page: ask again with `after_id` set to `next_after_id`.',
         security: [['bearerAuth' => []]],
         tags: ['Tasks'],
         parameters: [
             new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
-            new OA\Parameter(name: 'after_id', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 0)),
+            new OA\Parameter(
+                name: 'after_id',
+                in: 'query',
+                required: false,
+                description: self::AFTER_ID_DESCRIPTION,
+                schema: new OA\Schema(type: 'integer', default: 0, minimum: 0),
+            ),
+            new OA\Parameter(
+                name: 'limit',
+                in: 'query',
+                required: false,
+                description: self::LIMIT_DESCRIPTION,
+                schema: new OA\Schema(type: 'integer', default: TaskLogPage::DEFAULT_LIMIT, maximum: TaskLogPage::MAX_LIMIT, minimum: 1),
+                x: ['mcp-default' => TaskLogPage::DEFAULT_LIMIT],
+            ),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Task status and log page', content: new OA\JsonContent(
@@ -176,13 +200,14 @@ class TaskController extends Controller
             new OA\Response(response: 404, description: 'Task not found', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'message', type: 'string')],
             )),
+            new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function show(int $id): TaskResource|JsonResponse
+    public function show(int $id, TaskLogPageRequest $request): TaskResource|JsonResponse
     {
         $task = $this->taskOr404($id);
 
-        return new TaskResource($task);
+        return new TaskResource($task, $request->afterId(), $request->limit());
     }
 
     #[OA\Get(
@@ -190,8 +215,9 @@ class TaskController extends Controller
         description: 'Pass `since` as unix seconds or an ISO datetime to keep only rows '
             .'with created_at greater than that instant. Pass `after_id` to skip rows at '
             .'or below that id (needed when many lines share the same second). Both filters '
-            .'AND together. Prefer this over the logs embedded in GET /tasks/{id} when '
-            .'polling by time.',
+            .'AND together. A page holds at most `limit` rows; while `meta.more` is true there are '
+            .'rows after it: ask again with `after_id` set to `meta.next_after_id`. Prefer this over '
+            .'the logs embedded in GET /tasks/{id} when polling by time.',
         summary: 'Page of task log lines after a timestamp and/or id cursor',
         security: [['bearerAuth' => []]],
         tags: ['Tasks'],
@@ -206,7 +232,21 @@ class TaskController extends Controller
                     new OA\Schema(type: 'string', description: 'ISO datetime'),
                 ]),
             ),
-            new OA\Parameter(name: 'after_id', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 0)),
+            new OA\Parameter(
+                name: 'after_id',
+                in: 'query',
+                required: false,
+                description: self::AFTER_ID_DESCRIPTION,
+                schema: new OA\Schema(type: 'integer', default: 0, minimum: 0),
+            ),
+            new OA\Parameter(
+                name: 'limit',
+                in: 'query',
+                required: false,
+                description: self::LIMIT_DESCRIPTION,
+                schema: new OA\Schema(type: 'integer', default: TaskLogPage::DEFAULT_LIMIT, maximum: TaskLogPage::MAX_LIMIT, minimum: 1),
+                x: ['mcp-default' => TaskLogPage::DEFAULT_LIMIT],
+            ),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Log page', content: new OA\JsonContent(
@@ -218,18 +258,16 @@ class TaskController extends Controller
             new OA\Response(response: 404, description: 'Task not found', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'message', type: 'string')],
             )),
+            new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function logs(int $id, Request $request): TaskLogCollection|JsonResponse
+    public function logs(int $id, TaskLogPageRequest $request): TaskLogCollection|JsonResponse
     {
         $task = $this->taskOr404($id);
 
-        $afterId = max(0, (int) $request->query('after_id', 0));
-        $since = $this->since($request);
-        $page = $task->logsPage($afterId, $since);
-        $nextAfterId = $page->isEmpty() ? $afterId : (int) $page->last()->id;
+        $page = TaskLogPage::read($task, $request->afterId(), $this->since($request), $request->limit());
 
-        return new TaskLogCollection($page, $task->status, $nextAfterId);
+        return new TaskLogCollection($page, $task->status);
     }
 
     #[OA\Get(

@@ -133,14 +133,6 @@ class Task extends Model
     }
 
     /**
-     * @return Collection<int, TaskLog>
-     */
-    public function logsAfter(int $afterId, int $limit = 2000): Collection
-    {
-        return $this->logsPage(afterId: $afterId, limit: $limit);
-    }
-
-    /**
      * Page of log rows after an id cursor and/or a timestamp.
      *
      * $since is unix seconds or an ISO datetime string. Both filters AND

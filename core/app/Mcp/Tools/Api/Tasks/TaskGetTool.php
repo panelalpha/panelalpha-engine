@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('task_get')]
 #[Description(<<<'MARKDOWN'
     Poll a task status and new log lines after a cursor
+
+    Returns the task and a page of at most `limit` log rows after `after_id`. While `more` is true there are rows after this page: ask again with `after_id` set to `next_after_id`.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -48,6 +50,17 @@ class TaskGetTool extends ApiTool
     {
         return [
             'after_id',
+            'limit',
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function defaults(): array
+    {
+        return [
+            'limit' => '500',
         ];
     }
 
@@ -58,7 +71,8 @@ class TaskGetTool extends ApiTool
     {
         return [
             'id' => $schema->integer()->required(),
-            'after_id' => $schema->integer(),
+            'after_id' => $schema->integer()->min(0)->description('The offset cursor: only log rows with an id above it are returned. Start at 0, then send the `next_after_id` of the previous page.'),
+            'limit' => $schema->integer()->min(1)->max(2000)->description('Log rows in one page, 1 to 2000. 500 rows of typical deploy output are about 100 KB. This tool sends 500 when it is omitted.'),
         ];
     }
 }

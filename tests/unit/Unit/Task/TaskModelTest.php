@@ -203,7 +203,7 @@ class TaskModelTest extends SqliteTaskTestCase
         $this->assertNull($task->pid_start_time);
     }
 
-    public function test_logs_after_returns_newer_rows_capped_and_next_cursor(): void
+    public function test_logs_page_returns_newer_rows_capped(): void
     {
         $task = Task::start(jobType: 'App\\Jobs\\RebuildJob', queue: 'default');
         $ids = [];
@@ -214,12 +214,12 @@ class TaskModelTest extends SqliteTaskTestCase
             ])->id;
         }
 
-        $page = $task->logsAfter($ids[1], 2);
+        $page = $task->logsPage($ids[1], limit: 2);
         $this->assertCount(2, $page);
         $this->assertSame('line-2', $page[0]->log);
         $this->assertSame('line-3', $page[1]->log);
 
-        $empty = $task->logsAfter($ids[4], 2000);
+        $empty = $task->logsPage($ids[4]);
         $this->assertCount(0, $empty);
     }
 
@@ -273,7 +273,7 @@ class TaskModelTest extends SqliteTaskTestCase
         $this->assertNull(Task::parseSince(''));
     }
 
-    public function test_logs_after_caps_at_2000(): void
+    public function test_logs_page_caps_at_2000(): void
     {
         $task = Task::start(jobType: 'App\\Jobs\\RebuildJob', queue: 'default');
         $rows = [];
@@ -286,7 +286,7 @@ class TaskModelTest extends SqliteTaskTestCase
         }
         TaskLog::insert($rows);
 
-        $this->assertCount(2000, $task->logsAfter(0, 2000));
+        $this->assertCount(2000, $task->logsPage());
     }
 
     public function test_deleting_a_task_cascades_logs(): void

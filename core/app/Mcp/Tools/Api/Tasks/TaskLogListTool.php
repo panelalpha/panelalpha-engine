@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Page of task log lines after a timestamp and/or id cursor
 
-    Pass `since` as unix seconds or an ISO datetime to keep only rows with created_at greater than that instant. Pass `after_id` to skip rows at or below that id (needed when many lines share the same second). Both filters AND together. Prefer this over the logs embedded in GET /tasks/{id} when polling by time.
+    Pass `since` as unix seconds or an ISO datetime to keep only rows with created_at greater than that instant. Pass `after_id` to skip rows at or below that id (needed when many lines share the same second). Both filters AND together. A page holds at most `limit` rows; while `meta.more` is true there are rows after it: ask again with `after_id` set to `meta.next_after_id`. Prefer this over the logs embedded in GET /tasks/{id} when polling by time.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -51,6 +51,17 @@ class TaskLogListTool extends ApiTool
         return [
             'since',
             'after_id',
+            'limit',
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function defaults(): array
+    {
+        return [
+            'limit' => '500',
         ];
     }
 
@@ -62,7 +73,8 @@ class TaskLogListTool extends ApiTool
         return [
             'id' => $schema->integer()->required(),
             'since' => $schema->string(),
-            'after_id' => $schema->integer(),
+            'after_id' => $schema->integer()->min(0)->description('The offset cursor: only log rows with an id above it are returned. Start at 0, then send the `next_after_id` of the previous page.'),
+            'limit' => $schema->integer()->min(1)->max(2000)->description('Log rows in one page, 1 to 2000. 500 rows of typical deploy output are about 100 KB. This tool sends 500 when it is omitted.'),
         ];
     }
 }
