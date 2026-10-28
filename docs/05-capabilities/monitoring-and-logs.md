@@ -135,7 +135,22 @@ Two different questions here.
 How much CPU, memory and disk is this host using?
 ```
 
-Samples are kept over several time windows, from the last few minutes to the last twelve hours, so you can tell a spike from a trend.
+Samples are kept over several time windows, from the last few minutes up to the last 30 days, so you can tell a spike from a trend. The history comes as averages: per minute over the last hour, per 10 minutes over 24 hours, per hour over 7 days and per 6 hours over 30 days (`metrics_history`). It includes disk use of `/home`, where the projects live. `system_info` names the host itself: host name, operating system, kernel, uptime, CPU cores, total memory, the data disk's size and the main IPv4 address. A token limited to some projects does not get these.
+
+```text
+How has this server's CPU and memory looked over the last 7 days?
+```
+
+**One project's CPU and memory:**
+
+```text
+How much CPU and memory has tshop used over the last 24 hours? Which of its
+containers uses the most?
+```
+
+Every minute the engine measures each project, its own Docker included, and every container inside it. CPU is a percentage where one core is 100; memory leaves out cache the system can free. The project list carries each project's latest reading as `usage`, so one list shows them all. `project_metrics_history` gives the project over 1 hour, 24 hours, 7 days or 30 days, and `container_metrics` gives each container now, or over one of those ranges.
+
+Minute readings are kept 48 hours and hourly averages 30 days. The server operator can change that in `/opt/panelalpha/shared-hosting/.env-core` with `PROJECT_METRICS_RAW_HOURS` (at least 2) and `PROJECT_METRICS_LIMIT_DAYS` (at least 1).
 
 **One project against its plan:**
 
@@ -143,7 +158,7 @@ Samples are kept over several time windows, from the last few minutes to the las
 How close is this project to its limits?
 ```
 
-Covers storage, the disk its container logs take, domains, subdomains, FTP and SFTP accounts, and databases. Storage counts the project's files and also its own Docker data (images, build cache and database data), which is often the larger part. Disk use is measured in the background every 15 minutes, so a file you just added can take up to that long to show. Before the first measurement it is measured when you ask. To change a limit: [Limits](projects.md#limits).
+Covers storage, the disk its container logs take, domains, subdomains, FTP and SFTP accounts, and databases. This month's transfer is also on every project in the project list (`bandwidth`, updated every hour), with its limit: `-1` is unlimited and `null` means no limit was set. Storage counts the project's files and also its own Docker data (images, build cache and database data), which is often the larger part. Disk use is measured in the background every 15 minutes, so a file you just added can take up to that long to show. Before the first measurement it is measured when you ask. To change a limit: [Limits](projects.md#limits).
 
 **From inside a project.** If you run a monitoring app or agent in a project (Zabbix, Netdata, node_exporter and the like), two files in it describe the whole server, not the project:
 
@@ -194,7 +209,7 @@ How is this server doing? Give me CPU, memory and disk now, the last five
 minutes, the last hour and the last 12 hours, and the hourly averages.
 ```
 
-Mode: read. Tools: `metrics_latest`, `metrics_current`, `metrics_last_5_minutes`, `metrics_last_hour`, `metrics_last_12_hours`, `metrics_last_hour_averages`, `system_info`. Check: the numbers are consistent between views, and the memory budget is shown.
+Mode: read. Tools: `metrics_latest`, `metrics_current`, `metrics_last_5_minutes`, `metrics_last_hour`, `metrics_last_12_hours`, `metrics_last_hour_averages`, `metrics_history`, `system_info`. Check: the numbers are consistent between views, and the memory budget is shown.
 
 **One site, is it itself?**
 
