@@ -95,7 +95,7 @@ push only those tables.
 
 Each table you push is named by its database and its name. After a full database push, the diff can still list tables. On a WordPress site, the push keeps the other side's own site address, so the data there differs from the pushed side by that address.
 
-Container projects have no table push. On a container project, `databases` means the stored data volumes: they are pushed only together with the files, so a push with both left on carries both.
+Container projects have no table push. On a container project, `databases` covers two things. The MySQL database the engine made for the app is pushed on its own, so a databases-only push carries it. The stored data volumes go only together with the files, so a push with both left on carries both. A databases-only push from a container project that has no such database has nothing to carry, and is refused before either app is stopped. The project's deploy settings, such as how it is built and which commit it runs, go with the files: a databases-only push leaves the other side's own.
 
 Only the volumes your compose file names are copied. An anonymous volume, such as the data directory a database image declares for itself when the compose file gives that service no volume, or an entry that gives only the path inside the container (`- /var/lib/mysql`), is left out of a staging copy, a clone and a push, and the result's warnings name each one that held data. Name the volume in your compose file to have it copied.
 

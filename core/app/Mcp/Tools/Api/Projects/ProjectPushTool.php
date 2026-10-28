@@ -72,8 +72,8 @@ class ProjectPushTool extends ApiTool
         return [
             'name' => $schema->string()->required(),
             'target' => $schema->string()->required(),
-            'files' => $schema->boolean()->description('Replace the target home directory with the source files. Defaults to true.'),
-            'databases' => $schema->boolean()->description('Replace the target MySQL databases with the source data. Defaults to true.'),
+            'files' => $schema->boolean()->description('Replace the target home directory with the source files, and the target\'s deploy settings (strategy, image, commit) with the source\'s. Defaults to true.'),
+            'databases' => $schema->boolean()->description('Replace the target MySQL databases with the source data. Defaults to true. On a container project that is the application database the engine made, plus the data volumes when `files` is true too: with `files` false and no such database on the source, the push is refused (nothing_to_push).'),
             'tables' => $schema->array()->description('Replace only these source tables, leaving the target\'s other tables untouched. Only valid for a classic project with `databases` true. Each item names a source database and table.'),
         ];
     }

@@ -55,7 +55,10 @@ class ProjectPushRequest extends FormRequest
                 return;
             }
 
-            $problems = self::pushProblems($from, $to);
+            $problems = [
+                ...self::pushProblems($from, $to),
+                ...Projects::emptyContainerPushProblems($from, $to, $this->boolean('files', true), $this->boolean('databases', true)),
+            ];
             if ($problems !== []) {
                 throw ProblemException::of($problems);
             }

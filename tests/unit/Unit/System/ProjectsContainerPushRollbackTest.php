@@ -6,11 +6,14 @@ use App\Lib\Deploy\Platform\Strategies;
 use App\Models\User;
 use App\System;
 use App\System\Project;
+use App\System\Project\Dind\AppDatabase;
 use App\System\Projects;
+use App\System\Services\Mysql;
 use Illuminate\Support\Facades\Facade;
 use Symfony\Component\Process\Process;
 use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
+use Tests\Unit\System\Project\Dind\RecordingAppMysql;
 
 /**
  * A container push whose pushed app does not come up is rolled back while
@@ -27,6 +30,8 @@ class ProjectsContainerPushRollbackTest extends TestCase
     private string $root;
 
     private object $record;
+
+    private ?RecordingAppMysql $mysql = null;
 
     protected function setUp(): void
     {
@@ -101,6 +106,7 @@ class ProjectsContainerPushRollbackTest extends TestCase
     /** A database-only push swaps no files, but the app it started may have crashed on the pushed database. */
     public function test_a_database_only_push_that_does_not_run_starts_the_target_again(): void
     {
+        $mysql = $this->giveAppDatabases();
         $this->record->failStarts = 0;
         $this->record->notRunning = 'The application is stopped, not running.';
 
@@ -114,6 +120,7 @@ class ProjectsContainerPushRollbackTest extends TestCase
         $starts = array_values(preg_grep('/^start live /', $this->record->events) ?: []);
         $this->assertSame(['start live recreate=no', 'start live recreate=yes'], $starts);
         $this->assertSame('live code', file_get_contents($this->root.'/live/project/index.js'));
+        $this->assertContains('restore live_app from live_app.sql.gz', $mysql->log);
     }
 
     public function test_a_pushed_app_that_runs_completes_the_push(): void
@@ -150,6 +157,23 @@ class ProjectsContainerPushRollbackTest extends TestCase
         $this->fail("'{$event}' was never recorded after event {$after}: ".implode(' | ', $events));
     }
 
+    /** Both sides get the application database a database-only container push carries. */
+    private function giveAppDatabases(): RecordingAppMysql
+    {
+        $this->mysql = new RecordingAppMysql;
+        foreach (['live', 'stg'] as $username) {
+            $user = User::findByUsernameOrFail($username);
+            $user->setDetails([AppDatabase::PASSWORD_DETAIL => $username.'-secret']);
+            $user->save();
+            $user->mysqlDatabases()->create(['database' => $username.'_app']);
+            $user->mysqlUsers()->create(['user' => $username.'_app']);
+            $this->mysql->databases[] = $username.'_app';
+            $this->mysql->users[$username.'_app'] = $username.'-secret';
+        }
+
+        return $this->mysql;
+    }
+
     private function containerProject(string $username, int $uid): User
     {
         return $this->makeUser($username, [
@@ -176,9 +200,14 @@ class ProjectsContainerPushRollbackTest extends TestCase
 
     private function system(): System
     {
-        return new class($this->root, $this->record) extends System
+        return new class($this->root, $this->record, $this->mysql) extends System
         {
-            public function __construct(private string $root, private object $record) {}
+            public function __construct(private string $root, private object $record, private ?Mysql $server) {}
+
+            public function mysql(): Mysql
+            {
+                return $this->server ?? parent::mysql();
+            }
 
             public function project(User $model): Project
             {

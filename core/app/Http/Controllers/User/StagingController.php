@@ -173,13 +173,16 @@ class StagingController extends Controller
                 new OA\Property(property: 'target', type: 'string'),
                 new OA\Property(
                     property: 'files',
-                    description: 'Replace the target home directory with the source files. Defaults to true.',
+                    description: 'Replace the target home directory with the source files, and the target\'s deploy settings '
+                        .'(strategy, image, commit) with the source\'s. Defaults to true.',
                     type: 'boolean',
                     nullable: true,
                 ),
                 new OA\Property(
                     property: 'databases',
-                    description: 'Replace the target MySQL databases with the source data. Defaults to true.',
+                    description: 'Replace the target MySQL databases with the source data. Defaults to true. On a container '
+                        .'project that is the application database the engine made, plus the data volumes when `files` is '
+                        .'true too: with `files` false and no such database on the source, the push is refused (nothing_to_push).',
                     type: 'boolean',
                     nullable: true,
                 ),

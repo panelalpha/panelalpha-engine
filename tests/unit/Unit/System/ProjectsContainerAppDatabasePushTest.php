@@ -174,6 +174,60 @@ class ProjectsContainerAppDatabasePushTest extends TestCase
         $this->assertSame([], $live->refresh()->mysqlDatabases()->pluck('database')->all());
     }
 
+    public function test_a_database_only_push_from_a_source_without_one_is_refused_before_anything_stops(): void
+    {
+        $live = $this->containerProject('live', 1001);
+        $stg = $this->makeUser('stg', ['template' => 'dind', 'UID' => 2002, 'GID' => 2002, 'mysql_prefix' => 'stg_', 'deploy_strategy' => 'dockerfile']);
+        $stg->staging = $live->id;
+        $stg->save();
+        $before = $live->refresh()->getDetails();
+
+        try {
+            (new Projects($this->system(failStart: true)))->pushToApp('stg', 'live', files: false);
+            $this->fail('the push should have been refused');
+        } catch (\RuntimeException $e) {
+            $this->assertSame(422, $e->getCode());
+            $this->assertStringStartsWith('Nothing to push', $e->getMessage());
+        }
+
+        $this->assertSame([], $this->mysql->log);
+        $this->assertSame($before, $live->refresh()->getDetails());
+        $this->assertDirectoryDoesNotExist($this->root.'/live/.pre-push-db');
+    }
+
+    public function test_a_database_only_push_keeps_the_targets_deploy_settings(): void
+    {
+        [$stg, $live] = $this->stagingPair();
+        $this->deployedAs($stg, 'dockerfile', 'stg-image', 'aaaa');
+        $this->deployedAs($live, 'php', 'live-image', 'bbbb');
+
+        (new Projects($this->system()))->pushToApp('stg', 'live', files: false);
+
+        $details = User::findByUsernameOrFail('live')->getDetails();
+        $this->assertSame(['php', 'live-image', 'bbbb'], [$details['deploy_strategy'], $details['deploy_image'], $details['git_commit']]);
+        $this->assertContains('copy stg_app to live_app', $this->mysql->log);
+    }
+
+    public function test_a_push_with_files_takes_the_sources_deploy_settings(): void
+    {
+        [$stg, $live] = $this->stagingPair();
+        $this->writeRunFile('stg', $stg);
+        $this->writeRunFile('live', $live);
+        $this->deployedAs($stg, 'dockerfile', 'stg-image', 'aaaa');
+        $this->deployedAs($live, 'php', 'live-image', 'bbbb');
+
+        (new Projects($this->system()))->pushToApp('stg', 'live');
+
+        $details = User::findByUsernameOrFail('live')->getDetails();
+        $this->assertSame(['dockerfile', 'stg-image', 'aaaa'], [$details['deploy_strategy'], $details['deploy_image'], $details['git_commit']]);
+    }
+
+    private function deployedAs(User $user, string $strategy, string $image, string $commit): void
+    {
+        $user->setDetails(['deploy_strategy' => $strategy, 'deploy_image' => $image, 'git_commit' => $commit]);
+        $user->save();
+    }
+
     private function pushFails(bool $files, bool $databases): void
     {
         try {

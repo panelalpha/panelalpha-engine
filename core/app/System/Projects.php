@@ -101,10 +101,13 @@ class Projects
         $from = ModelsUser::findByUsernameOrFail($sourceUsername);
         $to = ModelsUser::findByUsernameOrFail($targetUsername);
         self::assertCanPush($from, $to);
+        self::assertContainerPushCarriesSomething($from, $to, $files, $databases);
 
         $targetSnapshot = ModelsUser::copiedDeploySnapshot($to->getDetails());
-        $to->applyDeploySnapshotFrom($from);
-        $to->save();
+        if ($files) {
+            $to->applyDeploySnapshotFrom($from);
+            $to->save();
+        }
 
         $fromProject = $this->system->project($from);
         $toProject = $this->system->project($to);
@@ -1388,6 +1391,35 @@ class Projects
         if ($problems !== []) {
             throw new \RuntimeException($problems[0]['message'], 422);
         }
+    }
+
+    private static function assertContainerPushCarriesSomething(ModelsUser $from, ModelsUser $to, bool $files, bool $databases): void
+    {
+        $problems = self::emptyContainerPushProblems($from, $to, $files, $databases);
+        if ($problems !== []) {
+            throw new \RuntimeException($problems[0]['message'], 422);
+        }
+    }
+
+    /**
+     * Without its files a container project pushes only the application database
+     * the engine made for it; a source without one would stop and restart both apps
+     * to carry nothing.
+     *
+     * @return list<array{field: string, code: string, message: string}>
+     */
+    public static function emptyContainerPushProblems(ModelsUser $from, ModelsUser $to, bool $files, bool $databases): array
+    {
+        if ($files || ! $databases || ! self::isDind($to) || AppDatabase::isOwnedBy($from)) {
+            return [];
+        }
+
+        return [[
+            'field' => 'databases',
+            'code' => 'nothing_to_push',
+            'message' => "Nothing to push: files are disabled, and '{$from->username}' has no application database, "
+                .'the only database a container project pushes without its files.',
+        ]];
     }
 
     /**
