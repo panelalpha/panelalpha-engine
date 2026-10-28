@@ -16,6 +16,7 @@ use PHPUnit\Framework\TestCase;
  * Contract for named maintenance-mode operations: enabled body, set resource
  * body, failure as Exception, and the WP-CLI argv including resolved --path.
  * Status treats a non-zero is-active exit as enabled=false, not as a failure.
+ * Set reads the state back, since WP-CLI reports success either way.
  */
 class MaintenanceTest extends TestCase
 {
@@ -76,14 +77,18 @@ class MaintenanceTest extends TestCase
             $sequence,
             results: [
                 ['exit_code' => 0, 'stdout' => "Success: Maintenance mode activated.\n", 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => '', 'stderr' => ''],
             ],
         );
 
         $body = $maintenance->set(true);
 
         $this->assertSame(
-            ['maintenance-mode', 'activate', '--path=/home/alice/example.test/public_html'],
-            $sequence[0]
+            [
+                ['maintenance-mode', 'activate', '--path=/home/alice/example.test/public_html'],
+                ['maintenance-mode', 'is-active', '--path=/home/alice/example.test/public_html'],
+            ],
+            $sequence
         );
         $this->assertSame(
             ['enabled' => true, 'message' => 'Success: Maintenance mode activated.'],
@@ -98,14 +103,18 @@ class MaintenanceTest extends TestCase
             $sequence,
             results: [
                 ['exit_code' => 0, 'stdout' => 'Success: Maintenance mode deactivated.', 'stderr' => ''],
+                ['exit_code' => 1, 'stdout' => '', 'stderr' => ''],
             ],
         );
 
         $body = $maintenance->set(false);
 
         $this->assertSame(
-            ['maintenance-mode', 'deactivate', '--path=/home/alice/example.test/public_html'],
-            $sequence[0]
+            [
+                ['maintenance-mode', 'deactivate', '--path=/home/alice/example.test/public_html'],
+                ['maintenance-mode', 'is-active', '--path=/home/alice/example.test/public_html'],
+            ],
+            $sequence
         );
         $this->assertSame(
             ['enabled' => false, 'message' => 'Success: Maintenance mode deactivated.'],
@@ -133,6 +142,47 @@ class MaintenanceTest extends TestCase
         } catch (WordPressException $e) {
             $this->assertSame('Error: Could not activate maintenance mode.', $e->getMessage());
             $this->assertSame(422, $e->httpStatus);
+        }
+    }
+
+    public function test_set_fails_when_wp_cli_reported_success_but_maintenance_mode_stayed_off(): void
+    {
+        $sequence = [];
+        $maintenance = $this->maintenanceWithFakeRunner(
+            $sequence,
+            results: [
+                ['exit_code' => 0, 'stdout' => "Enabling Maintenance mode...\nSuccess: Activated Maintenance mode.\n", 'stderr' => ''],
+                ['exit_code' => 1, 'stdout' => '', 'stderr' => ''],
+            ],
+        );
+
+        try {
+            $maintenance->set(true);
+            $this->fail('Expected WordPressException');
+        } catch (WordPressException $e) {
+            $this->assertSame(422, $e->httpStatus);
+            $this->assertStringStartsWith('Maintenance mode is still off although WP-CLI reported success', $e->getMessage());
+            $this->assertStringContainsString('could not create .maintenance', $e->getMessage());
+        }
+    }
+
+    public function test_set_fails_when_wp_cli_reported_success_but_maintenance_mode_stayed_on(): void
+    {
+        $sequence = [];
+        $maintenance = $this->maintenanceWithFakeRunner(
+            $sequence,
+            results: [
+                ['exit_code' => 0, 'stdout' => 'Success: Deactivated Maintenance mode.', 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => '', 'stderr' => ''],
+            ],
+        );
+
+        try {
+            $maintenance->set(false);
+            $this->fail('Expected WordPressException');
+        } catch (WordPressException $e) {
+            $this->assertStringStartsWith('Maintenance mode is still on although WP-CLI reported success', $e->getMessage());
+            $this->assertStringContainsString('could not remove .maintenance', $e->getMessage());
         }
     }
 

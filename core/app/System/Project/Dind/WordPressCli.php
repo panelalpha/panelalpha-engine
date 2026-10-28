@@ -16,7 +16,8 @@ use Illuminate\Support\Str;
  * both PHP and a WordPress tree, streams the account's wp-cli.phar into it
  * when missing or stale, and execs WP-CLI there as the owner of wp-content,
  * so plugin installs land with the web server's ownership and the container's
- * own environment (database credentials) applies.
+ * own environment (database credentials) applies. A command that writes into
+ * the install directory itself runs as that directory's owner instead.
  *
  * WP-CLI's database commands shell out to mysql and mysqldump, which the
  * official wordpress image lacks: they run in the first container that has a
@@ -39,6 +40,13 @@ class WordPressCli
 
     /** The `wp db` subcommands that run the mysql, mysqldump or mysqlcheck client rather than PHP. */
     public const DATABASE_CLIENT_COMMANDS = ['create', 'drop', 'reset', 'clean', 'check', 'optimize', 'repair', 'cli', 'query', 'export', 'import'];
+
+    /**
+     * The commands that write into the install directory itself: maintenance
+     * mode creates and removes .maintenance there. On a bind-mounted checkout
+     * that directory is the account's, which wp-content's owner cannot write.
+     */
+    public const INSTALL_DIRECTORY_COMMANDS = ['maintenance-mode'];
 
     /**
      * Runs in the target container with its default user and working
@@ -80,14 +88,15 @@ class WordPressCli
     /**
      * Runs in the account as its user: $1 the requested path and $2 the
      * service (either may be empty), $3 the PHP memory limit, $4 code WP-CLI
-     * runs first, $5 1 when the command needs the MySQL client, the rest
-     * WP-CLI's arguments. A database command runs as the owner of the install
-     * directory, so a dump it writes or reads there is the account's file. The last step
-     * execs WP-CLI, so stdout, stderr and the exit code are WP-CLI's own.
+     * runs first, $5 1 when the command needs the MySQL client, $6 1 when it
+     * runs as the owner of the install directory, the rest WP-CLI's arguments.
+     * A database command runs as that owner too, so a dump it writes or reads
+     * there is the account's file. The last step execs WP-CLI, so stdout,
+     * stderr and the exit code are WP-CLI's own.
      */
     public const SCRIPT = <<<'SH'
         set -u
-        want=$1; service=$2; memory=$3; mend=$4; needs_client=$5; shift 5
+        want=$1; service=$2; memory=$3; mend=$4; needs_client=$5; as_install_owner=$6; shift 6
         phar=__PHAR__; dest=__DEST__; probe=__PROBE__
         fail() { printf '%s %s\n' '__MARKER__' "$1" >&2; exit 70; }
         missing() { printf '%s %s\n' '__MARKER__' "$1" >&2; exit __NOT_FOUND__; }
@@ -107,8 +116,8 @@ class WordPressCli
           { read -r path; read -r owner; read -r have; read -r client; read -r tree; } <<< "$out"
           if [ "$needs_client" = 1 ]; then
             [ "$client" = 1 ] || { without_client=1; continue; }
-            owner=$tree
           fi
+          if [ "$as_install_owner" = 1 ]; then owner=$tree; fi
           if [ "$have" != "$size" ]; then
             docker exec -i "$id" sh -c 'cat > "$1.$$" && chmod 0644 "$1.$$" && mv -f "$1.$$" "$1"' sh "$dest" < "$phar" \
               || fail "Could not copy WP-CLI into the container: its /tmp is not writable."
@@ -189,16 +198,35 @@ class WordPressCli
             '__NOT_FOUND__' => (string) self::NOT_FOUND_EXIT,
             '__NO_CLIENT__' => (string) self::NO_DATABASE_CLIENT_EXIT,
         ]);
-        $needsClient = self::needsDatabaseClient($rest) ? '1' : '0';
+        $needsClient = self::needsDatabaseClient($rest);
+        $asInstallOwner = $needsClient || self::writesInstallDirectory($rest);
 
-        return ['bash', '-c', $script, 'wp', $path, (string) $service, self::MEMORY_LIMIT, MustUsePlugin::MEND_ON_LOAD, $needsClient, ...$rest];
+        return [
+            'bash', '-c', $script, 'wp', $path, (string) $service, self::MEMORY_LIMIT, MustUsePlugin::MEND_ON_LOAD,
+            $needsClient ? '1' : '0', $asInstallOwner ? '1' : '0', ...$rest,
+        ];
     }
 
     /** @param  list<string>  $args */
     public static function needsDatabaseClient(array $args): bool
     {
-        $words = array_values(array_filter($args, fn (string $arg): bool => ! str_starts_with($arg, '-')));
+        $words = self::words($args);
 
         return ($words[0] ?? null) === 'db' && in_array($words[1] ?? null, self::DATABASE_CLIENT_COMMANDS, true);
+    }
+
+    /** @param  list<string>  $args */
+    public static function writesInstallDirectory(array $args): bool
+    {
+        return in_array(self::words($args)[0] ?? null, self::INSTALL_DIRECTORY_COMMANDS, true);
+    }
+
+    /**
+     * @param  list<string>  $args
+     * @return list<string>
+     */
+    private static function words(array $args): array
+    {
+        return array_values(array_filter($args, fn (string $arg): bool => ! str_starts_with($arg, '-')));
     }
 }

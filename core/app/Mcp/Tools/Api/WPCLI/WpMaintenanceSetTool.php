@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Set WordPress maintenance mode
 
-    Turns maintenance mode on or off via `wp maintenance-mode activate|deactivate`. Optional `path` selects the install.
+    Turns maintenance mode on or off via `wp maintenance-mode activate|deactivate`, then reads it back: a state that did not change is a 422, although WP-CLI reports success. On a project running in its own containers it runs as the owner of the WordPress directory, where .maintenance is written. Optional `path` selects the install.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

@@ -65,8 +65,10 @@ class WpMaintenanceController extends WordPressController
     #[OA\Put(
         path: '/projects/{username}/wp/maintenance',
         summary: 'Set WordPress maintenance mode',
-        description: 'Turns maintenance mode on or off via `wp maintenance-mode activate|deactivate`. '
-            .'Optional `path` selects the install.',
+        description: 'Turns maintenance mode on or off via `wp maintenance-mode activate|deactivate`, '
+            .'then reads it back: a state that did not change is a 422, although WP-CLI reports success. '
+            .'On a project running in its own containers it runs as the owner of the WordPress directory, '
+            .'where .maintenance is written. Optional `path` selects the install.',
         security: [['bearerAuth' => []]],
         tags: ['WP-CLI'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -101,7 +103,7 @@ class WpMaintenanceController extends WordPressController
                 ])],
             )),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 422, description: 'WP-CLI failed, or no WordPress install was found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'WP-CLI failed, maintenance mode did not change, or no WordPress install was found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     public function update(string $username, WpMaintenanceSetRequest $request): JsonResponse

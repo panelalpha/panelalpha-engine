@@ -244,7 +244,7 @@ class WordPressCliTest extends TestCase
 
         $exec = array_search('exec', $this->commands[0], true);
         $this->assertSame(['-u', '1000:1000', '-T', 'dind', 'bash', '-c'], array_slice($this->commands[0], $exec + 1, 6));
-        $this->assertSame(['wp', '', '', WordPressCli::MEMORY_LIMIT, MustUsePlugin::MEND_ON_LOAD, '0', 'core', 'version'], array_slice($this->commands[0], -8));
+        $this->assertSame(['wp', '', '', WordPressCli::MEMORY_LIMIT, MustUsePlugin::MEND_ON_LOAD, '0', '0', 'core', 'version'], array_slice($this->commands[0], -9));
     }
 
     public function test_no_wordpress_is_its_own_exception_and_other_script_failures_are_not(): void
@@ -329,6 +329,37 @@ class WordPressCliTest extends TestCase
         $this->assertFalse(WordPressCli::needsDatabaseClient([]));
     }
 
+    public function test_maintenance_mode_runs_in_the_wordpress_container_as_the_owner_of_the_install_directory(): void
+    {
+        $this->containers("wp1|wordpress|wordpress:latest\ncli1|wp-cli|wordpress:cli");
+        $this->probe('wp1', "/var/www/html\n33:33\n1234\n0\n1013:1013");
+
+        $process = $this->runScript(['maintenance-mode', 'activate']);
+
+        $this->assertSame(0, $process->getExitCode(), $process->getErrorOutput());
+        $this->assertSame(['probe wp1', 'run wp1'], $this->calls(), 'no MySQL client is needed');
+        $this->assertStringContainsString('-u 1013:1013', $process->getOutput(), 'as the owner of the directory .maintenance goes into');
+    }
+
+    public function test_only_maintenance_mode_writes_into_the_install_directory(): void
+    {
+        $this->assertTrue(WordPressCli::writesInstallDirectory(['maintenance-mode', 'activate']));
+        $this->assertTrue(WordPressCli::writesInstallDirectory(['--skip-plugins', 'maintenance-mode', 'deactivate', '--path=/x']));
+        $this->assertTrue(WordPressCli::writesInstallDirectory(['maintenance-mode', 'is-active']));
+        $this->assertFalse(WordPressCli::writesInstallDirectory(['plugin', 'install', 'maintenance-mode']));
+        $this->assertFalse(WordPressCli::writesInstallDirectory(['option', 'get', 'siteurl']));
+        $this->assertFalse(WordPressCli::writesInstallDirectory([]));
+    }
+
+    public function test_the_runner_is_told_which_commands_run_as_the_install_owner(): void
+    {
+        $command = fn (array $args): array => array_slice((new WordPressCli($this->dind()))->command($args), 8, 2);
+
+        $this->assertSame(['0', '0'], $command(['plugin', 'list']));
+        $this->assertSame(['0', '1'], $command(['maintenance-mode', 'activate']));
+        $this->assertSame(['1', '1'], $command(['db', 'export', 'backup.sql']));
+    }
+
     public function test_a_missing_mysql_client_is_its_own_exception(): void
     {
         $this->reply = $this->process(WordPressCli::NO_DATABASE_CLIENT_EXIT, '', WordPressCli::MARKER." WP-CLI's database commands need the MySQL client.\n");
@@ -339,7 +370,7 @@ class WordPressCliTest extends TestCase
         } catch (DatabaseClientMissing $e) {
             $this->assertSame("WP-CLI's database commands need the MySQL client.", $e->getMessage());
         }
-        $this->assertSame(['1', 'db', 'query', 'SELECT 1'], array_slice($this->commands[0], -4));
+        $this->assertSame(['1', '1', 'db', 'query', 'SELECT 1'], array_slice($this->commands[0], -5));
     }
 
     public function test_a_database_probe_without_a_mysql_client_comes_back_as_a_result(): void
