@@ -4,6 +4,7 @@ namespace App\System\Project\Dind\Source;
 
 use App\Exceptions\DeployCancelledException;
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
+use App\Lib\Deploy\DeployLog\DeployStartLine;
 use App\Lib\Deploy\Platform\ManifestException;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Models\User as ModelsUser;
@@ -77,7 +78,7 @@ class GitRepository extends WorkTree
         $logger?->info($this->cloningMessage($gitRepo, $branch));
 
         $this->cloneAndAdopt($gitRepo, $branch, $gitToken, $gitProjectDir, $beforeReplacing);
-        $logger?->ok(self::clonedMessage($branch ?? $this->readHeadBranch()));
+        $logger?->ok($this->clonedMessage($branch));
         if ($this->wantsFullHistory($gitRepo)) {
             $logger?->info('Fetching the full history and tags (the recipe sets git: {history: full})');
             $this->rethrowingGitFailure(fn () => $this->fetchFullHistory($gitToken));
@@ -94,10 +95,16 @@ class GitRepository extends WorkTree
             : "Cloning repository {$safeRepo}";
     }
 
-    /** Names the branch the clone landed on, so the deploy history can tell a default-branch create's branch. */
-    private static function clonedMessage(?string $branch): string
+    /**
+     * Names the branch and the commit the clone landed on: a create or a rebuild logs its
+     * start before either is known, and the deploy history reads both from here.
+     */
+    private function clonedMessage(?string $branch): string
     {
-        return $branch !== null ? "Repository cloned (branch: {$branch})" : 'Repository cloned';
+        return DeployStartLine::cloned(
+            $branch ?? $this->readHeadBranch(),
+            $this->quietly(fn (): ?string => $this->readHeadCommit()),
+        );
     }
 
     private function cloneAndAdopt(

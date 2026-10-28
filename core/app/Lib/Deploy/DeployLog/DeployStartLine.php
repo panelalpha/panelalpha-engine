@@ -4,7 +4,8 @@ namespace App\Lib\Deploy\DeployLog;
 
 /**
  * The `Deploy started (source: …)` lines a deploy log opens with, and what
- * they say about where the deploy came from.
+ * they say about where the deploy came from. A create or a rebuild writes its
+ * start line before it clones, so the line its clone ends on names the commit.
  */
 final class DeployStartLine
 {
@@ -12,6 +13,10 @@ final class DeployStartLine
     public const HEAD = 200;
 
     private const OPENING = 'Deploy started (';
+
+    private const CLONED = 'Repository cloned';
+
+    private const CLONED_OPENING = self::CLONED.' (';
 
     /** Sources as the log spells them, renamed where the API has its own word. */
     private const RENAMED = ['push' => 'hook', 'dind template' => 'template'];
@@ -27,7 +32,7 @@ final class DeployStartLine
     /** Only a create names the repository or the template it starts from. */
     private const INSTALL_SOURCE = 'dind template';
 
-    private const CLONE_BRANCH = '/^(?:Cloning repository .+|Repository cloned) \(branch: ([^)]+)\)$/';
+    private const CLONING_BRANCH = '/^Cloning repository .+ \(branch: ([^)]+)\)$/';
 
     /**
      * The start line a redeploy writes; empty fields are left out.
@@ -36,21 +41,38 @@ final class DeployStartLine
      */
     public static function text(string $source, array $fields = []): string
     {
-        $parts = ['source: '.$source];
+        return self::OPENING.implode(', ', ['source: '.$source, ...self::pairs($fields)]).')';
+    }
+
+    /** The line a clone ends on, naming the branch and the commit it checked out when git could tell. */
+    public static function cloned(?string $branch, ?string $commit): string
+    {
+        $pairs = self::pairs(['branch' => $branch, 'commit' => $commit]);
+
+        return $pairs === [] ? self::CLONED : self::CLONED_OPENING.implode(', ', $pairs).')';
+    }
+
+    /**
+     * @param  array<string, ?string>  $fields
+     * @return list<string>
+     */
+    private static function pairs(array $fields): array
+    {
+        $pairs = [];
         foreach ($fields as $key => $value) {
             if ($value !== null && $value !== '') {
-                $parts[] = $key.': '.$value;
+                $pairs[] = $key.': '.$value;
             }
         }
 
-        return self::OPENING.implode(', ', $parts).')';
+        return $pairs;
     }
 
     /**
      * An archive deploy logs `archive` and then `rebuild`, and a template
      * account that later receives files logs `template` first, so the first
-     * source that is not a follow-on wins. The branch is the one a start line
-     * names, or the one the create cloned.
+     * source that is not a follow-on wins. The commit and the branch are the
+     * ones a start line names, or the ones the clone checked out.
      *
      * @param  list<array{msg: string}>  $lines
      * @return array{source: ?string, commit: ?string, branch: ?string, kind: ?string}
@@ -62,8 +84,10 @@ final class DeployStartLine
         $branch = null;
         $install = false;
         foreach ($lines as $line) {
-            $branch ??= self::clonedBranch($line['msg']);
-            $fields = self::fields($line['msg']);
+            $cloned = self::fields($line['msg'], self::CLONED_OPENING) ?? [];
+            $commit ??= self::value($cloned, 'commit');
+            $branch ??= self::cloningBranch($line['msg']) ?? self::value($cloned, 'branch');
+            $fields = self::fields($line['msg'], self::OPENING);
             if ($fields === null) {
                 continue;
             }
@@ -91,9 +115,9 @@ final class DeployStartLine
         return ($fields[$key] ?? '') !== '' ? $fields[$key] : null;
     }
 
-    private static function clonedBranch(string $msg): ?string
+    private static function cloningBranch(string $msg): ?string
     {
-        return preg_match(self::CLONE_BRANCH, $msg, $match) === 1 ? $match[1] : null;
+        return preg_match(self::CLONING_BRANCH, $msg, $match) === 1 ? $match[1] : null;
     }
 
     /**
@@ -113,14 +137,14 @@ final class DeployStartLine
     /**
      * @return array<string, string>|null
      */
-    private static function fields(string $msg): ?array
+    private static function fields(string $msg, string $opening): ?array
     {
-        if (! str_starts_with($msg, self::OPENING) || ! str_ends_with($msg, ')')) {
+        if (! str_starts_with($msg, $opening) || ! str_ends_with($msg, ')')) {
             return null;
         }
 
         $fields = [];
-        foreach (explode(', ', substr($msg, strlen(self::OPENING), -1)) as $pair) {
+        foreach (explode(', ', substr($msg, strlen($opening), -1)) as $pair) {
             [$key, $value] = array_pad(explode(': ', $pair, 2), 2, '');
             $fields[$key] = $value;
         }

@@ -8,6 +8,7 @@ use App\Lib\Deploy\DeployLog\DeployFinishLine;
 use App\Lib\Deploy\DeployLog\DeployHistory;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\DeployLogPaths;
+use App\Lib\Deploy\DeployLog\DeployStartLine;
 use App\Lib\Deploy\DeployLog\LogStorage;
 use App\Models\DeployHook;
 use App\Models\HookDelivery;
@@ -165,6 +166,35 @@ class DeployHistoryTest extends TestCase
         $this->assertSame(['redeploy', null], $pick('20260105-000000-eeeeee'), 'a redeploy logged before the branch was');
         $this->assertSame([null, null], $pick('20260106-000000-ffffff'), 'a log that names no source');
         $this->assertSame(['install', 'trunk'], $pick('20260107-000000-abcdef'), 'a create that cloned the default branch');
+    }
+
+    /** A create and a rebuild log their start before they clone, so the commit is the one their clone names. */
+    public function test_a_create_and_a_rebuild_name_the_commit_their_clone_checked_out(): void
+    {
+        $rebuilt = '0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c';
+        $this->oldDeploy('20260101-000000-aaaaaa', [
+            'Deploy started (source: git, repo: https://github.com/acme/app.git)',
+            'Cloning repository https://github.com/acme/app.git',
+            DeployStartLine::cloned('main', self::SHA),
+        ], DeployLogger::STATUS_SUCCESS);
+        $this->oldDeploy('20260102-000000-bbbbbb', [
+            'Deploy started (source: rebuild)',
+            'Cloning repository https://github.com/acme/app.git (branch: release)',
+            DeployStartLine::cloned('release', $rebuilt),
+        ], DeployLogger::STATUS_FAILED, 'npm ci exited 1');
+        $this->task(RebuildProject::class, ['action' => 'rebuild', 'trigger' => 'mcp', 'deploy_id' => '20260102-000000-bbbbbb']);
+        $this->oldDeploy('20260103-000000-cccccc', [
+            'Deploy started (source: git, repo: https://github.com/acme/app.git)',
+            DeployStartLine::cloned(null, null),
+        ], DeployLogger::STATUS_FAILED);
+
+        $entries = $this->byId();
+        $pick = static fn (string $id): array => [$entries[$id]['kind'], $entries[$id]['branch'], $entries[$id]['commit']];
+
+        $this->assertSame(['install', 'main', self::SHA], $pick('20260101-000000-aaaaaa'));
+        $this->assertSame(['redeploy', 'release', $rebuilt], $pick('20260102-000000-bbbbbb'));
+        $this->assertSame('rebuild', $entries['20260102-000000-bbbbbb']['action']);
+        $this->assertSame(['install', null, null], $pick('20260103-000000-cccccc'), 'a clone whose HEAD git could not read');
     }
 
     public function test_trigger_action_task_and_commit_come_from_the_newest_task_that_ran_the_deploy(): void

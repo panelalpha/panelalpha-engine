@@ -95,7 +95,7 @@ class DindSourceTest extends TestCase
     {
         $source = file_get_contents($this->coreAppRoot . '/System/Project/Dind/Source/GitRepository.php');
         $this->assertStringContainsString('Cloning repository', $source);
-        $this->assertStringContainsString('Repository cloned', $source);
+        $this->assertStringContainsString('DeployStartLine::cloned(', $source);
         $this->assertStringContainsString('Submodules fetched', $source);
         $this->assertStringContainsString('DeployFailureExplainer::SUBMODULE_FAILURE', $source);
     }
