@@ -8,6 +8,7 @@ use App\Http\Resources\TunnelCollection;
 use App\Http\Resources\TunnelResource;
 use App\Integrations\Tunnels\TunnelManager;
 use App\Lib\Apis\Cloudflare\CloudflareException;
+use App\Lib\Apis\Cloudflare\CloudflareFailure;
 use App\Lib\Apis\PanelAlpha\PanelAlphaException;
 use App\Models\Domain;
 use App\Models\Tunnel;
@@ -82,7 +83,13 @@ class TunnelController extends Controller
             .'the fleet, so a name in use is refused; deleting the tunnel releases it again. `cloudflare` '
             .'puts a CNAME in a zone the project\'s own '
             .'API token controls, so it fits a custom domain; set the token first with PUT '
-            .'/projects/{username}/settings/cloudflare-api-token. Omit `hostname` with the `panelalpha` '
+            .'/projects/{username}/settings/cloudflare-api-token. The hostname\'s zone is looked up before the '
+            .'project\'s tunnel is created or started. A token Cloudflare does not accept answers 422 '
+            .'`cloudflare_token_invalid`; one missing a permission answers 422 `cloudflare_permission_denied` '
+            .'naming it (Account · Cloudflare Tunnel · Edit, Zone · Zone · Read or Zone · DNS · Edit); any other '
+            .'refusal 422 `cloudflare_request_refused` with Cloudflare\'s message; a rate limit 503 '
+            .'`cloudflare_rate_limited` and an outage 502 `cloudflare_unavailable`, both worth retrying later. '
+            .'Omit `hostname` with the `panelalpha` '
             .'provider and the engine allocates a free `preview-<8 random [a-z0-9]>` label under '
             .'panelalpha.online; it draws a new label when one is taken, and answers 409 '
             .'`tunnel_hostname_unavailable` when five labels in a row are. `purpose` separates a '
@@ -144,7 +151,19 @@ class TunnelController extends Controller
                     new OA\Property(property: 'code', type: 'string', example: 'tunnel_hostname_unavailable'),
                 ],
             )),
-            new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 422, description: 'Validation error, or a Cloudflare token that is invalid, lacks a permission or was refused', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 502, description: 'Cloudflare failed or could not be reached', content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(property: 'message', type: 'string'),
+                    new OA\Property(property: 'code', type: 'string', example: 'cloudflare_unavailable'),
+                ],
+            )),
+            new OA\Response(response: 503, description: 'Cloudflare is rate-limiting the project token', content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(property: 'message', type: 'string'),
+                    new OA\Property(property: 'code', type: 'string', example: 'cloudflare_rate_limited'),
+                ],
+            )),
         ],
     )]
     /**
@@ -169,6 +188,8 @@ class TunnelController extends Controller
             // A refused hostname or an unusable provider is the caller's input,
             // not a server fault.
             throw ValidationException::withMessages(['hostname' => $e->getMessage()]);
+        } catch (CloudflareFailure $e) {
+            return new JsonResponse(['message' => $e->getMessage(), 'code' => $e->problemCode], $e->httpStatus);
         }
 
         return (new TunnelResource($tunnel))->response()->setStatusCode(201);
