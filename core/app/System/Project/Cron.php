@@ -3,6 +3,7 @@
 namespace App\System\Project;
 
 use App\Exceptions\DockerErrorException;
+use App\Exceptions\ProblemException;
 use App\System\Project as UserProject;
 use Dsc\Cron\Crontab;
 use Dsc\Cron\Job;
@@ -47,6 +48,9 @@ class Cron
      */
     public function list(): array
     {
+        if (! $this->hasCrontab()) {
+            return [];
+        }
         $crontab = $this->loadCrontab();
 
         $jobs = [];
@@ -89,6 +93,7 @@ class Cron
      */
     public function create(array $params): array
     {
+        $this->ensureWritableCrontab();
         $crontab = $this->loadCrontab();
 
         $job = new Job;
@@ -172,6 +177,35 @@ class Cron
         $this->persistCrontab($crontab);
 
         return $this->jobToArray($job);
+    }
+
+    /** The deploy that renders the account writes the crontab, so none before it means no jobs. */
+    private function hasCrontab(): bool
+    {
+        return is_file($this->crontabPath());
+    }
+
+    /**
+     * Before the first deploy there is no account to load a job into, and that
+     * deploy creates the crontab; after it, a lost crontab is created as setup does.
+     *
+     * @throws ProblemException
+     * @throws DockerErrorException
+     */
+    private function ensureWritableCrontab(): void
+    {
+        if ($this->hasCrontab()) {
+            return;
+        }
+        if (! $this->project->exists()) {
+            throw ProblemException::conflict(
+                'project',
+                'project_not_deployed',
+                "Project '{$this->project->username()}' has not been deployed yet, and its first deploy creates the crontab. "
+                    .'Add the cron job once that deploy has finished.',
+            );
+        }
+        $this->ensureCrontabFile($this->project->model()->getChownString());
     }
 
     private function loadCrontab(): Crontab

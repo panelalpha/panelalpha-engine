@@ -62,6 +62,7 @@ class CronJobController extends Controller
         )),
         responses: [
             new OA\Response(response: 200, description: 'Cron job created', content: new OA\JsonContent(ref: '#/components/schemas/CronJob')),
+            new OA\Response(response: 409, description: 'The project has not been deployed yet: problems code `project_not_deployed`', content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
