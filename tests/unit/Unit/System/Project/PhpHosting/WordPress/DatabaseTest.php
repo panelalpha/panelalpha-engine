@@ -75,14 +75,14 @@ class DatabaseTest extends TestCase
             path: '/home/alice/other.test/public_html',
         );
 
-        $op->export('/tmp/dump.sql');
+        $op->export('/home/alice/dump.sql');
 
         $this->assertSame(
             [
                 'db',
                 'export',
-                '/tmp/dump.sql',
-                '--exec='.$this->ownerOnlyCodeOf('/tmp/dump.sql'),
+                '/home/alice/dump.sql',
+                '--exec='.$this->ownerOnlyCodeOf('/home/alice/dump.sql'),
                 '--path=/home/alice/other.test/public_html',
             ],
             $sequence[0]
@@ -176,7 +176,7 @@ class DatabaseTest extends TestCase
     private function runRemoveDefinerCode(string $file): Process
     {
         $sequence = [];
-        $this->databaseWithFakeRunner($sequence)->import($file);
+        $this->databaseWithFakeRunner($sequence, home: $this->tmp)->import($file);
         $code = substr($sequence[0][3], strlen('--exec='));
         $runner = 'class WP_CLI { public static function error(string $m): void { fwrite(STDERR, "Error: $m\n"); exit(1); } }';
         $process = new Process([PHP_BINARY, '-r', $runner.$code]);
@@ -235,7 +235,7 @@ class DatabaseTest extends TestCase
     private function ownerOnlyCodeOf(string $file): string
     {
         $sequence = [];
-        $this->databaseWithFakeRunner($sequence)->export($file);
+        $this->databaseWithFakeRunner($sequence, home: dirname($file))->export($file);
         $exec = array_values(array_filter($sequence[0], fn (string $arg): bool => str_starts_with($arg, '--exec=')));
 
         return substr($exec[0], strlen('--exec='));
@@ -261,10 +261,10 @@ class DatabaseTest extends TestCase
             path: '/home/alice/other.test/public_html',
         );
 
-        $op->import('/tmp/dump.sql');
+        $op->import('/home/alice/dump.sql');
 
         $this->assertCount(1, $sequence);
-        $this->assertSame(['db', 'import', '/tmp/dump.sql'], array_slice($sequence[0], 0, 3));
+        $this->assertSame(['db', 'import', '/home/alice/dump.sql'], array_slice($sequence[0], 0, 3));
         $this->assertSame('--path=/home/alice/other.test/public_html', $sequence[0][4]);
     }
 
@@ -277,7 +277,7 @@ class DatabaseTest extends TestCase
         );
 
         try {
-            $op->export('/tmp/x.sql');
+            $op->export('/home/alice/x.sql');
             $this->fail('Expected WordPressException');
         } catch (WordPressException $e) {
             $this->assertSame('Error: Failed to export.', $e->getMessage());
@@ -294,7 +294,7 @@ class DatabaseTest extends TestCase
         );
 
         try {
-            $op->import('/tmp/x.sql');
+            $op->import('/home/alice/x.sql');
             $this->fail('Expected WordPressException');
         } catch (WordPressException $e) {
             $this->assertSame('Error: Failed to import.', $e->getMessage());
@@ -311,22 +311,22 @@ class DatabaseTest extends TestCase
             results: [
                 [
                     'exit_code' => 0,
-                    'stdout' => "Success: Imported from '/tmp/x.sql'.\n",
+                    'stdout' => "Success: Imported from '/home/alice/x.sql'.\n",
                     'stderr' => "mysql: Deprecated program name. It will be removed in a future release, use '/usr/bin/mariadb' instead\n"
                         ."--------------\nCREATE DEFINER=`ghost`@`%` SQL SECURITY DEFINER VIEW v1 AS SELECT a FROM t1\n--------------\n\n"
-                        ."ERROR 1227 (42000) at line 3 in file: '/tmp/x.sql': Access denied; you need (at least one of) "
+                        ."ERROR 1227 (42000) at line 3 in file: '/home/alice/x.sql': Access denied; you need (at least one of) "
                         ."the SET USER privilege(s) for this operation\n",
                 ],
             ],
         );
 
         try {
-            $op->import('/tmp/x.sql');
+            $op->import('/home/alice/x.sql');
             $this->fail('Expected WordPressException');
         } catch (WordPressException $e) {
             $this->assertSame(422, $e->httpStatus);
-            $this->assertStringStartsWith('MySQL rejected 1 statement(s) in /tmp/x.sql, so it was not fully imported', $e->getMessage());
-            $this->assertStringContainsString("\nERROR 1227 (42000) at line 3 in file: '/tmp/x.sql': Access denied;", $e->getMessage());
+            $this->assertStringStartsWith('MySQL rejected 1 statement(s) in /home/alice/x.sql, so it was not fully imported', $e->getMessage());
+            $this->assertStringContainsString("\nERROR 1227 (42000) at line 3 in file: '/home/alice/x.sql': Access denied;", $e->getMessage());
             $this->assertStringNotContainsString('Success', $e->getMessage());
         }
     }
@@ -336,17 +336,17 @@ class DatabaseTest extends TestCase
         $sequence = [];
         $errors = '';
         for ($line = 1; $line <= 7; $line++) {
-            $errors .= "ERROR 1050 (42S01) at line {$line} in file: '/tmp/x.sql': Table 't{$line}' already exists\n";
+            $errors .= "ERROR 1050 (42S01) at line {$line} in file: '/home/alice/x.sql': Table 't{$line}' already exists\n";
         }
         $op = $this->databaseWithFakeRunner(
             $sequence,
             results: [
-                ['exit_code' => 0, 'stdout' => "Success: Imported from '/tmp/x.sql'.\n", 'stderr' => $errors],
+                ['exit_code' => 0, 'stdout' => "Success: Imported from '/home/alice/x.sql'.\n", 'stderr' => $errors],
             ],
         );
 
         try {
-            $op->import('/tmp/x.sql');
+            $op->import('/home/alice/x.sql');
             $this->fail('Expected WordPressException');
         } catch (WordPressException $e) {
             $this->assertStringContainsString('MySQL rejected 7 statement(s)', $e->getMessage());
@@ -363,15 +363,15 @@ class DatabaseTest extends TestCase
             results: [
                 [
                     'exit_code' => 0,
-                    'stdout' => "Success: Imported from '/tmp/x.sql'.\n",
+                    'stdout' => "Success: Imported from '/home/alice/x.sql'.\n",
                     'stderr' => "mysql: Deprecated program name. It will be removed in a future release, use '/usr/bin/mariadb' instead\n",
                 ],
             ],
         );
 
-        $body = $op->import('/tmp/x.sql');
+        $body = $op->import('/home/alice/x.sql');
 
-        $this->assertSame("Success: Imported from '/tmp/x.sql'.", $body['message']);
+        $this->assertSame("Success: Imported from '/home/alice/x.sql'.", $body['message']);
     }
 
     /**
@@ -382,11 +382,12 @@ class DatabaseTest extends TestCase
         array &$sequence,
         array $results = [['exit_code' => 0, 'stdout' => '', 'stderr' => '']],
         ?string $path = null,
+        string $home = '/home/alice',
     ): Database {
         $user = Mockery::mock(User::class)->makePartial();
         $user->username = 'alice';
         $project = Mockery::mock(Project::class);
-        $project->shouldReceive('homeDirPath')->andReturn('/home/alice');
+        $project->shouldReceive('homeDirPath')->andReturn($home);
         $project->shouldReceive('resolvePath')
             ->andReturnUsing(fn (string $path): string => (new FileManager($project))->resolvePath($path));
         $call = 0;

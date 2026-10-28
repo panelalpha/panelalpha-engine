@@ -2,6 +2,7 @@
 
 namespace App\System\Project\PhpHosting\WordPress;
 
+use App\Exceptions\ProblemException;
 use App\Models\Domain;
 use App\Models\User;
 use App\System;
@@ -31,6 +32,12 @@ use Illuminate\Validation\ValidationException;
  */
 final class WpCli
 {
+    /** Where the engine's WordPress mounts the project's checkout in its container. */
+    private const CONTAINER_PROJECT_DIR = '/var/www/html';
+
+    /** On PHP hosting, WP-CLI's working directory: the home, mounted a second time. */
+    private const PHP_HOSTING_WORKING_DIR = '/var/www';
+
     public function __construct(
         private User $user,
         private ?string $path = null,
@@ -95,6 +102,20 @@ final class WpCli
         }
 
         return $value;
+    }
+
+    /**
+     * A file WP-CLI reads or writes for the caller, as WP-CLI is to be given
+     * it: on PHP hosting an absolute path inside the project home; in the
+     * project's own containers a path below the checkout's mount, or one
+     * relative to the install directory, WP-CLI's working directory there.
+     * `..` is resolved first, so it cannot lead out.
+     *
+     * @throws ProblemException 422 on $field for any other path
+     */
+    public function projectFile(string $field, string $file): string
+    {
+        return $this->runsInContainer() ? $this->containerFile($field, $file) : $this->homeFile($field, $file);
     }
 
     /**
@@ -216,6 +237,66 @@ final class WpCli
         } catch (ValidationException) {
             throw new Exception("The path {$path} does not name a directory inside the project home.");
         }
+    }
+
+    /** WP-CLI's container mounts the home at its own path, and at its working directory /var/www. */
+    private function homeFile(string $field, string $file): string
+    {
+        $home = rtrim($this->user->project()->homeDirPath(), '/');
+        $path = self::normalised(str_starts_with($file, '/') ? $file : self::PHP_HOSTING_WORKING_DIR.'/'.$file);
+        if ($path !== null && self::isBelow($path, self::PHP_HOSTING_WORKING_DIR)) {
+            $path = $home.substr($path, strlen(self::PHP_HOSTING_WORKING_DIR));
+        }
+        if ($path === null || ! self::isBelow($path, $home)) {
+            throw self::outsideProject($field, "The {$field} must be inside the project home {$home}, absolute or relative to it; {$file} is not.");
+        }
+
+        return $path;
+    }
+
+    private function containerFile(string $field, string $file): string
+    {
+        $path = self::normalised($file);
+        $relative = $path !== null && $path !== '' && ! str_starts_with($path, '/');
+        if ($path === null || (! $relative && ! self::isBelow($path, self::CONTAINER_PROJECT_DIR))) {
+            throw self::outsideProject($field, "The {$field} must be below ".self::CONTAINER_PROJECT_DIR
+                .", where the project is mounted in its container, or relative to the WordPress directory; {$file} is neither.");
+        }
+
+        return $path;
+    }
+
+    /** `.` and `..` resolved by name; null when `..` would climb above where the path starts. */
+    private static function normalised(string $path): ?string
+    {
+        $parts = [];
+        foreach (explode('/', $path) as $part) {
+            if ($part === '' || $part === '.') {
+                continue;
+            }
+            if ($part !== '..') {
+                $parts[] = $part;
+
+                continue;
+            }
+            if ($parts === []) {
+                return null;
+            }
+            array_pop($parts);
+        }
+
+        return (str_starts_with($path, '/') ? '/' : '').implode('/', $parts);
+    }
+
+    /** Strictly below, by whole segments: `/home/alice2` is not below `/home/alice`. */
+    private static function isBelow(string $path, string $dir): bool
+    {
+        return str_starts_with($path, rtrim($dir, '/').'/');
+    }
+
+    private static function outsideProject(string $field, string $message): ProblemException
+    {
+        return ProblemException::one($field, $field.'_outside_project', $message);
     }
 
     private function absoluteDocumentRoot(Domain $domain): string

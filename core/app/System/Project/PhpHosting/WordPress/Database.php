@@ -12,6 +12,9 @@ namespace App\System\Project\PhpHosting\WordPress;
  * Import strips DEFINER clauses from the SQL file first (same sed pattern as
  * app-lite AbstractDatabase::removeDefinerFromSqlFile), as an internal step —
  * not a named operation.
+ *
+ * The file of either is held inside the project ({@see WpCli::projectFile()}),
+ * so neither reads nor writes a file of the host or of WP-CLI's container.
  */
 final class Database
 {
@@ -20,6 +23,9 @@ final class Database
 
     /** Rejected statements named in an import failure; the rest are only counted. */
     private const REJECTED_STATEMENTS_SHOWN = 5;
+
+    /** The field a file outside the project is refused on. */
+    private const FILE_FIELD = 'file';
 
     public function __construct(
         private WpCli $cli,
@@ -31,7 +37,8 @@ final class Database
      */
     public function export(string $file, array $tables = []): array
     {
-        $args = ['db', 'export', WpCli::positional($file)];
+        $file = $this->projectFile($file);
+        $args = ['db', 'export', $file];
         if ($tables !== []) {
             $args[] = '--tables='.implode(',', $tables);
         }
@@ -63,7 +70,7 @@ final class Database
      */
     public function import(string $file): array
     {
-        $file = WpCli::positional($file);
+        $file = $this->projectFile($file);
         $result = $this->cli->runOrFail(['db', 'import', $file, '--exec='.self::removeDefinerCode($file)]);
         $this->refuseRejectedStatements($file, $result['stderr']);
 
@@ -71,6 +78,11 @@ final class Database
             'file' => $file,
             'message' => trim($result['stdout']),
         ];
+    }
+
+    private function projectFile(string $file): string
+    {
+        return $this->cli->projectFile(self::FILE_FIELD, WpCli::positional($file));
     }
 
     /**

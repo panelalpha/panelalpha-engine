@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Import a SQL file into the WordPress install database
 
-    Strips DEFINER clauses from the SQL file when needed, then runs `wp db import {file}` against the install's own database. Both steps run in one WP-CLI run, as the same user, and a file with DEFINER clauses that cannot be rewritten in place is not imported. Neither step loads WordPress, so an empty database or a broken plugin does not block the import. `file` is a path inside the project. Optional `path` selects the install. On a project running in its own containers it runs in the first container with WordPress that also has the MySQL client, such as a wordpress:cli service. A statement MySQL rejects fails the import with 422, naming the first rejected lines, although WP-CLI itself reports success; the statements MySQL accepted stay in the database.
+    Strips DEFINER clauses from the SQL file when needed, then runs `wp db import {file}` against the install's own database. Both steps run in one WP-CLI run, as the same user, and a file with DEFINER clauses that cannot be rewritten in place is not imported. Neither step loads WordPress, so an empty database or a broken plugin does not block the import. `file` stays inside the project: on PHP hosting in the project home, absolute or relative to it; on a project running in its own containers below /var/www/html, where the checkout is mounted, or relative to the WordPress directory. `..` is resolved first; any other path is a 422 on `file`. Optional `path` selects the install. On a project running in its own containers it runs in the first container with WordPress that also has the MySQL client, such as a wordpress:cli service. A statement MySQL rejects fails the import with 422, naming the first rejected lines, although WP-CLI itself reports success; the statements MySQL accepted stay in the database.
     MARKDOWN)]
 #[IsDestructive]
 class WpDatabaseImportTool extends ApiTool
@@ -71,7 +71,7 @@ class WpDatabaseImportTool extends ApiTool
     {
         return [
             'name' => $schema->string()->required(),
-            'file' => $schema->string()->description('Source SQL file path inside the project. Example: /home/alice/example.test/public_html/backup.sql.')->required(),
+            'file' => $schema->string()->description('Source SQL file. On PHP hosting a path inside the project home, absolute or relative to it; on a project running in its own containers a path below /var/www/html or relative to the WordPress directory. Example: /home/alice/example.test/public_html/backup.sql.')->required(),
             'path' => $schema->string()->description('WordPress directory. On PHP hosting it is inside the project home, read as the file manager reads a path: absolute, or relative to the home. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.'),
             'service' => $schema->string()->description('Compose service whose container runs WordPress, on a project running in its own containers. Omitted: the first container with both PHP and WordPress.'),
             'skip_plugins' => $schema->boolean()->description('Run without loading plugins and themes (--skip-plugins --skip-themes), so a plugin or theme with a fatal error does not block the operation. Omitted: false.'),

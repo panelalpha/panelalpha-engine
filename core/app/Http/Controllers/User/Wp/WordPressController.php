@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\User\Wp;
 
+use App\Exceptions\ProblemException;
 use App\Http\Controllers\Controller;
 use App\System\Project\PhpHosting\WordPress\Exception as WordPressException;
 use App\System\Project\PhpHosting\WordPress\WordPress;
@@ -11,8 +12,8 @@ use Illuminate\Validation\ValidationException;
 
 /**
  * One call on a project\'s WordPress install, answered as {"data": ...}. A
- * WordPress failure keeps its own status; anything else is a 422 on the
- * controller's field.
+ * WordPress failure keeps its own status and a problem its own field;
+ * anything else is a 422 on the controller's field.
  */
 abstract class WordPressController extends Controller
 {
@@ -34,6 +35,8 @@ abstract class WordPressController extends Controller
             return new JsonResponse(['data' => $call($wordpress, $validated)]);
         } catch (WordPressException $e) {
             abort(new JsonResponse(['message' => $e->getMessage()], $e->httpStatus));
+        } catch (ProblemException $e) {
+            throw $e;
         } catch (\Exception $e) {
             throw ValidationException::withMessages([$this->failureField() => $e->getMessage()]);
         }

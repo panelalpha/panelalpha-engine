@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Export the WordPress install database to a file
 
-    Runs `wp db export {file}` against the install's own database (wp-config credentials and table prefix), not the engine MySQL account API. `file` is a path inside the project. The dump is readable and writable by the user that writes it only (mode 0600), and a file already there is narrowed the same way first. Optional `path` selects the install. On a project running in its own containers it runs in the first container with WordPress that also has the MySQL client, such as a wordpress:cli service.
+    Runs `wp db export {file}` against the install's own database (wp-config credentials and table prefix), not the engine MySQL account API. `file` stays inside the project: on PHP hosting in the project home, absolute or relative to it; on a project running in its own containers below /var/www/html, where the checkout is mounted, or relative to the WordPress directory. `..` is resolved first; any other path is a 422 on `file`. The dump is readable and writable by the user that writes it only (mode 0600), and a file already there is narrowed the same way first. Optional `path` selects the install. On a project running in its own containers it runs in the first container with WordPress that also has the MySQL client, such as a wordpress:cli service.
     MARKDOWN)]
 #[IsDestructive]
 class WpDatabaseExportTool extends ApiTool
@@ -72,7 +72,7 @@ class WpDatabaseExportTool extends ApiTool
     {
         return [
             'name' => $schema->string()->required(),
-            'file' => $schema->string()->description('Destination SQL file path inside the project. Prefer one outside the document root. Example: /home/alice/backup.sql.')->required(),
+            'file' => $schema->string()->description('Destination SQL file. On PHP hosting a path inside the project home, absolute or relative to it; on a project running in its own containers a path below /var/www/html or relative to the WordPress directory. Prefer one outside the document root. Example: /home/alice/backup.sql.')->required(),
             'tables' => $schema->array()->description('Only these tables. Omitted: every table of the install. Example: ["wp_posts","wp_postmeta"].'),
             'path' => $schema->string()->description('WordPress directory. On PHP hosting it is inside the project home, read as the file manager reads a path: absolute, or relative to the home. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.'),
             'service' => $schema->string()->description('Compose service whose container runs WordPress, on a project running in its own containers. Omitted: the first container with both PHP and WordPress.'),
