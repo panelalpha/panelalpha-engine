@@ -188,7 +188,7 @@ Set shop.example.com to PHP 8.2.
 **Raise PHP memory on this project**
 
 ```text
-Set PHP memory_limit to 256M on this project.
+Set PHP 8.2 memory_limit to 256M on this project.
 ```
 
 **Deploy a public repository**

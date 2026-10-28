@@ -29,7 +29,7 @@ That token belongs to the project it was pasted for. The first project given it 
 
 <img src="../assets/connect-repository.jpg" alt="Connect your repository page: paste a git token and select Save secret" style="max-width: 100%; height: auto; margin-top: 1.5em; margin-bottom: 1.5em;">
 
-If the stored token later stops working, ask the assistant to replace it. You get the same paste page. Do not put the new token in the chat.
+If the stored token later stops working, ask the assistant to replace it. You get the same paste page. Do not put the new token in the chat. The secret's type has to match the field it is passed in: `git_token` for a new project, `token` when you replace the token of a project that exists.
 
 ## A token shared by several projects
 
@@ -287,10 +287,10 @@ Mode: modify. Tools: `project_rebuild` twice. Check: the second answer is a conf
 **Project inspection against the last deploy**
 
 ```text
-Inspect tmemos. Have its files changed since the last deploy?
+Inspect tmemos. Is it still set up the way the last deploy left it?
 ```
 
-Mode: read. Tools: `project_inspect`, `file_write`, `project_inspect`. Check: after a file is written by hand, the second inspection reports the difference.
+Mode: read. Tools: `project_inspect`. Check: `drift` is empty when the strategy, platform, runtime, port and commit match the last deploy, and lists each one that differs. It does not compare file contents.
 
 **Pull, branch, history**
 
@@ -307,7 +307,7 @@ Mode: modify. Tools: `git_status`, `git_branches`, `git_commits`, `git_change_br
 Roll tmemos back to the previous commit.
 ```
 
-Mode: modify. Tools: `git_commits`, `git_revert` with `ref`, `task_get`. Check: the assistant warns that local changes are discarded and asks first. The deployed commit afterwards is the one asked for.
+Mode: modify. Tools: `git_commits`, `git_revert` with `ref`, `task_get`. Check: the assistant warns that local changes are discarded and asks first. The deployed commit afterwards is the one asked for. A deploy from git clones only the newest commit, so there is no earlier one to go back to unless the repository's `.panelalpha/panelalpha.yaml` sets `git: {history: full}`.
 
 **Push local edits, force a pull**
 
@@ -333,7 +333,7 @@ Mode: full. Tools: `git_connect`, `git_status` (poll while `connecting` is true)
 The git token of tmemos no longer works. Send me the page to replace it.
 ```
 
-Mode: modify. Tools: `vault_secret_create`, `git_update_credentials`. Check: the token is not typed in chat, and `git_pull` works afterwards.
+Mode: modify. Tools: `vault_secret_create`, `git_update_credentials`. Check: the token is not typed in chat and the secret is created with the type `token`. `git_pull` works afterwards.
 
 **Deploy key for an SSH remote**
 

@@ -116,7 +116,7 @@ Mode: read, and modify for the last part. Tools: `file_list` with `show_hidden` 
 ```text
 In tshop, create the folder /project/notes, write hello.txt into it with the
 text "test run", upload a small file named upload.txt, and download
-https://example.com/robots.txt into the same folder.
+https://www.iana.org/robots.txt into the same folder.
 ```
 
 Mode: modify. Tools: `file_mkdir` (with `parents`), `file_write`, `file_upload`, `file_fetch`. Check: all three files exist afterwards with the content asked for. A non-http address for the fetch is refused, and so is an address on the server itself or a private network.
@@ -184,7 +184,7 @@ Give tshop an SFTP account tshop_sftp1 with a password. Then change it to key
 login using this public key: ssh-ed25519 AAAA...example. Delete it afterwards.
 ```
 
-Mode: full. Tools: `sftp_account_create`, `sftp_account_list`, `sftp_account_update` with `auth_method`, `sftp_account_delete`. Check: an SFTP account name is the project's name, an underscore and a suffix (`tshop_sftp1`), and any other name is refused. After the update the account accepts the key and not the password. Prefer SFTP in the answer over plain FTP.
+Mode: full. Tools: `sftp_account_create`, `sftp_account_list`, `sftp_account_update` with `auth_method` set to `public_key` and the key as `public_key`, `sftp_account_delete`. Check: an SFTP account name is the project's name, an underscore and a suffix (`tshop_sftp1`), and any other name is refused. After the update the account accepts the key and not the password. Prefer SFTP in the answer over plain FTP.
 
 **End SFTP sessions**
 

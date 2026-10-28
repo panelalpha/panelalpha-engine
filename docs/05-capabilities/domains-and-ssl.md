@@ -134,7 +134,7 @@ The top of the answer repeats what matters most about the certificate visitors g
 Is the certificate on shop.example.com really working for visitors?
 ```
 
-Mode: read. Tools: `ssl_check`. Check: `status` is `trusted`, `dns.points_here` is true, `engine.serves_installed` is true, and the assistant names the signer and the expiry date.
+Mode: read. Tools: `ssl_check`. Check: `status` is `trusted`, `dns.points_here` is true, `engine.serves_installed` is true, and the assistant names the signer and the expiry date. On a project's `panelalpha.online` name, `dns.points_here` is false and `engine.serves_installed` is null: that name resolves to the PanelAlpha proxy and HTTPS ends there, so check a domain of your own for these two.
 
 ## Troubleshooting
 
@@ -273,10 +273,10 @@ Mode: read. Tools: `domain_mail_dns_get` with `check` and `dkim_selector`. Check
 ```text
 List the PHP versions available. Set shop.example.com to PHP 8.2, show its PHP
 settings, set memory_limit to 256M while keeping the others, then read the
-project's own PHP settings.
+project's own PHP settings for PHP 8.2.
 ```
 
-Mode: modify. Tools: `php_version_list`, `domain_php_version_get`, `domain_php_version_set`, `domain_php_directives_get`, `domain_php_directives_set`, `php_ini_get`, `php_ini_set`. Check: saving the directives with only `memory_limit` would drop the others, so the assistant sends the full set. On a container project the project-level PHP settings answer is a refusal with the reason.
+Mode: modify. Tools: `php_version_list`, `domain_php_version_get`, `domain_php_version_set`, `domain_php_directives_get`, `domain_php_directives_set`, `php_ini_get`, `php_ini_set`. Check: `php_ini_get` and `php_ini_set` need a `php_version` (here 8.2), so name it in the request. Saving the directives with only `memory_limit` would drop the others, so the assistant sends the full set. On a container project the project-level PHP settings answer is a refusal with the reason.
 
 **Extra routes**
 

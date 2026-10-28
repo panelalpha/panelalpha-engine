@@ -209,7 +209,7 @@ How is this server doing? Give me CPU, memory and disk now, the last five
 minutes, the last hour and the last 12 hours, and the hourly averages.
 ```
 
-Mode: read. Tools: `metrics_latest`, `metrics_current`, `metrics_last_5_minutes`, `metrics_last_hour`, `metrics_last_12_hours`, `metrics_last_hour_averages`, `metrics_history`, `system_info`. Check: the numbers are consistent between views, and the memory budget is shown.
+Mode: read. Tools: `metrics_latest`, `metrics_current`, `metrics_last_5_minutes`, `metrics_last_hour`, `metrics_last_12_hours`, `metrics_last_hour_averages`, `metrics_history`, `system_info`. Check: the numbers are consistent between views, and the memory budget is shown. `metrics_latest` has CPU, RAM, swap, disk I/O and network I/O but no disk use. Disk use comes from `metrics_current` (and `metrics_history` for `/home` over time). A project's own disk use is in `project_usage`.
 
 **One site, is it itself?**
 
@@ -276,11 +276,11 @@ Mode: modify. Tools: `lighthouse_report_create` with `desktop_preset`, `summary`
 
 ```text
 File a bug report about tshop: the site shows a blank page after deploy.
-Severity: medium. Attach the deploy log and health, and show me exactly what
-will be sent before you send it.
+Severity: medium. Attach the deploy log and health, and show me the report
+that was filed.
 ```
 
-Mode: modify. Tools: `bug_report_create` with `attach_log` and `attach_health`. Check: the answer carries the redacted report, no `.env` values or tokens are in it, and the status says accepted and queued, not delivered.
+Mode: modify. Tools: `bug_report_create` with `attach_log` and `attach_health`. Check: the answer carries the redacted report that was queued (there is no preview before it is filed), no `.env` values or tokens are in it, and the status says accepted and queued, not delivered.
 
 **What is running**
 

@@ -8,6 +8,8 @@ This page covers creating, inspecting, rebuilding, copying, suspending, protecti
 
 Creating a project from a repository *is* the deploy. It is covered in full on [Connecting with Git](connecting-with-git.md). Creating WordPress without a repository, or looking after WordPress you already host, is on [WordPress](wordpress-and-apps.md).
 
+A new project runs in its own container unless you ask for traditional PHP hosting. For that, say so: "Create it on traditional PHP hosting." The assistant then creates the project with the template `default`.
+
 To see what you already have:
 
 ```text
@@ -19,11 +21,11 @@ List the projects on this engine.
 Inspecting tells you what a project contains right now, without redeploying anything.
 
 ```text
-Inspect this project. Tell me the stack, and whether the files have changed
-since the last deploy.
+Inspect this project. Tell me the stack, and whether it still matches the last
+deploy.
 ```
 
-**That last part is the interesting one.** If the files on disk no longer match what the last deploy recorded, somebody uploaded over FTP or edited a file directly. When a site is behaving unexpectedly and nobody deployed recently, that is the first thing to check.
+**That last part is the interesting one.** The inspection compares how the app would be run now (strategy, platform, runtime, port) and the commit with what the last deploy recorded. A difference means the files changed after the deploy, for example over FTP, or a different commit is checked out. It does not compare file contents. When a site is behaving unexpectedly and nobody deployed recently, that is the first thing to check.
 
 ## The application's login
 
@@ -90,6 +92,8 @@ On a traditional PHP project you can also push only some tables, and leave the r
 Which database tables differ between this project and its staging copy? Then
 push only those tables.
 ```
+
+Each table you push is named by its database and its name. After a full database push, the diff can still list tables. On a WordPress site, the push keeps the other side's own site address, so the data there differs from the pushed side by that address.
 
 Container projects have no table push. On a container project, `databases` means the stored data volumes: they are pushed only together with the files, so a push with both left on carries both.
 
@@ -356,7 +360,7 @@ On tphpsite, list the database tables that differ from tphpstage, then push
 only the changed table named <table> to staging.
 ```
 
-Mode: read for the first part, modify for the push. Tools: `project_push_diff`, `project_push` with `tables`. Check: the list names the differing tables, only those are replaced, and a container project is refused.
+Mode: read for the first part, modify for the push. Tools: `project_push_diff`, `project_push` with `tables`. Check: the list names the differing tables, each one sent to `project_push` with its `database` and `name`, only those are replaced, and a container project is refused. After a full database push on a WordPress site the diff may still list tables, because the other side keeps its own site address.
 
 **A protected project**
 

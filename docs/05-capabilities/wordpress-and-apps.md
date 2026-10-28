@@ -45,10 +45,10 @@ This domain setting is for traditional PHP hosting. A WordPress site in its own 
 Plugin installs that fail for lack of memory are often a PHP limit. On traditional PHP hosting, raise it, then try WP-CLI again:
 
 ```text
-Set PHP memory_limit to 256M on this project.
+Set PHP 8.2 memory_limit to 256M on this project.
 ```
 
-A WordPress site in its own container reads its PHP settings from its own image, so the assistant is told this setting does not apply there.
+The tool needs the PHP version, so name it, as above. A WordPress site in its own container reads its PHP settings from its own image, so the assistant is told this setting does not apply there.
 
 ## Set up WordPress
 
