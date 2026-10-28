@@ -6,7 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\CdnPurgeRequest;
 use App\Http\Requests\CdnSetSecurityLevelRequest;
 use App\Lib\Apis\Cloudflare;
-use App\Lib\Cdn\CdnFailure;
+use App\Lib\Apis\Cloudflare\CloudflareFailure;
 use App\Lib\Cdn\CloudflareCdn;
 use App\Models\Domain;
 use App\Models\User;
@@ -219,7 +219,7 @@ class CdnController extends Controller
     {
         try {
             return new JsonResponse(['data' => $operation()]);
-        } catch (CdnFailure $e) {
+        } catch (CloudflareFailure $e) {
             return new JsonResponse(['message' => $e->getMessage(), 'code' => $e->problemCode], $e->httpStatus);
         }
     }

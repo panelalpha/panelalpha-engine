@@ -5,6 +5,7 @@ namespace App\Lib\Cdn;
 use App\Exceptions\ProblemException;
 use App\Lib\Apis\Cloudflare;
 use App\Lib\Apis\Cloudflare\CloudflareException;
+use App\Lib\Apis\Cloudflare\CloudflareFailure;
 use App\Lib\Apis\Cloudflare\ZoneNotFoundException;
 use App\Lib\Domains\ProjectHostnames;
 use App\Models\User;
@@ -16,7 +17,7 @@ use Illuminate\Http\Client\ConnectionException;
  * container-based project can hold. A zone-wide change is refused while the
  * zone also serves another project on this engine. A token Cloudflare does not
  * accept, a refused permission or a refused request is a ProblemException that
- * says which; anything else is a {@see CdnFailure}.
+ * says which; anything else is a {@see CloudflareFailure}.
  */
 final class CloudflareCdn
 {
@@ -122,9 +123,9 @@ final class CloudflareCdn
         try {
             return $client->findZoneForHostname($hostname);
         } catch (ZoneNotFoundException) {
-            throw CdnFailure::zoneNotFound($hostname);
+            throw CloudflareFailure::zoneNotFound($hostname);
         } catch (CloudflareException|ConnectionException $e) {
-            throw $this->failure($e, self::SCOPE_ZONE_READ);
+            throw CloudflareFailure::of($e, self::SCOPE_ZONE_READ);
         }
     }
 
@@ -157,50 +158,8 @@ final class CloudflareCdn
         try {
             return $operation();
         } catch (CloudflareException|ConnectionException $e) {
-            throw $this->failure($e, $scope);
+            throw CloudflareFailure::of($e, $scope);
         }
-    }
-
-    /**
-     * A refused permission or request is the caller's to fix (422); a rate limit
-     * or a Cloudflare failure is worth retrying later (503, 502).
-     */
-    private function failure(CloudflareException|ConnectionException $e, string $scope): \Throwable
-    {
-        if ($e instanceof ConnectionException) {
-            return CdnFailure::unavailable('Cloudflare could not be reached. Try again later.');
-        }
-
-        return match (true) {
-            $e->isInvalidToken() => $this->invalidToken($e),
-            $e->isPermissionDenied() => $this->permissionDenied($scope),
-            $e->isRateLimited() => CdnFailure::rateLimited(),
-            $e->isRefusedRequest() => ProblemException::one(
-                'cloudflare_api_token',
-                'cloudflare_request_refused',
-                $e->getMessage()
-            ),
-            default => CdnFailure::unavailable($e->getMessage()),
-        };
-    }
-
-    private function invalidToken(CloudflareException $e): ProblemException
-    {
-        return ProblemException::one(
-            'cloudflare_api_token',
-            'cloudflare_token_invalid',
-            "The project's Cloudflare API token is invalid or revoked ({$e->getMessage()}). "
-            .'Save a current token on the project.'
-        );
-    }
-
-    private function permissionDenied(string $scope): ProblemException
-    {
-        return ProblemException::one(
-            'cloudflare_api_token',
-            'cloudflare_permission_denied',
-            "The Cloudflare API token is missing the {$scope} permission for this zone."
-        );
     }
 
     /**
