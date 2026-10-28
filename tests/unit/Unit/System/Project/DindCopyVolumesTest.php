@@ -9,9 +9,9 @@ use App\System;
 use App\System\Project;
 use App\System\Project\Dind;
 use App\System\Project\Dind\CopyVolumes;
-use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 use Tests\Support\FakeProcess;
+use Tests\TestCase;
 
 class DindCopyVolumesTest extends TestCase
 {

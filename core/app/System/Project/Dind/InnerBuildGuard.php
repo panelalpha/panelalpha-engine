@@ -66,9 +66,9 @@ final class InnerBuildGuard
 
     private function apply(): ?string
     {
-        $megabytes = $this->megabytes();
         $token = bin2hex(random_bytes(8));
         try {
+            $megabytes = $this->megabytes();
             $this->exec(InnerBuildLimit::applyCommand($megabytes, $token));
         } catch (\Throwable $e) {
             Log::warning("Could not limit image builds for {$this->project->username()}: ".$e->getMessage());
